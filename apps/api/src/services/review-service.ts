@@ -40,12 +40,13 @@ export async function launchReview(parentTaskId: string): Promise<string> {
     agentType: "claude-code",
   });
 
-  // Set the task type and parent link
+  // Set the task type, parent link, and inherit priority
   await db
     .update(tasks)
     .set({
       parentTaskId: parentTask.id,
       taskType: "review",
+      priority: Math.max(1, (parentTask.priority ?? 100) - 1), // Higher priority than parent
     })
     .where(eq(tasks.id, reviewTask.id));
 

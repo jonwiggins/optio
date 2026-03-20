@@ -7,7 +7,10 @@ export interface TaskSummary {
   agentType: string;
   repoUrl: string;
   prUrl?: string;
+  costUsd?: string;
   errorMessage?: string;
+  taskType?: string;
+  parentTaskId?: string;
   createdAt: string;
   updatedAt: string;
 }
