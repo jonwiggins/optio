@@ -245,6 +245,9 @@ export const api = {
     return request<{ issues: any[] }>(`/api/issues${query ? `?${query}` : ""}`);
   },
 
+  launchReview: (taskId: string) =>
+    request<{ reviewTaskId: string }>(`/api/tasks/${taskId}/review`, { method: "POST" }),
+
   assignIssue: (data: {
     issueNumber: number;
     repoId: string;

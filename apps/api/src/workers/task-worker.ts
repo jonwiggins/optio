@@ -26,10 +26,16 @@ export function startTaskWorker() {
   const worker = new Worker(
     "tasks",
     async (job) => {
-      const { taskId, resumeSessionId, resumePrompt } = job.data as {
+      const { taskId, resumeSessionId, resumePrompt, reviewOverride } = job.data as {
         taskId: string;
         resumeSessionId?: string;
         resumePrompt?: string;
+        reviewOverride?: {
+          renderedPrompt: string;
+          taskFileContent: string;
+          taskFilePath: string;
+          claudeModel?: string;
+        };
       };
       const log = logger.child({ taskId, jobId: job.id });
       let repoPodId: string | null = null;
@@ -124,6 +130,13 @@ export function startTaskWorker() {
           ticketUrl: (task.metadata as any)?.ticketUrl,
         });
 
+        // Apply review overrides if this is a review task
+        const finalRenderedPrompt = reviewOverride?.renderedPrompt ?? renderedPrompt;
+        const finalTaskFileContent = reviewOverride?.taskFileContent ?? taskFileContent;
+        const finalTaskFilePath = reviewOverride?.taskFilePath ?? taskFilePath;
+        const finalClaudeModel =
+          reviewOverride?.claudeModel ?? repoConfig?.claudeModel ?? undefined;
+
         const agentConfig = adapter.buildContainerConfig({
           taskId: task.id,
           prompt: task.prompt,
@@ -131,10 +144,10 @@ export function startTaskWorker() {
           repoBranch: task.repoBranch,
           claudeAuthMode,
           optioApiUrl,
-          renderedPrompt,
-          taskFileContent,
-          taskFilePath,
-          claudeModel: repoConfig?.claudeModel ?? undefined,
+          renderedPrompt: finalRenderedPrompt,
+          taskFileContent: finalTaskFileContent,
+          taskFilePath: finalTaskFilePath,
+          claudeModel: finalClaudeModel,
           claudeContextWindow: repoConfig?.claudeContextWindow ?? undefined,
           claudeThinking: repoConfig?.claudeThinking ?? undefined,
           claudeEffort: repoConfig?.claudeEffort ?? undefined,

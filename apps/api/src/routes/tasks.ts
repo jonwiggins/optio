@@ -99,6 +99,18 @@ export async function taskRoutes(app: FastifyInstance) {
     reply.send({ events });
   });
 
+  // Launch a review for a task
+  app.post("/api/tasks/:id/review", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const { launchReview } = await import("../services/review-service.js");
+      const reviewTaskId = await launchReview(id);
+      reply.status(201).send({ reviewTaskId });
+    } catch (err) {
+      reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Reorder tasks (update priorities)
   app.post("/api/tasks/reorder", async (req, reply) => {
     const body = req.body as { taskIds: string[] };

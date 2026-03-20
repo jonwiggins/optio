@@ -23,6 +23,11 @@ const updateRepoSchema = z.object({
   claudeEffort: z.string().optional(),
   autoResumeOnReview: z.boolean().optional(),
   maxConcurrentTasks: z.number().int().min(1).max(50).optional(),
+  reviewEnabled: z.boolean().optional(),
+  reviewTrigger: z.string().optional(),
+  reviewPromptTemplate: z.string().nullable().optional(),
+  testCommand: z.string().optional(),
+  reviewModel: z.string().optional(),
 });
 
 export async function repoRoutes(app: FastifyInstance) {

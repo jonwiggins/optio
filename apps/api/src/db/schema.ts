@@ -48,6 +48,8 @@ export const tasks = pgTable("tasks", {
   retryCount: integer("retry_count").notNull().default(0),
   maxRetries: integer("max_retries").notNull().default(3),
   priority: integer("priority").notNull().default(100), // lower = higher priority
+  parentTaskId: uuid("parent_task_id"), // for review tasks linked to a coding task
+  taskType: text("task_type").notNull().default("coding"), // "coding" | "review"
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   startedAt: timestamp("started_at", { withTimezone: true }),
@@ -117,6 +119,11 @@ export const repos = pgTable("repos", {
   claudeEffort: text("claude_effort").default("high"), // "low", "medium", "high"
   autoResumeOnReview: boolean("auto_resume_on_review").notNull().default(false),
   maxConcurrentTasks: integer("max_concurrent_tasks").notNull().default(2),
+  reviewEnabled: boolean("review_enabled").notNull().default(false),
+  reviewTrigger: text("review_trigger").default("on_ci_pass"), // "manual" | "on_pr" | "on_ci_pass"
+  reviewPromptTemplate: text("review_prompt_template"), // null = use default
+  testCommand: text("test_command"), // "npm test", "cargo test", etc.
+  reviewModel: text("review_model").default("sonnet"), // can use cheaper model for reviews
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

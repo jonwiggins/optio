@@ -32,6 +32,12 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [claudeEffort, setClaudeEffort] = useState("high");
   const [autoResumeOnReview, setAutoResumeOnReview] = useState(false);
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
+  const [reviewEnabled, setReviewEnabled] = useState(false);
+  const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
+  const [testCommand, setTestCommand] = useState("");
+  const [reviewModel, setReviewModel] = useState("sonnet");
+  const [reviewPromptTemplate, setReviewPromptTemplate] = useState("");
+  const [showReviewPrompt, setShowReviewPrompt] = useState(false);
 
   useEffect(() => {
     api
@@ -52,6 +58,12 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setClaudeContextWindow(r.claudeContextWindow ?? "1m");
         setClaudeThinking(r.claudeThinking ?? true);
         setClaudeEffort(r.claudeEffort ?? "high");
+        setReviewEnabled(r.reviewEnabled ?? false);
+        setReviewTrigger(r.reviewTrigger ?? "on_ci_pass");
+        setTestCommand(r.testCommand ?? "");
+        setReviewModel(r.reviewModel ?? "sonnet");
+        setReviewPromptTemplate(r.reviewPromptTemplate ?? "");
+        if (r.reviewPromptTemplate) setShowReviewPrompt(true);
         if (r.promptTemplateOverride) {
           setUseCustomPrompt(true);
           setPromptOverride(r.promptTemplateOverride);
@@ -78,6 +90,11 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         claudeContextWindow,
         claudeThinking,
         claudeEffort,
+        reviewEnabled,
+        reviewTrigger,
+        testCommand,
+        reviewModel,
+        reviewPromptTemplate: showReviewPrompt ? reviewPromptTemplate : null,
       });
       toast.success("Repo settings saved");
     } catch {
@@ -230,6 +247,91 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             </label>
           </div>
         </div>
+      </section>
+
+      {/* Code Review */}
+      <section className="p-4 rounded-lg border border-border bg-bg-card space-y-3">
+        <h2 className="text-sm font-medium">Code Review Agent</h2>
+        <p className="text-xs text-text-muted">Automatically review PRs opened by coding agents.</p>
+
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={reviewEnabled}
+            onChange={(e) => setReviewEnabled(e.target.checked)}
+            className="w-4 h-4 rounded"
+          />
+          <span className="text-sm">Enable automated code reviews</span>
+        </label>
+
+        {reviewEnabled && (
+          <div className="space-y-3 pt-2 border-t border-border">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Trigger</label>
+                <select
+                  value={reviewTrigger}
+                  onChange={(e) => setReviewTrigger(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                >
+                  <option value="on_ci_pass">After CI passes</option>
+                  <option value="on_pr">Immediately on PR open</option>
+                  <option value="manual">Manual only</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Review model</label>
+                <select
+                  value={reviewModel}
+                  onChange={(e) => setReviewModel(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                >
+                  <option value="sonnet">Sonnet 4.6 (faster, cheaper)</option>
+                  <option value="opus">Opus 4.6 (more thorough)</option>
+                  <option value="haiku">Haiku 4.5 (fastest)</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Test command</label>
+              <p className="text-[10px] text-text-muted/60 mb-1.5">
+                The reviewer will run this to verify the PR doesn't break tests.
+              </p>
+              <input
+                value={testCommand}
+                onChange={(e) => setTestCommand(e.target.value)}
+                placeholder="npm test, cargo test, pytest, etc."
+                className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showReviewPrompt}
+                onChange={(e) => {
+                  setShowReviewPrompt(e.target.checked);
+                  if (e.target.checked && !reviewPromptTemplate) {
+                    setReviewPromptTemplate("");
+                  }
+                }}
+                className="w-4 h-4 rounded"
+              />
+              <span className="text-sm">Custom review prompt</span>
+            </label>
+
+            {showReviewPrompt && (
+              <textarea
+                value={reviewPromptTemplate}
+                onChange={(e) => setReviewPromptTemplate(e.target.value)}
+                rows={8}
+                placeholder="Custom review prompt template..."
+                className="w-full px-3 py-2 rounded-md bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary resize-y leading-relaxed"
+              />
+            )}
+          </div>
+        )}
       </section>
 
       {/* Image */}

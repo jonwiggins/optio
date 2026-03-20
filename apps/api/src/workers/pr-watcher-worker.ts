@@ -1,5 +1,5 @@
 import { Queue, Worker } from "bullmq";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, repos } from "../db/schema.js";
 import { TaskState } from "@optio/shared";
@@ -138,6 +138,58 @@ export function startPrWatcherWorker() {
             updates.prReviewComments = reviewComments;
           }
           await db.update(tasks).set(updates).where(eq(tasks.id, task.id));
+
+          // Trigger review if enabled and CI just passed
+          if (
+            checksStatus === "passing" &&
+            task.prChecksStatus !== "passing" && // State changed to passing
+            prData.state === "open"
+          ) {
+            const [repoConf] = await db.select().from(repos).where(eq(repos.repoUrl, task.repoUrl));
+
+            if (repoConf?.reviewEnabled && repoConf.reviewTrigger === "on_ci_pass") {
+              // Check if a review task already exists for this task
+              const existingReview = await db
+                .select({ id: tasks.id })
+                .from(tasks)
+                .where(sql`${tasks.parentTaskId} = ${task.id} AND ${tasks.taskType} = 'review'`);
+
+              if (existingReview.length === 0) {
+                try {
+                  const { launchReview } = await import("../services/review-service.js");
+                  await launchReview(task.id);
+                  logger.info({ taskId: task.id }, "Auto-launched review agent on CI pass");
+                } catch (err) {
+                  logger.warn({ err, taskId: task.id }, "Failed to auto-launch review");
+                }
+              }
+            }
+          }
+
+          // Also trigger review on PR open if configured
+          if (
+            task.prChecksStatus === null && // First time seeing this PR
+            prData.state === "open"
+          ) {
+            const [repoConf] = await db.select().from(repos).where(eq(repos.repoUrl, task.repoUrl));
+
+            if (repoConf?.reviewEnabled && repoConf.reviewTrigger === "on_pr") {
+              const existingReview = await db
+                .select({ id: tasks.id })
+                .from(tasks)
+                .where(sql`${tasks.parentTaskId} = ${task.id} AND ${tasks.taskType} = 'review'`);
+
+              if (existingReview.length === 0) {
+                try {
+                  const { launchReview } = await import("../services/review-service.js");
+                  await launchReview(task.id);
+                  logger.info({ taskId: task.id }, "Auto-launched review agent on PR open");
+                } catch (err) {
+                  logger.warn({ err, taskId: task.id }, "Failed to auto-launch review");
+                }
+              }
+            }
+          }
 
           // Handle state transitions
           if (prData.merged) {

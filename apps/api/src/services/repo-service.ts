@@ -20,6 +20,11 @@ export interface RepoRecord {
   claudeEffort: string | null;
   autoResumeOnReview: boolean;
   maxConcurrentTasks: number;
+  reviewEnabled: boolean;
+  reviewTrigger: string | null;
+  reviewPromptTemplate: string | null;
+  testCommand: string | null;
+  reviewModel: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -81,6 +86,11 @@ export async function updateRepo(
     claudeEffort?: string;
     autoResumeOnReview?: boolean;
     maxConcurrentTasks?: number;
+    reviewEnabled?: boolean;
+    reviewTrigger?: string;
+    reviewPromptTemplate?: string | null;
+    testCommand?: string;
+    reviewModel?: string;
   },
 ): Promise<RepoRecord | null> {
   const [repo] = await db

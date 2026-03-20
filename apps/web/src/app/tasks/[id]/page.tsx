@@ -18,7 +18,9 @@ import {
   Clock,
   Send,
   AlertCircle,
+  Eye,
 } from "lucide-react";
+import { toast } from "sonner";
 
 export default function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -284,6 +286,28 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                 <span className="text-text-muted ml-auto">
                   Cost: ${parseFloat(task.costUsd).toFixed(4)}
                 </span>
+              )}
+
+              {/* Request Review */}
+              {task.state === "pr_opened" && (
+                <button
+                  onClick={async () => {
+                    setActionLoading(true);
+                    try {
+                      const res = await api.launchReview(id);
+                      toast.success("Review agent launched");
+                      refresh();
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Failed to launch review");
+                    }
+                    setActionLoading(false);
+                  }}
+                  disabled={actionLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 disabled:opacity-50 ml-auto"
+                >
+                  <Eye className="w-3 h-3" />
+                  Request Review
+                </button>
               )}
             </div>
 

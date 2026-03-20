@@ -71,6 +71,13 @@
       "when": 1774016156301,
       "tag": "0009_burly_moon_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1774019245579,
+      "tag": "0010_organic_ender_wiggin",
+      "breakpoints": true
     }
   ]
 }
