@@ -251,13 +251,16 @@ export async function execTaskInRepoPod(
     `[ -f /home/agent/.optio-env-ready ] && ENV_FRESH="false"`,
     `export ENV_FRESH`,
     `if [ "$ENV_FRESH" = "true" ]; then echo "[optio] Fresh environment — tools may need to be installed"; else echo "[optio] Warm environment — tools from previous tasks should be available"; fi`,
-    // Create worktree from the main branch (clean up stale branch/worktree from previous attempts)
+    // Create worktree from the latest main branch
     `cd /workspace/repo`,
     `git fetch origin`,
+    `git checkout ${env.OPTIO_REPO_BRANCH ?? "main"} 2>/dev/null || true`,
+    `git reset --hard origin/${env.OPTIO_REPO_BRANCH ?? "main"}`,
     `git worktree remove --force /workspace/tasks/${taskId} 2>/dev/null || true`,
     `git branch -D optio/task-${taskId} 2>/dev/null || true`,
     `git worktree add /workspace/tasks/${taskId} -b optio/task-${taskId} origin/${env.OPTIO_REPO_BRANCH ?? "main"}`,
     `cd /workspace/tasks/${taskId}`,
+    `export OPTIO_TASK_ID="${taskId}"`,
     // Write setup files if provided
     // Paths starting with / are absolute; relative paths are within the worktree
     // Use /home/agent instead of /opt/optio for user-writable paths
