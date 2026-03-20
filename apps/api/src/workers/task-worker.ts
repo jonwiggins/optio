@@ -101,6 +101,20 @@ export function startTaskWorker() {
         const resolvedSecrets = await resolveSecretsForTask(agentConfig.requiredSecrets);
         const allEnv = { ...agentConfig.env, ...resolvedSecrets };
 
+        // For max-subscription mode, fetch the OAuth token from the auth proxy
+        if (claudeAuthMode === "max-subscription") {
+          const { getClaudeAuthToken } = await import("../services/auth-service.js");
+          const authResult = getClaudeAuthToken();
+          if (authResult.available && authResult.token) {
+            allEnv.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
+            log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from host credentials");
+          } else {
+            throw new Error(
+              `Max subscription auth failed: ${authResult.error ?? "Token not available"}`,
+            );
+          }
+        }
+
         // Get or create a repo pod for this repo
         log.info("Getting repo pod");
         const pod = await repoPool.getOrCreateRepoPod(task.repoUrl, task.repoBranch, allEnv);

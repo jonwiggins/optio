@@ -186,13 +186,19 @@ export async function execTaskInRepoPod(
     "set -e",
     ...envFileLines,
     `export OPTIO_TASK_ID='${taskId}'`,
+    // Wait for the repo-init script to finish cloning
+    `echo "[optio] Waiting for repo to be ready..."`,
+    `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
+    `[ -f /workspace/.ready ] || { echo "[optio] ERROR: repo not ready after 120s"; exit 1; }`,
+    `echo "[optio] Repo ready"`,
     // Create worktree from the main branch
     `cd /workspace/repo`,
     `git fetch origin`,
     `git worktree add /workspace/tasks/${taskId} -b optio/task-${taskId} origin/${env.OPTIO_REPO_BRANCH ?? "main"}`,
     `cd /workspace/tasks/${taskId}`,
     // Write setup files if provided
-    // Paths starting with / are absolute (auth helpers); relative paths are within the worktree
+    // Paths starting with / are absolute; relative paths are within the worktree
+    // Use /home/agent instead of /opt/optio for user-writable paths
     `if [ -n "\${OPTIO_SETUP_FILES:-}" ]; then`,
     `  echo "[optio] Writing setup files..."`,
     `  WORKTREE_DIR=$(pwd)`,
@@ -201,7 +207,12 @@ export async function execTaskInRepoPod(
     `worktree = os.environ.get('WORKTREE_DIR', '.')`,
     `files = json.load(sys.stdin)`,
     `for f in files:`,
-    `    p = f['path'] if f['path'].startswith('/') else os.path.join(worktree, f['path'])`,
+    `    p = f['path']`,
+    `    # Remap /opt/optio/ to /home/agent/optio/ (writable by agent user)`,
+    `    if p.startswith('/opt/optio/'):`,
+    `        p = '/home/agent/optio/' + p[len('/opt/optio/'):]`,
+    `    elif not p.startswith('/'):`,
+    `        p = os.path.join(worktree, p)`,
     `    os.makedirs(os.path.dirname(p), exist_ok=True)`,
     `    with open(p, 'w') as fh:`,
     `        fh.write(f['content'])`,

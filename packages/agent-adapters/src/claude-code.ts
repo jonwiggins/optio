@@ -43,27 +43,18 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     if (authMode === "api-key") {
       requiredSecrets.push("ANTHROPIC_API_KEY");
     } else if (authMode === "max-subscription") {
+      // Max subscription: use CLAUDE_CODE_OAUTH_TOKEN env var
+      // The token is fetched from the Optio auth proxy at task execution time
+      // and injected as an env var by the task worker
       const apiUrl = input.optioApiUrl ?? "http://host.docker.internal:4000";
       env.OPTIO_API_URL = apiUrl;
+      // CLAUDE_CODE_OAUTH_TOKEN will be injected by the task worker after fetching from auth proxy
 
-      setupFiles.push({
-        path: "/opt/optio/claude-key-helper.sh",
-        content: [
-          "#!/bin/bash",
-          `TOKEN=$(curl -sf "${apiUrl}/api/auth/claude-token" 2>/dev/null)`,
-          'if [ -z "$TOKEN" ]; then',
-          '  echo "Failed to get token from Optio API" >&2',
-          "  exit 1",
-          "fi",
-          'echo "$TOKEN"',
-        ].join("\n"),
-        executable: true,
-      });
-
+      // Claude Code needs hasCompletedOnboarding to skip interactive setup
       setupFiles.push({
         path: "/home/agent/.claude/settings.json",
         content: JSON.stringify({
-          apiKeyHelper: "/opt/optio/claude-key-helper.sh",
+          hasCompletedOnboarding: true,
         }),
       });
     }

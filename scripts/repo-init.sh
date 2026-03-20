@@ -37,6 +37,8 @@ if [ -f /workspace/repo/.optio/setup.sh ]; then
   echo "[optio] Repo setup complete"
 fi
 
+# Signal that the pod is ready for tasks
+touch /workspace/.ready
 echo "[optio] Repo pod ready — waiting for tasks"
 
 # Keep the pod alive
