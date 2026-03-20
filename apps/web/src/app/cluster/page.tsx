@@ -198,7 +198,7 @@ export default function ClusterPage() {
                       <span className="font-mono text-sm font-medium">{pod.name}</span>
                       {pod.isOptioManaged && (
                         <span className="text-[10px] px-1 py-0.5 rounded bg-primary/10 text-primary">
-                          agent
+                          workspace
                         </span>
                       )}
                       {pod.isInfra && (

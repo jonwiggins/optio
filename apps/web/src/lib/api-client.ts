@@ -113,6 +113,15 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  getReviewDefault: () =>
+    request<{ template: string }>("/api/prompt-templates/review-default"),
+
+  saveReviewDefault: (template: string) =>
+    request<{ ok: boolean }>("/api/prompt-templates", {
+      method: "POST",
+      body: JSON.stringify({ template, isReview: true }),
+    }),
+
   // Repos
   listRepos: () => request<{ repos: any[] }>("/api/repos"),
 

@@ -123,13 +123,19 @@ function DefaultReviewEditor() {
   const [reviewPrompt, setReviewPrompt] = useState("");
   const [reviewModel, setReviewModel] = useState("sonnet");
   const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
+  const [reviewContextWindow, setReviewContextWindow] = useState("200k");
+  const [reviewEffort, setReviewEffort] = useState("medium");
+  const [reviewThinking, setReviewThinking] = useState(true);
+  const [reviewTestCommand, setReviewTestCommand] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    import("@optio/shared")
-      .then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE))
-      .catch(() => {})
+    api.getReviewDefault()
+      .then((res) => setReviewPrompt(res.template))
+      .catch(() => {
+        import("@optio/shared").then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE)).catch(() => {});
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -172,6 +178,56 @@ function DefaultReviewEditor() {
             <option value="haiku">Haiku 4.5</option>
           </select>
         </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div>
+          <label className="block text-xs text-text-muted mb-1">Context Window</label>
+          <select
+            value={reviewContextWindow}
+            onChange={(e) => setReviewContextWindow(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+          >
+            <option value="200k">200K tokens</option>
+            <option value="1m">1M tokens</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-text-muted mb-1">Effort Level</label>
+          <select
+            value={reviewEffort}
+            onChange={(e) => setReviewEffort(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <div className="flex items-end pb-1">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={reviewThinking}
+              onChange={(e) => setReviewThinking(e.target.checked)}
+              className="w-4 h-4 rounded"
+            />
+            <span className="text-sm">Thinking</span>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-xs text-text-muted mb-1">Default Test Command</label>
+        <p className="text-[10px] text-text-muted/60 mb-1.5">
+          Command to run tests locally. Leave empty if GitHub Actions handles testing — the reviewer will check CI status instead.
+        </p>
+        <input
+          value={reviewTestCommand}
+          onChange={(e) => setReviewTestCommand(e.target.value)}
+          placeholder="npm test, cargo test, pytest"
+          className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+        />
       </div>
 
       <div className="p-3 rounded-md bg-bg border border-border">
@@ -219,11 +275,14 @@ function DefaultReviewEditor() {
         <button
           onClick={async () => {
             setSaving(true);
-            // For now, the global review settings are stored as the defaults
-            // in the DEFAULT_REVIEW_PROMPT_TEMPLATE constant.
-            // A future enhancement would persist these to the DB.
-            toast.success("Review defaults updated");
-            setSaving(false);
+            try {
+              await api.saveReviewDefault(reviewPrompt);
+              toast.success("Review defaults saved");
+            } catch {
+              toast.error("Failed to save");
+            } finally {
+              setSaving(false);
+            }
           }}
           disabled={saving}
           className="px-4 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"

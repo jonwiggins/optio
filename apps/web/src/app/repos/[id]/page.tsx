@@ -296,6 +296,9 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               </div>
               <div>
                 <label className="block text-xs text-text-muted mb-1">Test command</label>
+                <p className="text-[10px] text-text-muted/60 mb-1.5">
+                  Command to run tests locally. Leave empty if GitHub Actions handles testing — the reviewer will check CI status instead.
+                </p>
                 <input
                   value={testCommand}
                   onChange={(e) => setTestCommand(e.target.value)}

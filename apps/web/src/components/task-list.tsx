@@ -37,9 +37,12 @@ export function TaskList() {
 
   const filteredTasks = filter ? tasks.filter((t) => t.state === filter) : tasks;
 
-  // Separate queued tasks for reordering
+  // Separate tasks into running, queued, and other
+  const runningTasks = filteredTasks.filter((t) => ["running", "provisioning"].includes(t.state));
   const queuedTasks = filteredTasks.filter((t) => t.state === "queued" || t.state === "pending");
-  const otherTasks = filteredTasks.filter((t) => t.state !== "queued" && t.state !== "pending");
+  const otherTasks = filteredTasks.filter(
+    (t) => !["running", "provisioning", "queued", "pending"].includes(t.state),
+  );
 
   const moveTask = async (index: number, direction: "up" | "down") => {
     const newIndex = direction === "up" ? index - 1 : index + 1;
@@ -50,7 +53,7 @@ export function TaskList() {
     reordered.splice(newIndex, 0, moved);
 
     // Optimistic update
-    const newTasks = [...reordered, ...otherTasks];
+    const newTasks = [...runningTasks, ...reordered, ...otherTasks];
     setTasks(newTasks);
 
     // Save to backend
@@ -92,6 +95,15 @@ export function TaskList() {
         </div>
       ) : (
         <div className="space-y-4">
+          {/* Running tasks first */}
+          {runningTasks.length > 0 && (
+            <div className="grid gap-2">
+              {runningTasks.map((task) => (
+                <TaskCard key={task.id} task={task} />
+              ))}
+            </div>
+          )}
+
           {/* Queued/pending tasks — reorderable */}
           {queuedTasks.length > 0 && (
             <div>

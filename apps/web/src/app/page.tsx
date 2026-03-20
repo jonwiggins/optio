@@ -23,6 +23,7 @@ import {
   ChevronDown,
   X,
   Plus,
+  DollarSign,
 } from "lucide-react";
 import { StateBadge } from "@/components/state-badge";
 
@@ -117,6 +118,10 @@ export default function OverviewPage() {
       </div>
     );
   }
+
+  const totalCost = recentTasks.reduce((sum: number, t: any) => {
+    return sum + (t.costUsd ? parseFloat(t.costUsd) : 0);
+  }, 0);
 
   const { nodes, pods, services, events, summary } = cluster ?? {
     nodes: [],
@@ -233,6 +238,13 @@ export default function OverviewPage() {
                   <>{formatK8sResource(nodes[0].memory)}</>
                 )}
               </span>
+              {totalCost > 0 && (
+                <span className="flex items-center gap-1 border-l border-border pl-3 ml-1">
+                  <DollarSign className="w-3 h-3" />
+                  <span className="font-medium text-text">${totalCost.toFixed(2)}</span>
+                  <span className="text-text-muted">total</span>
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -287,13 +299,9 @@ export default function OverviewPage() {
                 const color = STATUS_COLORS[pod.status] ?? "text-text-muted";
                 const isExpanded = expandedPods.has(pod.name);
                 const podTasks = pod.isOptioManaged
-                  ? recentTasks.filter((t: any) => {
-                      // Match tasks to pods by repo URL pattern in the pod name
-                      const podRepo = pod.labels?.["optio.repo-url"] ?? "";
-                      return t.repoUrl
-                        ?.replace(/[^a-zA-Z0-9-_.]/g, "_")
-                        .startsWith(podRepo.slice(0, 20));
-                    })
+                  ? recentTasks.filter((t: any) =>
+                      t.containerId === pod.name
+                    )
                   : [];
 
                 return (
@@ -319,7 +327,7 @@ export default function OverviewPage() {
                         {pod.isOptioManaged && (
                           <>
                             <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary">
-                              agent
+                              workspace
                             </span>
                             <ChevronDown
                               className={cn(

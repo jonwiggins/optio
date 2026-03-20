@@ -3,7 +3,7 @@ import { StateBadge } from "./state-badge";
 import { classifyError } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { formatRelativeTime, truncate } from "@/lib/utils";
-import { GitBranch, ExternalLink, RotateCcw } from "lucide-react";
+import { GitBranch, ExternalLink, RotateCcw, Bot } from "lucide-react";
 
 interface TaskCardProps {
   task: {
@@ -15,6 +15,7 @@ interface TaskCardProps {
     prUrl?: string;
     costUsd?: string;
     errorMessage?: string;
+    taskType?: string;
     createdAt: string;
     updatedAt: string;
   };
@@ -30,7 +31,15 @@ export function TaskCard({ task }: TaskCardProps) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="font-medium text-sm truncate">{task.title}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-medium text-sm truncate">{task.title}</h3>
+            {task.taskType === "review" && (
+              <span className="shrink-0 flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-info/10 text-info border border-info/20">
+                <Bot className="w-2.5 h-2.5" />
+                Review
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2 mt-1.5 text-xs text-text-muted">
             <GitBranch className="w-3 h-3" />
             <span>{truncate(repoName, 30)}</span>
