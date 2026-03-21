@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { useStore, type TaskSummary } from "@/hooks/use-store";
 import { TaskCard } from "./task-card";
-import { StateBadge } from "./state-badge";
-import { Loader2, ChevronUp, ChevronDown, GripVertical, Bot } from "lucide-react";
+import { Loader2, ChevronUp, ChevronDown, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -104,33 +102,6 @@ export function TaskList() {
     }
   };
 
-  const renderSubtasks = (parentId: string) => {
-    const subs = reviewMap.get(parentId);
-    if (!subs || subs.length === 0) return null;
-    return (
-      <div className="ml-8 mt-1.5 space-y-1.5 border-l-2 border-border pl-3">
-        {subs.map((sub) => (
-          <Link
-            key={sub.id}
-            href={`/tasks/${sub.id}`}
-            className={cn(
-              "flex items-center gap-2 p-2.5 rounded-lg text-xs transition-colors hover:bg-bg-hover",
-              sub.taskType === "review" ? "bg-info/5" : "bg-bg-card",
-            )}
-          >
-            {sub.taskType === "review" ? (
-              <Bot className="w-3.5 h-3.5 text-info shrink-0" />
-            ) : (
-              <span className="w-3.5 h-3.5 text-text-muted shrink-0 text-center">&bull;</span>
-            )}
-            <span className="truncate flex-1">{sub.title}</span>
-            <StateBadge state={sub.state} />
-          </Link>
-        ))}
-      </div>
-    );
-  };
-
   return (
     <div>
       {/* Filters */}
@@ -166,10 +137,7 @@ export function TaskList() {
           {running.length > 0 && (
             <Section label="Running" count={running.length}>
               {running.map((task) => (
-                <div key={task.id}>
-                  <TaskCard task={task} />
-                  {renderSubtasks(task.id)}
-                </div>
+                <TaskCard key={task.id} task={task} subtasks={reviewMap.get(task.id)} />
               ))}
             </Section>
           )}
@@ -178,10 +146,7 @@ export function TaskList() {
           {awaitingAction.length > 0 && (
             <Section label="Needs Your Input" count={awaitingAction.length}>
               {awaitingAction.map((task) => (
-                <div key={task.id}>
-                  <TaskCard task={task} />
-                  {renderSubtasks(task.id)}
-                </div>
+                <TaskCard key={task.id} task={task} subtasks={reviewMap.get(task.id)} />
               ))}
             </Section>
           )}
@@ -216,8 +181,7 @@ export function TaskList() {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <TaskCard task={task} />
-                    {renderSubtasks(task.id)}
+                    <TaskCard task={task} subtasks={reviewMap.get(task.id)} />
                   </div>
                 </div>
               ))}
@@ -228,10 +192,7 @@ export function TaskList() {
           {failed.length > 0 && (
             <Section label="Failed" count={failed.length}>
               {failed.map((task) => (
-                <div key={task.id}>
-                  <TaskCard task={task} />
-                  {renderSubtasks(task.id)}
-                </div>
+                <TaskCard key={task.id} task={task} subtasks={reviewMap.get(task.id)} />
               ))}
             </Section>
           )}
@@ -240,10 +201,7 @@ export function TaskList() {
           {completed.length > 0 && (
             <Section label="Completed" count={completed.length}>
               {completed.map((task) => (
-                <div key={task.id}>
-                  <TaskCard task={task} />
-                  {renderSubtasks(task.id)}
-                </div>
+                <TaskCard key={task.id} task={task} subtasks={reviewMap.get(task.id)} />
               ))}
             </Section>
           )}
