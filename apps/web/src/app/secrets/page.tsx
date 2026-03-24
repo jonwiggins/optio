@@ -3,26 +3,38 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, KeyRound } from "lucide-react";
+import { Loader2, Plus, Trash2, KeyRound, Globe, FolderGit2, Filter } from "lucide-react";
 
 export default function SecretsPage() {
   const [secrets, setSecrets] = useState<any[]>([]);
+  const [repos, setRepos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", value: "", scope: "global" });
   const [submitting, setSubmitting] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<string>("all");
 
   const loadSecrets = () => {
+    const scope = scopeFilter === "all" ? undefined : scopeFilter;
     api
-      .listSecrets()
+      .listSecrets(scope)
       .then((res) => setSecrets(res.secrets))
       .catch(() => {})
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
+    api
+      .listRepos()
+      .then((res) => setRepos(res.repos))
+      .catch(() => {});
     loadSecrets();
   }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    loadSecrets();
+  }, [scopeFilter]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +63,16 @@ export default function SecretsPage() {
       toast.error("Failed to delete secret");
     }
   };
+
+  /** Display-friendly label for a scope value */
+  const scopeLabel = (scope: string) => {
+    if (scope === "global") return "Global";
+    const repo = repos.find((r) => r.repoUrl === scope);
+    return repo?.fullName ?? scope;
+  };
+
+  /** Unique scopes present in the current secrets list (for filter dropdown) */
+  const uniqueScopes = Array.from(new Set(secrets.map((s) => s.scope)));
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
@@ -83,11 +105,18 @@ export default function SecretsPage() {
             </div>
             <div>
               <label className="block text-sm text-text-muted mb-1">Scope</label>
-              <input
+              <select
                 value={form.scope}
                 onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value }))}
                 className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-              />
+              >
+                <option value="global">Global (all repos)</option>
+                {repos.map((repo) => (
+                  <option key={repo.id} value={repo.repoUrl}>
+                    {repo.fullName}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <div>
@@ -120,6 +149,24 @@ export default function SecretsPage() {
         </form>
       )}
 
+      {/* Scope filter */}
+      <div className="flex items-center gap-2 mb-4">
+        <Filter className="w-4 h-4 text-text-muted" />
+        <select
+          value={scopeFilter}
+          onChange={(e) => setScopeFilter(e.target.value)}
+          className="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+        >
+          <option value="all">All scopes</option>
+          <option value="global">Global only</option>
+          {repos.map((repo) => (
+            <option key={repo.id} value={repo.repoUrl}>
+              {repo.fullName}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-12 text-text-muted">
           <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -138,9 +185,16 @@ export default function SecretsPage() {
               key={secret.id}
               className="flex items-center justify-between p-3 rounded-xl border border-border/50 bg-bg-card"
             >
-              <div>
+              <div className="flex items-center gap-3">
                 <span className="text-sm font-medium">{secret.name}</span>
-                <span className="text-xs text-text-muted ml-2">({secret.scope})</span>
+                <span className="inline-flex items-center gap-1 text-xs text-text-muted px-2 py-0.5 rounded-full bg-bg-hover">
+                  {secret.scope === "global" ? (
+                    <Globe className="w-3 h-3" />
+                  ) : (
+                    <FolderGit2 className="w-3 h-3" />
+                  )}
+                  {scopeLabel(secret.scope)}
+                </span>
               </div>
               <button
                 onClick={() => handleDelete(secret.name, secret.scope)}

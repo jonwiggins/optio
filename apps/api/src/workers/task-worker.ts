@@ -162,8 +162,11 @@ export function startTaskWorker() {
           ).toString("base64");
         }
 
-        // Resolve secrets
-        const resolvedSecrets = await resolveSecretsForTask(agentConfig.requiredSecrets);
+        // Resolve secrets (repo-scoped secrets override global ones)
+        const resolvedSecrets = await resolveSecretsForTask(
+          agentConfig.requiredSecrets,
+          task.repoUrl,
+        );
         const allEnv = { ...agentConfig.env, ...resolvedSecrets };
 
         // Inject repo-level setup config into pod env

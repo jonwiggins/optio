@@ -91,7 +91,16 @@ export async function resolveSecretsForTask(
 ): Promise<Record<string, string>> {
   const resolved: Record<string, string> = {};
   for (const name of requiredSecrets) {
-    resolved[name] = await retrieveSecret(name, scope);
+    if (scope !== "global") {
+      // Try repo-scoped secret first, fall back to global
+      try {
+        resolved[name] = await retrieveSecret(name, scope);
+        continue;
+      } catch {
+        // Not found at repo scope — fall through to global
+      }
+    }
+    resolved[name] = await retrieveSecret(name, "global");
   }
   return resolved;
 }
