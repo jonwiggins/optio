@@ -129,7 +129,7 @@ export default function NewRepoPage() {
         reviewTrigger,
         testCommand: testCommand || undefined,
         reviewModel,
-        autoResume: reviewEnabled ? autoResume : false,
+        autoResume,
         autoMerge,
       });
 
@@ -730,24 +730,17 @@ function ReviewStep({
 
       {/* Auto-resume */}
       <div>
-        <label
-          className={cn(
-            "flex items-center gap-2",
-            reviewEnabled ? "cursor-pointer" : "cursor-not-allowed opacity-40",
-          )}
-        >
+        <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"
             checked={autoResume}
             onChange={(e) => setAutoResume(e.target.checked)}
-            disabled={!reviewEnabled}
-            className="w-4 h-4 rounded disabled:opacity-50"
+            className="w-4 h-4 rounded"
           />
           <div>
-            <span className="text-sm">Auto-resume agent when reviewer requests changes</span>
-            {!reviewEnabled && (
-              <p className="text-[10px] text-text-muted/60">Requires code review to be enabled</p>
-            )}
+            <span className="text-sm">
+              Auto-resume agent on CI failures, merge conflicts, or review changes
+            </span>
           </div>
         </label>
       </div>

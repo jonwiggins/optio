@@ -97,7 +97,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setupCommands: setupCommands || undefined,
         customDockerfile: customDockerfile || null,
         autoMerge,
-        autoResume: reviewEnabled ? autoResume : false,
+        autoResume,
         maxConcurrentTasks,
         defaultBranch,
         promptTemplateOverride: useCustomPrompt ? promptOverride : null,
@@ -365,31 +365,19 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
           )}
         </PipelineStage>
 
-        {/* Stage 2: Resume on Feedback */}
-        <PipelineStage
-          number={2}
-          enabled={reviewEnabled && autoResume}
-          disabled={!reviewEnabled}
-          label="Resume on Feedback"
-        >
-          <label
-            className={cn(
-              "flex items-center gap-2",
-              reviewEnabled ? "cursor-pointer" : "cursor-not-allowed",
-            )}
-          >
+        {/* Stage 2: Auto-Resume */}
+        <PipelineStage number={2} enabled={autoResume} label="Auto-Resume">
+          <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={autoResume}
               onChange={(e) => setAutoResume(e.target.checked)}
-              disabled={!reviewEnabled}
-              className="w-4 h-4 rounded disabled:opacity-50"
+              className="w-4 h-4 rounded"
             />
             <div>
-              <span className="text-sm">Auto-resume agent when reviewer requests changes</span>
-              {!reviewEnabled && (
-                <p className="text-[10px] text-text-muted/60">Requires code review to be enabled</p>
-              )}
+              <span className="text-sm">
+                Auto-resume agent on CI failures, merge conflicts, or review changes
+              </span>
             </div>
           </label>
         </PipelineStage>
