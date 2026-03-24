@@ -1,5 +1,6 @@
 {
   "name": "optio",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "turbo dev",
