@@ -45,6 +45,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [maxTurnsReview, setMaxTurnsReview] = useState(10);
   const [autoResume, setAutoResume] = useState(false);
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
+  const [maxPodInstances, setMaxPodInstances] = useState(1);
+  const [maxAgentsPerPod, setMaxAgentsPerPod] = useState(2);
   const [reviewEnabled, setReviewEnabled] = useState(false);
   const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
   const [testCommand, setTestCommand] = useState("");
@@ -66,6 +68,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setAutoMerge(r.autoMerge);
         setAutoResume(r.autoResume ?? false);
         setMaxConcurrentTasks(r.maxConcurrentTasks ?? 2);
+        setMaxPodInstances(r.maxPodInstances ?? 1);
+        setMaxAgentsPerPod(r.maxAgentsPerPod ?? 2);
         setDefaultBranch(r.defaultBranch);
         setClaudeModel(r.claudeModel ?? "opus");
         setClaudeContextWindow(r.claudeContextWindow ?? "1m");
@@ -99,6 +103,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         autoMerge,
         autoResume: reviewEnabled ? autoResume : false,
         maxConcurrentTasks,
+        maxPodInstances,
+        maxAgentsPerPod,
         defaultBranch,
         promptTemplateOverride: useCustomPrompt ? promptOverride : null,
         claudeModel,
@@ -181,6 +187,41 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               onChange={(e) => setMaxConcurrentTasks(parseInt(e.target.value, 10) || 2)}
               className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
             />
+          </div>
+        </div>
+        <h3 className="text-xs font-medium text-text-muted pt-2">Pod Scaling</h3>
+        <p className="text-[10px] text-text-muted/60">
+          Control how many pod instances can run for this repo and how many agents each pod
+          supports.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Max pod instances</label>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={maxPodInstances}
+              onChange={(e) => setMaxPodInstances(parseInt(e.target.value, 10) || 1)}
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+            />
+            <p className="text-[10px] text-text-muted/60 mt-1">
+              Number of pod replicas for horizontal scaling
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Max agents per pod</label>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={maxAgentsPerPod}
+              onChange={(e) => setMaxAgentsPerPod(parseInt(e.target.value, 10) || 2)}
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+            />
+            <p className="text-[10px] text-text-muted/60 mt-1">
+              Concurrent agent worktrees per pod
+            </p>
           </div>
         </div>
       </section>

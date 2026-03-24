@@ -56,6 +56,8 @@ export default function NewRepoPage() {
   const [claudeEffort, setClaudeEffort] = useState("high");
   const [maxTurnsCoding, setMaxTurnsCoding] = useState(250);
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
+  const [maxPodInstances, setMaxPodInstances] = useState(1);
+  const [maxAgentsPerPod, setMaxAgentsPerPod] = useState(2);
 
   // Step 4: Review
   const [reviewEnabled, setReviewEnabled] = useState(false);
@@ -125,6 +127,8 @@ export default function NewRepoPage() {
         claudeEffort,
         maxTurnsCoding,
         maxConcurrentTasks,
+        maxPodInstances,
+        maxAgentsPerPod,
         reviewEnabled,
         reviewTrigger,
         testCommand: testCommand || undefined,
@@ -252,6 +256,10 @@ export default function NewRepoPage() {
             setMaxTurnsCoding={setMaxTurnsCoding}
             maxConcurrentTasks={maxConcurrentTasks}
             setMaxConcurrentTasks={setMaxConcurrentTasks}
+            maxPodInstances={maxPodInstances}
+            setMaxPodInstances={setMaxPodInstances}
+            maxAgentsPerPod={maxAgentsPerPod}
+            setMaxAgentsPerPod={setMaxAgentsPerPod}
             selectClass={selectClass}
             inputClass={inputClass}
           />
@@ -524,6 +532,10 @@ function AgentStep({
   setMaxTurnsCoding,
   maxConcurrentTasks,
   setMaxConcurrentTasks,
+  maxPodInstances,
+  setMaxPodInstances,
+  maxAgentsPerPod,
+  setMaxAgentsPerPod,
   selectClass,
   inputClass,
 }: {
@@ -539,6 +551,10 @@ function AgentStep({
   setMaxTurnsCoding: (v: number) => void;
   maxConcurrentTasks: number;
   setMaxConcurrentTasks: (v: number) => void;
+  maxPodInstances: number;
+  setMaxPodInstances: (v: number) => void;
+  maxAgentsPerPod: number;
+  setMaxAgentsPerPod: (v: number) => void;
   selectClass: string;
   inputClass: string;
 }) {
@@ -623,6 +639,39 @@ function AgentStep({
             onChange={(e) => setMaxConcurrentTasks(parseInt(e.target.value, 10) || 2)}
             className={inputClass}
           />
+        </div>
+      </div>
+
+      <div className="pt-3 border-t border-border/50">
+        <h3 className="text-xs font-medium text-text-muted mb-1">Pod Scaling</h3>
+        <p className="text-[10px] text-text-muted/60 mb-3">
+          Control how many pod instances and agents per pod for horizontal scaling.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Max Pod Instances</label>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={maxPodInstances}
+              onChange={(e) => setMaxPodInstances(parseInt(e.target.value, 10) || 1)}
+              className={inputClass}
+            />
+            <p className="text-[10px] text-text-muted/60 mt-1">Pod replicas for this repo</p>
+          </div>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Max Agents per Pod</label>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={maxAgentsPerPod}
+              onChange={(e) => setMaxAgentsPerPod(parseInt(e.target.value, 10) || 2)}
+              className={inputClass}
+            />
+            <p className="text-[10px] text-text-muted/60 mt-1">Concurrent worktrees per pod</p>
+          </div>
         </div>
       </div>
     </section>

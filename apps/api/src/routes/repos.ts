@@ -25,6 +25,8 @@ const updateRepoSchema = z.object({
   maxTurnsReview: z.number().int().min(1).max(100).optional(),
   autoResume: z.boolean().optional(),
   maxConcurrentTasks: z.number().int().min(1).max(50).optional(),
+  maxPodInstances: z.number().int().min(1).max(10).optional(),
+  maxAgentsPerPod: z.number().int().min(1).max(20).optional(),
   reviewEnabled: z.boolean().optional(),
   reviewTrigger: z.string().optional(),
   reviewPromptTemplate: z.string().nullable().optional(),

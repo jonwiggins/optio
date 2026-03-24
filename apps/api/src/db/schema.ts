@@ -52,6 +52,8 @@ export const tasks = pgTable("tasks", {
   taskType: text("task_type").notNull().default("coding"), // "coding" | "review"
   subtaskOrder: integer("subtask_order").default(0), // ordering within parent's subtasks
   blocksParent: boolean("blocks_parent").notNull().default(false), // if true, parent waits for this
+  worktreeState: text("worktree_state").default("none"), // "none" | "active" | "dirty" | "reset" | "preserved" | "removed"
+  lastPodId: uuid("last_pod_id"), // tracks which pod ran this task (for same-pod retry)
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   startedAt: timestamp("started_at", { withTimezone: true }),
@@ -123,6 +125,8 @@ export const repos = pgTable("repos", {
   maxTurnsReview: integer("max_turns_review"), // null = use global default (10)
   autoResume: boolean("auto_resume").notNull().default(false),
   maxConcurrentTasks: integer("max_concurrent_tasks").notNull().default(2),
+  maxPodInstances: integer("max_pod_instances").notNull().default(1),
+  maxAgentsPerPod: integer("max_agents_per_pod").notNull().default(2),
   reviewEnabled: boolean("review_enabled").notNull().default(false),
   reviewTrigger: text("review_trigger").default("on_ci_pass"), // "manual" | "on_pr" | "on_ci_pass"
   reviewPromptTemplate: text("review_prompt_template"), // null = use default
@@ -150,8 +154,9 @@ export const repoPodStateEnum = pgEnum("repo_pod_state", [
 
 export const repoPods = pgTable("repo_pods", {
   id: uuid("id").primaryKey().defaultRandom(),
-  repoUrl: text("repo_url").notNull().unique(),
+  repoUrl: text("repo_url").notNull(),
   repoBranch: text("repo_branch").notNull().default("main"),
+  instanceIndex: integer("instance_index").notNull().default(0),
   podName: text("pod_name"),
   podId: text("pod_id"),
   state: repoPodStateEnum("state").notNull().default("provisioning"),

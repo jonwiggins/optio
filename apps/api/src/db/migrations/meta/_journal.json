@@ -99,6 +99,13 @@
       "when": 1774108800000,
       "tag": "0013_rename_auto_resume",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1774108900000,
+      "tag": "0014_pod_scaling_worktree_lifecycle",
+      "breakpoints": true
     }
   ]
 }

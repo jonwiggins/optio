@@ -156,18 +156,40 @@ export function startRepoCleanupWorker() {
           const worktreeIds = output.trim().split("\n").filter(Boolean);
           if (worktreeIds.length === 0) continue;
 
-          // Check which ones belong to completed/failed tasks (with grace period)
+          // State-aware worktree cleanup
           const WORKTREE_GRACE_MS = 120_000; // 2 minutes after terminal state before cleanup
           for (const taskId of worktreeIds) {
             const [task] = await db
-              .select({ state: tasks.state, updatedAt: tasks.updatedAt })
+              .select({
+                state: tasks.state,
+                updatedAt: tasks.updatedAt,
+                worktreeState: tasks.worktreeState,
+                retryCount: tasks.retryCount,
+                maxRetries: tasks.maxRetries,
+              })
               .from(tasks)
               .where(eq(tasks.id, taskId));
 
-            const isTerminal = task && ["completed", "failed", "cancelled"].includes(task.state);
+            // Skip cleanup for preserved worktrees (pr_opened, needs_attention)
+            if (task?.worktreeState === "preserved") continue;
+            if (task && ["pr_opened", "needs_attention"].includes(task.state)) continue;
+
+            // Skip cleanup for dirty worktrees that might be retried
+            if (
+              task?.worktreeState === "dirty" &&
+              task.state === "failed" &&
+              (task.retryCount ?? 0) < (task.maxRetries ?? 3)
+            ) {
+              continue;
+            }
+
+            const isTerminal = task && ["completed", "cancelled"].includes(task.state);
+            const isFailedNoRetry =
+              task?.state === "failed" && (task.retryCount ?? 0) >= (task.maxRetries ?? 3);
+            const shouldClean = isTerminal || isFailedNoRetry || task?.worktreeState === "removed";
             const age = task?.updatedAt ? Date.now() - new Date(task.updatedAt).getTime() : 0;
-            if (isTerminal && age > WORKTREE_GRACE_MS) {
-              // Orphaned worktree — clean it up
+
+            if (shouldClean && age > WORKTREE_GRACE_MS) {
               try {
                 const cleanSession = await rt.exec(
                   { id: pod.podId ?? pod.podName, name: pod.podName },
@@ -178,7 +200,40 @@ export function startRepoCleanupWorker() {
                   ],
                   { tty: false },
                 );
-                // Consume output
+                for await (const _ of cleanSession.stdout as AsyncIterable<Buffer>) {
+                }
+                cleanSession.close();
+
+                // Update worktree state to removed
+                if (task) {
+                  await db
+                    .update(tasks)
+                    .set({ worktreeState: "removed" })
+                    .where(eq(tasks.id, taskId));
+                }
+
+                await recordHealthEvent(
+                  pod.id,
+                  pod.repoUrl,
+                  "orphan_cleaned",
+                  pod.podName,
+                  `Cleaned orphan worktree for task ${taskId}`,
+                );
+              } catch {}
+            }
+
+            // Also clean worktrees with no matching task (truly orphaned)
+            if (!task && age === 0) {
+              try {
+                const cleanSession = await rt.exec(
+                  { id: pod.podId ?? pod.podName, name: pod.podName },
+                  [
+                    "bash",
+                    "-c",
+                    `cd /workspace/repo && git worktree remove --force /workspace/tasks/${taskId} 2>/dev/null; rm -rf /workspace/tasks/${taskId}`,
+                  ],
+                  { tty: false },
+                );
                 for await (const _ of cleanSession.stdout as AsyncIterable<Buffer>) {
                 }
                 cleanSession.close();
@@ -188,7 +243,7 @@ export function startRepoCleanupWorker() {
                   pod.repoUrl,
                   "orphan_cleaned",
                   pod.podName,
-                  `Cleaned orphan worktree for task ${taskId}`,
+                  `Cleaned truly orphan worktree (no task) ${taskId}`,
                 );
               } catch {}
             }

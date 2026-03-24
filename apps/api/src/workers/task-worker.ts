@@ -231,10 +231,22 @@ export function startTaskWorker() {
         }
 
         // Get or create a repo pod for this repo
+        // Pass scaling config and same-pod retry preference
+        const isRetry = (task.retryCount ?? 0) > 0;
         log.info("Getting repo pod");
-        const pod = await repoPool.getOrCreateRepoPod(task.repoUrl, task.repoBranch, allEnv);
+        const pod = await repoPool.getOrCreateRepoPod(
+          task.repoUrl,
+          task.repoBranch,
+          allEnv,
+          undefined,
+          {
+            maxPodInstances: repoConfig?.maxPodInstances ?? 1,
+            maxAgentsPerPod: repoConfig?.maxAgentsPerPod ?? 2,
+            preferPodId: isRetry ? ((task as any).lastPodId ?? undefined) : undefined,
+          },
+        );
         repoPodId = pod.id;
-        log.info({ podName: pod.podName }, "Repo pod ready");
+        log.info({ podName: pod.podName, instanceIndex: pod.instanceIndex }, "Repo pod ready");
 
         await taskService.updateTaskContainer(taskId, pod.podName ?? pod.podId ?? pod.id);
         await taskService.transitionTask(taskId, TaskState.RUNNING, "worktree_created");
@@ -250,8 +262,15 @@ export function startTaskWorker() {
           maxTurnsReview: repoConfig?.maxTurnsReview ?? undefined,
         });
 
+        // Update worktree state to active
+        await db.update(tasks).set({ worktreeState: "active" }).where(eq(tasks.id, taskId));
+
         // Execute the task in the repo pod via worktree
-        const execSession = await repoPool.execTaskInRepoPod(pod, task.id, agentCommand, allEnv);
+        // For retries on the same pod, reset the worktree instead of recreating
+        const resetWorktree = isRetry && pod.id === (task as any).lastPodId;
+        const execSession = await repoPool.execTaskInRepoPod(pod, task.id, agentCommand, allEnv, {
+          resetWorktree,
+        });
 
         // Stream stdout with structured parsing
         let allLogs = "";
@@ -395,18 +414,16 @@ export function startTaskWorker() {
 
         if (!sessionId && !isReviewTask) {
           // Agent never started — no session ID means no agent output was produced.
-          // Check this FIRST: a stale prUrl from a previous run would otherwise
-          // cause a ghost-completion to be treated as pr_opened.
           await taskService.transitionTask(
             taskId,
             TaskState.FAILED,
             "agent_no_output",
             "Agent process exited without producing any output",
           );
+          await db.update(tasks).set({ worktreeState: "dirty" }).where(eq(tasks.id, taskId));
           log.warn("Agent exited without output — no session ID captured");
         } else if (detectedPrUrl && !isReviewTask) {
           // PR exists — go to pr_opened regardless of exit code.
-          // The PR watcher will track CI status and handle merge/failure from here.
           if (detectedPrUrl !== taskAfterExec?.prUrl) {
             await taskService.updateTaskPr(taskId, detectedPrUrl);
           }
@@ -416,6 +433,8 @@ export function startTaskWorker() {
             "pr_detected",
             detectedPrUrl,
           );
+          // Preserve worktree for PR review / resume
+          await db.update(tasks).set({ worktreeState: "preserved" }).where(eq(tasks.id, taskId));
           log.info({ prUrl: detectedPrUrl }, "PR opened");
         } else if (result.success || isReviewTask) {
           await taskService.transitionTask(
@@ -424,9 +443,13 @@ export function startTaskWorker() {
             "agent_success",
             result.summary,
           );
+          // Terminal state — mark for removal
+          await db.update(tasks).set({ worktreeState: "removed" }).where(eq(tasks.id, taskId));
           log.info("Task completed");
         } else {
           await taskService.transitionTask(taskId, TaskState.FAILED, "agent_failure", result.error);
+          // Mark as dirty for potential retry
+          await db.update(tasks).set({ worktreeState: "dirty" }).where(eq(tasks.id, taskId));
           log.warn({ error: result.error }, "Task failed");
 
           // Publish global alert for auth failures so the UI can show a banner

@@ -22,6 +22,8 @@ export interface RepoRecord {
   maxTurnsReview: number | null;
   autoResume: boolean;
   maxConcurrentTasks: number;
+  maxPodInstances: number;
+  maxAgentsPerPod: number;
   reviewEnabled: boolean;
   reviewTrigger: string | null;
   reviewPromptTemplate: string | null;
@@ -90,6 +92,8 @@ export async function updateRepo(
     maxTurnsReview?: number;
     autoResume?: boolean;
     maxConcurrentTasks?: number;
+    maxPodInstances?: number;
+    maxAgentsPerPod?: number;
     reviewEnabled?: boolean;
     reviewTrigger?: string;
     reviewPromptTemplate?: string | null;
