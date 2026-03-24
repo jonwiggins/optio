@@ -1,27 +1,35 @@
-# Implement OpenAI Codex agent adapter
+# Improve test coverage for critical paths
 
-Implement OpenAI Codex agent adapter
+Improve test coverage for critical paths
 
 ## Description
 
-The Codex adapter in `packages/agent-adapters/src/claude-code.ts` is currently a stub. `parseResult()` is hardcoded to `success: exitCode === 0` without actually parsing Codex output, and there's no cost tracking, error handling, or PR detection.
+Current test coverage is estimated at 10-15%, focused on shared utilities. The core orchestration paths have zero tests.
 
-## Current state
+## What's tested today
 
-- `buildContainerConfig()` is implemented
-- `parseResult()` is a dummy — doesn't parse Codex output format
-- No cost tracking
-- No PR URL extraction from Codex output
-- No Codex-specific error handling
+- State machine transitions (`state-machine.test.ts`)
+- Error classifier patterns (`error-classifier.test.ts`)
+- Prompt template rendering (`prompt-template.test.ts`)
+- Agent event parser (`agent-event-parser.test.ts`)
+- PR watcher decision logic (`pr-watcher-worker.test.ts`)
+
+## Critical untested paths (priority order)
+
+1. **Task worker** — the main orchestration loop: concurrency checks, pod provisioning, agent execution, result handling (~200+ lines of complex logic)
+2. **Repo pool service** — pod creation, worktree exec, cleanup (~150+ lines)
+3. **Secret encryption/decryption** — round-trip correctness
+4. **Review agent flow** — subtask creation, prompt rendering, completion callbacks
+5. **Subtask completion checks** — `onSubtaskComplete()` parent advancement logic
+6. **API routes** — at minimum: task CRUD, secrets CRUD, bulk operations
 
 ## Acceptance criteria
 
-- Codex adapter correctly parses agent output
-- PR URLs are detected from Codex logs
-- Cost tracking works (if Codex exposes usage data)
-- Error classification handles Codex-specific failure modes
-- If Codex output format can't be determined, remove Codex from the UI agent selector rather than leaving a broken option
+- Task worker has unit tests covering: concurrency limiting, retry logic, state transitions on success/failure
+- Repo pool service has tests for pod lifecycle
+- Secret encryption has round-trip test
+- Overall coverage meaningfully improved (target: 40%+ of backend logic)
 
 ---
 
-_Optio Task ID: 7633f5f4-eb11-4891-8a4a-070704352f8f_
+_Optio Task ID: 6c9dbab8-e267-48d8-97a5-2530561d6cc3_

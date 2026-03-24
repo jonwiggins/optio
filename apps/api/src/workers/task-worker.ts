@@ -573,7 +573,7 @@ export async function reconcileOrphanedTasks() {
   }
 }
 
-function buildAgentCommand(
+export function buildAgentCommand(
   agentType: string,
   env: Record<string, string>,
   opts?: {
@@ -625,7 +625,7 @@ function buildAgentCommand(
 }
 
 /** Infer exit code from agent logs based on agent-specific error patterns */
-function inferExitCode(agentType: string, logs: string): number {
+export function inferExitCode(agentType: string, logs: string): number {
   switch (agentType) {
     case "codex": {
       // Codex: look for error events in JSON output or OpenAI-specific failures

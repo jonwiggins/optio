@@ -77,7 +77,7 @@ export async function getOrCreateRepoPod(
   }
 }
 
-function resolveImage(imageConfig?: RepoImageConfig): string {
+export function resolveImage(imageConfig?: RepoImageConfig): string {
   if (imageConfig?.customImage) return imageConfig.customImage;
   if (imageConfig?.preset && imageConfig.preset in PRESET_IMAGES) {
     return PRESET_IMAGES[imageConfig.preset].tag;
