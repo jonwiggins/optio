@@ -11,3 +11,4 @@ export * from "./constants.js";
 export * from "./prompt-template.js";
 export * from "./types/image.js";
 export * from "./error-classifier.js";
+export * from "./types/session.js";

@@ -17,7 +17,11 @@ import {
   GitPullRequest,
   ChevronDown,
   ChevronRight,
+  Terminal,
+  Plus,
+  CircleDot,
 } from "lucide-react";
+import { formatRelativeTime, formatDuration } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
@@ -55,6 +59,9 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [reviewModel, setReviewModel] = useState("sonnet");
   const [reviewPromptTemplate, setReviewPromptTemplate] = useState("");
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessionCount, setSessionCount] = useState(0);
+  const [creatingSession, setCreatingSession] = useState(false);
 
   useEffect(() => {
     api
@@ -93,6 +100,18 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
       .catch(() => toast.error("Failed to load repo"))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Fetch sessions for this repo
+  useEffect(() => {
+    if (!repo?.repoUrl) return;
+    api
+      .listSessions({ repoUrl: repo.repoUrl, limit: 5 })
+      .then((res) => {
+        setSessions(res.sessions);
+        setSessionCount(res.activeCount);
+      })
+      .catch(() => {});
+  }, [repo?.repoUrl]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -152,6 +171,19 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
     return <div className="flex items-center justify-center h-full text-error">Repo not found</div>;
   }
 
+  const handleCreateSession = async () => {
+    if (!repo?.repoUrl) return;
+    setCreatingSession(true);
+    try {
+      const res = await api.createSession({ repoUrl: repo.repoUrl });
+      toast.success("Session created");
+      window.location.href = `/sessions/${res.session.id}`;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create session");
+    }
+    setCreatingSession(false);
+  };
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
@@ -165,7 +197,78 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         ) : (
           <Globe className="w-4 h-4 text-text-muted" />
         )}
+        <div className="flex-1" />
+        <button
+          onClick={handleCreateSession}
+          disabled={creatingSession}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
+        >
+          {creatingSession ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Terminal className="w-3.5 h-3.5" />
+          )}
+          New Session
+        </button>
       </div>
+
+      {/* Sessions */}
+      {sessions.length > 0 && (
+        <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-primary" />
+              Sessions
+              {sessionCount > 0 && (
+                <span className="text-xs font-normal text-primary bg-primary/10 px-1.5 py-0.5 rounded-md">
+                  {sessionCount} active
+                </span>
+              )}
+            </h2>
+            <Link href="/sessions" className="text-xs text-primary hover:underline">
+              All sessions &rarr;
+            </Link>
+          </div>
+          <div className="space-y-1.5">
+            {sessions.map((session: any) => {
+              const isActive = session.state === "active";
+              return (
+                <Link
+                  key={session.id}
+                  href={`/sessions/${session.id}`}
+                  className="flex items-center gap-3 p-2.5 rounded-lg border border-border hover:border-primary/30 hover:bg-bg-hover transition-colors"
+                >
+                  <div
+                    className={cn(
+                      "w-7 h-7 rounded-md flex items-center justify-center shrink-0",
+                      isActive ? "bg-primary/10 text-primary" : "bg-bg text-text-muted",
+                    )}
+                  >
+                    <Terminal className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-medium truncate block">
+                      {session.branch ?? `Session ${session.id.slice(0, 8)}`}
+                    </span>
+                    <div className="flex items-center gap-2 text-[10px] text-text-muted">
+                      <span>{formatRelativeTime(session.createdAt)}</span>
+                      {isActive && (
+                        <span className="text-primary">{formatDuration(session.createdAt)}</span>
+                      )}
+                    </div>
+                  </div>
+                  {isActive && (
+                    <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/10 text-primary text-[10px] font-medium shrink-0">
+                      <CircleDot className="w-2.5 h-2.5" />
+                      Connect
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* General */}
       <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">

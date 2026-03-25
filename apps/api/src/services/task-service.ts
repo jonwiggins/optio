@@ -380,15 +380,40 @@ export async function appendTaskLog(
   });
 }
 
-export async function getTaskLogs(taskId: string, opts?: { limit?: number; offset?: number }) {
+export async function getTaskLogs(
+  taskId: string,
+  opts?: { limit?: number; offset?: number; search?: string; logType?: string },
+) {
+  const conditions = [eq(taskLogs.taskId, taskId)];
+  if (opts?.logType) {
+    conditions.push(eq(taskLogs.logType, opts.logType));
+  }
+  if (opts?.search) {
+    conditions.push(ilike(taskLogs.content, `%${opts.search}%`));
+  }
   let query = db
     .select()
     .from(taskLogs)
-    .where(eq(taskLogs.taskId, taskId))
+    .where(and(...conditions))
     .orderBy(taskLogs.timestamp);
   if (opts?.limit) query = query.limit(opts.limit) as typeof query;
   if (opts?.offset) query = query.offset(opts.offset) as typeof query;
   return query;
+}
+
+export async function getAllTaskLogs(taskId: string, opts?: { search?: string; logType?: string }) {
+  const conditions = [eq(taskLogs.taskId, taskId)];
+  if (opts?.logType) {
+    conditions.push(eq(taskLogs.logType, opts.logType));
+  }
+  if (opts?.search) {
+    conditions.push(ilike(taskLogs.content, `%${opts.search}%`));
+  }
+  return db
+    .select()
+    .from(taskLogs)
+    .where(and(...conditions))
+    .orderBy(taskLogs.timestamp);
 }
 
 export async function forceRedoTask(id: string) {

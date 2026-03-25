@@ -74,3 +74,7 @@ export function createLogClient(taskId: string): WsClient {
 export function createTerminalClient(taskId: string): WsClient {
   return new WsClient(`${WS_URL}/ws/terminal/${taskId}`);
 }
+
+export function createSessionTerminalClient(sessionId: string): WsClient {
+  return new WsClient(`${WS_URL}/ws/sessions/${sessionId}/terminal`);
+}

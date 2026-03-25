@@ -146,12 +146,124 @@ export async function taskRoutes(app: FastifyInstance) {
   // Get task logs
   app.get("/api/tasks/:id/logs", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const query = req.query as { limit?: string; offset?: string };
+    const query = req.query as {
+      limit?: string;
+      offset?: string;
+      search?: string;
+      logType?: string;
+    };
     const logs = await taskService.getTaskLogs(id, {
       limit: query.limit ? parseInt(query.limit, 10) : 200,
       offset: query.offset ? parseInt(query.offset, 10) : 0,
+      search: query.search || undefined,
+      logType: query.logType || undefined,
     });
     reply.send({ logs });
+  });
+
+  // Export task logs
+  app.get("/api/tasks/:id/logs/export", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const query = req.query as { format?: string; search?: string; logType?: string };
+    const format = query.format ?? "json";
+
+    const task = await taskService.getTask(id);
+    if (!task) return reply.status(404).send({ error: "Task not found" });
+
+    const logs = await taskService.getAllTaskLogs(id, {
+      search: query.search || undefined,
+      logType: query.logType || undefined,
+    });
+
+    const meta = {
+      taskId: task.id,
+      title: task.title,
+      repoUrl: task.repoUrl,
+      state: task.state,
+      agentType: task.agentType,
+      prUrl: task.prUrl,
+      costUsd: task.costUsd,
+      createdAt: task.createdAt,
+      startedAt: task.startedAt,
+      completedAt: task.completedAt,
+      exportedAt: new Date().toISOString(),
+      totalLogs: logs.length,
+    };
+
+    if (format === "plaintext") {
+      const lines = logs.map(
+        (l) => `[${new Date(l.timestamp).toISOString()}] [${l.logType ?? "text"}] ${l.content}`,
+      );
+      const header = [
+        `Task: ${meta.title} (${meta.taskId})`,
+        `Repo: ${meta.repoUrl}`,
+        `State: ${meta.state}`,
+        meta.prUrl ? `PR: ${meta.prUrl}` : null,
+        meta.costUsd ? `Cost: $${meta.costUsd}` : null,
+        `Created: ${meta.createdAt}`,
+        meta.startedAt ? `Started: ${meta.startedAt}` : null,
+        meta.completedAt ? `Completed: ${meta.completedAt}` : null,
+        `Exported: ${meta.exportedAt}`,
+        `Total logs: ${meta.totalLogs}`,
+        "",
+        "---",
+        "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      reply
+        .header("Content-Type", "text/plain")
+        .header("Content-Disposition", `attachment; filename="task-${id}-logs.txt"`)
+        .send(header + lines.join("\n"));
+      return;
+    }
+
+    if (format === "markdown") {
+      const logLines = logs.map((l) => {
+        const type = l.logType ?? "text";
+        const ts = new Date(l.timestamp).toISOString();
+        if (type === "error") return `> **ERROR** (${ts})\n> ${l.content}`;
+        if (type === "tool_use")
+          return `\`\`\`\n[${ts}] 🔧 ${(l.metadata as any)?.toolName ?? "Tool"}: ${l.content}\n\`\`\``;
+        if (type === "tool_result")
+          return `<details><summary>Result (${ts})</summary>\n\n\`\`\`\n${l.content}\n\`\`\`\n</details>`;
+        if (type === "thinking") return `*${ts} — thinking:* ${l.content}`;
+        return `${l.content}`;
+      });
+      const md = [
+        `# Task Logs: ${meta.title}`,
+        "",
+        `| Field | Value |`,
+        `| --- | --- |`,
+        `| Task ID | \`${meta.taskId}\` |`,
+        `| Repo | ${meta.repoUrl} |`,
+        `| State | ${meta.state} |`,
+        meta.prUrl ? `| PR | ${meta.prUrl} |` : null,
+        meta.costUsd ? `| Cost | $${meta.costUsd} |` : null,
+        `| Created | ${meta.createdAt} |`,
+        meta.startedAt ? `| Started | ${meta.startedAt} |` : null,
+        meta.completedAt ? `| Completed | ${meta.completedAt} |` : null,
+        `| Exported | ${meta.exportedAt} |`,
+        `| Total logs | ${meta.totalLogs} |`,
+        "",
+        "---",
+        "",
+        ...logLines,
+      ]
+        .filter((l) => l !== null)
+        .join("\n");
+      reply
+        .header("Content-Type", "text/markdown")
+        .header("Content-Disposition", `attachment; filename="task-${id}-logs.md"`)
+        .send(md);
+      return;
+    }
+
+    // Default: JSON
+    reply
+      .header("Content-Type", "application/json")
+      .header("Content-Disposition", `attachment; filename="task-${id}-logs.json"`)
+      .send({ meta, logs });
   });
 
   // Get task events

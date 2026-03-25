@@ -23,6 +23,11 @@ export async function publishEvent(event: WsEvent): Promise<void> {
   }
 }
 
+export async function publishSessionEvent(sessionId: string, event: WsEvent): Promise<void> {
+  const redis = getPublisher();
+  await redis.publish(`optio:session:${sessionId}`, JSON.stringify(event));
+}
+
 export function createSubscriber(): Redis {
   return new Redis(redisUrl);
 }

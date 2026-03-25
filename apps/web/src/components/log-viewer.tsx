@@ -1,10 +1,12 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, useCallback } from "react";
+import { Fragment, useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useLogs, type LogEntry } from "@/hooks/use-logs";
+import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import {
   ArrowDown,
+  ArrowUp,
   Trash2,
   Terminal,
   AlertCircle,
@@ -16,6 +18,9 @@ import {
   FileText,
   Pencil,
   Search,
+  X,
+  Download,
+  Filter,
 } from "lucide-react";
 
 const TOOL_ICONS: Record<string, any> = {
@@ -26,6 +31,17 @@ const TOOL_ICONS: Record<string, any> = {
   Grep: Search,
   Glob: Search,
 };
+
+const LOG_TYPES = [
+  { value: "", label: "All types" },
+  { value: "text", label: "Text" },
+  { value: "tool_use", label: "Tool use" },
+  { value: "tool_result", label: "Tool result" },
+  { value: "thinking", label: "Thinking" },
+  { value: "system", label: "System" },
+  { value: "error", label: "Error" },
+  { value: "info", label: "Info" },
+];
 
 function formatTime(ts: string): string {
   try {
@@ -64,6 +80,25 @@ function TimeGap({ ms }: { ms: number }) {
   );
 }
 
+function HighlightedText({ text, search }: { text: string; search: string }) {
+  if (!search) return <>{text}</>;
+  const regex = new RegExp(`(${search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+  const parts = text.split(regex);
+  return (
+    <>
+      {parts.map((part, i) =>
+        regex.test(part) ? (
+          <mark key={i} className="bg-warning/40 text-inherit rounded-sm px-0.5">
+            {part}
+          </mark>
+        ) : (
+          <Fragment key={i}>{part}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
 export function LogViewer({ taskId }: { taskId: string }) {
   const { logs, connected, clear } = useLogs(taskId);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -72,6 +107,18 @@ export function LogViewer({ taskId }: { taskId: string }) {
   const [showResults, setShowResults] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [now, setNow] = useState(Date.now());
+
+  // Search state
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Filter state
+  const [logTypeFilter, setLogTypeFilter] = useState("");
+
+  // Export state
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
@@ -99,11 +146,84 @@ export function LogViewer({ taskId }: { taskId: string }) {
     });
   }, []);
 
-  // Build grouped log entries: pair tool_use with following tool_result
-  const filteredLogs = logs.filter((l) => {
-    if (l.logType === "thinking" && !showThinking) return false;
-    return true;
-  });
+  // Keyboard shortcut for search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault();
+        setSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.focus(), 0);
+      }
+      if (e.key === "Escape" && searchOpen) {
+        setSearchOpen(false);
+        setSearchQuery("");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [searchOpen]);
+
+  // Build filtered logs: apply log type filter + thinking/results toggles
+  const filteredLogs = useMemo(() => {
+    return logs.filter((l) => {
+      if (logTypeFilter && l.logType !== logTypeFilter) return false;
+      if (l.logType === "thinking" && !showThinking) return false;
+      return true;
+    });
+  }, [logs, logTypeFilter, showThinking]);
+
+  // Search match indices (indices into filteredLogs that match the search query)
+  const searchMatches = useMemo(() => {
+    if (!searchQuery) return [];
+    const q = searchQuery.toLowerCase();
+    const matches: number[] = [];
+    filteredLogs.forEach((l, i) => {
+      if (l.content.toLowerCase().includes(q)) {
+        matches.push(i);
+      }
+    });
+    return matches;
+  }, [filteredLogs, searchQuery]);
+
+  // Clamp currentMatchIndex
+  useEffect(() => {
+    if (searchMatches.length === 0) {
+      setCurrentMatchIndex(0);
+    } else if (currentMatchIndex >= searchMatches.length) {
+      setCurrentMatchIndex(searchMatches.length - 1);
+    }
+  }, [searchMatches.length, currentMatchIndex]);
+
+  // Scroll to current match
+  useEffect(() => {
+    if (searchMatches.length === 0) return;
+    const matchIdx = searchMatches[currentMatchIndex];
+    if (matchIdx == null) return;
+    const el = containerRef.current?.querySelector(`[data-log-index="${matchIdx}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setAutoScroll(false);
+    }
+  }, [currentMatchIndex, searchMatches]);
+
+  const goToNextMatch = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    setCurrentMatchIndex((prev) => (prev + 1) % searchMatches.length);
+  }, [searchMatches.length]);
+
+  const goToPrevMatch = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    setCurrentMatchIndex((prev) => (prev - 1 + searchMatches.length) % searchMatches.length);
+  }, [searchMatches.length]);
+
+  const handleExport = useCallback(
+    (format: string) => {
+      const url = api.exportTaskLogs(taskId, { format });
+      window.open(url, "_blank");
+      setShowExportMenu(false);
+    },
+    [taskId],
+  );
 
   // Group consecutive tool_use + tool_result pairs
   type LogGroup =
@@ -133,8 +253,69 @@ export function LogViewer({ taskId }: { taskId: string }) {
     i++;
   }
 
+  // Create a set of match indices for highlight
+  const matchIndexSet = useMemo(() => new Set(searchMatches), [searchMatches]);
+  const currentHighlightIdx = searchMatches.length > 0 ? searchMatches[currentMatchIndex] : -1;
+
   return (
     <div className="flex flex-col h-full border border-border rounded-xl overflow-hidden bg-bg">
+      {/* Search bar */}
+      {searchOpen && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-card">
+          <Search className="w-3.5 h-3.5 text-text-muted shrink-0" />
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setCurrentMatchIndex(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (e.shiftKey) goToPrevMatch();
+                else goToNextMatch();
+              }
+            }}
+            placeholder="Search logs..."
+            className="flex-1 bg-transparent text-xs outline-none placeholder:text-text-muted/40"
+            autoFocus
+          />
+          {searchQuery && (
+            <span className="text-[10px] text-text-muted tabular-nums shrink-0">
+              {searchMatches.length > 0
+                ? `${currentMatchIndex + 1}/${searchMatches.length}`
+                : "No matches"}
+            </span>
+          )}
+          <button
+            onClick={goToPrevMatch}
+            disabled={searchMatches.length === 0}
+            className="p-1 rounded hover:bg-bg-hover text-text-muted disabled:opacity-30"
+            title="Previous match (Shift+Enter)"
+          >
+            <ArrowUp className="w-3 h-3" />
+          </button>
+          <button
+            onClick={goToNextMatch}
+            disabled={searchMatches.length === 0}
+            className="p-1 rounded hover:bg-bg-hover text-text-muted disabled:opacity-30"
+            title="Next match (Enter)"
+          >
+            <ArrowDown className="w-3 h-3" />
+          </button>
+          <button
+            onClick={() => {
+              setSearchOpen(false);
+              setSearchQuery("");
+            }}
+            className="p-1 rounded hover:bg-bg-hover text-text-muted"
+            title="Close search (Esc)"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-bg-card">
         <div className="flex items-center gap-2.5 text-xs text-text-muted">
@@ -171,6 +352,26 @@ export function LogViewer({ taskId }: { taskId: string }) {
             )}
         </div>
         <div className="flex items-center gap-1.5">
+          {/* Log type filter */}
+          <div className="relative">
+            <select
+              value={logTypeFilter}
+              onChange={(e) => setLogTypeFilter(e.target.value)}
+              className={cn(
+                "appearance-none pl-6 pr-2 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer bg-transparent border-none outline-none",
+                logTypeFilter
+                  ? "bg-primary/10 text-primary"
+                  : "text-text-muted/50 hover:text-text-muted hover:bg-bg-hover",
+              )}
+            >
+              {LOG_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted/50" />
+          </div>
           <button
             onClick={() => setShowThinking(!showThinking)}
             className={cn(
@@ -195,6 +396,54 @@ export function LogViewer({ taskId }: { taskId: string }) {
           </button>
           <div className="w-px h-4 bg-border mx-1" />
           <button
+            onClick={() => {
+              setSearchOpen(true);
+              setTimeout(() => searchInputRef.current?.focus(), 0);
+            }}
+            className={cn(
+              "p-1.5 rounded-md hover:bg-bg-hover transition-colors",
+              searchOpen ? "text-primary" : "text-text-muted/50 hover:text-text-muted",
+            )}
+            title="Search (Ctrl+F)"
+          >
+            <Search className="w-3.5 h-3.5" />
+          </button>
+          {/* Export dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted/50 hover:text-text-muted transition-colors"
+              title="Export logs"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+            {showExportMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 z-20 bg-bg-card border border-border rounded-lg shadow-lg py-1 min-w-[140px]">
+                  <button
+                    onClick={() => handleExport("json")}
+                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
+                  >
+                    Export as JSON
+                  </button>
+                  <button
+                    onClick={() => handleExport("plaintext")}
+                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
+                  >
+                    Export as Text
+                  </button>
+                  <button
+                    onClick={() => handleExport("markdown")}
+                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
+                  >
+                    Export as Markdown
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          <button
             onClick={clear}
             className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted/50 hover:text-text-muted transition-colors"
             title="Clear"
@@ -212,7 +461,7 @@ export function LogViewer({ taskId }: { taskId: string }) {
       >
         {groups.length === 0 ? (
           <div className="text-text-muted/40 text-center py-12 font-sans">
-            Waiting for output...
+            {logTypeFilter || searchQuery ? "No matching logs" : "Waiting for output..."}
           </div>
         ) : (
           groups.map((group, gi) => {
@@ -225,10 +474,27 @@ export function LogViewer({ taskId }: { taskId: string }) {
               : null;
             const gapMs = prevEnd ? new Date(ts).getTime() - new Date(prevEnd).getTime() : 0;
 
+            const isMatch =
+              group.type === "tool_call"
+                ? matchIndexSet.has(group.index) ||
+                  (group.result && matchIndexSet.has(group.index + 1))
+                : matchIndexSet.has(group.index);
+            const isCurrent =
+              group.type === "tool_call"
+                ? currentHighlightIdx === group.index || currentHighlightIdx === group.index + 1
+                : currentHighlightIdx === group.index;
+
             return (
               <Fragment key={group.index}>
                 {gapMs > 10000 && <TimeGap ms={gapMs} />}
-                <div className="flex gap-2.5">
+                <div
+                  className={cn(
+                    "flex gap-2.5",
+                    isMatch && "bg-warning/5 -mx-2 px-2 rounded",
+                    isCurrent && "ring-1 ring-warning/50 bg-warning/10",
+                  )}
+                  data-log-index={group.index}
+                >
                   <span
                     className="text-[10px] leading-6 text-text-muted/25 tabular-nums shrink-0 select-none w-[54px] text-right"
                     title={new Date(ts).toLocaleString()}
@@ -242,9 +508,10 @@ export function LogViewer({ taskId }: { taskId: string }) {
                         isCollapsed={collapsed.has(group.index)}
                         onToggle={() => toggleCollapse(group.index)}
                         showResults={showResults}
+                        searchQuery={searchQuery}
                       />
                     ) : (
-                      <LogLine log={group.entry} />
+                      <LogLine log={group.entry} searchQuery={searchQuery} />
                     )}
                   </div>
                 </div>
@@ -279,11 +546,13 @@ function ToolCallGroup({
   isCollapsed,
   onToggle,
   showResults,
+  searchQuery,
 }: {
   group: { use: LogEntry; result?: LogEntry };
   isCollapsed: boolean;
   onToggle: () => void;
   showResults: boolean;
+  searchQuery: string;
 }) {
   const toolName = (group.use.metadata?.toolName as string) ?? "Tool";
   const Icon = TOOL_ICONS[toolName] ?? Wrench;
@@ -306,12 +575,14 @@ function ToolCallGroup({
         )}
         <Icon className="w-3 h-3 text-primary shrink-0" />
         <span className="text-[11px] font-medium text-primary font-sans">{toolName}</span>
-        <span className="text-text-muted/60 truncate flex-1">{group.use.content}</span>
+        <span className="text-text-muted/60 truncate flex-1">
+          <HighlightedText text={group.use.content} search={searchQuery} />
+        </span>
       </button>
       {showBody && (
         <div className="px-3 py-2 border-t border-border/30 bg-bg max-h-60 overflow-auto">
           <pre className="text-text-muted/50 whitespace-pre-wrap break-all">
-            {group.result!.content}
+            <HighlightedText text={group.result!.content} search={searchQuery} />
           </pre>
         </div>
       )}
@@ -321,8 +592,10 @@ function ToolCallGroup({
 
 function LogLine({
   log,
+  searchQuery,
 }: {
   log: { content: string; logType?: string; metadata?: Record<string, unknown> };
+  searchQuery: string;
 }) {
   const type = log.logType ?? "text";
 
@@ -330,7 +603,9 @@ function LogLine({
     return (
       <div className="flex items-center gap-2 py-1 text-info/50 font-sans text-[11px]">
         <Info className="w-3 h-3 shrink-0" />
-        <span>{log.content}</span>
+        <span>
+          <HighlightedText text={log.content} search={searchQuery} />
+        </span>
       </div>
     );
   }
@@ -338,21 +613,21 @@ function LogLine({
   if (type === "thinking") {
     return (
       <div className="py-1.5 pl-4 border-l-2 border-text-muted/20 text-text-muted/50 italic bg-bg-subtle/30 rounded-r-md my-0.5">
-        {log.content}
+        <HighlightedText text={log.content} search={searchQuery} />
       </div>
     );
   }
 
   if (type === "tool_result") {
-    // Tool results may contain literal \n escapes and trailing JSON metadata
-    // (e.g., structuredPatch from Edit). Clean up for display.
     let display = log.content;
     const patchIdx = display.indexOf('","structuredPatch":');
     if (patchIdx !== -1) display = display.slice(0, patchIdx);
     display = display.replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\"/g, '"');
     return (
       <div className="py-0.5 pl-5 text-text-muted/50 overflow-auto max-h-60">
-        <pre className="whitespace-pre-wrap break-all text-[11px] leading-relaxed">{display}</pre>
+        <pre className="whitespace-pre-wrap break-all text-[11px] leading-relaxed">
+          <HighlightedText text={display} search={searchQuery} />
+        </pre>
       </div>
     );
   }
@@ -363,7 +638,9 @@ function LogLine({
       <div className="flex items-start gap-2 py-1.5 text-success/80">
         <ChevronRight className="w-3 h-3 mt-0.5 shrink-0" />
         <div>
-          <span className="whitespace-pre-wrap">{log.content}</span>
+          <span className="whitespace-pre-wrap">
+            <HighlightedText text={log.content} search={searchQuery} />
+          </span>
           {cost != null && cost > 0 && (
             <span className="ml-2 text-text-muted/40 inline-flex items-center gap-0.5 tabular-nums">
               <DollarSign className="w-2.5 h-2.5" />
@@ -379,11 +656,17 @@ function LogLine({
     return (
       <div className="flex items-start gap-2 py-1.5 px-2 -mx-1 rounded-md bg-error/5 text-error my-0.5">
         <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
-        <span className="whitespace-pre-wrap">{log.content}</span>
+        <span className="whitespace-pre-wrap">
+          <HighlightedText text={log.content} search={searchQuery} />
+        </span>
       </div>
     );
   }
 
   // Text — default agent output
-  return <div className="py-0.5 text-text/90 whitespace-pre-wrap break-words">{log.content}</div>;
+  return (
+    <div className="py-0.5 text-text/90 whitespace-pre-wrap break-words">
+      <HighlightedText text={log.content} search={searchQuery} />
+    </div>
+  );
 }

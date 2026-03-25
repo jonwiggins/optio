@@ -5,6 +5,7 @@ export const DEFAULT_AGENT_IMAGE = "optio-agent:latest";
 export const DEFAULT_TICKET_LABEL = "optio";
 export const DEFAULT_MAX_TURNS_CODING = 250;
 export const DEFAULT_MAX_TURNS_REVIEW = 10;
+export const DEFAULT_MAX_TICKET_PAGES = 20;
 
 /**
  * Max length for K8s resource names.

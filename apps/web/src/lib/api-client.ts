@@ -93,12 +93,27 @@ export const api = {
       body: JSON.stringify(prompt ? { prompt } : {}),
     }),
 
-  getTaskLogs: (id: string, params?: { limit?: number; offset?: number }) => {
+  getTaskLogs: (
+    id: string,
+    params?: { limit?: number; offset?: number; search?: string; logType?: string },
+  ) => {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.offset) qs.set("offset", String(params.offset));
+    if (params?.search) qs.set("search", params.search);
+    if (params?.logType) qs.set("logType", params.logType);
     const query = qs.toString();
     return request<{ logs: any[] }>(`/api/tasks/${id}/logs${query ? `?${query}` : ""}`);
+  },
+
+  exportTaskLogs: (id: string, params?: { format?: string; search?: string; logType?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.format) qs.set("format", params.format);
+    if (params?.search) qs.set("search", params.search);
+    if (params?.logType) qs.set("logType", params.logType);
+    const query = qs.toString();
+    const url = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/tasks/${id}/logs/export${query ? `?${query}` : ""}`;
+    return url;
   },
 
   getTaskEvents: (id: string) => request<{ events: any[] }>(`/api/tasks/${id}/events`),
@@ -459,6 +474,43 @@ export const api = {
     }>("/api/auth/me"),
 
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+
+  // Interactive Sessions
+  listSessions: (params?: {
+    repoUrl?: string;
+    state?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.repoUrl) qs.set("repoUrl", params.repoUrl);
+    if (params?.state) qs.set("state", params.state);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.offset) qs.set("offset", String(params.offset));
+    const query = qs.toString();
+    return request<{ sessions: any[]; activeCount: number }>(
+      `/api/sessions${query ? `?${query}` : ""}`,
+    );
+  },
+
+  getSession: (id: string) => request<{ session: any }>(`/api/sessions/${id}`),
+
+  createSession: (data: { repoUrl: string }) =>
+    request<{ session: any }>("/api/sessions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  endSession: (id: string) =>
+    request<{ session: any }>(`/api/sessions/${id}/end`, { method: "POST" }),
+
+  getSessionPrs: (sessionId: string) => request<{ prs: any[] }>(`/api/sessions/${sessionId}/prs`),
+
+  addSessionPr: (sessionId: string, data: { prUrl: string; prNumber: number }) =>
+    request<{ pr: any }>(`/api/sessions/${sessionId}/prs`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // Schedules
   listSchedules: () =>

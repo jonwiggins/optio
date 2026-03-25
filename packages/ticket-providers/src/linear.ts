@@ -2,6 +2,7 @@ import { LinearClient } from "@linear/sdk";
 import {
   TicketSource,
   DEFAULT_TICKET_LABEL,
+  DEFAULT_MAX_TICKET_PAGES,
   type Ticket,
   type TicketProviderConfig,
 } from "@optio/shared";
@@ -12,6 +13,8 @@ export interface LinearProviderConfig extends TicketProviderConfig {
   teamId?: string;
   projectId?: string;
   label?: string;
+  /** Max pages to fetch (default: DEFAULT_MAX_TICKET_PAGES). Set to prevent runaway pagination. */
+  maxPages?: number;
 }
 
 function asLinearConfig(config: TicketProviderConfig): LinearProviderConfig {
@@ -29,38 +32,58 @@ export class LinearTicketProvider implements TicketProvider {
     const linearConfig = asLinearConfig(config);
     const client = new LinearClient({ apiKey: linearConfig.apiKey });
     const label = linearConfig.label ?? DEFAULT_TICKET_LABEL;
+    const maxPages = linearConfig.maxPages ?? DEFAULT_MAX_TICKET_PAGES;
 
-    // Fetch issues with the optio label
-    const issues = await client.issues({
-      filter: {
-        labels: { name: { eq: label } },
-        state: { type: { nin: ["completed", "canceled"] } },
-        ...(linearConfig.teamId ? { team: { id: { eq: linearConfig.teamId } } } : {}),
-      },
-      first: 50,
-    });
+    const filter = {
+      labels: { name: { eq: label } },
+      state: { type: { nin: ["completed", "canceled"] } },
+      ...(linearConfig.teamId ? { team: { id: { eq: linearConfig.teamId } } } : {}),
+    };
 
-    return issues.nodes.map((issue) => ({
-      externalId: issue.identifier,
-      source: TicketSource.LINEAR,
-      title: issue.title,
-      body: issue.description ?? "",
-      url: issue.url,
-      labels: [],
-      assignee: undefined,
-      repo: undefined,
-      metadata: {
-        id: issue.id,
-        identifier: issue.identifier,
-        priority: issue.priority,
-        createdAt: issue.createdAt,
-      },
-    }));
+    const allTickets: Ticket[] = [];
+    let afterCursor: string | undefined;
+    let pageCount = 0;
+
+    while (pageCount < maxPages) {
+      const issues = await client.issues({
+        filter,
+        first: 50,
+        ...(afterCursor ? { after: afterCursor } : {}),
+      });
+
+      for (const issue of issues.nodes) {
+        allTickets.push({
+          externalId: issue.identifier,
+          source: TicketSource.LINEAR,
+          title: issue.title,
+          body: issue.description ?? "",
+          url: issue.url,
+          labels: [],
+          assignee: undefined,
+          repo: undefined,
+          metadata: {
+            id: issue.id,
+            identifier: issue.identifier,
+            priority: issue.priority,
+            createdAt: issue.createdAt,
+          },
+        });
+      }
+
+      if (!issues.pageInfo.hasNextPage) break;
+      afterCursor = issues.pageInfo.endCursor;
+      pageCount++;
+    }
+
+    return allTickets;
   }
 
   private async findIssueByIdentifier(client: LinearClient, identifier: string) {
     // Search by the identifier string (e.g., "ENG-123")
-    const results = await client.issueSearch({ query: identifier, first: 5 });
+    const results = await client.issueSearch({
+      query: identifier,
+      first: 5,
+    });
     return results.nodes.find((issue) => issue.identifier === identifier) ?? null;
   }
 

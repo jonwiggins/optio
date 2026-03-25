@@ -34,6 +34,8 @@ import {
   KeyRound,
   GitBranch,
   Bot,
+  Terminal,
+  CircleDot,
 } from "lucide-react";
 import { StateBadge } from "@/components/state-badge";
 
@@ -96,6 +98,8 @@ export default function OverviewPage() {
   const [repoCount, setRepoCount] = useState<number | null>(null);
   const [cluster, setCluster] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [activeSessions, setActiveSessions] = useState<any[]>([]);
+  const [activeSessionCount, setActiveSessionCount] = useState(0);
   const [dismissedEvents, setDismissedEvents] = useState<Set<number>>(new Set());
   const [expandedPods, setExpandedPods] = useState<Set<string>>(new Set());
   const [usage, setUsage] = useState<{
@@ -116,8 +120,13 @@ export default function OverviewPage() {
       api.listTasks({ limit: 100 }),
       api.getClusterOverview().catch(() => null),
       api.listRepos().catch(() => ({ repos: [] })),
+      api
+        .listSessions({ state: "active", limit: 5 })
+        .catch(() => ({ sessions: [], activeCount: 0 })),
     ])
-      .then(([tasksRes, clusterRes, reposRes]) => {
+      .then(([tasksRes, clusterRes, reposRes, sessionsRes]) => {
+        setActiveSessions(sessionsRes.sessions);
+        setActiveSessionCount(sessionsRes.activeCount);
         const tasks = tasksRes.tasks;
         setTaskStats({
           total: tasks.length,
@@ -225,6 +234,12 @@ export default function OverviewPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
           <p className="text-sm text-text-muted mt-0.5">
             {taskStats?.running ?? 0} active {(taskStats?.running ?? 0) === 1 ? "task" : "tasks"}
+            {activeSessionCount > 0 && (
+              <span className="text-primary">
+                {" \u00B7 "}
+                {activeSessionCount} {activeSessionCount === 1 ? "session" : "sessions"}
+              </span>
+            )}
             {(taskStats?.needsAttention ?? 0) > 0 && (
               <span className="text-warning">
                 {" \u00B7 "}
@@ -430,6 +445,58 @@ export default function OverviewPage() {
           </div>
         )}
       </div>
+
+      {/* Active Sessions */}
+      {activeSessions.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-text-heading flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-primary" />
+              Active Sessions
+              <span className="text-xs font-normal text-primary bg-primary/10 px-1.5 py-0.5 rounded-md">
+                {activeSessionCount}
+              </span>
+            </h2>
+            <Link href="/sessions" className="text-xs text-primary hover:underline">
+              All sessions &rarr;
+            </Link>
+          </div>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2">
+            {activeSessions.map((session: any) => {
+              const repoName = session.repoUrl
+                ? session.repoUrl.replace("https://github.com/", "")
+                : "Unknown";
+              return (
+                <Link
+                  key={session.id}
+                  href={`/sessions/${session.id}`}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-border bg-bg-card hover:border-primary/30 hover:bg-bg-hover transition-colors"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <Terminal className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium truncate">
+                        {session.branch ?? `Session ${session.id.slice(0, 8)}`}
+                      </span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-text-muted mt-0.5">
+                      <span className="flex items-center gap-0.5">
+                        <FolderGit2 className="w-2.5 h-2.5" />
+                        {repoName}
+                      </span>
+                      <span>{formatRelativeTime(session.createdAt)}</span>
+                    </div>
+                  </div>
+                  <CircleDot className="w-3.5 h-3.5 text-primary shrink-0" />
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid md:grid-cols-2 gap-8">
         <div className="min-w-0 overflow-hidden">

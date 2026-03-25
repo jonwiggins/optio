@@ -1,10 +1,13 @@
 import type { TaskState } from "./task.js";
+import type { InteractiveSessionState } from "./session.js";
 
 export type WsEvent =
   | TaskStateChangedEvent
   | TaskLogEvent
   | TaskCreatedEvent
   | AuthFailedEvent
+  | SessionCreatedEvent
+  | SessionEndedEvent
   | TaskCommentEvent;
 
 export interface TaskStateChangedEvent {
@@ -33,6 +36,20 @@ export interface TaskCreatedEvent {
 export interface AuthFailedEvent {
   type: "auth:failed";
   message: string;
+  timestamp: string;
+}
+
+export interface SessionCreatedEvent {
+  type: "session:created";
+  sessionId: string;
+  repoUrl: string;
+  state: InteractiveSessionState;
+  timestamp: string;
+}
+
+export interface SessionEndedEvent {
+  type: "session:ended";
+  sessionId: string;
   timestamp: string;
 }
 

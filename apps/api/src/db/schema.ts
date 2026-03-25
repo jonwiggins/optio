@@ -261,6 +261,47 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
   deliveredAt: timestamp("delivered_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const interactiveSessionStateEnum = pgEnum("interactive_session_state", ["active", "ended"]);
+
+export const interactiveSessions = pgTable(
+  "interactive_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    repoUrl: text("repo_url").notNull(),
+    userId: uuid("user_id"),
+    worktreePath: text("worktree_path"),
+    branch: text("branch").notNull(),
+    state: interactiveSessionStateEnum("state").notNull().default("active"),
+    podId: uuid("pod_id"),
+    costUsd: text("cost_usd"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("interactive_sessions_repo_url_idx").on(table.repoUrl),
+    index("interactive_sessions_state_idx").on(table.state),
+    index("interactive_sessions_user_id_idx").on(table.userId),
+  ],
+);
+
+export const sessionPrs = pgTable(
+  "session_prs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => interactiveSessions.id, { onDelete: "cascade" }),
+    prUrl: text("pr_url").notNull(),
+    prNumber: integer("pr_number").notNull(),
+    prState: text("pr_state"), // "open" | "merged" | "closed"
+    prChecksStatus: text("pr_checks_status"), // "pending" | "passing" | "failing" | "none"
+    prReviewStatus: text("pr_review_status"), // "approved" | "changes_requested" | "pending" | "none"
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("session_prs_session_id_idx").on(table.sessionId)],
+);
+
 export const schedules = pgTable(
   "schedules",
   {
