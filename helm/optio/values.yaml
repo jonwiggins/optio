@@ -17,6 +17,17 @@ api:
       memory: 1Gi
   env:
     LOG_LEVEL: info
+  # Pod anti-affinity spreads API replicas across nodes.
+  # "soft" = preferredDuringSchedulingIgnoredDuringExecution (default)
+  # "hard" = requiredDuringSchedulingIgnoredDuringExecution
+  # ""     = disabled
+  antiAffinity: soft
+  # Worker scaling: BullMQ workers (task-worker, pr-watcher, repo-cleanup,
+  # ticket-sync) use Redis-backed queues with built-in leader election via
+  # BullMQ's concurrency model. Each worker type processes jobs independently,
+  # so multiple API replicas safely share the same queue — Redis ensures each
+  # job is delivered to exactly one worker instance. You can safely increase
+  # api.replicas for high availability without risking duplicate job processing.
 
 # Web UI
 web:
@@ -33,6 +44,8 @@ web:
     limits:
       cpu: 500m
       memory: 512Mi
+  # Pod anti-affinity (same options as api.antiAffinity)
+  antiAffinity: soft
 
 # Agent containers
 agent:
@@ -41,6 +54,14 @@ agent:
     tag: latest
     pullPolicy: Never  # Use "IfNotPresent" or "Always" for registry images
   imagePullPolicy: Never
+  # PVC template for repo pod home directories.
+  # These PVCs are created dynamically by the API server (one per repo pod
+  # instance), but this template controls the storage class and default size.
+  pvc:
+    storageClass: ""  # Empty = cluster default storage class
+    size: 10Gi
+    accessModes:
+      - ReadWriteOnce
 
 # PostgreSQL
 postgresql:
@@ -61,7 +82,9 @@ postgresql:
   auth:
     database: optio
     username: optio
-    password: optio-prod-change-me
+    # IMPORTANT: Override this in production! The chart will fail to install
+    # if this is left as the default value and auth is enabled.
+    password: ""
 
 # Redis
 redis:
@@ -88,7 +111,8 @@ externalRedis:
 
 # Authentication
 auth:
-  # Set to true to disable authentication (not recommended for production)
+  # Set to true to disable authentication (NOT recommended for production).
+  # When false, at least one OAuth provider must be configured.
   disabled: false
   # OAuth provider credentials
   github:
@@ -115,6 +139,12 @@ ingress:
   enabled: false
   className: nginx
   annotations: {}
+  # cert-manager TLS support. When enabled, the chart adds the
+  # cert-manager.io/cluster-issuer annotation and generates a TLS block
+  # for each host automatically.
+  certManager:
+    enabled: false
+    clusterIssuer: letsencrypt-prod
   hosts:
     - host: optio.example.com
       paths:
@@ -127,13 +157,37 @@ ingress:
         - path: /ws
           pathType: Prefix
           service: api
+  # Manual TLS configuration. When certManager is enabled, TLS entries are
+  # generated automatically from hosts — this field is only needed for
+  # manual certificate management.
   tls: []
+  #  - secretName: optio-tls
+  #    hosts:
+  #      - optio.example.com
 
 # Namespace
 namespace: optio
+
+# Namespace resource quotas. Enable to prevent rogue agents from consuming
+# all cluster resources. Set to false or leave limits empty to disable.
+resourceQuota:
+  enabled: false
+  hard:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+    limits.cpu: "40"
+    limits.memory: 80Gi
+    pods: "50"
+    persistentvolumeclaims: "30"
 
 # Service account
 serviceAccount:
   create: true
   name: optio
   annotations: {}
+
+# Image pull secrets for pulling from private registries.
+# Each entry should be the name of an existing Kubernetes secret of type
+# kubernetes.io/dockerconfigjson in the target namespace.
+imagePullSecrets: []
+#  - name: my-registry-secret

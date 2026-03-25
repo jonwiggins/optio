@@ -1,18 +1,31 @@
-# chore: Remove or implement Notion ticket provider stub
+# feat: Helm chart production hardening
 
-chore: Remove or implement Notion ticket provider stub
+feat: Helm chart production hardening
 
 ## Problem
 
-The Notion ticket provider (`packages/ticket-providers/src/notion.ts`) is a stub — all methods throw "not yet implemented". It's listed as an option in the UI but will crash if selected.
+The Helm chart works for local dev but isn't production-ready.
 
-## Options
+## Missing
 
-1. Implement it using the Notion API
-2. Remove it from the codebase and UI until ready
+- **TLS**: No cert-manager integration or default TLS configuration for ingress
+- **Resource quotas**: No namespace-level quotas — rogue agents can consume all cluster resources
+- **Multi-replica API**: Default `replicas: 1` with no leader election story for BullMQ workers
+- **Agent PVCs**: Chart doesn't create PVCs for repo pod home directories
+- **Pod anti-affinity**: No rules to spread API/web across nodes
+- **Image pull secrets**: No support for pulling from private registries
+- **Secure defaults**: Postgres password defaults to `optio-prod-change-me`, auth disabled by default
 
-Either way, it shouldn't be selectable in its current state.
+## Acceptance Criteria
+
+- [ ] Ingress TLS with cert-manager annotation support
+- [ ] Namespace resource quotas configurable in values.yaml
+- [ ] API replica count configurable with documented worker scaling story
+- [ ] Agent PVC template included
+- [ ] Pod anti-affinity rules for API and web
+- [ ] Image pull secret support
+- [ ] Secure defaults (require encryption key, require auth in production)
 
 ---
 
-_Optio Task ID: 8acbbe70-4301-41be-a16e-7ae1b956f69e_
+_Optio Task ID: 8b558fe5-bb2e-4568-84f7-f06b96af2674_

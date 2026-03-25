@@ -1,0 +1,19 @@
+{{/*
+Agent PVC Template — stored as a ConfigMap so the API server can read it
+at runtime when dynamically provisioning PVCs for repo pods.
+
+The API server creates PVCs named "optio-home-<repo>-<instanceIndex>" using
+these parameters. This ConfigMap makes the storage class, size, and access
+modes configurable via Helm values without redeploying the API.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-agent-pvc-template
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+data:
+  storageClass: {{ .Values.agent.pvc.storageClass | quote }}
+  size: {{ .Values.agent.pvc.size | quote }}
+  accessModes: {{ .Values.agent.pvc.accessModes | toJson | quote }}
