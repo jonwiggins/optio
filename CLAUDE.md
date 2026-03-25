@@ -22,7 +22,7 @@ Optio is a workflow orchestration system for AI coding agents. Think of it as "C
 ┌─────────────┐     ┌──────────────┐     ┌─────────────────────┐
 │   Web UI    │────→│  API Server  │────→│   K8s Pods          │
 │  Next.js    │     │   Fastify    │     │                     │
-│  :3000      │     │   :4000      │     │  ┌─ Repo Pod A ──┐  │
+│  :3100      │     │   :4000      │     │  ┌─ Repo Pod A ──┐  │
 │             │←ws──│              │     │  │ clone + sleep  │  │
 │             │     │ - BullMQ     │     │  │ ├─ worktree 1  │  │
 │             │     │ - Drizzle    │     │  │ ├─ worktree 2  │  │
@@ -52,6 +52,46 @@ The entrypoint scripts are in `scripts/`:
 
 - `repo-init.sh` — pod entrypoint: clone repo, run `.optio/setup.sh` if present, sleep forever
 - `agent-entrypoint.sh` — legacy per-task entrypoint (kept for compatibility)
+
+### Multi-pod scaling
+
+Repos can scale beyond a single pod to handle higher task throughput. Two per-repo settings control this:
+
+- **`maxPodInstances`** (default 1) — maximum pod replicas per repository (1–20)
+- **`maxAgentsPerPod`** (default 2) — maximum concurrent agents (worktrees) per pod instance (1–50)
+
+Total capacity = `maxPodInstances × maxAgentsPerPod`. The task worker computes `effectiveRepoConcurrency` and uses `max(maxConcurrentTasks, effectiveRepoConcurrency)` as the per-repo limit.
+
+Pod scheduling in `repo-pool-service.ts`:
+
+1. **Same-pod retry affinity**: if this is a retry, prefer the pod the task last ran on (via `tasks.lastPodId`)
+2. **Least-loaded selection**: pick the ready pod with the lowest `activeTaskCount`
+3. **Dynamic scale-up**: if all pods are at capacity and under the instance limit, create a new pod with the next `instanceIndex`
+4. **Queue overflow**: if at the instance limit and all pods are full, queue the task on the least-loaded pod
+
+Each pod instance gets its own PVC (e.g., `optio-home-repo-0`, `optio-home-repo-1`) and is labeled with `optio.instance-index`. On idle cleanup, higher-index pods are removed first (LIFO scaling).
+
+### Worktree lifecycle management
+
+Tasks track their worktree state via `tasks.worktreeState`:
+
+| State       | Meaning                                        |
+| ----------- | ---------------------------------------------- |
+| `active`    | Worktree is in use by a running agent          |
+| `dirty`     | Agent finished but worktree not yet cleaned up |
+| `reset`     | Worktree was reset for a retry on the same pod |
+| `preserved` | Worktree kept for manual inspection or resume  |
+| `removed`   | Worktree has been cleaned up                   |
+
+`tasks.lastPodId` records which pod the task ran on, enabling same-pod retry affinity — retries reuse the existing worktree (reset instead of recreate) for faster restarts.
+
+The `repo-cleanup-worker` uses worktree state to make cleanup decisions:
+
+- **active / preserved**: leave alone
+- **dirty + retries remaining**: leave for same-pod retry
+- **dirty + no retries**: remove after 2-minute grace period
+- **orphaned** (no matching task): remove immediately
+- **terminal states** (completed/cancelled): remove after grace period
 
 ### Pod health monitoring
 
@@ -151,6 +191,28 @@ The review system (`review-service.ts`) launches a review agent as a blocking su
 9. If this is a subtask, `onSubtaskComplete()` checks if the parent should advance
 10. The repo pod stays alive for the next task
 
+### Authentication (Web UI)
+
+Multi-provider OAuth for the web UI and API. Three providers are supported:
+
+- **GitHub** (`apps/api/src/services/oauth/github.ts`) — scopes: `read:user user:email`
+- **Google** (`apps/api/src/services/oauth/google.ts`) — scopes: `openid email profile`
+- **GitLab** (`apps/api/src/services/oauth/gitlab.ts`) — scopes: `read_user`
+
+Enable a provider by setting both `<PROVIDER>_OAUTH_CLIENT_ID` and `<PROVIDER>_OAUTH_CLIENT_SECRET` env vars (e.g., `GITHUB_OAUTH_CLIENT_ID`). GitLab also accepts `GITLAB_OAUTH_BASE_URL` for self-hosted instances.
+
+**OAuth flow**: `GET /api/auth/:provider/login` → redirect to provider → callback at `GET /api/auth/:provider/callback` → upsert user in `users` table → create session (SHA256-hashed token in `sessions` table) → set `optio_session` HttpOnly cookie (30-day TTL) → redirect to web app.
+
+**Auth middleware** (`apps/api/src/plugins/auth.ts`): `preHandler` hook on all routes except `/api/health`, `/api/auth/*`, `/api/setup/*`. WebSocket connections accept the token as a `?token=` query param. Next.js middleware (`apps/web/src/middleware.ts`) redirects unauthenticated users to `/login`.
+
+**Local dev bypass**: Set `OPTIO_AUTH_DISABLED=true` (API) and `NEXT_PUBLIC_AUTH_DISABLED=true` (web) to skip all auth checks. `GET /api/auth/me` returns a synthetic "Local Dev" user.
+
+**Key routes**:
+
+- `GET /api/auth/providers` — list enabled providers
+- `GET /api/auth/me` — current user profile
+- `POST /api/auth/logout` — revoke session and clear cookie
+
 ### Authentication (Claude Code)
 
 Two modes, selected during setup:
@@ -194,13 +256,34 @@ Claude Code's `--output-format stream-json` produces NDJSON. Each line is parsed
 
 When tasks fail, the error message is pattern-matched by `packages/shared/src/error-classifier.ts` into categories (image, auth, network, timeout, agent, state, resource) with human-readable titles, descriptions, and suggested remedies. This powers both the task detail error panel and the task card previews.
 
+### Cost tracking analytics
+
+`GET /api/analytics/costs` (`apps/api/src/routes/analytics.ts`) provides cost analytics with optional `days` (default 30) and `repoUrl` query params. Returns:
+
+- **summary** — total cost, task count, average cost, cost trend (% change vs previous period)
+- **dailyCosts** — per-day cost and task count breakdown
+- **costByRepo** — cost aggregated by repository
+- **costByType** — cost aggregated by task type (coding vs review)
+- **topTasks** — 10 most expensive tasks
+
+The web UI at `/costs` (`apps/web/src/app/costs/page.tsx`) renders this data with Recharts charts: area chart for daily costs, bar chart for cost by repo, pie chart for cost by type, and a table of top tasks. Period selector (7d/14d/30d/90d) and repo filter are available. Accessible from the sidebar via the DollarSign icon.
+
+### Repository URL normalization
+
+`normalizeRepoUrl()` in `packages/shared/src/utils/normalize-repo-url.ts` normalizes git repository URLs to a canonical HTTPS form for consistent matching and storage. Handles:
+
+- HTTPS/HTTP URLs, SSH shorthand (`git@host:path`), SSH protocol URLs (`ssh://git@host/path`)
+- Bare domain paths, mixed case, trailing slashes, `.git` suffixes, whitespace
+
+Canonical output: `https://github.com/owner/repo` (lowercase host, no trailing slash, no `.git`). Used throughout the codebase wherever repo URLs are compared or stored. Test coverage in `normalize-repo-url.test.ts`.
+
 ## Tech Stack
 
 | Layer      | Technology                       | Notes                                                                                             |
 | ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------- |
 | Monorepo   | Turborepo + pnpm 10              | 6 packages, workspace protocol                                                                    |
 | API        | Fastify 5                        | Plugins, schema validation, WebSocket                                                             |
-| ORM        | Drizzle                          | PostgreSQL, generated migrations in `apps/api/src/db/migrations/` (12 migrations)                 |
+| ORM        | Drizzle                          | PostgreSQL, generated migrations in `apps/api/src/db/migrations/` (15 migrations)                 |
 | Queue      | BullMQ + Redis                   | Also used for pub/sub (log streaming to WebSocket clients)                                        |
 | Web        | Next.js 15 App Router            | Tailwind CSS v4, Zustand, Lucide icons, sonner toasts                                             |
 | K8s client | @kubernetes/client-node          | Pod lifecycle, exec, log streaming, metrics                                                       |
@@ -217,27 +300,31 @@ apps/
   api/
     src/
       routes/         health, tasks, subtasks, bulk, secrets, repos, issues, tickets, setup, auth,
-                      cluster, resume, prompt-templates
+                      cluster, resume, prompt-templates, analytics
       services/       task-service, repo-pool-service, secret-service, auth-service, container-service,
                       prompt-template-service, repo-service, repo-detect-service, review-service,
-                      subtask-service, ticket-sync-service, event-bus, agent-event-parser
+                      subtask-service, ticket-sync-service, event-bus, agent-event-parser,
+                      session-service, oauth/ (github, google, gitlab)
+      plugins/        auth (session validation middleware)
       workers/        task-worker (main job processor), pr-watcher-worker, repo-cleanup-worker,
                       ticket-sync-worker
       ws/             log-stream (per-task), events (global)
-      db/             schema.ts (Drizzle), client.ts, migrations/ (12 migrations)
+      db/             schema.ts (Drizzle), client.ts, migrations/ (15 migrations)
     drizzle.config.ts
   web/
     src/
       app/            Pages: / (overview), /tasks, /tasks/new, /tasks/[id], /repos, /repos/[id],
-                      /cluster, /cluster/[id], /secrets, /settings, /setup
+                      /cluster, /cluster/[id], /secrets, /settings, /setup, /costs, /login
       components/     task-card, task-list, log-viewer, web-terminal, event-timeline, state-badge,
-                      skeleton, layout/ (sidebar, layout-shell, setup-check, ws-provider)
+                      skeleton, layout/ (sidebar, layout-shell, setup-check, ws-provider, user-menu)
+      middleware.ts   Next.js auth middleware (redirects unauthenticated users to /login)
       hooks/          use-store (Zustand), use-websocket, use-task, use-logs
       lib/            api-client, ws-client, utils
 
 packages/
   shared/             Types (task, agent, container, secret, ticket, events, image, agent-events),
-                      state machine, prompt template renderer, error classifier, constants
+                      state machine, prompt template renderer, error classifier, constants,
+                      normalize-repo-url
   container-runtime/  ContainerRuntime interface, DockerContainerRuntime, KubernetesContainerRuntime
   agent-adapters/     AgentAdapter interface, ClaudeCodeAdapter, CodexAdapter
   ticket-providers/   TicketProvider interface, GitHubTicketProvider, LinearTicketProvider, Notion stub
@@ -250,15 +337,17 @@ scripts/              repo-init.sh, agent-entrypoint.sh, setup-local.sh
 
 ## Database Schema
 
-9 tables (Drizzle, 12 migrations):
+11 tables (Drizzle, 15 migrations):
 
-- **tasks** — id, title, prompt, repoUrl, repoBranch, state (enum), agentType, containerId, sessionId, prUrl, prNumber, prState, prChecksStatus, prReviewStatus, prReviewComments, resultSummary, costUsd, errorMessage, ticketSource, ticketExternalId, metadata (jsonb), retryCount, maxRetries, priority, parentTaskId, taskType ("coding"|"review"), subtaskOrder, blocksParent, timestamps (created/updated/started/completed)
+- **tasks** — id, title, prompt, repoUrl, repoBranch, state (enum), agentType, containerId, sessionId, prUrl, prNumber, prState, prChecksStatus, prReviewStatus, prReviewComments, resultSummary, costUsd, errorMessage, ticketSource, ticketExternalId, metadata (jsonb), retryCount, maxRetries, priority, parentTaskId, taskType ("coding"|"review"), subtaskOrder, blocksParent, worktreeState, lastPodId, createdBy (FK to users), timestamps (created/updated/started/completed)
 - **task_events** — id, taskId (FK), fromState, toState, trigger, message, createdAt (audit trail)
 - **task_logs** — id, taskId (FK), stream, content, logType, metadata (jsonb), timestamp
 - **secrets** — id, name, scope, encryptedValue (bytea), iv, authTag (AES-256-GCM)
-- **repos** — id, repoUrl (unique), fullName, defaultBranch, isPrivate, imagePreset, extraPackages, setupCommands, customDockerfile, autoMerge, promptTemplateOverride, claudeModel, claudeContextWindow, claudeThinking, claudeEffort, autoResumeOnReview, maxConcurrentTasks, reviewEnabled, reviewTrigger, reviewPromptTemplate, testCommand, reviewModel
-- **repo_pods** — id, repoUrl (unique), repoBranch, podName, podId, state (enum), activeTaskCount, lastTaskAt, errorMessage
+- **repos** — id, repoUrl (unique), fullName, defaultBranch, isPrivate, imagePreset, extraPackages, setupCommands, customDockerfile, autoMerge, promptTemplateOverride, claudeModel, claudeContextWindow, claudeThinking, claudeEffort, autoResume, maxConcurrentTasks, maxPodInstances, maxAgentsPerPod, maxTurnsCoding, maxTurnsReview, reviewEnabled, reviewTrigger, reviewPromptTemplate, testCommand, reviewModel
+- **repo_pods** — id, repoUrl, repoBranch, podName, podId, state (enum), activeTaskCount, instanceIndex, lastTaskAt, errorMessage (note: repoUrl is no longer unique — multiple pod instances per repo)
 - **pod_health_events** — id, repoPodId, repoUrl, eventType ("crashed"|"oom_killed"|"restarted"|"healthy"|"orphan_cleaned"), podName, message, createdAt
+- **users** — id (uuid), provider ("github"|"google"|"gitlab"), externalId, email, displayName, avatarUrl, lastLoginAt, timestamps. Unique on (provider, externalId)
+- **sessions** — id (uuid), userId (FK to users), tokenHash (unique, SHA256), expiresAt (30-day TTL), createdAt
 - **ticket_providers** — id, source, config (jsonb), enabled
 - **prompt_templates** — id, name, template, isDefault, repoUrl, autoMerge
 
@@ -296,7 +385,7 @@ helm install optio helm/optio \
 # Development
 pnpm install                          # Install all deps
 ./scripts/setup-local.sh              # Bootstrap K8s infra + DB + .env
-pnpm dev                              # Start API (:4000) + Web (:3000) via Turborepo
+pnpm dev                              # Start API (:4000) + Web (:3100) via Turborepo
 docker build -t optio-agent:latest -f Dockerfile.agent .  # Build agent image
 
 # Quality (these are what CI runs, and pre-commit hooks mirror them)
@@ -351,6 +440,12 @@ Key routes beyond basic CRUD:
 - `GET /api/issues` — browse GitHub Issues across all repos
 - `POST /api/issues/assign` — assign a GitHub Issue to Optio (adds label, creates task, comments on issue)
 - `GET /api/auth/claude-token` — get Claude OAuth token for max-subscription mode
+- `GET /api/auth/providers` — list enabled OAuth providers
+- `GET /api/auth/me` — current authenticated user profile
+- `POST /api/auth/logout` — revoke session and clear cookie
+- `GET /api/auth/:provider/login` — initiate OAuth login flow
+- `GET /api/auth/:provider/callback` — OAuth callback handler
+- `GET /api/analytics/costs` — cost analytics with daily/repo/type breakdowns
 
 ## Workers
 
@@ -361,9 +456,86 @@ Four BullMQ workers run as part of the API server:
 3. **repo-cleanup-worker** — health checks every 60s, auto-restart crashed pods, clean orphan worktrees, idle cleanup
 4. **ticket-sync-worker** — syncs tickets from configured providers (GitHub Issues, Linear)
 
+## Security Model
+
+- **Web UI / API authentication**: Multi-provider OAuth (GitHub, Google, GitLab). Sessions use SHA256-hashed tokens stored in the database with 30-day TTL. Cookies are HttpOnly + SameSite=Lax. OAuth state parameters have 10-minute TTL for CSRF protection. Disable with `OPTIO_AUTH_DISABLED=true` for local development.
+- **Secrets at rest**: AES-256-GCM encryption. Secret values are never logged or returned via API — only names and scopes are exposed.
+- **Claude Code auth**: API key or OAuth token injected as env vars into pod containers. Max-subscription tokens are cached for 30 seconds with auto-refresh.
+- **K8s RBAC**: ServiceAccount with scoped permissions for pod lifecycle, exec, and secret management only.
+- **No role-based access control** within Optio itself — any authenticated user can perform any action. Production deployments should add RBAC or restrict at the network level.
+
+## Troubleshooting
+
+**Pod won't start / stays in provisioning**:
+
+- Check `kubectl get pods -n optio` for pod status and events
+- Verify the agent image exists locally: `docker images | grep optio-agent`
+- Ensure `OPTIO_IMAGE_PULL_POLICY=Never` is set when using local images
+- Check PVC availability: `kubectl get pvc -n optio`
+
+**Agent fails immediately with auth error**:
+
+- Verify `CLAUDE_AUTH_MODE` secret is set (`api-key` or `max-subscription`)
+- For API key mode: ensure `ANTHROPIC_API_KEY` secret exists
+- For max-subscription: check `GET /api/auth/status` for token validity
+
+**Tasks stuck in `queued` state**:
+
+- Check concurrency limits: `OPTIO_MAX_CONCURRENT` (global) and per-repo `maxConcurrentTasks`
+- Verify no tasks are stuck in `provisioning` or `running` state (may need manual cancellation)
+- Check the task worker logs for re-queue messages
+
+**WebSocket connection drops / no live logs**:
+
+- Ensure Redis is running and accessible
+- Check that `REDIS_URL` is correctly configured
+- Verify the web app's `NEXT_PUBLIC_API_URL` points to the correct API host
+
+**Pod OOM-killed / crashed**:
+
+- Check `pod_health_events` table for crash history
+- Increase pod resource limits in the Helm chart or image preset
+- The cleanup worker auto-detects crashes and fails associated tasks
+
+**OAuth login fails**:
+
+- Verify `API_PUBLIC_URL` and `WEB_PUBLIC_URL` match the actual deployment URLs
+- Ensure OAuth callback URLs are registered with the provider (e.g., `{API_PUBLIC_URL}/api/auth/github/callback`)
+- Check for `invalid_state` errors — may indicate expired CSRF tokens (>10 min between login click and callback)
+
+**Database migration errors**:
+
+- Run `cd apps/api && npx drizzle-kit migrate` to apply pending migrations
+- Check migration status: inspect `apps/api/src/db/migrations/` for the latest migration number
+
+## Production Deployment Checklist
+
+1. **Encryption key**: Generate with `openssl rand -hex 32` and set via `encryption.key` in Helm values
+2. **OAuth providers**: Configure at least one OAuth provider (set `*_CLIENT_ID` and `*_CLIENT_SECRET` env vars)
+3. **Disable auth bypass**: Ensure `OPTIO_AUTH_DISABLED` is NOT set (or set to `false`)
+4. **External database**: Use managed PostgreSQL — set `postgresql.enabled=false` and `externalDatabase.url`
+5. **External Redis**: Use managed Redis — set `redis.enabled=false` and `externalRedis.url`
+6. **Public URLs**: Set `API_PUBLIC_URL` and `WEB_PUBLIC_URL` to the actual deployment URLs (required for OAuth callbacks)
+7. **Ingress**: Enable `ingress.enabled=true` with TLS and proper host configuration
+8. **Agent image**: Push to a container registry and set `agent.imagePullPolicy=IfNotPresent` or `Always`
+9. **GitHub token**: Set `GITHUB_TOKEN` secret for PR watching, issue sync, and repo detection
+10. **Resource limits**: Tune pod resource requests/limits based on expected agent workload
+11. **Metrics server**: Install `metrics-server` in the cluster for resource usage display
+
+## Performance Tuning
+
+- **`OPTIO_MAX_CONCURRENT`** (default 5): Global task concurrency. Increase for clusters with more resources.
+- **`maxPodInstances`** (per-repo, default 1): Scale up for repos with high task throughput. Each instance gets its own PVC and K8s pod.
+- **`maxAgentsPerPod`** (per-repo, default 2): Concurrent agents per pod. Increase if pods have sufficient CPU/memory. Total capacity = `maxPodInstances × maxAgentsPerPod`.
+- **`maxConcurrentTasks`** (per-repo, default 2): Legacy concurrency limit. Effective limit is `max(maxConcurrentTasks, maxPodInstances × maxAgentsPerPod)`.
+- **`OPTIO_REPO_POD_IDLE_MS`** (default 600000 / 10 min): How long idle pods persist. Increase to reduce cold starts for repos with sporadic traffic.
+- **`OPTIO_PR_WATCH_INTERVAL`** (default 30s): PR polling interval. Increase to reduce GitHub API usage.
+- **`OPTIO_HEALTH_CHECK_INTERVAL`** (default 60s): Health check and cleanup interval.
+- **`maxTurnsCoding`** / **`maxTurnsReview`** (per-repo): Limit agent turns to control cost and runtime. Null falls back to global defaults.
+
 ## Known Issues / TODO
 
 - Agent image must be built locally (`docker build`) — K8s can't pull it from a registry yet. Set `OPTIO_IMAGE_PULL_POLICY=Never`.
 - Docker Desktop K8s needs `metrics-server` installed manually for resource usage display: `kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml` then patch with `--kubelet-insecure-tls`.
-- No auth on the web UI or API — all endpoints are open. Production needs JWT/OAuth.
+- No role-based access control within Optio — any authenticated user has full access.
 - Notion ticket provider is a stub (GitHub Issues and Linear are implemented).
