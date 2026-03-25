@@ -6,6 +6,7 @@ import { normalizeRepoUrl } from "@optio/shared";
 export interface RepoRecord {
   id: string;
   repoUrl: string;
+  workspaceId: string | null;
   fullName: string;
   defaultBranch: string;
   isPrivate: boolean;

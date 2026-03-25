@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import * as subtaskService from "../services/subtask-service.js";
+import * as taskService from "../services/task-service.js";
 
 const createSubtaskSchema = z.object({
   title: z.string().min(1),
@@ -16,6 +17,12 @@ export async function subtaskRoutes(app: FastifyInstance) {
   // List subtasks for a task
   app.get("/api/tasks/:id/subtasks", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const task = await taskService.getTask(id);
+    if (!task) return reply.status(404).send({ error: "Task not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && task.workspaceId && task.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
     const subtasks = await subtaskService.getSubtasks(id);
     reply.send({ subtasks });
   });
@@ -23,6 +30,12 @@ export async function subtaskRoutes(app: FastifyInstance) {
   // Create a subtask
   app.post("/api/tasks/:id/subtasks", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const task = await taskService.getTask(id);
+    if (!task) return reply.status(404).send({ error: "Task not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && task.workspaceId && task.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
     const body = createSubtaskSchema.parse(req.body);
 
     const subtask = await subtaskService.createSubtask({
@@ -46,6 +59,12 @@ export async function subtaskRoutes(app: FastifyInstance) {
   // Check blocking subtask status
   app.get("/api/tasks/:id/subtasks/status", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const task = await taskService.getTask(id);
+    if (!task) return reply.status(404).send({ error: "Task not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && task.workspaceId && task.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
     const status = await subtaskService.checkBlockingSubtasks(id);
     reply.send(status);
   });

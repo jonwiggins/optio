@@ -20,6 +20,10 @@ export async function resumeRoutes(app: FastifyInstance) {
 
     const task = await taskService.getTask(id);
     if (!task) return reply.status(404).send({ error: "Task not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && task.workspaceId && task.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
 
     if (!["needs_attention", "failed"].includes(task.state)) {
       return reply.status(409).send({
@@ -58,6 +62,10 @@ export async function resumeRoutes(app: FastifyInstance) {
 
     const task = await taskService.getTask(id);
     if (!task) return reply.status(404).send({ error: "Task not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && task.workspaceId && task.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
 
     if (!["needs_attention", "failed", "pr_opened"].includes(task.state)) {
       return reply.status(409).send({

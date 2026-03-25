@@ -52,6 +52,10 @@ export async function repoRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const repo = await repoService.getRepo(id);
     if (!repo) return reply.status(404).send({ error: "Repo not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && repo.workspaceId && repo.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Repo not found" });
+    }
     reply.send({ repo });
   });
 
@@ -83,6 +87,12 @@ export async function repoRoutes(app: FastifyInstance) {
 
   app.patch("/api/repos/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const existing = await repoService.getRepo(id);
+    if (!existing) return reply.status(404).send({ error: "Repo not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Repo not found" });
+    }
     const body = updateRepoSchema.parse(req.body);
     const repo = await repoService.updateRepo(id, body);
     if (!repo) return reply.status(404).send({ error: "Repo not found" });
@@ -91,6 +101,12 @@ export async function repoRoutes(app: FastifyInstance) {
 
   app.delete("/api/repos/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const existing = await repoService.getRepo(id);
+    if (!existing) return reply.status(404).send({ error: "Repo not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Repo not found" });
+    }
     await repoService.deleteRepo(id);
     reply.status(204).send();
   });
@@ -100,6 +116,10 @@ export async function repoRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const repo = await repoService.getRepo(id);
     if (!repo) return reply.status(404).send({ error: "Repo not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && repo.workspaceId && repo.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Repo not found" });
+    }
 
     try {
       const { retrieveSecret } = await import("../services/secret-service.js");
