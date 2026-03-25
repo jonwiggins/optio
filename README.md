@@ -182,7 +182,7 @@ packages/
   shared/             Types, task state machine, prompt templates, error classifier
   container-runtime/  Kubernetes pod lifecycle, exec, log streaming
   agent-adapters/     Claude Code + Codex prompt/auth adapters
-  ticket-providers/   GitHub Issues, Linear (+ Notion stub)
+  ticket-providers/   GitHub Issues, Linear
 
 images/               Dockerfiles: base, node, python, go, rust, full
 helm/optio/           Helm chart for production K8s deployment

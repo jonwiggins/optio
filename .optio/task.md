@@ -1,26 +1,18 @@
-# perf: Add database indexes for common query patterns
+# chore: Remove or implement Notion ticket provider stub
 
-perf: Add database indexes for common query patterns
+chore: Remove or implement Notion ticket provider stub
 
 ## Problem
 
-No indexes exist on frequently queried columns. As task volume grows, queries will degrade to full table scans.
+The Notion ticket provider (`packages/ticket-providers/src/notion.ts`) is a stub — all methods throw "not yet implemented". It's listed as an option in the UI but will crash if selected.
 
-## Missing Indexes
+## Options
 
-- `tasks(repoUrl, state)` — filtering tasks by repo and state
-- `tasks(state)` — state-based filtering on task list
-- `tasks(parentTaskId)` — finding subtasks
-- `tasks(createdAt DESC)` — sorting by creation time
-- `taskLogs(taskId, timestamp)` — fetching logs for a task
-- `repoPods(repoUrl)` — finding pods by repo
-- `taskEvents(taskId)` — fetching event history
+1. Implement it using the Notion API
+2. Remove it from the codebase and UI until ready
 
-## Acceptance Criteria
-
-- [ ] Migration adds indexes for the above columns
-- [ ] No noticeable regression on write performance
+Either way, it shouldn't be selectable in its current state.
 
 ---
 
-_Optio Task ID: e0c05c2e-9c70-4ea1-82c7-06f3f931c7b5_
+_Optio Task ID: 8acbbe70-4301-41be-a16e-7ae1b956f69e_

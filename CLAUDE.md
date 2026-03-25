@@ -327,7 +327,7 @@ packages/
                       normalize-repo-url
   container-runtime/  ContainerRuntime interface, DockerContainerRuntime, KubernetesContainerRuntime
   agent-adapters/     AgentAdapter interface, ClaudeCodeAdapter, CodexAdapter
-  ticket-providers/   TicketProvider interface, GitHubTicketProvider, LinearTicketProvider, Notion stub
+  ticket-providers/   TicketProvider interface, GitHubTicketProvider, LinearTicketProvider
 
 images/               Dockerfiles: base, node, python, go, rust, full + build.sh
 helm/optio/           Helm chart: api, web, postgres, redis, ingress, rbac, secrets
@@ -538,4 +538,3 @@ Four BullMQ workers run as part of the API server:
 - Agent image must be built locally (`docker build`) — K8s can't pull it from a registry yet. Set `OPTIO_IMAGE_PULL_POLICY=Never`.
 - Docker Desktop K8s needs `metrics-server` installed manually for resource usage display: `kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml` then patch with `--kubelet-insecure-tls`.
 - No role-based access control within Optio — any authenticated user has full access.
-- Notion ticket provider is a stub (GitHub Issues and Linear are implemented).
