@@ -24,7 +24,7 @@ export function verifyGitHubSignature(rawBody: Buffer, signature: string, secret
 
 /**
  * Check whether the webhook delivery timestamp is within the acceptable window.
- * Returns true if the event should be rejected (too old).
+ * Returns true if the event should be rejected (too old or too far in the future).
  */
 export function isReplayedEvent(
   timestampHeader: string | undefined,
@@ -34,7 +34,11 @@ export function isReplayedEvent(
   const ts = Number(timestampHeader);
   if (Number.isNaN(ts)) return false;
   const ageMs = Date.now() - ts * 1000;
-  return ageMs > maxAgeMinutes * 60 * 1000;
+  // Reject events older than the tolerance window
+  if (ageMs > maxAgeMinutes * 60 * 1000) return true;
+  // Reject events with timestamps far in the future (clock-skew attack)
+  if (ageMs < -(maxAgeMinutes * 60 * 1000)) return true;
+  return false;
 }
 
 export async function ticketRoutes(app: FastifyInstance) {

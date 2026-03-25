@@ -58,4 +58,14 @@ describe("isReplayedEvent", () => {
     expect(isReplayedEvent(threeMinutesAgoSec, 2)).toBe(true);
     expect(isReplayedEvent(threeMinutesAgoSec, 5)).toBe(false);
   });
+
+  it("returns true for a timestamp far in the future (clock-skew attack)", () => {
+    const tenMinutesFromNowSec = Math.floor((Date.now() + 10 * 60 * 1000) / 1000).toString();
+    expect(isReplayedEvent(tenMinutesFromNowSec, 5)).toBe(true);
+  });
+
+  it("returns false for a timestamp slightly in the future within tolerance", () => {
+    const oneMinuteFromNowSec = Math.floor((Date.now() + 1 * 60 * 1000) / 1000).toString();
+    expect(isReplayedEvent(oneMinuteFromNowSec, 5)).toBe(false);
+  });
 });
