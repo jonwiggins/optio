@@ -630,10 +630,20 @@ function inferExitCode(agentType: string, logs: string): number {
     case "codex": {
       // Codex: look for error events in JSON output or OpenAI-specific failures
       const hasErrorEvent = logs.includes('"type":"error"') || logs.includes('"type": "error"');
+      const hasApiErrorEnvelope = /"error"\s*:\s*\{\s*"message"/.test(logs);
       const hasAuthError =
         /OPENAI_API_KEY|invalid.*api.?key|unauthorized|authentication.*failed/i.test(logs);
       const hasQuotaError = /quota|insufficient_quota|billing/i.test(logs);
-      return hasErrorEvent || hasAuthError || hasQuotaError ? 1 : 0;
+      const hasModelError = /model_not_found|model.*not found|does not exist.*model/i.test(logs);
+      const hasContentFilter = /content.?filter|content.?policy|safety.?system/i.test(logs);
+      return hasErrorEvent ||
+        hasApiErrorEnvelope ||
+        hasAuthError ||
+        hasQuotaError ||
+        hasModelError ||
+        hasContentFilter
+        ? 1
+        : 0;
     }
     case "claude-code":
     default: {

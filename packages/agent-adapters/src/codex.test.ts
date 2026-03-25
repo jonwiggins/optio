@@ -62,6 +62,15 @@ describe("CodexAdapter", () => {
       expect(config.env.OPTIO_PROMPT).toContain("Instructions:");
     });
 
+    it("includes task file path in fallback prompt", () => {
+      const config = adapter.buildContainerConfig({
+        ...baseInput,
+        taskFilePath: ".optio/task.md",
+        taskFileContent: "# Task details",
+      });
+      expect(config.env.OPTIO_PROMPT).toContain(".optio/task.md");
+    });
+
     it("includes setup files when task file is provided", () => {
       const config = adapter.buildContainerConfig({
         ...baseInput,
@@ -180,6 +189,63 @@ describe("CodexAdapter", () => {
       const result = adapter.parseResult(0, logs);
       // o4-mini: 1M input tokens * $1.1/M + 100K output tokens * $4.4/M = $1.1 + $0.44 = $1.54
       expect(result.costUsd).toBeCloseTo(1.54, 1);
+    });
+
+    it("detects OpenAI structured API error envelope", () => {
+      const logs =
+        '{"error":{"message":"The model `gpt-5` does not exist","type":"invalid_request_error","code":"model_not_found"}}';
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("The model `gpt-5` does not exist");
+    });
+
+    it("accounts for cached tokens in cost calculation", () => {
+      const logs = [
+        '{"model":"o4-mini","type":"message","role":"assistant","content":"Hi"}',
+        '{"type":"message","role":"assistant","content":"Done","usage":{"input_tokens":1000000,"output_tokens":100000,"cached_tokens":500000}}',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      // o4-mini: 500K non-cached * $1.1/M + 500K cached * $0.275/M + 100K output * $4.4/M
+      // = $0.55 + $0.1375 + $0.44 = $1.1275
+      expect(result.costUsd).toBeCloseTo(1.1275, 2);
+    });
+
+    it("accounts for cached tokens via prompt_tokens_details", () => {
+      const logs = [
+        '{"model":"gpt-4.1","type":"message","role":"assistant","content":"Done","usage":{"prompt_tokens":100000,"completion_tokens":10000,"prompt_tokens_details":{"cached_tokens":60000}}}',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      // gpt-4.1: 40K non-cached * $2.0/M + 60K cached * $0.5/M + 10K output * $8.0/M
+      // = $0.08 + $0.03 + $0.08 = $0.19
+      expect(result.costUsd).toBeCloseTo(0.19, 2);
+    });
+
+    it("detects model_not_found in raw text", () => {
+      const logs = "Error: model_not_found - The model does not exist";
+      const result = adapter.parseResult(1, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("model_not_found");
+    });
+
+    it("detects context length exceeded in raw text", () => {
+      const logs = "Error: This model's maximum context length is 128000 tokens";
+      const result = adapter.parseResult(1, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("context length");
+    });
+
+    it("detects content filter errors in raw text", () => {
+      const logs = "Error: content_filter - Output was blocked by content policy";
+      const result = adapter.parseResult(1, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("content_filter");
+    });
+
+    it("detects server errors in raw text", () => {
+      const logs = "Error: 503 service unavailable";
+      const result = adapter.parseResult(1, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("503");
     });
   });
 });

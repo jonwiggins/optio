@@ -10,20 +10,22 @@ import type { AgentAdapter } from "./types.js";
  * - { type: "function_call", name: "shell"|"...", call_id: "...", arguments: "..." }
  * - { type: "function_call_output", call_id: "...", output: "..." }
  * - { type: "error", message: "..." }
+ * - { error: { message: "...", type: "...", code: "..." } }  (OpenAI API error envelope)
  * - { type: "usage", ... } or inline usage in final message
  *
  * The final summary event may contain usage data with input_tokens / output_tokens.
  */
 
 /** Known Codex-compatible model pricing (USD per 1M tokens) */
-const CODEX_MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "codex-mini": { input: 1.5, output: 6.0 },
-  "o4-mini": { input: 1.1, output: 4.4 },
-  o3: { input: 10.0, output: 40.0 },
-  "gpt-4.1": { input: 2.0, output: 8.0 },
-  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
-  "gpt-4.1-nano": { input: 0.1, output: 0.4 },
-};
+const CODEX_MODEL_PRICING: Record<string, { input: number; output: number; cachedInput?: number }> =
+  {
+    "codex-mini": { input: 1.5, output: 6.0, cachedInput: 0.375 },
+    "o4-mini": { input: 1.1, output: 4.4, cachedInput: 0.275 },
+    o3: { input: 10.0, output: 40.0, cachedInput: 2.5 },
+    "gpt-4.1": { input: 2.0, output: 8.0, cachedInput: 0.5 },
+    "gpt-4.1-mini": { input: 0.4, output: 1.6, cachedInput: 0.1 },
+    "gpt-4.1-nano": { input: 0.1, output: 0.4, cachedInput: 0.025 },
+  };
 
 const DEFAULT_PRICING = CODEX_MODEL_PRICING["codex-mini"];
 
@@ -97,6 +99,8 @@ export class CodexAdapter implements AgentAdapter {
   } {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let totalCachedTokens = 0;
+    let directCost: number | undefined;
     let model: string | undefined;
     let errorMessage: string | undefined;
     let hasError = false;
@@ -110,11 +114,7 @@ export class CodexAdapter implements AgentAdapter {
         event = JSON.parse(line);
       } catch {
         // Not JSON — check for error patterns in raw text
-        if (
-          /error|failed|fatal/i.test(line) &&
-          !errorMessage &&
-          /OPENAI_API_KEY|api\.openai\.com|authentication|unauthorized|quota/i.test(line)
-        ) {
+        if (!errorMessage && isRawTextError(line)) {
           errorMessage = line.trim();
           hasError = true;
         }
@@ -126,7 +126,14 @@ export class CodexAdapter implements AgentAdapter {
         model = event.model;
       }
 
-      // Error events
+      // OpenAI structured API error envelope: { error: { message, type, code } }
+      if (event.error && typeof event.error === "object" && event.error.message) {
+        errorMessage = event.error.message;
+        hasError = true;
+        continue;
+      }
+
+      // Error events: { type: "error", message: "..." }
       if (event.type === "error") {
         errorMessage = event.message ?? event.error ?? JSON.stringify(event);
         hasError = true;
@@ -148,25 +155,29 @@ export class CodexAdapter implements AgentAdapter {
         // Also handle OpenAI-style naming
         if (usage.prompt_tokens) totalInputTokens += usage.prompt_tokens;
         if (usage.completion_tokens) totalOutputTokens += usage.completion_tokens;
+        // Cached tokens (discounted pricing)
+        if (usage.cached_tokens) totalCachedTokens += usage.cached_tokens;
+        if (usage.prompt_tokens_details?.cached_tokens)
+          totalCachedTokens += usage.prompt_tokens_details.cached_tokens;
       }
 
-      // Some Codex versions embed total_cost directly
+      // Capture direct cost without returning early — subsequent lines may
+      // contain error events or additional messages that we still need to parse.
       if (event.total_cost_usd != null) {
-        return {
-          costUsd: event.total_cost_usd,
-          errorMessage,
-          hasError,
-          summary: lastAssistantMessage ? truncate(lastAssistantMessage, 200) : undefined,
-        };
+        directCost = event.total_cost_usd;
       }
     }
 
-    // Calculate cost from token usage
-    let costUsd: number | undefined;
-    if (totalInputTokens > 0 || totalOutputTokens > 0) {
+    // Prefer direct cost from the agent over token-calculated cost
+    let costUsd: number | undefined = directCost;
+    if (costUsd == null && (totalInputTokens > 0 || totalOutputTokens > 0)) {
       const pricing = model ? (CODEX_MODEL_PRICING[model] ?? DEFAULT_PRICING) : DEFAULT_PRICING;
+      // Cached tokens are a subset of input tokens and charged at a discounted rate
+      const nonCachedInputTokens = Math.max(0, totalInputTokens - totalCachedTokens);
+      const cachedRate = pricing.cachedInput ?? pricing.input * 0.25;
       costUsd =
-        (totalInputTokens / 1_000_000) * pricing.input +
+        (nonCachedInputTokens / 1_000_000) * pricing.input +
+        (totalCachedTokens / 1_000_000) * cachedRate +
         (totalOutputTokens / 1_000_000) * pricing.output;
     }
 
@@ -179,15 +190,15 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   private buildPrompt(input: AgentTaskInput): string {
-    const parts = [
-      input.prompt,
-      "",
-      "Instructions:",
-      "- Work on the task described above.",
+    const parts = [input.prompt, "", "Instructions:", "- Work on the task described above."];
+    if (input.taskFilePath) {
+      parts.push(`- Read the task file at ${input.taskFilePath} for full details.`);
+    }
+    parts.push(
       "- When you are done, create a pull request using the gh CLI.",
       `- Use branch name: ${TASK_BRANCH_PREFIX}${input.taskId}`,
       "- Write a clear PR title and description summarizing your changes.",
-    ];
+    );
     if (input.additionalContext) {
       parts.push("", "Additional context:", input.additionalContext);
     }
@@ -198,4 +209,32 @@ export class CodexAdapter implements AgentAdapter {
 function truncate(s: string, maxLen: number): string {
   if (s.length <= maxLen) return s;
   return s.slice(0, maxLen) + "\u2026";
+}
+
+/** Detect common Codex/OpenAI error patterns in non-JSON output lines */
+function isRawTextError(line: string): boolean {
+  // Auth / API key errors
+  if (
+    /error|failed|fatal/i.test(line) &&
+    /OPENAI_API_KEY|api\.openai\.com|authentication|unauthorized|quota/i.test(line)
+  ) {
+    return true;
+  }
+  // Model not found
+  if (/model.*not found|model_not_found|does not exist|invalid.*model/i.test(line)) {
+    return true;
+  }
+  // Context length exceeded
+  if (/context.?length|maximum.?context|token.?limit|too many tokens/i.test(line)) {
+    return true;
+  }
+  // Content filter / safety
+  if (/content.?filter|content.?policy|safety.?system|flagged/i.test(line)) {
+    return true;
+  }
+  // Server errors
+  if (/server.?error|internal.?error|service.?unavailable|503|502/i.test(line)) {
+    return true;
+  }
+  return false;
 }

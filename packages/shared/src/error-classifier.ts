@@ -90,6 +90,40 @@ const ERROR_PATTERNS: Array<{
     }),
   },
   {
+    pattern: /model.*not.?found|model_not_found|does not exist.*model|invalid.*model/i,
+    classify: () => ({
+      category: "agent",
+      title: "Model not found",
+      description: "The requested model does not exist or your API key does not have access to it.",
+      remedy:
+        "Check the model name in your repo settings. Ensure your OpenAI account has access to the model.",
+      retryable: false,
+    }),
+  },
+  {
+    pattern: /context.?length.*exceeded|maximum.?context|too many tokens|token.?limit/i,
+    classify: () => ({
+      category: "agent",
+      title: "Context length exceeded",
+      description:
+        "The agent's input exceeded the model's maximum context window. The task prompt or repository content may be too large.",
+      remedy: "Try reducing the prompt length, or use a model with a larger context window.",
+      retryable: false,
+    }),
+  },
+  {
+    pattern: /content.?filter|content.?policy|safety.?system/i,
+    classify: () => ({
+      category: "agent",
+      title: "Content filter triggered",
+      description:
+        "The OpenAI content filter blocked the request. The task prompt or generated output may have triggered a safety policy.",
+      remedy:
+        "Review the task prompt for content that may trigger safety filters. Rephrase if needed.",
+      retryable: false,
+    }),
+  },
+  {
     pattern: /InvalidTransitionError.*(\w+) -> (\w+)/i,
     classify: (match) => ({
       category: "state",

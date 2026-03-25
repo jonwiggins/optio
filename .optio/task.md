@@ -1,40 +1,28 @@
-# Improve pod naming and add per-repo task indicators to overview
+# Implement OpenAI Codex agent adapter
 
-Improve pod naming and add per-repo task indicators to overview
+Implement OpenAI Codex agent adapter
 
 ## Description
 
-Two related improvements for observability of the pod-per-repo system:
+The Codex adapter in `packages/agent-adapters/src/claude-code.ts` is currently a stub. `parseResult()` is hardcoded to `success: exitCode === 0` without actually parsing Codex output, and there's no cost tracking, error handling, or PR detection.
 
-### 1. Improve workspace pod naming
+## Current state
 
-Pod names should clearly indicate which repository they belong to. Currently pod names are generic, making it hard to identify which repo is running in which pod when viewing the cluster or `kubectl get pods`.
-
-**Suggested format:** `optio-repo-<owner>-<repo>-<short-hash>` (e.g., `optio-repo-jonwiggins-optio-a3f2`)
-
-Constraints:
-
-- Must be valid K8s resource names (lowercase, alphanumeric + hyphens, max 63 chars)
-- Must be unique (short hash suffix)
-- Should truncate long owner/repo names gracefully
-
-### 2. Add per-repo task indicators to overview panel
-
-The overview page should show at a glance how busy each repo pod is:
-
-- Number of tasks currently **running** in each pod
-- Number of tasks **queued** for that repo
-- Visual indicator of capacity usage (e.g., 2/3 slots used)
-
-This information already exists in the system (`repo_pods.activeTaskCount`, `repos.maxConcurrentTasks`, and queued tasks can be counted from the `tasks` table), it just needs to be surfaced in the UI.
+- `buildContainerConfig()` is implemented
+- `parseResult()` is a dummy — doesn't parse Codex output format
+- No cost tracking
+- No PR URL extraction from Codex output
+- No Codex-specific error handling
 
 ## Acceptance criteria
 
-- Pod names include a human-readable repo identifier
-- Overview panel shows running task count per pod
-- Overview panel shows queued task count per repo
-- Capacity indicator shows usage vs. `maxConcurrentTasks` limit
+- Codex adapter correctly parses agent output
+- PR URLs are detected from Codex logs
+- Cost tracking works (if Codex exposes usage data)
+- Error classification handles Codex-specific failure modes
+- If Codex output format can't be determined, remove Codex from the UI agent selector rather than leaving a broken option
 
 ---
 
-_Optio Task ID: b6c16293-851f-4a3d-bfbd-b3575146bc2f_
+_Optio Task ID: 9456a634-2389-49b0-86c2-fcd8192fb33d_
+_Source: [github](https://github.com/jonwiggins/optio/issues/8)_

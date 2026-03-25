@@ -91,6 +91,29 @@ describe("classifyError", () => {
     expect(result.title).toBe("OpenAI quota exceeded");
   });
 
+  it("classifies model not found", () => {
+    const result = classifyError('The model "gpt-5" does not exist or model_not_found');
+    expect(result.category).toBe("agent");
+    expect(result.title).toBe("Model not found");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies context length exceeded", () => {
+    const result = classifyError(
+      "This model's maximum context length is 128000 tokens. context_length exceeded",
+    );
+    expect(result.category).toBe("agent");
+    expect(result.title).toBe("Context length exceeded");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies content filter", () => {
+    const result = classifyError("content_filter - Output blocked by content policy");
+    expect(result.category).toBe("agent");
+    expect(result.title).toBe("Content filter triggered");
+    expect(result.retryable).toBe(false);
+  });
+
   it("handles null/undefined input", () => {
     expect(classifyError(null).category).toBe("unknown");
     expect(classifyError(undefined).category).toBe("unknown");
