@@ -1,7 +1,6 @@
 export enum TicketSource {
   GITHUB = "github",
   LINEAR = "linear",
-  NOTION = "notion",
 }
 
 export interface Ticket {
