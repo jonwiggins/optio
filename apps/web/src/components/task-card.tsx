@@ -39,7 +39,11 @@ export const TaskCard = React.memo(function TaskCard({ task, subtasks }: TaskCar
   return (
     <div
       onClick={() => router.push(`/tasks/${task.id}`)}
-      className="block rounded-xl border border-border/50 bg-bg-card hover:border-border-strong hover:bg-bg-card-hover hover:shadow-md transition-all duration-150 cursor-pointer overflow-hidden"
+      className={cn(
+        "block rounded-xl border border-border/50 border-l-[3px] bg-bg-card cursor-pointer overflow-hidden card-hover",
+        "hover:border-border-strong hover:bg-bg-card-hover hover:shadow-lg hover:shadow-black/5",
+        `border-state-${task.state}`,
+      )}
     >
       <div className="p-5">
         {/* Top row: title + badges */}
@@ -64,7 +68,7 @@ export const TaskCard = React.memo(function TaskCard({ task, subtasks }: TaskCar
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {task.costUsd && (
-              <span className="text-[11px] text-text-muted/40 tabular-nums">
+              <span className="text-[10px] text-text-muted tabular-nums cost-pill px-2 py-0.5 rounded-full font-medium">
                 ${parseFloat(task.costUsd).toFixed(2)}
               </span>
             )}
@@ -111,7 +115,7 @@ export const TaskCard = React.memo(function TaskCard({ task, subtasks }: TaskCar
                   }, 2000);
                 }
               }}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-all shrink-0 btn-press"
             >
               <RotateCcw className="w-3 h-3" />
               Retry

@@ -400,10 +400,10 @@ function PipelineStageRow({ stage, isLast }: { stage: PipelineStage; isLast: boo
 
   // Icon & dot styling per status
   const iconWrapperClass = cn(
-    "relative w-6 h-6 rounded-full flex items-center justify-center shrink-0",
-    stage.status === "completed" && "bg-success/15",
-    stage.status === "active" && "bg-primary/15",
-    stage.status === "failed" && "bg-error/15",
+    "relative w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all duration-300",
+    stage.status === "completed" && "bg-success/15 shadow-[0_0_8px_-2px_rgba(34,197,94,0.3)]",
+    stage.status === "active" && "bg-primary/15 shadow-[0_0_12px_-2px_rgba(109,40,217,0.4)]",
+    stage.status === "failed" && "bg-error/15 shadow-[0_0_8px_-2px_rgba(239,68,68,0.3)]",
     stage.status === "cancelled" && "bg-text-muted/10",
     stage.status === "upcoming" && "bg-transparent border border-border",
     stage.status === "skipped" && "bg-transparent border border-border/40",
@@ -423,7 +423,7 @@ function PipelineStageRow({ stage, isLast }: { stage: PipelineStage; isLast: boo
   const connectorClass = cn(
     "w-px flex-1 min-h-3",
     stage.status === "completed" && "bg-success/30",
-    stage.status === "active" && "bg-gradient-to-b from-primary/30 to-border/40",
+    stage.status === "active" && "bg-gradient-to-b from-primary/40 via-primary/20 to-border/30",
     stage.status === "failed" && "bg-error/20",
     (stage.status === "upcoming" || stage.status === "cancelled") && "bg-border/40",
     stage.status === "skipped" &&
@@ -529,7 +529,7 @@ export function PipelineTimeline({
       </div>
 
       {/* Raw events toggle */}
-      <div className="border-t border-border pt-3">
+      <div className="border-t border-border/50 pt-3">
         <button
           onClick={() => setShowRawEvents(!showRawEvents)}
           className="flex items-center gap-1.5 text-[11px] text-text-muted/50 hover:text-text-muted transition-colors w-full"
@@ -542,7 +542,7 @@ export function PipelineTimeline({
           Raw Events ({events.length})
         </button>
         {showRawEvents && (
-          <div className="mt-3">
+          <div className="mt-3 animate-slide-down">
             <EventTimeline events={events} />
           </div>
         )}

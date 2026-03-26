@@ -77,3 +77,398 @@ html.theme-transition *::after {
     color 0.2s ease,
     box-shadow 0.2s ease !important;
 }
+
+/* ──────────────────────────────────────
+   Animations & Micro-interactions
+   ────────────────────────────────────── */
+
+/* Subtle background texture — faint radial gradient */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -20%, rgba(109, 40, 217, 0.08), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 100% 100%, rgba(59, 130, 246, 0.04), transparent 60%);
+  pointer-events: none;
+}
+
+html.light body::before {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -20%, rgba(124, 58, 237, 0.05), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 100% 100%, rgba(59, 130, 246, 0.03), transparent 60%);
+}
+
+/* Shimmer loading skeleton */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-hover) 25%,
+    var(--color-border) 50%,
+    var(--color-bg-hover) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+  border-radius: 0.5rem;
+}
+
+/* Animated gradient — slow-moving accent */
+@keyframes gradient-shift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.animated-gradient {
+  background: linear-gradient(
+    135deg,
+    rgba(109, 40, 217, 0.14),
+    rgba(59, 130, 246, 0.08),
+    rgba(139, 92, 246, 0.12),
+    rgba(109, 40, 217, 0.06)
+  );
+  background-size: 400% 400%;
+  animation: gradient-shift 12s ease infinite;
+}
+
+html.light .animated-gradient {
+  background: linear-gradient(
+    135deg,
+    rgba(124, 58, 237, 0.1),
+    rgba(59, 130, 246, 0.06),
+    rgba(124, 58, 237, 0.08),
+    rgba(139, 92, 246, 0.05)
+  );
+  background-size: 400% 400%;
+  animation: gradient-shift 12s ease infinite;
+}
+
+/* Pulsing glow for status indicators */
+@keyframes glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 3px 1px currentColor;
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 8px 3px currentColor;
+    opacity: 0.7;
+  }
+}
+
+.glow-dot {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Button press feedback */
+.btn-press {
+  transition: transform 0.1s ease;
+}
+.btn-press:active {
+  transform: scale(0.97);
+}
+
+/* Card hover lift */
+.card-hover {
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 4px 12px -2px rgba(0, 0, 0, 0.15),
+    0 2px 4px -1px rgba(0, 0, 0, 0.08);
+}
+html.light .card-hover:hover {
+  box-shadow:
+    0 4px 12px -2px rgba(0, 0, 0, 0.08),
+    0 2px 4px -1px rgba(0, 0, 0, 0.04);
+}
+
+/* Gradient divider line */
+.gradient-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-border) 20%,
+    var(--color-border) 80%,
+    transparent
+  );
+  border: none;
+}
+
+/* Glassmorphism */
+.glass {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.glass-sidebar {
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  background: rgba(17, 17, 19, 0.85);
+}
+html.light .glass-sidebar {
+  background: rgba(240, 241, 244, 0.85);
+}
+
+/* Active nav glow */
+.nav-active-glow {
+  box-shadow:
+    inset 3px 0 0 0 var(--color-primary),
+    inset 0 0 16px -4px rgba(109, 40, 217, 0.2);
+}
+html.light .nav-active-glow {
+  box-shadow:
+    inset 3px 0 0 0 var(--color-primary),
+    inset 0 0 16px -4px rgba(124, 58, 237, 0.12);
+}
+
+/* State-colored left borders for task cards */
+.border-state-running {
+  border-left-color: var(--color-primary);
+}
+.border-state-completed,
+.border-state-pr_opened {
+  border-left-color: var(--color-success);
+}
+.border-state-failed {
+  border-left-color: var(--color-error);
+}
+.border-state-needs_attention,
+.border-state-waiting_on_deps {
+  border-left-color: var(--color-warning);
+}
+.border-state-queued,
+.border-state-provisioning {
+  border-left-color: var(--color-info);
+}
+.border-state-pending,
+.border-state-cancelled {
+  border-left-color: var(--color-border-strong);
+}
+
+/* State badge glow backgrounds */
+.badge-glow-primary {
+  background: rgba(109, 40, 217, 0.12);
+  box-shadow: 0 0 8px -2px rgba(109, 40, 217, 0.3);
+}
+.badge-glow-success {
+  background: rgba(34, 197, 94, 0.1);
+  box-shadow: 0 0 8px -2px rgba(34, 197, 94, 0.25);
+}
+.badge-glow-warning {
+  background: rgba(245, 158, 11, 0.1);
+  box-shadow: 0 0 8px -2px rgba(245, 158, 11, 0.25);
+}
+.badge-glow-error {
+  background: rgba(239, 68, 68, 0.1);
+  box-shadow: 0 0 8px -2px rgba(239, 68, 68, 0.25);
+}
+.badge-glow-info {
+  background: rgba(59, 130, 246, 0.1);
+  box-shadow: 0 0 8px -2px rgba(59, 130, 246, 0.25);
+}
+.badge-glow-muted {
+  background: rgba(161, 161, 170, 0.08);
+}
+
+html.light .badge-glow-primary {
+  background: rgba(124, 58, 237, 0.08);
+  box-shadow: 0 0 8px -2px rgba(124, 58, 237, 0.15);
+}
+html.light .badge-glow-success {
+  background: rgba(34, 197, 94, 0.08);
+  box-shadow: 0 0 8px -2px rgba(34, 197, 94, 0.12);
+}
+html.light .badge-glow-warning {
+  background: rgba(245, 158, 11, 0.08);
+  box-shadow: 0 0 8px -2px rgba(245, 158, 11, 0.12);
+}
+html.light .badge-glow-error {
+  background: rgba(239, 68, 68, 0.08);
+  box-shadow: 0 0 8px -2px rgba(239, 68, 68, 0.12);
+}
+html.light .badge-glow-info {
+  background: rgba(59, 130, 246, 0.08);
+  box-shadow: 0 0 8px -2px rgba(59, 130, 246, 0.12);
+}
+
+/* Cost pill */
+.cost-pill {
+  background: rgba(109, 40, 217, 0.08);
+  border: 1px solid rgba(109, 40, 217, 0.12);
+}
+html.light .cost-pill {
+  background: rgba(124, 58, 237, 0.06);
+  border: 1px solid rgba(124, 58, 237, 0.1);
+}
+
+/* Text gradient for hero numbers */
+.text-gradient {
+  background: linear-gradient(135deg, var(--color-text) 30%, var(--color-primary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+html.light .text-gradient {
+  background: linear-gradient(135deg, var(--color-text-heading) 30%, var(--color-primary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Animated count-up for numbers */
+@keyframes count-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-count-in {
+  animation: count-fade-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Smooth collapse/expand */
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 500px;
+  }
+}
+.animate-slide-down {
+  animation: slide-down 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+  overflow: hidden;
+}
+
+/* Fade in */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.3s ease both;
+}
+
+/* Log entry type styling */
+.log-thinking {
+  border-left: 2px solid rgba(109, 40, 217, 0.3);
+  padding-left: 0.75rem;
+  font-style: italic;
+  opacity: 0.85;
+  background: rgba(109, 40, 217, 0.02);
+}
+
+.log-tool-use {
+  border-left: 2px solid rgba(59, 130, 246, 0.4);
+  padding-left: 0.75rem;
+  background: rgba(59, 130, 246, 0.02);
+}
+
+.log-error {
+  border-left: 2px solid rgba(239, 68, 68, 0.4);
+  padding-left: 0.75rem;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.log-system {
+  border-left: 2px solid rgba(161, 161, 170, 0.25);
+  padding-left: 0.75rem;
+  background: rgba(161, 161, 170, 0.02);
+}
+
+/* Frosted tooltip/popover */
+.glass-tooltip {
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  background: rgba(24, 24, 27, 0.9);
+  border: 1px solid rgba(63, 63, 70, 0.5);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.24),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+}
+html.light .glass-tooltip {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(224, 225, 230, 0.8);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* Recharts custom tooltip */
+.recharts-custom-tooltip {
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  background: rgba(24, 24, 27, 0.92) !important;
+  border: 1px solid rgba(63, 63, 70, 0.5) !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24) !important;
+}
+html.light .recharts-custom-tooltip {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid rgba(224, 225, 230, 0.8) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ──────────────────────────────────────
+   Respect reduced motion preferences
+   ────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .skeleton-shimmer {
+    animation: none;
+    background: var(--color-bg-hover);
+  }
+  .animated-gradient {
+    animation: none;
+  }
+  .glow-dot {
+    animation: none;
+    box-shadow: 0 0 3px 1px currentColor;
+  }
+  .card-hover:hover {
+    transform: none;
+  }
+  .animate-count-in,
+  .animate-slide-down,
+  .animate-fade-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

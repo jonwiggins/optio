@@ -322,7 +322,7 @@ export function LogViewer({ taskId }: { taskId: string }) {
           <span
             className={cn(
               "w-2 h-2 rounded-full",
-              connected ? "bg-success animate-pulse" : "bg-text-muted/30",
+              connected ? "bg-success glow-dot" : "bg-text-muted/30",
             )}
           />
           <span className="font-medium">{connected ? "Live" : "Ended"}</span>
@@ -420,7 +420,7 @@ export function LogViewer({ taskId }: { taskId: string }) {
             {showExportMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 bg-bg-card border border-border rounded-lg shadow-lg py-1 min-w-[140px]">
+                <div className="absolute right-0 top-full mt-1 z-20 glass-tooltip rounded-lg py-1 min-w-[140px]">
                   <button
                     onClick={() => handleExport("json")}
                     className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
@@ -531,7 +531,7 @@ export function LogViewer({ taskId }: { taskId: string }) {
               behavior: "smooth",
             });
           }}
-          className="absolute bottom-14 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-bg-card border border-border text-xs text-text-muted hover:text-text shadow-lg transition-colors flex items-center gap-1.5 font-sans"
+          className="absolute bottom-14 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full glass-tooltip text-xs text-text-muted hover:text-text transition-all flex items-center gap-1.5 font-sans btn-press"
         >
           <ArrowDown className="w-3 h-3" />
           Scroll to bottom
@@ -559,10 +559,10 @@ function ToolCallGroup({
   const showBody = !isCollapsed && group.result && showResults;
 
   return (
-    <div className="rounded-lg border border-border/50 my-1.5 overflow-hidden">
+    <div className="rounded-lg border border-border/50 my-1.5 overflow-hidden log-tool-use">
       <button
         onClick={onToggle}
-        className="flex items-center gap-2 w-full px-3 py-2 text-left bg-bg-card hover:bg-bg-card-hover transition-colors"
+        className="flex items-center gap-2 w-full px-3 py-2 text-left bg-bg-card/50 hover:bg-bg-card-hover transition-colors"
       >
         {group.result ? (
           isCollapsed ? (
@@ -601,7 +601,7 @@ function LogLine({
 
   if (type === "system") {
     return (
-      <div className="flex items-center gap-2 py-1 text-info/50 font-sans text-[11px]">
+      <div className="flex items-center gap-2 py-1 text-info/50 font-sans text-[11px] my-0.5 log-system">
         <Info className="w-3 h-3 shrink-0" />
         <span>
           <HighlightedText text={log.content} search={searchQuery} />
@@ -612,7 +612,7 @@ function LogLine({
 
   if (type === "thinking") {
     return (
-      <div className="py-1.5 pl-4 border-l-2 border-text-muted/20 text-text-muted/50 italic bg-bg-subtle/30 rounded-r-md my-0.5">
+      <div className="py-1.5 text-text-muted/50 rounded-r-md my-0.5 log-thinking leading-relaxed">
         <HighlightedText text={log.content} search={searchQuery} />
       </div>
     );
@@ -654,7 +654,7 @@ function LogLine({
 
   if (type === "error") {
     return (
-      <div className="flex items-start gap-2 py-1.5 px-2 -mx-1 rounded-md bg-error/5 text-error my-0.5">
+      <div className="flex items-start gap-2 py-1.5 rounded-md text-error my-0.5 log-error">
         <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
         <span className="whitespace-pre-wrap">
           <HighlightedText text={log.content} search={searchQuery} />

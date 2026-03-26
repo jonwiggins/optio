@@ -14,6 +14,8 @@ const STATE_DOT_COLORS: Record<string, string> = {
   needs_attention: "bg-warning",
 };
 
+const ACTIVE_STATES = new Set(["running", "provisioning", "queued"]);
+
 interface TimelineEvent {
   id: string;
   fromState?: string;
@@ -28,16 +30,39 @@ export function EventTimeline({ events }: { events: TimelineEvent[] }) {
     <div className="space-y-0">
       {events.map((event, i) => {
         const isLast = i === events.length - 1;
+        const isFirst = i === 0;
         const dotColor = STATE_DOT_COLORS[event.toState] ?? "bg-text-muted";
+        const isActive = isLast && ACTIVE_STATES.has(event.toState);
         return (
-          <div key={event.id} className="flex items-start gap-3">
+          <div
+            key={event.id}
+            className={cn("flex items-start gap-3", isFirst && "animate-fade-in")}
+          >
             <div className="flex flex-col items-center">
-              <div className={cn("w-2 h-2 rounded-full mt-2 shrink-0", dotColor)} />
+              <div className="relative mt-2 shrink-0">
+                {isActive && (
+                  <div
+                    className={cn(
+                      "absolute -inset-1 rounded-full opacity-30 animate-ping",
+                      dotColor,
+                    )}
+                  />
+                )}
+                <div
+                  className={cn(
+                    "w-2.5 h-2.5 rounded-full relative z-10 ring-2 ring-bg",
+                    dotColor,
+                    isActive && "glow-dot",
+                  )}
+                />
+              </div>
               {!isLast && (
                 <div
                   className={cn(
                     "w-px flex-1 mt-1",
-                    isLast ? "bg-gradient-to-b from-border to-transparent" : "bg-border/60",
+                    isLast
+                      ? "bg-gradient-to-b from-border to-transparent"
+                      : "bg-gradient-to-b from-border/60 to-border/30",
                   )}
                 />
               )}
@@ -52,7 +77,7 @@ export function EventTimeline({ events }: { events: TimelineEvent[] }) {
                 )}
                 <StateBadge
                   state={event.toState}
-                  showDot={isLast || ["running", "provisioning", "queued"].includes(event.toState)}
+                  showDot={isLast || ACTIVE_STATES.has(event.toState)}
                 />
               </div>
               <div className="text-xs text-text-muted/70 mt-1.5 font-medium">
@@ -61,7 +86,7 @@ export function EventTimeline({ events }: { events: TimelineEvent[] }) {
                   <span className="font-normal text-text-muted/50"> &mdash; {event.message}</span>
                 )}
               </div>
-              <div className="text-[11px] text-text-muted/40 mt-0.5 tabular-nums">
+              <div className="text-[10px] text-text-muted/40 mt-0.5 tabular-nums font-mono">
                 {formatRelativeTime(event.createdAt)}
               </div>
             </div>

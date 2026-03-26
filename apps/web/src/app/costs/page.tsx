@@ -107,14 +107,14 @@ function StatCard({
   trend?: { value: number; label: string };
 }) {
   return (
-    <div className="bg-bg-card border border-border rounded-xl p-5">
+    <div className="bg-gradient-to-br from-bg-card to-bg-card/80 border border-border/50 rounded-xl p-5 card-hover">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs text-text-muted font-medium uppercase tracking-wider">
+        <span className="text-[10px] text-text-muted font-semibold uppercase tracking-widest">
           {label}
         </span>
-        <Icon className="w-4 h-4 text-text-muted" />
+        <Icon className="w-4 h-4 text-text-muted/50" />
       </div>
-      <div className="text-2xl font-semibold text-text">{value}</div>
+      <div className="text-2xl font-bold tracking-tight text-text">{value}</div>
       {(sub || trend) && (
         <div className="mt-1.5 flex items-center gap-2">
           {trend && (
@@ -157,7 +157,7 @@ function ChartTooltipContent({
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-bg-card border border-border rounded-lg px-3 py-2 shadow-lg">
+    <div className="glass-tooltip px-3 py-2">
       <p className="text-xs text-text-muted mb-1">{label}</p>
       {payload.map((p, i) => (
         <p key={i} className="text-sm font-medium" style={{ color: p.color }}>
@@ -248,8 +248,8 @@ export default function CostsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">Cost Analytics</h1>
-          <p className="text-sm text-text-muted mt-0.5">
+          <h1 className="text-xl font-bold tracking-tight text-text">Cost Analytics</h1>
+          <p className="text-sm text-text-muted mt-0.5 font-light">
             Track and analyze agent spend across your tasks
           </p>
         </div>
@@ -388,8 +388,8 @@ export default function CostsPage() {
       )}
 
       {/* Cost over time chart */}
-      <div className="bg-bg-card border border-border rounded-xl p-5">
-        <h2 className="text-sm font-medium text-text mb-4">Cost Over Time</h2>
+      <div className="bg-bg-card border border-border/50 rounded-xl p-5">
+        <h2 className="text-sm font-medium text-text-heading mb-4">Cost Over Time</h2>
         {dailyCosts.length === 0 ? (
           <div className="h-64 flex items-center justify-center text-text-muted text-sm">
             No cost data for this period
@@ -428,6 +428,8 @@ export default function CostsPage() {
                 stroke="#6366f1"
                 fill="url(#costGradient)"
                 strokeWidth={2}
+                animationDuration={800}
+                animationEasing="ease-out"
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -437,10 +439,10 @@ export default function CostsPage() {
       {/* Three-column layout: Cost by Model + Cost by Repo + Cost by Type */}
       <div className="grid grid-cols-3 gap-4">
         {/* Cost by model */}
-        <div className="bg-bg-card border border-border rounded-xl p-5">
+        <div className="bg-bg-card border border-border/50 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
-            <Cpu className="w-4 h-4 text-text-muted" />
-            <h2 className="text-sm font-medium text-text">Cost by Model</h2>
+            <Cpu className="w-4 h-4 text-text-muted/60" />
+            <h2 className="text-sm font-medium text-text-heading">Cost by Model</h2>
           </div>
           {costByModel.length === 0 ? (
             <div className="h-48 flex items-center justify-center text-text-muted text-sm">
@@ -484,8 +486,8 @@ export default function CostsPage() {
         </div>
 
         {/* Cost by repo */}
-        <div className="bg-bg-card border border-border rounded-xl p-5">
-          <h2 className="text-sm font-medium text-text mb-4">Cost by Repository</h2>
+        <div className="bg-bg-card border border-border/50 rounded-xl p-5">
+          <h2 className="text-sm font-medium text-text-heading mb-4">Cost by Repository</h2>
           {costByRepo.length === 0 ? (
             <div className="h-48 flex items-center justify-center text-text-muted text-sm">
               No data
@@ -522,8 +524,8 @@ export default function CostsPage() {
         </div>
 
         {/* Cost by task type */}
-        <div className="bg-bg-card border border-border rounded-xl p-5">
-          <h2 className="text-sm font-medium text-text mb-4">Cost by Task Type</h2>
+        <div className="bg-bg-card border border-border/50 rounded-xl p-5">
+          <h2 className="text-sm font-medium text-text-heading mb-4">Cost by Task Type</h2>
           {costByType.length === 0 ? (
             <div className="h-48 flex items-center justify-center text-text-muted text-sm">
               No data

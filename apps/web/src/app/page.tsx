@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import { TaskCard } from "@/components/task-card";
+import { FadeIn, StaggerList, StaggerItem, AnimatedNumber } from "@/components/animated";
 import Link from "next/link";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
@@ -193,8 +194,26 @@ export default function OverviewPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full text-text-muted">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
+      <div className="p-6 max-w-6xl mx-auto space-y-6">
+        <div className="h-8 w-40 skeleton-shimmer" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-24 skeleton-shimmer" />
+          ))}
+        </div>
+        <div className="h-16 skeleton-shimmer" />
+        <div className="grid md:grid-cols-2 gap-8">
+          <div className="space-y-2">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-20 skeleton-shimmer" />
+            ))}
+          </div>
+          <div className="space-y-2">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-12 skeleton-shimmer" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -239,7 +258,7 @@ export default function OverviewPage() {
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gradient">Overview</h1>
           <p className="text-sm text-text-muted mt-0.5">
             {taskStats?.running ?? 0} active {(taskStats?.running ?? 0) === 1 ? "task" : "tasks"}
             {activeSessionCount > 0 && (
@@ -259,38 +278,46 @@ export default function OverviewPage() {
         </div>
         <button
           onClick={refresh}
-          className="p-2 rounded-lg hover:bg-bg-hover text-text-muted transition-colors"
+          className="p-2 rounded-lg hover:bg-bg-hover text-text-muted transition-all btn-press hover:text-text"
         >
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard
-          icon={Activity}
-          label="Running"
-          value={taskStats?.running ?? 0}
-          color="text-primary"
-        />
-        <StatCard
-          icon={AlertTriangle}
-          label="Attention"
-          value={taskStats?.needsAttention ?? 0}
-          color="text-warning"
-        />
-        <StatCard
-          icon={GitPullRequest}
-          label="PRs Open"
-          value={taskStats?.prOpened ?? 0}
-          color="text-success"
-        />
-        <StatCard
-          icon={CheckCircle}
-          label="Completed"
-          value={taskStats?.completed ?? 0}
-          color="text-success"
-        />
-      </div>
+      <StaggerList className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StaggerItem>
+          <StatCard
+            icon={Activity}
+            label="Running"
+            value={taskStats?.running ?? 0}
+            color="text-primary"
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <StatCard
+            icon={AlertTriangle}
+            label="Attention"
+            value={taskStats?.needsAttention ?? 0}
+            color="text-warning"
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <StatCard
+            icon={GitPullRequest}
+            label="PRs Open"
+            value={taskStats?.prOpened ?? 0}
+            color="text-success"
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <StatCard
+            icon={CheckCircle}
+            label="Completed"
+            value={taskStats?.completed ?? 0}
+            color="text-success"
+          />
+        </StaggerItem>
+      </StaggerList>
 
       {usage?.available && (
         <div className="rounded-xl border border-border/50 bg-bg-card p-4">
@@ -903,7 +930,7 @@ function QuickLink({
   return (
     <Link
       href={href}
-      className="group p-4 rounded-xl border border-border/50 bg-bg-card hover:border-primary/30 hover:bg-bg-card-hover transition-all"
+      className="group p-4 rounded-xl border border-border/50 bg-bg-card hover:border-primary/30 hover:bg-bg-card-hover transition-all card-hover"
     >
       <Icon className="w-5 h-5 text-text-muted group-hover:text-primary transition-colors mb-2" />
       <div className="text-sm font-medium text-text-heading">{label}</div>
@@ -937,7 +964,7 @@ function EmptyState({
       {action && (
         <Link
           href={action.href}
-          className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors shadow-sm"
+          className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-all btn-press shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/25"
         >
           <Plus className="w-3.5 h-3.5" />
           {action.label}
@@ -967,21 +994,36 @@ function StatCard({
     "text-error": "border-l-error/40",
     "text-info": "border-l-info/40",
   };
+  const gradientMap: Record<string, string> = {
+    "text-primary": "from-primary/[0.06] to-transparent",
+    "text-warning": "from-warning/[0.04] to-transparent",
+    "text-success": "from-success/[0.04] to-transparent",
+    "text-error": "from-error/[0.04] to-transparent",
+    "text-info": "from-info/[0.04] to-transparent",
+  };
   const accent = accentMap[color] ?? "border-l-primary/40";
+  const gradient = gradientMap[color] ?? "from-primary/[0.06] to-transparent";
 
   return (
     <div
       className={cn(
-        "p-4 rounded-xl border border-border/50 bg-bg-card relative overflow-hidden border-l-2 hover:bg-bg-card-hover transition-colors",
+        "p-4 rounded-xl border border-border/50 relative overflow-hidden border-l-2 card-hover bg-gradient-to-br",
         accent,
+        gradient,
       )}
     >
-      <Icon className={cn("w-8 h-8 absolute top-3 right-3 opacity-15", color)} />
-      <span className="text-xs font-medium uppercase tracking-wider text-text-muted">{label}</span>
-      <div className="mt-1.5">
-        <span className={cn("text-3xl font-semibold tabular-nums", value > 0 && color)}>
-          {value}
-        </span>
+      <Icon className={cn("w-8 h-8 absolute top-3 right-3 opacity-[0.07]", color)} />
+      <span className="text-[10px] font-semibold uppercase tracking-widest text-text-muted/70">
+        {label}
+      </span>
+      <div className="mt-2">
+        <AnimatedNumber
+          value={value}
+          className={cn(
+            "text-3xl font-bold tabular-nums tracking-tight",
+            value > 0 ? color : "text-text-muted/40",
+          )}
+        />
       </div>
     </div>
   );

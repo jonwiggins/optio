@@ -191,7 +191,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         <div className="flex items-start justify-between gap-4 max-w-5xl mx-auto">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
-              <h1 className="text-lg font-semibold truncate">{task.title}</h1>
+              <h1 className="text-lg font-bold tracking-tight truncate">{task.title}</h1>
               <StateBadge state={task.state} />
             </div>
             <div className="flex items-center gap-4 mt-2 text-xs text-text-muted">
@@ -393,7 +393,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                                 setTokenSaving(false);
                               }}
                               disabled={!tokenInput.trim() || tokenSaving}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
                             >
                               {tokenSaving ? (
                                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -420,7 +420,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                         <button
                           onClick={handleRetry}
                           disabled={actionLoading}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
                         >
                           <RotateCcw className="w-3 h-3" />
                           Retry Task
@@ -662,7 +662,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                   <button
                     onClick={handleCreateSubtask}
                     disabled={actionLoading || !newSubtask.title.trim()}
-                    className="px-3 py-1 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 ml-auto"
+                    className="px-3 py-1 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 ml-auto btn-press transition-all"
                   >
                     Create & Queue
                   </button>
