@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import * as sessionService from "../services/interactive-session-service.js";
+import { db } from "../db/client.js";
+import { repos } from "../db/schema.js";
 
 const createSessionSchema = z.object({
   repoUrl: z.string().url(),
@@ -25,12 +28,25 @@ export async function sessionRoutes(app: FastifyInstance) {
     reply.send({ sessions, activeCount });
   });
 
-  // Get session
+  // Get session — includes model info from repo config
   app.get("/api/sessions/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const session = await sessionService.getSession(id);
     if (!session) return reply.status(404).send({ error: "Session not found" });
-    reply.send({ session });
+
+    // Attach repo model config
+    let modelConfig: { claudeModel: string; availableModels: string[] } | null = null;
+    try {
+      const [repoConfig] = await db.select().from(repos).where(eq(repos.repoUrl, session.repoUrl));
+      modelConfig = {
+        claudeModel: repoConfig?.claudeModel ?? "sonnet",
+        availableModels: ["haiku", "sonnet", "opus"],
+      };
+    } catch {
+      // Non-critical
+    }
+
+    reply.send({ session, modelConfig });
   });
 
   // Create session
