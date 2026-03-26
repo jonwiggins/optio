@@ -7,6 +7,7 @@ import {
   TASK_FILE_PATH,
   DEFAULT_MAX_TURNS_CODING,
   DEFAULT_MAX_TURNS_REVIEW,
+  type PresetImageId,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
@@ -321,11 +322,14 @@ export function startTaskWorker() {
         // Get or create a repo pod (with multi-pod scheduling)
         log.info("Getting repo pod");
         const isRetry = (task.retryCount ?? 0) > 0;
+        const imageConfig = repoConfig
+          ? { preset: (repoConfig.imagePreset ?? "base") as PresetImageId }
+          : undefined;
         const pod = await repoPool.getOrCreateRepoPod(
           task.repoUrl,
           task.repoBranch,
           allEnv,
-          undefined,
+          imageConfig,
           {
             preferredPodId: isRetry ? ((task as any).lastPodId ?? undefined) : undefined,
             maxAgentsPerPod,
