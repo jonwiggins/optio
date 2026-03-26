@@ -268,6 +268,31 @@ When tasks fail, the error message is pattern-matched by `packages/shared/src/er
 
 The web UI at `/costs` (`apps/web/src/app/costs/page.tsx`) renders this data with Recharts charts: area chart for daily costs, bar chart for cost by repo, pie chart for cost by type, and a table of top tasks. Period selector (7d/14d/30d/90d) and repo filter are available. Accessible from the sidebar via the DollarSign icon.
 
+### Slack notifications
+
+`slack-service.ts` sends rich Block Kit messages to Slack when tasks transition to notifiable states. Supports per-repo and global webhook configuration.
+
+**Configuration** (per-repo fields in `repos` table, migration `0019_slack_integration.sql`):
+
+- `slackWebhookUrl` — incoming webhook URL (per-repo, overrides global)
+- `slackChannel` — optional channel override
+- `slackNotifyOn` — JSONB array of states to notify on (default: `["completed","failed","needs_attention","pr_opened"]`)
+- `slackEnabled` — boolean toggle (default: `false`)
+
+A global fallback webhook can be set via the `SLACK_WEBHOOK_URL` secret (stored in the secrets table, not an env var).
+
+**Message format**: Block Kit attachments with status emoji, repo name, cost, PR link, and action buttons:
+
+- "View Logs" — always present, links to task in web UI
+- "Retry" — on failed tasks, transitions to `queued`
+- "Cancel" — on failed or `needs_attention` tasks, transitions to `cancelled`
+
+**Interactive actions**: Button clicks POST to `POST /api/webhooks/slack/actions`, which validates the payload and performs the requested task transition.
+
+**Integration point**: `task-service.ts` calls `notifySlackOnTransition()` on every state transition. Notifications are fire-and-forget (failures are logged, never thrown).
+
+The generic webhook service (`webhook-service.ts`) also auto-detects Slack URLs (`hooks.slack.com/`) and formats payloads as Block Kit instead of plain JSON.
+
 ### Repository URL normalization
 
 `normalizeRepoUrl()` in `packages/shared/src/utils/normalize-repo-url.ts` normalizes git repository URLs to a canonical HTTPS form for consistent matching and storage. Handles:
@@ -275,7 +300,7 @@ The web UI at `/costs` (`apps/web/src/app/costs/page.tsx`) renders this data wit
 - HTTPS/HTTP URLs, SSH shorthand (`git@host:path`), SSH protocol URLs (`ssh://git@host/path`)
 - Bare domain paths, mixed case, trailing slashes, `.git` suffixes, whitespace
 
-Canonical output: `https://github.com/owner/repo` (lowercase host, no trailing slash, no `.git`). Used throughout the codebase wherever repo URLs are compared or stored. Test coverage in `normalize-repo-url.test.ts`.
+Canonical output: `https://github.com/owner/repo` (fully lowercase, no trailing slash, no `.git`). Used throughout the codebase wherever repo URLs are compared or stored. Test coverage in `normalize-repo-url.test.ts`.
 
 ## Tech Stack
 
@@ -283,7 +308,7 @@ Canonical output: `https://github.com/owner/repo` (lowercase host, no trailing s
 | ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------- |
 | Monorepo   | Turborepo + pnpm 10              | 6 packages, workspace protocol                                                                    |
 | API        | Fastify 5                        | Plugins, schema validation, WebSocket                                                             |
-| ORM        | Drizzle                          | PostgreSQL, generated migrations in `apps/api/src/db/migrations/` (15 migrations)                 |
+| ORM        | Drizzle                          | PostgreSQL, generated migrations in `apps/api/src/db/migrations/` (28 migrations)                 |
 | Queue      | BullMQ + Redis                   | Also used for pub/sub (log streaming to WebSocket clients)                                        |
 | Web        | Next.js 15 App Router            | Tailwind CSS v4, Zustand, Lucide icons, sonner toasts                                             |
 | K8s client | @kubernetes/client-node          | Pod lifecycle, exec, log streaming, metrics                                                       |
@@ -300,16 +325,17 @@ apps/
   api/
     src/
       routes/         health, tasks, subtasks, bulk, secrets, repos, issues, tickets, setup, auth,
-                      cluster, resume, prompt-templates, analytics
+                      cluster, resume, prompt-templates, analytics, slack
       services/       task-service, repo-pool-service, secret-service, auth-service, container-service,
                       prompt-template-service, repo-service, repo-detect-service, review-service,
-                      subtask-service, ticket-sync-service, event-bus, agent-event-parser,
+                      subtask-service, ticket-sync-service, slack-service, webhook-service,
+                      event-bus, agent-event-parser,
                       session-service, oauth/ (github, google, gitlab)
       plugins/        auth (session validation middleware)
       workers/        task-worker (main job processor), pr-watcher-worker, repo-cleanup-worker,
                       ticket-sync-worker
       ws/             log-stream (per-task), events (global)
-      db/             schema.ts (Drizzle), client.ts, migrations/ (15 migrations)
+      db/             schema.ts (Drizzle), client.ts, migrations/ (28 migrations)
     drizzle.config.ts
   web/
     src/
@@ -337,7 +363,7 @@ scripts/              repo-init.sh, agent-entrypoint.sh, setup-local.sh
 
 ## Database Schema
 
-11 tables (Drizzle, 15 migrations):
+11 tables (Drizzle, 28 migrations):
 
 - **tasks** — id, title, prompt, repoUrl, repoBranch, state (enum), agentType, containerId, sessionId, prUrl, prNumber, prState, prChecksStatus, prReviewStatus, prReviewComments, resultSummary, costUsd, errorMessage, ticketSource, ticketExternalId, metadata (jsonb), retryCount, maxRetries, priority, parentTaskId, taskType ("coding"|"review"), subtaskOrder, blocksParent, worktreeState, lastPodId, createdBy (FK to users), timestamps (created/updated/started/completed)
 - **task_events** — id, taskId (FK), fromState, toState, trigger, message, createdAt (audit trail)
@@ -446,6 +472,9 @@ Key routes beyond basic CRUD:
 - `GET /api/auth/:provider/login` — initiate OAuth login flow
 - `GET /api/auth/:provider/callback` — OAuth callback handler
 - `GET /api/analytics/costs` — cost analytics with daily/repo/type breakdowns
+- `POST /api/webhooks/slack/actions` — handle Slack interactive button clicks (retry, cancel)
+- `POST /api/slack/test` — test Slack webhook configuration
+- `GET /api/slack/status` — check global Slack webhook status
 
 ## Workers
 
