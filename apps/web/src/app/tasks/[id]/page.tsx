@@ -29,7 +29,7 @@ import { toast } from "sonner";
 
 export default function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { task, events, loading, error, refresh } = useTask(id);
+  const { task, events, pendingReason, pipelineProgress, loading, error, refresh } = useTask(id);
   usePageTitle(task?.title ?? "Task");
   const [actionLoading, setActionLoading] = useState(false);
   const [resumePrompt, setResumePrompt] = useState("");
@@ -265,6 +265,60 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
       </div>
+
+      {/* Pending reason */}
+      {pendingReason && (
+        <div className="shrink-0 border-b border-warning/20 bg-warning/5 px-4 py-2.5">
+          <div className="max-w-5xl mx-auto flex items-center gap-2 text-xs">
+            <Clock className="w-3.5 h-3.5 text-warning shrink-0" />
+            <span className="text-warning/80">{pendingReason}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Pipeline progress */}
+      {pipelineProgress && (
+        <div className="shrink-0 border-b border-border bg-bg px-4 py-2.5">
+          <div className="max-w-5xl mx-auto">
+            <div className="flex items-center gap-3 text-xs">
+              <span className="text-text-muted font-medium">
+                Pipeline: Step {pipelineProgress.currentStepIndex} of {pipelineProgress.totalSteps}
+              </span>
+              {pipelineProgress.currentStepTitle && (
+                <span className="text-text-muted/60 truncate">
+                  — {pipelineProgress.currentStepTitle}
+                </span>
+              )}
+              {pipelineProgress.failedSteps > 0 && (
+                <span className="text-error text-[10px] px-1.5 py-0.5 rounded bg-error/10">
+                  {pipelineProgress.failedSteps} failed
+                </span>
+              )}
+            </div>
+            {/* Progress bar */}
+            <div className="mt-1.5 flex gap-1">
+              {pipelineProgress.steps.map((step: any, i: number) => (
+                <div
+                  key={step.id}
+                  className={cn(
+                    "h-1.5 rounded-full flex-1 transition-colors",
+                    step.state === "completed"
+                      ? "bg-success"
+                      : step.state === "failed"
+                        ? "bg-error"
+                        : ["running", "provisioning"].includes(step.state)
+                          ? "bg-primary animate-pulse"
+                          : step.state === "queued"
+                            ? "bg-primary/40"
+                            : "bg-border",
+                  )}
+                  title={`Step ${i + 1}: ${step.title} (${step.state})`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Error panel */}
       {task.errorMessage &&
@@ -547,37 +601,71 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
             {/* Subtask list */}
             {subtasks.length > 0 && (
               <div className="space-y-1">
-                {subtasks.map((sub: any) => (
-                  <Link
-                    key={sub.id}
-                    href={`/tasks/${sub.id}`}
-                    className={cn(
-                      "flex items-center gap-2 p-2 rounded-md border text-xs transition-colors hover:bg-bg-hover",
-                      sub.taskType === "review"
-                        ? "border-info/20 bg-info/5"
-                        : sub.blocksParent
-                          ? "border-warning/20 bg-warning/5"
-                          : "border-border bg-bg-card",
-                    )}
-                  >
-                    {sub.taskType === "review" ? (
-                      <Bot className="w-3.5 h-3.5 text-info shrink-0" />
-                    ) : sub.blocksParent ? (
-                      <span className="w-3.5 h-3.5 text-warning shrink-0 text-center font-bold">
-                        !
-                      </span>
-                    ) : (
-                      <span className="w-3.5 h-3.5 text-text-muted shrink-0 text-center">•</span>
-                    )}
-                    <span className="truncate flex-1">{sub.title}</span>
-                    {sub.blocksParent && (
-                      <span className="text-[9px] px-1 py-0.5 rounded bg-warning/10 text-warning shrink-0">
-                        blocking
-                      </span>
-                    )}
-                    <StateBadge state={sub.state} />
-                  </Link>
-                ))}
+                {subtasks.map((sub: any, idx: number) => {
+                  const isStep = sub.taskType === "step";
+                  const stepIndex = isStep
+                    ? subtasks.filter((s: any) => s.taskType === "step").indexOf(sub) + 1
+                    : 0;
+                  return (
+                    <Link
+                      key={sub.id}
+                      href={`/tasks/${sub.id}`}
+                      className={cn(
+                        "flex items-center gap-2 p-2 rounded-md border text-xs transition-colors hover:bg-bg-hover",
+                        sub.taskType === "review"
+                          ? "border-info/20 bg-info/5"
+                          : isStep
+                            ? sub.state === "completed"
+                              ? "border-success/20 bg-success/5"
+                              : sub.state === "failed"
+                                ? "border-error/20 bg-error/5"
+                                : ["running", "provisioning", "queued"].includes(sub.state)
+                                  ? "border-primary/20 bg-primary/5"
+                                  : "border-border bg-bg-card"
+                            : sub.blocksParent
+                              ? "border-warning/20 bg-warning/5"
+                              : "border-border bg-bg-card",
+                      )}
+                    >
+                      {sub.taskType === "review" ? (
+                        <Bot className="w-3.5 h-3.5 text-info shrink-0" />
+                      ) : isStep ? (
+                        <span
+                          className={cn(
+                            "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
+                            sub.state === "completed"
+                              ? "bg-success/20 text-success"
+                              : sub.state === "failed"
+                                ? "bg-error/20 text-error"
+                                : ["running", "provisioning", "queued"].includes(sub.state)
+                                  ? "bg-primary/20 text-primary"
+                                  : "bg-border text-text-muted",
+                          )}
+                        >
+                          {stepIndex}
+                        </span>
+                      ) : sub.blocksParent ? (
+                        <span className="w-3.5 h-3.5 text-warning shrink-0 text-center font-bold">
+                          !
+                        </span>
+                      ) : (
+                        <span className="w-3.5 h-3.5 text-text-muted shrink-0 text-center">•</span>
+                      )}
+                      <span className="truncate flex-1">{sub.title}</span>
+                      {isStep && (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-bg-hover text-text-muted shrink-0">
+                          step
+                        </span>
+                      )}
+                      {sub.blocksParent && !isStep && (
+                        <span className="text-[9px] px-1 py-0.5 rounded bg-warning/10 text-warning shrink-0">
+                          blocking
+                        </span>
+                      )}
+                      <StateBadge state={sub.state} />
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>

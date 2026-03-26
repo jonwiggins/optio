@@ -125,11 +125,41 @@ export async function checkBlockingSubtasks(parentTaskId: string) {
 }
 
 /**
- * Called when a subtask completes. Checks if the parent should transition.
+ * Called when a subtask completes. Handles:
+ * 1. Pipeline step auto-chaining — queue next step when current completes
+ * 2. Review subtask handling — auto-merge if approved
+ * 3. Parent advancement — when all blocking subtasks are done
  */
 export async function onSubtaskComplete(subtaskId: string) {
   const subtask = await taskService.getTask(subtaskId);
   if (!subtask?.parentTaskId) return;
+
+  // ── Pipeline step auto-chaining ─────────────────────────────────
+  // When a step completes, auto-queue the next step by subtaskOrder.
+  // If the step failed, stop the pipeline (don't queue subsequent steps).
+  if (subtask.taskType === "step" && subtask.state === "completed") {
+    const siblings = await getSubtasks(subtask.parentTaskId);
+    const steps = siblings.filter((s) => s.taskType === "step");
+    const currentIdx = steps.findIndex((s) => s.id === subtaskId);
+    const nextStep = currentIdx >= 0 ? steps[currentIdx + 1] : undefined;
+
+    if (nextStep && nextStep.state === "pending") {
+      try {
+        await queueSubtask(nextStep.id);
+        logger.info(
+          {
+            parentTaskId: subtask.parentTaskId,
+            completedStep: subtaskId,
+            nextStep: nextStep.id,
+            stepOrder: `${currentIdx + 2}/${steps.length}`,
+          },
+          "Pipeline: queued next step",
+        );
+      } catch (err) {
+        logger.warn({ err, nextStepId: nextStep.id }, "Failed to queue next pipeline step");
+      }
+    }
+  }
 
   const status = await checkBlockingSubtasks(subtask.parentTaskId);
   if (!status.allComplete) return;
@@ -146,7 +176,6 @@ export async function onSubtaskComplete(subtaskId: string) {
       .where(and(eq(tasks.parentTaskId, parent.id), eq(tasks.taskType, "review")));
 
     const anyApproved = reviewSubtasks.some((r) => r.state === "completed");
-    const anyFailed = reviewSubtasks.some((r) => r.state === "failed");
 
     if (anyApproved && parent.prUrl) {
       logger.info({ taskId: parent.id }, "All blocking subtasks complete, review approved");
@@ -205,5 +234,65 @@ export async function onSubtaskComplete(subtaskId: string) {
     }
   }
 
+  // If the completed subtask is a step, check if all steps are done to advance parent
+  if (subtask.taskType === "step") {
+    const allSubtasks = await getSubtasks(parent.id);
+    const allSteps = allSubtasks.filter((s) => s.taskType === "step");
+    if (allSteps.length > 0) {
+      const allStepsComplete = allSteps.every((s) => s.state === "completed");
+      if (allStepsComplete) {
+        try {
+          await taskService.transitionTask(
+            parent.id,
+            TaskState.COMPLETED,
+            "all_steps_complete",
+            `All ${allSteps.length} pipeline steps completed`,
+          );
+          logger.info(
+            { parentTaskId: parent.id, stepCount: allSteps.length },
+            "Pipeline complete — all steps done",
+          );
+        } catch (err) {
+          logger.warn(
+            { err, parentTaskId: parent.id },
+            "Failed to complete parent after all steps",
+          );
+        }
+      }
+    }
+  }
+
   logger.info({ parentTaskId: parent.id, status }, "All blocking subtasks complete");
+}
+
+/**
+ * Get pipeline progress for a parent task.
+ * Returns null if the task has no step subtasks.
+ */
+export async function getPipelineProgress(parentTaskId: string) {
+  const subtasks = await getSubtasks(parentTaskId);
+  const steps = subtasks.filter((s) => s.taskType === "step");
+  if (steps.length === 0) return null;
+
+  const completed = steps.filter((s) => s.state === "completed").length;
+  const failed = steps.filter((s) => s.state === "failed").length;
+  const running = steps.filter((s) =>
+    ["running", "provisioning", "queued"].includes(s.state),
+  ).length;
+  const currentStep = steps.find((s) => !["completed", "failed", "cancelled"].includes(s.state));
+
+  return {
+    totalSteps: steps.length,
+    completedSteps: completed,
+    failedSteps: failed,
+    runningSteps: running,
+    currentStepIndex: currentStep ? steps.indexOf(currentStep) + 1 : steps.length,
+    currentStepTitle: currentStep?.title ?? null,
+    steps: steps.map((s) => ({
+      id: s.id,
+      title: s.title,
+      state: s.state,
+      subtaskOrder: s.subtaskOrder,
+    })),
+  };
 }

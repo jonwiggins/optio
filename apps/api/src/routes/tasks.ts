@@ -59,7 +59,7 @@ export async function taskRoutes(app: FastifyInstance) {
     reply.send(result);
   });
 
-  // Get task
+  // Get task (enriched with pendingReason and pipelineProgress)
   app.get("/api/tasks/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const task = await taskService.getTask(id);
@@ -68,7 +68,20 @@ export async function taskRoutes(app: FastifyInstance) {
     if (wsId && task.workspaceId !== wsId) {
       return reply.status(404).send({ error: "Task not found" });
     }
-    reply.send({ task });
+
+    // Compute pending reason for non-terminal tasks
+    let pendingReason: string | null = null;
+    if (["pending", "waiting_on_deps", "queued"].includes(task.state)) {
+      const { computePendingReason } = await import("../services/dependency-service.js");
+      pendingReason = await computePendingReason(id);
+    }
+
+    // Compute pipeline progress if this task has step subtasks
+    let pipelineProgress = null;
+    const { getPipelineProgress } = await import("../services/subtask-service.js");
+    pipelineProgress = await getPipelineProgress(id);
+
+    reply.send({ task, pendingReason, pipelineProgress });
   });
 
   // Create task

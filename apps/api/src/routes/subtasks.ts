@@ -48,8 +48,19 @@ export async function subtaskRoutes(app: FastifyInstance) {
       priority: body.priority,
     });
 
-    // Auto-queue if requested
-    if (body.autoQueue !== false) {
+    // For pipeline steps: only auto-queue the first step (lowest subtaskOrder).
+    // Subsequent steps stay pending and are auto-queued by onSubtaskComplete().
+    const shouldAutoQueue = (() => {
+      if (body.autoQueue === false) return false;
+      if (body.taskType === "step") {
+        // Check if there are already running/queued step siblings
+        // If so, this is not the first step — don't auto-queue
+        return subtask.subtaskOrder === 0;
+      }
+      return true;
+    })();
+
+    if (shouldAutoQueue) {
       await subtaskService.queueSubtask(subtask.id);
     }
 

@@ -7,7 +7,7 @@ import { StateBadge } from "./state-badge";
 import { classifyError } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/utils";
-import { ExternalLink, RotateCcw, Bot } from "lucide-react";
+import { ExternalLink, RotateCcw, Bot, Link2, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface TaskSummary {
@@ -71,6 +71,22 @@ export const TaskCard = React.memo(function TaskCard({ task, subtasks }: TaskCar
             <StateBadge state={task.state} />
           </div>
         </div>
+
+        {/* Blocked / waiting on deps indicator */}
+        {task.state === "waiting_on_deps" && (
+          <div className="mt-3 px-3 py-2 rounded-lg bg-warning/5 border border-warning/10 flex items-center gap-2">
+            <Link2 className="w-3 h-3 text-warning/60 shrink-0" />
+            <span className="text-xs text-warning/70">Waiting for dependencies to complete</span>
+          </div>
+        )}
+
+        {/* Pipeline step pending indicator */}
+        {task.state === "pending" && task.taskType === "step" && (
+          <div className="mt-3 px-3 py-2 rounded-lg bg-bg-hover/50 border border-border/50 flex items-center gap-2">
+            <Clock className="w-3 h-3 text-text-muted/50 shrink-0" />
+            <span className="text-xs text-text-muted/60">Waiting for previous step</span>
+          </div>
+        )}
 
         {/* Error section */}
         {task.state === "failed" && task.errorMessage && (

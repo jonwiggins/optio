@@ -69,6 +69,7 @@ import {
   getSubtasks,
   checkBlockingSubtasks,
   onSubtaskComplete,
+  getPipelineProgress,
 } from "./subtask-service.js";
 
 describe("subtask-service", () => {
@@ -600,6 +601,213 @@ describe("subtask-service", () => {
       // Should not call fetch (no merge attempt)
       expect(globalThis.fetch).not.toHaveBeenCalled();
       expect(taskService.transitionTask).not.toHaveBeenCalled();
+    });
+
+    it("auto-queues next step when a pipeline step completes", async () => {
+      const stepSiblings = [
+        { id: "step-1", taskType: "step", state: "completed", subtaskOrder: 0, blocksParent: true },
+        { id: "step-2", taskType: "step", state: "pending", subtaskOrder: 1, blocksParent: true },
+        { id: "step-3", taskType: "step", state: "pending", subtaskOrder: 2, blocksParent: true },
+      ];
+
+      // Step 1 completes, should auto-queue step 2
+      vi.mocked(taskService.getTask)
+        .mockResolvedValueOnce({
+          id: "step-1",
+          parentTaskId: "parent-1",
+          taskType: "step",
+          state: "completed",
+          subtaskOrder: 0,
+        } as any)
+        // For queueSubtask (getTask for step-2)
+        .mockResolvedValueOnce({
+          id: "step-2",
+          priority: 50,
+          maxRetries: 3,
+        } as any)
+        // For parent lookup after checkBlockingSubtasks
+        .mockResolvedValueOnce({
+          id: "parent-1",
+          state: "running",
+          repoUrl: "https://github.com/owner/repo",
+        } as any);
+
+      // The mock needs to handle multiple db.select() calls:
+      // 1. getSubtasks (has .orderBy) — returns step siblings
+      // 2. checkBlockingSubtasks (no .orderBy) — returns blocking subtasks
+      // 3. getSubtasks again for step completion check (has .orderBy) — returns step siblings
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            // Return an object that works both with and without .orderBy()
+            const result = Promise.resolve(stepSiblings);
+            (result as any).orderBy = vi.fn().mockResolvedValue(stepSiblings);
+            return result;
+          }),
+        }),
+      });
+
+      await onSubtaskComplete("step-1");
+
+      // Verify step-2 was queued (transitionTask called for it)
+      expect(taskService.transitionTask).toHaveBeenCalledWith("step-2", "queued", "subtask_queued");
+      expect(taskQueue.add).toHaveBeenCalledWith(
+        "process-task",
+        { taskId: "step-2" },
+        expect.objectContaining({ jobId: "step-2" }),
+      );
+    });
+
+    it("does not auto-queue next step when step fails", async () => {
+      vi.mocked(taskService.getTask).mockResolvedValueOnce({
+        id: "step-1",
+        parentTaskId: "parent-1",
+        taskType: "step",
+        state: "failed", // Failed, not completed
+        subtaskOrder: 0,
+      } as any);
+
+      // Mock db.select for checkBlockingSubtasks
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            const result = Promise.resolve([]);
+            (result as any).orderBy = vi.fn().mockResolvedValue([]);
+            return result;
+          }),
+        }),
+      });
+
+      await onSubtaskComplete("step-1");
+
+      // queueSubtask should NOT have been called
+      expect(taskService.transitionTask).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getPipelineProgress", () => {
+    it("returns null when no step subtasks exist", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      const result = await getPipelineProgress("parent-1");
+      expect(result).toBeNull();
+    });
+
+    it("returns correct progress for a pipeline with steps", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockResolvedValue([
+              {
+                id: "s-1",
+                title: "Step 1",
+                state: "completed",
+                taskType: "step",
+                subtaskOrder: 0,
+              },
+              {
+                id: "s-2",
+                title: "Step 2",
+                state: "running",
+                taskType: "step",
+                subtaskOrder: 1,
+              },
+              {
+                id: "s-3",
+                title: "Step 3",
+                state: "pending",
+                taskType: "step",
+                subtaskOrder: 2,
+              },
+            ]),
+          }),
+        }),
+      });
+
+      const result = await getPipelineProgress("parent-1");
+      expect(result).not.toBeNull();
+      expect(result!.totalSteps).toBe(3);
+      expect(result!.completedSteps).toBe(1);
+      expect(result!.runningSteps).toBe(1);
+      expect(result!.failedSteps).toBe(0);
+      expect(result!.currentStepIndex).toBe(2); // Step 2 is current
+      expect(result!.currentStepTitle).toBe("Step 2");
+      expect(result!.steps).toHaveLength(3);
+    });
+
+    it("ignores non-step subtasks in pipeline progress", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockResolvedValue([
+              {
+                id: "s-1",
+                title: "Step 1",
+                state: "completed",
+                taskType: "step",
+                subtaskOrder: 0,
+              },
+              {
+                id: "r-1",
+                title: "Review",
+                state: "running",
+                taskType: "review",
+                subtaskOrder: 1,
+              },
+              {
+                id: "s-2",
+                title: "Step 2",
+                state: "pending",
+                taskType: "step",
+                subtaskOrder: 2,
+              },
+            ]),
+          }),
+        }),
+      });
+
+      const result = await getPipelineProgress("parent-1");
+      expect(result).not.toBeNull();
+      expect(result!.totalSteps).toBe(2); // Only step subtasks counted
+      expect(result!.completedSteps).toBe(1);
+    });
+
+    it("reports all steps complete when pipeline is done", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockResolvedValue([
+              {
+                id: "s-1",
+                title: "Step 1",
+                state: "completed",
+                taskType: "step",
+                subtaskOrder: 0,
+              },
+              {
+                id: "s-2",
+                title: "Step 2",
+                state: "completed",
+                taskType: "step",
+                subtaskOrder: 1,
+              },
+            ]),
+          }),
+        }),
+      });
+
+      const result = await getPipelineProgress("parent-1");
+      expect(result).not.toBeNull();
+      expect(result!.totalSteps).toBe(2);
+      expect(result!.completedSteps).toBe(2);
+      expect(result!.currentStepIndex).toBe(2); // All complete, at the end
+      expect(result!.currentStepTitle).toBeNull();
     });
   });
 });
