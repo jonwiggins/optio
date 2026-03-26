@@ -14,6 +14,7 @@ import {
   DollarSign,
   Terminal,
   Clock,
+  FileText,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
 
@@ -25,6 +26,7 @@ const MAIN_NAV = [
   { href: "/cluster", label: "Cluster", icon: Server },
   { href: "/costs", label: "Costs", icon: DollarSign },
   { href: "/schedules", label: "Schedules", icon: Clock },
+  { href: "/templates", label: "Templates", icon: FileText },
 ];
 
 const SECONDARY_NAV = [

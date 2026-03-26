@@ -365,6 +365,18 @@ export const taskComments = pgTable(
   (table) => [index("task_comments_task_id_idx").on(table.taskId)],
 );
 
+export const taskTemplates = pgTable("task_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  repoUrl: text("repo_url"),
+  prompt: text("prompt").notNull(),
+  agentType: text("agent_type").notNull().default("claude-code"),
+  priority: integer("priority").notNull().default(100),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const promptTemplates = pgTable("prompt_templates", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull().unique(),

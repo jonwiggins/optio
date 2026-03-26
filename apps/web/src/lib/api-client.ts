@@ -475,6 +475,54 @@ export const api = {
 
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
 
+  // Task Templates
+  listTaskTemplates: (repoUrl?: string) => {
+    const qs = repoUrl ? `?repoUrl=${encodeURIComponent(repoUrl)}` : "";
+    return request<{ templates: any[] }>(`/api/task-templates${qs}`);
+  },
+
+  getTaskTemplate: (id: string) => request<{ template: any }>(`/api/task-templates/${id}`),
+
+  createTaskTemplate: (data: {
+    name: string;
+    prompt: string;
+    repoUrl?: string;
+    agentType?: string;
+    priority?: number;
+    metadata?: Record<string, unknown>;
+  }) =>
+    request<{ template: any }>("/api/task-templates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateTaskTemplate: (id: string, data: Record<string, unknown>) =>
+    request<{ template: any }>(`/api/task-templates/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteTaskTemplate: (id: string) =>
+    request<void>(`/api/task-templates/${id}`, { method: "DELETE" }),
+
+  createTaskFromTemplate: (
+    templateId: string,
+    data: {
+      title: string;
+      repoUrl?: string;
+      repoBranch?: string;
+      prompt?: string;
+      agentType?: string;
+      priority?: number;
+      maxRetries?: number;
+      metadata?: Record<string, unknown>;
+    },
+  ) =>
+    request<{ task: any }>(`/api/tasks/from-template/${templateId}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   // Interactive Sessions
   listSessions: (params?: {
     repoUrl?: string;

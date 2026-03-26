@@ -148,6 +148,13 @@
       "when": 1774713600000,
       "tag": "0020_max_auto_resumes",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1774800000000,
+      "tag": "0021_task_templates",
+      "breakpoints": true
     }
   ]
 }
