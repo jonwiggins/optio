@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api-client";
-import { LogOut, User, ChevronUp } from "lucide-react";
+import { LogOut, User, ChevronUp, Sun, Moon, Monitor } from "lucide-react";
+import { useTheme, type Theme } from "./theme-provider";
+import { cn } from "@/lib/utils";
 
 interface UserInfo {
   id: string;
@@ -12,11 +14,18 @@ interface UserInfo {
   avatarUrl: string | null;
 }
 
+const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "System", icon: Monitor },
+];
+
 export function UserMenu() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [authDisabled, setAuthDisabled] = useState(false);
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const { theme, setTheme } = useTheme();
 
   useEffect(() => {
     api
@@ -85,6 +94,29 @@ export function UserMenu() {
               <p className="text-[10px] text-text-muted capitalize mt-0.5">via {user.provider}</p>
             )}
           </div>
+
+          {/* Theme selector */}
+          <div className="px-3 py-2 border-b border-border">
+            <p className="text-[10px] text-text-muted mb-1.5">Theme</p>
+            <div className="flex gap-1">
+              {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+                <button
+                  key={value}
+                  onClick={() => setTheme(value)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-colors flex-1 justify-center",
+                    theme === value
+                      ? "bg-primary/15 text-primary"
+                      : "text-text-muted hover:bg-bg-hover hover:text-text",
+                  )}
+                >
+                  <Icon className="w-3 h-3" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {!authDisabled && (
             <button
               onClick={handleLogout}

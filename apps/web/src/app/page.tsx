@@ -926,16 +926,18 @@ function EmptyState({
   action?: { label: string; href: string };
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-12 px-4 rounded-xl border border-dashed border-border bg-bg-card/50">
-      <div className="p-3 rounded-xl bg-bg-hover mb-3">
-        <Icon className="w-6 h-6 text-text-muted" />
+    <div className="flex flex-col items-center justify-center py-14 px-6 rounded-xl border border-dashed border-border bg-bg-card/50">
+      <div className="p-3.5 rounded-2xl bg-bg-hover/70 mb-4">
+        <Icon className="w-7 h-7 text-text-muted/60" />
       </div>
       <span className="text-sm font-medium text-text-heading">{title}</span>
-      <p className="text-xs text-text-muted mt-1 text-center max-w-xs">{description}</p>
+      <p className="text-xs text-text-muted mt-1.5 text-center max-w-xs leading-relaxed">
+        {description}
+      </p>
       {action && (
         <Link
           href={action.href}
-          className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors"
+          className="mt-5 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors shadow-sm"
         >
           <Plus className="w-3.5 h-3.5" />
           {action.label}
@@ -958,12 +960,28 @@ function StatCard({
   value: number;
   color: string;
 }) {
+  const accentMap: Record<string, string> = {
+    "text-primary": "border-l-primary/40",
+    "text-warning": "border-l-warning/40",
+    "text-success": "border-l-success/40",
+    "text-error": "border-l-error/40",
+    "text-info": "border-l-info/40",
+  };
+  const accent = accentMap[color] ?? "border-l-primary/40";
+
   return (
-    <div className="p-4 rounded-xl border border-border/50 bg-bg-card relative overflow-hidden">
-      <Icon className={cn("w-8 h-8 absolute top-3 right-3 opacity-25", color)} />
+    <div
+      className={cn(
+        "p-4 rounded-xl border border-border/50 bg-bg-card relative overflow-hidden border-l-2 hover:bg-bg-card-hover transition-colors",
+        accent,
+      )}
+    >
+      <Icon className={cn("w-8 h-8 absolute top-3 right-3 opacity-15", color)} />
       <span className="text-xs font-medium uppercase tracking-wider text-text-muted">{label}</span>
       <div className="mt-1.5">
-        <span className="text-3xl font-semibold tabular-nums">{value}</span>
+        <span className={cn("text-3xl font-semibold tabular-nums", value > 0 && color)}>
+          {value}
+        </span>
       </div>
     </div>
   );

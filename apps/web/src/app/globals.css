@@ -21,6 +21,22 @@
   --font-mono: var(--font-jetbrains), "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
+/* Light theme overrides */
+html.light {
+  --color-bg: #f8f9fb;
+  --color-bg-subtle: #f0f1f4;
+  --color-bg-card: #ffffff;
+  --color-bg-card-hover: #f5f5f7;
+  --color-bg-hover: #ebebef;
+  --color-border: #e0e1e6;
+  --color-border-strong: #c8c9d0;
+  --color-text: #111113;
+  --color-text-heading: #18181b;
+  --color-text-muted: #6b6b76;
+  --color-primary: #7c3aed;
+  --color-primary-hover: #6d28d9;
+}
+
 body {
   background: var(--color-bg);
   color: var(--color-text);
@@ -41,4 +57,23 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);
+}
+
+/* Focus ring utility — consistent keyboard nav indicator */
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Smooth transitions on theme switch */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease !important;
 }

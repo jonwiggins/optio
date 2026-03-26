@@ -54,13 +54,13 @@ function NavLink({
     <Link
       href={href}
       className={cn(
-        "flex items-center gap-3 py-2.5 px-3 rounded-lg text-[13px] font-medium transition-colors",
+        "flex items-center gap-2.5 py-2 px-2.5 rounded-lg text-[13px] font-medium transition-all duration-150",
         active
-          ? "bg-primary/10 text-text border-l-2 border-primary -ml-px"
+          ? "bg-primary/12 text-text border-l-2 border-primary -ml-px shadow-[inset_0_0_0_1px_rgba(109,40,217,0.08)]"
           : "text-text-muted hover:bg-bg-hover hover:text-text",
       )}
     >
-      <Icon className="w-4 h-4 shrink-0" />
+      <Icon className={cn("w-4 h-4 shrink-0", active && "text-primary")} />
       {label}
     </Link>
   );
@@ -73,38 +73,40 @@ export function Sidebar() {
     href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/");
 
   return (
-    <aside className="w-60 shrink-0 border-r border-border bg-bg flex flex-col">
-      <div className="px-5 py-5 border-b border-border">
-        <Link href="/" className="flex items-center gap-2.5 text-primary">
-          <Zap className="w-5 h-5" />
+    <aside className="w-60 shrink-0 border-r border-border bg-bg-subtle flex flex-col">
+      <div className="px-4 py-4 border-b border-border">
+        <Link href="/" className="flex items-center gap-2.5 text-primary group">
+          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
+            <Zap className="w-4.5 h-4.5" />
+          </div>
           <div>
-            <span className="font-semibold text-lg tracking-tight">Optio</span>
+            <span className="font-semibold text-base tracking-tight text-text">Optio</span>
             <span className="block text-[10px] text-text-muted font-normal tracking-wide">
               Agent Orchestration
             </span>
           </div>
         </Link>
       </div>
-      <div className="px-3 py-2 border-b border-border">
+      <div className="px-2.5 py-2 border-b border-border">
         <WorkspaceSwitcher />
       </div>
-      <nav className="flex-1 px-3 py-4">
-        <div className="space-y-1">
+      <nav className="flex-1 px-2.5 py-3 overflow-y-auto">
+        <div className="space-y-0.5">
           {MAIN_NAV.map((item) => (
             <NavLink key={item.href} {...item} active={isActive(item.href)} />
           ))}
         </div>
-        <div className="my-4 mx-3 border-t border-border" />
-        <div className="space-y-1">
+        <div className="my-3 mx-2.5 border-t border-border" />
+        <div className="space-y-0.5">
           {SECONDARY_NAV.map((item) => (
             <NavLink key={item.href} {...item} active={isActive(item.href)} />
           ))}
         </div>
       </nav>
-      <div className="border-t border-border px-3 py-3">
+      <div className="border-t border-border px-2.5 py-2.5">
         <UserMenu />
       </div>
-      <div className="px-5 py-2 text-[11px] text-text-muted/50">Optio v0.1.0</div>
+      <div className="px-4 py-1.5 text-[10px] text-text-muted/40">Optio v0.1.0</div>
     </aside>
   );
 }

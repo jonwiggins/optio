@@ -39,7 +39,7 @@ export const TaskCard = React.memo(function TaskCard({ task, subtasks }: TaskCar
   return (
     <div
       onClick={() => router.push(`/tasks/${task.id}`)}
-      className="block rounded-xl border border-border/50 bg-bg-card hover:border-border hover:bg-bg-card-hover transition-all cursor-pointer overflow-hidden"
+      className="block rounded-xl border border-border/50 bg-bg-card hover:border-border-strong hover:bg-bg-card-hover hover:shadow-md transition-all duration-150 cursor-pointer overflow-hidden"
     >
       <div className="p-5">
         {/* Top row: title + badges */}
@@ -111,7 +111,7 @@ export const TaskCard = React.memo(function TaskCard({ task, subtasks }: TaskCar
                   }, 2000);
                 }
               }}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs bg-primary/10 text-primary hover:bg-primary/20 shrink-0"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0"
             >
               <RotateCcw className="w-3 h-3" />
               Retry
