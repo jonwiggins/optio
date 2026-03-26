@@ -50,6 +50,8 @@ spec:
               value: "http://{{ .Release.Name }}-api:{{ .Values.api.port }}"
             - name: NEXT_PUBLIC_WS_URL
               value: "ws://{{ .Release.Name }}-api:{{ .Values.api.port }}"
+            - name: WEB_PUBLIC_URL
+              value: {{ .Values.api.env.WEB_PUBLIC_URL | default (printf "http://%s-web:%s" .Release.Name (toString .Values.web.port)) | quote }}
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
 ---
