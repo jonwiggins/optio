@@ -14,3 +14,4 @@ export * from "./prompt-template.js";
 export * from "./types/image.js";
 export * from "./error-classifier.js";
 export * from "./types/session.js";
+export * from "./types/mcp.js";

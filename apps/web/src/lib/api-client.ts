@@ -806,4 +806,81 @@ export const api = {
     request<{ runs: any[] }>(`/api/workflows/${templateId}/runs`),
 
   getWorkflowRun: (id: string) => request<{ workflowRun: any }>(`/api/workflow-runs/${id}`),
+
+  // MCP Servers
+  listMcpServers: (scope?: string) => {
+    const qs = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    return request<{ servers: any[] }>(`/api/mcp-servers${qs}`);
+  },
+
+  getMcpServer: (id: string) => request<{ server: any }>(`/api/mcp-servers/${id}`),
+
+  createMcpServer: (data: {
+    name: string;
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+    installCommand?: string;
+    repoUrl?: string;
+    enabled?: boolean;
+  }) =>
+    request<{ server: any }>("/api/mcp-servers", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateMcpServer: (id: string, data: Record<string, unknown>) =>
+    request<{ server: any }>(`/api/mcp-servers/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteMcpServer: (id: string) => request<void>(`/api/mcp-servers/${id}`, { method: "DELETE" }),
+
+  listRepoMcpServers: (repoId: string) =>
+    request<{ servers: any[] }>(`/api/repos/${repoId}/mcp-servers`),
+
+  createRepoMcpServer: (
+    repoId: string,
+    data: {
+      name: string;
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      installCommand?: string;
+      enabled?: boolean;
+    },
+  ) =>
+    request<{ server: any }>(`/api/repos/${repoId}/mcp-servers`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Custom Skills
+  listSkills: (scope?: string) => {
+    const qs = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    return request<{ skills: any[] }>(`/api/skills${qs}`);
+  },
+
+  getSkill: (id: string) => request<{ skill: any }>(`/api/skills/${id}`),
+
+  createSkill: (data: {
+    name: string;
+    description?: string;
+    prompt: string;
+    repoUrl?: string;
+    enabled?: boolean;
+  }) =>
+    request<{ skill: any }>("/api/skills", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateSkill: (id: string, data: Record<string, unknown>) =>
+    request<{ skill: any }>(`/api/skills/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteSkill: (id: string) => request<void>(`/api/skills/${id}`, { method: "DELETE" }),
 };

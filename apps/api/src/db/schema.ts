@@ -495,6 +495,52 @@ export const workflowRuns = pgTable(
   (table) => [index("workflow_runs_template_id_idx").on(table.workflowTemplateId)],
 );
 
+// ── MCP Servers ──────────────────────────────────────────────────────────────
+
+export const mcpServers = pgTable(
+  "mcp_servers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    command: text("command").notNull(),
+    args: jsonb("args").$type<string[]>().notNull().default([]),
+    env: jsonb("env").$type<Record<string, string>>(),
+    installCommand: text("install_command"),
+    scope: text("scope").notNull().default("global"), // "global" or repo URL
+    repoUrl: text("repo_url"), // null = global, set = repo-scoped
+    workspaceId: uuid("workspace_id"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("mcp_servers_scope_idx").on(table.scope),
+    index("mcp_servers_repo_url_idx").on(table.repoUrl),
+  ],
+);
+
+// ── Custom Skills ────────────────────────────────────────────────────────────
+
+export const customSkills = pgTable(
+  "custom_skills",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    description: text("description"),
+    prompt: text("prompt").notNull(), // markdown content
+    scope: text("scope").notNull().default("global"), // "global" or repo URL
+    repoUrl: text("repo_url"), // null = global, set = repo-scoped
+    workspaceId: uuid("workspace_id"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("custom_skills_scope_idx").on(table.scope),
+    index("custom_skills_repo_url_idx").on(table.repoUrl),
+  ],
+);
+
 export const promptTemplates = pgTable("prompt_templates", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull().unique(),

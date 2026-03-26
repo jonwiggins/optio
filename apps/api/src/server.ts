@@ -26,6 +26,8 @@ import { taskTemplateRoutes } from "./routes/task-templates.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { dependencyRoutes } from "./routes/dependencies.js";
 import { workflowRoutes } from "./routes/workflows.js";
+import { mcpServerRoutes } from "./routes/mcp-servers.js";
+import { skillRoutes } from "./routes/skills.js";
 import { logStreamWs } from "./ws/log-stream.js";
 import { eventsWs } from "./ws/events.js";
 import { sessionTerminalWs } from "./ws/session-terminal.js";
@@ -87,6 +89,8 @@ export async function buildServer() {
   await app.register(workspaceRoutes);
   await app.register(dependencyRoutes);
   await app.register(workflowRoutes);
+  await app.register(mcpServerRoutes);
+  await app.register(skillRoutes);
 
   // WebSocket routes
   await app.register(logStreamWs);

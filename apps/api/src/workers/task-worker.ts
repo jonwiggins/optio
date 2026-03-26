@@ -229,6 +229,40 @@ export function startTaskWorker() {
           claudeEffort: repoConfig?.claudeEffort ?? undefined,
         });
 
+        // ── MCP servers & custom skills injection ────────────────────
+        const { getMcpServersForTask, buildMcpJsonContent } =
+          await import("../services/mcp-server-service.js");
+        const { getSkillsForTask, buildSkillSetupFiles } =
+          await import("../services/skill-service.js");
+
+        const taskWorkspaceId = (task as any).workspaceId ?? null;
+        const mcpServers = await getMcpServersForTask(task.repoUrl, taskWorkspaceId);
+        if (mcpServers.length > 0) {
+          const mcpJsonContent = await buildMcpJsonContent(mcpServers, task.repoUrl);
+          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
+          agentConfig.setupFiles.push({
+            path: ".mcp.json",
+            content: mcpJsonContent,
+          });
+
+          // Collect install commands
+          const installCommands = mcpServers
+            .filter((s) => s.installCommand)
+            .map((s) => s.installCommand!);
+          if (installCommands.length > 0) {
+            agentConfig.env.OPTIO_MCP_INSTALL_COMMANDS = installCommands.join(" && ");
+          }
+          log.info({ count: mcpServers.length }, "Injecting MCP servers");
+        }
+
+        const skills = await getSkillsForTask(task.repoUrl, taskWorkspaceId);
+        if (skills.length > 0) {
+          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
+          const skillFiles = buildSkillSetupFiles(skills);
+          agentConfig.setupFiles.push(...skillFiles);
+          log.info({ count: skills.length }, "Injecting custom skills");
+        }
+
         // Encode setup files
         if (agentConfig.setupFiles && agentConfig.setupFiles.length > 0) {
           agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(

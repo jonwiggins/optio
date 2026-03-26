@@ -4,7 +4,18 @@ import { useState, useEffect } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import { Loader2, Bell, RefreshCw, Shield, CheckCircle2, XCircle } from "lucide-react";
+import {
+  Loader2,
+  Bell,
+  RefreshCw,
+  Shield,
+  CheckCircle2,
+  XCircle,
+  Server,
+  Sparkles,
+  Plus,
+  X,
+} from "lucide-react";
 
 function PromptTemplateEditor() {
   const [template, setTemplate] = useState("");
@@ -299,6 +310,372 @@ function DefaultReviewEditor() {
   );
 }
 
+function GlobalMcpServers() {
+  const [servers, setServers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [name, setName] = useState("");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [env, setEnv] = useState("");
+  const [installCmd, setInstallCmd] = useState("");
+
+  useEffect(() => {
+    api
+      .listMcpServers("global")
+      .then((res) => setServers(res.servers))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
+        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-text-muted">
+          Global MCP servers are available to all repos. Use{" "}
+          <code className="text-primary">{"${{SECRET_NAME}}"}</code> to reference Optio secrets.
+        </p>
+        <button
+          onClick={() => setShowAdd(!showAdd)}
+          className="flex items-center gap-1 text-xs text-primary hover:underline"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add
+        </button>
+      </div>
+
+      {servers.length > 0 && (
+        <div className="space-y-2">
+          {servers.map((server: any) => (
+            <div
+              key={server.id}
+              className="flex items-center gap-3 p-3 rounded-lg border border-border bg-bg"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{server.name}</span>
+                  {!server.enabled && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning">
+                      disabled
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-text-muted mt-0.5 font-mono truncate">
+                  {server.command} {(server.args ?? []).join(" ")}
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  await api.updateMcpServer(server.id, { enabled: !server.enabled });
+                  setServers((prev) =>
+                    prev.map((s) => (s.id === server.id ? { ...s, enabled: !s.enabled } : s)),
+                  );
+                }}
+                className="text-xs text-text-muted hover:text-text"
+              >
+                {server.enabled ? "Disable" : "Enable"}
+              </button>
+              <button
+                onClick={async () => {
+                  await api.deleteMcpServer(server.id);
+                  setServers((prev) => prev.filter((s) => s.id !== server.id));
+                  toast.success("MCP server removed");
+                }}
+                className="text-text-muted hover:text-error"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {servers.length === 0 && !showAdd && (
+        <p className="text-xs text-text-muted/60 text-center py-2">
+          No global MCP servers configured.
+        </p>
+      )}
+
+      {showAdd && (
+        <div className="space-y-3 p-3 rounded-lg border border-primary/30 bg-primary/5">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Name</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="postgres"
+                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Command</label>
+              <input
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                placeholder="npx"
+                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Args (one per line)</label>
+            <textarea
+              value={args}
+              onChange={(e) => setArgs(e.target.value)}
+              rows={2}
+              placeholder={"-y\n@modelcontextprotocol/server-postgres"}
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">
+              Env vars (KEY=VALUE, one per line)
+            </label>
+            <textarea
+              value={env}
+              onChange={(e) => setEnv(e.target.value)}
+              rows={2}
+              placeholder={"POSTGRES_URL=${{POSTGRES_URL}}"}
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Install command (optional)</label>
+            <input
+              value={installCmd}
+              onChange={(e) => setInstallCmd(e.target.value)}
+              placeholder="npm install -g @modelcontextprotocol/server-postgres"
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setShowAdd(false);
+                setName("");
+                setCommand("");
+                setArgs("");
+                setEnv("");
+                setInstallCmd("");
+              }}
+              className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                if (!name || !command) {
+                  toast.error("Name and command are required");
+                  return;
+                }
+                const parsedArgs = args
+                  .split("\n")
+                  .map((a) => a.trim())
+                  .filter(Boolean);
+                const parsedEnv: Record<string, string> = {};
+                for (const line of env.split("\n")) {
+                  const idx = line.indexOf("=");
+                  if (idx > 0) parsedEnv[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+                }
+                const res = await api.createMcpServer({
+                  name,
+                  command,
+                  args: parsedArgs.length > 0 ? parsedArgs : undefined,
+                  env: Object.keys(parsedEnv).length > 0 ? parsedEnv : undefined,
+                  installCommand: installCmd || undefined,
+                });
+                setServers((prev) => [...prev, res.server]);
+                setShowAdd(false);
+                setName("");
+                setCommand("");
+                setArgs("");
+                setEnv("");
+                setInstallCmd("");
+                toast.success("MCP server added");
+              }}
+              className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover"
+            >
+              Add Server
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GlobalSkills() {
+  const [skills, setSkills] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [prompt, setPrompt] = useState("");
+
+  useEffect(() => {
+    api
+      .listSkills("global")
+      .then((res) => setSkills(res.skills))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
+        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-text-muted">
+          Global skills are available as slash commands to agents in all repos. Written to{" "}
+          <code className="text-primary">.claude/commands/</code> before the agent starts.
+        </p>
+        <button
+          onClick={() => setShowAdd(!showAdd)}
+          className="flex items-center gap-1 text-xs text-primary hover:underline"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add
+        </button>
+      </div>
+
+      {skills.length > 0 && (
+        <div className="space-y-2">
+          {skills.map((skill: any) => (
+            <div
+              key={skill.id}
+              className="flex items-center gap-3 p-3 rounded-lg border border-border bg-bg"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">/{skill.name}</span>
+                  {!skill.enabled && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning">
+                      disabled
+                    </span>
+                  )}
+                </div>
+                {skill.description && (
+                  <p className="text-xs text-text-muted mt-0.5 truncate">{skill.description}</p>
+                )}
+              </div>
+              <button
+                onClick={async () => {
+                  await api.updateSkill(skill.id, { enabled: !skill.enabled });
+                  setSkills((prev) =>
+                    prev.map((s) => (s.id === skill.id ? { ...s, enabled: !s.enabled } : s)),
+                  );
+                }}
+                className="text-xs text-text-muted hover:text-text"
+              >
+                {skill.enabled ? "Disable" : "Enable"}
+              </button>
+              <button
+                onClick={async () => {
+                  await api.deleteSkill(skill.id);
+                  setSkills((prev) => prev.filter((s) => s.id !== skill.id));
+                  toast.success("Skill removed");
+                }}
+                className="text-text-muted hover:text-error"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {skills.length === 0 && !showAdd && (
+        <p className="text-xs text-text-muted/60 text-center py-2">No global skills configured.</p>
+      )}
+
+      {showAdd && (
+        <div className="space-y-3 p-3 rounded-lg border border-primary/30 bg-primary/5">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Name</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="run-tests"
+                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Description</label>
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Run the full test suite"
+                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Prompt (markdown)</label>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={6}
+              placeholder="Run the full test suite and analyze any failures..."
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => {
+                setShowAdd(false);
+                setName("");
+                setDescription("");
+                setPrompt("");
+              }}
+              className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                if (!name || !prompt) {
+                  toast.error("Name and prompt are required");
+                  return;
+                }
+                const res = await api.createSkill({
+                  name,
+                  description: description || undefined,
+                  prompt,
+                });
+                setSkills((prev) => [...prev, res.skill]);
+                setShowAdd(false);
+                setName("");
+                setDescription("");
+                setPrompt("");
+                toast.success("Skill added");
+              }}
+              className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover"
+            >
+              Add Skill
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AuthenticationSettings() {
   const [providers, setProviders] = useState<Array<{ name: string; displayName: string }>>([]);
   const [authDisabled, setAuthDisabled] = useState(false);
@@ -504,6 +881,24 @@ export default function SettingsPage() {
             Sync Now
           </button>
         </div>
+      </section>
+
+      {/* MCP Servers */}
+      <section>
+        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
+          <Server className="w-4 h-4" />
+          Global MCP Servers
+        </h2>
+        <GlobalMcpServers />
+      </section>
+
+      {/* Custom Skills */}
+      <section>
+        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
+          <Sparkles className="w-4 h-4" />
+          Global Custom Skills
+        </h2>
+        <GlobalSkills />
       </section>
 
       {/* Prompt Template */}

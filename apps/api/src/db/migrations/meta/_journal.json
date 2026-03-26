@@ -169,6 +169,13 @@
       "when": 1774972800000,
       "tag": "0023_task_dependencies_workflows",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1775059200000,
+      "tag": "0024_mcp_servers_custom_skills",
+      "breakpoints": true
     }
   ]
 }
