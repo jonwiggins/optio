@@ -11,3 +11,5 @@ apps/api/.env
 /tmp/
 .optio/
 .claude/
+.values.local.yaml
+.tool-versions
