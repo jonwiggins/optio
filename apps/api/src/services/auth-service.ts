@@ -179,7 +179,17 @@ export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
     return cachedUsage;
   }
 
-  const auth = getClaudeAuthToken();
+  // Try Keychain/file first (local dev), then secrets store (k8s oauth-token mode)
+  let auth = getClaudeAuthToken();
+  if (!auth.available || !auth.token) {
+    try {
+      const { retrieveSecret } = await import("./secret-service.js");
+      const token = await retrieveSecret("CLAUDE_CODE_OAUTH_TOKEN").catch(() => null);
+      if (token) {
+        auth = { available: true, token: token as string };
+      }
+    } catch {}
+  }
   if (!auth.available || !auth.token) {
     return { available: false, error: auth.error ?? "No OAuth token available" };
   }

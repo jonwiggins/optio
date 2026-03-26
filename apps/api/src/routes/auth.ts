@@ -63,7 +63,17 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/auth/status", async (_req, reply) => {
-    const result = getClaudeAuthToken();
+    let result = getClaudeAuthToken();
+    // Fallback: check secrets store for oauth-token mode (k8s deployments)
+    if (!result.available) {
+      try {
+        const { retrieveSecret } = await import("../services/secret-service.js");
+        const token = await retrieveSecret("CLAUDE_CODE_OAUTH_TOKEN").catch(() => null);
+        if (token) {
+          result = { available: true, token: token as string };
+        }
+      } catch {}
+    }
     reply.send({
       subscription: {
         available: result.available,
