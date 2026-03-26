@@ -35,6 +35,7 @@ export async function createSession(input: { repoUrl: string; userId?: string })
   const pod = await getOrCreateRepoPod(repoUrl, repoBranch, env, imageConfig, {
     maxAgentsPerPod: repoConfig?.maxAgentsPerPod ?? 2,
     maxPodInstances: repoConfig?.maxPodInstances ?? 1,
+    networkPolicy: repoConfig?.networkPolicy ?? "unrestricted",
   });
 
   // Generate a short ID for the branch name

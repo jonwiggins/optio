@@ -39,6 +39,7 @@ const updateRepoSchema = z.object({
     .array(z.enum(["completed", "failed", "needs_attention", "pr_opened"]))
     .optional(),
   slackEnabled: z.boolean().optional(),
+  networkPolicy: z.enum(["unrestricted", "restricted"]).optional(),
 });
 
 export async function repoRoutes(app: FastifyInstance) {

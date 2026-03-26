@@ -221,6 +221,7 @@ export const repos = pgTable(
     slackChannel: text("slack_channel"), // override channel (optional)
     slackNotifyOn: jsonb("slack_notify_on").$type<string[]>(), // e.g. ["completed","failed","pr_opened","needs_attention"]
     slackEnabled: boolean("slack_enabled").notNull().default(false),
+    networkPolicy: text("network_policy").notNull().default("unrestricted"), // "unrestricted" | "restricted"
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

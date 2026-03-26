@@ -56,6 +56,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
   const [maxPodInstances, setMaxPodInstances] = useState(1);
   const [maxAgentsPerPod, setMaxAgentsPerPod] = useState(2);
+  const [networkPolicy, setNetworkPolicy] = useState("unrestricted");
   const [reviewEnabled, setReviewEnabled] = useState(false);
   const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
   const [testCommand, setTestCommand] = useState("");
@@ -98,6 +99,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setMaxConcurrentTasks(r.maxConcurrentTasks ?? 2);
         setMaxPodInstances(r.maxPodInstances ?? 1);
         setMaxAgentsPerPod(r.maxAgentsPerPod ?? 2);
+        setNetworkPolicy(r.networkPolicy ?? "unrestricted");
         setDefaultBranch(r.defaultBranch);
         setClaudeModel(r.claudeModel ?? "opus");
         setClaudeContextWindow(r.claudeContextWindow ?? "1m");
@@ -158,6 +160,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         maxConcurrentTasks,
         maxPodInstances,
         maxAgentsPerPod,
+        networkPolicy,
         defaultBranch,
         promptTemplateOverride: useCustomPrompt ? promptOverride : null,
         claudeModel,
@@ -362,6 +365,40 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             </p>
           </div>
         </div>
+
+        <h3 className="text-xs font-medium text-text-muted pt-2">Network Egress Policy</h3>
+        <p className="text-[10px] text-text-muted/60">
+          Control outbound network access from agent pods. Requires a CNI plugin that supports
+          NetworkPolicy (Calico, Cilium, etc.).
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Egress policy</label>
+            <select
+              value={networkPolicy}
+              onChange={(e) => setNetworkPolicy(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+            >
+              <option value="unrestricted">Unrestricted (default)</option>
+              <option value="restricted">Restricted</option>
+            </select>
+            <p className="text-[10px] text-text-muted/60 mt-1">
+              {networkPolicy === "restricted"
+                ? "Egress limited to DNS, AI APIs (Anthropic, OpenAI), GitHub, and the Optio API server."
+                : "No network restrictions. Agent pods can reach any endpoint."}
+            </p>
+          </div>
+        </div>
+        {networkPolicy === "restricted" && (
+          <div className="p-3 rounded-md bg-bg border border-border">
+            <p className="text-xs text-text-muted mb-2">Allowed egress destinations:</p>
+            <ul className="text-xs space-y-1 text-text-muted">
+              <li>DNS (kube-dns, port 53 UDP/TCP)</li>
+              <li>HTTPS (port 443) &mdash; api.anthropic.com, api.openai.com, github.com</li>
+              <li>Intra-namespace &mdash; Optio API server (callbacks, token refresh)</li>
+            </ul>
+          </div>
+        )}
       </section>
 
       {/* PR Lifecycle */}

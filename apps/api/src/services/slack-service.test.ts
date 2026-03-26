@@ -41,6 +41,7 @@ function makeRepoConfig(overrides: Partial<RepoRecord> = {}): RepoRecord {
     slackChannel: null,
     slackNotifyOn: null,
     slackEnabled: true,
+    networkPolicy: "unrestricted",
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

@@ -6,6 +6,7 @@ import {
   cleanupIdleRepoPods,
   updateWorktreeState,
   reconcileActiveTaskCounts,
+  deleteNetworkPolicy,
 } from "../services/repo-pool-service.js";
 import { getRuntime } from "../services/container-service.js";
 import { TaskState } from "@optio/shared";
@@ -103,8 +104,9 @@ export function startRepoCleanupWorker() {
               } catch {}
             }
 
-            // Auto-restart: delete the dead pod and clear the record so next task recreates it
+            // Auto-restart: delete the dead pod (and its NetworkPolicy) and clear the record
             try {
+              await deleteNetworkPolicy(pod.podName).catch(() => {});
               await rt.destroy({ id: pod.podId ?? pod.podName, name: pod.podName });
             } catch {}
             await db.delete(repoPods).where(eq(repoPods.id, pod.id));
@@ -129,7 +131,10 @@ export function startRepoCleanupWorker() {
             await recordHealthEvent(pod.id, pod.repoUrl, "healthy", pod.podName, "Pod recovered");
           }
         } catch (err) {
-          // Pod not found in K8s — clean up the record
+          // Pod not found in K8s — clean up the record and any associated NetworkPolicy
+          if (pod.podName) {
+            await deleteNetworkPolicy(pod.podName).catch(() => {});
+          }
           await db.delete(repoPods).where(eq(repoPods.id, pod.id));
           await recordHealthEvent(
             pod.id,

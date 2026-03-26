@@ -39,7 +39,12 @@ export async function getOrCreateRepoPod(
   repoBranch: string,
   env: Record<string, string>,
   imageConfig?: RepoImageConfig,
-  opts?: { preferredPodId?: string; maxAgentsPerPod?: number; maxPodInstances?: number },
+  opts?: {
+    preferredPodId?: string;
+    maxAgentsPerPod?: number;
+    maxPodInstances?: number;
+    networkPolicy?: string;
+  },
 ): Promise<RepoPod> {
   const repoUrl = normalizeRepoUrl(rawRepoUrl);
   const maxAgentsPerPod = opts?.maxAgentsPerPod ?? 2;
@@ -128,7 +133,14 @@ export async function getOrCreateRepoPod(
   // 4. Create new pod instance
   const instanceIndex = Number(currentPodCount);
   try {
-    return await createRepoPod(repoUrl, repoBranch, env, imageConfig, instanceIndex);
+    return await createRepoPod(
+      repoUrl,
+      repoBranch,
+      env,
+      imageConfig,
+      instanceIndex,
+      opts?.networkPolicy,
+    );
   } catch (err: any) {
     if (err?.message?.includes("unique") || err?.code === "23505") {
       logger.info({ repoUrl }, "Concurrent pod creation detected, retrying lookup");
@@ -152,6 +164,7 @@ async function createRepoPod(
   env: Record<string, string>,
   imageConfig?: RepoImageConfig,
   instanceIndex = 0,
+  networkPolicy?: string,
 ): Promise<RepoPod> {
   const [record] = await db
     .insert(repoPods)
@@ -218,11 +231,22 @@ spec:
         "optio.repo-url": repoUrl.replace(/[^a-zA-Z0-9-_.]/g, "_").slice(0, 63),
         "optio.type": "repo-pod",
         "optio.instance-index": String(instanceIndex),
+        "optio.network-policy": networkPolicy ?? "unrestricted",
         "managed-by": "optio",
       },
     };
 
     const handle = await rt.create(spec);
+
+    // Create a K8s NetworkPolicy if restricted mode is enabled
+    if (networkPolicy === "restricted") {
+      await applyRestrictedNetworkPolicy(podName).catch((err) => {
+        logger.warn(
+          { err, podName },
+          "Failed to apply NetworkPolicy — pod will run without egress restrictions",
+        );
+      });
+    }
 
     await db
       .update(repoPods)
@@ -234,7 +258,15 @@ spec:
       })
       .where(eq(repoPods.id, record.id));
 
-    logger.info({ repoUrl, podName: handle.name, instanceIndex }, "Repo pod created");
+    logger.info(
+      {
+        repoUrl,
+        podName: handle.name,
+        instanceIndex,
+        networkPolicy: networkPolicy ?? "unrestricted",
+      },
+      "Repo pod created",
+    );
 
     return {
       ...record,
@@ -478,6 +510,7 @@ export async function cleanupIdleRepoPods(): Promise<number> {
     for (const pod of sorted) {
       try {
         if (pod.podName) {
+          await deleteNetworkPolicy(pod.podName).catch(() => {});
           await rt.destroy({ id: pod.podId ?? pod.podName, name: pod.podName });
         }
         await db.delete(repoPods).where(eq(repoPods.id, pod.id));
@@ -507,6 +540,96 @@ export async function listRepoPods(): Promise<RepoPod[]> {
  */
 export async function listRepoPodsForRepo(repoUrl: string): Promise<RepoPod[]> {
   return db.select().from(repoPods).where(eq(repoPods.repoUrl, repoUrl)) as Promise<RepoPod[]>;
+}
+
+/**
+ * Apply a restricted egress NetworkPolicy to a repo pod.
+ * Allows only: DNS (port 53), AI provider APIs, GitHub, and intra-namespace Optio API.
+ */
+async function applyRestrictedNetworkPolicy(podName: string): Promise<void> {
+  const namespace = process.env.OPTIO_NAMESPACE ?? "optio";
+  const policyName = `optio-egress-${podName}`;
+
+  const manifest = {
+    apiVersion: "networking.k8s.io/v1",
+    kind: "NetworkPolicy",
+    metadata: {
+      name: policyName,
+      namespace,
+      labels: {
+        "managed-by": "optio",
+        "optio.type": "egress-policy",
+        "optio.pod-name": podName,
+      },
+    },
+    spec: {
+      podSelector: {
+        matchLabels: {
+          "optio.type": "repo-pod",
+          "optio.network-policy": "restricted",
+        },
+      },
+      policyTypes: ["Egress"],
+      egress: [
+        // Allow DNS (kube-dns, port 53 UDP+TCP)
+        {
+          ports: [
+            { protocol: "UDP", port: 53 },
+            { protocol: "TCP", port: 53 },
+          ],
+        },
+        // Allow HTTPS to AI provider APIs and GitHub (port 443)
+        {
+          ports: [{ protocol: "TCP", port: 443 }],
+        },
+        // Allow intra-namespace traffic (Optio API server for callbacks/token refresh)
+        {
+          to: [
+            {
+              namespaceSelector: {
+                matchLabels: { "kubernetes.io/metadata.name": namespace },
+              },
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
+  const manifestJson = JSON.stringify(manifest);
+  await execFileAsync("bash", [
+    "-c",
+    `echo ${JSON.stringify(manifestJson)} | kubectl apply -f - -n ${namespace}`,
+  ]);
+  logger.info({ policyName, podName }, "Applied restricted egress NetworkPolicy");
+}
+
+/**
+ * Delete the NetworkPolicy associated with a repo pod.
+ */
+export async function deleteNetworkPolicy(podName: string): Promise<void> {
+  const namespace = process.env.OPTIO_NAMESPACE ?? "optio";
+  const policyName = `optio-egress-${podName}`;
+
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    await execFileAsync("kubectl", [
+      "delete",
+      "networkpolicy",
+      policyName,
+      "-n",
+      namespace,
+      "--ignore-not-found",
+    ]);
+    logger.info({ policyName, podName }, "Deleted NetworkPolicy");
+  } catch (err) {
+    logger.warn({ err, policyName }, "Failed to delete NetworkPolicy");
+  }
 }
 
 /**

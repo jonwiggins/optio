@@ -36,6 +36,7 @@ export interface RepoRecord {
   slackChannel: string | null;
   slackNotifyOn: string[] | null;
   slackEnabled: boolean;
+  networkPolicy: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -126,6 +127,7 @@ export async function updateRepo(
     slackChannel?: string | null;
     slackNotifyOn?: string[];
     slackEnabled?: boolean;
+    networkPolicy?: string;
   },
 ): Promise<RepoRecord | null> {
   const [repo] = await db

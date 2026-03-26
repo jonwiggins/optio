@@ -127,7 +127,7 @@ export const TaskCard = React.memo(function TaskCard({ task, subtasks }: TaskCar
               href={task.prUrl}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
               className="flex items-center gap-1 text-text-muted hover:text-text transition-colors"
             >
               PR #{prNumber}
@@ -144,7 +144,7 @@ export const TaskCard = React.memo(function TaskCard({ task, subtasks }: TaskCar
             <Link
               key={sub.id}
               href={`/tasks/${sub.id}`}
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
               className={cn(
                 "flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-colors hover:bg-bg-hover",
                 sub.taskType === "review" ? "bg-info/5" : "bg-bg-card/50",

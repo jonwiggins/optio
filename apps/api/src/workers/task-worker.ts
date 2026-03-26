@@ -330,6 +330,7 @@ export function startTaskWorker() {
             preferredPodId: isRetry ? ((task as any).lastPodId ?? undefined) : undefined,
             maxAgentsPerPod,
             maxPodInstances,
+            networkPolicy: repoConfig?.networkPolicy ?? "unrestricted",
           },
         );
         repoPodId = pod.id;
