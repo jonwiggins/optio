@@ -46,9 +46,46 @@ function addOAuthState(state: string, provider: string): void {
   oauthStates.set(state, { provider, createdAt: Date.now() });
 }
 
+// Short-lived auth codes: exchanged by the web app for the real session token.
+// This avoids cross-origin cookie issues when API and web run on different ports.
+const AUTH_CODE_TTL_MS = 30_000; // 30 seconds
+const authCodes = new Map<string, { token: string; createdAt: number }>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of authCodes) {
+    if (now - val.createdAt > AUTH_CODE_TTL_MS) authCodes.delete(key);
+  }
+}, 10_000);
+
+function createAuthCode(token: string): string {
+  const code = randomBytes(32).toString("hex");
+  authCodes.set(code, { token, createdAt: Date.now() });
+  return code;
+}
+
+// In local dev, API (:4000) and web (:3100) run on different ports.
+// Set Domain=localhost so the session cookie is visible to both origins.
+function getCookieDomain(): string {
+  try {
+    const host = new URL(WEB_URL).hostname;
+    if (host === "localhost" || host === "127.0.0.1") return "; Domain=localhost";
+  } catch {
+    // No valid WEB_PUBLIC_URL — skip domain attribute
+  }
+  return "";
+}
+
+const COOKIE_DOMAIN = getCookieDomain();
+// Only set Secure when the web app is served over HTTPS
+const COOKIE_SECURE = WEB_URL.startsWith("https://") ? "; Secure" : "";
+
 function buildSessionCookie(token: string): string {
-  const secure = IS_PRODUCTION ? "; Secure" : "";
-  return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}${secure}`;
+  return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}${COOKIE_SECURE}${COOKIE_DOMAIN}`;
+}
+
+function buildClearCookie(): string {
+  return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${COOKIE_DOMAIN}`;
 }
 
 export async function authRoutes(app: FastifyInstance) {
@@ -158,12 +195,38 @@ export async function authRoutes(app: FastifyInstance) {
       const profile = await provider.fetchUser(tokens.accessToken);
       const { token } = await createSession(providerName, profile);
 
-      // Set session cookie and redirect to web app
-      reply.header("Set-Cookie", buildSessionCookie(token)).redirect(`${WEB_URL}/`);
+      // Redirect to web app with a short-lived exchange code.
+      // The web app exchanges it for the session token and sets its own cookie.
+      const authCode = createAuthCode(token);
+      reply.redirect(`${WEB_URL}/auth/callback?code=${authCode}`);
     } catch (err) {
       app.log.error(err, "OAuth callback failed");
       reply.redirect(`${WEB_URL}/login?error=auth_failed`);
     }
+  });
+
+  /** Exchange a short-lived auth code for the session token. Called by the web app. */
+  app.post<{ Body: { code: string } }>("/api/auth/exchange", async (req, reply) => {
+    const { code: authCode } = req.body as { code?: string };
+    if (!authCode) {
+      return reply.status(400).send({ error: "Missing code" });
+    }
+
+    const entry = authCodes.get(authCode);
+    if (!entry) {
+      return reply.status(401).send({ error: "Invalid or expired code" });
+    }
+
+    // One-time use
+    authCodes.delete(authCode);
+
+    // Verify the token is still valid
+    const user = await validateSession(entry.token);
+    if (!user) {
+      return reply.status(401).send({ error: "Session expired" });
+    }
+
+    return reply.send({ token: entry.token });
   });
 
   /** Get current user from session. */
@@ -223,8 +286,6 @@ export async function authRoutes(app: FastifyInstance) {
       await revokeSession(token);
     }
 
-    reply
-      .header("Set-Cookie", `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`)
-      .send({ ok: true });
+    reply.header("Set-Cookie", buildClearCookie()).send({ ok: true });
   });
 }

@@ -34,9 +34,12 @@ async function authPlugin(app: FastifyInstance) {
     // Public routes — no auth needed
     if (isPublicRoute(req.url)) return;
 
-    // WebSocket upgrades pass token as query param
+    // Accept token from cookie, Authorization header, or query param (WebSocket)
+    const authHeader = req.headers.authorization;
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
     const token =
       parseCookie(req.headers.cookie, SESSION_COOKIE_NAME) ??
+      bearerToken ??
       (req.query as Record<string, string>)?.token;
 
     if (!token) {

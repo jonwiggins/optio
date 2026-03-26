@@ -49,7 +49,9 @@ export function UserMenu() {
 
   const handleLogout = async () => {
     try {
-      await api.logout();
+      // POST to the web-side logout route which clears the HttpOnly cookie
+      // and revokes the session on the API
+      await fetch("/auth/logout", { method: "POST", redirect: "manual" });
     } catch {
       // best-effort
     }
