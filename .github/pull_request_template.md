@@ -9,12 +9,14 @@
 ## Testing
 
 <!-- How was this tested? -->
+
 - [ ] Tests pass (`pnpm turbo test`)
 - [ ] Typechecks pass (`pnpm turbo typecheck`)
 
 ## Related
 
 <!-- Issues, PRs, docs, etc. -->
+
 Closes #
 
 ## Screenshots
