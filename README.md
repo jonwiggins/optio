@@ -132,27 +132,37 @@ You create a task          Optio runs the agent           Optio closes the loop
 
 - **Docker Desktop** with Kubernetes enabled (Settings → Kubernetes → Enable)
 - **Node.js 22+** and **pnpm 10+**
+- **Helm** (`brew install helm`)
 
 ### Setup
 
 ```bash
-# Clone and install
 git clone https://github.com/jonwiggins/optio.git && cd optio
-pnpm install
-
-# Bootstrap infrastructure (Postgres + Redis in K8s, migrations, .env)
 ./scripts/setup-local.sh
-
-# Build the agent image
-docker build -t optio-agent:latest -f Dockerfile.agent .
-
-# Start dev servers
-pnpm dev
-# API → http://localhost:4000
-# Web → http://localhost:3100
 ```
 
-The setup wizard walks you through configuring GitHub access, agent credentials (API key or Max Subscription), and adding your first repository.
+That's it. The setup script installs dependencies, builds all Docker images (API, web, and agent presets), deploys the full stack to your local Kubernetes cluster via Helm, and installs metrics-server.
+
+```
+Web UI ...... http://localhost:30310
+API ......... http://localhost:30400
+```
+
+Open the web UI and the setup wizard will walk you through configuring GitHub access, agent credentials (API key or Max/Pro subscription), and adding your first repository.
+
+### Redeploying after code changes
+
+```bash
+docker build -t optio-api:latest -f Dockerfile.api .
+docker build -t optio-web:latest -f Dockerfile.web .
+kubectl rollout restart deployment/optio-api deployment/optio-web -n optio
+```
+
+### Teardown
+
+```bash
+helm uninstall optio -n optio
+```
 
 ## Project Structure
 
