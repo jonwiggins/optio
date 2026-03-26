@@ -48,6 +48,8 @@ You create a task          Optio runs the agent           Optio closes the loop
 - **Per-repo configuration** — model, prompt template, container image, concurrency limits, and setup commands, all tunable per repository
 - **GitHub Issues and Linear intake** — assign issues to Optio from the UI or via ticket sync
 - **Real-time dashboard** — live log streaming, pipeline progress, cost analytics, and cluster health
+- **Workspaces** — multi-tenant isolation with per-workspace secrets, repos, and role-based access (admin/member/viewer); users can bring their own credentials
+- **Slack notifications** — per-repo or global webhook notifications with interactive buttons for retry and cancel
 
 ## Architecture
 
@@ -201,7 +203,7 @@ See the [Helm chart values](helm/optio/values.yaml) for full configuration optio
 | Queue    | Redis 7 + BullMQ                                                 |
 | Runtime  | Kubernetes (Docker Desktop for local dev)                        |
 | Deploy   | Helm chart                                                       |
-| Auth     | Multi-provider OAuth (GitHub, Google, GitLab)                    |
+| Auth     | Multi-provider OAuth (GitHub, Google, GitLab), workspace RBAC    |
 | CI       | GitHub Actions (format, typecheck, test, build-web, build-image) |
 | Agents   | Claude Code, OpenAI Codex                                        |
 

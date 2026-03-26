@@ -201,17 +201,35 @@ Multi-provider OAuth for the web UI and API. Three providers are supported:
 
 Enable a provider by setting both `<PROVIDER>_OAUTH_CLIENT_ID` and `<PROVIDER>_OAUTH_CLIENT_SECRET` env vars (e.g., `GITHUB_OAUTH_CLIENT_ID`). GitLab also accepts `GITLAB_OAUTH_BASE_URL` for self-hosted instances.
 
-**OAuth flow**: `GET /api/auth/:provider/login` → redirect to provider → callback at `GET /api/auth/:provider/callback` → upsert user in `users` table → create session (SHA256-hashed token in `sessions` table) → set `optio_session` HttpOnly cookie (30-day TTL) → redirect to web app.
+**OAuth flow** (exchange-code pattern to avoid cross-origin cookie issues):
 
-**Auth middleware** (`apps/api/src/plugins/auth.ts`): `preHandler` hook on all routes except `/api/health`, `/api/auth/*`, `/api/setup/*`. WebSocket connections accept the token as a `?token=` query param. Next.js middleware (`apps/web/src/middleware.ts`) redirects unauthenticated users to `/login`.
+1. `GET /api/auth/:provider/login` → redirect to OAuth provider
+2. Provider calls back to `GET /api/auth/:provider/callback`
+3. API upserts user, creates session (SHA256-hashed token in `sessions` table)
+4. API creates a short-lived, one-time exchange code (30s TTL, in-memory)
+5. API redirects to `WEB_PUBLIC_URL/auth/callback?code=xxx`
+6. Next.js route handler (`apps/web/src/app/auth/callback/route.ts`) exchanges the code via `POST /api/auth/exchange` for the real session token
+7. Web app sets two cookies on its own origin: `optio_session` (HttpOnly, for middleware) and `optio_token` (JS-readable, for API client Bearer auth)
+8. Redirects to `/`
 
-**Local dev bypass**: Set `OPTIO_AUTH_DISABLED=true` (API) and `NEXT_PUBLIC_AUTH_DISABLED=true` (web) to skip all auth checks. `GET /api/auth/me` returns a synthetic "Local Dev" user.
+This pattern is necessary because the API and web app run on different ports (or hosts), so cookies set by the API aren't visible to the web origin.
+
+**Auth middleware** (`apps/api/src/plugins/auth.ts`): `preHandler` hook on all routes except `/api/health`, `/api/auth/*`, `/api/setup/*`. Accepts session token from cookie, `Authorization: Bearer` header, or `?token=` query param (WebSocket). Next.js middleware (`apps/web/src/middleware.ts`) redirects unauthenticated users to `/login`.
+
+**API client auth**: The browser reads the `optio_token` cookie and sends it as an `Authorization: Bearer` header on all API requests (`apps/web/src/lib/api-client.ts`).
+
+**Logout**: `POST /auth/logout` (web-side route handler) clears both cookies and revokes the API session. The API's `POST /api/auth/logout` is called internally by the web route.
+
+**Local dev bypass**: Set `OPTIO_AUTH_DISABLED=true` (API) and `NEXT_PUBLIC_AUTH_DISABLED=true` (web, baked at Docker build time) to skip all auth checks. `GET /api/auth/me` returns a synthetic "Local Dev" user.
+
+**`Secure` cookie flag**: Based on the URL scheme of `WEB_PUBLIC_URL`, not `NODE_ENV`. This prevents cookies from being silently dropped when serving over HTTP (e.g., local Kind cluster with NodePort).
 
 **Key routes**:
 
 - `GET /api/auth/providers` — list enabled providers
 - `GET /api/auth/me` — current user profile
-- `POST /api/auth/logout` — revoke session and clear cookie
+- `POST /api/auth/exchange` — exchange short-lived auth code for session token
+- `POST /api/auth/logout` — revoke session (called by web logout route)
 
 ### Authentication (Claude Code)
 
@@ -222,6 +240,30 @@ Two modes, selected during setup:
 **Max Subscription mode**: The Optio API server reads the host machine's Claude OAuth credentials from the macOS Keychain (`Claude Code-credentials` service) or `~/.claude/.credentials.json` on Linux. The token is injected directly into the container as `CLAUDE_CODE_OAUTH_TOKEN`. It also serves the token via `GET /api/auth/claude-token` for backward compatibility with the `claude-key-helper.sh` approach.
 
 The auth service is at `apps/api/src/services/auth-service.ts`. Credentials are cached for 30 seconds and auto-refresh.
+
+### Workspaces
+
+Workspaces provide multi-tenant isolation. All resources (tasks, repos, secrets, pods, webhooks, workflows, MCP servers, skills) are scoped by `workspaceId`. Migration `0022_workspaces.sql` creates a default workspace and assigns all existing data to it.
+
+**Tables**: `workspaces` (id, name, slug, description, createdBy) and `workspace_members` (workspaceId, userId, role). Every resource table has a nullable `workspaceId` column for backward compatibility.
+
+**Roles**: `admin` (full workspace control, member management), `member` (create/edit resources), `viewer` (read-only).
+
+**Context resolution** (`plugins/auth.ts`): The active workspace is determined from the `x-workspace-id` request header or `optio_workspace` cookie. The auth middleware validates the user's membership, falls back to their `defaultWorkspaceId` if the requested workspace is invalid, and always ensures a workspace exists via `ensureUserHasWorkspace()`.
+
+**Secret isolation**: Each workspace has its own secrets (unique constraint on `name, scope, workspaceId`). Workers use `retrieveSecretWithFallback()` which tries the task's workspace first, then falls back to global. This allows users to bring their own credentials (GitHub tokens, API keys) while sharing a common `CLAUDE_AUTH_MODE` or other global config.
+
+**Repo isolation**: Repos have a unique constraint on `(repoUrl, workspaceId)` — the same repository can be configured independently in different workspaces with different image presets, prompts, and settings.
+
+**Key routes**:
+
+- `GET/POST /api/workspaces` — list/create workspaces
+- `GET/PATCH/DELETE /api/workspaces/:id` — read/update/delete
+- `POST /api/workspaces/:id/switch` — switch active workspace
+- `GET/POST /api/workspaces/:id/members` — list/add members
+- `PATCH/DELETE /api/workspaces/:id/members/:userId` — update role/remove
+
+**UI**: Workspace switcher in the sidebar, workspace settings page (`/workspace-settings`) with member management and danger zone (delete workspace).
 
 ### Auto-detect image preset
 
@@ -325,10 +367,10 @@ apps/
   api/
     src/
       routes/         health, tasks, subtasks, bulk, secrets, repos, issues, tickets, setup, auth,
-                      cluster, resume, prompt-templates, analytics, slack
+                      cluster, resume, prompt-templates, analytics, slack, workspaces
       services/       task-service, repo-pool-service, secret-service, auth-service, container-service,
                       prompt-template-service, repo-service, repo-detect-service, review-service,
-                      subtask-service, ticket-sync-service, slack-service, webhook-service,
+                      subtask-service, ticket-sync-service, slack-service, webhook-service, workspace-service,
                       event-bus, agent-event-parser,
                       session-service, oauth/ (github, google, gitlab)
       plugins/        auth (session validation middleware)
@@ -340,7 +382,8 @@ apps/
   web/
     src/
       app/            Pages: / (overview), /tasks, /tasks/new, /tasks/[id], /repos, /repos/[id],
-                      /cluster, /cluster/[id], /secrets, /settings, /setup, /costs, /login
+                      /cluster, /cluster/[id], /secrets, /settings, /setup, /costs, /login,
+                      auth/callback (OAuth code exchange route), auth/logout (session logout route)
       components/     task-card, task-list, log-viewer, web-terminal, event-timeline, state-badge,
                       skeleton, layout/ (sidebar, layout-shell, setup-check, ws-provider, user-menu)
       middleware.ts   Next.js auth middleware (redirects unauthenticated users to /login)
@@ -363,7 +406,7 @@ scripts/              repo-init.sh, agent-entrypoint.sh, setup-local.sh
 
 ## Database Schema
 
-11 tables (Drizzle, 28 migrations):
+13 tables (Drizzle, 28 migrations):
 
 - **tasks** — id, title, prompt, repoUrl, repoBranch, state (enum), agentType, containerId, sessionId, prUrl, prNumber, prState, prChecksStatus, prReviewStatus, prReviewComments, resultSummary, costUsd, errorMessage, ticketSource, ticketExternalId, metadata (jsonb), retryCount, maxRetries, priority, parentTaskId, taskType ("coding"|"review"), subtaskOrder, blocksParent, worktreeState, lastPodId, createdBy (FK to users), timestamps (created/updated/started/completed)
 - **task_events** — id, taskId (FK), fromState, toState, trigger, message, createdAt (audit trail)
@@ -372,7 +415,9 @@ scripts/              repo-init.sh, agent-entrypoint.sh, setup-local.sh
 - **repos** — id, repoUrl (unique), fullName, defaultBranch, isPrivate, imagePreset, extraPackages, setupCommands, customDockerfile, autoMerge, promptTemplateOverride, claudeModel, claudeContextWindow, claudeThinking, claudeEffort, autoResume, maxConcurrentTasks, maxPodInstances, maxAgentsPerPod, maxTurnsCoding, maxTurnsReview, reviewEnabled, reviewTrigger, reviewPromptTemplate, testCommand, reviewModel
 - **repo_pods** — id, repoUrl, repoBranch, podName, podId, state (enum), activeTaskCount, instanceIndex, lastTaskAt, errorMessage (note: repoUrl is no longer unique — multiple pod instances per repo)
 - **pod_health_events** — id, repoPodId, repoUrl, eventType ("crashed"|"oom_killed"|"restarted"|"healthy"|"orphan_cleaned"), podName, message, createdAt
-- **users** — id (uuid), provider ("github"|"google"|"gitlab"), externalId, email, displayName, avatarUrl, lastLoginAt, timestamps. Unique on (provider, externalId)
+- **users** — id (uuid), provider ("github"|"google"|"gitlab"), externalId, email, displayName, avatarUrl, defaultWorkspaceId, lastLoginAt, timestamps. Unique on (provider, externalId)
+- **workspaces** — id (uuid), name, slug (unique), description, createdBy (FK to users), timestamps
+- **workspace_members** — id, workspaceId (FK), userId (FK), role (admin|member|viewer). Unique on (workspaceId, userId), cascades on delete
 - **sessions** — id (uuid), userId (FK to users), tokenHash (unique, SHA256), expiresAt (30-day TTL), createdAt
 - **ticket_providers** — id, source, config (jsonb), enabled
 - **prompt_templates** — id, name, template, isDefault, repoUrl, autoMerge
@@ -475,6 +520,11 @@ Key routes beyond basic CRUD:
 - `POST /api/webhooks/slack/actions` — handle Slack interactive button clicks (retry, cancel)
 - `POST /api/slack/test` — test Slack webhook configuration
 - `GET /api/slack/status` — check global Slack webhook status
+- `GET/POST /api/workspaces` — list/create workspaces
+- `GET/PATCH/DELETE /api/workspaces/:id` — workspace CRUD
+- `POST /api/workspaces/:id/switch` — switch active workspace
+- `GET/POST /api/workspaces/:id/members` — list/add workspace members
+- `PATCH/DELETE /api/workspaces/:id/members/:userId` — update role/remove member
 
 ## Workers
 
@@ -491,7 +541,7 @@ Four BullMQ workers run as part of the API server:
 - **Secrets at rest**: AES-256-GCM encryption. Secret values are never logged or returned via API — only names and scopes are exposed.
 - **Claude Code auth**: API key or OAuth token injected as env vars into pod containers. Max-subscription tokens are cached for 30 seconds with auto-refresh.
 - **K8s RBAC**: ServiceAccount with scoped permissions for pod lifecycle, exec, and secret management only.
-- **No role-based access control** within Optio itself — any authenticated user can perform any action. Production deployments should add RBAC or restrict at the network level.
+- **Workspace-scoped RBAC**: Users are assigned roles (admin/member/viewer) per workspace. Resources are isolated by workspace, and secrets use a workspace-then-global fallback chain. See the Workspaces section above.
 
 ## Troubleshooting
 
@@ -528,9 +578,12 @@ Four BullMQ workers run as part of the API server:
 
 **OAuth login fails**:
 
-- Verify `API_PUBLIC_URL` and `WEB_PUBLIC_URL` match the actual deployment URLs
+- Verify `API_PUBLIC_URL` and `WEB_PUBLIC_URL` match the actual deployment URLs (both must be reachable from the browser)
 - Ensure OAuth callback URLs are registered with the provider (e.g., `{API_PUBLIC_URL}/api/auth/github/callback`)
 - Check for `invalid_state` errors — may indicate expired CSRF tokens (>10 min between login click and callback)
+- If redirected to `/login` after successful OAuth: check that the `WEB_PUBLIC_URL` env var is set on the web deployment (used by the auth callback route handler to redirect correctly)
+- If `NEXT_PUBLIC_AUTH_DISABLED` is baked into the web Docker image at build time — rebuild with `--build-arg NEXT_PUBLIC_AUTH_DISABLED=false` when enabling auth
+- Cookie `Secure` flag is based on `WEB_PUBLIC_URL` scheme — if serving over HTTP, ensure the URL starts with `http://` not `https://`
 
 **Database migration errors**:
 
@@ -544,12 +597,13 @@ Four BullMQ workers run as part of the API server:
 3. **Disable auth bypass**: Ensure `OPTIO_AUTH_DISABLED` is NOT set (or set to `false`)
 4. **External database**: Use managed PostgreSQL — set `postgresql.enabled=false` and `externalDatabase.url`
 5. **External Redis**: Use managed Redis — set `redis.enabled=false` and `externalRedis.url`
-6. **Public URLs**: Set `API_PUBLIC_URL` and `WEB_PUBLIC_URL` to the actual deployment URLs (required for OAuth callbacks)
-7. **Ingress**: Enable `ingress.enabled=true` with TLS and proper host configuration
-8. **Agent image**: Push to a container registry and set `agent.imagePullPolicy=IfNotPresent` or `Always`
-9. **GitHub token**: Set `GITHUB_TOKEN` secret for PR watching, issue sync, and repo detection
-10. **Resource limits**: Tune pod resource requests/limits based on expected agent workload
-11. **Metrics server**: Install `metrics-server` in the cluster for resource usage display
+6. **Public URLs**: Set `API_PUBLIC_URL` and `WEB_PUBLIC_URL` to the actual deployment URLs (required for OAuth callbacks and auth cookie routing). `WEB_PUBLIC_URL` must be set on both the API and web deployments
+7. **Web Docker build args**: Rebuild the web image with `--build-arg NEXT_PUBLIC_AUTH_DISABLED=false` and the correct `NEXT_PUBLIC_API_URL`/`NEXT_PUBLIC_WS_URL` for the deployment
+8. **Ingress**: Enable `ingress.enabled=true` with TLS and proper host configuration
+9. **Agent image**: Push to a container registry and set `agent.imagePullPolicy=IfNotPresent` or `Always`
+10. **GitHub token**: Set `GITHUB_TOKEN` secret for PR watching, issue sync, and repo detection
+11. **Resource limits**: Tune pod resource requests/limits based on expected agent workload
+12. **Metrics server**: Install `metrics-server` in the cluster for resource usage display
 
 ## Performance Tuning
 
