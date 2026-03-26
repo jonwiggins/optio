@@ -211,22 +211,25 @@ export default function SetupPage() {
     setOauthChecking(false);
   };
 
-  const validateRepo = async (index: number) => {
-    const repo = repos[index];
-    if (!repo.url.trim()) return;
+  const validateRepo = async (repoUrl: string) => {
+    if (!repoUrl.trim()) return;
     setLoading(true);
     try {
-      const res = await api.validateRepo(repo.url, githubToken || undefined);
+      const res = await api.validateRepo(repoUrl, githubToken || undefined);
       if (res.valid && res.repo) {
-        const updated = [...repos];
-        updated[index] = {
-          ...repo,
-          fullName: res.repo.fullName,
-          defaultBranch: res.repo.defaultBranch,
-          isPrivate: res.repo.isPrivate,
-          validated: true,
-        };
-        setRepos(updated);
+        setRepos((prev) =>
+          prev.map((r) =>
+            r.url === repoUrl
+              ? {
+                  ...r,
+                  fullName: res.repo!.fullName,
+                  defaultBranch: res.repo!.defaultBranch,
+                  isPrivate: res.repo!.isPrivate,
+                  validated: true,
+                }
+              : r,
+          ),
+        );
       } else {
         toast.error(res.error ?? "Could not access repository");
       }
@@ -437,6 +440,7 @@ export default function SetupPage() {
                     setGithubError("");
                   }}
                   onPaste={(e) => {
+                    e.preventDefault();
                     const pasted = e.clipboardData.getData("text").trim();
                     if (pasted) {
                       setGithubToken(pasted);
@@ -663,6 +667,7 @@ export default function SetupPage() {
                                 setAnthropicError("");
                               }}
                               onPaste={(e) => {
+                                e.preventDefault();
                                 const pasted = e.clipboardData.getData("text").trim();
                                 if (pasted) {
                                   setAnthropicKey(pasted);
@@ -721,6 +726,7 @@ export default function SetupPage() {
                       setOpenaiError("");
                     }}
                     onPaste={(e) => {
+                      e.preventDefault();
                       const pasted = e.clipboardData.getData("text").trim();
                       if (pasted) {
                         setOpenaiKey(pasted);
@@ -871,11 +877,10 @@ export default function SetupPage() {
                     onChange={(e) => setManualRepoUrl(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && manualRepoUrl.trim()) {
-                        const newRepo: RepoEntry = { url: manualRepoUrl.trim(), validated: false };
-                        setRepos([...repos, newRepo]);
-                        const idx = repos.length;
+                        const url = manualRepoUrl.trim();
+                        setRepos([...repos, { url, validated: false }]);
                         setManualRepoUrl("");
-                        setTimeout(() => validateRepo(idx), 100);
+                        setTimeout(() => validateRepo(url), 100);
                       }
                     }}
                     placeholder="https://github.com/owner/repo"
@@ -884,11 +889,10 @@ export default function SetupPage() {
                   <button
                     onClick={() => {
                       if (!manualRepoUrl.trim()) return;
-                      const newRepo: RepoEntry = { url: manualRepoUrl.trim(), validated: false };
-                      setRepos([...repos, newRepo]);
-                      const idx = repos.length;
+                      const url = manualRepoUrl.trim();
+                      setRepos([...repos, { url, validated: false }]);
                       setManualRepoUrl("");
-                      setTimeout(() => validateRepo(idx), 100);
+                      setTimeout(() => validateRepo(url), 100);
                     }}
                     disabled={!manualRepoUrl.trim()}
                     className="px-3 py-2 rounded-md bg-bg-hover text-sm hover:bg-border disabled:opacity-50"
