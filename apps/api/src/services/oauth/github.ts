@@ -5,20 +5,26 @@ export class GitHubOAuthProvider implements OAuthProvider {
   name = "github";
 
   private get clientId(): string {
-    return process.env.GITHUB_OAUTH_CLIENT_ID ?? "";
+    return process.env.GITHUB_APP_CLIENT_ID ?? process.env.GITHUB_OAUTH_CLIENT_ID ?? "";
   }
 
   private get clientSecret(): string {
-    return process.env.GITHUB_OAUTH_CLIENT_SECRET ?? "";
+    return process.env.GITHUB_APP_CLIENT_SECRET ?? process.env.GITHUB_OAUTH_CLIENT_SECRET ?? "";
+  }
+
+  private get isGitHubApp(): boolean {
+    return !!(process.env.GITHUB_APP_CLIENT_ID && process.env.GITHUB_APP_CLIENT_SECRET);
   }
 
   authorizeUrl(state: string): string {
     const params = new URLSearchParams({
       client_id: this.clientId,
       redirect_uri: getCallbackUrl("github"),
-      scope: "read:user user:email",
       state,
     });
+    if (!this.isGitHubApp) {
+      params.set("scope", "read:user user:email");
+    }
     return `https://github.com/login/oauth/authorize?${params}`;
   }
 
@@ -39,11 +45,15 @@ export class GitHubOAuthProvider implements OAuthProvider {
     if (!res.ok) {
       throw new Error(`GitHub token exchange failed: ${res.status} ${res.statusText}`);
     }
-    const data = (await res.json()) as Record<string, string>;
+    const data = (await res.json()) as Record<string, string | number>;
     if (data.error) {
-      throw new Error(`GitHub OAuth error: ${data.error_description ?? data.error}`);
+      throw new Error(`GitHub OAuth error: ${(data.error_description as string) ?? data.error}`);
     }
-    return { accessToken: data.access_token, refreshToken: data.refresh_token };
+    return {
+      accessToken: data.access_token as string,
+      refreshToken: data.refresh_token as string | undefined,
+      expiresIn: (data.expires_in as number | undefined) ?? undefined,
+    };
   }
 
   async fetchUser(accessToken: string): Promise<OAuthUser> {

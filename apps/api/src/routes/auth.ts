@@ -12,6 +12,7 @@ import {
   revokeSession,
   validateSession,
 } from "../services/session-service.js";
+import { storeUserGitHubTokens } from "../services/github-token-service.js";
 import { SESSION_COOKIE_NAME } from "../plugins/auth.js";
 
 const WEB_URL = process.env.WEB_PUBLIC_URL ?? "http://localhost:3000";
@@ -193,11 +194,20 @@ export async function authRoutes(app: FastifyInstance) {
     try {
       const tokens = await provider.exchangeCode(code);
       const profile = await provider.fetchUser(tokens.accessToken);
-      const { token } = await createSession(providerName, profile);
+      const session = await createSession(providerName, profile);
+
+      // Store GitHub App user tokens for git/API operations
+      if (providerName === "github" && tokens.refreshToken && tokens.expiresIn) {
+        await storeUserGitHubTokens(session.user.id, {
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresIn: tokens.expiresIn,
+        });
+      }
 
       // Redirect to web app with a short-lived exchange code.
       // The web app exchanges it for the session token and sets its own cookie.
-      const authCode = createAuthCode(token);
+      const authCode = createAuthCode(session.token);
       reply.redirect(`${WEB_URL}/auth/callback?code=${authCode}`);
     } catch (err) {
       app.log.error(err, "OAuth callback failed");

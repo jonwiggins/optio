@@ -1,6 +1,7 @@
 export interface OAuthTokens {
   accessToken: string;
   refreshToken?: string;
+  expiresIn?: number;
 }
 
 export interface OAuthUser {
