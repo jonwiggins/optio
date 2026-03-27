@@ -58,6 +58,8 @@ spec:
               value: "production"
             - name: LOG_LEVEL
               value: {{ .Values.api.env.LOG_LEVEL | quote }}
+            - name: OPTIO_ENVOY_IMAGE
+              value: "{{ .Values.agent.envoyProxy.image.repository }}:{{ .Values.agent.envoyProxy.image.tag }}"
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           readinessProbe:

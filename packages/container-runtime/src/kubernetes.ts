@@ -143,6 +143,18 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
       }
     }
 
+    // Add extra volume mounts for the main container (e.g., CA certs from sidecar)
+    if (spec.extraVolumeMounts) {
+      for (const evm of spec.extraVolumeMounts) {
+        const mount = new K8sVolumeMount();
+        mount.name = evm.name;
+        mount.mountPath = evm.mountPath;
+        mount.subPath = evm.subPath;
+        mount.readOnly = evm.readOnly ?? false;
+        volumeMounts.push(mount);
+      }
+    }
+
     // Set security context (capabilities for DinD, etc.)
     if (spec.capabilities && spec.capabilities.length > 0) {
       const secCtx = new V1SecurityContext();
@@ -154,8 +166,28 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
 
     container.volumeMounts = volumeMounts.length > 0 ? volumeMounts : undefined;
 
+    // Add extra volumes (emptyDir, configMap, etc.)
+    if (spec.extraVolumes) {
+      for (const ev of spec.extraVolumes) {
+        volumes.push(ev.raw as V1Volume);
+      }
+    }
+
     const podSpec = new V1PodSpec();
     podSpec.containers = [container];
+
+    // Add sidecar containers
+    if (spec.sidecarContainers && spec.sidecarContainers.length > 0) {
+      for (const sc of spec.sidecarContainers) {
+        podSpec.containers.push(sc.raw as V1Container);
+      }
+    }
+
+    // Add init containers
+    if (spec.initContainers && spec.initContainers.length > 0) {
+      podSpec.initContainers = spec.initContainers.map((ic) => ic.raw as V1Container);
+    }
+
     podSpec.restartPolicy = "Never";
     podSpec.volumes = volumes.length > 0 ? volumes : undefined;
 

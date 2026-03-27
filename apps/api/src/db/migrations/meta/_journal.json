@@ -211,6 +211,13 @@
       "when": 1775491200000,
       "tag": "0029_docker_in_docker",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1775577600000,
+      "tag": "0030_secret_proxy",
+      "breakpoints": true
     }
   ]
 }

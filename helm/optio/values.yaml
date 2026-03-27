@@ -60,6 +60,15 @@ agent:
     tag: latest
     pullPolicy: Never  # Use "IfNotPresent" or "Always" for registry images
   imagePullPolicy: Never  # Use "IfNotPresent" or "Always" for registry images
+  # Envoy sidecar proxy for secret isolation.
+  # When repos.secretProxy is enabled, this image is added as a sidecar to agent pods.
+  # The sidecar intercepts outbound HTTPS requests and injects auth headers so the
+  # agent container never sees raw secrets (GitHub token, Anthropic API key).
+  envoyProxy:
+    image:
+      repository: envoyproxy/envoy
+      tag: v1.31-latest
+      pullPolicy: IfNotPresent
   # PVC template for repo pod home directories.
   # These PVCs are created dynamically by the API server (one per repo pod
   # instance), but this template controls the storage class and default size.

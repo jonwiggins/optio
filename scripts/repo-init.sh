@@ -8,8 +8,30 @@ echo "[optio] Repo: ${OPTIO_REPO_URL} (branch: ${OPTIO_REPO_BRANCH})"
 git config --global user.name "Optio Agent"
 git config --global user.email "optio-agent@noreply.github.com"
 
-# Set up git credential helper to use GITHUB_TOKEN for all github.com requests
-if [ -n "${GITHUB_TOKEN:-}" ]; then
+# When secret proxy is enabled, trust the Envoy-generated CA certificate
+# and configure git/gh to use the proxy instead of raw credentials.
+if [ "${OPTIO_SECRET_PROXY:-}" = "true" ]; then
+  echo "[optio] Secret proxy mode — configuring CA trust and proxy settings"
+
+  # Update CA certificates if the Envoy CA cert has been mounted
+  if [ -f /usr/local/share/ca-certificates/optio-envoy-ca.crt ]; then
+    update-ca-certificates 2>/dev/null || true
+    # Also set NODE_EXTRA_CA_CERTS for Node.js tools (gh, claude)
+    export NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/optio-envoy-ca.crt
+    echo "export NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/optio-envoy-ca.crt" >> ~/.bashrc
+    echo "[optio] CA certificate trusted"
+  fi
+
+  # Configure git to use the proxy for HTTPS operations
+  git config --global http.proxy "${HTTP_PROXY:-http://127.0.0.1:10080}"
+  git config --global https.proxy "${HTTPS_PROXY:-http://127.0.0.1:10080}"
+  echo "[optio] Git proxy configured"
+
+  # Configure gh CLI to use the proxy (it respects HTTPS_PROXY env var)
+  echo "[optio] Secret proxy configured — credentials are injected by the Envoy sidecar"
+
+# Standard credential setup (no proxy)
+elif [ -n "${GITHUB_TOKEN:-}" ]; then
   git config --global credential.helper store
   echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
   chmod 600 ~/.git-credentials

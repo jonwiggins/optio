@@ -19,12 +19,40 @@ export interface ContainerSpec {
   capabilities?: string[];
   /** Tmpfs mounts (memory-backed volumes) for the container. */
   tmpfsMounts?: { mountPath: string; sizeLimit?: string }[];
+  /** Optional sidecar containers added alongside the main container. */
+  sidecarContainers?: SidecarContainer[];
+  /** Optional init containers that run before the main container starts. */
+  initContainers?: SidecarContainer[];
+  /** Optional raw K8s volumes (for emptyDir, configMap, etc.). */
+  extraVolumes?: ExtraVolume[];
+  /** Optional extra volume mounts for the main container. */
+  extraVolumeMounts?: ExtraVolumeMount[];
 }
 
 export interface VolumeMount {
   hostPath?: string;
   persistentVolumeClaim?: string;
   mountPath: string;
+  readOnly?: boolean;
+}
+
+/** A sidecar or init container definition (opaque to the shared package). */
+export interface SidecarContainer {
+  /** Raw K8s V1Container object — passed through to the runtime. */
+  raw: unknown;
+}
+
+/** A raw K8s volume definition (for emptyDir, configMap, etc.). */
+export interface ExtraVolume {
+  /** Raw K8s V1Volume object — passed through to the runtime. */
+  raw: unknown;
+}
+
+/** An extra volume mount for the main container. */
+export interface ExtraVolumeMount {
+  name: string;
+  mountPath: string;
+  subPath?: string;
   readOnly?: boolean;
 }
 

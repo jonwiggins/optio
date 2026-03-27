@@ -11,6 +11,16 @@ import {
   normalizeRepoUrl,
 } from "@optio/shared";
 import { logger } from "../logger.js";
+import {
+  generateEnvoyConfig,
+  buildEnvoySidecarContainer,
+  buildSecretInitContainer,
+  buildEnvoyVolumes,
+  getAgentProxyEnv,
+  getAgentCaVolumeMount,
+  PROXIED_SECRET_ENV_VARS,
+  type SecretProxySecrets,
+} from "./envoy-sidecar.js";
 
 const IDLE_TIMEOUT_MS = parseInt(process.env.OPTIO_REPO_POD_IDLE_MS ?? "600000", 10); // 10 min default
 
@@ -49,6 +59,7 @@ export async function getOrCreateRepoPod(
     memoryRequest?: string | null;
     memoryLimit?: string | null;
     dockerInDocker?: boolean;
+    secretProxy?: boolean;
   },
 ): Promise<RepoPod> {
   const repoUrl = normalizeRepoUrl(rawRepoUrl);
@@ -152,6 +163,7 @@ export async function getOrCreateRepoPod(
         memoryLimit: opts?.memoryLimit ?? undefined,
       },
       opts?.dockerInDocker,
+      opts?.secretProxy,
     );
   } catch (err: any) {
     if (err?.message?.includes("unique") || err?.code === "23505") {
@@ -184,6 +196,7 @@ async function createRepoPod(
     memoryLimit?: string;
   },
   dockerInDocker?: boolean,
+  secretProxy?: boolean,
 ): Promise<RepoPod> {
   const [record] = await db
     .insert(repoPods)
@@ -234,15 +247,23 @@ spec:
     const volumes = pvcReady
       ? [{ persistentVolumeClaim: pvcName, mountPath: "/home/agent" }]
       : undefined;
+
+    // Build base agent env, stripping proxied secrets when secret proxy is enabled
+    const agentEnv: Record<string, string> = {
+      ...env,
+      OPTIO_REPO_URL: repoUrl,
+      OPTIO_REPO_BRANCH: repoBranch,
+    };
+    if (secretProxy) {
+      Object.assign(agentEnv, getAgentProxyEnv());
+      agentEnv.OPTIO_SECRET_PROXY = "true";
+    }
+
     const spec: ContainerSpec = {
       name: podName,
       image,
       command: ["/opt/optio/repo-init.sh"],
-      env: {
-        ...env,
-        OPTIO_REPO_URL: repoUrl,
-        OPTIO_REPO_BRANCH: repoBranch,
-      },
+      env: agentEnv,
       workDir: "/workspace",
       imagePullPolicy: (process.env.OPTIO_IMAGE_PULL_POLICY as any) ?? "Never",
       volumes,
@@ -255,6 +276,7 @@ spec:
         "optio.type": "repo-pod",
         "optio.instance-index": String(instanceIndex),
         "optio.network-policy": networkPolicy ?? "unrestricted",
+        "optio.secret-proxy": secretProxy ? "true" : "false",
         "managed-by": "optio",
       },
       // Docker-in-Docker: user namespace isolation + capabilities + tmpfs for daemon storage
@@ -266,6 +288,61 @@ spec:
           }
         : {}),
     };
+
+    // Add Envoy sidecar containers and volumes when secret proxy is enabled
+    if (secretProxy) {
+      const envoyImage = process.env.OPTIO_ENVOY_IMAGE ?? "envoyproxy/envoy:v1.31-latest";
+      const pullPolicy = (process.env.OPTIO_IMAGE_PULL_POLICY as string) ?? "IfNotPresent";
+
+      const proxySecrets: SecretProxySecrets = {
+        githubToken: env.GITHUB_TOKEN,
+        anthropicApiKey: env.ANTHROPIC_API_KEY,
+      };
+
+      const envoyConfig = generateEnvoyConfig(proxySecrets);
+
+      // Create a ConfigMap for the Envoy config
+      const configMapName = `envoy-config-${podName}`;
+      await createEnvoyConfigMap(configMapName, envoyConfig).catch((err) => {
+        logger.warn({ err, podName }, "Failed to create Envoy ConfigMap");
+      });
+
+      spec.sidecarContainers = [
+        { raw: buildEnvoySidecarContainer({ envoyImage, imagePullPolicy: pullPolicy }) },
+      ];
+      spec.initContainers = [
+        {
+          raw: buildSecretInitContainer({
+            envoyImage,
+            secrets: proxySecrets,
+            imagePullPolicy: pullPolicy,
+          }),
+        },
+      ];
+      spec.extraVolumes = buildEnvoyVolumes(envoyConfig).map((v) => {
+        // Patch the configMap volume to use the actual ConfigMap name
+        if (v.name === "envoy-config") {
+          return {
+            raw: {
+              name: "envoy-config",
+              configMap: {
+                name: configMapName,
+                items: [{ key: "envoy.yaml", path: "envoy.yaml" }],
+              },
+            },
+          };
+        }
+        return { raw: v };
+      });
+      spec.extraVolumeMounts = [getAgentCaVolumeMount()];
+
+      // Strip raw secret values from the agent container env
+      for (const key of PROXIED_SECRET_ENV_VARS) {
+        delete spec.env[key];
+      }
+
+      logger.info({ podName }, "Envoy secret proxy sidecar configured");
+    }
 
     const handle = await rt.create(spec);
 
@@ -295,6 +372,7 @@ spec:
         podName: handle.name,
         instanceIndex,
         networkPolicy: networkPolicy ?? "unrestricted",
+        secretProxy: !!secretProxy,
       },
       "Repo pod created",
     );
@@ -542,6 +620,7 @@ export async function cleanupIdleRepoPods(): Promise<number> {
       try {
         if (pod.podName) {
           await deleteNetworkPolicy(pod.podName).catch(() => {});
+          await deleteEnvoyConfigMap(pod.podName).catch(() => {});
           await rt.destroy({ id: pod.podId ?? pod.podName, name: pod.podName });
         }
         await db.delete(repoPods).where(eq(repoPods.id, pod.id));
@@ -660,6 +739,64 @@ export async function deleteNetworkPolicy(podName: string): Promise<void> {
     logger.info({ policyName, podName }, "Deleted NetworkPolicy");
   } catch (err) {
     logger.warn({ err, policyName }, "Failed to delete NetworkPolicy");
+  }
+}
+
+/**
+ * Create a K8s ConfigMap for the Envoy proxy configuration.
+ */
+async function createEnvoyConfigMap(name: string, envoyYaml: string): Promise<void> {
+  const namespace = process.env.OPTIO_NAMESPACE ?? "optio";
+
+  const manifest = {
+    apiVersion: "v1",
+    kind: "ConfigMap",
+    metadata: {
+      name,
+      namespace,
+      labels: {
+        "managed-by": "optio",
+        "optio.type": "envoy-config",
+      },
+    },
+    data: {
+      "envoy.yaml": envoyYaml,
+    },
+  };
+
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
+  const manifestJson = JSON.stringify(manifest);
+  await execFileAsync("bash", [
+    "-c",
+    `echo ${JSON.stringify(manifestJson)} | kubectl apply -f - -n ${namespace}`,
+  ]);
+  logger.info({ configMapName: name }, "Created Envoy ConfigMap");
+}
+
+/**
+ * Delete the Envoy ConfigMap associated with a repo pod.
+ */
+export async function deleteEnvoyConfigMap(podName: string): Promise<void> {
+  const namespace = process.env.OPTIO_NAMESPACE ?? "optio";
+  const configMapName = `envoy-config-${podName}`;
+
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    await execFileAsync("kubectl", [
+      "delete",
+      "configmap",
+      configMapName,
+      "-n",
+      namespace,
+      "--ignore-not-found",
+    ]);
+    logger.info({ configMapName, podName }, "Deleted Envoy ConfigMap");
+  } catch (err) {
+    logger.warn({ err, configMapName }, "Failed to delete Envoy ConfigMap");
   }
 }
 

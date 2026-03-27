@@ -57,6 +57,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [maxPodInstances, setMaxPodInstances] = useState(1);
   const [maxAgentsPerPod, setMaxAgentsPerPod] = useState(2);
   const [networkPolicy, setNetworkPolicy] = useState("unrestricted");
+  const [secretProxy, setSecretProxy] = useState(false);
   const [offPeakOnly, setOffPeakOnly] = useState(false);
   const [cpuRequest, setCpuRequest] = useState("");
   const [cpuLimit, setCpuLimit] = useState("");
@@ -106,6 +107,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setMaxPodInstances(r.maxPodInstances ?? 1);
         setMaxAgentsPerPod(r.maxAgentsPerPod ?? 2);
         setNetworkPolicy(r.networkPolicy ?? "unrestricted");
+        setSecretProxy(r.secretProxy ?? false);
         setOffPeakOnly(r.offPeakOnly ?? false);
         setCpuRequest(r.cpuRequest ?? "");
         setCpuLimit(r.cpuLimit ?? "");
@@ -173,6 +175,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         maxPodInstances,
         maxAgentsPerPod,
         networkPolicy,
+        secretProxy,
         offPeakOnly,
         dockerInDocker,
         defaultBranch,
@@ -475,6 +478,54 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               <li>HTTPS (port 443) &mdash; api.anthropic.com, api.openai.com, github.com</li>
               <li>Intra-namespace &mdash; Optio API server (callbacks, token refresh)</li>
             </ul>
+          </div>
+        )}
+
+        <h3 className="text-xs font-medium text-text-muted pt-2">Secret Proxy (Envoy Sidecar)</h3>
+        <p className="text-[10px] text-text-muted/60">
+          Inject an Envoy sidecar proxy that intercepts outbound API calls and adds authentication
+          headers. Agent containers never see raw secrets (GitHub token, Anthropic API key).
+        </p>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={secretProxy}
+            onChange={(e) => setSecretProxy(e.target.checked)}
+            className="w-4 h-4 rounded"
+          />
+          <div>
+            <span className="text-sm">Enable secret proxy</span>
+            <p className="text-[10px] text-text-muted/60 mt-0.5">
+              Adds an Envoy sidecar to agent pods. Requires &ldquo;Restricted&rdquo; network policy
+              to prevent agents from bypassing the proxy.
+            </p>
+          </div>
+        </label>
+        {secretProxy && networkPolicy !== "restricted" && (
+          <div className="p-3 rounded-md bg-warning/10 border border-warning/30">
+            <p className="text-xs text-warning">
+              Warning: Secret proxy is most effective with a restricted network policy. Without
+              egress restrictions, agents can bypass the proxy and call APIs directly.
+            </p>
+          </div>
+        )}
+        {secretProxy && (
+          <div className="p-3 rounded-md bg-bg border border-border">
+            <p className="text-xs text-text-muted mb-2">Secrets covered by the proxy:</p>
+            <ul className="text-xs space-y-1 text-text-muted">
+              <li>
+                <code className="text-primary">GITHUB_TOKEN</code> &rarr;{" "}
+                <code>Authorization: Bearer</code> for github.com, api.github.com
+              </li>
+              <li>
+                <code className="text-primary">ANTHROPIC_API_KEY</code> &rarr;{" "}
+                <code>x-api-key</code> for api.anthropic.com
+              </li>
+            </ul>
+            <p className="text-[10px] text-text-muted/60 mt-2">
+              Note: <code>CLAUDE_CODE_OAUTH_TOKEN</code> is not covered in v1 &mdash; Claude Code
+              reads it from an env var, not via HTTP headers.
+            </p>
           </div>
         )}
 

@@ -223,6 +223,7 @@ export const repos = pgTable(
     slackNotifyOn: jsonb("slack_notify_on").$type<string[]>(), // e.g. ["completed","failed","pr_opened","needs_attention"]
     slackEnabled: boolean("slack_enabled").notNull().default(false),
     networkPolicy: text("network_policy").notNull().default("unrestricted"), // "unrestricted" | "restricted"
+    secretProxy: boolean("secret_proxy").notNull().default(false), // Envoy sidecar proxy for secret isolation
     offPeakOnly: boolean("off_peak_only").notNull().default(false),
     cpuRequest: text("cpu_request"), // e.g. "500m", "1000m", "2000m" — K8s CPU request
     cpuLimit: text("cpu_limit"), // e.g. "2000m", "4000m" — K8s CPU limit

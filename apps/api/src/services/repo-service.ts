@@ -37,6 +37,7 @@ export interface RepoRecord {
   slackNotifyOn: string[] | null;
   slackEnabled: boolean;
   networkPolicy: string;
+  secretProxy: boolean;
   offPeakOnly: boolean;
   cpuRequest: string | null;
   cpuLimit: string | null;
@@ -160,6 +161,7 @@ export async function updateRepo(
     slackNotifyOn?: string[];
     slackEnabled?: boolean;
     networkPolicy?: string;
+    secretProxy?: boolean;
     offPeakOnly?: boolean;
     cpuRequest?: string | null;
     cpuLimit?: string | null;
