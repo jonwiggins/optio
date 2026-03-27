@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, taskEvents, sessionPrs, interactiveSessions } from "../db/schema.js";
 import { TaskState } from "@optio/shared";
-import { retrieveSecretWithFallback } from "../services/secret-service.js";
+import { getGitHubToken } from "../services/github-token-service.js";
 import * as taskService from "../services/task-service.js";
 import { updateSessionPr } from "../services/interactive-session-service.js";
 import { taskQueue } from "./task-worker.js";
@@ -154,7 +154,7 @@ export function startPrWatcherWorker() {
         const cacheKey = workspaceId ?? "__global__";
         if (tokenCache.has(cacheKey)) return tokenCache.get(cacheKey)!;
         try {
-          const token = await retrieveSecretWithFallback("GITHUB_TOKEN", "global", workspaceId);
+          const token = await getGitHubToken({ server: true });
           tokenCache.set(cacheKey, token);
           return token;
         } catch {
