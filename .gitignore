@@ -13,3 +13,4 @@ apps/api/.env
 .claude/
 .values.local.yaml
 .tool-versions
+.worktrees/
