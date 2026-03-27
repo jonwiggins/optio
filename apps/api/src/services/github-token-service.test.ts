@@ -185,3 +185,209 @@ describe("github-app-service", () => {
     });
   });
 });
+
+describe("github-token-service", () => {
+  const mockRetrieveSecret = vi.fn();
+  const mockRetrieveSecretWithFallback = vi.fn();
+  const mockStoreSecret = vi.fn().mockResolvedValue(undefined);
+  const mockDeleteSecret = vi.fn().mockResolvedValue(undefined);
+  const mockIsConfigured = vi.fn();
+  const mockGetInstToken = vi.fn();
+  const mockDbWhere = vi.fn();
+
+  let getGitHubToken: typeof import("./github-token-service.js").getGitHubToken;
+  let storeUserGitHubTokens: typeof import("./github-token-service.js").storeUserGitHubTokens;
+  let deleteUserGitHubTokens: typeof import("./github-token-service.js").deleteUserGitHubTokens;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.resetModules();
+
+    vi.doMock("../db/client.js", () => ({
+      db: {
+        select: () => ({
+          from: () => ({
+            where: (...args: unknown[]) => mockDbWhere(...args),
+          }),
+        }),
+      },
+    }));
+
+    vi.doMock("../db/schema.js", () => ({
+      tasks: {
+        id: "id",
+        createdBy: "created_by",
+        workspaceId: "workspace_id",
+      },
+    }));
+
+    vi.doMock("./secret-service.js", () => ({
+      retrieveSecret: (...args: unknown[]) => mockRetrieveSecret(...args),
+      retrieveSecretWithFallback: (...args: unknown[]) => mockRetrieveSecretWithFallback(...args),
+      storeSecret: (...args: unknown[]) => mockStoreSecret(...args),
+      deleteSecret: (...args: unknown[]) => mockDeleteSecret(...args),
+    }));
+
+    vi.doMock("./github-app-service.js", () => ({
+      isGitHubAppConfigured: () => mockIsConfigured(),
+      getInstallationToken: () => mockGetInstToken(),
+    }));
+
+    const mod = await import("./github-token-service.js");
+    getGitHubToken = mod.getGitHubToken;
+    storeUserGitHubTokens = mod.storeUserGitHubTokens;
+    deleteUserGitHubTokens = mod.deleteUserGitHubTokens;
+  });
+
+  afterEach(() => {
+    vi.doUnmock("../db/client.js");
+    vi.doUnmock("../db/schema.js");
+    vi.doUnmock("./secret-service.js");
+    vi.doUnmock("./github-app-service.js");
+    process.env = { ...originalEnv };
+    globalThis.fetch = originalFetch;
+  });
+
+  it("returns valid user token when not expired", async () => {
+    const futureDate = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    mockRetrieveSecret.mockResolvedValueOnce("ghu_valid_token").mockResolvedValueOnce(futureDate);
+
+    const token = await getGitHubToken({ userId: "user-1" });
+
+    expect(token).toBe("ghu_valid_token");
+    expect(mockRetrieveSecret).toHaveBeenCalledWith("GITHUB_USER_ACCESS_TOKEN", "user:user-1");
+    expect(mockRetrieveSecret).toHaveBeenCalledWith("GITHUB_USER_TOKEN_EXPIRES_AT", "user:user-1");
+  });
+
+  it("refreshes expired user token", async () => {
+    const pastDate = new Date(Date.now() - 60 * 1000).toISOString();
+    mockRetrieveSecret
+      .mockResolvedValueOnce("ghu_expired_token")
+      .mockResolvedValueOnce(pastDate)
+      .mockResolvedValueOnce("ghr_refresh_token");
+
+    process.env.GITHUB_APP_CLIENT_ID = "client-id";
+    process.env.GITHUB_APP_CLIENT_SECRET = "client-secret";
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        access_token: "ghu_new_token",
+        refresh_token: "ghr_new_refresh",
+        expires_in: 28800,
+      }),
+    });
+    globalThis.fetch = mockFetch;
+
+    const token = await getGitHubToken({ userId: "user-2" });
+
+    expect(token).toBe("ghu_new_token");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://github.com/login/oauth/access_token",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(mockStoreSecret).toHaveBeenCalledTimes(3);
+  });
+
+  it("falls back to PAT when no user tokens exist", async () => {
+    mockRetrieveSecret.mockRejectedValue(new Error("Secret not found"));
+    mockRetrieveSecretWithFallback.mockResolvedValue("ghp_pat_token");
+
+    const token = await getGitHubToken({ userId: "user-3", workspaceId: "ws-1" });
+
+    expect(token).toBe("ghp_pat_token");
+    expect(mockRetrieveSecretWithFallback).toHaveBeenCalledWith("GITHUB_TOKEN", "global", "ws-1");
+  });
+
+  it("falls back to PAT when refresh fails", async () => {
+    const pastDate = new Date(Date.now() - 60 * 1000).toISOString();
+    mockRetrieveSecret
+      .mockResolvedValueOnce("ghu_expired")
+      .mockResolvedValueOnce(pastDate)
+      .mockResolvedValueOnce("ghr_refresh");
+
+    process.env.GITHUB_APP_CLIENT_ID = "client-id";
+    process.env.GITHUB_APP_CLIENT_SECRET = "client-secret";
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+    });
+    globalThis.fetch = mockFetch;
+
+    mockRetrieveSecretWithFallback.mockResolvedValue("ghp_fallback_pat");
+
+    const token = await getGitHubToken({ userId: "user-4" });
+
+    expect(token).toBe("ghp_fallback_pat");
+    expect(mockDeleteSecret).toHaveBeenCalled();
+  });
+
+  it("resolves task creator's token", async () => {
+    mockDbWhere.mockResolvedValue([{ createdBy: "user-5", workspaceId: "ws-2" }]);
+    const futureDate = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    mockRetrieveSecret
+      .mockResolvedValueOnce("ghu_task_user_token")
+      .mockResolvedValueOnce(futureDate);
+
+    const token = await getGitHubToken({ taskId: "task-1" });
+
+    expect(token).toBe("ghu_task_user_token");
+    expect(mockRetrieveSecret).toHaveBeenCalledWith("GITHUB_USER_ACCESS_TOKEN", "user:user-5");
+  });
+
+  it("returns installation token when GitHub App is configured (server context)", async () => {
+    mockIsConfigured.mockReturnValue(true);
+    mockGetInstToken.mockResolvedValue("ghs_install_token");
+
+    const token = await getGitHubToken({ server: true });
+
+    expect(token).toBe("ghs_install_token");
+    expect(mockIsConfigured).toHaveBeenCalled();
+    expect(mockGetInstToken).toHaveBeenCalled();
+  });
+
+  it("falls back to PAT when GitHub App not configured (server context)", async () => {
+    mockIsConfigured.mockReturnValue(false);
+    mockRetrieveSecretWithFallback.mockResolvedValue("ghp_server_pat");
+
+    const token = await getGitHubToken({ server: true });
+
+    expect(token).toBe("ghp_server_pat");
+    expect(mockRetrieveSecretWithFallback).toHaveBeenCalledWith("GITHUB_TOKEN", "global");
+  });
+
+  it("storeUserGitHubTokens stores 3 secrets", async () => {
+    await storeUserGitHubTokens("user-6", {
+      accessToken: "ghu_access",
+      refreshToken: "ghr_refresh",
+      expiresIn: 28800,
+    });
+
+    expect(mockStoreSecret).toHaveBeenCalledTimes(3);
+    expect(mockStoreSecret).toHaveBeenCalledWith(
+      "GITHUB_USER_ACCESS_TOKEN",
+      "ghu_access",
+      "user:user-6",
+    );
+    expect(mockStoreSecret).toHaveBeenCalledWith(
+      "GITHUB_USER_REFRESH_TOKEN",
+      "ghr_refresh",
+      "user:user-6",
+    );
+    expect(mockStoreSecret).toHaveBeenCalledWith(
+      "GITHUB_USER_TOKEN_EXPIRES_AT",
+      expect.any(String),
+      "user:user-6",
+    );
+  });
+
+  it("deleteUserGitHubTokens deletes 3 secrets", async () => {
+    await deleteUserGitHubTokens("user-7");
+
+    expect(mockDeleteSecret).toHaveBeenCalledTimes(3);
+    expect(mockDeleteSecret).toHaveBeenCalledWith("GITHUB_USER_ACCESS_TOKEN", "user:user-7");
+    expect(mockDeleteSecret).toHaveBeenCalledWith("GITHUB_USER_REFRESH_TOKEN", "user:user-7");
+    expect(mockDeleteSecret).toHaveBeenCalledWith("GITHUB_USER_TOKEN_EXPIRES_AT", "user:user-7");
+  });
+});
