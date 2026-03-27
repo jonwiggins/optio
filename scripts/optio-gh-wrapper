@@ -1,0 +1,4 @@
+#!/bin/bash
+# Wrapper for gh CLI — fetches a fresh GitHub token before each invocation.
+export GITHUB_TOKEN=$(curl -sf "${OPTIO_GIT_CREDENTIAL_URL}" | jq -r '.token')
+exec /usr/bin/gh-real "$@"
