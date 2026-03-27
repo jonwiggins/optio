@@ -487,6 +487,11 @@ export const api = {
       authDisabled: boolean;
     }>("/api/auth/providers"),
 
+  getGitHubAppStatus: () =>
+    request<{ configured: boolean; appId?: string; installationId?: string }>(
+      "/api/github-app/status",
+    ),
+
   getCurrentUser: () =>
     request<{
       user: {
