@@ -10,7 +10,9 @@ coverage-report.md
 apps/api/.env
 /tmp/
 .optio/
-.claude/
 .values.local.yaml
 .tool-versions
 .worktrees/
+.claude/*
+!.claude/rules/
+!.claude/rules/*.md
