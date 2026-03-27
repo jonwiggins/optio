@@ -167,7 +167,8 @@ export async function setupRoutes(app: FastifyInstance) {
       }
       const [, owner, repo] = match;
       const headers: Record<string, string> = { "User-Agent": "Optio" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const effectiveToken = token ?? (await retrieveSecret("GITHUB_TOKEN").catch(() => null));
+      if (effectiveToken) headers["Authorization"] = `Bearer ${effectiveToken}`;
 
       const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
       if (res.ok) {
