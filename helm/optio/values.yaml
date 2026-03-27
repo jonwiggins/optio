@@ -136,6 +136,17 @@ auth:
 webhook:
   githubSecret: ""  # Generate with: openssl rand -hex 32. Must match GitHub's webhook config.
 
+# GitHub App (recommended — replaces OAuth App + PAT for GitHub operations)
+# Register at https://github.com/organizations/{org}/settings/apps
+# Required permissions: Contents R/W, Pull Requests R/W, Issues R/W, Checks R, Metadata R
+github:
+  app:
+    id: ""                # App ID (integer, from app settings page)
+    clientId: ""          # Client ID (for user OAuth login flow)
+    clientSecret: ""      # Client secret (for user OAuth login flow)
+    installationId: ""    # Installation ID (from org install URL or API)
+    privateKey: ""        # PEM private key (for server-side installation tokens)
+
 # Secrets encryption
 encryption:
   key: ""  # Generate with: openssl rand -hex 32. Required.
