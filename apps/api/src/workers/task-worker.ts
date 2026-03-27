@@ -20,6 +20,7 @@ import * as repoPool from "../services/repo-pool-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
+import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { logger } from "../logger.js";
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -279,7 +280,17 @@ export function startTaskWorker() {
           task.repoUrl,
           taskWorkspaceId,
         );
-        const allEnv = { ...agentConfig.env, ...resolvedSecrets };
+        const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
+
+        // Inject dynamic credential URL for pod git/gh operations
+        const credentialUrl = `http://${process.env.API_HOST ?? "optio-api"}:${process.env.API_PORT ?? "4000"}/api/internal/git-credentials?taskId=${task.id}`;
+        allEnv.OPTIO_GIT_CREDENTIAL_URL = credentialUrl;
+
+        // Only inject static GITHUB_TOKEN when GitHub App is not configured
+        // and the credential helper scripts may not be available (old images)
+        if (isGitHubAppConfigured() && allEnv.GITHUB_TOKEN) {
+          delete allEnv.GITHUB_TOKEN;
+        }
 
         // Force-restart: tell the exec script to use the existing PR branch
         if (restartFromBranch) {

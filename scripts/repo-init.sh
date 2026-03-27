@@ -8,14 +8,32 @@ echo "[optio] Repo: ${OPTIO_REPO_URL} (branch: ${OPTIO_REPO_BRANCH})"
 git config --global user.name "Optio Agent"
 git config --global user.email "optio-agent@noreply.github.com"
 
-# Set up git credential helper to use GITHUB_TOKEN for all github.com requests
-if [ -n "${GITHUB_TOKEN:-}" ]; then
+# Set up GitHub credentials
+if [ -n "${OPTIO_GIT_CREDENTIAL_URL:-}" ]; then
+  # Dynamic credential helper — always-fresh tokens from Optio API
+  git config --global credential.helper '/usr/local/bin/optio-git-credential'
+  echo "[optio] Dynamic git credential helper configured"
+
+  # Set up gh CLI wrapper for dynamic token refresh
+  if [ -f /usr/bin/gh ] && [ -f /usr/local/bin/optio-gh-wrapper ]; then
+    mv /usr/bin/gh /usr/bin/gh-real
+    ln -s /usr/local/bin/optio-gh-wrapper /usr/bin/gh
+    echo "[optio] gh CLI wrapper configured"
+  fi
+
+  # Verify connectivity
+  if curl -sf "${OPTIO_GIT_CREDENTIAL_URL}" > /dev/null 2>&1; then
+    echo "[optio] Credential service reachable"
+  else
+    echo "[optio] WARNING: Credential service not reachable at ${OPTIO_GIT_CREDENTIAL_URL}"
+  fi
+elif [ -n "${GITHUB_TOKEN:-}" ]; then
+  # Fallback: static PAT (existing behavior)
   git config --global credential.helper store
   echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
   chmod 600 ~/.git-credentials
-  echo "[optio] Git credentials configured"
+  echo "[optio] Git credentials configured (static token)"
 
-  # Also set up gh CLI (suppress interactive output)
   echo "${GITHUB_TOKEN}" | gh auth login --with-token 2>/dev/null || true
   echo "[optio] GitHub CLI configured"
 fi
