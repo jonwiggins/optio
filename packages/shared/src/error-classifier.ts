@@ -157,6 +157,29 @@ const ERROR_PATTERNS: Array<{
     }),
   },
   {
+    pattern: /GitHub access revoked|github.*app.*authorization.*revoked|bad_refresh_token/i,
+    classify: () => ({
+      category: "auth",
+      title: "GitHub access revoked",
+      description:
+        "The user's GitHub App authorization has been revoked. The agent can no longer access GitHub on their behalf.",
+      remedy:
+        "The user needs to log in again via GitHub to re-authorize the application. Go to Settings > Applications on GitHub to verify the app is authorized.",
+      retryable: false,
+    }),
+  },
+  {
+    pattern: /GitHub user token expired|refresh_token.*expired/i,
+    classify: () => ({
+      category: "auth",
+      title: "GitHub token expired",
+      description:
+        "The user's GitHub refresh token has expired (6-month lifetime). A fresh login is required.",
+      remedy: "Log out and log back in via GitHub to obtain a fresh token.",
+      retryable: false,
+    }),
+  },
+  {
     pattern: /ECONNREFUSED|ENOTFOUND|network|connection refused/i,
     classify: () => ({
       category: "network",
