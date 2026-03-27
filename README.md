@@ -175,6 +175,56 @@ helm/optio/           Helm chart for production Kubernetes deployment
 scripts/              Setup, init, and entrypoint scripts
 ```
 
+## GitHub App Setup
+
+Optio can use a [GitHub App](https://docs.github.com/en/apps/creating-github-apps) instead of a Personal Access Token for GitHub operations. This provides user-scoped access (respecting CODEOWNERS, branch protection, and repository permissions), automatic token refresh, and clear attribution on PRs and commits.
+
+### Creating the GitHub App
+
+Register a new GitHub App at `https://github.com/organizations/{org}/settings/apps/new` with these settings:
+
+**Repository permissions:**
+
+| Permission    | Access       | Used for                           |
+| ------------- | ------------ | ---------------------------------- |
+| Contents      | Read & Write | git clone, push, branch management |
+| Pull requests | Read & Write | create PRs, post comments, merge   |
+| Issues        | Read & Write | issue sync, label management       |
+| Checks        | Read         | CI status polling in PR watcher    |
+| Metadata      | Read         | repo listing, auto-detection       |
+
+**Organisation permissions:**
+
+| Permission | Access | Used for                |
+| ---------- | ------ | ----------------------- |
+| Members    | Read   | repo listing (optional) |
+
+**Other settings:**
+
+- **Callback URL:** `{API_PUBLIC_URL}/api/auth/github/callback`
+- **Request user authorization (OAuth) during installation:** Yes
+- **Expire user authorization tokens:** Yes (recommended, 8-hour lifetime with refresh)
+- **Webhook:** Can be left disabled (Optio uses polling)
+
+### Configuration
+
+After creating the app and installing it on your organisation, configure Optio via Helm values:
+
+```yaml
+github:
+  app:
+    id: "123456" # App ID (from app settings page)
+    clientId: "Iv1.abc123" # Client ID (for user OAuth login)
+    clientSecret: "..." # Client secret
+    installationId: "789" # Installation ID (from org install URL)
+    privateKey: | # PEM private key (for server-side tokens)
+      -----BEGIN RSA PRIVATE KEY-----
+      ...
+      -----END RSA PRIVATE KEY-----
+```
+
+When configured, users who log in via GitHub get a user access token that is used for all their git and API operations. Background workers (PR watcher, ticket sync) use the app's installation token. If the GitHub App is not configured, Optio falls back to the `GITHUB_TOKEN` PAT.
+
 ## Production Deployment
 
 Optio ships with a Helm chart for production Kubernetes clusters:
