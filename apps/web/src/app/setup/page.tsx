@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -84,6 +84,7 @@ export default function SetupPage() {
   >([]);
   const [suggestedLoading, setSuggestedLoading] = useState(false);
   const [manualRepoUrl, setManualRepoUrl] = useState("");
+  const validatingUrlsRef = useRef<Set<string>>(new Set());
 
   // Step 5: Prompt template
   const [promptTemplate, setPromptTemplate] = useState("");
@@ -238,6 +239,16 @@ export default function SetupPage() {
     }
     setLoading(false);
   };
+
+  // Validate newly added repos when repos state changes
+  useEffect(() => {
+    for (const repo of repos) {
+      if (!repo.validated && !validatingUrlsRef.current.has(repo.url)) {
+        validatingUrlsRef.current.add(repo.url);
+        validateRepo(repo.url);
+      }
+    }
+  }, [repos]);
 
   // Save step: store all secrets and config
   const saveGithubStep = async () => {
@@ -880,7 +891,6 @@ export default function SetupPage() {
                         const url = manualRepoUrl.trim();
                         setRepos([...repos, { url, validated: false }]);
                         setManualRepoUrl("");
-                        setTimeout(() => validateRepo(url), 100);
                       }
                     }}
                     placeholder="https://github.com/owner/repo"
@@ -892,7 +902,6 @@ export default function SetupPage() {
                       const url = manualRepoUrl.trim();
                       setRepos([...repos, { url, validated: false }]);
                       setManualRepoUrl("");
-                      setTimeout(() => validateRepo(url), 100);
                     }}
                     disabled={!manualRepoUrl.trim()}
                     className="px-3 py-2 rounded-md bg-bg-hover text-sm hover:bg-border disabled:opacity-50"
