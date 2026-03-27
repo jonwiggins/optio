@@ -38,6 +38,11 @@ COPY scripts/agent-entrypoint.sh /opt/optio/entrypoint.sh
 COPY scripts/repo-init.sh /opt/optio/repo-init.sh
 RUN chmod +x /opt/optio/entrypoint.sh /opt/optio/repo-init.sh
 
+# Optio credential helpers for dynamic GitHub token refresh
+COPY scripts/optio-git-credential /usr/local/bin/optio-git-credential
+COPY scripts/optio-gh-wrapper /usr/local/bin/optio-gh-wrapper
+RUN chmod +x /usr/local/bin/optio-git-credential /usr/local/bin/optio-gh-wrapper
+
 # Non-root user
 RUN useradd -m -s /bin/bash agent \
     && chown -R agent:agent /workspace
