@@ -8,6 +8,7 @@ import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import { publishSessionEvent } from "../services/event-bus.js";
 import type { ExecSession } from "@optio/shared";
+import { extractSessionToken } from "./ws-auth.js";
 
 /**
  * Session chat WebSocket handler.
@@ -30,6 +31,11 @@ export async function sessionChatWs(app: FastifyInstance) {
   app.get("/ws/sessions/:sessionId/chat", { websocket: true }, async (socket, req) => {
     const { sessionId } = req.params as { sessionId: string };
     const log = logger.child({ sessionId, ws: "session-chat" });
+
+    // Extract the user's raw session token for auth passthrough.
+    // This token will be injected into the pod environment so that API calls
+    // made by the agent carry the user's identity.
+    const userSessionToken = extractSessionToken(req);
 
     const session = await getSession(sessionId);
     if (!session) {
@@ -106,14 +112,29 @@ export async function sessionChatWs(app: FastifyInstance) {
       const escapedPrompt = prompt.replace(/'/g, "'\\''");
       const modelFlag = currentModel ? `--model ${currentModel}` : "";
 
+      // Build auth passthrough env vars so the agent can make
+      // authenticated API calls on behalf of the requesting user.
+      const passthroughEnv: Record<string, string> = {};
+      if (userSessionToken) {
+        passthroughEnv.OPTIO_SESSION_TOKEN = userSessionToken;
+      }
+      const apiUrl = process.env.API_PUBLIC_URL || process.env.OPTIO_API_URL || "";
+      if (apiUrl) {
+        passthroughEnv.OPTIO_API_URL = apiUrl;
+      }
+
       const script = [
         "set -e",
         // Wait for repo to be ready
         "for i in $(seq 1 30); do [ -f /workspace/.ready ] && break; sleep 1; done",
         '[ -f /workspace/.ready ] || { echo "Repo not ready"; exit 1; }',
         `cd "${worktreePath}"`,
-        // Set auth env vars
+        // Set auth env vars for the Claude process
         ...Object.entries(authEnv).map(([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`),
+        // Set auth passthrough env vars for Optio API calls
+        ...Object.entries(passthroughEnv).map(
+          ([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`,
+        ),
         // Run claude in one-shot prompt mode with streaming JSON output
         `claude -p '${escapedPrompt}' ${modelFlag} --output-format stream-json --verbose --dangerously-skip-permissions 2>&1 || true`,
       ].join("\n");
