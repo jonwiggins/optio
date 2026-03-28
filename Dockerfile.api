@@ -15,8 +15,8 @@ COPY packages/container-runtime/package.json packages/container-runtime/tsconfig
 COPY packages/agent-adapters/package.json packages/agent-adapters/tsconfig.json packages/agent-adapters/
 COPY packages/ticket-providers/package.json packages/ticket-providers/tsconfig.json packages/ticket-providers/
 
-# Install production dependencies only
-RUN pnpm install --frozen-lockfile --prod
+# Install production dependencies only (--ignore-scripts avoids husky prepare hook)
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 
 # ---- Runtime stage ----
 FROM node:22-slim
