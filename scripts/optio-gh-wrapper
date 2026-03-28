@@ -1,0 +1,5 @@
+#!/bin/bash
+# Wrapper for gh CLI — fetches a fresh GitHub token before each invocation.
+# Intended to be called as an alias/function, not as a replacement binary.
+export GITHUB_TOKEN=$(curl -sf -H "Authorization: Bearer ${OPTIO_CREDENTIAL_SECRET}" "${OPTIO_GIT_CREDENTIAL_URL}" | jq -r '.token')
+exec /usr/bin/gh "$@"

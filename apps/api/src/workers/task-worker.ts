@@ -22,6 +22,8 @@ import * as repoPool from "../services/repo-pool-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
+import { isGitHubAppConfigured } from "../services/github-app-service.js";
+import { getCredentialSecret } from "../routes/github-app.js";
 import { logger } from "../logger.js";
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -319,7 +321,26 @@ export function startTaskWorker() {
           task.repoUrl,
           taskWorkspaceId,
         );
-        const allEnv = { ...agentConfig.env, ...resolvedSecrets };
+        const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
+
+        // Inject credential URLs for dynamic GitHub token resolution.
+        // OPTIO_API_INTERNAL_URL is the K8s service URL (set by Helm chart).
+        // Falls back to localhost for local dev where API_HOST is the bind address.
+        const apiInternalUrl =
+          process.env.OPTIO_API_INTERNAL_URL ??
+          `http://localhost:${process.env.API_PORT ?? "4000"}`;
+        // Pod-level URL (no taskId): used by repo-init.sh for git clone with installation token
+        allEnv.OPTIO_GIT_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials`;
+        // Task-level URL (with taskId): injected at exec time for user-scoped git operations
+        allEnv.OPTIO_GIT_TASK_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials?taskId=${task.id}`;
+        // Shared secret for authenticating credential requests from pods
+        allEnv.OPTIO_CREDENTIAL_SECRET = getCredentialSecret();
+
+        // Only inject static GITHUB_TOKEN when GitHub App is not configured
+        // and the credential helper scripts may not be available (old images)
+        if (isGitHubAppConfigured() && allEnv.GITHUB_TOKEN) {
+          delete allEnv.GITHUB_TOKEN;
+        }
 
         // Force-restart: tell the exec script to use the existing PR branch
         if (restartFromBranch) {
@@ -366,6 +387,27 @@ export function startTaskWorker() {
           }
         }
 
+        // Split env into pod-level (for repo-init.sh) and task-level (for exec).
+        // Pod env must NOT contain user-specific secrets (API keys, OAuth tokens)
+        // since the pod is shared across users. Secrets are only in task exec env.
+        const podEnv: Record<string, string> = {
+          OPTIO_GIT_CREDENTIAL_URL: allEnv.OPTIO_GIT_CREDENTIAL_URL,
+          OPTIO_CREDENTIAL_SECRET: allEnv.OPTIO_CREDENTIAL_SECRET,
+          ...(allEnv.GITHUB_TOKEN ? { GITHUB_TOKEN: allEnv.GITHUB_TOKEN } : {}),
+          ...(process.env.GITHUB_APP_BOT_NAME
+            ? { GITHUB_APP_BOT_NAME: process.env.GITHUB_APP_BOT_NAME }
+            : {}),
+          ...(process.env.GITHUB_APP_BOT_EMAIL
+            ? { GITHUB_APP_BOT_EMAIL: process.env.GITHUB_APP_BOT_EMAIL }
+            : {}),
+          ...(allEnv.OPTIO_EXTRA_PACKAGES
+            ? { OPTIO_EXTRA_PACKAGES: allEnv.OPTIO_EXTRA_PACKAGES }
+            : {}),
+          ...(allEnv.OPTIO_SETUP_COMMANDS
+            ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
+            : {}),
+        };
+
         // Get or create a repo pod (with multi-pod scheduling)
         log.info("Getting repo pod");
         const isRetry = (task.retryCount ?? 0) > 0;
@@ -375,7 +417,7 @@ export function startTaskWorker() {
         const pod = await repoPool.getOrCreateRepoPod(
           task.repoUrl,
           task.repoBranch,
-          allEnv,
+          podEnv,
           imageConfig,
           {
             preferredPodId: isRetry ? ((task as any).lastPodId ?? undefined) : undefined,

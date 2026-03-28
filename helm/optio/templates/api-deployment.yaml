@@ -60,11 +60,17 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ .Release.Name }}-config
+            {{- if .Values.github.app.existingSecret }}
+            - secretRef:
+                name: {{ .Values.github.app.existingSecret }}
+            {{- end }}
           env:
             - name: API_PORT
               value: {{ .Values.api.port | quote }}
             - name: API_HOST
               value: "0.0.0.0"
+            - name: OPTIO_API_INTERNAL_URL
+              value: "http://{{ .Release.Name }}-api:{{ .Values.api.port }}"
             - name: NODE_ENV
               value: "production"
             - name: LOG_LEVEL

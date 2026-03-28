@@ -226,6 +226,35 @@ webhook:
   githubSecret: ""  # Generate with: openssl rand -hex 32. Must match GitHub's webhook config.
 
 # ──────────────────────────────────────────────────────────────────────────────
+# GitHub App (recommended — replaces OAuth App + PAT for GitHub operations)
+# Register at https://github.com/organizations/{org}/settings/apps
+# Required permissions: Contents R/W, Pull Requests R/W, Issues R/W, Checks R, Metadata R
+# ──────────────────────────────────────────────────────────────────────────────
+github:
+  app:
+    # IMPORTANT: id and installationId MUST be quoted strings in your values file.
+    # Unquoted large integers are silently truncated by YAML float parsing.
+    # Correct:   id: "123456"
+    # Wrong:     id: 123456
+    id: ""                # App ID (quoted string)
+    clientId: ""          # Client ID (for user OAuth login flow)
+    clientSecret: ""      # Client secret (for user OAuth login flow)
+    installationId: ""    # Installation ID (quoted string)
+    privateKey: ""        # PEM private key (for server-side installation tokens)
+    # Git commit author for agent commits. Use the GitHub App's bot identity
+    # so commits show properly in the GitHub UI.
+    # Format: "{app-name}[bot]" and "{app-id}+{app-slug}[bot]@users.noreply.github.com"
+    # Find these on your app's settings page at github.com/settings/apps/{slug}
+    botName: ""           # e.g. "my-optio-app[bot]"
+    botEmail: ""          # e.g. "123456+my-optio-app[bot]@users.noreply.github.com"
+    # Use an existing K8s Secret instead of the values above. The secret must
+    # contain keys: GITHUB_APP_ID, GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET,
+    # GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY.
+    # Optionally also: GITHUB_APP_BOT_NAME, GITHUB_APP_BOT_EMAIL.
+    # Useful with external-secrets-operator, sealed-secrets, or vault-injector.
+    existingSecret: ""
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Secrets encryption
 # REQUIRED. Generate with: openssl rand -hex 32
 # ──────────────────────────────────────────────────────────────────────────────

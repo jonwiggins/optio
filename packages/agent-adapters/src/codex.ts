@@ -42,7 +42,7 @@ export class CodexAdapter implements AgentAdapter {
     availableSecrets: string[],
     codexAuthMode?: CodexAuthMode,
   ): { valid: boolean; missing: string[] } {
-    const required: string[] = ["GITHUB_TOKEN"];
+    const required: string[] = [];
     // In app-server mode, no OpenAI API key is needed — the CLI connects to
     // a local app-server endpoint that handles auth via the user's ChatGPT plan.
     if (codexAuthMode !== "app-server") {
@@ -65,7 +65,7 @@ export class CodexAdapter implements AgentAdapter {
       OPTIO_BRANCH_NAME: `${TASK_BRANCH_PREFIX}${input.taskId}`,
     };
 
-    const requiredSecrets: string[] = ["GITHUB_TOKEN"];
+    const requiredSecrets: string[] = [];
 
     if (input.codexAuthMode === "app-server") {
       env.OPTIO_CODEX_AUTH_MODE = "app-server";

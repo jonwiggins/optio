@@ -15,44 +15,26 @@ describe("CodexAdapter", () => {
   });
 
   describe("validateSecrets", () => {
-    it("returns valid when both secrets are present", () => {
-      const result = adapter.validateSecrets(["OPENAI_API_KEY", "GITHUB_TOKEN"]);
+    it("returns valid when OPENAI_API_KEY is present", () => {
+      const result = adapter.validateSecrets(["OPENAI_API_KEY"]);
       expect(result.valid).toBe(true);
       expect(result.missing).toEqual([]);
     });
 
     it("reports missing OPENAI_API_KEY", () => {
-      const result = adapter.validateSecrets(["GITHUB_TOKEN"]);
-      expect(result.valid).toBe(false);
-      expect(result.missing).toContain("OPENAI_API_KEY");
-    });
-
-    it("reports missing GITHUB_TOKEN", () => {
-      const result = adapter.validateSecrets(["OPENAI_API_KEY"]);
-      expect(result.valid).toBe(false);
-      expect(result.missing).toContain("GITHUB_TOKEN");
-    });
-
-    it("reports both missing when empty", () => {
       const result = adapter.validateSecrets([]);
       expect(result.valid).toBe(false);
-      expect(result.missing).toEqual(["GITHUB_TOKEN", "OPENAI_API_KEY"]);
+      expect(result.missing).toEqual(["OPENAI_API_KEY"]);
     });
 
     it("does not require OPENAI_API_KEY in app-server mode", () => {
-      const result = adapter.validateSecrets(["GITHUB_TOKEN"], "app-server");
+      const result = adapter.validateSecrets([], "app-server");
       expect(result.valid).toBe(true);
       expect(result.missing).toEqual([]);
     });
 
-    it("still requires GITHUB_TOKEN in app-server mode", () => {
-      const result = adapter.validateSecrets([], "app-server");
-      expect(result.valid).toBe(false);
-      expect(result.missing).toEqual(["GITHUB_TOKEN"]);
-    });
-
     it("requires OPENAI_API_KEY in api-key mode", () => {
-      const result = adapter.validateSecrets(["GITHUB_TOKEN"], "api-key");
+      const result = adapter.validateSecrets([], "api-key");
       expect(result.valid).toBe(false);
       expect(result.missing).toContain("OPENAI_API_KEY");
     });
@@ -114,8 +96,7 @@ describe("CodexAdapter", () => {
 
     it("requires correct secrets in api-key mode", () => {
       const config = adapter.buildContainerConfig(baseInput);
-      expect(config.requiredSecrets).toContain("OPENAI_API_KEY");
-      expect(config.requiredSecrets).toContain("GITHUB_TOKEN");
+      expect(config.requiredSecrets).toEqual(["OPENAI_API_KEY"]);
     });
 
     it("does not require OPENAI_API_KEY in app-server mode", () => {
@@ -124,7 +105,7 @@ describe("CodexAdapter", () => {
         codexAuthMode: "app-server",
         codexAppServerUrl: "ws://localhost:3900/v1/connect",
       });
-      expect(config.requiredSecrets).toContain("GITHUB_TOKEN");
+      expect(config.requiredSecrets).toEqual([]);
       expect(config.requiredSecrets).not.toContain("OPENAI_API_KEY");
     });
 

@@ -506,6 +506,18 @@ export async function execTaskInRepoPod(
     `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
     `[ -f /workspace/.ready ] || { echo "[optio] ERROR: repo not ready after 120s"; exit 1; }`,
     `echo "[optio] Repo ready"`,
+    // Use task-scoped credential URL for git operations (user-scoped token).
+    // Override the pod-level URL which returns an installation token.
+    `if [ -n "\${OPTIO_GIT_TASK_CREDENTIAL_URL:-}" ]; then`,
+    `  export OPTIO_GIT_CREDENTIAL_URL="\${OPTIO_GIT_TASK_CREDENTIAL_URL}"`,
+    `fi`,
+    // Set up gh CLI wrapper with PATH prepend (no root required)
+    `if [ -f /usr/local/bin/optio-gh-wrapper ]; then`,
+    `  mkdir -p /home/agent/.local/bin`,
+    `  cp /usr/local/bin/optio-gh-wrapper /home/agent/.local/bin/gh 2>/dev/null || true`,
+    `  chmod +x /home/agent/.local/bin/gh 2>/dev/null || true`,
+    `  export PATH="/home/agent/.local/bin:$PATH"`,
+    `fi`,
     `ENV_FRESH="true"`,
     `[ -f /home/agent/.optio-env-ready ] && ENV_FRESH="false"`,
     `export ENV_FRESH`,
@@ -523,6 +535,13 @@ export async function execTaskInRepoPod(
     `flock -u 9`,
     `exec 9>&-`,
     `cd /workspace/tasks/${taskId}`,
+    // Configure git at worktree scope so concurrent tasks don't interfere
+    `if [ -n "\${OPTIO_GIT_CREDENTIAL_URL:-}" ] && [ -f /usr/local/bin/optio-git-credential ]; then`,
+    `  git config --local credential.helper '/usr/local/bin/optio-git-credential'`,
+    `  echo "[optio] Worktree credential helper configured"`,
+    `fi`,
+    `git config --local user.name "\${GITHUB_APP_BOT_NAME:-Optio Agent}"`,
+    `git config --local user.email "\${GITHUB_APP_BOT_EMAIL:-optio-agent@noreply.github.com}"`,
     `echo "${runToken}" > /workspace/tasks/${taskId}/.optio-run-token`,
     `export OPTIO_TASK_ID="${taskId}"`,
     `if [ -n "\${OPTIO_SETUP_FILES:-}" ]; then`,

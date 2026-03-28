@@ -94,6 +94,7 @@ export async function taskTemplateRoutes(app: FastifyInstance) {
       priority: overrides.priority ?? template.priority,
       maxRetries: overrides.maxRetries,
       metadata: overrides.metadata ?? (template.metadata as Record<string, unknown> | undefined),
+      createdBy: req.user?.id,
     });
 
     await taskService.transitionTask(task.id, TaskState.QUEUED, "task_from_template");

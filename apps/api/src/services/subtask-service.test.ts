@@ -485,9 +485,9 @@ describe("subtask-service", () => {
         }),
       }));
 
-      // Mock secret retrieval for GITHUB_TOKEN
-      vi.doMock("./secret-service.js", () => ({
-        retrieveSecret: vi.fn().mockResolvedValue("gh-token-123"),
+      // Mock github-token-service for token retrieval
+      vi.doMock("./github-token-service.js", () => ({
+        getGitHubToken: vi.fn().mockResolvedValue("gh-token-123"),
       }));
 
       // Mock fetch for merge API call

@@ -4,12 +4,13 @@ set -euo pipefail
 echo "[optio] Initializing repo pod"
 echo "[optio] Repo: ${OPTIO_REPO_URL} (branch: ${OPTIO_REPO_BRANCH})"
 
-# Configure git
-git config --global user.name "Optio Agent"
-git config --global user.email "optio-agent@noreply.github.com"
+# Configure git author for initial clone (overridden per-worktree at task exec time)
+git config --global user.name "${GITHUB_APP_BOT_NAME:-Optio Agent}"
+git config --global user.email "${GITHUB_APP_BOT_EMAIL:-optio-agent@noreply.github.com}"
 
-# When secret proxy is enabled, trust the Envoy-generated CA certificate
-# and configure git/gh to use the proxy instead of raw credentials.
+# Set up GitHub credentials for initial clone.
+# Priority: Envoy secret proxy > dynamic credential helper > static PAT fallback.
+# Dynamic credential helpers are re-configured per-task at exec time by the API server.
 if [ "${OPTIO_SECRET_PROXY:-}" = "true" ]; then
   echo "[optio] Secret proxy mode — configuring CA trust and proxy settings"
 
@@ -26,18 +27,20 @@ if [ "${OPTIO_SECRET_PROXY:-}" = "true" ]; then
   git config --global http.proxy "${HTTP_PROXY:-http://127.0.0.1:10080}"
   git config --global https.proxy "${HTTPS_PROXY:-http://127.0.0.1:10080}"
   echo "[optio] Git proxy configured"
-
-  # Configure gh CLI to use the proxy (it respects HTTPS_PROXY env var)
   echo "[optio] Secret proxy configured — credentials are injected by the Envoy sidecar"
 
-# Standard credential setup (no proxy)
+elif [ -n "${OPTIO_GIT_CREDENTIAL_URL:-}" ] && [ -f /usr/local/bin/optio-git-credential ]; then
+  # Dynamic credential helper — fetches token from Optio API
+  git config --global credential.helper '/usr/local/bin/optio-git-credential'
+  echo "[optio] Dynamic git credential helper configured"
+
 elif [ -n "${GITHUB_TOKEN:-}" ]; then
+  # Static PAT fallback
   git config --global credential.helper store
   echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
   chmod 600 ~/.git-credentials
-  echo "[optio] Git credentials configured"
+  echo "[optio] Git credentials configured (static token)"
 
-  # Also set up gh CLI (suppress interactive output)
   echo "${GITHUB_TOKEN}" | gh auth login --with-token 2>/dev/null || true
   echo "[optio] GitHub CLI configured"
 fi

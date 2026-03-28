@@ -71,6 +71,7 @@ export interface CreateTaskInput {
   maxRetries?: number;
   priority?: number;
   dependsOn?: string[];
+  createdBy?: string;
 }
 
 export interface WorkflowStep {

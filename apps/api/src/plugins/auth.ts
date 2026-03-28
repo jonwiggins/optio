@@ -42,7 +42,14 @@ const SESSION_COOKIE_NAME = "optio_session";
 const WORKSPACE_HEADER = "x-workspace-id";
 
 /** Routes that never require authentication. */
-const PUBLIC_ROUTES = ["/api/health", "/api/auth/", "/api/setup/", "/api/webhooks/", "/ws/"];
+const PUBLIC_ROUTES = [
+  "/api/health",
+  "/api/auth/",
+  "/api/setup/",
+  "/api/webhooks/",
+  "/ws/",
+  "/api/internal/",
+];
 
 function isPublicRoute(url: string): boolean {
   return PUBLIC_ROUTES.some((prefix) => url.startsWith(prefix));
