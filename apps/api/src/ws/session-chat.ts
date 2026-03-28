@@ -9,6 +9,8 @@ import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import { publishSessionEvent } from "../services/event-bus.js";
 import type { ExecSession } from "@optio/shared";
 
+const SESSION_COOKIE_NAME = "optio_session";
+
 /**
  * Session chat WebSocket handler.
  *
@@ -30,6 +32,10 @@ export async function sessionChatWs(app: FastifyInstance) {
   app.get("/ws/sessions/:sessionId/chat", { websocket: true }, async (socket, req) => {
     const { sessionId } = req.params as { sessionId: string };
     const log = logger.child({ sessionId, ws: "session-chat" });
+
+    // Extract the user's session token for auth passthrough.
+    // The agent can use this token to make API calls as the requesting user.
+    const userSessionToken = extractSessionToken(req);
 
     const session = await getSession(sessionId);
     if (!session) {
@@ -73,6 +79,17 @@ export async function sessionChatWs(app: FastifyInstance) {
 
     // Resolve auth env vars for the claude process
     const authEnv = await buildAuthEnv(log);
+
+    // Auth passthrough: inject the user's session token so the agent's HTTP
+    // calls to the Optio API are attributed to the requesting user.
+    if (userSessionToken) {
+      authEnv.OPTIO_SESSION_TOKEN = userSessionToken;
+    }
+    // Provide the API base URL so the agent knows where to send requests
+    const apiPublicUrl = process.env.API_PUBLIC_URL ?? process.env.OPTIO_API_URL;
+    if (apiPublicUrl) {
+      authEnv.OPTIO_API_URL = apiPublicUrl;
+    }
 
     const send = (msg: Record<string, unknown>) => {
       if (socket.readyState === 1) {
@@ -247,6 +264,34 @@ export async function sessionChatWs(app: FastifyInstance) {
       }
     });
   });
+}
+
+/**
+ * Extract the user's session token from the WebSocket upgrade request.
+ * Checks Bearer header, session cookie, and query param (in that order).
+ */
+function extractSessionToken(req: {
+  headers: Record<string, string | string[] | undefined>;
+  query: unknown;
+}): string | undefined {
+  // Bearer header
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+
+  // Session cookie
+  const cookieHeader = typeof req.headers.cookie === "string" ? req.headers.cookie : undefined;
+  if (cookieHeader) {
+    const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]*)`));
+    if (match) return decodeURIComponent(match[1]);
+  }
+
+  // Query param (WebSocket connections)
+  const token = (req.query as Record<string, string>)?.token;
+  if (token) return token;
+
+  return undefined;
 }
 
 /** Build auth environment variables for the claude process in the pod. */
