@@ -42,14 +42,21 @@ if [ "$REBUILD_AGENTS" = true ]; then
   docker build -t optio-full:latest -f images/full.Dockerfile . -q
 fi
 
+# Rebuild the Optio operations assistant image if missing
+if ! docker image inspect "optio-optio:latest" &>/dev/null; then
+  echo "   Rebuilding optio-optio (operations assistant)..."
+  docker build -t optio-optio:latest -f Dockerfile.optio . -q
+fi
+
 echo "   Images built."
 
 # Rolling restart
 echo "[4/4] Restarting deployments..."
 helm upgrade optio helm/optio -n optio --reuse-values
-kubectl rollout restart deployment/optio-api deployment/optio-web -n optio
+kubectl rollout restart deployment/optio-api deployment/optio-web deployment/optio-optio -n optio
 kubectl rollout status deployment/optio-api -n optio --timeout=60s 2>/dev/null || true
 kubectl rollout status deployment/optio-web -n optio --timeout=60s 2>/dev/null || true
+kubectl rollout status deployment/optio-optio -n optio --timeout=60s 2>/dev/null || true
 
 echo ""
 echo "=== Update Complete ==="

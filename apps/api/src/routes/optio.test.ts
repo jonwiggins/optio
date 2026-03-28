@@ -124,4 +124,28 @@ describe("GET /api/optio/status", () => {
     expect(body.ready).toBe(false);
     expect(body.podName).toBeNull();
   });
+
+  it("caches K8s API result for subsequent requests", async () => {
+    mockListNamespacedPod.mockResolvedValue({
+      items: [
+        {
+          metadata: { name: "optio-optio-abc123" },
+          status: {
+            phase: "Running",
+            conditions: [{ type: "Ready", status: "True" }],
+          },
+        },
+      ],
+    });
+
+    // First request hits the K8s API
+    const res1 = await app.inject({ method: "GET", url: "/api/optio/status" });
+    expect(res1.json().ready).toBe(true);
+    expect(mockListNamespacedPod).toHaveBeenCalledTimes(1);
+
+    // Second request within the TTL should use cache
+    const res2 = await app.inject({ method: "GET", url: "/api/optio/status" });
+    expect(res2.json().ready).toBe(true);
+    expect(mockListNamespacedPod).toHaveBeenCalledTimes(1);
+  });
 });
