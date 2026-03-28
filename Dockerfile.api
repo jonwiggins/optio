@@ -1,4 +1,5 @@
-FROM node:22-slim
+# ---- Dependencies stage ----
+FROM node:22-slim AS deps
 
 RUN corepack enable && corepack prepare pnpm@10 --activate
 
@@ -14,8 +15,20 @@ COPY packages/container-runtime/package.json packages/container-runtime/tsconfig
 COPY packages/agent-adapters/package.json packages/agent-adapters/tsconfig.json packages/agent-adapters/
 COPY packages/ticket-providers/package.json packages/ticket-providers/tsconfig.json packages/ticket-providers/
 
-# Install dependencies (production only to avoid vitest/vite type issues)
-RUN pnpm install --frozen-lockfile --prod=false
+# Install production dependencies only
+RUN pnpm install --frozen-lockfile --prod
+
+# ---- Runtime stage ----
+FROM node:22-slim
+
+# Install tsx globally for TypeScript execution at runtime
+# (workspace packages export .ts source, so the API runs via tsx)
+RUN npm install -g tsx
+
+WORKDIR /app
+
+# Copy production dependencies from deps stage
+COPY --from=deps /app/ ./
 
 # Copy source
 COPY packages/ packages/
@@ -23,5 +36,10 @@ COPY apps/api/ apps/api/
 
 EXPOSE 4000
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://localhost:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+
+USER node
+
 WORKDIR /app/apps/api
-CMD ["./node_modules/.bin/tsx", "src/index.ts"]
+CMD ["tsx", "src/index.ts"]

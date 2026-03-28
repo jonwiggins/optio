@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   transpilePackages: ["@optio/shared"],
   webpack: (config) => {
     // Resolve .js imports to .ts files in workspace packages

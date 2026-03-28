@@ -34,7 +34,7 @@ RUN chmod +x /opt/optio/entrypoint.sh /opt/optio/repo-init.sh
 
 RUN useradd -m -s /bin/bash agent \
     && chown -R agent:agent /workspace \
-    && echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    && echo "agent ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt" >> /etc/sudoers
 USER agent
 WORKDIR /workspace
 
