@@ -24,6 +24,7 @@ import {
 import { SessionTerminal } from "@/components/session-terminal";
 import { SessionChat } from "@/components/session-chat";
 import { SplitPane } from "@/components/split-pane";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -276,15 +277,19 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             leftLabel="Agent Chat"
             rightLabel="Terminal"
             left={
-              <SessionChat
-                sessionId={id}
-                onCostUpdate={handleCostUpdate}
-                onSendToAgent={handleSendToAgentRegister}
-              />
+              <ErrorBoundary label="Session chat">
+                <SessionChat
+                  sessionId={id}
+                  onCostUpdate={handleCostUpdate}
+                  onSendToAgent={handleSendToAgentRegister}
+                />
+              </ErrorBoundary>
             }
             right={
               <div className="h-full flex flex-col">
-                <SessionTerminal sessionId={id} />
+                <ErrorBoundary label="Terminal">
+                  <SessionTerminal sessionId={id} />
+                </ErrorBoundary>
                 {/* PR cards inline below terminal when present */}
                 {prs.length > 0 && (
                   <div className="shrink-0 border-t border-border bg-bg px-3 py-2">

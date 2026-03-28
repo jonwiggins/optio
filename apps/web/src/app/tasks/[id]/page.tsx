@@ -9,6 +9,7 @@ import { PipelineTimeline } from "@/components/pipeline-timeline";
 import { ActivityFeed } from "@/components/activity-feed";
 import { StateBadge } from "@/components/state-badge";
 import { api } from "@/lib/api-client";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { classifyError } from "@optio/shared";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
@@ -801,7 +802,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
 
           {/* Log content via LogViewer */}
           <div className="flex-1 overflow-hidden">
-            <LogViewer taskId={id} />
+            <ErrorBoundary label="Log viewer">
+              <LogViewer taskId={id} />
+            </ErrorBoundary>
           </div>
 
           {/* Resume / interact bar */}
@@ -882,9 +885,13 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
             </div>
             <div className="flex-1 overflow-auto p-3">
               {sidebarTab === "pipeline" ? (
-                <PipelineTimeline task={task} events={events} subtasks={subtasks} />
+                <ErrorBoundary label="Pipeline timeline">
+                  <PipelineTimeline task={task} events={events} subtasks={subtasks} />
+                </ErrorBoundary>
               ) : (
-                <ActivityFeed taskId={id} />
+                <ErrorBoundary label="Activity feed">
+                  <ActivityFeed taskId={id} />
+                </ErrorBoundary>
               )}
             </div>
           </div>
