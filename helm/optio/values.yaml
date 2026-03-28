@@ -1,6 +1,11 @@
 # Optio Helm Chart Values
+#
+# For production deployments, see values.production.yaml for recommended overrides.
+# Required values are marked with "# REQUIRED" below.
 
+# ──────────────────────────────────────────────────────────────────────────────
 # API Server
+# ──────────────────────────────────────────────────────────────────────────────
 api:
   image:
     repository: optio-api
@@ -25,6 +30,20 @@ api:
   # "hard" = requiredDuringSchedulingIgnoredDuringExecution
   # ""     = disabled
   antiAffinity: soft
+  # Pod disruption budget. Enable when running multiple replicas to ensure
+  # availability during voluntary disruptions (rolling updates, node drains).
+  pdb:
+    enabled: false
+    # Set ONE of minAvailable or maxUnavailable (not both).
+    minAvailable: ""         # e.g. 1 or "50%"
+    maxUnavailable: 1        # Used when minAvailable is empty
+  # Horizontal pod autoscaler. Requires metrics-server in the cluster.
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: ""  # Optional, e.g. 80
   # Worker scaling: BullMQ workers (task-worker, pr-watcher, repo-cleanup,
   # ticket-sync) use Redis-backed queues with built-in leader election via
   # BullMQ's concurrency model. Each worker type processes jobs independently,
@@ -32,7 +51,9 @@ api:
   # job is delivered to exactly one worker instance. You can safely increase
   # api.replicas for high availability without risking duplicate job processing.
 
+# ──────────────────────────────────────────────────────────────────────────────
 # Web UI
+# ──────────────────────────────────────────────────────────────────────────────
 web:
   image:
     repository: optio-web
@@ -52,8 +73,22 @@ web:
       memory: 512Mi
   # Pod anti-affinity (same options as api.antiAffinity)
   antiAffinity: soft
+  # Pod disruption budget (same options as api.pdb)
+  pdb:
+    enabled: false
+    minAvailable: ""
+    maxUnavailable: 1
+  # Horizontal pod autoscaler (same options as api.autoscaling)
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: ""
 
+# ──────────────────────────────────────────────────────────────────────────────
 # Agent containers
+# ──────────────────────────────────────────────────────────────────────────────
 agent:
   image:
     repository: optio-base  # Local dev default; override for registry (e.g. ghcr.io/org/optio-agent-node)
@@ -78,9 +113,11 @@ agent:
     accessModes:
       - ReadWriteOnce
 
-# PostgreSQL
+# ──────────────────────────────────────────────────────────────────────────────
+# PostgreSQL (built-in)
+# Set enabled=false and configure externalDatabase.url for managed Postgres.
+# ──────────────────────────────────────────────────────────────────────────────
 postgresql:
-  # Set to false to use an external database
   enabled: true
   image:
     repository: postgres
@@ -97,13 +134,14 @@ postgresql:
   auth:
     database: optio
     username: optio
-    # IMPORTANT: Override this in production! The chart will fail to install
-    # if this is left as the default value and auth is enabled.
+    # REQUIRED when auth is enabled. Override this in production.
     password: ""
 
-# Redis
+# ──────────────────────────────────────────────────────────────────────────────
+# Redis (built-in)
+# Set enabled=false and configure externalRedis.url for managed Redis.
+# ──────────────────────────────────────────────────────────────────────────────
 redis:
-  # Set to false to use an external Redis
   enabled: true
   image:
     repository: redis
@@ -116,28 +154,36 @@ redis:
       cpu: 250m
       memory: 256Mi
 
-# External database (used when postgresql.enabled=false)
+# ──────────────────────────────────────────────────────────────────────────────
+# External services (used when built-in PostgreSQL/Redis are disabled)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# REQUIRED when postgresql.enabled=false
 externalDatabase:
   url: ""  # e.g., postgres://user:pass@host:5432/optio
 
-# External Redis (used when redis.enabled=false)
+# REQUIRED when redis.enabled=false
 externalRedis:
   url: ""  # e.g., redis://host:6379
 
-# Public URLs — required for OAuth callbacks and cross-origin cookie handling.
-# Set these to the externally-reachable URLs of the API and web services.
-# When using Ingress, derive from the ingress host (e.g. https://optio.example.com).
-# For local dev with NodePort, use http://localhost:<nodePort>.
+# ──────────────────────────────────────────────────────────────────────────────
+# Public URLs
+# REQUIRED when auth is enabled. Set to the externally-reachable URLs of the
+# API and web services. Used for OAuth callbacks and cross-origin cookies.
+# ──────────────────────────────────────────────────────────────────────────────
 publicUrl:
   api: ""   # e.g. https://optio.example.com or http://localhost:30400
   web: ""   # e.g. https://optio.example.com or http://localhost:30310
 
+# ──────────────────────────────────────────────────────────────────────────────
 # Authentication
+# When auth.disabled=false (the default), at least one OAuth provider and
+# publicUrl.api/web are REQUIRED.
+# ──────────────────────────────────────────────────────────────────────────────
 auth:
   # Set to true to disable authentication (NOT recommended for production).
-  # When false, at least one OAuth provider must be configured.
   disabled: false
-  # OAuth provider credentials
+  # OAuth provider credentials — configure at least one when auth is enabled.
   github:
     clientId: ""
     clientSecret: ""
@@ -149,15 +195,22 @@ auth:
     clientSecret: ""
     # baseUrl: https://gitlab.com  # Self-hosted GitLab URL
 
+# ──────────────────────────────────────────────────────────────────────────────
 # GitHub webhook signature validation
+# ──────────────────────────────────────────────────────────────────────────────
 webhook:
   githubSecret: ""  # Generate with: openssl rand -hex 32. Must match GitHub's webhook config.
 
+# ──────────────────────────────────────────────────────────────────────────────
 # Secrets encryption
+# REQUIRED. Generate with: openssl rand -hex 32
+# ──────────────────────────────────────────────────────────────────────────────
 encryption:
-  key: ""  # Generate with: openssl rand -hex 32. Required.
+  key: ""
 
+# ──────────────────────────────────────────────────────────────────────────────
 # Ingress
+# ──────────────────────────────────────────────────────────────────────────────
 ingress:
   enabled: false
   className: nginx
@@ -188,11 +241,15 @@ ingress:
   #    hosts:
   #      - optio.example.com
 
+# ──────────────────────────────────────────────────────────────────────────────
 # Namespace
+# ──────────────────────────────────────────────────────────────────────────────
 namespace: optio
 
-# Namespace resource quotas. Enable to prevent rogue agents from consuming
-# all cluster resources. Set to false or leave limits empty to disable.
+# ──────────────────────────────────────────────────────────────────────────────
+# Namespace resource quotas
+# Enable to prevent rogue agents from consuming all cluster resources.
+# ──────────────────────────────────────────────────────────────────────────────
 resourceQuota:
   enabled: false
   hard:
@@ -203,14 +260,18 @@ resourceQuota:
     pods: "50"
     persistentvolumeclaims: "30"
 
+# ──────────────────────────────────────────────────────────────────────────────
 # Service account
+# ──────────────────────────────────────────────────────────────────────────────
 serviceAccount:
   create: true
   name: optio
   annotations: {}
 
+# ──────────────────────────────────────────────────────────────────────────────
 # Image pull secrets for pulling from private registries.
 # Each entry should be the name of an existing Kubernetes secret of type
 # kubernetes.io/dockerconfigjson in the target namespace.
+# ──────────────────────────────────────────────────────────────────────────────
 imagePullSecrets: []
 #  - name: my-registry-secret

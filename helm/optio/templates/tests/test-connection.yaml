@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-test-api
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test-api-health
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing API health endpoint..."
+          wget -qO- --timeout=10 http://{{ .Release.Name }}-api:{{ .Values.api.port }}/api/health || exit 1
+          echo "API health check passed."
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-test-web
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test-web-reachable
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing Web UI reachability..."
+          wget -qO- --timeout=10 http://{{ .Release.Name }}-web:{{ .Values.web.port }}/ || exit 1
+          echo "Web UI reachability check passed."
+{{- if .Values.redis.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-test-redis
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test-redis-ping
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing Redis connectivity..."
+          echo PING | nc -w 5 {{ .Release.Name }}-redis 6379 | grep -q PONG || exit 1
+          echo "Redis connectivity check passed."
+{{- end }}
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-test-postgres
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test-postgres-reachable
+      image: busybox:1.36
+      command: ['sh', '-c']
+      args:
+        - |
+          echo "Testing PostgreSQL connectivity..."
+          nc -z -w 5 {{ .Release.Name }}-postgres 5432 || exit 1
+          echo "PostgreSQL connectivity check passed."
+{{- end }}

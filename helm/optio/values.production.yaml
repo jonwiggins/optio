@@ -1,0 +1,120 @@
+# Optio Helm Chart — Recommended Production Values
+#
+# Usage:
+#   helm install optio helm/optio -n optio --create-namespace \
+#     -f helm/optio/values.production.yaml \
+#     --set encryption.key=<generated-key> \
+#     --set auth.github.clientId=<id> \
+#     --set auth.github.clientSecret=<secret> \
+#     --set externalDatabase.url=<postgres-url> \
+#     --set externalRedis.url=<redis-url> \
+#     --set publicUrl.api=https://optio-api.example.com \
+#     --set publicUrl.web=https://optio.example.com
+#
+# Generate encryption key: openssl rand -hex 32
+
+# --- API Server ---
+api:
+  replicas: 2
+  image:
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  antiAffinity: hard
+  # Pod disruption budget — keeps at least 1 replica during rolling updates
+  pdb:
+    enabled: true
+    minAvailable: 1
+  # Horizontal pod autoscaler
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# --- Web UI ---
+web:
+  replicas: 2
+  image:
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  antiAffinity: hard
+  pdb:
+    enabled: true
+    minAvailable: 1
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+# --- Agent containers ---
+agent:
+  image:
+    pullPolicy: IfNotPresent
+  imagePullPolicy: IfNotPresent
+
+# --- Use external managed database and Redis ---
+postgresql:
+  enabled: false
+redis:
+  enabled: false
+# Set via --set flags or a separate secrets file:
+# externalDatabase:
+#   url: "postgres://user:pass@host:5432/optio"
+# externalRedis:
+#   url: "redis://host:6379"
+
+# --- Authentication (required for production) ---
+auth:
+  disabled: false
+  # Configure at least one provider via --set flags:
+  # auth.github.clientId / auth.github.clientSecret
+  # auth.google.clientId / auth.google.clientSecret
+  # auth.gitlab.clientId / auth.gitlab.clientSecret
+
+# --- Ingress with TLS ---
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: 50m
+  certManager:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
+  hosts:
+    - host: optio.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: web
+        - path: /api
+          pathType: Prefix
+          service: api
+        - path: /ws
+          pathType: Prefix
+          service: api
+
+# --- Resource quotas to limit agent resource consumption ---
+resourceQuota:
+  enabled: true
+  hard:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+    limits.cpu: "40"
+    limits.memory: 80Gi
+    pods: "50"
+    persistentvolumeclaims: "30"
