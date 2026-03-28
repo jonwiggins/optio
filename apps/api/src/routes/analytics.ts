@@ -12,9 +12,12 @@ const costsQuerySchema = z.object({
 export async function analyticsRoutes(app: FastifyInstance) {
   // Cost analytics — aggregated cost data for the dashboard (member+)
   app.get("/api/analytics/costs", { preHandler: [requireRole("member")] }, async (req, reply) => {
-    const query = costsQuerySchema.parse(req.query);
-    const days = query.days;
-    const repoUrl = query.repoUrl || null;
+    const parsed = costsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.issues[0].message });
+    }
+    const days = parsed.data.days;
+    const repoUrl = parsed.data.repoUrl || null;
 
     const workspaceId = req.user?.workspaceId || null;
 

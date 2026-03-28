@@ -9,6 +9,34 @@ import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { requireRole } from "../plugins/auth.js";
 
+const listQuerySchema = z.object({
+  state: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(1000).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+const searchQuerySchema = z.object({
+  q: z.string().optional(),
+  state: z.string().optional(),
+  repoUrl: z.string().optional(),
+  agentType: z.string().optional(),
+  taskType: z.string().optional(),
+  costMin: z.string().optional(),
+  costMax: z.string().optional(),
+  createdAfter: z.string().optional(),
+  createdBefore: z.string().optional(),
+  author: z.string().optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(1000).optional(),
+});
+
+const logsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(10000).default(200),
+  offset: z.coerce.number().int().min(0).default(0),
+  search: z.string().optional(),
+  logType: z.string().optional(),
+});
+
 const createTaskSchema = z.object({
   title: z.string().min(1),
   prompt: z.string().min(1),
@@ -26,12 +54,14 @@ const createTaskSchema = z.object({
 export async function taskRoutes(app: FastifyInstance) {
   // List tasks
   app.get("/api/tasks", async (req, reply) => {
-    const query = req.query as { state?: string; limit?: string; offset?: string };
-    const limit = query.limit ? parseInt(query.limit, 10) : 50;
-    const offset = query.offset ? parseInt(query.offset, 10) : 0;
+    const parsed = listQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.issues[0].message });
+    }
+    const { state, limit, offset } = parsed.data;
     const workspaceId = req.user?.workspaceId ?? null;
     const taskList = await taskService.listTasks({
-      state: query.state,
+      state,
       limit,
       offset,
       workspaceId,
@@ -41,7 +71,11 @@ export async function taskRoutes(app: FastifyInstance) {
 
   // Search tasks with advanced filtering and cursor-based pagination
   app.get("/api/tasks/search", async (req, reply) => {
-    const query = req.query as Record<string, string | undefined>;
+    const parsed = searchQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.issues[0].message });
+    }
+    const query = parsed.data;
     const result = await taskService.searchTasks({
       q: query.q,
       state: query.state,
@@ -54,7 +88,7 @@ export async function taskRoutes(app: FastifyInstance) {
       createdBefore: query.createdBefore,
       author: query.author,
       cursor: query.cursor,
-      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      limit: query.limit,
       workspaceId: req.user?.workspaceId ?? null,
     });
     reply.send(result);
@@ -231,17 +265,16 @@ export async function taskRoutes(app: FastifyInstance) {
     if (wsId && task.workspaceId !== wsId) {
       return reply.status(404).send({ error: "Task not found" });
     }
-    const query = req.query as {
-      limit?: string;
-      offset?: string;
-      search?: string;
-      logType?: string;
-    };
+    const logsParsed = logsQuerySchema.safeParse(req.query);
+    if (!logsParsed.success) {
+      return reply.status(400).send({ error: logsParsed.error.issues[0].message });
+    }
+    const logsQuery = logsParsed.data;
     const logs = await taskService.getTaskLogs(id, {
-      limit: query.limit ? parseInt(query.limit, 10) : 200,
-      offset: query.offset ? parseInt(query.offset, 10) : 0,
-      search: query.search || undefined,
-      logType: query.logType || undefined,
+      limit: logsQuery.limit,
+      offset: logsQuery.offset,
+      search: logsQuery.search || undefined,
+      logType: logsQuery.logType || undefined,
     });
     reply.send({ logs });
   });

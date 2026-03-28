@@ -5,6 +5,13 @@ import * as sessionService from "../services/interactive-session-service.js";
 import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
 
+const listSessionsQuerySchema = z.object({
+  repoUrl: z.string().optional(),
+  state: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(1000).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 const createSessionSchema = z.object({
   repoUrl: z.string().url(),
 });
@@ -12,19 +19,18 @@ const createSessionSchema = z.object({
 export async function sessionRoutes(app: FastifyInstance) {
   // List sessions
   app.get("/api/sessions", async (req, reply) => {
-    const query = req.query as {
-      repoUrl?: string;
-      state?: string;
-      limit?: string;
-      offset?: string;
-    };
+    const parsed = listSessionsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.issues[0].message });
+    }
+    const { repoUrl, state, limit, offset } = parsed.data;
     const sessions = await sessionService.listSessions({
-      repoUrl: query.repoUrl,
-      state: query.state,
-      limit: query.limit ? parseInt(query.limit, 10) : 50,
-      offset: query.offset ? parseInt(query.offset, 10) : 0,
+      repoUrl,
+      state,
+      limit,
+      offset,
     });
-    const activeCount = await sessionService.getActiveSessionCount(query.repoUrl);
+    const activeCount = await sessionService.getActiveSessionCount(repoUrl);
     reply.send({ sessions, activeCount });
   });
 

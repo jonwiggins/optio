@@ -1,9 +1,14 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { KubeConfig, CoreV1Api, CustomObjectsApi } from "@kubernetes/client-node";
 import { db } from "../db/client.js";
 import { repoPods, tasks, podHealthEvents, repos } from "../db/schema.js";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { requireRole } from "../plugins/auth.js";
+
+const healthEventsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(1000).default(50),
+});
 
 function getK8sConfig() {
   const kc = new KubeConfig();
@@ -383,8 +388,11 @@ export async function clusterRoutes(app: FastifyInstance) {
     "/api/cluster/health-events",
     { preHandler: [requireRole("admin")] },
     async (req, reply) => {
-      const query = req.query as { limit?: string };
-      const limit = query.limit ? parseInt(query.limit, 10) : 50;
+      const parsed = healthEventsQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: parsed.error.issues[0].message });
+      }
+      const limit = parsed.data.limit;
       const events = await db
         .select()
         .from(podHealthEvents)
