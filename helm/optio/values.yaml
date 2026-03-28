@@ -87,6 +87,25 @@ web:
     targetMemoryUtilizationPercentage: ""
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Optio Operations Assistant Pod
+# A single always-on pod running the Optio conversational assistant.
+# It makes API calls on behalf of users — no repo checkout needed.
+# ──────────────────────────────────────────────────────────────────────────────
+optio:
+  enabled: true
+  image:
+    repository: optio-optio
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Agent containers
 # ──────────────────────────────────────────────────────────────────────────────
 agent:

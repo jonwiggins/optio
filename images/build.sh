@@ -7,28 +7,31 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "=== Building Optio Agent Images ==="
 
 # Base image (all others depend on this)
-echo "[1/7] Building optio-base..."
+echo "[1/8] Building optio-base..."
 docker build -t optio-base:latest -f "$SCRIPT_DIR/base.Dockerfile" "$ROOT_DIR"
 
 # Language-specific images (can be built in parallel)
-echo "[2/7] Building optio-node..."
+echo "[2/8] Building optio-node..."
 docker build -t optio-node:latest -f "$SCRIPT_DIR/node.Dockerfile" "$ROOT_DIR" &
 
-echo "[3/7] Building optio-python..."
+echo "[3/8] Building optio-python..."
 docker build -t optio-python:latest -f "$SCRIPT_DIR/python.Dockerfile" "$ROOT_DIR" &
 
-echo "[4/7] Building optio-go..."
+echo "[4/8] Building optio-go..."
 docker build -t optio-go:latest -f "$SCRIPT_DIR/go.Dockerfile" "$ROOT_DIR" &
 
-echo "[5/7] Building optio-rust..."
+echo "[5/8] Building optio-rust..."
 docker build -t optio-rust:latest -f "$SCRIPT_DIR/rust.Dockerfile" "$ROOT_DIR" &
 
-echo "[6/7] Building optio-dind..."
+echo "[6/8] Building optio-dind..."
 docker build -t optio-dind:latest -f "$SCRIPT_DIR/dind.Dockerfile" "$ROOT_DIR" &
+
+echo "[7/8] Building optio-optio (operations assistant)..."
+docker build -t optio-optio:latest -f "$ROOT_DIR/Dockerfile.optio" "$ROOT_DIR" &
 
 wait
 
-echo "[7/7] Building optio-full..."
+echo "[8/8] Building optio-full..."
 docker build -t optio-full:latest -f "$SCRIPT_DIR/full.Dockerfile" "$ROOT_DIR"
 
 # Tag optio-base as the default

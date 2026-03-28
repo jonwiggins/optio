@@ -1,0 +1,66 @@
+{{- if .Values.optio.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-optio
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: optio-assistant
+    {{- include "optio.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: optio-assistant
+  template:
+    metadata:
+      labels:
+        app: optio-assistant
+        optio.pod-role: optio
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: optio
+          image: "{{ .Values.optio.image.repository }}:{{ .Values.optio.image.tag }}"
+          imagePullPolicy: {{ .Values.optio.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: OPTIO_API_URL
+              value: "http://{{ .Release.Name }}-api:{{ .Values.api.port }}"
+            - name: OPTIO_POD_ROLE
+              value: "optio"
+          resources:
+            {{- toYaml .Values.optio.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "pgrep -f 'sleep infinity' > /dev/null"
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "pgrep -f 'sleep infinity' > /dev/null"
+            initialDelaySeconds: 3
+            periodSeconds: 10
+{{- end }}

@@ -1,0 +1,29 @@
+# Optio operations assistant pod.
+# Lightweight image: Claude Code + HTTP tools. No repo/language tooling needed.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Minimal system packages — only what an ops agent needs
+RUN apt-get update && apt-get install -y \
+    curl wget jq ca-certificates gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 (needed for Claude Code)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code
+RUN npm install -g @anthropic-ai/claude-code
+
+# Non-root user
+RUN useradd -m -s /bin/bash optio \
+    && mkdir -p /home/optio/.claude \
+    && chown -R optio:optio /home/optio
+
+USER optio
+WORKDIR /home/optio
+
+# The pod runs sleep infinity — the API server execs into it for chat sessions
+CMD ["sleep", "infinity"]
