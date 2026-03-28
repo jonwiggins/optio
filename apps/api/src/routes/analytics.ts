@@ -1,12 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import { sql } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "../db/client.js";
+
+const costsQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).optional().default(30),
+  repoUrl: z.string().optional(),
+});
 
 export async function analyticsRoutes(app: FastifyInstance) {
   // Cost analytics — aggregated cost data for the dashboard
   app.get("/api/analytics/costs", async (req, reply) => {
-    const query = req.query as { days?: string; repoUrl?: string };
-    const days = query.days ? parseInt(query.days, 10) : 30;
+    const query = costsQuerySchema.parse(req.query);
+    const days = query.days;
     const repoUrl = query.repoUrl || null;
 
     const workspaceId = req.user?.workspaceId || null;
@@ -14,7 +20,7 @@ export async function analyticsRoutes(app: FastifyInstance) {
     const repoFilter = repoUrl ? sql`AND repo_url = ${repoUrl}` : sql``;
     const wsFilter = workspaceId ? sql`AND workspace_id = ${workspaceId}` : sql``;
 
-    const dateFilter = sql`AND created_at >= NOW() - ${sql.raw(`INTERVAL '${days} days'`)}`;
+    const dateFilter = sql`AND created_at >= NOW() - INTERVAL '1 day' * ${days}`;
 
     // Total cost and task count
     const [totals] = await db.execute<{
@@ -41,8 +47,8 @@ export async function analyticsRoutes(app: FastifyInstance) {
         COALESCE(SUM(CAST(cost_usd AS NUMERIC)), 0) AS total_cost
       FROM tasks
       WHERE cost_usd IS NOT NULL
-        AND created_at >= NOW() - ${sql.raw(`INTERVAL '${days * 2} days'`)}
-        AND created_at < NOW() - ${sql.raw(`INTERVAL '${days} days'`)}
+        AND created_at >= NOW() - INTERVAL '1 day' * ${days * 2}
+        AND created_at < NOW() - INTERVAL '1 day' * ${days}
         ${repoFilter}
         ${wsFilter}
     `);
