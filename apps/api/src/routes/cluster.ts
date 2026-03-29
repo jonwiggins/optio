@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { KubeConfig, CoreV1Api, CustomObjectsApi } from "@kubernetes/client-node";
+import { KubeConfig, CoreV1Api, AppsV1Api, CustomObjectsApi } from "@kubernetes/client-node";
 import { db } from "../db/client.js";
 import { repoPods, tasks, podHealthEvents, repos } from "../db/schema.js";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { requireRole } from "../plugins/auth.js";
+import { getVersionInfo, isLocalDev } from "../services/version-service.js";
 
 const healthEventsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(50),
@@ -21,6 +22,10 @@ function getK8sApi() {
 }
 
 const NAMESPACE = "optio";
+
+function getAppsApi() {
+  return getK8sConfig().makeApiClient(AppsV1Api);
+}
 
 function getMetricsApi() {
   return getK8sConfig().makeApiClient(CustomObjectsApi);
@@ -438,4 +443,75 @@ export async function clusterRoutes(app: FastifyInstance) {
       reply.send({ ok: true });
     },
   );
+
+  // Version check — any authenticated user can read
+  app.get("/api/cluster/version", async (_req, reply) => {
+    try {
+      const info = await getVersionInfo();
+      reply.send(info);
+    } catch (err) {
+      reply.status(500).send({ error: String(err) });
+    }
+  });
+
+  // Trigger update — admin only
+  const updateBodySchema = z.object({
+    targetVersion: z.string().regex(/^\d+\.\d+\.\d+$/, "Must be a valid semver version"),
+  });
+
+  app.post("/api/cluster/update", { preHandler: [requireRole("admin")] }, async (req, reply) => {
+    if (isLocalDev()) {
+      return reply
+        .status(400)
+        .send({ error: "Self-update is not available in local development mode" });
+    }
+
+    const parsed = updateBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.issues[0].message });
+    }
+    const { targetVersion } = parsed.data;
+
+    const imageOwner = process.env.OPTIO_IMAGE_OWNER ?? "jonwiggins";
+    const registry = "ghcr.io";
+
+    const deployments = [
+      { name: "optio-api", image: `${registry}/${imageOwner}/optio-api:${targetVersion}` },
+      { name: "optio-web", image: `${registry}/${imageOwner}/optio-web:${targetVersion}` },
+    ];
+
+    try {
+      const appsApi = getAppsApi();
+
+      for (const dep of deployments) {
+        try {
+          await appsApi.patchNamespacedDeployment({
+            name: dep.name,
+            namespace: NAMESPACE,
+            body: {
+              spec: {
+                template: {
+                  spec: {
+                    containers: [{ name: dep.name, image: dep.image }],
+                  },
+                },
+              },
+            },
+          });
+        } catch (depErr: any) {
+          // If a deployment doesn't exist, skip it
+          if (depErr?.response?.statusCode === 404) continue;
+          throw depErr;
+        }
+      }
+
+      reply.send({
+        ok: true,
+        targetVersion,
+        message: `Rolling update to v${targetVersion} initiated. The API will restart shortly.`,
+      });
+    } catch (err) {
+      reply.status(500).send({ error: `Failed to trigger update: ${String(err)}` });
+    }
+  });
 }

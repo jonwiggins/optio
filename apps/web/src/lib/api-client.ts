@@ -258,6 +258,19 @@ export const api = {
   restartPod: (id: string) =>
     request<{ ok: boolean }>(`/api/cluster/pods/${id}/restart`, { method: "POST" }),
 
+  getClusterVersion: () =>
+    request<{
+      current: string;
+      latest: string | null;
+      updateAvailable: boolean;
+    }>("/api/cluster/version"),
+
+  triggerClusterUpdate: (targetVersion: string) =>
+    request<{ ok: boolean; targetVersion: string; message: string }>("/api/cluster/update", {
+      method: "POST",
+      body: JSON.stringify({ targetVersion }),
+    }),
+
   // Setup
   getSetupStatus: () =>
     request<{

@@ -35,6 +35,9 @@ RUN cd apps/web && npx next build
 # ---- Runtime stage ----
 FROM node:22-slim
 
+ARG OPTIO_VERSION=dev
+ENV OPTIO_VERSION=${OPTIO_VERSION}
+
 WORKDIR /app
 
 ENV NODE_ENV=production

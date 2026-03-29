@@ -21,6 +21,9 @@ RUN pnpm install --frozen-lockfile --prod --ignore-scripts
 # ---- Runtime stage ----
 FROM node:22-slim
 
+ARG OPTIO_VERSION=dev
+ENV OPTIO_VERSION=${OPTIO_VERSION}
+
 # Install tsx globally for TypeScript execution at runtime
 # (workspace packages export .ts source, so the API runs via tsx)
 RUN npm install -g tsx

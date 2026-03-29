@@ -13,6 +13,7 @@ import {
   WelcomeHero,
 } from "@/components/dashboard";
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
+import { UpdateBanner } from "@/components/update-banner";
 
 export default function OverviewPage() {
   usePageTitle("Overview");
@@ -105,6 +106,8 @@ export default function OverviewPage() {
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
+
+      <UpdateBanner />
 
       <PipelineStatsBar taskStats={taskStats} />
 
