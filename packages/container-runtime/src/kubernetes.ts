@@ -429,6 +429,15 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     this.namespaceEnsured = true;
   }
 
+  /**
+   * Reasons that indicate the pod will never start successfully.
+   * When detected, we fail immediately instead of waiting for the full timeout.
+   */
+  private static readonly TERMINAL_CONTAINER_REASONS = new Set([
+    "ErrImageNeverPull",
+    "InvalidImageName",
+  ]);
+
   private async waitForPodRunning(podName: string): Promise<void> {
     const deadline = Date.now() + POD_READY_TIMEOUT_MS;
 
@@ -449,12 +458,40 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
         return;
       }
 
+      // Check container statuses for unrecoverable errors (e.g. image not
+      // available locally with imagePullPolicy=Never). Waiting for the full
+      // timeout is pointless — these will never self-resolve.
+      const terminalReason = this.getTerminalContainerReason(pod);
+      if (terminalReason) {
+        throw new Error(`Pod "${podName}" failed with unrecoverable error: ${terminalReason}`);
+      }
+
       await this.sleep(POD_READY_POLL_MS);
     }
 
     throw new Error(
       `Timed out waiting for pod "${podName}" to reach Running state after ${POD_READY_TIMEOUT_MS / 1000}s`,
     );
+  }
+
+  /**
+   * Inspect all container statuses (init + regular) for a waiting reason that
+   * is known to be unrecoverable. Returns the reason string if found, or
+   * undefined if the pod might still recover.
+   */
+  private getTerminalContainerReason(pod: V1Pod): string | undefined {
+    const allStatuses = [
+      ...(pod.status?.containerStatuses ?? []),
+      ...(pod.status?.initContainerStatuses ?? []),
+    ];
+    for (const cs of allStatuses) {
+      const reason = cs.state?.waiting?.reason;
+      if (reason && KubernetesContainerRuntime.TERMINAL_CONTAINER_REASONS.has(reason)) {
+        const message = cs.state?.waiting?.message;
+        return message ? `${reason}: ${message}` : reason;
+      }
+    }
+    return undefined;
   }
 
   private async *followLogs(handle: ContainerHandle, opts?: LogOptions): AsyncGenerator<string> {

@@ -11,6 +11,20 @@ const ERROR_PATTERNS: Array<{
   classify: (match: RegExpMatchArray) => ClassifiedError;
 }> = [
   {
+    pattern: /ErrImageNeverPull|InvalidImageName/i,
+    classify: (match) => {
+      const reason = match[0];
+      return {
+        category: "image",
+        title: "Container image not available locally",
+        description: `Pod failed with ${reason}. The image pull policy is set to "Never" but the required image does not exist on the node. This will never succeed without building the image first.`,
+        remedy:
+          "Build the missing image locally:\n  ./images/build.sh <preset>\nFor example: ./images/build.sh node\nThen retry the task.",
+        retryable: false,
+      };
+    },
+  },
+  {
     pattern: /ImagePullBackOff|ErrImagePull|failed to pull.*image/i,
     classify: () => ({
       category: "image",

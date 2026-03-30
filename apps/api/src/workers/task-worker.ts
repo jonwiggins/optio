@@ -9,6 +9,7 @@ import {
   DEFAULT_MAX_TURNS_REVIEW,
   type PresetImageId,
   msUntilOffPeak,
+  classifyError,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
@@ -56,19 +57,26 @@ export function startTaskWorker() {
   const worker = new Worker(
     "tasks",
     async (job) => {
-      const { taskId, resumeSessionId, resumePrompt, restartFromBranch, reviewOverride } =
-        job.data as {
-          taskId: string;
-          resumeSessionId?: string;
-          resumePrompt?: string;
-          restartFromBranch?: boolean;
-          reviewOverride?: {
-            renderedPrompt: string;
-            taskFileContent: string;
-            taskFilePath: string;
-            claudeModel?: string;
-          };
+      const {
+        taskId,
+        resumeSessionId,
+        resumePrompt,
+        restartFromBranch,
+        reviewOverride,
+        provisioningRetryCount = 0,
+      } = job.data as {
+        taskId: string;
+        resumeSessionId?: string;
+        resumePrompt?: string;
+        restartFromBranch?: boolean;
+        provisioningRetryCount?: number;
+        reviewOverride?: {
+          renderedPrompt: string;
+          taskFileContent: string;
+          taskFilePath: string;
+          claudeModel?: string;
         };
+      };
       const log = logger.child({ taskId, jobId: job.id });
       let repoPodId: string | null = null;
 
@@ -741,12 +749,38 @@ export function startTaskWorker() {
           const currentTask = await taskService.getTask(taskId);
           if (currentTask && ["provisioning", "running"].includes(currentTask.state)) {
             await repoPool.updateWorktreeState(taskId, "dirty").catch(() => {});
-            // If the task is still provisioning (pod never started), re-queue
-            // instead of failing — the pod may become available later (e.g.
-            // image pull in progress, node scaling up).
+            // If the task is still provisioning (pod never started), check if
+            // the error is recoverable and we haven't exceeded the retry cap.
             if (currentTask.state === "provisioning") {
+              const MAX_PROVISIONING_RETRIES = 3;
               const errStr = String(err);
-              log.warn({ err: errStr }, "Pod provisioning failed, re-queuing task");
+              const classified = classifyError(errStr);
+              const isUnrecoverable = !classified.retryable;
+              const retriesExhausted = provisioningRetryCount >= MAX_PROVISIONING_RETRIES;
+
+              if (isUnrecoverable || retriesExhausted) {
+                const reason = isUnrecoverable
+                  ? `Unrecoverable provisioning error (${classified.title})`
+                  : `Provisioning failed after ${provisioningRetryCount} retries`;
+                log.error(
+                  { err: errStr, provisioningRetryCount, classified: classified.title },
+                  reason,
+                );
+                await taskService.updateTaskResult(taskId, undefined, errStr);
+                await taskService.transitionTask(
+                  taskId,
+                  TaskState.FAILED,
+                  "provisioning_permanent_failure",
+                  errStr,
+                );
+                return;
+              }
+
+              // Recoverable — re-queue with incremented retry counter
+              log.warn(
+                { err: errStr, provisioningRetryCount: provisioningRetryCount + 1 },
+                "Pod provisioning failed, re-queuing task",
+              );
               await taskService.updateTaskResult(taskId, undefined, errStr);
               await taskService.transitionTask(
                 taskId,
@@ -755,11 +789,18 @@ export function startTaskWorker() {
                 errStr,
               );
               const jitter = Math.floor(Math.random() * 5000);
-              await taskQueue.add("process-task", job.data, {
-                jobId: `${taskId}-provretry-${Date.now()}`,
-                priority: currentTask.priority ?? 100,
-                delay: 30_000 + jitter,
-              });
+              await taskQueue.add(
+                "process-task",
+                {
+                  ...job.data,
+                  provisioningRetryCount: provisioningRetryCount + 1,
+                },
+                {
+                  jobId: `${taskId}-provretry-${Date.now()}`,
+                  priority: currentTask.priority ?? 100,
+                  delay: 30_000 + jitter,
+                },
+              );
               return;
             }
             await taskService.updateTaskResult(taskId, undefined, String(err));

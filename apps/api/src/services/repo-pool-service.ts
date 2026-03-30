@@ -242,8 +242,10 @@ spec:
     logger.warn({ err, pvcName }, "Failed to create PVC, pod will use ephemeral storage");
   }
 
+  let podNameForCleanup: string | undefined;
   try {
     const podName = generateRepoPodName(repoUrl);
+    podNameForCleanup = podName;
     const volumes = pvcReady
       ? [{ persistentVolumeClaim: pvcName, mountPath: "/home/agent" }]
       : undefined;
@@ -392,6 +394,24 @@ spec:
         updatedAt: new Date(),
       })
       .where(eq(repoPods.id, record.id));
+
+    // Clean up the K8s pod if it was created — prevents dead pods from
+    // accumulating when provisioning repeatedly fails (e.g. ErrImageNeverPull).
+    if (podNameForCleanup) {
+      try {
+        const rtForCleanup = getRuntime();
+        await rtForCleanup.destroy({ id: podNameForCleanup, name: podNameForCleanup });
+        await deleteNetworkPolicy(podNameForCleanup).catch(() => {});
+        await deleteEnvoyConfigMap(podNameForCleanup).catch(() => {});
+        logger.info({ podName: podNameForCleanup }, "Cleaned up failed pod");
+      } catch (cleanupErr) {
+        logger.warn(
+          { err: cleanupErr, podName: podNameForCleanup },
+          "Failed to cleanup errored pod",
+        );
+      }
+    }
+
     throw err;
   }
 }

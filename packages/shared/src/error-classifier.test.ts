@@ -114,6 +114,22 @@ describe("classifyError", () => {
     expect(result.retryable).toBe(false);
   });
 
+  it("classifies ErrImageNeverPull as non-retryable image error", () => {
+    const result = classifyError(
+      'Pod "optio-repo-abc" failed with unrecoverable error: ErrImageNeverPull: Container image "optio-node:latest" is not present with pull policy of Never',
+    );
+    expect(result.category).toBe("image");
+    expect(result.title).toBe("Container image not available locally");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies InvalidImageName as non-retryable image error", () => {
+    const result = classifyError("InvalidImageName: invalid reference format");
+    expect(result.category).toBe("image");
+    expect(result.title).toBe("Container image not available locally");
+    expect(result.retryable).toBe(false);
+  });
+
   it("handles null/undefined input", () => {
     expect(classifyError(null).category).toBe("unknown");
     expect(classifyError(undefined).category).toBe("unknown");
