@@ -8,6 +8,32 @@ import {
 } from "@optio/shared";
 import type { TicketProvider } from "./types.js";
 
+/**
+ * Convert Atlassian Document Format (ADF) to plaintext.
+ * Recursively extracts text from ADF nodes.
+ */
+function adfToPlaintext(adf: any): string {
+  if (!adf || typeof adf !== "object") return "";
+
+  let text = "";
+
+  if (adf.type === "text" && adf.text) {
+    return adf.text;
+  }
+
+  if (Array.isArray(adf.content)) {
+    for (const node of adf.content) {
+      text += adfToPlaintext(node);
+      // Add newlines after paragraphs, headings, etc.
+      if (node.type === "paragraph" || node.type === "heading" || node.type === "codeBlock") {
+        text += "\n";
+      }
+    }
+  }
+
+  return text;
+}
+
 export interface JiraProviderConfig extends TicketProviderConfig {
   baseUrl: string;
   email: string;
@@ -54,9 +80,9 @@ export class JiraTicketProvider implements TicketProvider {
     const allTickets: Ticket[] = [];
     let startAt = 0;
     const maxResults = 100;
-    let pageCount = 0;
+    let pageCount = 1;
 
-    while (pageCount < maxPages) {
+    while (pageCount <= maxPages) {
       const response = await client.issueSearch.searchForIssuesUsingJql({
         jql,
         startAt,
@@ -86,11 +112,18 @@ export class JiraTicketProvider implements TicketProvider {
             mimeType: att.mimeType,
           })) ?? [];
 
+        // Convert ADF description to plaintext
+        const description = fields.description
+          ? typeof fields.description === "string"
+            ? fields.description
+            : adfToPlaintext(fields.description)
+          : "";
+
         allTickets.push({
           externalId: issue.key,
           source: TicketSource.JIRA,
           title: fields.summary,
-          body: (fields.description ?? "") as any,
+          body: description,
           url: `${jiraConfig.baseUrl}/browse/${issue.key}`,
           labels: fields.labels ?? [],
           assignee: fields.assignee?.displayName,
@@ -179,8 +212,8 @@ export class JiraTicketProvider implements TicketProvider {
     );
 
     if (!targetTransition) {
-      process.stderr.write(
-        `JIRA: No transition found to status "${targetStatusName}" for issue ${ticketId}. Available transitions: ${transitionsResponse.transitions?.map((t: any) => t.to?.name).join(", ")}\n`,
+      console.warn(
+        `JIRA: No transition found to status "${targetStatusName}" for issue ${ticketId}. Available transitions: ${transitionsResponse.transitions?.map((t: any) => t.to?.name).join(", ")}`,
       );
       return;
     }

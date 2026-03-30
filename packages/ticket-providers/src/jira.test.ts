@@ -225,7 +225,7 @@ describe("JiraTicketProvider pagination", () => {
     expect(ticket.externalId).toBe("TEST-123");
     expect(ticket.source).toBe("jira");
     expect(ticket.title).toBe("Issue 1");
-    expect(ticket.body).toEqual(issue.fields.description);
+    expect(ticket.body).toBe("Description 1\n");
     expect(ticket.url).toBe("https://test.atlassian.net/browse/TEST-123");
     expect(ticket.labels).toEqual(["optio"]);
     expect(ticket.assignee).toBe("Test User");
@@ -270,7 +270,7 @@ describe("JiraTicketProvider pagination", () => {
     ]);
   });
 
-  it("keeps description in ADF JSON format", async () => {
+  it("converts ADF description to plaintext", async () => {
     const issue = makeJiraIssue("TEST-123", 1);
     const searchForIssuesUsingJql = vi.fn().mockResolvedValueOnce({
       issues: [issue],
@@ -287,10 +287,8 @@ describe("JiraTicketProvider pagination", () => {
     const provider = new JiraTicketProvider();
     const tickets = await provider.fetchActionableTickets(baseConfig());
 
-    expect(typeof tickets[0].body).toBe("object");
-    expect(tickets[0].body).toHaveProperty("type", "doc");
-    expect(tickets[0].body).toHaveProperty("version", 1);
-    expect(tickets[0].body).toHaveProperty("content");
+    expect(typeof tickets[0].body).toBe("string");
+    expect(tickets[0].body).toBe("Description 1\n");
   });
 });
 
