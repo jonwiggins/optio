@@ -17,7 +17,7 @@ const createSessionSchema = z.object({
 });
 
 export async function sessionRoutes(app: FastifyInstance) {
-  // List sessions
+  // List sessions — scoped to the current user
   app.get("/api/sessions", async (req, reply) => {
     const parsed = listSessionsQuerySchema.safeParse(req.query);
     if (!parsed.success) {
@@ -29,16 +29,22 @@ export async function sessionRoutes(app: FastifyInstance) {
       state,
       limit,
       offset,
+      userId: req.user?.id,
     });
     const activeCount = await sessionService.getActiveSessionCount(repoUrl);
     reply.send({ sessions, activeCount });
   });
 
-  // Get session — includes model info from repo config
+  // Get session — verify ownership
   app.get("/api/sessions/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const session = await sessionService.getSession(id);
     if (!session) return reply.status(404).send({ error: "Session not found" });
+
+    // Verify the session belongs to the requesting user
+    if (req.user?.id && session.userId && session.userId !== req.user.id) {
+      return reply.status(404).send({ error: "Session not found" });
+    }
 
     // Attach repo model config
     let modelConfig: { claudeModel: string; availableModels: string[] } | null = null;
@@ -62,31 +68,54 @@ export async function sessionRoutes(app: FastifyInstance) {
     const session = await sessionService.createSession({
       repoUrl: input.repoUrl,
       userId,
+      workspaceId: req.user?.workspaceId ?? null,
     });
     reply.status(201).send({ session });
   });
 
-  // End session
+  // End session — verify ownership
   app.post("/api/sessions/:id/end", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const session = await sessionService.getSession(id);
+    if (!session) return reply.status(404).send({ error: "Session not found" });
+
+    // Verify the session belongs to the requesting user
+    if (req.user?.id && session.userId && session.userId !== req.user.id) {
+      return reply.status(404).send({ error: "Session not found" });
+    }
+
     try {
-      const session = await sessionService.endSession(id);
-      reply.send({ session });
+      const updated = await sessionService.endSession(id);
+      reply.send({ session: updated });
     } catch (err) {
       reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
-  // List PRs for a session
+  // List PRs for a session — verify ownership
   app.get("/api/sessions/:id/prs", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const session = await sessionService.getSession(id);
+    if (!session) return reply.status(404).send({ error: "Session not found" });
+
+    if (req.user?.id && session.userId && session.userId !== req.user.id) {
+      return reply.status(404).send({ error: "Session not found" });
+    }
+
     const prs = await sessionService.getSessionPrs(id);
     reply.send({ prs });
   });
 
-  // Add a PR to a session
+  // Add a PR to a session — verify ownership
   app.post("/api/sessions/:id/prs", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const session = await sessionService.getSession(id);
+    if (!session) return reply.status(404).send({ error: "Session not found" });
+
+    if (req.user?.id && session.userId && session.userId !== req.user.id) {
+      return reply.status(404).send({ error: "Session not found" });
+    }
+
     const body = req.body as { prUrl: string; prNumber: number };
     if (!body.prUrl || !body.prNumber) {
       return reply.status(400).send({ error: "prUrl and prNumber required" });

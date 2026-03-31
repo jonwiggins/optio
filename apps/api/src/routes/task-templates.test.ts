@@ -40,7 +40,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   app.decorateRequest("user", undefined as any);
   app.addHook("preHandler", (req, _reply, done) => {
-    (req as any).user = { workspaceId: "ws-1" };
+    (req as any).user = { id: "user-1", workspaceId: "ws-1" };
     done();
   });
   await taskTemplateRoutes(app);
@@ -73,6 +73,31 @@ describe("GET /api/task-templates", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().templates).toHaveLength(1);
+  });
+});
+
+describe("GET /api/task-templates/:id", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns 404 for template from another workspace", async () => {
+    mockGetTaskTemplate.mockResolvedValue({ ...mockTemplateData, workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "GET", url: "/api/task-templates/tmpl-1" });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns template from own workspace", async () => {
+    mockGetTaskTemplate.mockResolvedValue({ ...mockTemplateData, workspaceId: "ws-1" });
+
+    const res = await app.inject({ method: "GET", url: "/api/task-templates/tmpl-1" });
+
+    expect(res.statusCode).toBe(200);
   });
 });
 
@@ -171,10 +196,27 @@ describe("DELETE /api/task-templates/:id", () => {
   });
 
   it("deletes a template", async () => {
+    mockGetTaskTemplate.mockResolvedValue({ ...mockTemplateData, workspaceId: "ws-1" });
     mockDeleteTaskTemplate.mockResolvedValue(undefined);
 
     const res = await app.inject({ method: "DELETE", url: "/api/task-templates/tmpl-1" });
 
     expect(res.statusCode).toBe(204);
+  });
+
+  it("returns 404 when deleting template from another workspace", async () => {
+    mockGetTaskTemplate.mockResolvedValue({ ...mockTemplateData, workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "DELETE", url: "/api/task-templates/tmpl-1" });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 404 for nonexistent template", async () => {
+    mockGetTaskTemplate.mockResolvedValue(null);
+
+    const res = await app.inject({ method: "DELETE", url: "/api/task-templates/tmpl-1" });
+
+    expect(res.statusCode).toBe(404);
   });
 });

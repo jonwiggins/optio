@@ -45,15 +45,17 @@ export async function promptTemplateRoutes(app: FastifyInstance) {
     }
   });
 
-  // List all templates
-  app.get("/api/prompt-templates", async (_req, reply) => {
-    const templates = await listPromptTemplates();
+  // List all templates — scoped to workspace
+  app.get("/api/prompt-templates", async (req, reply) => {
+    const workspaceId = req.user?.workspaceId ?? null;
+    const templates = await listPromptTemplates(workspaceId);
     reply.send({ templates });
   });
 
-  // Save template
+  // Save template — assign workspace on insert
   app.post("/api/prompt-templates", async (req, reply) => {
     const body = saveTemplateSchema.parse(req.body);
+    const workspaceId = req.user?.workspaceId ?? null;
     if (body.isReview) {
       // Save as review default
       const [existing] = await db
@@ -61,14 +63,21 @@ export async function promptTemplateRoutes(app: FastifyInstance) {
         .from(promptTemplates)
         .where(and(eq(promptTemplates.name, "review-default"), isNull(promptTemplates.repoUrl)));
       if (existing) {
+        // Verify workspace ownership before updating
+        if (workspaceId && existing.workspaceId && existing.workspaceId !== workspaceId) {
+          return reply.status(404).send({ error: "Template not found" });
+        }
         await db
           .update(promptTemplates)
           .set({ template: body.template, updatedAt: new Date() })
           .where(eq(promptTemplates.id, existing.id));
       } else {
-        await db
-          .insert(promptTemplates)
-          .values({ name: "review-default", template: body.template, isDefault: false });
+        await db.insert(promptTemplates).values({
+          name: "review-default",
+          template: body.template,
+          isDefault: false,
+          workspaceId,
+        });
       }
     } else if (body.repoUrl) {
       await saveRepoPromptTemplate(body.repoUrl, body.template, body.autoMerge ?? false);

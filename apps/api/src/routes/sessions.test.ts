@@ -85,6 +85,7 @@ describe("GET /api/sessions", () => {
       state: undefined,
       limit: 50,
       offset: 0,
+      userId: "user-1",
     });
   });
 
@@ -103,6 +104,7 @@ describe("GET /api/sessions", () => {
       state: "active",
       limit: 10,
       offset: 5,
+      userId: "user-1",
     });
   });
 });
@@ -134,6 +136,15 @@ describe("GET /api/sessions/:id", () => {
     mockGetSession.mockResolvedValue(null);
 
     const res = await app.inject({ method: "GET", url: "/api/sessions/nonexistent" });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("Session not found");
+  });
+
+  it("returns 404 for another user's session", async () => {
+    mockGetSession.mockResolvedValue({ ...mockSession, userId: "other-user" });
+
+    const res = await app.inject({ method: "GET", url: "/api/sessions/session-1" });
 
     expect(res.statusCode).toBe(404);
     expect(res.json().error).toBe("Session not found");
@@ -172,6 +183,7 @@ describe("POST /api/sessions", () => {
     expect(mockCreateSession).toHaveBeenCalledWith({
       repoUrl: "https://github.com/org/repo",
       userId: "user-1",
+      workspaceId: "ws-1",
     });
   });
 
@@ -196,6 +208,7 @@ describe("POST /api/sessions/:id/end", () => {
   });
 
   it("ends a session", async () => {
+    mockGetSession.mockResolvedValue(mockSession);
     mockEndSession.mockResolvedValue({ ...mockSession, state: "ended" });
 
     const res = await app.inject({ method: "POST", url: "/api/sessions/session-1/end" });
@@ -204,7 +217,26 @@ describe("POST /api/sessions/:id/end", () => {
     expect(res.json().session.state).toBe("ended");
   });
 
+  it("returns 404 when ending another user's session", async () => {
+    mockGetSession.mockResolvedValue({ ...mockSession, userId: "other-user" });
+
+    const res = await app.inject({ method: "POST", url: "/api/sessions/session-1/end" });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("Session not found");
+  });
+
+  it("returns 404 when session does not exist", async () => {
+    mockGetSession.mockResolvedValue(null);
+
+    const res = await app.inject({ method: "POST", url: "/api/sessions/nonexistent/end" });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe("Session not found");
+  });
+
   it("returns 400 when session cannot be ended", async () => {
+    mockGetSession.mockResolvedValue(mockSession);
     mockEndSession.mockRejectedValue(new Error("Session already ended"));
 
     const res = await app.inject({ method: "POST", url: "/api/sessions/session-1/end" });
@@ -223,6 +255,7 @@ describe("session PRs", () => {
   });
 
   it("GET /api/sessions/:id/prs lists PRs", async () => {
+    mockGetSession.mockResolvedValue(mockSession);
     mockGetSessionPrs.mockResolvedValue([
       { id: "pr-1", prUrl: "https://github.com/org/repo/pull/1" },
     ]);
@@ -233,7 +266,16 @@ describe("session PRs", () => {
     expect(res.json().prs).toHaveLength(1);
   });
 
+  it("GET /api/sessions/:id/prs returns 404 for other user's session", async () => {
+    mockGetSession.mockResolvedValue({ ...mockSession, userId: "other-user" });
+
+    const res = await app.inject({ method: "GET", url: "/api/sessions/session-1/prs" });
+
+    expect(res.statusCode).toBe(404);
+  });
+
   it("POST /api/sessions/:id/prs adds a PR", async () => {
+    mockGetSession.mockResolvedValue(mockSession);
     mockAddSessionPr.mockResolvedValue({
       id: "pr-1",
       prUrl: "https://github.com/org/repo/pull/1",
@@ -255,6 +297,7 @@ describe("session PRs", () => {
   });
 
   it("POST /api/sessions/:id/prs rejects missing fields", async () => {
+    mockGetSession.mockResolvedValue(mockSession);
     const res = await app.inject({
       method: "POST",
       url: "/api/sessions/session-1/prs",

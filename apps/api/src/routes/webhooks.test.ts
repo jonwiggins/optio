@@ -26,7 +26,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   app.decorateRequest("user", undefined as any);
   app.addHook("preHandler", (req, _reply, done) => {
-    (req as any).user = { id: "user-1" };
+    (req as any).user = { id: "user-1", workspaceId: "ws-1" };
     done();
   });
   await webhookRoutes(app);
@@ -87,6 +87,14 @@ describe("GET /api/webhooks/:id", () => {
 
     expect(res.statusCode).toBe(404);
   });
+
+  it("returns 404 for webhook from another workspace", async () => {
+    mockGetWebhook.mockResolvedValue({ id: "wh-1", workspaceId: "ws-other", secret: null });
+
+    const res = await app.inject({ method: "GET", url: "/api/webhooks/wh-1" });
+
+    expect(res.statusCode).toBe(404);
+  });
 });
 
 describe("POST /api/webhooks", () => {
@@ -144,6 +152,7 @@ describe("DELETE /api/webhooks/:id", () => {
   });
 
   it("deletes a webhook", async () => {
+    mockGetWebhook.mockResolvedValue({ id: "wh-1", workspaceId: "ws-1" });
     mockDeleteWebhook.mockResolvedValue(true);
 
     const res = await app.inject({ method: "DELETE", url: "/api/webhooks/wh-1" });
@@ -152,9 +161,17 @@ describe("DELETE /api/webhooks/:id", () => {
   });
 
   it("returns 404 for nonexistent webhook", async () => {
-    mockDeleteWebhook.mockResolvedValue(false);
+    mockGetWebhook.mockResolvedValue(null);
 
     const res = await app.inject({ method: "DELETE", url: "/api/webhooks/nonexistent" });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 404 when deleting webhook from another workspace", async () => {
+    mockGetWebhook.mockResolvedValue({ id: "wh-1", workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "DELETE", url: "/api/webhooks/wh-1" });
 
     expect(res.statusCode).toBe(404);
   });

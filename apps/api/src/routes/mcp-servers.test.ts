@@ -60,6 +60,31 @@ describe("GET /api/mcp-servers", () => {
   });
 });
 
+describe("GET /api/mcp-servers/:id", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns 404 for MCP server from another workspace", async () => {
+    mockGetMcpServer.mockResolvedValue({ id: "mcp-1", workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "GET", url: "/api/mcp-servers/mcp-1" });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns MCP server from own workspace", async () => {
+    mockGetMcpServer.mockResolvedValue({ id: "mcp-1", workspaceId: "ws-1", name: "test" });
+
+    const res = await app.inject({ method: "GET", url: "/api/mcp-servers/mcp-1" });
+
+    expect(res.statusCode).toBe(200);
+  });
+});
+
 describe("POST /api/mcp-servers", () => {
   let app: FastifyInstance;
 
@@ -104,7 +129,7 @@ describe("PATCH /api/mcp-servers/:id", () => {
   });
 
   it("updates an MCP server", async () => {
-    mockGetMcpServer.mockResolvedValue({ id: "mcp-1" });
+    mockGetMcpServer.mockResolvedValue({ id: "mcp-1", workspaceId: "ws-1" });
     mockUpdateMcpServer.mockResolvedValue({ id: "mcp-1", enabled: false });
 
     const res = await app.inject({
@@ -114,6 +139,18 @@ describe("PATCH /api/mcp-servers/:id", () => {
     });
 
     expect(res.statusCode).toBe(200);
+  });
+
+  it("returns 404 for MCP server from another workspace", async () => {
+    mockGetMcpServer.mockResolvedValue({ id: "mcp-1", workspaceId: "ws-other" });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/mcp-servers/mcp-1",
+      payload: { enabled: false },
+    });
+
+    expect(res.statusCode).toBe(404);
   });
 
   it("returns 404 for nonexistent server", async () => {
@@ -138,7 +175,7 @@ describe("DELETE /api/mcp-servers/:id", () => {
   });
 
   it("deletes an MCP server", async () => {
-    mockGetMcpServer.mockResolvedValue({ id: "mcp-1" });
+    mockGetMcpServer.mockResolvedValue({ id: "mcp-1", workspaceId: "ws-1" });
     mockDeleteMcpServer.mockResolvedValue(undefined);
 
     const res = await app.inject({ method: "DELETE", url: "/api/mcp-servers/mcp-1" });

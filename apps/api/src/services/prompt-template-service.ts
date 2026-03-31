@@ -1,4 +1,4 @@
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { promptTemplates, repos } from "../db/schema.js";
 import { DEFAULT_PROMPT_TEMPLATE, normalizeRepoUrl } from "@optio/shared";
@@ -120,8 +120,14 @@ export async function saveRepoPromptTemplate(
 }
 
 /**
- * List all prompt templates.
+ * List all prompt templates, optionally scoped to a workspace.
  */
-export async function listPromptTemplates() {
+export async function listPromptTemplates(workspaceId?: string | null) {
+  if (workspaceId) {
+    return db
+      .select()
+      .from(promptTemplates)
+      .where(or(eq(promptTemplates.workspaceId, workspaceId), isNull(promptTemplates.workspaceId)));
+  }
   return db.select().from(promptTemplates);
 }

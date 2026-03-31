@@ -38,51 +38,73 @@ const createFromTemplateSchema = z.object({
 });
 
 export async function taskTemplateRoutes(app: FastifyInstance) {
-  // List templates
+  // List templates — scoped to workspace
   app.get("/api/task-templates", async (req, reply) => {
     const query = req.query as { repoUrl?: string };
-    const templates = await taskTemplateService.listTaskTemplates(query.repoUrl);
+    const workspaceId = req.user?.workspaceId ?? null;
+    const templates = await taskTemplateService.listTaskTemplates(query.repoUrl, workspaceId);
     reply.send({ templates });
   });
 
-  // Get template
+  // Get template — verify workspace ownership
   app.get("/api/task-templates/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const template = await taskTemplateService.getTaskTemplate(id);
     if (!template) return reply.status(404).send({ error: "Template not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && template.workspaceId && template.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Template not found" });
+    }
     reply.send({ template });
   });
 
-  // Create template
+  // Create template — assign to workspace
   app.post("/api/task-templates", async (req, reply) => {
     const body = createTemplateSchema.parse(req.body);
-    const template = await taskTemplateService.createTaskTemplate(body);
+    const workspaceId = req.user?.workspaceId ?? null;
+    const template = await taskTemplateService.createTaskTemplate(body, workspaceId);
     reply.status(201).send({ template });
   });
 
-  // Update template
+  // Update template — verify workspace ownership
   app.patch("/api/task-templates/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const existing = await taskTemplateService.getTaskTemplate(id);
+    if (!existing) return reply.status(404).send({ error: "Template not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Template not found" });
+    }
     const body = updateTemplateSchema.parse(req.body);
     const template = await taskTemplateService.updateTaskTemplate(id, body);
     if (!template) return reply.status(404).send({ error: "Template not found" });
     reply.send({ template });
   });
 
-  // Delete template
+  // Delete template — verify workspace ownership
   app.delete("/api/task-templates/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const existing = await taskTemplateService.getTaskTemplate(id);
+    if (!existing) return reply.status(404).send({ error: "Template not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Template not found" });
+    }
     await taskTemplateService.deleteTaskTemplate(id);
     reply.status(204).send();
   });
 
-  // Create task from template
+  // Create task from template — verify workspace ownership of template
   app.post("/api/tasks/from-template/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const overrides = createFromTemplateSchema.parse(req.body);
 
     const template = await taskTemplateService.getTaskTemplate(id);
     if (!template) return reply.status(404).send({ error: "Template not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && template.workspaceId && template.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Template not found" });
+    }
 
     if (!template.repoUrl && !overrides.repoUrl) {
       return reply.status(400).send({ error: "repoUrl is required (template has no default)" });
@@ -98,6 +120,7 @@ export async function taskTemplateRoutes(app: FastifyInstance) {
       maxRetries: overrides.maxRetries,
       metadata: overrides.metadata ?? (template.metadata as Record<string, unknown> | undefined),
       createdBy: req.user?.id,
+      workspaceId: req.user?.workspaceId ?? null,
     });
 
     await taskService.transitionTask(task.id, TaskState.QUEUED, "task_from_template");

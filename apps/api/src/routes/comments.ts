@@ -12,20 +12,28 @@ const updateCommentSchema = z.object({
 });
 
 export async function commentRoutes(app: FastifyInstance) {
-  // List comments for a task
+  // List comments for a task — verify workspace
   app.get("/api/tasks/:id/comments", async (req, reply) => {
     const { id } = req.params as { id: string };
     const task = await taskService.getTask(id);
     if (!task) return reply.status(404).send({ error: "Task not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && task.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
     const comments = await commentService.listComments(id);
     reply.send({ comments });
   });
 
-  // Add a comment to a task
+  // Add a comment to a task — verify workspace
   app.post("/api/tasks/:id/comments", async (req, reply) => {
     const { id } = req.params as { id: string };
     const task = await taskService.getTask(id);
     if (!task) return reply.status(404).send({ error: "Task not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && task.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
     const { content } = createCommentSchema.parse(req.body);
     const comment = await commentService.addComment(id, content, req.user?.id);
     reply.status(201).send({ comment });
@@ -72,11 +80,15 @@ export async function commentRoutes(app: FastifyInstance) {
     }
   });
 
-  // Activity feed: interleaved comments + events
+  // Activity feed: interleaved comments + events — verify workspace
   app.get("/api/tasks/:id/activity", async (req, reply) => {
     const { id } = req.params as { id: string };
     const task = await taskService.getTask(id);
     if (!task) return reply.status(404).send({ error: "Task not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && task.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
     const [comments, events] = await Promise.all([
       commentService.listComments(id),
       taskService.getTaskEvents(id),

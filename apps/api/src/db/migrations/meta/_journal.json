@@ -267,6 +267,13 @@
       "when": 1776182400000,
       "tag": "0037_encrypt_webhook_slack_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1776268800000,
+      "tag": "0038_workspace_scoping_idor",
+      "breakpoints": true
     }
   ]
 }

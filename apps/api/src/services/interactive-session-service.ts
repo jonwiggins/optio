@@ -7,7 +7,11 @@ import { InteractiveSessionState, normalizeRepoUrl, type PresetImageId } from "@
 import { getOrCreateRepoPod } from "./repo-pool-service.js";
 import { logger } from "../logger.js";
 
-export async function createSession(input: { repoUrl: string; userId?: string }) {
+export async function createSession(input: {
+  repoUrl: string;
+  userId?: string;
+  workspaceId?: string | null;
+}) {
   const repoUrl = normalizeRepoUrl(input.repoUrl);
 
   // Look up repo config for branch and image settings
@@ -59,6 +63,7 @@ export async function createSession(input: { repoUrl: string; userId?: string })
       branch,
       state: "active",
       podId: pod.id,
+      workspaceId: input.workspaceId ?? null,
     })
     .returning();
 
@@ -103,10 +108,12 @@ export async function listSessions(opts?: {
   state?: string;
   limit?: number;
   offset?: number;
+  userId?: string;
 }) {
   const conditions = [];
   if (opts?.repoUrl) conditions.push(eq(interactiveSessions.repoUrl, opts.repoUrl));
   if (opts?.state) conditions.push(eq(interactiveSessions.state, opts.state as "active" | "ended"));
+  if (opts?.userId) conditions.push(eq(interactiveSessions.userId, opts.userId));
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 

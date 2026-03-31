@@ -363,6 +363,7 @@ export const interactiveSessions = pgTable(
     state: interactiveSessionStateEnum("state").notNull().default("active"),
     podId: uuid("pod_id"),
     costUsd: text("cost_usd"),
+    workspaceId: uuid("workspace_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },
@@ -370,6 +371,7 @@ export const interactiveSessions = pgTable(
     index("interactive_sessions_repo_url_idx").on(table.repoUrl),
     index("interactive_sessions_state_idx").on(table.state),
     index("interactive_sessions_user_id_idx").on(table.userId),
+    index("interactive_sessions_workspace_id_idx").on(table.workspaceId),
   ],
 );
 
@@ -413,10 +415,14 @@ export const schedules = pgTable(
     lastRunAt: timestamp("last_run_at", { withTimezone: true }),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }),
     createdBy: uuid("created_by"),
+    workspaceId: uuid("workspace_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("schedules_enabled_next_run_idx").on(table.enabled, table.nextRunAt)],
+  (table) => [
+    index("schedules_enabled_next_run_idx").on(table.enabled, table.nextRunAt),
+    index("schedules_workspace_id_idx").on(table.workspaceId),
+  ],
 );
 
 export const scheduleRuns = pgTable(
@@ -449,17 +455,22 @@ export const taskComments = pgTable(
   (table) => [index("task_comments_task_id_idx").on(table.taskId)],
 );
 
-export const taskTemplates = pgTable("task_templates", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  repoUrl: text("repo_url"),
-  prompt: text("prompt").notNull(),
-  agentType: text("agent_type").notNull().default("claude-code"),
-  priority: integer("priority").notNull().default(100),
-  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const taskTemplates = pgTable(
+  "task_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    repoUrl: text("repo_url"),
+    prompt: text("prompt").notNull(),
+    agentType: text("agent_type").notNull().default("claude-code"),
+    priority: integer("priority").notNull().default(100),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    workspaceId: uuid("workspace_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("task_templates_workspace_id_idx").on(table.workspaceId)],
+);
 
 // ── Task Dependencies (DAG edges) ────────────────────────────────────────────
 
@@ -649,13 +660,18 @@ export const reviewDrafts = pgTable(
   ],
 );
 
-export const promptTemplates = pgTable("prompt_templates", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull().unique(),
-  template: text("template").notNull(),
-  isDefault: boolean("is_default").notNull().default(false),
-  repoUrl: text("repo_url"), // null = global default, set = repo-specific
-  autoMerge: boolean("auto_merge").notNull().default(false),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const promptTemplates = pgTable(
+  "prompt_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull().unique(),
+    template: text("template").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    repoUrl: text("repo_url"), // null = global default, set = repo-specific
+    autoMerge: boolean("auto_merge").notNull().default(false),
+    workspaceId: uuid("workspace_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("prompt_templates_workspace_id_idx").on(table.workspaceId)],
+);

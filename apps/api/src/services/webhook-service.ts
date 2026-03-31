@@ -66,6 +66,7 @@ export interface CreateWebhookInput {
 export async function createWebhook(
   input: CreateWebhookInput,
   createdBy?: string,
+  workspaceId?: string | null,
 ): Promise<WebhookRecord> {
   let encryptedSecret: Buffer | null = null;
   let secretIv: Buffer | null = null;
@@ -88,12 +89,21 @@ export async function createWebhook(
       secretAuthTag,
       description: input.description ?? null,
       createdBy: createdBy ?? null,
+      workspaceId: workspaceId ?? null,
     })
     .returning();
   return decryptWebhookRow(webhook);
 }
 
-export async function listWebhooks(): Promise<WebhookRecord[]> {
+export async function listWebhooks(workspaceId?: string | null): Promise<WebhookRecord[]> {
+  if (workspaceId) {
+    const rows = await db
+      .select()
+      .from(webhooks)
+      .where(eq(webhooks.workspaceId, workspaceId))
+      .orderBy(desc(webhooks.createdAt));
+    return rows.map(decryptWebhookRow);
+  }
   const rows = await db.select().from(webhooks).orderBy(desc(webhooks.createdAt));
   return rows.map(decryptWebhookRow);
 }

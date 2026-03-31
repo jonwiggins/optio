@@ -32,7 +32,11 @@ function computeNextRun(cronExpression: string): Date {
   return interval.next().toDate();
 }
 
-export async function createSchedule(input: CreateScheduleInput, createdBy?: string) {
+export async function createSchedule(
+  input: CreateScheduleInput,
+  createdBy?: string,
+  workspaceId?: string | null,
+) {
   const nextRunAt = input.enabled !== false ? computeNextRun(input.cronExpression) : null;
   const [schedule] = await db
     .insert(schedules)
@@ -44,12 +48,20 @@ export async function createSchedule(input: CreateScheduleInput, createdBy?: str
       taskConfig: input.taskConfig,
       nextRunAt,
       createdBy: createdBy ?? null,
+      workspaceId: workspaceId ?? null,
     })
     .returning();
   return schedule;
 }
 
-export async function listSchedules() {
+export async function listSchedules(workspaceId?: string | null) {
+  if (workspaceId) {
+    return db
+      .select()
+      .from(schedules)
+      .where(eq(schedules.workspaceId, workspaceId))
+      .orderBy(desc(schedules.createdAt));
+  }
   return db.select().from(schedules).orderBy(desc(schedules.createdAt));
 }
 

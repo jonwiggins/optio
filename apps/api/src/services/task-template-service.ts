@@ -1,10 +1,17 @@
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { taskTemplates } from "../db/schema.js";
 
-export async function listTaskTemplates(repoUrl?: string) {
-  if (repoUrl) {
-    return db.select().from(taskTemplates).where(eq(taskTemplates.repoUrl, repoUrl));
+export async function listTaskTemplates(repoUrl?: string, workspaceId?: string | null) {
+  const conditions = [];
+  if (repoUrl) conditions.push(eq(taskTemplates.repoUrl, repoUrl));
+  if (workspaceId) conditions.push(eq(taskTemplates.workspaceId, workspaceId));
+
+  if (conditions.length > 0) {
+    return db
+      .select()
+      .from(taskTemplates)
+      .where(and(...conditions));
   }
   return db.select().from(taskTemplates);
 }
@@ -14,14 +21,17 @@ export async function getTaskTemplate(id: string) {
   return template ?? null;
 }
 
-export async function createTaskTemplate(data: {
-  name: string;
-  repoUrl?: string;
-  prompt: string;
-  agentType?: string;
-  priority?: number;
-  metadata?: Record<string, unknown>;
-}) {
+export async function createTaskTemplate(
+  data: {
+    name: string;
+    repoUrl?: string;
+    prompt: string;
+    agentType?: string;
+    priority?: number;
+    metadata?: Record<string, unknown>;
+  },
+  workspaceId?: string | null,
+) {
   const [template] = await db
     .insert(taskTemplates)
     .values({
@@ -31,6 +41,7 @@ export async function createTaskTemplate(data: {
       agentType: data.agentType ?? "claude-code",
       priority: data.priority ?? 100,
       metadata: data.metadata,
+      workspaceId: workspaceId ?? null,
     })
     .returning();
   return template;

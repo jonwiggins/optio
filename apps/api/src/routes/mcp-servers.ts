@@ -30,11 +30,15 @@ export async function mcpServerRoutes(app: FastifyInstance) {
     reply.send({ servers });
   });
 
-  // Get a single MCP server
+  // Get a single MCP server — verify workspace ownership
   app.get("/api/mcp-servers/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const server = await mcpService.getMcpServer(id);
     if (!server) return reply.status(404).send({ error: "MCP server not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && server.workspaceId && server.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "MCP server not found" });
+    }
     reply.send({ server });
   });
 
@@ -46,21 +50,29 @@ export async function mcpServerRoutes(app: FastifyInstance) {
     reply.status(201).send({ server });
   });
 
-  // Update an MCP server
+  // Update an MCP server — verify workspace ownership
   app.patch("/api/mcp-servers/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const existing = await mcpService.getMcpServer(id);
     if (!existing) return reply.status(404).send({ error: "MCP server not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "MCP server not found" });
+    }
     const input = updateMcpServerSchema.parse(req.body);
     const server = await mcpService.updateMcpServer(id, input);
     reply.send({ server });
   });
 
-  // Delete an MCP server
+  // Delete an MCP server — verify workspace ownership
   app.delete("/api/mcp-servers/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const existing = await mcpService.getMcpServer(id);
     if (!existing) return reply.status(404).send({ error: "MCP server not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "MCP server not found" });
+    }
     await mcpService.deleteMcpServer(id);
     reply.status(204).send();
   });

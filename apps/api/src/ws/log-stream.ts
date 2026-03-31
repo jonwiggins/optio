@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
-import { getTaskLogs } from "../services/task-service.js";
+import { getTask, getTaskLogs } from "../services/task-service.js";
 import {
   getClientIp,
   trackConnection,
@@ -25,6 +25,17 @@ export async function logStreamWs(app: FastifyInstance) {
     }
 
     const { taskId } = req.params as { taskId: string };
+
+    // Verify the task exists and belongs to the user's workspace
+    const task = await getTask(taskId);
+    if (!task) {
+      socket.close(4404, "Task not found");
+      return;
+    }
+    if (user.workspaceId && task.workspaceId && task.workspaceId !== user.workspaceId) {
+      socket.close(4403, "Access denied");
+      return;
+    }
 
     // Send catch-up: recent logs so reconnecting clients don't miss data
     try {

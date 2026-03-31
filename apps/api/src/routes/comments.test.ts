@@ -49,7 +49,7 @@ describe("GET /api/tasks/:id/comments", () => {
   });
 
   it("lists comments for a task", async () => {
-    mockGetTask.mockResolvedValue({ id: "task-1" });
+    mockGetTask.mockResolvedValue({ id: "task-1", workspaceId: "ws-1" });
     mockListComments.mockResolvedValue([{ id: "c-1", content: "Hello" }]);
 
     const res = await app.inject({ method: "GET", url: "/api/tasks/task-1/comments" });
@@ -76,7 +76,7 @@ describe("POST /api/tasks/:id/comments", () => {
   });
 
   it("adds a comment", async () => {
-    mockGetTask.mockResolvedValue({ id: "task-1" });
+    mockGetTask.mockResolvedValue({ id: "task-1", workspaceId: "ws-1" });
     mockAddComment.mockResolvedValue({ id: "c-1", content: "New comment", taskId: "task-1" });
 
     const res = await app.inject({
@@ -90,7 +90,7 @@ describe("POST /api/tasks/:id/comments", () => {
   });
 
   it("rejects empty content (Zod throws)", async () => {
-    mockGetTask.mockResolvedValue({ id: "task-1" });
+    mockGetTask.mockResolvedValue({ id: "task-1", workspaceId: "ws-1" });
 
     const res = await app.inject({
       method: "POST",
@@ -191,7 +191,7 @@ describe("GET /api/tasks/:id/activity", () => {
   });
 
   it("returns interleaved activity feed", async () => {
-    mockGetTask.mockResolvedValue({ id: "task-1" });
+    mockGetTask.mockResolvedValue({ id: "task-1", workspaceId: "ws-1" });
     mockListComments.mockResolvedValue([
       {
         id: "c-1",

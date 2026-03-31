@@ -294,7 +294,7 @@ export async function taskRoutes(app: FastifyInstance) {
     reply.send({ logs });
   });
 
-  // Export task logs
+  // Export task logs — verify workspace
   app.get("/api/tasks/:id/logs/export", async (req, reply) => {
     const { id } = req.params as { id: string };
     const query = req.query as { format?: string; search?: string; logType?: string };
@@ -302,6 +302,10 @@ export async function taskRoutes(app: FastifyInstance) {
 
     const task = await taskService.getTask(id);
     if (!task) return reply.status(404).send({ error: "Task not found" });
+    const wsId = req.user?.workspaceId;
+    if (wsId && task.workspaceId !== wsId) {
+      return reply.status(404).send({ error: "Task not found" });
+    }
 
     const logs = await taskService.getAllTaskLogs(id, {
       search: query.search || undefined,
@@ -473,11 +477,21 @@ export async function taskRoutes(app: FastifyInstance) {
     },
   );
 
-  // Reorder tasks (update priorities) — member+
+  // Reorder tasks (update priorities) — member+, workspace-scoped
   app.post("/api/tasks/reorder", { preHandler: [requireRole("member")] }, async (req, reply) => {
     const body = req.body as { taskIds: string[] };
     if (!Array.isArray(body.taskIds)) {
       return reply.status(400).send({ error: "taskIds array required" });
+    }
+    const wsId = req.user?.workspaceId;
+    // Verify all tasks belong to the user's workspace before reordering
+    if (wsId) {
+      for (const taskId of body.taskIds) {
+        const task = await taskService.getTask(taskId);
+        if (!task || task.workspaceId !== wsId) {
+          return reply.status(404).send({ error: "Task not found" });
+        }
+      }
     }
     // Assign priorities based on position: first = 1, second = 2, etc.
     for (let i = 0; i < body.taskIds.length; i++) {

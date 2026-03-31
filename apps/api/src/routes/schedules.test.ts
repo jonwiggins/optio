@@ -46,7 +46,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   app.decorateRequest("user", undefined as any);
   app.addHook("preHandler", (req, _reply, done) => {
-    (req as any).user = { id: "user-1" };
+    (req as any).user = { id: "user-1", workspaceId: "ws-1" };
     done();
   });
   await scheduleRoutes(app);
@@ -146,6 +146,7 @@ describe("PATCH /api/schedules/:id", () => {
   });
 
   it("updates a schedule", async () => {
+    mockGetSchedule.mockResolvedValue({ ...mockScheduleData, workspaceId: "ws-1" });
     mockUpdateSchedule.mockResolvedValue({ ...mockScheduleData, name: "Updated" });
 
     const res = await app.inject({
@@ -158,11 +159,23 @@ describe("PATCH /api/schedules/:id", () => {
   });
 
   it("returns 404 for nonexistent schedule", async () => {
-    mockUpdateSchedule.mockResolvedValue(null);
+    mockGetSchedule.mockResolvedValue(null);
 
     const res = await app.inject({
       method: "PATCH",
       url: "/api/schedules/nonexistent",
+      payload: { name: "Updated" },
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 404 for schedule from another workspace", async () => {
+    mockGetSchedule.mockResolvedValue({ ...mockScheduleData, workspaceId: "ws-other" });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/schedules/sched-1",
       payload: { name: "Updated" },
     });
 
@@ -179,6 +192,7 @@ describe("DELETE /api/schedules/:id", () => {
   });
 
   it("deletes a schedule", async () => {
+    mockGetSchedule.mockResolvedValue({ ...mockScheduleData, workspaceId: "ws-1" });
     mockDeleteSchedule.mockResolvedValue(true);
 
     const res = await app.inject({ method: "DELETE", url: "/api/schedules/sched-1" });
@@ -187,9 +201,17 @@ describe("DELETE /api/schedules/:id", () => {
   });
 
   it("returns 404 for nonexistent schedule", async () => {
-    mockDeleteSchedule.mockResolvedValue(false);
+    mockGetSchedule.mockResolvedValue(null);
 
     const res = await app.inject({ method: "DELETE", url: "/api/schedules/nonexistent" });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 404 when deleting schedule from another workspace", async () => {
+    mockGetSchedule.mockResolvedValue({ ...mockScheduleData, workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "DELETE", url: "/api/schedules/sched-1" });
 
     expect(res.statusCode).toBe(404);
   });
