@@ -53,9 +53,11 @@ export async function buildServer() {
   // Plugins
   const allowedOrigins = process.env.OPTIO_ALLOWED_ORIGINS
     ? process.env.OPTIO_ALLOWED_ORIGINS.split(",").map((o) => o.trim())
-    : undefined;
+    : process.env.NODE_ENV === "production"
+      ? [] // deny all cross-origin requests in production by default
+      : ["http://localhost:3000", "http://localhost:3001"];
   await app.register(cors, {
-    origin: allowedOrigins ?? true,
+    origin: allowedOrigins,
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });

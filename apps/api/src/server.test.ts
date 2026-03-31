@@ -57,6 +57,116 @@ describe("CORS configuration", () => {
     const allowedHeaders = res.headers["access-control-allow-headers"];
     expect(allowedHeaders).toMatch(/content-type/i);
   });
+
+  it("rejects unknown origins in dev mode (no OPTIO_ALLOWED_ORIGINS)", async () => {
+    const res = await app.inject({
+      method: "OPTIONS",
+      url: "/api/health",
+      headers: {
+        origin: "https://evil.example.com",
+        "access-control-request-method": "GET",
+      },
+    });
+    // @fastify/cors returns 200 for disallowed origins but without the allow-origin header
+    expect(res.headers["access-control-allow-origin"]).not.toBe("https://evil.example.com");
+  });
+
+  it("allows localhost:3000 in dev mode", async () => {
+    const res = await app.inject({
+      method: "OPTIONS",
+      url: "/api/health",
+      headers: {
+        origin: "http://localhost:3000",
+        "access-control-request-method": "GET",
+      },
+    });
+    expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
+  });
+
+  it("allows localhost:3001 in dev mode", async () => {
+    const res = await app.inject({
+      method: "OPTIONS",
+      url: "/api/health",
+      headers: {
+        origin: "http://localhost:3001",
+        "access-control-request-method": "GET",
+      },
+    });
+    expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:3001");
+  });
+
+  it("respects OPTIO_ALLOWED_ORIGINS env var", async () => {
+    const original = process.env.OPTIO_ALLOWED_ORIGINS;
+    process.env.OPTIO_ALLOWED_ORIGINS = "https://app.example.com, https://admin.example.com";
+    try {
+      const customApp = await buildServer();
+      try {
+        // Allowed origin
+        const allowed = await customApp.inject({
+          method: "OPTIONS",
+          url: "/api/health",
+          headers: {
+            origin: "https://app.example.com",
+            "access-control-request-method": "GET",
+          },
+        });
+        expect(allowed.headers["access-control-allow-origin"]).toBe("https://app.example.com");
+
+        // Disallowed origin
+        const denied = await customApp.inject({
+          method: "OPTIONS",
+          url: "/api/health",
+          headers: {
+            origin: "https://evil.example.com",
+            "access-control-request-method": "GET",
+          },
+        });
+        expect(denied.headers["access-control-allow-origin"]).not.toBe("https://evil.example.com");
+      } finally {
+        await customApp.close();
+      }
+    } finally {
+      if (original === undefined) {
+        delete process.env.OPTIO_ALLOWED_ORIGINS;
+      } else {
+        process.env.OPTIO_ALLOWED_ORIGINS = original;
+      }
+    }
+  });
+
+  it("denies all origins in production when OPTIO_ALLOWED_ORIGINS is unset", async () => {
+    const originalOrigins = process.env.OPTIO_ALLOWED_ORIGINS;
+    const originalNodeEnv = process.env.NODE_ENV;
+    delete process.env.OPTIO_ALLOWED_ORIGINS;
+    process.env.NODE_ENV = "production";
+    try {
+      const prodApp = await buildServer();
+      try {
+        const res = await prodApp.inject({
+          method: "OPTIONS",
+          url: "/api/health",
+          headers: {
+            origin: "http://localhost:3000",
+            "access-control-request-method": "GET",
+          },
+        });
+        expect(res.headers["access-control-allow-origin"]).not.toBe("http://localhost:3000");
+      } finally {
+        await prodApp.close();
+      }
+    } finally {
+      if (originalOrigins === undefined) {
+        delete process.env.OPTIO_ALLOWED_ORIGINS;
+      } else {
+        process.env.OPTIO_ALLOWED_ORIGINS = originalOrigins;
+      }
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    }
+  });
 });
 
 describe("POST endpoints accept empty body", () => {
