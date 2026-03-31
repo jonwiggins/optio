@@ -6,6 +6,7 @@ import { repoPods } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
+import { authenticateWs } from "./ws-auth.js";
 import {
   getClientIp,
   trackConnection,
@@ -26,6 +27,12 @@ export async function sessionTerminalWs(app: FastifyInstance) {
       return;
     }
 
+    const user = await authenticateWs(socket, req);
+    if (!user) {
+      releaseConnection(clientIp);
+      return;
+    }
+
     const { sessionId } = req.params as { sessionId: string };
     const log = logger.child({ sessionId });
 
@@ -34,6 +41,11 @@ export async function sessionTerminalWs(app: FastifyInstance) {
       socket.send(JSON.stringify({ error: "Session not found" }));
       releaseConnection(clientIp);
       socket.close();
+      return;
+    }
+
+    if (session.userId && session.userId !== user.id) {
+      socket.close(4403, "Not authorized for this session");
       return;
     }
 

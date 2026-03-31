@@ -9,7 +9,7 @@ import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import { publishSessionEvent } from "../services/event-bus.js";
 import type { ExecSession, OptioSettings } from "@optio/shared";
-import { extractSessionToken } from "./ws-auth.js";
+import { authenticateWs, extractSessionToken } from "./ws-auth.js";
 import {
   getClientIp,
   trackConnection,
@@ -45,6 +45,12 @@ export async function sessionChatWs(app: FastifyInstance) {
       return;
     }
 
+    const user = await authenticateWs(socket, req);
+    if (!user) {
+      releaseConnection(clientIp);
+      return;
+    }
+
     const { sessionId } = req.params as { sessionId: string };
     const log = logger.child({ sessionId, ws: "session-chat" });
 
@@ -58,6 +64,11 @@ export async function sessionChatWs(app: FastifyInstance) {
       socket.send(JSON.stringify({ type: "error", message: "Session not found" }));
       releaseConnection(clientIp);
       socket.close();
+      return;
+    }
+
+    if (session.userId && session.userId !== user.id) {
+      socket.close(4403, "Not authorized for this session");
       return;
     }
 
