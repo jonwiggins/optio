@@ -248,4 +248,42 @@ describe("POST /api/auth/logout", () => {
     expect(res.headers["set-cookie"]).toContain("optio_session=");
     expect(res.headers["set-cookie"]).toContain("Max-Age=0");
   });
+
+  it("includes Secure flag in production", async () => {
+    const origEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      mockRevokeSession.mockResolvedValue(undefined);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/auth/logout",
+        headers: {
+          authorization: "Bearer token",
+        },
+      });
+      expect(res.headers["set-cookie"]).toContain("Secure;");
+    } finally {
+      process.env.NODE_ENV = origEnv;
+    }
+  });
+
+  it("omits Secure flag in non-production", async () => {
+    const origEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
+    try {
+      mockRevokeSession.mockResolvedValue(undefined);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/auth/logout",
+        headers: {
+          authorization: "Bearer token",
+        },
+      });
+      expect(res.headers["set-cookie"]).not.toContain("Secure");
+    } finally {
+      process.env.NODE_ENV = origEnv;
+    }
+  });
 });

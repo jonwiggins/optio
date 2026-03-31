@@ -302,8 +302,12 @@ export async function authRoutes(app: FastifyInstance) {
       await revokeSession(token);
     }
 
+    const secure = process.env.NODE_ENV === "production" ? " Secure;" : "";
     reply
-      .header("Set-Cookie", `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`)
+      .header(
+        "Set-Cookie",
+        `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly;${secure} SameSite=Lax; Max-Age=0`,
+      )
       .send({ ok: true });
   });
 }
