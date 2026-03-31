@@ -77,10 +77,20 @@ if [ -f /workspace/repo/.optio/setup.sh ]; then
 fi
 
 # Run custom setup commands from Optio repo settings
+# NOTE: .optio/setup.sh is the preferred extensibility hook.
+# OPTIO_SETUP_COMMANDS is deprecated and will be removed in a future release.
 if [ -n "${OPTIO_SETUP_COMMANDS:-}" ]; then
-  echo "[optio] Running setup commands..."
+  echo "[optio] Running setup commands (consider migrating to .optio/setup.sh)..."
   cd /workspace/repo
-  eval "${OPTIO_SETUP_COMMANDS}"
+  SETUP_SCRIPT="$(mktemp /tmp/optio-setup-XXXXXX.sh)"
+  printf '%s\n' "${OPTIO_SETUP_COMMANDS}" > "${SETUP_SCRIPT}"
+  chmod 700 "${SETUP_SCRIPT}"
+  bash "${SETUP_SCRIPT}"
+  SETUP_EXIT=$?
+  rm -f "${SETUP_SCRIPT}"
+  if [ "${SETUP_EXIT}" -ne 0 ]; then
+    echo "[optio] Warning: setup commands exited with status ${SETUP_EXIT}" >&2
+  fi
   echo "[optio] Setup commands complete"
 fi
 
