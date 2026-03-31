@@ -131,17 +131,88 @@ export async function revokeAllUserSessions(userId: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.userId, userId));
 }
 
-/** Create a short-lived token for WebSocket authentication. */
+// ── In-memory store for single-use WebSocket upgrade tokens ──────────────
+
+const WS_TOKEN_TTL_MS = 30_000; // 30 seconds — just enough for the WS upgrade
+const WS_TOKEN_CLEANUP_INTERVAL_MS = 60_000;
+
+interface WsUpgradeEntry {
+  userId: string;
+  expiresAt: number; // epoch ms
+}
+
+/** Map from token-hash → { userId, expiresAt }. Tokens are deleted on first use. */
+const wsUpgradeTokens = new Map<string, WsUpgradeEntry>();
+
+/** Periodic cleanup of expired entries (prevents slow leak if tokens are never used). */
+const _wsCleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [hash, entry] of wsUpgradeTokens) {
+    if (entry.expiresAt <= now) wsUpgradeTokens.delete(hash);
+  }
+}, WS_TOKEN_CLEANUP_INTERVAL_MS);
+// Allow the process to exit even if the timer is still running.
+if (_wsCleanupTimer.unref) _wsCleanupTimer.unref();
+
+/** Create a short-lived, single-use token for WebSocket authentication. */
 export async function createWsToken(userId: string): Promise<string> {
-  const WS_TOKEN_TTL_MS = 60_000; // 60 seconds — enough for the WS upgrade
   const token = randomBytes(32).toString("hex");
   const tokenHash = hashToken(token);
-  const expiresAt = new Date(Date.now() + WS_TOKEN_TTL_MS);
 
-  await db.insert(sessions).values({ userId, tokenHash, expiresAt });
+  wsUpgradeTokens.set(tokenHash, {
+    userId,
+    expiresAt: Date.now() + WS_TOKEN_TTL_MS,
+  });
 
   return token;
 }
+
+/**
+ * Validate and consume a single-use WebSocket upgrade token.
+ * Returns the SessionUser on success (token is deleted), or null if
+ * the token is invalid, expired, or already consumed.
+ */
+export async function validateWsToken(token: string): Promise<SessionUser | null> {
+  const tokenHash = hashToken(token);
+  const entry = wsUpgradeTokens.get(tokenHash);
+
+  if (!entry) return null;
+
+  // Always delete — single use regardless of expiry check
+  wsUpgradeTokens.delete(tokenHash);
+
+  if (entry.expiresAt <= Date.now()) return null;
+
+  // Look up the user by ID
+  const rows = await db
+    .select({
+      userId: users.id,
+      provider: users.provider,
+      email: users.email,
+      displayName: users.displayName,
+      avatarUrl: users.avatarUrl,
+      defaultWorkspaceId: users.defaultWorkspaceId,
+    })
+    .from(users)
+    .where(eq(users.id, entry.userId))
+    .limit(1);
+
+  if (rows.length === 0) return null;
+
+  const row = rows[0];
+  return {
+    id: row.userId,
+    provider: row.provider,
+    email: row.email,
+    displayName: row.displayName,
+    avatarUrl: row.avatarUrl,
+    workspaceId: row.defaultWorkspaceId,
+    workspaceRole: null,
+  };
+}
+
+/** Expose internals for testing only. */
+export const _wsTokenStoreForTesting = wsUpgradeTokens;
 
 /** Delete all expired sessions. Returns count of deleted rows. */
 export async function cleanupExpiredSessions(): Promise<number> {

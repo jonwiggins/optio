@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock session service
 const mockValidateSession = vi.fn();
+const mockValidateWsToken = vi.fn();
 vi.mock("../services/session-service.js", () => ({
   validateSession: (...args: unknown[]) => mockValidateSession(...args),
+  validateWsToken: (...args: unknown[]) => mockValidateWsToken(...args),
 }));
 
 // Mock oauth index for isAuthDisabled
@@ -56,6 +58,7 @@ describe("authenticateWs", () => {
     });
     expect(socket.close).not.toHaveBeenCalled();
     expect(mockValidateSession).not.toHaveBeenCalled();
+    expect(mockValidateWsToken).not.toHaveBeenCalled();
   });
 
   it("closes socket with 4401 when no token is provided", async () => {
@@ -68,7 +71,7 @@ describe("authenticateWs", () => {
     expect(socket.close).toHaveBeenCalledWith(4401, "Authentication required");
   });
 
-  it("validates session from cookie", async () => {
+  it("validates session from cookie via validateSession", async () => {
     const mockUser = {
       id: "user-1",
       provider: "github",
@@ -84,10 +87,11 @@ describe("authenticateWs", () => {
 
     expect(user).toEqual(mockUser);
     expect(mockValidateSession).toHaveBeenCalledWith("abc123");
+    expect(mockValidateWsToken).not.toHaveBeenCalled();
     expect(socket.close).not.toHaveBeenCalled();
   });
 
-  it("validates session from query param token", async () => {
+  it("validates query param token via validateWsToken (single-use)", async () => {
     const mockUser = {
       id: "user-2",
       provider: "google",
@@ -95,14 +99,16 @@ describe("authenticateWs", () => {
       displayName: "Query User",
       avatarUrl: null,
     };
-    mockValidateSession.mockResolvedValue(mockUser);
+    mockValidateWsToken.mockResolvedValue(mockUser);
     const socket = createMockSocket();
-    const req = createMockRequest({ token: "token456" });
+    const req = createMockRequest({ token: "upgrade-token-456" });
 
     const user = await authenticateWs(socket as any, req);
 
     expect(user).toEqual(mockUser);
-    expect(mockValidateSession).toHaveBeenCalledWith("token456");
+    expect(mockValidateWsToken).toHaveBeenCalledWith("upgrade-token-456");
+    // Should NOT call validateSession for query param tokens (no cookie present)
+    expect(mockValidateSession).not.toHaveBeenCalled();
     expect(socket.close).not.toHaveBeenCalled();
   });
 
@@ -121,12 +127,57 @@ describe("authenticateWs", () => {
     await authenticateWs(socket as any, req);
 
     expect(mockValidateSession).toHaveBeenCalledWith("fromcookie");
+    // Upgrade token should not be checked when cookie succeeds
+    expect(mockValidateWsToken).not.toHaveBeenCalled();
+  });
+
+  it("falls back to upgrade token when cookie is invalid", async () => {
+    const mockUser = {
+      id: "user-4",
+      provider: "github",
+      email: "fallback@example.com",
+      displayName: "Fallback User",
+      avatarUrl: null,
+    };
+    mockValidateSession.mockResolvedValue(null); // cookie invalid
+    mockValidateWsToken.mockResolvedValue(mockUser);
+    const socket = createMockSocket();
+    const req = createMockRequest({ cookie: "optio_session=bad-cookie", token: "good-upgrade" });
+
+    const user = await authenticateWs(socket as any, req);
+
+    expect(user).toEqual(mockUser);
+    expect(mockValidateSession).toHaveBeenCalledWith("bad-cookie");
+    expect(mockValidateWsToken).toHaveBeenCalledWith("good-upgrade");
   });
 
   it("closes socket with 4401 when session is invalid", async () => {
     mockValidateSession.mockResolvedValue(null);
     const socket = createMockSocket();
     const req = createMockRequest({ cookie: "optio_session=expired-token" });
+
+    const user = await authenticateWs(socket as any, req);
+
+    expect(user).toBeNull();
+    expect(socket.close).toHaveBeenCalledWith(4401, "Invalid or expired session");
+  });
+
+  it("closes socket when both cookie and upgrade token are invalid", async () => {
+    mockValidateSession.mockResolvedValue(null);
+    mockValidateWsToken.mockResolvedValue(null);
+    const socket = createMockSocket();
+    const req = createMockRequest({ cookie: "optio_session=bad", token: "also-bad" });
+
+    const user = await authenticateWs(socket as any, req);
+
+    expect(user).toBeNull();
+    expect(socket.close).toHaveBeenCalledWith(4401, "Invalid or expired session");
+  });
+
+  it("closes socket when upgrade token alone is invalid", async () => {
+    mockValidateWsToken.mockResolvedValue(null);
+    const socket = createMockSocket();
+    const req = createMockRequest({ token: "consumed-token" });
 
     const user = await authenticateWs(socket as any, req);
 
@@ -151,12 +202,12 @@ describe("extractSessionToken", () => {
     expect(extractSessionToken(req)).toBe("my-token");
   });
 
-  it("extracts token from query param", () => {
+  it("does NOT extract token from query param (security fix)", () => {
     const req = createMockRequest({ token: "query-token" });
-    expect(extractSessionToken(req)).toBe("query-token");
+    expect(extractSessionToken(req)).toBeUndefined();
   });
 
-  it("prefers cookie over query param", () => {
+  it("returns cookie token even when query param is present", () => {
     const req = createMockRequest({ cookie: "optio_session=cookie-token", token: "query-token" });
     expect(extractSessionToken(req)).toBe("cookie-token");
   });

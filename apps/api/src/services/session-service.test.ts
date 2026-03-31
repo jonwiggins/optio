@@ -35,12 +35,15 @@ import {
   revokeSession,
   revokeAllUserSessions,
   createWsToken,
+  validateWsToken,
   cleanupExpiredSessions,
+  _wsTokenStoreForTesting,
 } from "./session-service.js";
 
 describe("session-service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _wsTokenStoreForTesting.clear();
   });
 
   describe("createSession", () => {
@@ -203,14 +206,94 @@ describe("session-service", () => {
   });
 
   describe("createWsToken", () => {
-    it("creates a short-lived WebSocket token", async () => {
-      (db.insert as any) = vi.fn().mockReturnValue({
-        values: vi.fn().mockResolvedValue(undefined),
-      });
-
+    it("creates a short-lived WebSocket upgrade token in memory", async () => {
       const token = await createWsToken("user-1");
       expect(token).toBeDefined();
       expect(token.length).toBe(64); // 32 bytes hex
+      // Token should be stored in the in-memory map, not in the DB
+      expect(_wsTokenStoreForTesting.size).toBe(1);
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("validateWsToken", () => {
+    it("validates and consumes a valid upgrade token", async () => {
+      // Mock the user lookup that happens after token validation
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([
+              {
+                userId: "user-1",
+                provider: "github",
+                email: "test@test.com",
+                displayName: "Test User",
+                avatarUrl: null,
+                defaultWorkspaceId: "ws-1",
+              },
+            ]),
+          }),
+        }),
+      });
+
+      const token = await createWsToken("user-1");
+      expect(_wsTokenStoreForTesting.size).toBe(1);
+
+      const user = await validateWsToken(token);
+      expect(user).not.toBeNull();
+      expect(user!.id).toBe("user-1");
+      expect(user!.email).toBe("test@test.com");
+
+      // Token should be consumed (deleted from map)
+      expect(_wsTokenStoreForTesting.size).toBe(0);
+    });
+
+    it("rejects a token that has already been consumed (single-use)", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([
+              {
+                userId: "user-1",
+                provider: "github",
+                email: "test@test.com",
+                displayName: "Test User",
+                avatarUrl: null,
+                defaultWorkspaceId: null,
+              },
+            ]),
+          }),
+        }),
+      });
+
+      const token = await createWsToken("user-1");
+
+      // First use succeeds
+      const user1 = await validateWsToken(token);
+      expect(user1).not.toBeNull();
+
+      // Second use fails (consumed)
+      const user2 = await validateWsToken(token);
+      expect(user2).toBeNull();
+    });
+
+    it("rejects an unknown token", async () => {
+      const user = await validateWsToken("nonexistent-token");
+      expect(user).toBeNull();
+    });
+
+    it("rejects an expired token", async () => {
+      const token = await createWsToken("user-1");
+
+      // Manually expire the token in the store
+      for (const [, entry] of _wsTokenStoreForTesting) {
+        entry.expiresAt = Date.now() - 1000;
+      }
+
+      const user = await validateWsToken(token);
+      expect(user).toBeNull();
+      // Token should still be removed from the map even though expired
+      expect(_wsTokenStoreForTesting.size).toBe(0);
     });
   });
 

@@ -1,5 +1,5 @@
 import type { FastifyRequest } from "fastify";
-import { validateSession, type SessionUser } from "../services/session-service.js";
+import { validateSession, validateWsToken, type SessionUser } from "../services/session-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 
 /** Minimal WebSocket interface for auth — avoids depending on @types/ws. */
@@ -16,7 +16,13 @@ function parseCookie(header: string | undefined, name: string): string | undefin
 }
 
 /**
- * Authenticate a WebSocket connection using session cookie or token query param.
+ * Authenticate a WebSocket connection.
+ *
+ * Two paths:
+ *  1. Session cookie (`optio_session`) — validated against the sessions table.
+ *  2. Single-use upgrade token (`?token=`) — validated and consumed from the
+ *     in-memory WS token store (short-lived, ~30 s, one-time use).
+ *
  * Returns the session user on success, or null after closing the socket with code 4401.
  * When auth is disabled, returns a synthetic dev user.
  */
@@ -36,34 +42,40 @@ export async function authenticateWs(
     };
   }
 
-  const token =
-    parseCookie(req.headers.cookie, SESSION_COOKIE_NAME) ??
-    (req.query as Record<string, string>)?.token;
-
-  if (!token) {
-    socket.close(4401, "Authentication required");
-    return null;
+  // Path 1: cookie-based session auth (long-lived session token)
+  const cookieToken = parseCookie(req.headers.cookie, SESSION_COOKIE_NAME);
+  if (cookieToken) {
+    const user = await validateSession(cookieToken);
+    if (user) return user;
+    // Cookie was present but invalid/expired — fall through to close
   }
 
-  const user = await validateSession(token);
-  if (!user) {
-    socket.close(4401, "Invalid or expired session");
-    return null;
+  // Path 2: single-use upgrade token via query param
+  const upgradeToken = (req.query as Record<string, string>)?.token;
+  if (upgradeToken) {
+    const user = await validateWsToken(upgradeToken);
+    if (user) return user;
+    // Token was present but invalid/expired/already consumed
   }
 
-  return user;
+  // No valid auth found
+  const reason =
+    cookieToken || upgradeToken ? "Invalid or expired session" : "Authentication required";
+  socket.close(4401, reason);
+  return null;
 }
 
 /**
- * Extract the raw session token from a Fastify request (cookie or query param).
+ * Extract the raw session token from a Fastify request (cookie only).
  * Used for auth passthrough — the raw token is forwarded to agent pods so they
  * can make authenticated API calls on behalf of the user.
+ *
+ * Only reads the session cookie — never the query param upgrade token, which is
+ * single-use and not suitable for passthrough.
+ *
  * Returns undefined if no token is found or auth is disabled.
  */
 export function extractSessionToken(req: FastifyRequest): string | undefined {
   if (isAuthDisabled()) return undefined;
-  return (
-    parseCookie(req.headers.cookie, SESSION_COOKIE_NAME) ??
-    (req.query as Record<string, string>)?.token
-  );
+  return parseCookie(req.headers.cookie, SESSION_COOKIE_NAME);
 }
