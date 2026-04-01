@@ -45,6 +45,10 @@ elif [ -n "${GITHUB_TOKEN:-}" ]; then
   echo "[optio] GitHub CLI configured"
 fi
 
+# Rewrite SSH URLs to HTTPS so submodules using SSH can authenticate via HTTPS credentials
+git config --global --replace-all url."https://github.com/".insteadOf "git@github.com:"
+git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
+
 # Install extra packages if requested (comma or space separated)
 if [ -n "${OPTIO_EXTRA_PACKAGES:-}" ]; then
   PACKAGES=$(echo "${OPTIO_EXTRA_PACKAGES}" | tr ',' ' ')

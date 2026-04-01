@@ -33,7 +33,7 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["configmaps"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "create", "delete", "patch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]

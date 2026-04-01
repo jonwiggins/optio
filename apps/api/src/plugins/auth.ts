@@ -4,6 +4,9 @@ import { validateSession, type SessionUser } from "../services/session-service.j
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { getUserRole, ensureUserHasWorkspace } from "../services/workspace-service.js";
 import { listSecrets } from "../services/secret-service.js";
+import { db } from "../db/client.js";
+import { users } from "../db/schema.js";
+import { eq } from "drizzle-orm";
 import type { WorkspaceRole } from "@optio/shared";
 
 declare module "fastify" {
@@ -91,6 +94,40 @@ export function resetSetupCompleteCache(): void {
   _setupCompleteCache = null;
 }
 
+// Deterministic UUID for the local dev user (auth-disabled mode)
+const LOCAL_DEV_USER_ID = "00000000-0000-4000-a000-000000000000";
+let _localDevUser: SessionUser | null = null;
+
+async function getOrCreateLocalDevUser(): Promise<SessionUser> {
+  if (_localDevUser) return _localDevUser;
+
+  // Upsert the local dev user in the DB
+  const existing = await db.select().from(users).where(eq(users.id, LOCAL_DEV_USER_ID));
+  if (existing.length === 0) {
+    await db.insert(users).values({
+      id: LOCAL_DEV_USER_ID,
+      provider: "local",
+      externalId: "local",
+      email: "dev@localhost",
+      displayName: "Local Dev",
+    });
+  }
+
+  // Ensure the user has a workspace
+  const wsId = await ensureUserHasWorkspace(LOCAL_DEV_USER_ID);
+
+  _localDevUser = {
+    id: LOCAL_DEV_USER_ID,
+    provider: "local",
+    email: "dev@localhost",
+    displayName: "Local Dev",
+    avatarUrl: null,
+    workspaceId: wsId,
+    workspaceRole: "admin",
+  };
+  return _localDevUser;
+}
+
 function isPublicRoute(url: string): boolean {
   return PUBLIC_ROUTES.some((prefix) => url.startsWith(prefix));
 }
@@ -108,8 +145,14 @@ function parseBearer(header: string | undefined): string | undefined {
 
 async function authPlugin(app: FastifyInstance) {
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
-    // Auth disabled — allow everything
-    if (isAuthDisabled()) return;
+    // Auth disabled — allow everything with a real local dev user
+    if (isAuthDisabled()) {
+      if (!req.user) {
+        const user = await getOrCreateLocalDevUser();
+        req.user = user;
+      }
+      return;
+    }
 
     // Public routes — no auth needed
     if (isPublicRoute(req.url)) return;

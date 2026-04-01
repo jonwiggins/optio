@@ -207,7 +207,12 @@ async function createRepoPod(
   const image = resolveImage(imageConfig);
 
   const pvcSuffix = instanceIndex > 0 ? `-${instanceIndex}` : "";
-  const pvcName = `optio-home-${repoUrl.replace(/[^a-zA-Z0-9]/g, "-").slice(0, 40)}${pvcSuffix}`;
+  const pvcName = `optio-home-${repoUrl
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase()
+    .slice(0, 40)
+    .replace(/-$/, "")}${pvcSuffix}`;
   let pvcReady = false;
   try {
     const { execFile } = await import("node:child_process");
