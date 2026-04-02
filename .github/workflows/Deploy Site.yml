@@ -1,0 +1,53 @@
+# GENERATED with jsonnet - DO NOT EDIT MANUALLY
+"concurrency":
+  "cancel-in-progress": false
+  "group": "pages"
+"jobs":
+  "build":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "name": "Install pnpm tool"
+        "uses": "pnpm/action-setup@v4"
+        "with":
+          "version": "10"
+      - "name": "Run pnpm install"
+        "run": "pnpm install"
+      - "name": "Build site"
+        "run": "pnpm turbo build --filter=@optio/site"
+      - "name": "Upload Pages artifact"
+        "uses": "actions/upload-pages-artifact@v3"
+        "with":
+          "path": "apps/site/out"
+    "timeout-minutes": 30
+  "deploy":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "needs":
+      - "build"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "id": "deployment"
+        "name": "Deploy to Pages"
+        "uses": "actions/deploy-pages@v4"
+    "timeout-minutes": 30
+"name": "Deploy Site"
+"on":
+  "push":
+    "branches":
+      - "main"
+    "paths":
+      - "apps/site/**"
+      - ".github/workflows/Deploy Site.yml"
+  "workflow_dispatch": null
+"permissions":
+  "contents": "read"
+  "id-token": "write"
+  "pages": "write"

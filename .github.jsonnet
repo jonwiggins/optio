@@ -28,4 +28,151 @@ local ci = base.pipeline(
   event={ push: { branches: ['main'] }, pull_request: { branches: ['main'] } },
 );
 
-ci
+// ── Build Agent Images ──────────────────────────────────────────────────────
+local agentPresets = ['node', 'python', 'go', 'rust', 'full'];
+
+local buildImages = base.pipeline(
+  'Build Agent Images',
+  [
+    base.ghJob(
+      'build-base',
+      image=optio.nodeImage,
+      useCredentials=false,
+      steps=[
+        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.buildImage('optio-agent-base', 'images/base.Dockerfile'),
+      ],
+    ),
+  ] + [
+    base.ghJob(
+      'build-' + preset,
+      image=optio.nodeImage,
+      useCredentials=false,
+      needs=['build-base'],
+      steps=[
+        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.buildImage(
+          'optio-agent-' + preset,
+          'images/' + preset + '.Dockerfile',
+          buildArgs='BASE_IMAGE=' + optio.baseImageRef,
+        ),
+      ],
+    )
+    for preset in agentPresets
+  ],
+  event={
+    push: {
+      branches: ['main'],
+      tags: ['v*'],
+      paths: ['images/**', 'scripts/repo-init.sh', 'scripts/agent-entrypoint.sh', '.github/workflows/Build Agent Images.yml'],
+    },
+    workflow_dispatch: null,
+  },
+);
+
+// ── Release ─────────────────────────────────────────────────────────────────
+local releaseServices = [
+  { name: 'api', dockerfile: 'Dockerfile.api' },
+  { name: 'web', dockerfile: 'Dockerfile.web' },
+  { name: 'optio', dockerfile: 'Dockerfile.optio' },
+];
+
+local release = base.pipeline(
+  'Release',
+  [
+    base.ghJob(
+      'build-' + svc.name,
+      image=optio.nodeImage,
+      useCredentials=false,
+      steps=[
+        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.buildImage('optio-' + svc.name, svc.dockerfile),
+      ],
+    )
+    for svc in releaseServices
+  ] + [
+    base.ghJob(
+      'build-agent-base',
+      image=optio.nodeImage,
+      useCredentials=false,
+      steps=[
+        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.buildImage('optio-agent-base', 'images/base.Dockerfile'),
+      ],
+    ),
+  ] + [
+    base.ghJob(
+      'build-agent-' + preset,
+      image=optio.nodeImage,
+      useCredentials=false,
+      needs=['build-agent-base'],
+      steps=[
+        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.buildImage(
+          'optio-agent-' + preset,
+          'images/' + preset + '.Dockerfile',
+          buildArgs='BASE_IMAGE=' + optio.baseImageRef,
+        ),
+      ],
+    )
+    for preset in agentPresets
+  ] + [
+    base.ghJob(
+      'deploy',
+      image=optio.nodeImage,
+      useCredentials=false,
+      needs=['build-api', 'build-web', 'build-optio'] + ['build-agent-' + p for p in agentPresets],
+      steps=[
+        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        helm.deployHelm(
+          clusters['gh-runners'],
+          release='optio',
+          values={ image: { tag: optio.imageTag } },
+          chartPath='./helm/optio',
+          namespace='optio',
+        ),
+      ],
+    ),
+  ],
+  event={
+    push: { tags: ['v*'] },
+    workflow_dispatch: null,
+  },
+);
+
+// ── Deploy Site ─────────────────────────────────────────────────────────────
+local deploySite = base.pipeline(
+  'Deploy Site',
+  [
+    base.ghJob(
+      'build',
+      image=optio.nodeImage,
+      useCredentials=false,
+      steps=[
+        optio.checkoutAndPnpm(),
+        base.step('Build site', 'pnpm turbo build --filter=@optio/site'),
+        base.action('Upload Pages artifact', 'actions/upload-pages-artifact@v3', with={ path: 'apps/site/out' }),
+      ],
+    ),
+    base.ghJob(
+      'deploy',
+      image=optio.nodeImage,
+      useCredentials=false,
+      needs=['build'],
+      steps=[
+        base.action('Deploy to Pages', 'actions/deploy-pages@v4', id='deployment'),
+      ],
+    ),
+  ],
+  event={
+    push: {
+      branches: ['main'],
+      paths: ['apps/site/**', '.github/workflows/Deploy Site.yml'],
+    },
+    workflow_dispatch: null,
+  },
+  permissions={ contents: 'read', pages: 'write', 'id-token': 'write' },
+  concurrency={ group: 'pages', 'cancel-in-progress': false },
+);
+
+ci + buildImages + release + deploySite

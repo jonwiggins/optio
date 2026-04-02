@@ -1,0 +1,268 @@
+# GENERATED with jsonnet - DO NOT EDIT MANUALLY
+"jobs":
+  "build-agent-base":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "env": {}
+        "name": "build-docker optio-agent-base"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/push-to-gcr-github-action:v1"
+        "with":
+          "context": "."
+          "dockerfile": "images/base.Dockerfile"
+          "gcloud_service_key": "${{ secrets.docker_gcr_io_base64 }}"
+          "image_name": "private-images/optio-agent-base"
+          "image_tag": "deploy-${{ github.sha }}"
+          "project_id": "unicorn-985"
+          "registry": "europe-docker.pkg.dev"
+    "timeout-minutes": 30
+  "build-agent-full":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "needs":
+      - "build-agent-base"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "env": {}
+        "name": "build-docker optio-agent-full"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/push-to-gcr-github-action:v1"
+        "with":
+          "build_args": "BASE_IMAGE=europe-docker.pkg.dev/unicorn-985/private-images/optio-agent-base:deploy-${{ github.sha }}"
+          "context": "."
+          "dockerfile": "images/full.Dockerfile"
+          "gcloud_service_key": "${{ secrets.docker_gcr_io_base64 }}"
+          "image_name": "private-images/optio-agent-full"
+          "image_tag": "deploy-${{ github.sha }}"
+          "project_id": "unicorn-985"
+          "registry": "europe-docker.pkg.dev"
+    "timeout-minutes": 30
+  "build-agent-go":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "needs":
+      - "build-agent-base"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "env": {}
+        "name": "build-docker optio-agent-go"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/push-to-gcr-github-action:v1"
+        "with":
+          "build_args": "BASE_IMAGE=europe-docker.pkg.dev/unicorn-985/private-images/optio-agent-base:deploy-${{ github.sha }}"
+          "context": "."
+          "dockerfile": "images/go.Dockerfile"
+          "gcloud_service_key": "${{ secrets.docker_gcr_io_base64 }}"
+          "image_name": "private-images/optio-agent-go"
+          "image_tag": "deploy-${{ github.sha }}"
+          "project_id": "unicorn-985"
+          "registry": "europe-docker.pkg.dev"
+    "timeout-minutes": 30
+  "build-agent-node":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "needs":
+      - "build-agent-base"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "env": {}
+        "name": "build-docker optio-agent-node"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/push-to-gcr-github-action:v1"
+        "with":
+          "build_args": "BASE_IMAGE=europe-docker.pkg.dev/unicorn-985/private-images/optio-agent-base:deploy-${{ github.sha }}"
+          "context": "."
+          "dockerfile": "images/node.Dockerfile"
+          "gcloud_service_key": "${{ secrets.docker_gcr_io_base64 }}"
+          "image_name": "private-images/optio-agent-node"
+          "image_tag": "deploy-${{ github.sha }}"
+          "project_id": "unicorn-985"
+          "registry": "europe-docker.pkg.dev"
+    "timeout-minutes": 30
+  "build-agent-python":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "needs":
+      - "build-agent-base"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "env": {}
+        "name": "build-docker optio-agent-python"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/push-to-gcr-github-action:v1"
+        "with":
+          "build_args": "BASE_IMAGE=europe-docker.pkg.dev/unicorn-985/private-images/optio-agent-base:deploy-${{ github.sha }}"
+          "context": "."
+          "dockerfile": "images/python.Dockerfile"
+          "gcloud_service_key": "${{ secrets.docker_gcr_io_base64 }}"
+          "image_name": "private-images/optio-agent-python"
+          "image_tag": "deploy-${{ github.sha }}"
+          "project_id": "unicorn-985"
+          "registry": "europe-docker.pkg.dev"
+    "timeout-minutes": 30
+  "build-agent-rust":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "needs":
+      - "build-agent-base"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "env": {}
+        "name": "build-docker optio-agent-rust"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/push-to-gcr-github-action:v1"
+        "with":
+          "build_args": "BASE_IMAGE=europe-docker.pkg.dev/unicorn-985/private-images/optio-agent-base:deploy-${{ github.sha }}"
+          "context": "."
+          "dockerfile": "images/rust.Dockerfile"
+          "gcloud_service_key": "${{ secrets.docker_gcr_io_base64 }}"
+          "image_name": "private-images/optio-agent-rust"
+          "image_tag": "deploy-${{ github.sha }}"
+          "project_id": "unicorn-985"
+          "registry": "europe-docker.pkg.dev"
+    "timeout-minutes": 30
+  "build-api":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "env": {}
+        "name": "build-docker optio-api"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/push-to-gcr-github-action:v1"
+        "with":
+          "context": "."
+          "dockerfile": "Dockerfile.api"
+          "gcloud_service_key": "${{ secrets.docker_gcr_io_base64 }}"
+          "image_name": "private-images/optio-api"
+          "image_tag": "deploy-${{ github.sha }}"
+          "project_id": "unicorn-985"
+          "registry": "europe-docker.pkg.dev"
+    "timeout-minutes": 30
+  "build-optio":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "env": {}
+        "name": "build-docker optio-optio"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/push-to-gcr-github-action:v1"
+        "with":
+          "context": "."
+          "dockerfile": "Dockerfile.optio"
+          "gcloud_service_key": "${{ secrets.docker_gcr_io_base64 }}"
+          "image_name": "private-images/optio-optio"
+          "image_tag": "deploy-${{ github.sha }}"
+          "project_id": "unicorn-985"
+          "registry": "europe-docker.pkg.dev"
+    "timeout-minutes": 30
+  "build-web":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "env": {}
+        "name": "build-docker optio-web"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/push-to-gcr-github-action:v1"
+        "with":
+          "context": "."
+          "dockerfile": "Dockerfile.web"
+          "gcloud_service_key": "${{ secrets.docker_gcr_io_base64 }}"
+          "image_name": "private-images/optio-web"
+          "image_tag": "deploy-${{ github.sha }}"
+          "project_id": "unicorn-985"
+          "registry": "europe-docker.pkg.dev"
+    "timeout-minutes": 30
+  "deploy":
+    "container":
+      "image": "mirror.gcr.io/node:22"
+    "needs":
+      - "build-api"
+      - "build-web"
+      - "build-optio"
+      - "build-agent-node"
+      - "build-agent-python"
+      - "build-agent-go"
+      - "build-agent-rust"
+      - "build-agent-full"
+    "runs-on": "arc-runner-2"
+    "steps":
+      - "name": "Check out repository code"
+        "uses": "actions/checkout@v4"
+        "with":
+          "submodules": "recursive"
+      - "name": "git safe directory"
+        "run": "command -v git && git config --global --add safe.directory '*' || true"
+      - "name": "deploy-helm"
+        "uses": "docker://europe-docker.pkg.dev/unicorn-985/public-images/helm-action:v4"
+        "with":
+          "atomic": "false"
+          "chart": "./helm/optio"
+          "clusterLocation": "europe-west4-b"
+          "clusterName": "prod-europe-west4"
+          "clusterProject": "gh-runners"
+          "clusterSaJson": "${{ secrets.GCE_JSON }}"
+          "fetch-dependencies": "false"
+          "helm": "helm3"
+          "namespace": "optio"
+          "release": "optio"
+          "token": "${{ github.token }}"
+          "values": '{"image":{"tag":"deploy-${{ github.sha }}"}}'
+          "version": "${{ github.event.pull_request.head.sha }}"
+          "wait": "false"
+    "timeout-minutes": 30
+"name": "Release"
+"on":
+  "push":
+    "tags":
+      - "v*"
+  "workflow_dispatch": null
