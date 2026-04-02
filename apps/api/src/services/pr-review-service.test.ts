@@ -43,10 +43,38 @@ vi.mock("./task-service.js", () => ({
   getTask: (...args: any[]) => mockGetTask(...args),
 }));
 
-const mockGetGitHubToken = vi.fn().mockResolvedValue("ghp_test_token");
+const mockPlatform = {
+  type: "github",
+  getPullRequest: vi.fn(),
+  listOpenPullRequests: vi.fn(),
+  getCIChecks: vi.fn(),
+  getReviews: vi.fn(),
+  getInlineComments: vi.fn(),
+  getIssueComments: vi.fn(),
+  mergePullRequest: vi.fn(),
+  submitReview: vi.fn(),
+  listIssues: vi.fn(),
+  createLabel: vi.fn(),
+  addLabelsToIssue: vi.fn(),
+  createIssueComment: vi.fn(),
+  closeIssue: vi.fn(),
+  getRepoMetadata: vi.fn(),
+  listRepoContents: vi.fn(),
+};
 
-vi.mock("./github-token-service.js", () => ({
-  getGitHubToken: (...args: any[]) => mockGetGitHubToken(...args),
+const mockGetGitPlatformForRepo = vi.fn().mockResolvedValue({
+  platform: mockPlatform,
+  ri: {
+    platform: "github",
+    host: "github.com",
+    owner: "acme",
+    repo: "widgets",
+    apiBaseUrl: "https://api.github.com",
+  },
+});
+
+vi.mock("./git-token-service.js", () => ({
+  getGitPlatformForRepo: (...args: any[]) => mockGetGitPlatformForRepo(...args),
 }));
 
 const mockQueueAdd = vi.fn().mockResolvedValue(undefined);
@@ -130,10 +158,44 @@ const sampleRepoConfig = {
 
 // ── launchPrReview ──────────────────────────────────────────────────
 
+function setupPlatformMocks(
+  prData = {
+    title: "Add feature X",
+    body: "Implements feature X",
+    headSha: "abc123",
+    number: 42,
+    state: "open" as const,
+    merged: false,
+    mergeable: true,
+    draft: false,
+    baseBranch: "main",
+    url: "",
+    author: "",
+    assignees: [] as string[],
+    labels: [] as string[],
+    createdAt: "",
+    updatedAt: "",
+  },
+) {
+  mockPlatform.getPullRequest.mockResolvedValue(prData);
+  mockPlatform.getReviews.mockResolvedValue([]);
+  mockPlatform.getIssueComments.mockResolvedValue([]);
+  mockPlatform.getInlineComments.mockResolvedValue([]);
+}
+
 describe("launchPrReview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "github",
+        host: "github.com",
+        owner: "acme",
+        repo: "widgets",
+        apiBaseUrl: "https://api.github.com",
+      },
+    });
   });
 
   it("throws for an invalid PR URL format", async () => {
@@ -158,31 +220,17 @@ describe("launchPrReview", () => {
 
   it("creates a task and review draft for a valid PR URL", async () => {
     mockGetRepoByUrl.mockResolvedValueOnce(sampleRepoConfig);
-
-    // fetchPrContext: PR data, reviews, comments, inline comments
-    mockFetch
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          title: "Add feature X",
-          body: "Implements feature X",
-          head: { sha: "abc123" },
-        }),
-      )
-      .mockResolvedValueOnce(mockJsonResponse([]))
-      .mockResolvedValueOnce(mockJsonResponse([]))
-      .mockResolvedValueOnce(mockJsonResponse([]));
+    setupPlatformMocks();
 
     const createdTask = { id: "task-new", title: "Review: PR #42 - Add feature X" };
     mockCreateTask.mockResolvedValueOnce(createdTask);
 
-    // db.update(tasks).set(...).where(...)
     vi.mocked(db.update as any).mockReturnValue({
       set: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue(undefined),
       }),
     });
 
-    // db.insert(reviewDrafts).values(...).returning()
     const draftRow = { id: "draft-new", taskId: "task-new", state: "drafting" };
     vi.mocked(db.insert as any).mockReturnValue({
       values: vi.fn().mockReturnValue({
@@ -231,18 +279,23 @@ describe("launchPrReview", () => {
       reviewPromptTemplate: "Review PR #{{PR_NUMBER}} in {{REPO_NAME}}. Run: {{TEST_COMMAND}}",
       reviewModel: "haiku",
     });
-
-    mockFetch
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          title: "Fix bug",
-          body: "Fixes bug",
-          head: { sha: "def456" },
-        }),
-      )
-      .mockResolvedValueOnce(mockJsonResponse([]))
-      .mockResolvedValueOnce(mockJsonResponse([]))
-      .mockResolvedValueOnce(mockJsonResponse([]));
+    setupPlatformMocks({
+      title: "Fix bug",
+      body: "Fixes bug",
+      headSha: "def456",
+      number: 10,
+      state: "open",
+      merged: false,
+      mergeable: true,
+      draft: false,
+      baseBranch: "main",
+      url: "",
+      author: "",
+      assignees: [],
+      labels: [],
+      createdAt: "",
+      updatedAt: "",
+    });
 
     mockCreateTask.mockResolvedValueOnce({ id: "task-tpl" });
 
@@ -274,12 +327,23 @@ describe("launchPrReview", () => {
 
   it("falls back to default review prompt when repo has no reviewPromptTemplate", async () => {
     mockGetRepoByUrl.mockResolvedValueOnce({ ...sampleRepoConfig, reviewPromptTemplate: null });
-
-    mockFetch
-      .mockResolvedValueOnce(mockJsonResponse({ title: "Chore", body: "", head: { sha: "sha1" } }))
-      .mockResolvedValueOnce(mockJsonResponse([]))
-      .mockResolvedValueOnce(mockJsonResponse([]))
-      .mockResolvedValueOnce(mockJsonResponse([]));
+    setupPlatformMocks({
+      title: "Chore",
+      body: "",
+      headSha: "sha1",
+      number: 5,
+      state: "open",
+      merged: false,
+      mergeable: true,
+      draft: false,
+      baseBranch: "main",
+      url: "",
+      author: "",
+      assignees: [],
+      labels: [],
+      createdAt: "",
+      updatedAt: "",
+    });
 
     mockCreateTask.mockResolvedValueOnce({ id: "task-def" });
     vi.mocked(db.update as any).mockReturnValue({
@@ -294,7 +358,6 @@ describe("launchPrReview", () => {
 
     await launchPrReview({ prUrl: "https://github.com/acme/widgets/pull/5" });
 
-    // The default template contains "code review assistant"
     expect(mockQueueAdd).toHaveBeenCalledWith(
       "process-task",
       expect.objectContaining({
@@ -308,12 +371,23 @@ describe("launchPrReview", () => {
 
   it("throws when PR head SHA is empty", async () => {
     mockGetRepoByUrl.mockResolvedValueOnce(sampleRepoConfig);
-
-    mockFetch
-      .mockResolvedValueOnce(mockJsonResponse({ title: "PR", body: "", head: { sha: "" } }))
-      .mockResolvedValueOnce(mockJsonResponse([]))
-      .mockResolvedValueOnce(mockJsonResponse([]))
-      .mockResolvedValueOnce(mockJsonResponse([]));
+    setupPlatformMocks({
+      title: "PR",
+      body: "",
+      headSha: "",
+      number: 99,
+      state: "open",
+      merged: false,
+      mergeable: true,
+      draft: false,
+      baseBranch: "main",
+      url: "",
+      author: "",
+      assignees: [],
+      labels: [],
+      createdAt: "",
+      updatedAt: "",
+    });
 
     await expect(
       launchPrReview({ prUrl: "https://github.com/acme/widgets/pull/99" }),
@@ -692,7 +766,19 @@ describe("updateReviewDraft", () => {
 describe("submitReviewToGitHub", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "github",
+        host: "github.com",
+        owner: "acme",
+        repo: "widgets",
+        apiBaseUrl: "https://api.github.com",
+      },
+    });
+    mockPlatform.submitReview.mockResolvedValue({
+      url: "https://github.com/acme/widgets/pull/42#pullrequestreview-1",
+    });
   });
 
   it("throws when draft not found", async () => {
@@ -724,10 +810,6 @@ describe("submitReviewToGitHub", () => {
       }),
     });
 
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse({ html_url: "https://github.com/acme/widgets/pull/42#pullrequestreview-1" }),
-    );
-
     const updatedDraft = { ...sampleDraft, state: "submitted", submittedAt: new Date() };
     vi.mocked(db.update as any).mockReturnValue({
       set: vi.fn().mockReturnValue({
@@ -741,14 +823,10 @@ describe("submitReviewToGitHub", () => {
 
     expect(result.draft.state).toBe("submitted");
     expect(result.githubReviewUrl).toContain("pullrequestreview");
-
-    // Verify fetch was called with APPROVE event
-    expect(mockFetch).toHaveBeenCalledWith(
-      "https://api.github.com/repos/acme/widgets/pulls/42/reviews",
-      expect.objectContaining({
-        method: "POST",
-        body: expect.stringContaining('"APPROVE"'),
-      }),
+    expect(mockPlatform.submitReview).toHaveBeenCalledWith(
+      expect.any(Object),
+      42,
+      expect.objectContaining({ event: "APPROVE" }),
     );
   });
 
@@ -763,8 +841,6 @@ describe("submitReviewToGitHub", () => {
       }),
     });
 
-    mockFetch.mockResolvedValueOnce(mockJsonResponse({ html_url: "https://github.com/review/2" }));
-
     vi.mocked(db.update as any).mockReturnValue({
       set: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
@@ -775,11 +851,10 @@ describe("submitReviewToGitHub", () => {
 
     await submitReviewToGitHub("draft-1");
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining("/reviews"),
-      expect.objectContaining({
-        body: expect.stringContaining('"REQUEST_CHANGES"'),
-      }),
+    expect(mockPlatform.submitReview).toHaveBeenCalledWith(
+      expect.any(Object),
+      42,
+      expect.objectContaining({ event: "REQUEST_CHANGES" }),
     );
   });
 
@@ -792,8 +867,6 @@ describe("submitReviewToGitHub", () => {
       }),
     });
 
-    mockFetch.mockResolvedValueOnce(mockJsonResponse({ html_url: "https://github.com/review/3" }));
-
     vi.mocked(db.update as any).mockReturnValue({
       set: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
@@ -804,11 +877,10 @@ describe("submitReviewToGitHub", () => {
 
     await submitReviewToGitHub("draft-1");
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining("/reviews"),
-      expect.objectContaining({
-        body: expect.stringContaining('"COMMENT"'),
-      }),
+    expect(mockPlatform.submitReview).toHaveBeenCalledWith(
+      expect.any(Object),
+      42,
+      expect.objectContaining({ event: "COMMENT" }),
     );
   });
 
@@ -823,8 +895,6 @@ describe("submitReviewToGitHub", () => {
       }),
     });
 
-    mockFetch.mockResolvedValueOnce(mockJsonResponse({ html_url: "https://github.com/review/4" }));
-
     vi.mocked(db.update as any).mockReturnValue({
       set: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
@@ -835,29 +905,23 @@ describe("submitReviewToGitHub", () => {
 
     await submitReviewToGitHub("draft-1");
 
-    const fetchBody = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(fetchBody.comments).toHaveLength(2);
-    expect(fetchBody.comments[0]).toEqual(
+    const call = mockPlatform.submitReview.mock.calls[0];
+    expect(call[2].comments).toHaveLength(2);
+    expect(call[2].comments[0]).toEqual(
       expect.objectContaining({ path: "src/index.ts", line: 10, body: "Rename this variable" }),
-    );
-    // Second comment has no line, should have position: 1
-    expect(fetchBody.comments[1]).toEqual(
-      expect.objectContaining({ path: "src/utils.ts", body: "Add docs", position: 1 }),
     );
   });
 
-  it("throws for GitHub API errors", async () => {
+  it("throws for platform API errors", async () => {
     vi.mocked(db.select as any).mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue([{ ...sampleDraft, verdict: "approve" }]),
       }),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 422,
-      text: () => Promise.resolve("Validation failed"),
-    });
+    mockPlatform.submitReview.mockRejectedValueOnce(
+      new Error("GitHub API error 422: Validation failed"),
+    );
 
     await expect(submitReviewToGitHub("draft-1")).rejects.toThrow("GitHub API error 422");
   });
@@ -868,8 +932,6 @@ describe("submitReviewToGitHub", () => {
         where: vi.fn().mockResolvedValue([{ ...sampleDraft, verdict: "approve" }]),
       }),
     });
-
-    mockFetch.mockResolvedValueOnce(mockJsonResponse({ html_url: "https://github.com/review/5" }));
 
     const updateSetMock = vi.fn().mockReturnValue({
       where: vi.fn().mockReturnValue({
@@ -888,14 +950,12 @@ describe("submitReviewToGitHub", () => {
     expect(result.draft.state).toBe("submitted");
   });
 
-  it("uses user token when userId is provided", async () => {
+  it("uses user context when userId is provided", async () => {
     vi.mocked(db.select as any).mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue([{ ...sampleDraft, verdict: "approve" }]),
       }),
     });
-
-    mockFetch.mockResolvedValueOnce(mockJsonResponse({ html_url: "https://github.com/review/6" }));
 
     vi.mocked(db.update as any).mockReturnValue({
       set: vi.fn().mockReturnValue({
@@ -907,7 +967,10 @@ describe("submitReviewToGitHub", () => {
 
     await submitReviewToGitHub("draft-1", "user-123");
 
-    expect(mockGetGitHubToken).toHaveBeenCalledWith({ userId: "user-123" });
+    expect(mockGetGitPlatformForRepo).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ userId: "user-123" }),
+    );
   });
 });
 
@@ -916,7 +979,16 @@ describe("submitReviewToGitHub", () => {
 describe("getPrStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "github",
+        host: "github.com",
+        owner: "acme",
+        repo: "widgets",
+        apiBaseUrl: "https://api.github.com",
+      },
+    });
   });
 
   it("throws for an invalid PR URL", async () => {
@@ -924,27 +996,28 @@ describe("getPrStatus", () => {
   });
 
   it("returns checks/review/mergeable status", async () => {
-    mockFetch
-      // PR data
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          state: "open",
-          merged: false,
-          mergeable: true,
-          head: { sha: "sha1" },
-        }),
-      )
-      // Check runs
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          check_runs: [
-            { status: "completed", conclusion: "success" },
-            { status: "completed", conclusion: "skipped" },
-          ],
-        }),
-      )
-      // Reviews
-      .mockResolvedValueOnce(mockJsonResponse([{ state: "APPROVED", body: "LGTM" }]));
+    mockPlatform.getPullRequest.mockResolvedValue({
+      number: 42,
+      state: "open",
+      merged: false,
+      mergeable: true,
+      headSha: "sha1",
+      title: "",
+      body: "",
+      draft: false,
+      baseBranch: "main",
+      url: "",
+      author: "",
+      assignees: [],
+      labels: [],
+      createdAt: "",
+      updatedAt: "",
+    });
+    mockPlatform.getCIChecks.mockResolvedValue([
+      { name: "build", status: "completed", conclusion: "success" },
+      { name: "lint", status: "completed", conclusion: "skipped" },
+    ]);
+    mockPlatform.getReviews.mockResolvedValue([{ author: "bob", state: "APPROVED", body: "LGTM" }]);
 
     const result = await getPrStatus("https://github.com/acme/widgets/pull/42");
 
@@ -958,24 +1031,28 @@ describe("getPrStatus", () => {
   });
 
   it("maps check run conclusions to overall status - pending", async () => {
-    mockFetch
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          state: "open",
-          merged: false,
-          mergeable: true,
-          head: { sha: "sha2" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          check_runs: [
-            { status: "in_progress", conclusion: null },
-            { status: "completed", conclusion: "success" },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(mockJsonResponse([]));
+    mockPlatform.getPullRequest.mockResolvedValue({
+      number: 43,
+      state: "open",
+      merged: false,
+      mergeable: true,
+      headSha: "sha2",
+      title: "",
+      body: "",
+      draft: false,
+      baseBranch: "main",
+      url: "",
+      author: "",
+      assignees: [],
+      labels: [],
+      createdAt: "",
+      updatedAt: "",
+    });
+    mockPlatform.getCIChecks.mockResolvedValue([
+      { name: "build", status: "in_progress", conclusion: null },
+      { name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    mockPlatform.getReviews.mockResolvedValue([]);
 
     const result = await getPrStatus("https://github.com/acme/widgets/pull/43");
 
@@ -983,24 +1060,28 @@ describe("getPrStatus", () => {
   });
 
   it("maps check run conclusions to overall status - failing", async () => {
-    mockFetch
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          state: "open",
-          merged: false,
-          mergeable: null,
-          head: { sha: "sha3" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          check_runs: [
-            { status: "completed", conclusion: "failure" },
-            { status: "completed", conclusion: "success" },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(mockJsonResponse([]));
+    mockPlatform.getPullRequest.mockResolvedValue({
+      number: 44,
+      state: "open",
+      merged: false,
+      mergeable: null,
+      headSha: "sha3",
+      title: "",
+      body: "",
+      draft: false,
+      baseBranch: "main",
+      url: "",
+      author: "",
+      assignees: [],
+      labels: [],
+      createdAt: "",
+      updatedAt: "",
+    });
+    mockPlatform.getCIChecks.mockResolvedValue([
+      { name: "build", status: "completed", conclusion: "failure" },
+      { name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    mockPlatform.getReviews.mockResolvedValue([]);
 
     const result = await getPrStatus("https://github.com/acme/widgets/pull/44");
 
@@ -1008,17 +1089,25 @@ describe("getPrStatus", () => {
   });
 
   it("returns 'none' when there are no check runs", async () => {
-    mockFetch
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          state: "open",
-          merged: false,
-          mergeable: true,
-          head: { sha: "sha4" },
-        }),
-      )
-      .mockResolvedValueOnce(mockJsonResponse({ check_runs: [] }))
-      .mockResolvedValueOnce(mockJsonResponse([]));
+    mockPlatform.getPullRequest.mockResolvedValue({
+      number: 45,
+      state: "open",
+      merged: false,
+      mergeable: true,
+      headSha: "sha4",
+      title: "",
+      body: "",
+      draft: false,
+      baseBranch: "main",
+      url: "",
+      author: "",
+      assignees: [],
+      labels: [],
+      createdAt: "",
+      updatedAt: "",
+    });
+    mockPlatform.getCIChecks.mockResolvedValue([]);
+    mockPlatform.getReviews.mockResolvedValue([]);
 
     const result = await getPrStatus("https://github.com/acme/widgets/pull/45");
 
@@ -1027,17 +1116,25 @@ describe("getPrStatus", () => {
   });
 
   it("detects merged PRs", async () => {
-    mockFetch
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          state: "closed",
-          merged: true,
-          mergeable: false,
-          head: { sha: "sha5" },
-        }),
-      )
-      .mockResolvedValueOnce(mockJsonResponse({ check_runs: [] }))
-      .mockResolvedValueOnce(mockJsonResponse([]));
+    mockPlatform.getPullRequest.mockResolvedValue({
+      number: 46,
+      state: "closed",
+      merged: true,
+      mergeable: false,
+      headSha: "sha5",
+      title: "",
+      body: "",
+      draft: false,
+      baseBranch: "main",
+      url: "",
+      author: "",
+      assignees: [],
+      labels: [],
+      createdAt: "",
+      updatedAt: "",
+    });
+    mockPlatform.getCIChecks.mockResolvedValue([]);
+    mockPlatform.getReviews.mockResolvedValue([]);
 
     const result = await getPrStatus("https://github.com/acme/widgets/pull/46");
 
@@ -1045,22 +1142,28 @@ describe("getPrStatus", () => {
   });
 
   it("detects changes_requested review status", async () => {
-    mockFetch
-      .mockResolvedValueOnce(
-        mockJsonResponse({
-          state: "open",
-          merged: false,
-          mergeable: true,
-          head: { sha: "sha6" },
-        }),
-      )
-      .mockResolvedValueOnce(mockJsonResponse({ check_runs: [] }))
-      .mockResolvedValueOnce(
-        mockJsonResponse([
-          { state: "COMMENTED", body: "nice" },
-          { state: "CHANGES_REQUESTED", body: "Fix this" },
-        ]),
-      );
+    mockPlatform.getPullRequest.mockResolvedValue({
+      number: 47,
+      state: "open",
+      merged: false,
+      mergeable: true,
+      headSha: "sha6",
+      title: "",
+      body: "",
+      draft: false,
+      baseBranch: "main",
+      url: "",
+      author: "",
+      assignees: [],
+      labels: [],
+      createdAt: "",
+      updatedAt: "",
+    });
+    mockPlatform.getCIChecks.mockResolvedValue([]);
+    mockPlatform.getReviews.mockResolvedValue([
+      { author: "alice", state: "COMMENTED", body: "nice" },
+      { author: "bob", state: "CHANGES_REQUESTED", body: "Fix this" },
+    ]);
 
     const result = await getPrStatus("https://github.com/acme/widgets/pull/47");
 
@@ -1073,7 +1176,16 @@ describe("getPrStatus", () => {
 describe("listOpenPrs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "github",
+        host: "github.com",
+        owner: "acme",
+        repo: "widgets",
+        apiBaseUrl: "https://api.github.com",
+      },
+    });
   });
 
   it("returns empty array when no repos are configured", async () => {
@@ -1089,13 +1201,17 @@ describe("listOpenPrs", () => {
   });
 
   it("returns empty array when GitHub token is not available", async () => {
-    vi.mocked(db.select as any).mockReturnValue({
+    vi.mocked(db.select as any).mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue([sampleRepoConfig]),
       }),
     });
+    // Drafts query
+    vi.mocked(db.select as any).mockReturnValueOnce({
+      from: vi.fn().mockResolvedValue([]),
+    });
 
-    mockGetGitHubToken.mockRejectedValueOnce(new Error("No token"));
+    mockGetGitPlatformForRepo.mockRejectedValue(new Error("No token"));
 
     const result = await listOpenPrs("ws-1");
 
@@ -1103,58 +1219,34 @@ describe("listOpenPrs", () => {
   });
 
   it("lists PRs across configured repos", async () => {
-    let selectCallCount = 0;
-    vi.mocked(db.select as any).mockImplementation(() => {
-      selectCallCount++;
-      return {
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            if (selectCallCount === 1) {
-              // Repo list
-              return Promise.resolve([sampleRepoConfig]);
-            }
-            // This won't be called with the current mock setup; drafts are fetched without where
-            return Promise.resolve([]);
-          }),
-        }),
-      };
-    });
-
-    // Override: the drafts query has no where clause — uses `db.select().from(reviewDrafts)`
-    // We need a more nuanced approach: after repo list, the next select is for drafts (no where)
-    // Reset and set up sequentially
     vi.mocked(db.select as any).mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue([sampleRepoConfig]),
       }),
     });
-
-    // Drafts query: db.select().from(reviewDrafts) — no where
     vi.mocked(db.select as any).mockReturnValueOnce({
       from: vi.fn().mockResolvedValue([]),
     });
 
-    // GitHub API: list PRs for repo
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse([
-        {
-          id: 1001,
-          number: 42,
-          title: "Feature X",
-          body: "Adds X",
-          state: "open",
-          draft: false,
-          html_url: "https://github.com/acme/widgets/pull/42",
-          head: { sha: "abc" },
-          base: { ref: "main" },
-          user: { login: "alice" },
-          assignees: [],
-          labels: [{ name: "enhancement" }],
-          created_at: "2026-03-01T00:00:00Z",
-          updated_at: "2026-03-29T00:00:00Z",
-        },
-      ]),
-    );
+    mockPlatform.listOpenPullRequests.mockResolvedValue([
+      {
+        number: 42,
+        title: "Feature X",
+        body: "Adds X",
+        state: "open",
+        merged: false,
+        mergeable: true,
+        draft: false,
+        headSha: "abc",
+        baseBranch: "main",
+        url: "https://github.com/acme/widgets/pull/42",
+        author: "alice",
+        assignees: [],
+        labels: ["enhancement"],
+        createdAt: "2026-03-01T00:00:00Z",
+        updatedAt: "2026-03-29T00:00:00Z",
+      },
+    ]);
 
     const result = await listOpenPrs("ws-1");
 
@@ -1175,8 +1267,6 @@ describe("listOpenPrs", () => {
         where: vi.fn().mockResolvedValue([sampleRepoConfig]),
       }),
     });
-
-    // Drafts query
     vi.mocked(db.select as any).mockReturnValueOnce({
       from: vi.fn().mockResolvedValue([
         {
@@ -1191,26 +1281,25 @@ describe("listOpenPrs", () => {
       ]),
     });
 
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse([
-        {
-          id: 1001,
-          number: 42,
-          title: "Feature X",
-          body: "",
-          state: "open",
-          draft: false,
-          html_url: "https://github.com/acme/widgets/pull/42",
-          head: { sha: "abc" },
-          base: { ref: "main" },
-          user: { login: "alice" },
-          assignees: [],
-          labels: [],
-          created_at: "2026-03-01T00:00:00Z",
-          updated_at: "2026-03-29T00:00:00Z",
-        },
-      ]),
-    );
+    mockPlatform.listOpenPullRequests.mockResolvedValue([
+      {
+        number: 42,
+        title: "Feature X",
+        body: "",
+        state: "open",
+        merged: false,
+        mergeable: true,
+        draft: false,
+        headSha: "abc",
+        baseBranch: "main",
+        url: "https://github.com/acme/widgets/pull/42",
+        author: "alice",
+        assignees: [],
+        labels: [],
+        createdAt: "2026-03-01T00:00:00Z",
+        updatedAt: "2026-03-29T00:00:00Z",
+      },
+    ]);
 
     const result = await listOpenPrs("ws-1");
 
@@ -1230,7 +1319,6 @@ describe("listOpenPrs", () => {
         where: vi.fn().mockResolvedValue([sampleRepoConfig]),
       }),
     });
-
     vi.mocked(db.select as any).mockReturnValueOnce({
       from: vi.fn().mockResolvedValue([
         {
@@ -1245,86 +1333,81 @@ describe("listOpenPrs", () => {
       ]),
     });
 
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse([
-        {
-          id: 1,
-          number: 10,
-          title: "Already reviewed",
-          body: "",
-          state: "open",
-          draft: false,
-          html_url: "https://github.com/acme/widgets/pull/10",
-          head: { sha: "a" },
-          base: { ref: "main" },
-          user: { login: "bob" },
-          assignees: [],
-          labels: [],
-          created_at: "2026-03-01T00:00:00Z",
-          updated_at: "2026-03-30T00:00:00Z",
-        },
-        {
-          id: 2,
-          number: 11,
-          title: "Not reviewed",
-          body: "",
-          state: "open",
-          draft: false,
-          html_url: "https://github.com/acme/widgets/pull/11",
-          head: { sha: "b" },
-          base: { ref: "main" },
-          user: { login: "carol" },
-          assignees: [],
-          labels: [],
-          created_at: "2026-03-02T00:00:00Z",
-          updated_at: "2026-03-28T00:00:00Z",
-        },
-      ]),
-    );
+    mockPlatform.listOpenPullRequests.mockResolvedValue([
+      {
+        number: 10,
+        title: "Already reviewed",
+        body: "",
+        state: "open",
+        merged: false,
+        mergeable: true,
+        draft: false,
+        headSha: "a",
+        baseBranch: "main",
+        url: "https://github.com/acme/widgets/pull/10",
+        author: "bob",
+        assignees: [],
+        labels: [],
+        createdAt: "2026-03-01T00:00:00Z",
+        updatedAt: "2026-03-30T00:00:00Z",
+      },
+      {
+        number: 11,
+        title: "Not reviewed",
+        body: "",
+        state: "open",
+        merged: false,
+        mergeable: true,
+        draft: false,
+        headSha: "b",
+        baseBranch: "main",
+        url: "https://github.com/acme/widgets/pull/11",
+        author: "carol",
+        assignees: [],
+        labels: [],
+        createdAt: "2026-03-02T00:00:00Z",
+        updatedAt: "2026-03-28T00:00:00Z",
+      },
+    ]);
 
     const result = await listOpenPrs("ws-1");
 
     expect(result).toHaveLength(2);
-    // Unreviewed PR should come first
     expect(result[0].number).toBe(11);
     expect(result[0].reviewDraft).toBeNull();
-    // Reviewed PR second
     expect(result[1].number).toBe(10);
     expect(result[1].reviewDraft).not.toBeNull();
   });
 
   it("filters by repo when repoId is provided", async () => {
-    // When repoId is passed, we look up a single repo by id
     vi.mocked(db.select as any).mockReturnValueOnce({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue([sampleRepoConfig]),
       }),
     });
-
     vi.mocked(db.select as any).mockReturnValueOnce({
       from: vi.fn().mockResolvedValue([]),
     });
 
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse([
-        {
-          id: 1,
-          number: 1,
-          title: "PR 1",
-          body: "",
-          state: "open",
-          draft: false,
-          html_url: "https://github.com/acme/widgets/pull/1",
-          head: { sha: "x" },
-          base: { ref: "main" },
-          user: { login: "dev" },
-          assignees: [],
-          labels: [],
-          created_at: "2026-03-01T00:00:00Z",
-          updated_at: "2026-03-29T00:00:00Z",
-        },
-      ]),
-    );
+    mockPlatform.listOpenPullRequests.mockResolvedValue([
+      {
+        number: 1,
+        title: "PR 1",
+        body: "",
+        state: "open",
+        merged: false,
+        mergeable: true,
+        draft: false,
+        headSha: "x",
+        baseBranch: "main",
+        url: "https://github.com/acme/widgets/pull/1",
+        author: "dev",
+        assignees: [],
+        labels: [],
+        createdAt: "2026-03-01T00:00:00Z",
+        updatedAt: "2026-03-29T00:00:00Z",
+      },
+    ]);
 
     const result = await listOpenPrs("ws-1", "repo-1");
 
@@ -1338,7 +1421,16 @@ describe("listOpenPrs", () => {
 describe("mergePr", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "github",
+        host: "github.com",
+        owner: "acme",
+        repo: "widgets",
+        apiBaseUrl: "https://api.github.com",
+      },
+    });
   });
 
   it("throws for an invalid PR URL", async () => {
@@ -1348,7 +1440,7 @@ describe("mergePr", () => {
   });
 
   it("merges a PR with the specified method", async () => {
-    mockFetch.mockResolvedValueOnce(mockJsonResponse({ merged: true }));
+    mockPlatform.mergePullRequest.mockResolvedValue(undefined);
 
     const result = await mergePr({
       prUrl: "https://github.com/acme/widgets/pull/42",
@@ -1356,28 +1448,20 @@ describe("mergePr", () => {
     });
 
     expect(result).toEqual({ merged: true });
-    expect(mockFetch).toHaveBeenCalledWith(
-      "https://api.github.com/repos/acme/widgets/pulls/42/merge",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({ merge_method: "squash" }),
-      }),
-    );
+    expect(mockPlatform.mergePullRequest).toHaveBeenCalledWith(expect.any(Object), 42, "squash");
   });
 
   it("throws when merge fails", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 405,
-      text: () => Promise.resolve("Pull request is not mergeable"),
-    });
+    mockPlatform.mergePullRequest.mockRejectedValueOnce(
+      new Error("GitHub API error 405: Pull request is not mergeable"),
+    );
 
     await expect(
       mergePr({
         prUrl: "https://github.com/acme/widgets/pull/42",
         mergeMethod: "merge",
       }),
-    ).rejects.toThrow("Merge failed (405)");
+    ).rejects.toThrow("GitHub API error 405");
   });
 });
 
@@ -1386,7 +1470,16 @@ describe("mergePr", () => {
 describe("reReview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "github",
+        host: "github.com",
+        owner: "acme",
+        repo: "widgets",
+        apiBaseUrl: "https://api.github.com",
+      },
+    });
   });
 
   it("throws when no review draft found for task", async () => {

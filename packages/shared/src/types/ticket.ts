@@ -1,5 +1,6 @@
 export enum TicketSource {
   GITHUB = "github",
+  GITLAB = "gitlab",
   LINEAR = "linear",
   JIRA = "jira",
   NOTION = "notion",

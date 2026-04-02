@@ -3,7 +3,7 @@ import { db } from "../db/client.js";
 import { ticketProviders } from "../db/schema.js";
 import { getTicketProvider } from "@optio/ticket-providers";
 import type { TicketSource } from "@optio/shared";
-import { TaskState, normalizeRepoUrl } from "@optio/shared";
+import { TaskState, TicketSource as TicketSourceEnum, normalizeRepoUrl } from "@optio/shared";
 import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { logger } from "../logger.js";
@@ -22,8 +22,14 @@ export async function syncAllTickets(): Promise<number> {
       const tickets = await provider.fetchActionableTickets(providerConfig.config);
 
       for (const ticket of tickets) {
+        // Construct repo URL: use the ticket's repo field, or fall back to provider config
+        // For GitHub tickets, ticket.repo is "owner/repo"; for others, use provider config
         const repoUrl = ticket.repo
-          ? normalizeRepoUrl(`https://github.com/${ticket.repo}`)
+          ? normalizeRepoUrl(
+              ticket.source === TicketSourceEnum.GITLAB
+                ? `https://gitlab.com/${ticket.repo}`
+                : `https://github.com/${ticket.repo}`,
+            )
           : (providerConfig.config as any).repoUrl;
 
         // Check if task already exists for this ticket (scoped by repo + issue number)

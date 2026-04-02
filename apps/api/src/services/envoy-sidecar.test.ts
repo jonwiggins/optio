@@ -272,7 +272,8 @@ describe("getAgentCaVolumeMount", () => {
 describe("PROXIED_SECRET_ENV_VARS", () => {
   it("lists the expected secret env var names", () => {
     expect(PROXIED_SECRET_ENV_VARS).toContain("GITHUB_TOKEN");
+    expect(PROXIED_SECRET_ENV_VARS).toContain("GITLAB_TOKEN");
     expect(PROXIED_SECRET_ENV_VARS).toContain("ANTHROPIC_API_KEY");
-    expect(PROXIED_SECRET_ENV_VARS).toHaveLength(2);
+    expect(PROXIED_SECRET_ENV_VARS).toHaveLength(3);
   });
 });

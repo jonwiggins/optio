@@ -2,11 +2,12 @@ import { eq, and, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { repos, workspaces } from "../db/schema.js";
 import { encrypt, decrypt } from "./secret-service.js";
-import { normalizeRepoUrl } from "@optio/shared";
+import { normalizeRepoUrl, parseRepoUrl } from "@optio/shared";
 
 export interface RepoRecord {
   id: string;
   repoUrl: string;
+  gitPlatform: string;
   workspaceId: string | null;
   fullName: string;
   defaultBranch: string;
@@ -134,10 +135,14 @@ export async function createRepo(data: {
   // rows which bypass the (repo_url, workspace_id) unique constraint
   const workspaceId = data.workspaceId || (await getDefaultWorkspaceId()) || undefined;
 
+  const parsedUrl = parseRepoUrl(data.repoUrl);
+  const gitPlatform = parsedUrl?.platform ?? "github";
+
   const [repo] = await db
     .insert(repos)
     .values({
       repoUrl: normalizeRepoUrl(data.repoUrl),
+      gitPlatform,
       fullName: data.fullName,
       defaultBranch: data.defaultBranch ?? "main",
       isPrivate: data.isPrivate ?? false,

@@ -392,7 +392,7 @@ export function ReviewDraftPanel({ taskId, taskState }: ReviewDraftPanelProps) {
             ) : (
               <Send className="w-3 h-3" />
             )}
-            Submit Review to GitHub
+            Submit Review
           </button>
         </div>
 

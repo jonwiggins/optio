@@ -274,6 +274,13 @@
       "when": 1776268800000,
       "tag": "0038_workspace_scoping_idor",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1776355200000,
+      "tag": "0039_add_git_platform",
+      "breakpoints": true
     }
   ]
 }

@@ -96,7 +96,7 @@ export default function TasksPage() {
               : "border-transparent text-text-muted hover:text-text",
           )}
         >
-          GitHub Issues
+          Issues
         </button>
         <button
           onClick={() => setTab("prs")}

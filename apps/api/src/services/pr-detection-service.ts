@@ -1,5 +1,5 @@
-import { TASK_BRANCH_PREFIX } from "@optio/shared";
-import { getGitHubToken } from "./github-token-service.js";
+import { TASK_BRANCH_PREFIX, parseRepoUrl } from "@optio/shared";
+import { getGitPlatformForRepo } from "./git-token-service.js";
 import { logger } from "../logger.js";
 
 export interface ExistingPr {
@@ -13,15 +13,15 @@ export interface ExistingPr {
  * e.g. "https://github.com/owner/repo" → { owner: "owner", repo: "repo" }
  */
 export function parseOwnerRepo(repoUrl: string): { owner: string; repo: string } | null {
-  const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
-  if (!match) return null;
-  return { owner: match[1], repo: match[2] };
+  const ri = parseRepoUrl(repoUrl);
+  if (!ri) return null;
+  return { owner: ri.owner, repo: ri.repo };
 }
 
 /**
  * Check if an open PR already exists for a task's branch.
  *
- * Uses the GitHub API: GET /repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open
+ * Uses the GitPlatform abstraction to list open PRs filtered by branch.
  * Branch naming is deterministic: `optio/task-{taskId}`
  *
  * Returns the PR info if found, or null if no PR exists.
@@ -31,53 +31,31 @@ export async function checkExistingPr(
   taskId: string,
   workspaceId: string | null,
 ): Promise<ExistingPr | null> {
-  const parsed = parseOwnerRepo(repoUrl);
-  if (!parsed) {
-    logger.debug({ repoUrl }, "Cannot parse owner/repo from URL — skipping PR check");
+  const ri = parseRepoUrl(repoUrl);
+  if (!ri) {
+    logger.debug({ repoUrl }, "Cannot parse repo URL — skipping PR check");
     return null;
   }
 
-  let githubToken: string | null = null;
+  let platform;
   try {
-    githubToken = await getGitHubToken({ server: true });
+    const result = await getGitPlatformForRepo(repoUrl, { server: true });
+    platform = result.platform;
   } catch {
-    logger.debug("No GitHub token available — skipping existing PR check");
+    logger.debug("No git token available — skipping existing PR check");
     return null;
   }
-  if (!githubToken) return null;
 
   const branch = `${TASK_BRANCH_PREFIX}${taskId}`;
-  const { owner, repo } = parsed;
 
   try {
-    const res = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${branch}&state=open`,
-      {
-        headers: {
-          Authorization: `Bearer ${githubToken}`,
-          "User-Agent": "Optio",
-          Accept: "application/vnd.github.v3+json",
-        },
-      },
-    );
-
-    if (!res.ok) {
-      logger.debug({ status: res.status }, "GitHub API error checking for existing PR");
-      return null;
-    }
-
-    const pulls = (await res.json()) as Array<{
-      html_url: string;
-      number: number;
-      state: string;
-    }>;
+    const pulls = await platform.listOpenPullRequests(ri, { branch });
 
     if (pulls.length === 0) return null;
 
-    // Return the first (most relevant) open PR for this branch
     const pr = pulls[0];
     return {
-      url: pr.html_url,
+      url: pr.url,
       number: pr.number,
       state: pr.state,
     };

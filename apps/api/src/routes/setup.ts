@@ -135,6 +135,34 @@ export async function setupRoutes(app: FastifyInstance) {
     },
   );
 
+  // Validate a GitLab token by trying to get the authenticated user
+  app.post(
+    "/api/setup/validate/gitlab-token",
+    {
+      config: { rateLimit: SETUP_POST_RATE_LIMIT },
+      preHandler: [requireAdminWhenAuthenticated],
+    },
+    async (req, reply) => {
+      const { token, host } = req.body as { token: string; host?: string };
+      if (!token) return reply.status(400).send({ valid: false, error: "Token is required" });
+
+      const gitlabHost = host ?? "gitlab.com";
+      try {
+        const res = await fetch(`https://${gitlabHost}/api/v4/user`, {
+          headers: { "PRIVATE-TOKEN": token, "User-Agent": "Optio" },
+        });
+        if (!res.ok) {
+          return reply.send({ valid: false, error: `GitLab returned ${res.status}` });
+        }
+        const user = (await res.json()) as { username: string; name: string };
+        reply.send({ valid: true, user: { login: user.username, name: user.name } });
+      } catch (err) {
+        app.log.error(err, "GitLab token validation failed");
+        reply.send({ valid: false, error: sanitizeError(err) });
+      }
+    },
+  );
+
   // Validate an Anthropic API key
   app.post(
     "/api/setup/validate/anthropic-key",
@@ -278,6 +306,56 @@ export async function setupRoutes(app: FastifyInstance) {
         reply.send({ repos });
       } catch (err) {
         app.log.error(err, "Repo listing failed");
+        reply.send({ repos: [], error: sanitizeError(err) });
+      }
+    },
+  );
+
+  // List GitLab projects accessible to the token
+  app.post(
+    "/api/setup/repos/gitlab",
+    {
+      config: { rateLimit: SETUP_POST_RATE_LIMIT },
+      preHandler: [requireAdminWhenAuthenticated],
+    },
+    async (req, reply) => {
+      const { token, host } = req.body as { token: string; host?: string };
+      if (!token) return reply.status(400).send({ repos: [], error: "Token is required" });
+
+      const gitlabHost = host ?? "gitlab.com";
+      try {
+        const res = await fetch(
+          `https://${gitlabHost}/api/v4/projects?membership=true&order_by=last_activity_at&sort=desc&per_page=20`,
+          { headers: { "PRIVATE-TOKEN": token, "User-Agent": "Optio" } },
+        );
+        if (!res.ok) {
+          return reply.send({ repos: [], error: `GitLab returned ${res.status}` });
+        }
+
+        const data = (await res.json()) as Array<{
+          path_with_namespace: string;
+          web_url: string;
+          http_url_to_repo: string;
+          default_branch: string;
+          visibility: string;
+          description: string | null;
+          last_activity_at: string;
+        }>;
+
+        const repos = data.map((r) => ({
+          fullName: r.path_with_namespace,
+          cloneUrl: r.http_url_to_repo,
+          htmlUrl: r.web_url,
+          defaultBranch: r.default_branch ?? "main",
+          isPrivate: r.visibility !== "public",
+          description: r.description,
+          language: null,
+          pushedAt: r.last_activity_at,
+        }));
+
+        reply.send({ repos });
+      } catch (err) {
+        app.log.error(err, "GitLab repo listing failed");
         reply.send({ repos: [], error: sanitizeError(err) });
       }
     },

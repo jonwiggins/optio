@@ -5,42 +5,28 @@ import {
   PR_REVIEW_OUTPUT_PATH,
   renderPromptTemplate,
   normalizeRepoUrl,
+  parsePrUrl,
+  parseRepoUrl,
 } from "@optio/shared";
 import { db } from "../db/client.js";
 import { repos, tasks, taskLogs, reviewDrafts } from "../db/schema.js";
 import { eq, and, sql } from "drizzle-orm";
 import * as taskService from "./task-service.js";
-import { getGitHubToken } from "./github-token-service.js";
+import { getGitPlatformForRepo } from "./git-token-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { publishEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function parsePrUrl(prUrl: string): { owner: string; repo: string; prNumber: number } | null {
-  const match = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-  if (!match) return null;
-  return { owner: match[1], repo: match[2], prNumber: parseInt(match[3], 10) };
-}
-
-function buildGitHubHeaders(token: string) {
-  return {
-    Authorization: `Bearer ${token}`,
-    "User-Agent": "Optio",
-    Accept: "application/vnd.github.v3+json",
-    "Content-Type": "application/json",
-  };
-}
-
 /**
- * Fetch PR context from GitHub: description, existing reviews, comments.
- * Reuses the same pattern as review-service.ts fetchPrContext.
+ * Fetch PR context: description, existing reviews, comments.
+ * Uses the GitPlatform abstraction for both GitHub and GitLab.
  */
 async function fetchPrContext(
-  owner: string,
-  repo: string,
+  repoUrl: string,
   prNumber: number,
-  token: string,
+  userId?: string,
 ): Promise<{
   prTitle: string;
   prBody: string;
@@ -49,7 +35,11 @@ async function fetchPrContext(
   prComments: string;
   inlineComments: string;
 }> {
-  const headers = buildGitHubHeaders(token);
+  const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
+    userId,
+    server: !userId,
+  });
+
   const result = {
     prTitle: "",
     prBody: "",
@@ -60,64 +50,39 @@ async function fetchPrContext(
   };
 
   // Fetch PR data
-  const prRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}`, {
-    headers,
-  });
-  if (!prRes.ok) throw new Error(`Failed to fetch PR #${prNumber}: ${prRes.status}`);
-  const prData = (await prRes.json()) as any;
-  result.prTitle = prData.title ?? "";
-  result.prBody = prData.body ?? "";
-  result.headSha = prData.head?.sha ?? "";
+  const prData = await platform.getPullRequest(ri, prNumber);
+  result.prTitle = prData.title;
+  result.prBody = prData.body;
+  result.headSha = prData.headSha;
 
   // Fetch existing reviews
   try {
-    const reviewsRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/reviews`,
-      { headers },
-    );
-    if (reviewsRes.ok) {
-      const reviews = (await reviewsRes.json()) as any[];
-      const withBody = reviews.filter((r: any) => r.body?.trim());
-      if (withBody.length > 0) {
-        result.existingReviews = withBody
-          .map((r: any) => `**${r.user?.login ?? "unknown"}** (${r.state}):\n${r.body}`)
-          .join("\n\n");
-      }
+    const reviews = await platform.getReviews(ri, prNumber);
+    const withBody = reviews.filter((r) => r.body?.trim());
+    if (withBody.length > 0) {
+      result.existingReviews = withBody
+        .map((r) => `**${r.author}** (${r.state}):\n${r.body}`)
+        .join("\n\n");
     }
   } catch {}
 
   // Fetch PR discussion comments
   try {
-    const commentsRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/issues/${prNumber}/comments?per_page=30`,
-      { headers },
-    );
-    if (commentsRes.ok) {
-      const comments = (await commentsRes.json()) as any[];
-      if (comments.length > 0) {
-        result.prComments = comments
-          .map((c: any) => `**${c.user?.login ?? "unknown"}** (${c.created_at}):\n${c.body ?? ""}`)
-          .join("\n\n");
-      }
+    const comments = await platform.getIssueComments(ri, prNumber);
+    if (comments.length > 0) {
+      result.prComments = comments
+        .map((c) => `**${c.author}** (${c.createdAt}):\n${c.body}`)
+        .join("\n\n");
     }
   } catch {}
 
   // Fetch inline review comments
   try {
-    const inlineRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/comments?per_page=50`,
-      { headers },
-    );
-    if (inlineRes.ok) {
-      const inlineComments = (await inlineRes.json()) as any[];
-      if (inlineComments.length > 0) {
-        result.inlineComments = inlineComments
-          .map(
-            (c: any) =>
-              `**${c.user?.login ?? "unknown"}** on \`${c.path}${c.line ? `:${c.line}` : ""}\`:\n${c.body ?? ""}`,
-          )
-          .join("\n\n");
-      }
+    const inlineComments = await platform.getInlineComments(ri, prNumber);
+    if (inlineComments.length > 0) {
+      result.inlineComments = inlineComments
+        .map((c) => `**${c.author}** on \`${c.path}${c.line ? `:${c.line}` : ""}\`:\n${c.body}`)
+        .join("\n\n");
     }
   } catch {}
 
@@ -144,11 +109,6 @@ export async function listOpenPrs(workspaceId: string | undefined, repoId?: stri
 
   if (repoList.length === 0) return [];
 
-  const githubToken = await getGitHubToken({ server: true }).catch(() => null);
-  if (!githubToken) return [];
-
-  const headers = buildGitHubHeaders(githubToken);
-
   // Get existing review drafts to cross-reference
   const existingDrafts = await db.select().from(reviewDrafts);
   const draftMap = new Map(
@@ -159,45 +119,40 @@ export async function listOpenPrs(workspaceId: string | undefined, repoId?: stri
 
   for (const repo of repoList) {
     try {
-      const match = repo.repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
-      if (!match) continue;
-      const [, owner, repoName] = match;
+      const ri = parseRepoUrl(repo.repoUrl);
+      if (!ri) continue;
 
-      const res = await fetch(
-        `https://api.github.com/repos/${owner}/${repoName}/pulls?state=open&per_page=50&sort=updated&direction=desc`,
-        { headers },
+      const { platform } = await getGitPlatformForRepo(repo.repoUrl, { server: true }).catch(
+        () => ({ platform: null }),
       );
-      if (!res.ok) {
-        logger.warn({ repo: repo.fullName, status: res.status }, "Failed to fetch PRs");
-        continue;
-      }
+      if (!platform) continue;
 
-      const prs = (await res.json()) as any[];
+      const prs = await platform.listOpenPullRequests(ri, { perPage: 50 });
 
       for (const pr of prs) {
-        const draftKey = `${owner}/${repoName}#${pr.number}`;
+        const draftKey = `${ri.owner}/${ri.repo}#${pr.number}`;
         const existingDraft = draftMap.get(draftKey);
 
         allPrs.push({
-          id: pr.id,
+          id: pr.number, // Use number as ID for platform-neutral code
           number: pr.number,
           title: pr.title,
-          body: pr.body ?? "",
+          body: pr.body,
           state: pr.state,
-          draft: pr.draft ?? false,
-          url: pr.html_url,
-          headSha: pr.head?.sha,
-          baseBranch: pr.base?.ref,
-          author: pr.user?.login ?? null,
-          assignees: (pr.assignees ?? []).map((a: any) => a.login),
-          labels: (pr.labels ?? []).map((l: any) => (typeof l === "string" ? l : l.name)),
+          draft: pr.draft,
+          url: pr.url,
+          headSha: pr.headSha,
+          baseBranch: pr.baseBranch,
+          author: pr.author || null,
+          assignees: pr.assignees,
+          labels: pr.labels,
           repo: {
             id: repo.id,
             fullName: repo.fullName,
             repoUrl: repo.repoUrl,
           },
-          createdAt: pr.created_at,
-          updatedAt: pr.updated_at,
+          createdAt: pr.createdAt,
+          updatedAt: pr.updatedAt,
           reviewDraft: existingDraft
             ? {
                 id: existingDraft.id,
@@ -231,11 +186,10 @@ export async function launchPrReview(input: {
   createdBy?: string;
 }) {
   const parsed = parsePrUrl(input.prUrl);
-  if (!parsed)
-    throw new Error("Invalid PR URL — expected format: https://github.com/owner/repo/pull/123");
+  if (!parsed) throw new Error("Invalid PR URL");
 
   const { owner, repo: repoName, prNumber } = parsed;
-  const repoUrl = normalizeRepoUrl(`https://github.com/${owner}/${repoName}`);
+  const repoUrl = normalizeRepoUrl(`https://${parsed.host}/${owner}/${repoName}`);
 
   // Validate repo is configured
   const { getRepoByUrl } = await import("./repo-service.js");
@@ -244,12 +198,8 @@ export async function launchPrReview(input: {
     throw new Error(`Repository ${owner}/${repoName} is not configured in Optio. Add it first.`);
   }
 
-  // Get GitHub token and fetch PR context
-  const token = input.createdBy
-    ? await getGitHubToken({ userId: input.createdBy })
-    : await getGitHubToken({ server: true });
-
-  const prContext = await fetchPrContext(owner, repoName, prNumber, token);
+  // Fetch PR context using platform abstraction
+  const prContext = await fetchPrContext(repoUrl, prNumber, input.createdBy);
   if (!prContext.headSha) throw new Error("Could not determine PR head SHA");
 
   // Create the task
@@ -457,7 +407,7 @@ export async function updateReviewDraft(
   return updated;
 }
 
-// ── Submit Review to GitHub ─────────────────────────────────────────────────
+// ── Submit Review ───────────────────────────────────────────────────────────
 
 export async function submitReviewToGitHub(draftId: string, userId?: string) {
   const [draft] = await db.select().from(reviewDrafts).where(eq(reviewDrafts.id, draftId));
@@ -466,51 +416,36 @@ export async function submitReviewToGitHub(draftId: string, userId?: string) {
     throw new Error(`Cannot submit draft in ${draft.state} state`);
   }
 
-  const token = userId ? await getGitHubToken({ userId }) : await getGitHubToken({ server: true });
+  // Construct repo URL from draft fields
+  const repoUrl = normalizeRepoUrl(`https://github.com/${draft.repoOwner}/${draft.repoName}`);
+  const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
+    userId,
+    server: !userId,
+  });
 
-  const headers = buildGitHubHeaders(token);
-
-  // Map verdict to GitHub event
-  const eventMap: Record<string, string> = {
+  // Map verdict to review event
+  const eventMap: Record<string, "APPROVE" | "REQUEST_CHANGES" | "COMMENT"> = {
     approve: "APPROVE",
     request_changes: "REQUEST_CHANGES",
     comment: "COMMENT",
   };
   const event = eventMap[draft.verdict ?? "comment"] ?? "COMMENT";
 
-  // Build the review body
-  const body: Record<string, unknown> = {
-    body: draft.summary ?? "Review by Optio",
+  // Build inline comments
+  const comments = (draft.fileComments ?? [])
+    .filter((c: any) => c.path && c.body)
+    .map((c: any) => ({
+      path: c.path,
+      body: c.body,
+      ...(c.line ? { line: c.line } : {}),
+      ...(c.side ? { side: c.side } : {}),
+    }));
+
+  const reviewResult = await platform.submitReview(ri, draft.prNumber, {
     event,
-  };
-
-  // Add file comments if any (GitHub expects specific format)
-  if (draft.fileComments && draft.fileComments.length > 0) {
-    body.comments = draft.fileComments
-      .filter((c: any) => c.path && c.body)
-      .map((c: any) => ({
-        path: c.path,
-        body: c.body,
-        ...(c.line ? { line: c.line } : { position: 1 }),
-        ...(c.side ? { side: c.side } : {}),
-      }));
-  }
-
-  const res = await fetch(
-    `https://api.github.com/repos/${draft.repoOwner}/${draft.repoName}/pulls/${draft.prNumber}/reviews`,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    },
-  );
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`GitHub API error ${res.status}: ${errBody}`);
-  }
-
-  const reviewData = (await res.json()) as any;
+    body: draft.summary ?? "Review by Optio",
+    comments: comments.length > 0 ? comments : undefined,
+  });
 
   // Update draft state
   const [updated] = await db
@@ -523,9 +458,9 @@ export async function submitReviewToGitHub(draftId: string, userId?: string) {
     .where(eq(reviewDrafts.id, draftId))
     .returning();
 
-  logger.info({ draftId, prNumber: draft.prNumber, event }, "Review submitted to GitHub");
+  logger.info({ draftId, prNumber: draft.prNumber, event }, "Review submitted");
 
-  return { draft: updated, githubReviewUrl: reviewData.html_url };
+  return { draft: updated, githubReviewUrl: reviewResult.url };
 }
 
 // ── Re-review ───────────────────────────────────────────────────────────────
@@ -551,25 +486,13 @@ export async function mergePr(input: {
   const parsed = parsePrUrl(input.prUrl);
   if (!parsed) throw new Error("Invalid PR URL");
 
-  const token = input.userId
-    ? await getGitHubToken({ userId: input.userId })
-    : await getGitHubToken({ server: true });
+  const repoUrl = `https://${parsed.host}/${parsed.owner}/${parsed.repo}`;
+  const { platform, ri } = await getGitPlatformForRepo(repoUrl, {
+    userId: input.userId,
+    server: !input.userId,
+  });
 
-  const headers = buildGitHubHeaders(token);
-
-  const res = await fetch(
-    `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.prNumber}/merge`,
-    {
-      method: "PUT",
-      headers,
-      body: JSON.stringify({ merge_method: input.mergeMethod }),
-    },
-  );
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`Merge failed (${res.status}): ${errBody}`);
-  }
+  await platform.mergePullRequest(ri, parsed.prNumber, input.mergeMethod);
 
   logger.info({ prNumber: parsed.prNumber, method: input.mergeMethod }, "PR merged via Optio");
   return { merged: true };
@@ -581,45 +504,27 @@ export async function getPrStatus(prUrl: string) {
   const parsed = parsePrUrl(prUrl);
   if (!parsed) throw new Error("Invalid PR URL");
 
-  const token = await getGitHubToken({ server: true });
-  const headers = buildGitHubHeaders(token);
+  const repoUrl = `https://${parsed.host}/${parsed.owner}/${parsed.repo}`;
+  const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true });
 
-  const prRes = await fetch(
-    `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.prNumber}`,
-    { headers },
-  );
-  if (!prRes.ok) throw new Error(`Failed to fetch PR: ${prRes.status}`);
-  const prData = (await prRes.json()) as any;
+  const prData = await platform.getPullRequest(ri, parsed.prNumber);
 
   // Fetch check runs
-  const checksRes = await fetch(
-    `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits/${prData.head.sha}/check-runs`,
-    { headers },
-  );
+  const checkRuns = await platform.getCIChecks(ri, prData.headSha).catch(() => []);
   let checksStatus = "none";
-  if (checksRes.ok) {
-    const checksData = (await checksRes.json()) as any;
-    const checkRuns = checksData.check_runs ?? [];
-    if (checkRuns.length > 0) {
-      const allComplete = checkRuns.every((r: any) => r.status === "completed");
-      const allSuccess = checkRuns.every(
-        (r: any) => r.conclusion === "success" || r.conclusion === "skipped",
-      );
-      checksStatus = !allComplete ? "pending" : allSuccess ? "passing" : "failing";
-    }
+  if (checkRuns.length > 0) {
+    const allComplete = checkRuns.every((r) => r.status === "completed");
+    const allSuccess = checkRuns.every(
+      (r) => r.conclusion === "success" || r.conclusion === "skipped",
+    );
+    checksStatus = !allComplete ? "pending" : allSuccess ? "passing" : "failing";
   }
 
   // Fetch reviews
-  const reviewsRes = await fetch(
-    `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.prNumber}/reviews`,
-    { headers },
-  );
+  const reviews = await platform.getReviews(ri, parsed.prNumber).catch(() => []);
   let reviewStatus = "none";
-  if (reviewsRes.ok) {
-    const reviews = (await reviewsRes.json()) as any[];
-    const substantive = reviews.filter(
-      (r: any) => r.state !== "COMMENTED" && r.state !== "DISMISSED",
-    );
+  if (reviews.length > 0) {
+    const substantive = reviews.filter((r) => r.state !== "COMMENTED" && r.state !== "DISMISSED");
     const latest = substantive[substantive.length - 1];
     if (latest) {
       reviewStatus =
@@ -628,7 +533,7 @@ export async function getPrStatus(prUrl: string) {
           : latest.state === "CHANGES_REQUESTED"
             ? "changes_requested"
             : "pending";
-    } else if (reviews.length > 0) {
+    } else {
       reviewStatus = "pending";
     }
   }
@@ -636,9 +541,9 @@ export async function getPrStatus(prUrl: string) {
   return {
     checksStatus,
     reviewStatus,
-    mergeable: prData.mergeable ?? null,
+    mergeable: prData.mergeable,
     prState: prData.merged ? "merged" : prData.state,
-    headSha: prData.head?.sha,
+    headSha: prData.headSha,
   };
 }
 

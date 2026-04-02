@@ -8,34 +8,59 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
+const mockPlatform = {
+  type: "github",
+  listRepoContents: vi.fn(),
+};
+const mockGetGitPlatformForRepo = vi.fn().mockResolvedValue({
+  platform: mockPlatform,
+  ri: {
+    platform: "github",
+    host: "github.com",
+    owner: "owner",
+    repo: "repo",
+    apiBaseUrl: "https://api.github.com",
+  },
+});
+
+vi.mock("./git-token-service.js", () => ({
+  getGitPlatformForRepo: (...args: unknown[]) => mockGetGitPlatformForRepo(...args),
+}));
+
 import { detectRepoConfig } from "./repo-detect-service.js";
 
 describe("repo-detect-service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "github",
+        host: "github.com",
+        owner: "owner",
+        repo: "repo",
+        apiBaseUrl: "https://api.github.com",
+      },
+    });
   });
 
-  it("returns base preset for non-GitHub URLs", async () => {
-    const result = await detectRepoConfig("https://gitlab.com/o/r", "token");
+  it("returns base preset for unparseable URLs", async () => {
+    const result = await detectRepoConfig("not-a-url", "token");
     expect(result).toEqual({ imagePreset: "base", languages: [] });
   });
 
   it("returns base preset when API call fails", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+    mockPlatform.listRepoContents.mockRejectedValue(new Error("API error"));
 
     const result = await detectRepoConfig("https://github.com/owner/repo", "token");
     expect(result).toEqual({ imagePreset: "base", languages: [] });
   });
 
   it("detects node project", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve([
-          { name: "package.json", type: "file" },
-          { name: "README.md", type: "file" },
-        ]),
-    });
+    mockPlatform.listRepoContents.mockResolvedValue([
+      { name: "package.json", type: "file" },
+      { name: "README.md", type: "file" },
+    ]);
 
     const result = await detectRepoConfig("https://github.com/owner/repo", "token");
     expect(result.imagePreset).toBe("node");
@@ -44,10 +69,7 @@ describe("repo-detect-service", () => {
   });
 
   it("detects rust project", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([{ name: "Cargo.toml", type: "file" }]),
-    });
+    mockPlatform.listRepoContents.mockResolvedValue([{ name: "Cargo.toml", type: "file" }]);
 
     const result = await detectRepoConfig("https://github.com/owner/repo", "token");
     expect(result.imagePreset).toBe("rust");
@@ -56,10 +78,7 @@ describe("repo-detect-service", () => {
   });
 
   it("detects go project", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([{ name: "go.mod", type: "file" }]),
-    });
+    mockPlatform.listRepoContents.mockResolvedValue([{ name: "go.mod", type: "file" }]);
 
     const result = await detectRepoConfig("https://github.com/owner/repo", "token");
     expect(result.imagePreset).toBe("go");
@@ -68,10 +87,7 @@ describe("repo-detect-service", () => {
   });
 
   it("detects python project from pyproject.toml", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([{ name: "pyproject.toml", type: "file" }]),
-    });
+    mockPlatform.listRepoContents.mockResolvedValue([{ name: "pyproject.toml", type: "file" }]);
 
     const result = await detectRepoConfig("https://github.com/owner/repo", "token");
     expect(result.imagePreset).toBe("python");
@@ -80,24 +96,17 @@ describe("repo-detect-service", () => {
   });
 
   it("detects python project from requirements.txt", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([{ name: "requirements.txt", type: "file" }]),
-    });
+    mockPlatform.listRepoContents.mockResolvedValue([{ name: "requirements.txt", type: "file" }]);
 
     const result = await detectRepoConfig("https://github.com/owner/repo", "token");
     expect(result.imagePreset).toBe("python");
   });
 
   it("uses full preset for multi-language projects", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve([
-          { name: "package.json", type: "file" },
-          { name: "Cargo.toml", type: "file" },
-        ]),
-    });
+    mockPlatform.listRepoContents.mockResolvedValue([
+      { name: "package.json", type: "file" },
+      { name: "Cargo.toml", type: "file" },
+    ]);
 
     const result = await detectRepoConfig("https://github.com/owner/repo", "token");
     expect(result.imagePreset).toBe("full");
@@ -106,42 +115,36 @@ describe("repo-detect-service", () => {
   });
 
   it("sets first detected test command as the test command", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve([
-          { name: "Cargo.toml", type: "file" },
-          { name: "package.json", type: "file" },
-        ]),
-    });
+    mockPlatform.listRepoContents.mockResolvedValue([
+      { name: "Cargo.toml", type: "file" },
+      { name: "package.json", type: "file" },
+    ]);
 
     const result = await detectRepoConfig("https://github.com/owner/repo", "token");
     expect(result.testCommand).toBe("cargo test"); // Cargo.toml checked first
   });
 
-  it("handles fetch exceptions gracefully", async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
+  it("handles exceptions gracefully", async () => {
+    mockGetGitPlatformForRepo.mockRejectedValue(new Error("Network error"));
 
     const result = await detectRepoConfig("https://github.com/owner/repo", "token");
     expect(result).toEqual({ imagePreset: "base", languages: [] });
   });
 
-  it("sends correct authorization header", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve([]),
+  it("works with GitLab repos", async () => {
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "gitlab",
+        host: "gitlab.com",
+        owner: "owner",
+        repo: "repo",
+        apiBaseUrl: "https://gitlab.com/api/v4",
+      },
     });
-    globalThis.fetch = mockFetch;
+    mockPlatform.listRepoContents.mockResolvedValue([{ name: "package.json", type: "file" }]);
 
-    await detectRepoConfig("https://github.com/owner/repo", "my-token");
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "https://api.github.com/repos/owner/repo/contents/",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer my-token",
-        }),
-      }),
-    );
+    const result = await detectRepoConfig("https://gitlab.com/owner/repo", "token");
+    expect(result.imagePreset).toBe("node");
   });
 });

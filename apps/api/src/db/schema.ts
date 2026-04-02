@@ -197,6 +197,7 @@ export const repos = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     repoUrl: text("repo_url").notNull(),
+    gitPlatform: text("git_platform").notNull().default("github"),
     workspaceId: uuid("workspace_id"), // nullable for backward compat
     fullName: text("full_name").notNull(),
     defaultBranch: text("default_branch").notNull().default("main"),

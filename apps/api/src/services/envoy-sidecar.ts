@@ -27,6 +27,8 @@ export const CA_KEY_PATH = "/etc/envoy/ca/ca.key";
 
 export interface SecretProxySecrets {
   githubToken?: string;
+  gitlabToken?: string;
+  gitlabHost?: string; // defaults to "gitlab.com"
   anthropicApiKey?: string;
 }
 
@@ -130,6 +132,54 @@ export function generateEnvoyConfig(secrets: SecretProxySecrets): string {
                             path: /dev/null
                         header: "Authorization"
                         value_prefix: "Bearer "`);
+  }
+
+  if (secrets.gitlabToken) {
+    const gitlabHost = secrets.gitlabHost ?? "gitlab.com";
+    clusters.push(`
+    - name: gitlab
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: gitlab
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: ${gitlabHost}
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: ${gitlabHost}`);
+
+    routes.push(`
+              - match:
+                  connect_matcher: {}
+                  headers:
+                    - name: ":authority"
+                      string_match:
+                        contains: "${gitlabHost}"
+                route:
+                  cluster: gitlab
+                  upgrade_configs:
+                    - upgrade_type: CONNECT
+                      connect_config: {}
+                typed_per_filter_config:
+                  envoy.filters.http.credential_injector:
+                    "@type": type.googleapis.com/envoy.extensions.filters.http.credential_injector.v3.CredentialInjector
+                    overwrite: false
+                    credential:
+                      name: envoy.http.injected_credentials.generic
+                      typed_config:
+                        "@type": type.googleapis.com/envoy.extensions.http.injected_credentials.generic.v3.Generic
+                        credential:
+                          name: gitlab-token
+                          sds_config:
+                            path: /dev/null
+                        header: "PRIVATE-TOKEN"`);
   }
 
   if (secrets.anthropicApiKey) {
@@ -260,6 +310,11 @@ export function generateSecretInitScript(secrets: SecretProxySecrets): string {
     lines.push(`chmod 600 ${SECRET_MOUNT_PATH}/github-token`);
   }
 
+  if (secrets.gitlabToken) {
+    lines.push(`printf '%s' "$GITLAB_TOKEN" > ${SECRET_MOUNT_PATH}/gitlab-token`);
+    lines.push(`chmod 600 ${SECRET_MOUNT_PATH}/gitlab-token`);
+  }
+
   if (secrets.anthropicApiKey) {
     lines.push(`printf '%s' "$ANTHROPIC_API_KEY" > ${SECRET_MOUNT_PATH}/anthropic-api-key`);
     lines.push(`chmod 600 ${SECRET_MOUNT_PATH}/anthropic-api-key`);
@@ -313,6 +368,9 @@ export function buildSecretInitContainer(opts: {
   const env: V1EnvVar[] = [];
   if (opts.secrets.githubToken) {
     env.push({ name: "GITHUB_TOKEN", value: opts.secrets.githubToken });
+  }
+  if (opts.secrets.gitlabToken) {
+    env.push({ name: "GITLAB_TOKEN", value: opts.secrets.gitlabToken });
   }
   if (opts.secrets.anthropicApiKey) {
     env.push({ name: "ANTHROPIC_API_KEY", value: opts.secrets.anthropicApiKey });
@@ -389,4 +447,8 @@ export function getAgentCaVolumeMount(): V1VolumeMount {
  * List of secret env var names that should be stripped from the agent container
  * when secret proxy is enabled (they're only needed in the sidecar).
  */
-export const PROXIED_SECRET_ENV_VARS = ["GITHUB_TOKEN", "ANTHROPIC_API_KEY"] as const;
+export const PROXIED_SECRET_ENV_VARS = [
+  "GITHUB_TOKEN",
+  "GITLAB_TOKEN",
+  "ANTHROPIC_API_KEY",
+] as const;

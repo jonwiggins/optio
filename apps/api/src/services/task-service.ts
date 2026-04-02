@@ -272,10 +272,14 @@ export async function transitionTask(
     errorMessage: updatedTask.errorMessage ?? undefined,
   });
 
-  // Close linked GitHub issue when task completes
-  if (toState === TaskState.COMPLETED && task.ticketSource === "github" && task.ticketExternalId) {
-    closeGitHubIssue(task.repoUrl, task.ticketExternalId, task.prUrl).catch((err) =>
-      logger.warn({ err, taskId: id }, "Failed to close linked GitHub issue"),
+  // Close linked issue when task completes (GitHub or GitLab)
+  if (
+    toState === TaskState.COMPLETED &&
+    (task.ticketSource === "github" || task.ticketSource === "gitlab") &&
+    task.ticketExternalId
+  ) {
+    closeIssue(task.repoUrl, task.ticketExternalId, task.prUrl).catch((err) =>
+      logger.warn({ err, taskId: id }, "Failed to close linked issue"),
     );
   }
 
@@ -330,40 +334,19 @@ export async function transitionTask(
   return updated[0];
 }
 
-async function closeGitHubIssue(repoUrl: string, issueNumber: string, prUrl?: string | null) {
-  const { getGitHubToken } = await import("./github-token-service.js");
-  const token = await getGitHubToken({ server: true });
-  const match = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
-  if (!match) return;
-  const [, owner, repo] = match;
+async function closeIssue(repoUrl: string, issueNumber: string, prUrl?: string | null) {
+  const { getGitPlatformForRepo } = await import("./git-token-service.js");
+  const { platform, ri } = await getGitPlatformForRepo(repoUrl, { server: true });
 
   // Post completion comment
   const comment = prUrl
     ? `✅ **Optio** completed this issue. Changes merged in ${prUrl}.`
     : `✅ **Optio** completed this issue.`;
 
-  await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "User-Agent": "Optio",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ body: comment }),
-  });
+  await platform.createIssueComment(ri, parseInt(issueNumber, 10), comment);
+  await platform.closeIssue(ri, parseInt(issueNumber, 10));
 
-  // Close the issue
-  await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "User-Agent": "Optio",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ state: "closed", state_reason: "completed" }),
-  });
-
-  logger.info({ owner, repo, issueNumber }, "Closed linked GitHub issue");
+  logger.info({ repoUrl, issueNumber }, "Closed linked issue");
 }
 
 /**

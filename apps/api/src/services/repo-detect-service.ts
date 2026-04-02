@@ -1,3 +1,5 @@
+import { parseRepoUrl } from "@optio/shared";
+import { getGitPlatformForRepo } from "./git-token-service.js";
 import { logger } from "../logger.js";
 
 interface DetectedConfig {
@@ -8,26 +10,15 @@ interface DetectedConfig {
 
 /**
  * Detect the appropriate image preset and test command by checking
- * the GitHub API for files in the repo root.
+ * the git platform API for files in the repo root.
  */
-export async function detectRepoConfig(
-  repoUrl: string,
-  githubToken: string,
-): Promise<DetectedConfig> {
-  const match = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
-  if (!match) return { imagePreset: "base", languages: [] };
-  const [, owner, repo] = match;
-
-  const headers = {
-    Authorization: `Bearer ${githubToken}`,
-    "User-Agent": "Optio",
-  };
+export async function detectRepoConfig(repoUrl: string, token: string): Promise<DetectedConfig> {
+  const ri = parseRepoUrl(repoUrl);
+  if (!ri) return { imagePreset: "base", languages: [] };
 
   try {
-    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/`, { headers });
-    if (!res.ok) return { imagePreset: "base", languages: [] };
-
-    const files = (await res.json()) as Array<{ name: string; type: string }>;
+    const { platform } = await getGitPlatformForRepo(repoUrl, { server: true });
+    const files = await platform.listRepoContents(ri);
     const fileNames = new Set(files.map((f) => f.name));
 
     const languages: string[] = [];

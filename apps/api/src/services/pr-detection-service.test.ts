@@ -1,10 +1,15 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { parseOwnerRepo, checkExistingPr } from "./pr-detection-service.js";
 
-// Mock github-token-service
-const mockGetGitHubToken = vi.fn();
-vi.mock("./github-token-service.js", () => ({
-  getGitHubToken: (...args: unknown[]) => mockGetGitHubToken(...args),
+// Mock git-token-service
+const mockPlatform = {
+  type: "github",
+  listOpenPullRequests: vi.fn(),
+};
+const mockGetGitPlatformForRepo = vi.fn();
+
+vi.mock("./git-token-service.js", () => ({
+  getGitPlatformForRepo: (...args: unknown[]) => mockGetGitPlatformForRepo(...args),
 }));
 
 // Mock logger
@@ -38,8 +43,11 @@ describe("parseOwnerRepo", () => {
     });
   });
 
-  it("returns null for non-GitHub URL", () => {
-    expect(parseOwnerRepo("https://gitlab.com/owner/repo")).toBeNull();
+  it("parses GitLab URL", () => {
+    expect(parseOwnerRepo("https://gitlab.com/owner/repo")).toEqual({
+      owner: "owner",
+      repo: "repo",
+    });
   });
 
   it("returns null for empty string", () => {
@@ -53,31 +61,40 @@ describe("parseOwnerRepo", () => {
 });
 
 describe("checkExistingPr", () => {
-  const mockFetch = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubGlobal("fetch", mockFetch);
-    mockFetch.mockReset();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "github",
+        host: "github.com",
+        owner: "owner",
+        repo: "repo",
+        apiBaseUrl: "https://api.github.com",
+      },
+    });
   });
 
   it("returns PR when an open PR exists for the task branch", async () => {
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
-
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => [
-        {
-          html_url: "https://github.com/owner/repo/pull/42",
-          number: 42,
-          state: "open",
-        },
-      ],
-    });
+    mockPlatform.listOpenPullRequests.mockResolvedValue([
+      {
+        url: "https://github.com/owner/repo/pull/42",
+        number: 42,
+        state: "open",
+        title: "",
+        body: "",
+        merged: false,
+        mergeable: true,
+        draft: false,
+        headSha: "abc",
+        baseBranch: "main",
+        author: "",
+        assignees: [],
+        labels: [],
+        createdAt: "",
+        updatedAt: "",
+      },
+    ]);
 
     const result = await checkExistingPr("https://github.com/owner/repo", "task-123", null);
 
@@ -87,63 +104,56 @@ describe("checkExistingPr", () => {
       state: "open",
     });
 
-    // Verify the API call used the correct branch
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining("head=owner:optio/task-task-123"),
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer ghp_test_token",
-        }),
-      }),
-    );
+    expect(mockPlatform.listOpenPullRequests).toHaveBeenCalledWith(expect.any(Object), {
+      branch: "optio/task-task-123",
+    });
   });
 
   it("returns null when no PR exists", async () => {
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
-
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => [],
-    });
+    mockPlatform.listOpenPullRequests.mockResolvedValue([]);
 
     const result = await checkExistingPr("https://github.com/owner/repo", "task-456", null);
 
     expect(result).toBeNull();
   });
 
-  it("returns null when no GitHub token is available", async () => {
-    mockGetGitHubToken.mockRejectedValue(new Error("No token"));
+  it("returns null when no git token is available", async () => {
+    mockGetGitPlatformForRepo.mockRejectedValue(new Error("No token"));
 
     const result = await checkExistingPr("https://github.com/owner/repo", "task-789", null);
 
     expect(result).toBeNull();
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("returns null when GitHub API returns an error", async () => {
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
-
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 404,
-    });
+  it("returns null when platform API returns an error", async () => {
+    mockPlatform.listOpenPullRequests.mockRejectedValue(new Error("API error"));
 
     const result = await checkExistingPr("https://github.com/owner/repo", "task-err", null);
 
     expect(result).toBeNull();
   });
 
-  it("returns null for non-GitHub repo URLs", async () => {
+  it("works for GitLab repo URLs", async () => {
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "gitlab",
+        host: "gitlab.com",
+        owner: "owner",
+        repo: "repo",
+        apiBaseUrl: "https://gitlab.com/api/v4",
+      },
+    });
+    mockPlatform.listOpenPullRequests.mockResolvedValue([]);
+
     const result = await checkExistingPr("https://gitlab.com/owner/repo", "task-gl", null);
 
     expect(result).toBeNull();
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockGetGitPlatformForRepo).toHaveBeenCalled();
   });
 
   it("returns null when fetch throws a network error", async () => {
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
-
-    mockFetch.mockRejectedValue(new Error("Network error"));
+    mockPlatform.listOpenPullRequests.mockRejectedValue(new Error("Network error"));
 
     const result = await checkExistingPr("https://github.com/owner/repo", "task-net", null);
 
@@ -151,15 +161,12 @@ describe("checkExistingPr", () => {
   });
 
   it("uses server context for token resolution", async () => {
-    mockGetGitHubToken.mockResolvedValue("ghp_test_token");
-
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => [],
-    });
+    mockPlatform.listOpenPullRequests.mockResolvedValue([]);
 
     await checkExistingPr("https://github.com/owner/repo", "task-ws", "workspace-42");
 
-    expect(mockGetGitHubToken).toHaveBeenCalledWith({ server: true });
+    expect(mockGetGitPlatformForRepo).toHaveBeenCalledWith("https://github.com/owner/repo", {
+      server: true,
+    });
   });
 });
