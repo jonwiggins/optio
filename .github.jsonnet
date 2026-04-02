@@ -2,7 +2,6 @@ local base = import '.github/jsonnet/base.jsonnet';
 local clusters = import '.github/jsonnet/clusters.jsonnet';
 local docker = import '.github/jsonnet/docker.jsonnet';
 local helm = import '.github/jsonnet/helm.jsonnet';
-local misc = import '.github/jsonnet/misc.jsonnet';
 local optio = import '.github-helpers.jsonnet';
 
 // ── CI ──────────────────────────────────────────────────────────────────────
@@ -19,7 +18,7 @@ local ci = base.pipeline(
       image=optio.nodeImage,
       useCredentials=false,
       steps=[
-        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.checkout(),
         optio.buildImage('optio-agent-base', 'images/base.Dockerfile'),
         optio.buildImage('optio-agent-node', 'images/node.Dockerfile'),
       ],
@@ -39,7 +38,7 @@ local buildImages = base.pipeline(
       image=optio.nodeImage,
       useCredentials=false,
       steps=[
-        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.checkout(),
         optio.buildImage('optio-agent-base', 'images/base.Dockerfile'),
       ],
     ),
@@ -50,7 +49,7 @@ local buildImages = base.pipeline(
       useCredentials=false,
       needs=['build-base'],
       steps=[
-        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.checkout(),
         optio.buildImage(
           'optio-agent-' + preset,
           'images/' + preset + '.Dockerfile',
@@ -85,7 +84,7 @@ local release = base.pipeline(
       image=optio.nodeImage,
       useCredentials=false,
       steps=[
-        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.checkout(),
         optio.buildImage('optio-' + svc.name, svc.dockerfile),
       ],
     )
@@ -96,7 +95,7 @@ local release = base.pipeline(
       image=optio.nodeImage,
       useCredentials=false,
       steps=[
-        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.checkout(),
         optio.buildImage('optio-agent-base', 'images/base.Dockerfile'),
       ],
     ),
@@ -107,7 +106,7 @@ local release = base.pipeline(
       useCredentials=false,
       needs=['build-agent-base'],
       steps=[
-        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.checkout(),
         optio.buildImage(
           'optio-agent-' + preset,
           'images/' + preset + '.Dockerfile',
@@ -123,7 +122,7 @@ local release = base.pipeline(
       useCredentials=false,
       needs=['build-api', 'build-web', 'build-optio'] + ['build-agent-' + p for p in agentPresets],
       steps=[
-        misc.checkout(preferSshClone=false, includeSubmodules=false),
+        optio.checkout(),
         helm.deployHelm(
           clusters['gh-runners'],
           release='optio',
