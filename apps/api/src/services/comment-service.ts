@@ -13,6 +13,11 @@ export async function addComment(taskId: string, content: string, userId?: strin
     timestamp: new Date().toISOString(),
   });
 
+  // Send push notification to task creator (fire-and-forget)
+  import("./notification-service.js")
+    .then(({ sendPushNotificationForComment }) => sendPushNotificationForComment(taskId, userId))
+    .catch(() => {});
+
   return comment;
 }
 

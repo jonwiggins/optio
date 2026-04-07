@@ -33,10 +33,12 @@
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "postgres": "^3.4.7",
+    "web-push": "^3.6.7",
     "zod": "^3.25.17"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "@types/web-push": "^3.6.4",
     "@vitest/coverage-v8": "^3.2.4",
     "drizzle-kit": "^0.31.1",
     "tsx": "^4.19.4",

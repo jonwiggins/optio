@@ -316,6 +316,13 @@
       "when": 1776787200000,
       "tag": "0042_task_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1776873600000,
+      "tag": "0044_push_notifications",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import { SetupCheck } from "./setup-check";
 import { ThemeProvider } from "./theme-provider";
 import { ThemedToaster } from "./themed-toaster";
 import { OptioChatPanel } from "@/components/optio-chat";
+import { PushSwRegistrar } from "@/components/notifications/push-sw-registrar";
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -19,6 +20,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
     <ThemeProvider>
       {!isLogin && <SetupCheck />}
       {!isLogin && <GlobalWebSocketProvider />}
+      {!isLogin && !isSetup && <PushSwRegistrar />}
       {isSetup || isLogin ? (
         <main className="min-h-screen">{children}</main>
       ) : (

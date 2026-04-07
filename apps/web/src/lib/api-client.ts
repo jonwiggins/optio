@@ -1041,4 +1041,38 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
+  // Push Notifications
+  getVapidPublicKey: () => request<{ publicKey: string }>("/api/notifications/vapid-public-key"),
+
+  subscribePush: (data: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    userAgent?: string;
+  }) =>
+    request<{ ok: boolean }>("/api/notifications/subscribe", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  unsubscribePush: (data: { endpoint: string }) =>
+    request<void>("/api/notifications/subscribe", {
+      method: "DELETE",
+      body: JSON.stringify(data),
+    }),
+
+  listPushSubscriptions: () =>
+    request<{ subscriptions: any[] }>("/api/notifications/subscriptions"),
+
+  getNotificationPreferences: () =>
+    request<{ preferences: Record<string, { push: boolean }> }>("/api/notifications/preferences"),
+
+  updateNotificationPreferences: (prefs: Record<string, { push: boolean }>) =>
+    request<{ preferences: Record<string, { push: boolean }> }>("/api/notifications/preferences", {
+      method: "PUT",
+      body: JSON.stringify(prefs),
+    }),
+
+  testPushNotification: () =>
+    request<{ sent: number }>("/api/notifications/test", { method: "POST" }),
 };

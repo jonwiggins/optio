@@ -697,6 +697,50 @@ export const reviewDrafts = pgTable(
   ],
 );
 
+// ── Push Subscriptions (Web Push API) ────────────────────────────────────────
+
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    failureCount: integer("failure_count").notNull().default(0),
+  },
+  (table) => [
+    unique("push_subscriptions_user_endpoint_key").on(table.userId, table.endpoint),
+    index("push_subscriptions_user_id_idx").on(table.userId),
+  ],
+);
+
+// ── Notification Preferences ─────────────────────────────────────────────────
+
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"), // reserved for future per-workspace prefs
+    preferences: jsonb("preferences").$type<Record<string, { push: boolean }>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("notification_preferences_user_key").on(table.userId),
+    index("notification_preferences_user_id_idx").on(table.userId),
+  ],
+);
+
 export const promptTemplates = pgTable(
   "prompt_templates",
   {

@@ -33,6 +33,7 @@ import { dependencyRoutes } from "./routes/dependencies.js";
 import { workflowRoutes } from "./routes/workflows.js";
 import { mcpServerRoutes } from "./routes/mcp-servers.js";
 import { skillRoutes } from "./routes/skills.js";
+import { notificationRoutes } from "./routes/notifications.js";
 import { optioRoutes } from "./routes/optio.js";
 import { optioSettingsRoutes } from "./routes/optio-settings.js";
 import githubAppRoutes from "./routes/github-app.js";
@@ -119,6 +120,7 @@ export async function buildServer() {
   await app.register(workflowRoutes);
   await app.register(mcpServerRoutes);
   await app.register(skillRoutes);
+  await app.register(notificationRoutes);
   await app.register(optioRoutes);
   await app.register(optioSettingsRoutes);
   await app.register(githubAppRoutes);

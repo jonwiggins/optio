@@ -310,6 +310,13 @@ export async function transitionTask(
     logger.warn({ err, taskId: id }, "Failed to send Slack notification"),
   );
 
+  // Send push notification (fire-and-forget)
+  import("./notification-service.js")
+    .then(({ sendPushNotificationForTransition }) =>
+      sendPushNotificationForTransition(updated[0], toState),
+    )
+    .catch((err) => logger.warn({ err, taskId: id }, "Failed to send push notification"));
+
   // Handle task dependency graph: unblock dependents on completion, cascade on failure
   if (toState === TaskState.COMPLETED) {
     import("./dependency-service.js")

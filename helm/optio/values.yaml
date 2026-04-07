@@ -363,6 +363,17 @@ gatewayAPI:
   httpRouteAnnotations: {}
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Push Notifications (Web Push API)
+# Optional. If publicKey/privateKey are empty, browser push is disabled.
+# Generate keys with: npx web-push generate-vapid-keys --json
+# ──────────────────────────────────────────────────────────────────────────────
+notifications:
+  vapid:
+    publicKey: ""
+    privateKey: ""
+    subject: ""  # e.g. mailto:ops@example.com
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Namespace
 # ──────────────────────────────────────────────────────────────────────────────
 namespace: optio

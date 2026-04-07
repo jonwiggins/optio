@@ -43,7 +43,11 @@ const SESSION_COOKIE_NAME = "optio_session";
 const WORKSPACE_HEADER = "x-workspace-id";
 
 /** Exact routes that are always public. */
-const PUBLIC_ROUTES = new Set(["/api/health", "/api/setup/status"]);
+const PUBLIC_ROUTES = new Set([
+  "/api/health",
+  "/api/setup/status",
+  "/api/notifications/vapid-public-key",
+]);
 
 /**
  * Prefix-matched routes that are always public.

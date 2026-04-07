@@ -26,6 +26,7 @@ import {
   KeyRound,
 } from "lucide-react";
 import { OPTIO_TOOL_CATEGORIES, ALL_OPTIO_TOOL_NAMES } from "@optio/shared";
+import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 
 function PromptTemplateEditor() {
   const [template, setTemplate] = useState("");
@@ -1181,7 +1182,6 @@ function GitHubTokenManager() {
 
 export default function SettingsPage() {
   usePageTitle("Settings");
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [providers, setProviders] = useState<any[]>([]);
   const [showAddProvider, setShowAddProvider] = useState(false);
@@ -1190,23 +1190,11 @@ export default function SettingsPage() {
   const [savingProvider, setSavingProvider] = useState(false);
 
   useEffect(() => {
-    if (typeof Notification !== "undefined") {
-      setNotificationsEnabled(Notification.permission === "granted");
-    }
     api
       .listTicketProviders()
       .then((res) => setProviders(res.providers))
       .catch(() => {});
   }, []);
-
-  const requestNotifications = async () => {
-    if (typeof Notification === "undefined") return;
-    const result = await Notification.requestPermission();
-    setNotificationsEnabled(result === "granted");
-    if (result === "granted") {
-      toast.success("Notifications enabled");
-    }
-  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -1305,30 +1293,7 @@ export default function SettingsPage() {
       {/* Notifications */}
       <section>
         <h2 className="text-sm font-medium text-text-muted mb-3">Notifications</h2>
-        <div className="p-5 rounded-xl border border-border/50 bg-bg-card">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Bell className="w-5 h-5 text-text-muted" />
-              <div>
-                <p className="text-sm">Browser Notifications</p>
-                <p className="text-xs text-text-muted">
-                  Get notified when tasks complete or need attention
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={requestNotifications}
-              disabled={notificationsEnabled}
-              className={`px-3 py-1.5 rounded-md text-xs ${
-                notificationsEnabled
-                  ? "bg-success/10 text-success"
-                  : "bg-primary text-white hover:bg-primary-hover"
-              }`}
-            >
-              {notificationsEnabled ? "Enabled" : "Enable"}
-            </button>
-          </div>
-        </div>
+        <NotificationPreferences />
       </section>
 
       {/* Ticket Sync */}

@@ -38,12 +38,6 @@ export function useGlobalWebSocket() {
           taskId: event.taskId,
           timestamp: event.timestamp,
         });
-
-        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-          new Notification(`Optio: Task ${event.toState.replace("_", " ")}`, {
-            body: `Task moved to ${event.toState}`,
-          });
-        }
       }
     });
 
@@ -61,12 +55,6 @@ export function useGlobalWebSocket() {
       // Dispatch a DOM event so the dashboard data hook can immediately
       // update the usage panel without waiting for the 5-minute polling interval
       window.dispatchEvent(new Event("optio:auth-failed"));
-
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        new Notification("Optio: Authentication Failed", {
-          body: "Claude Code OAuth token expired — tasks will fail until re-authenticated.",
-        });
-      }
     });
 
     client.on("task:pending_reason", (event) => {
