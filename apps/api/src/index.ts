@@ -8,6 +8,7 @@ import { startPrWatcherWorker } from "./workers/pr-watcher-worker.js";
 import { startWebhookWorker } from "./workers/webhook-worker.js";
 import { startScheduleWorker } from "./workers/schedule-worker.js";
 import { logger } from "./logger.js";
+import { logTlsStackInfo, initTlsObservability } from "./services/tls-observability.js";
 
 const redisConnection = {
   url: process.env.REDIS_URL ?? "redis://localhost:6379",
@@ -102,6 +103,10 @@ async function main() {
   // dev tasks (e.g. @optio/web never starting).
   await app.listen({ port: PORT, host: HOST });
   logger.info(`API server listening on ${HOST}:${PORT}`);
+
+  // Log TLS stack info and start observing negotiated key-exchange groups
+  logTlsStackInfo();
+  initTlsObservability();
 
   // --- Background initialization (after listen) ---
 
