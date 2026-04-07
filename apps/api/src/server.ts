@@ -68,7 +68,18 @@ export async function buildServer() {
     allowList: ["127.0.0.1", "::1"],
   });
   await app.register(formbody);
-  await app.register(websocket);
+  await app.register(websocket, {
+    options: {
+      // WebSocket auth tokens are sent via Sec-WebSocket-Protocol header to avoid
+      // leaking tokens in URLs. The client sends ["optio-ws-v1", "optio-auth-<TOKEN>"]
+      // and we select "optio-ws-v1" so the raw token is never echoed back.
+      handleProtocols: (protocols: Set<string>) => {
+        if (protocols.has("optio-ws-v1")) return "optio-ws-v1";
+        // No recognized protocol — select the first one offered (ws default behavior)
+        return protocols.values().next().value;
+      },
+    },
+  });
 
   // Auth plugin (validates session cookie on protected routes)
   await app.register(authPlugin);

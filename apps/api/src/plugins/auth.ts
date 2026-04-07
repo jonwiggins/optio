@@ -122,11 +122,12 @@ async function authPlugin(app: FastifyInstance) {
       // Fall through to normal auth check
     }
 
-    // Token resolution order: Bearer header → session cookie → query param (WS)
+    // Token resolution order: Bearer header → session cookie
+    // Note: WebSocket auth is handled separately by authenticateWs() in ws-auth.ts
+    // using cookies and Sec-WebSocket-Protocol header (never URL query params).
     const token =
       parseBearer(req.headers.authorization) ??
-      parseCookie(req.headers.cookie, SESSION_COOKIE_NAME) ??
-      (req.query as Record<string, string>)?.token;
+      parseCookie(req.headers.cookie, SESSION_COOKIE_NAME);
 
     if (!token) {
       return reply.status(401).send({ error: "Authentication required" });

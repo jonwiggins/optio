@@ -25,12 +25,21 @@ function createMockSocket() {
   };
 }
 
-function createMockRequest(opts: { cookie?: string; token?: string } = {}): FastifyRequest {
+function createMockRequest(
+  opts: { cookie?: string; token?: string; protocol?: string } = {},
+): FastifyRequest {
+  const headers: Record<string, string | undefined> = {
+    cookie: opts.cookie,
+  };
+  // Token via Sec-WebSocket-Protocol header (new secure approach)
+  if (opts.protocol) {
+    headers["sec-websocket-protocol"] = opts.protocol;
+  } else if (opts.token) {
+    headers["sec-websocket-protocol"] = `optio-ws-v1, optio-auth-${opts.token}`;
+  }
   return {
-    headers: {
-      cookie: opts.cookie,
-    },
-    query: opts.token ? { token: opts.token } : {},
+    headers,
+    query: {},
   } as unknown as FastifyRequest;
 }
 
@@ -91,7 +100,7 @@ describe("authenticateWs", () => {
     expect(socket.close).not.toHaveBeenCalled();
   });
 
-  it("validates query param token via validateWsToken (single-use)", async () => {
+  it("validates upgrade token from Sec-WebSocket-Protocol header via validateWsToken", async () => {
     const mockUser = {
       id: "user-2",
       provider: "google",
@@ -107,12 +116,27 @@ describe("authenticateWs", () => {
 
     expect(user).toEqual(mockUser);
     expect(mockValidateWsToken).toHaveBeenCalledWith("upgrade-token-456");
-    // Should NOT call validateSession for query param tokens (no cookie present)
+    // Should NOT call validateSession for protocol header tokens (no cookie present)
     expect(mockValidateSession).not.toHaveBeenCalled();
     expect(socket.close).not.toHaveBeenCalled();
   });
 
-  it("prefers cookie over query param", async () => {
+  it("does NOT read token from query param (security: tokens must not be in URLs)", async () => {
+    const socket = createMockSocket();
+    // Simulate old-style query param token — should be ignored
+    const req = {
+      headers: {},
+      query: { token: "leaked-token" },
+    } as unknown as FastifyRequest;
+
+    const user = await authenticateWs(socket as any, req);
+
+    expect(user).toBeNull();
+    expect(mockValidateWsToken).not.toHaveBeenCalled();
+    expect(socket.close).toHaveBeenCalledWith(4401, "Authentication required");
+  });
+
+  it("prefers cookie over protocol header token", async () => {
     const mockUser = {
       id: "user-3",
       provider: "github",
@@ -122,7 +146,7 @@ describe("authenticateWs", () => {
     };
     mockValidateSession.mockResolvedValue(mockUser);
     const socket = createMockSocket();
-    const req = createMockRequest({ cookie: "optio_session=fromcookie", token: "fromquery" });
+    const req = createMockRequest({ cookie: "optio_session=fromcookie", token: "fromprotocol" });
 
     await authenticateWs(socket as any, req);
 
@@ -131,7 +155,7 @@ describe("authenticateWs", () => {
     expect(mockValidateWsToken).not.toHaveBeenCalled();
   });
 
-  it("falls back to upgrade token when cookie is invalid", async () => {
+  it("falls back to protocol header token when cookie is invalid", async () => {
     const mockUser = {
       id: "user-4",
       provider: "github",
@@ -162,7 +186,7 @@ describe("authenticateWs", () => {
     expect(socket.close).toHaveBeenCalledWith(4401, "Invalid or expired session");
   });
 
-  it("closes socket when both cookie and upgrade token are invalid", async () => {
+  it("closes socket when both cookie and protocol header token are invalid", async () => {
     mockValidateSession.mockResolvedValue(null);
     mockValidateWsToken.mockResolvedValue(null);
     const socket = createMockSocket();
@@ -174,7 +198,7 @@ describe("authenticateWs", () => {
     expect(socket.close).toHaveBeenCalledWith(4401, "Invalid or expired session");
   });
 
-  it("closes socket when upgrade token alone is invalid", async () => {
+  it("closes socket when protocol header token alone is invalid", async () => {
     mockValidateWsToken.mockResolvedValue(null);
     const socket = createMockSocket();
     const req = createMockRequest({ token: "consumed-token" });
@@ -183,6 +207,39 @@ describe("authenticateWs", () => {
 
     expect(user).toBeNull();
     expect(socket.close).toHaveBeenCalledWith(4401, "Invalid or expired session");
+  });
+
+  it("extracts token from raw Sec-WebSocket-Protocol header with multiple protocols", async () => {
+    const mockUser = {
+      id: "user-5",
+      provider: "github",
+      email: "proto@example.com",
+      displayName: "Proto User",
+      avatarUrl: null,
+    };
+    mockValidateWsToken.mockResolvedValue(mockUser);
+    const socket = createMockSocket();
+    const req = createMockRequest({
+      protocol: "optio-ws-v1, optio-auth-abc123hex",
+    });
+
+    const user = await authenticateWs(socket as any, req);
+
+    expect(user).toEqual(mockUser);
+    expect(mockValidateWsToken).toHaveBeenCalledWith("abc123hex");
+  });
+
+  it("ignores Sec-WebSocket-Protocol header without optio-auth- prefix", async () => {
+    const socket = createMockSocket();
+    const req = createMockRequest({
+      protocol: "graphql-ws, some-other-protocol",
+    });
+
+    const user = await authenticateWs(socket as any, req);
+
+    expect(user).toBeNull();
+    expect(mockValidateWsToken).not.toHaveBeenCalled();
+    expect(socket.close).toHaveBeenCalledWith(4401, "Authentication required");
   });
 });
 
@@ -202,13 +259,16 @@ describe("extractSessionToken", () => {
     expect(extractSessionToken(req)).toBe("my-token");
   });
 
-  it("does NOT extract token from query param (security fix)", () => {
-    const req = createMockRequest({ token: "query-token" });
+  it("does NOT extract token from protocol header (cookie only)", () => {
+    const req = createMockRequest({ token: "protocol-token" });
     expect(extractSessionToken(req)).toBeUndefined();
   });
 
-  it("returns cookie token even when query param is present", () => {
-    const req = createMockRequest({ cookie: "optio_session=cookie-token", token: "query-token" });
+  it("returns cookie token even when protocol header is present", () => {
+    const req = createMockRequest({
+      cookie: "optio_session=cookie-token",
+      token: "protocol-token",
+    });
     expect(extractSessionToken(req)).toBe("cookie-token");
   });
 

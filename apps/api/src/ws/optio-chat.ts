@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getSettings } from "../services/optio-settings-service.js";
-import { authenticateWs } from "./ws-auth.js";
+import { authenticateWs, extractSessionToken } from "./ws-auth.js";
 import { logger } from "../logger.js";
 import {
   OPTIO_TOOL_SCHEMAS,
@@ -408,12 +408,10 @@ export async function optioChatWs(app: FastifyInstance) {
     activeConnections.set(userId, socket as unknown as WebSocket);
     log.info("Optio chat connected");
 
-    // Extract session token for tool execution (cookie or query param)
-    const cookieHeader = req.headers.cookie ?? "";
-    const sessionMatch = cookieHeader.match(/optio_session=([^;]+)/);
-    const sessionCookie = sessionMatch?.[1] ?? "";
-    const wsToken = (req.query as Record<string, string>)?.token ?? "";
-    const sessionToken = sessionCookie || wsToken;
+    // Extract session token for tool execution (cookie only — never URL query params).
+    // The upgrade token from Sec-WebSocket-Protocol is single-use and already consumed
+    // by authenticateWs(), so it cannot be reused for API passthrough.
+    const sessionToken = extractSessionToken(req) ?? "";
 
     let isProcessing = false;
     let abortController: AbortController | null = null;

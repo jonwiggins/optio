@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { db } from "../db/client.js";
 import { users, sessions } from "../db/schema.js";
 import { eq, and, gt, lt } from "drizzle-orm";
@@ -168,20 +168,40 @@ export async function createWsToken(userId: string): Promise<string> {
 }
 
 /**
+ * Find a WS upgrade token entry using timing-safe comparison.
+ *
+ * Iterates all entries and compares hashes with crypto.timingSafeEqual
+ * to prevent timing side-channel attacks. Returns the matching key and
+ * entry, or null if not found.
+ */
+function findWsTokenEntry(tokenHash: string): { key: string; entry: WsUpgradeEntry } | null {
+  const targetBuf = Buffer.from(tokenHash, "hex");
+  for (const [key, entry] of wsUpgradeTokens) {
+    const candidateBuf = Buffer.from(key, "hex");
+    if (candidateBuf.length === targetBuf.length && timingSafeEqual(candidateBuf, targetBuf)) {
+      return { key, entry };
+    }
+  }
+  return null;
+}
+
+/**
  * Validate and consume a single-use WebSocket upgrade token.
  * Returns the SessionUser on success (token is deleted), or null if
  * the token is invalid, expired, or already consumed.
+ *
+ * Uses timing-safe comparison and atomic delete-then-validate semantics.
  */
 export async function validateWsToken(token: string): Promise<SessionUser | null> {
   const tokenHash = hashToken(token);
-  const entry = wsUpgradeTokens.get(tokenHash);
+  const match = findWsTokenEntry(tokenHash);
 
-  if (!entry) return null;
+  if (!match) return null;
 
-  // Always delete — single use regardless of expiry check
-  wsUpgradeTokens.delete(tokenHash);
+  // Always delete — single use regardless of expiry check (atomic consume)
+  wsUpgradeTokens.delete(match.key);
 
-  if (entry.expiresAt <= Date.now()) return null;
+  if (match.entry.expiresAt <= Date.now()) return null;
 
   // Look up the user by ID
   const rows = await db
@@ -194,7 +214,7 @@ export async function validateWsToken(token: string): Promise<SessionUser | null
       defaultWorkspaceId: users.defaultWorkspaceId,
     })
     .from(users)
-    .where(eq(users.id, entry.userId))
+    .where(eq(users.id, match.entry.userId))
     .limit(1);
 
   if (rows.length === 0) return null;
