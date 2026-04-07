@@ -171,6 +171,11 @@ postgresql:
     username: optio
     # REQUIRED when auth is enabled. Override this in production.
     password: ""
+  # TLS encryption for the in-cluster Postgres connection.
+  # When enabled, a self-signed CA + server cert are generated at install time
+  # and the DATABASE_URL is configured with sslmode=verify-full.
+  tls:
+    enabled: true
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Redis (built-in)

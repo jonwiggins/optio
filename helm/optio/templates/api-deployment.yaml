@@ -62,6 +62,11 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if and .Values.postgresql.enabled .Values.postgresql.tls.enabled }}
+            - name: pg-ca
+              mountPath: /etc/optio
+              readOnly: true
+            {{- end }}
           envFrom:
             - secretRef:
                 name: {{ .Release.Name }}-config
@@ -99,6 +104,14 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if and .Values.postgresql.enabled .Values.postgresql.tls.enabled }}
+        - name: pg-ca
+          secret:
+            secretName: {{ .Release.Name }}-postgres-tls
+            items:
+              - key: ca.crt
+                path: pg-ca.crt
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

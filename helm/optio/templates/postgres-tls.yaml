@@ -1,0 +1,43 @@
+{{- if and .Values.postgresql.enabled .Values.postgresql.tls.enabled }}
+{{/*
+  Generate a self-signed CA and server certificate for the in-cluster Postgres.
+  On first install genCA/genSignedCert create fresh certs.
+  On upgrade, existing certs are reused via lookup so connections are not broken.
+*/}}
+{{- $secretName := printf "%s-postgres-tls" .Release.Name -}}
+{{- $svcName := printf "%s-postgres" .Release.Name -}}
+{{- $svcFQDN := printf "%s-postgres.%s.svc.cluster.local" .Release.Name .Values.namespace -}}
+{{- $existing := lookup "v1" "Secret" .Values.namespace $secretName -}}
+{{- if $existing }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+type: Opaque
+data:
+  tls.crt: {{ index $existing.data "tls.crt" }}
+  tls.key: {{ index $existing.data "tls.key" }}
+  ca.crt: {{ index $existing.data "ca.crt" }}
+{{- else }}
+{{- $ca := genCA "optio-postgres-ca" 3650 -}}
+{{- $cert := genSignedCert $svcName (list "127.0.0.1") (list $svcName $svcFQDN "localhost") 3650 $ca -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  tls.crt: |
+    {{ $cert.Cert | nindent 4 }}
+  tls.key: |
+    {{ $cert.Key | nindent 4 }}
+  ca.crt: |
+    {{ $ca.Cert | nindent 4 }}
+{{- end }}
+{{- end }}

@@ -13,7 +13,12 @@ Database URL
 */}}
 {{- define "optio.databaseUrl" -}}
 {{- if .Values.postgresql.enabled -}}
-postgres://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ .Release.Name }}-postgres:5432/{{ .Values.postgresql.auth.database }}
+{{- $base := printf "postgres://%s:%s@%s-postgres:5432/%s" .Values.postgresql.auth.username .Values.postgresql.auth.password .Release.Name .Values.postgresql.auth.database -}}
+{{- if .Values.postgresql.tls.enabled -}}
+{{- printf "%s?sslmode=verify-full&sslrootcert=/etc/optio/pg-ca.crt" $base -}}
+{{- else -}}
+{{- $base -}}
+{{- end -}}
 {{- else -}}
 {{- required "externalDatabase.url is required when postgresql.enabled=false" .Values.externalDatabase.url -}}
 {{- end -}}

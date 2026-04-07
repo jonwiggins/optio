@@ -46,6 +46,29 @@ spec:
         runAsUser: 999
         runAsGroup: 999
         fsGroup: 999
+      {{- if .Values.postgresql.tls.enabled }}
+      initContainers:
+        - name: init-tls
+          image: busybox:1.36
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          command: ['sh', '-c']
+          args:
+            - |
+              cp /tls-secret/tls.crt /etc/postgres-tls/tls.crt
+              cp /tls-secret/tls.key /etc/postgres-tls/tls.key
+              chmod 600 /etc/postgres-tls/tls.key
+              chmod 644 /etc/postgres-tls/tls.crt
+          volumeMounts:
+            - name: tls-secret
+              mountPath: /tls-secret
+              readOnly: true
+            - name: postgres-tls
+              mountPath: /etc/postgres-tls
+      {{- end }}
       containers:
         - name: postgres
           image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
@@ -54,6 +77,17 @@ spec:
             capabilities:
               drop:
                 - ALL
+          {{- if .Values.postgresql.tls.enabled }}
+          args:
+            - "-c"
+            - "ssl=on"
+            - "-c"
+            - "ssl_cert_file=/etc/postgres-tls/tls.crt"
+            - "-c"
+            - "ssl_key_file=/etc/postgres-tls/tls.key"
+            - "-c"
+            - "ssl_min_protocol_version=TLSv1.3"
+          {{- end }}
           env:
             - name: POSTGRES_DB
               value: {{ .Values.postgresql.auth.database }}
@@ -69,12 +103,26 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            {{- if .Values.postgresql.tls.enabled }}
+            - name: postgres-tls
+              mountPath: /etc/postgres-tls
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.postgresql.resources | nindent 12 }}
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-postgres-data
+        {{- if .Values.postgresql.tls.enabled }}
+        - name: tls-secret
+          secret:
+            secretName: {{ .Release.Name }}-postgres-tls
+        - name: postgres-tls
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
