@@ -18,14 +18,13 @@ export class WsClient {
     if (this.ws?.readyState === WebSocket.OPEN) return;
 
     // If a token provider is set, fetch a token before connecting.
+    // Tokens are sent via the Sec-WebSocket-Protocol header (not URL query params)
+    // to prevent leaking into server logs, browser history, and Referer headers.
     if (this.tokenProvider) {
       this.tokenProvider()
         .then((token) => {
-          const sep = this.url.includes("?") ? "&" : "?";
-          const authedUrl = token
-            ? `${this.url}${sep}token=${encodeURIComponent(token)}`
-            : this.url;
-          this.openSocket(authedUrl);
+          const protocols = token ? ["optio-ws-v1", `optio-auth-${token}`] : undefined;
+          this.openSocket(this.url, protocols);
         })
         .catch(() => {
           // Token fetch failed — retry after delay
@@ -36,8 +35,8 @@ export class WsClient {
     }
   }
 
-  private openSocket(url: string): void {
-    this.ws = new WebSocket(url);
+  private openSocket(url: string, protocols?: string[]): void {
+    this.ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
 
     this.ws.onmessage = (msg) => {
       try {

@@ -8,6 +8,7 @@ class MockWebSocket {
 
   readyState = MockWebSocket.OPEN;
   url: string;
+  protocols: string | string[] | undefined;
   onmessage: ((msg: { data: string }) => void) | null = null;
   onclose: ((ev: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
@@ -17,8 +18,9 @@ class MockWebSocket {
   });
   send = vi.fn();
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string | string[]) {
     this.url = url;
+    this.protocols = protocols;
     MockWebSocket.instances.push(this);
   }
 }
@@ -151,7 +153,7 @@ describe("WsClient", () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 
-  it("uses token provider to build authenticated URL", async () => {
+  it("sends token via Sec-WebSocket-Protocol header, not URL", async () => {
     const tokenProvider = vi.fn().mockResolvedValue("test-token");
     const client = new WsClient("ws://localhost:4000/ws/events", tokenProvider);
     client.connect();
@@ -160,17 +162,23 @@ describe("WsClient", () => {
     await vi.runAllTimersAsync();
 
     expect(tokenProvider).toHaveBeenCalled();
-    expect(MockWebSocket.instances[0].url).toBe("ws://localhost:4000/ws/events?token=test-token");
+    const ws = MockWebSocket.instances[0];
+    // URL must NOT contain token (security: prevents token leaking into logs/history)
+    expect(ws.url).toBe("ws://localhost:4000/ws/events");
+    // Token must be sent via WebSocket subprotocol header
+    expect(ws.protocols).toEqual(["optio-ws-v1", "optio-auth-test-token"]);
   });
 
-  it("connects without token when provider returns null", async () => {
+  it("connects without protocols when provider returns null (cookie auth)", async () => {
     const tokenProvider = vi.fn().mockResolvedValue(null);
     const client = new WsClient("ws://localhost:4000/ws/events", tokenProvider);
     client.connect();
 
     await vi.runAllTimersAsync();
 
-    expect(MockWebSocket.instances[0].url).toBe("ws://localhost:4000/ws/events");
+    const ws = MockWebSocket.instances[0];
+    expect(ws.url).toBe("ws://localhost:4000/ws/events");
+    expect(ws.protocols).toBeUndefined();
   });
 
   it("retries connection when token provider fails", async () => {
@@ -187,6 +195,7 @@ describe("WsClient", () => {
     await vi.advanceTimersByTimeAsync(3000);
 
     expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0].protocols).toEqual(["optio-ws-v1", "optio-auth-new-token"]);
   });
 
   it("closes socket on error event", () => {
