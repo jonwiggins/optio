@@ -50,12 +50,19 @@ spec:
           imagePullPolicy: {{ .Values.web.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: {{ .Values.web.port }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/.next/cache
           env:
             - name: INTERNAL_API_URL
               value: "http://{{ .Release.Name }}-api:{{ .Values.api.port }}"
@@ -74,6 +81,11 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: next-cache
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

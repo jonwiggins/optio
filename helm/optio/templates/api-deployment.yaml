@@ -51,12 +51,17 @@ spec:
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: {{ .Values.api.port }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           envFrom:
             - secretRef:
                 name: {{ .Release.Name }}-config
@@ -91,6 +96,9 @@ spec:
               port: {{ .Values.api.port }}
             initialDelaySeconds: 15
             periodSeconds: 20
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
