@@ -130,6 +130,7 @@ You create a task          Optio runs the agent           Optio closes the loop
 
 ### Prerequisites
 
+- **Kubernetes v1.33+** — required for post-quantum TLS on the control plane. v1.33 is the first release built on Go 1.24, which enables hybrid X25519MLKEM768 key exchange automatically. Earlier versions run but do not negotiate post-quantum TLS between Optio and the Kubernetes API server.
 - **Docker Desktop** with Kubernetes enabled (Settings → Kubernetes → Enable)
 - **Node.js 22+** and **pnpm 10+**
 - **Helm** (`brew install helm`)

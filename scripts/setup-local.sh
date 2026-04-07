@@ -21,6 +21,20 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
   exit 1
 fi
 
+# Check Kubernetes version (v1.33+ required for post-quantum TLS)
+K8S_SERVER_VERSION=$(kubectl version --output=json 2>/dev/null | grep -o '"gitVersion":"v[0-9]*\.[0-9]*' | tail -1 | grep -o '[0-9]*\.[0-9]*')
+if [ -n "$K8S_SERVER_VERSION" ]; then
+  K8S_MAJOR=$(echo "$K8S_SERVER_VERSION" | cut -d. -f1)
+  K8S_MINOR=$(echo "$K8S_SERVER_VERSION" | cut -d. -f2)
+  if [ "$K8S_MAJOR" -lt 1 ] || { [ "$K8S_MAJOR" -eq 1 ] && [ "$K8S_MINOR" -lt 33 ]; }; then
+    echo "⚠ WARNING: Kubernetes v${K8S_SERVER_VERSION} detected. Optio requires v1.33+ for"
+    echo "  post-quantum TLS on the control plane. v1.33 is the first release built on"
+    echo "  Go 1.24, which enables hybrid X25519MLKEM768 key exchange automatically."
+    echo "  Update Docker Desktop or your cluster to Kubernetes v1.33+."
+    echo ""
+  fi
+fi
+
 echo "[1/6] Installing dependencies..."
 pnpm install
 
