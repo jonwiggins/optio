@@ -1,3 +1,4 @@
+import { assertMinOpenSSL } from "./openssl-check.js";
 import Fastify, { type FastifyError } from "fastify";
 import { Redis } from "ioredis";
 import cors from "@fastify/cors";
@@ -50,6 +51,8 @@ const loggerConfig =
     : { level: process.env.LOG_LEVEL ?? "info" };
 
 export async function buildServer() {
+  assertMinOpenSSL(process.versions.openssl);
+
   const app = Fastify({ logger: loggerConfig });
 
   // Plugins

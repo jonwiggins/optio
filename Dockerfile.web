@@ -41,6 +41,9 @@ ENV OPTIO_VERSION=${OPTIO_VERSION}
 
 WORKDIR /app
 
+# Verify Node ships OpenSSL >= 3.5 for post-quantum TLS (X25519MLKEM768)
+RUN node -e 'const [maj,min] = process.versions.openssl.split(".").map(Number); if (maj < 3 || (maj === 3 && min < 5)) { console.error("OpenSSL " + process.versions.openssl + " too old; need >= 3.5"); process.exit(1); }'
+
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 

@@ -26,6 +26,9 @@ FROM node:22-slim@sha256:80fdb3f57c815e1b638d221f30a826823467c4a56c8f6a8d7aa091c
 ARG OPTIO_VERSION=dev
 ENV OPTIO_VERSION=${OPTIO_VERSION}
 
+# Verify Node ships OpenSSL >= 3.5 for post-quantum TLS (X25519MLKEM768)
+RUN node -e 'const [maj,min] = process.versions.openssl.split(".").map(Number); if (maj < 3 || (maj === 3 && min < 5)) { console.error("OpenSSL " + process.versions.openssl + " too old; need >= 3.5"); process.exit(1); }'
+
 # Install tsx globally for TypeScript execution at runtime
 # (workspace packages export .ts source, so the API runs via tsx)
 RUN npm install -g tsx

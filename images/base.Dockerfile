@@ -29,6 +29,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Verify Node ships OpenSSL >= 3.5 for post-quantum TLS (X25519MLKEM768)
+RUN node -e 'const [maj,min] = process.versions.openssl.split(".").map(Number); if (maj < 3 || (maj === 3 && min < 5)) { console.error("OpenSSL " + process.versions.openssl + " too old; need >= 3.5"); process.exit(1); }'
+
 # pnpm (installed globally before switching to non-root user)
 RUN corepack enable && corepack prepare pnpm@10 --activate
 
