@@ -403,23 +403,21 @@ At `helm/optio/`. Deploys the full stack to any K8s cluster.
 
 Key `values.yaml` settings:
 
+- Image defaults point to GHCR (`ghcr.io/jonwiggins/optio-*`) with `pullPolicy: IfNotPresent` — works on any cluster out of the box
+- `agent.image.prefix` — controls how preset images (base, node, python, …) are resolved. Default: `ghcr.io/jonwiggins/optio-agent-`. Set to `optio-` for local dev
 - `postgresql.enabled` / `redis.enabled` — set to `false` and use `externalDatabase.url` / `externalRedis.url` for managed services
 - `encryption.key` — **required**, generate with `openssl rand -hex 32`
-- `agent.imagePullPolicy` — `Never` for local dev, `IfNotPresent` or `Always` for registries
 - `ingress.enabled` — set to `true` with hosts for production
+
+Local dev overrides live in `helm/optio/values.local.yaml` (short image names, `pullPolicy: Never`, `auth.disabled`, NodePort services). `setup-local.sh` applies this automatically.
 
 The chart creates: namespace, ServiceAccount + RBAC (pod/exec/secret management), API deployment + service (with health probes), web deployment + service, conditional Postgres + Redis, configurable Ingress.
 
 ```bash
 # Local dev (setup-local.sh handles this automatically)
 helm install optio helm/optio -n optio --create-namespace \
-  --set encryption.key=$(openssl rand -hex 32) \
-  --set api.image.pullPolicy=Never \
-  --set web.image.pullPolicy=Never \
-  --set auth.disabled=true \
-  --set api.service.type=NodePort --set api.service.nodePort=30400 \
-  --set web.service.type=NodePort --set web.service.nodePort=30310 \
-  --set postgresql.auth.password=optio_dev
+  -f helm/optio/values.local.yaml \
+  --set encryption.key=$(openssl rand -hex 32)
 
 # Production with managed services
 helm install optio helm/optio -n optio --create-namespace \
@@ -662,7 +660,7 @@ Six BullMQ workers run as part of the API server:
 
 ## Known Issues / TODO
 
-- Agent images are built locally — `setup-local.sh` handles this, but CI push to a registry is not yet configured
+- Agent images are published to GHCR via `release.yml` on tag push. Local dev builds images locally via `setup-local.sh`
 - `setup-local.sh` installs `metrics-server` automatically; production clusters should install it separately
 - Workspace RBAC roles (admin/member/viewer) are in the schema but not fully enforced in all routes
 - All four ticket providers are implemented (GitHub Issues, Linear, Jira, and Notion)

@@ -179,6 +179,11 @@ export async function getOrCreateRepoPod(
 export function resolveImage(imageConfig?: RepoImageConfig): string {
   if (imageConfig?.customImage) return imageConfig.customImage;
   if (imageConfig?.preset && imageConfig.preset in PRESET_IMAGES) {
+    const prefix = process.env.OPTIO_AGENT_IMAGE_PREFIX;
+    if (prefix) {
+      const tag = process.env.OPTIO_AGENT_IMAGE_TAG ?? "latest";
+      return `${prefix}${imageConfig.preset}:${tag}`;
+    }
     return PRESET_IMAGES[imageConfig.preset].tag;
   }
   return process.env.OPTIO_AGENT_IMAGE ?? DEFAULT_AGENT_IMAGE;

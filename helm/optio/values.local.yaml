@@ -1,0 +1,48 @@
+# Optio Helm Chart — Local Development Overrides
+#
+# Use with: helm install optio helm/optio -f helm/optio/values.local.yaml ...
+# (setup-local.sh applies this automatically)
+#
+# Overrides GHCR defaults with locally-built images (pullPolicy: Never)
+# so Docker Desktop / kind / minikube use images from the local daemon.
+
+# --- API Server ---
+api:
+  image:
+    repository: optio-api
+    pullPolicy: Never
+  service:
+    type: NodePort
+    nodePort: 30400
+
+# --- Web UI ---
+web:
+  image:
+    repository: optio-web
+    pullPolicy: Never
+  service:
+    type: NodePort
+    nodePort: 30310
+
+# --- Optio operations assistant ---
+optio:
+  image:
+    repository: optio-optio
+    pullPolicy: Never
+
+# --- Agent containers ---
+agent:
+  image:
+    repository: optio-base
+    pullPolicy: Never
+    prefix: "optio-"
+  imagePullPolicy: Never
+
+# --- Auth disabled for local dev ---
+auth:
+  disabled: true
+
+# --- Local Postgres password ---
+postgresql:
+  auth:
+    password: optio_dev

@@ -102,11 +102,23 @@ import {
 
 describe("resolveImage", () => {
   const origEnv = process.env.OPTIO_AGENT_IMAGE;
+  const origPrefix = process.env.OPTIO_AGENT_IMAGE_PREFIX;
+  const origTag = process.env.OPTIO_AGENT_IMAGE_TAG;
   afterEach(() => {
     if (origEnv !== undefined) {
       process.env.OPTIO_AGENT_IMAGE = origEnv;
     } else {
       delete process.env.OPTIO_AGENT_IMAGE;
+    }
+    if (origPrefix !== undefined) {
+      process.env.OPTIO_AGENT_IMAGE_PREFIX = origPrefix;
+    } else {
+      delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
+    }
+    if (origTag !== undefined) {
+      process.env.OPTIO_AGENT_IMAGE_TAG = origTag;
+    } else {
+      delete process.env.OPTIO_AGENT_IMAGE_TAG;
     }
   });
 
@@ -114,27 +126,33 @@ describe("resolveImage", () => {
     expect(resolveImage({ customImage: "my-org/my-image:v2" })).toBe("my-org/my-image:v2");
   });
 
-  it("returns preset image tag when preset is valid", () => {
+  it("returns preset image tag when preset is valid (no prefix env)", () => {
+    delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
     expect(resolveImage({ preset: "node" })).toBe("optio-node:latest");
   });
 
-  it("returns preset image for rust", () => {
+  it("returns preset image for rust (no prefix env)", () => {
+    delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
     expect(resolveImage({ preset: "rust" })).toBe("optio-rust:latest");
   });
 
-  it("returns preset image for python", () => {
+  it("returns preset image for python (no prefix env)", () => {
+    delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
     expect(resolveImage({ preset: "python" })).toBe("optio-python:latest");
   });
 
-  it("returns preset image for go", () => {
+  it("returns preset image for go (no prefix env)", () => {
+    delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
     expect(resolveImage({ preset: "go" })).toBe("optio-go:latest");
   });
 
-  it("returns preset image for full", () => {
+  it("returns preset image for full (no prefix env)", () => {
+    delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
     expect(resolveImage({ preset: "full" })).toBe("optio-full:latest");
   });
 
-  it("returns preset image for base", () => {
+  it("returns preset image for base (no prefix env)", () => {
+    delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
     expect(resolveImage({ preset: "base" })).toBe("optio-base:latest");
   });
 
@@ -157,13 +175,63 @@ describe("resolveImage", () => {
     expect(resolveImage({})).toBe("optio-agent:latest");
   });
 
-  it("returns preset image for dind", () => {
+  it("returns preset image for dind (no prefix env)", () => {
+    delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
     expect(resolveImage({ preset: "dind" })).toBe("optio-dind:latest");
   });
 
   it("falls through to default for invalid preset", () => {
     delete process.env.OPTIO_AGENT_IMAGE;
     expect(resolveImage({ preset: "nonexistent" as any })).toBe("optio-agent:latest");
+  });
+
+  // ── OPTIO_AGENT_IMAGE_PREFIX env var ─────────────────────────────
+
+  it("uses OPTIO_AGENT_IMAGE_PREFIX for preset images when set", () => {
+    process.env.OPTIO_AGENT_IMAGE_PREFIX = "ghcr.io/jonwiggins/optio-agent-";
+    expect(resolveImage({ preset: "node" })).toBe("ghcr.io/jonwiggins/optio-agent-node:latest");
+  });
+
+  it("uses OPTIO_AGENT_IMAGE_PREFIX for base preset", () => {
+    process.env.OPTIO_AGENT_IMAGE_PREFIX = "ghcr.io/jonwiggins/optio-agent-";
+    expect(resolveImage({ preset: "base" })).toBe("ghcr.io/jonwiggins/optio-agent-base:latest");
+  });
+
+  it("uses OPTIO_AGENT_IMAGE_PREFIX for all presets", () => {
+    process.env.OPTIO_AGENT_IMAGE_PREFIX = "ghcr.io/jonwiggins/optio-agent-";
+    expect(resolveImage({ preset: "python" })).toBe("ghcr.io/jonwiggins/optio-agent-python:latest");
+    expect(resolveImage({ preset: "go" })).toBe("ghcr.io/jonwiggins/optio-agent-go:latest");
+    expect(resolveImage({ preset: "rust" })).toBe("ghcr.io/jonwiggins/optio-agent-rust:latest");
+    expect(resolveImage({ preset: "full" })).toBe("ghcr.io/jonwiggins/optio-agent-full:latest");
+    expect(resolveImage({ preset: "dind" })).toBe("ghcr.io/jonwiggins/optio-agent-dind:latest");
+  });
+
+  it("uses OPTIO_AGENT_IMAGE_TAG with prefix for preset images", () => {
+    process.env.OPTIO_AGENT_IMAGE_PREFIX = "ghcr.io/jonwiggins/optio-agent-";
+    process.env.OPTIO_AGENT_IMAGE_TAG = "0.1.0";
+    expect(resolveImage({ preset: "node" })).toBe("ghcr.io/jonwiggins/optio-agent-node:0.1.0");
+  });
+
+  it("defaults tag to latest when OPTIO_AGENT_IMAGE_TAG is not set", () => {
+    process.env.OPTIO_AGENT_IMAGE_PREFIX = "ghcr.io/jonwiggins/optio-agent-";
+    delete process.env.OPTIO_AGENT_IMAGE_TAG;
+    expect(resolveImage({ preset: "base" })).toBe("ghcr.io/jonwiggins/optio-agent-base:latest");
+  });
+
+  it("still prefers customImage over prefix-based preset", () => {
+    process.env.OPTIO_AGENT_IMAGE_PREFIX = "ghcr.io/jonwiggins/optio-agent-";
+    expect(resolveImage({ customImage: "custom:v1", preset: "node" })).toBe("custom:v1");
+  });
+
+  it("prefix does not affect fallback when preset is invalid", () => {
+    process.env.OPTIO_AGENT_IMAGE_PREFIX = "ghcr.io/jonwiggins/optio-agent-";
+    delete process.env.OPTIO_AGENT_IMAGE;
+    expect(resolveImage({ preset: "nonexistent" as any })).toBe("optio-agent:latest");
+  });
+
+  it("uses local prefix for local dev", () => {
+    process.env.OPTIO_AGENT_IMAGE_PREFIX = "optio-";
+    expect(resolveImage({ preset: "node" })).toBe("optio-node:latest");
   });
 });
 

@@ -81,35 +81,13 @@ ENCRYPTION_KEY=$(openssl rand -hex 32)
 if helm status optio -n optio &>/dev/null; then
   echo "   Existing release found, upgrading..."
   helm upgrade optio helm/optio -n optio \
+    -f helm/optio/values.local.yaml \
     --set encryption.key="$ENCRYPTION_KEY" \
-    --set api.image.pullPolicy=Never \
-    --set web.image.pullPolicy=Never \
-    --set agent.image.repository=optio-base \
-    --set agent.image.tag=latest \
-    --set agent.imagePullPolicy=Never \
-    --set optio.image.pullPolicy=Never \
-    --set auth.disabled=true \
-    --set api.service.type=NodePort \
-    --set api.service.nodePort=30400 \
-    --set web.service.type=NodePort \
-    --set web.service.nodePort=30310 \
-    --set postgresql.auth.password=optio_dev \
     --wait --timeout=120s
 else
   helm install optio helm/optio -n optio --create-namespace \
+    -f helm/optio/values.local.yaml \
     --set encryption.key="$ENCRYPTION_KEY" \
-    --set api.image.pullPolicy=Never \
-    --set web.image.pullPolicy=Never \
-    --set agent.image.repository=optio-base \
-    --set agent.image.tag=latest \
-    --set agent.imagePullPolicy=Never \
-    --set optio.image.pullPolicy=Never \
-    --set auth.disabled=true \
-    --set api.service.type=NodePort \
-    --set api.service.nodePort=30400 \
-    --set web.service.type=NodePort \
-    --set web.service.nodePort=30310 \
-    --set postgresql.auth.password=optio_dev \
     --wait --timeout=120s
 fi
 echo "   Helm deployment complete."

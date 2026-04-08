@@ -23,11 +23,9 @@
 # Generate encryption key: openssl rand -hex 32
 
 # --- API Server ---
+# Images default to GHCR in values.yaml — no image overrides needed here.
 api:
   replicas: 2
-  image:
-    repository: ghcr.io/jonwiggins/optio-api
-    pullPolicy: IfNotPresent
   resources:
     requests:
       cpu: 500m
@@ -50,9 +48,6 @@ api:
 # --- Web UI ---
 web:
   replicas: 2
-  image:
-    repository: ghcr.io/jonwiggins/optio-web
-    pullPolicy: IfNotPresent
   resources:
     requests:
       cpu: 200m
@@ -70,17 +65,8 @@ web:
     maxReplicas: 4
     targetCPUUtilizationPercentage: 70
 
-# --- Optio operations assistant ---
-optio:
-  image:
-    repository: ghcr.io/jonwiggins/optio-optio
-
 # --- Agent containers ---
-agent:
-  image:
-    repository: ghcr.io/jonwiggins/optio-agent-base
-    pullPolicy: IfNotPresent
-  imagePullPolicy: IfNotPresent
+# Images and pull policies default to GHCR / IfNotPresent in values.yaml.
 
 # --- Use external managed database and Redis ---
 postgresql:

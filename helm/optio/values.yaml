@@ -1,20 +1,21 @@
 # Optio Helm Chart Values
 #
-# For production deployments, see values.production.yaml for recommended overrides.
-# Required values are marked with "# REQUIRED" below.
+# Defaults are production-ready: GHCR images with IfNotPresent pull policy.
+# For local development, use values.local.yaml:
+#   helm install optio helm/optio -f helm/optio/values.local.yaml ...
+# (setup-local.sh does this automatically)
 #
-# Image repositories default to short names for local dev (pullPolicy: Never).
-# For registry deployments, override with full GHCR paths, e.g.:
-#   api.image.repository: ghcr.io/jonwiggins/optio-api
-#   web.image.repository: ghcr.io/jonwiggins/optio-web
-# Or install a released chart: helm install optio oci://ghcr.io/jonwiggins/optio
+# For production deployments, see values.production.yaml for recommended overrides
+# (replicas, autoscaling, ingress, external DB/Redis, etc.).
+#
+# Install a released chart: helm install optio oci://ghcr.io/jonwiggins/optio
 
 # ──────────────────────────────────────────────────────────────────────────────
 # API Server
 # ──────────────────────────────────────────────────────────────────────────────
 api:
   image:
-    repository: optio-api  # Registry: ghcr.io/jonwiggins/optio-api
+    repository: ghcr.io/jonwiggins/optio-api
     tag: latest
     pullPolicy: IfNotPresent
   replicas: 1
@@ -62,7 +63,7 @@ api:
 # ──────────────────────────────────────────────────────────────────────────────
 web:
   image:
-    repository: optio-web  # Registry: ghcr.io/jonwiggins/optio-web
+    repository: ghcr.io/jonwiggins/optio-web
     tag: latest
     pullPolicy: IfNotPresent
   replicas: 1
@@ -100,7 +101,7 @@ web:
 optio:
   enabled: true
   image:
-    repository: optio-optio  # Registry: ghcr.io/jonwiggins/optio-optio
+    repository: ghcr.io/jonwiggins/optio-optio
     tag: latest
     pullPolicy: IfNotPresent
   resources:
@@ -116,10 +117,15 @@ optio:
 # ──────────────────────────────────────────────────────────────────────────────
 agent:
   image:
-    repository: optio-base  # Registry: ghcr.io/jonwiggins/optio-agent-base (or -node, -python, -go, -rust, -full)
+    repository: ghcr.io/jonwiggins/optio-agent-base
     tag: latest
-    pullPolicy: Never  # Use "IfNotPresent" or "Always" for registry images
-  imagePullPolicy: Never  # Use "IfNotPresent" or "Always" for registry images
+    pullPolicy: IfNotPresent
+    # Prefix used to resolve preset images (base, node, python, go, rust, full, dind).
+    # The full image name is: {prefix}{preset}:{tag}
+    # GHCR: ghcr.io/jonwiggins/optio-agent-  →  ghcr.io/jonwiggins/optio-agent-node:latest
+    # Local: optio-                           →  optio-node:latest
+    prefix: "ghcr.io/jonwiggins/optio-agent-"
+  imagePullPolicy: IfNotPresent
   # Envoy sidecar proxy for secret isolation.
   # When repos.secretProxy is enabled, this image is added as a sidecar to agent pods.
   # The sidecar intercepts outbound HTTPS requests and injects auth headers so the
