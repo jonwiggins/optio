@@ -10,6 +10,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.js
 
 # Copy package.json for ALL workspace packages (pnpm needs full workspace graph)
 COPY apps/api/package.json apps/api/tsconfig.json apps/api/drizzle.config.ts apps/api/
+COPY apps/cli/package.json apps/cli/
 COPY apps/web/package.json apps/web/
 COPY apps/site/package.json apps/site/
 COPY packages/shared/package.json packages/shared/tsconfig.json packages/shared/
