@@ -633,6 +633,29 @@ export const customSkills = pgTable(
   ],
 );
 
+// ── API Keys (CLI personal access tokens + user-created keys) ─────────────────
+
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(), // "CLI (jane-macbook)" or user-set
+    prefix: text("prefix").notNull(), // first 12 chars, e.g. "optio_pat_ab"
+    hashedKey: text("hashed_key").notNull().unique(), // SHA-256 hex of full token
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("api_keys_user_id_idx").on(table.userId),
+    index("api_keys_prefix_idx").on(table.prefix),
+  ],
+);
+
 // ── Optio Agent Settings (singleton per workspace) ────────────────────────────
 
 export const optioSettings = pgTable(

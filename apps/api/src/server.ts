@@ -85,7 +85,7 @@ export async function buildServer() {
       handleProtocols: (protocols: Set<string>) => {
         if (protocols.has("optio-ws-v1")) return "optio-ws-v1";
         // No recognized protocol — select the first one offered (ws default behavior)
-        return protocols.values().next().value;
+        return protocols.values().next().value ?? false;
       },
     },
   });

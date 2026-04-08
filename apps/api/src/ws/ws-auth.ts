@@ -1,5 +1,6 @@
 import type { FastifyRequest } from "fastify";
 import { validateSession, validateWsToken, type SessionUser } from "../services/session-service.js";
+import { validateApiKey } from "../services/api-key-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 
 /** Minimal WebSocket interface for auth — avoids depending on @types/ws. */
@@ -78,18 +79,23 @@ export async function authenticateWs(
     };
   }
 
-  // Path 1: cookie-based session auth (long-lived session token)
+  // Path 1: cookie-based session auth (long-lived session token or PAT)
   const cookieToken = parseCookie(req.headers.cookie, SESSION_COOKIE_NAME);
   if (cookieToken) {
-    const user = await validateSession(cookieToken);
+    const user = cookieToken.startsWith("optio_pat_")
+      ? await validateApiKey(cookieToken)
+      : await validateSession(cookieToken);
     if (user) return user;
     // Cookie was present but invalid/expired — fall through to protocol check
   }
 
-  // Path 2: single-use upgrade token via Sec-WebSocket-Protocol header
+  // Path 2: single-use upgrade token or PAT via Sec-WebSocket-Protocol header
   const upgradeToken = extractUpgradeTokenFromProtocol(req);
   if (upgradeToken) {
-    const user = await validateWsToken(upgradeToken);
+    // PAT tokens can also be passed via Sec-WebSocket-Protocol header
+    const user = upgradeToken.startsWith("optio_pat_")
+      ? await validateApiKey(upgradeToken)
+      : await validateWsToken(upgradeToken);
     if (user) return user;
     // Token was present but invalid/expired/already consumed
   }

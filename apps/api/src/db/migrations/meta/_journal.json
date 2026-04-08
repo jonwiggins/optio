@@ -344,6 +344,13 @@
       "when": 1775613995000,
       "tag": "1775613995_repair_duplicate_migrations",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1775627754000,
+      "tag": "1775627754_api_keys",
+      "breakpoints": true
     }
   ]
 }

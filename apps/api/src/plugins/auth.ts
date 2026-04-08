@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import fp from "fastify-plugin";
 import { validateSession, type SessionUser } from "../services/session-service.js";
+import { validateApiKey } from "../services/api-key-service.js";
 import { isAuthDisabled } from "../services/oauth/index.js";
 import { getUserRole, ensureUserHasWorkspace } from "../services/workspace-service.js";
 import { listSecrets } from "../services/secret-service.js";
@@ -73,6 +74,8 @@ const PUBLIC_AUTH_ROUTES = new Set([
   "/api/auth/google/callback",
   "/api/auth/gitlab/login",
   "/api/auth/gitlab/callback",
+  "/api/auth/cli/start",
+  "/api/auth/cli/token",
 ]);
 
 /**
@@ -158,7 +161,10 @@ async function authPlugin(app: FastifyInstance) {
       return reply.status(401).send({ error: "Authentication required" });
     }
 
-    const user = await validateSession(token);
+    // PAT tokens (optio_pat_*) validated via api_keys table; session tokens via sessions table
+    const user = token.startsWith("optio_pat_")
+      ? await validateApiKey(token)
+      : await validateSession(token);
     if (!user) {
       return reply.status(401).send({ error: "Invalid or expired session" });
     }
