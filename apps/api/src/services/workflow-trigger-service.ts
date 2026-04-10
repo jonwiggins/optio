@@ -27,10 +27,7 @@ export async function createTrigger(input: {
     .select()
     .from(workflowTriggers)
     .where(
-      and(
-        eq(workflowTriggers.workflowId, input.workflowId),
-        eq(workflowTriggers.type, input.type),
-      ),
+      and(eq(workflowTriggers.workflowId, input.workflowId), eq(workflowTriggers.type, input.type)),
     );
   if (existing.length > 0) {
     throw new Error("duplicate_type");
