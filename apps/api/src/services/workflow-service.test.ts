@@ -15,11 +15,32 @@ vi.mock("../db/schema.js", () => ({
     id: "workflows.id",
     workspaceId: "workflows.workspace_id",
     createdAt: "workflows.created_at",
+    enabled: "workflows.enabled",
   },
   workflowRuns: {
     id: "workflow_runs.id",
     workflowId: "workflow_runs.workflow_id",
+    state: "workflow_runs.state",
     createdAt: "workflow_runs.created_at",
+  },
+  workflowTriggers: {
+    id: "workflow_triggers.id",
+    workflowId: "workflow_triggers.workflow_id",
+  },
+  taskLogs: {
+    id: "task_logs.id",
+    taskId: "task_logs.task_id",
+    workflowRunId: "task_logs.workflow_run_id",
+    logType: "task_logs.log_type",
+    timestamp: "task_logs.timestamp",
+  },
+}));
+
+vi.mock("../logger.js", () => ({
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   },
 }));
 
@@ -34,6 +55,10 @@ import {
   getWorkflowWithStats,
   listWorkflowRuns,
   getWorkflowRun,
+  createWorkflowRun,
+  retryWorkflowRun,
+  cancelWorkflowRun,
+  getWorkflowRunLogs,
 } from "./workflow-service.js";
 
 describe("workflow-service", () => {
@@ -50,6 +75,7 @@ describe("workflow-service", () => {
       (db.select as any) = vi.fn().mockReturnValue({ from: mockFrom });
 
       mockOrderBy.mockResolvedValue(items);
+
       const result = await listWorkflows();
       expect(result).toEqual(items);
     });
@@ -417,6 +443,200 @@ describe("workflow-service", () => {
 
       const result = await getWorkflowRun("nonexistent");
       expect(result).toBeNull();
+    });
+  });
+
+  describe("createWorkflowRun", () => {
+    it("creates a run for an enabled workflow", async () => {
+      // First call: getWorkflow
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "wf-1", enabled: true }]),
+        }),
+      });
+
+      const created = { id: "wr-1", workflowId: "wf-1", state: "queued" };
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([created]),
+        }),
+      });
+
+      const result = await createWorkflowRun("wf-1", { params: { key: "value" } });
+      expect(result).toEqual(created);
+    });
+
+    it("throws when workflow not found", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await expect(createWorkflowRun("nonexistent")).rejects.toThrow("Workflow not found");
+    });
+
+    it("throws when workflow is disabled", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "wf-1", enabled: false }]),
+        }),
+      });
+
+      await expect(createWorkflowRun("wf-1")).rejects.toThrow("Workflow is disabled");
+    });
+  });
+
+  describe("retryWorkflowRun", () => {
+    it("retries a failed workflow run", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "wr-1", state: "failed", retryCount: 0 }]),
+        }),
+      });
+
+      const updated = { id: "wr-1", state: "queued", retryCount: 1 };
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([updated]),
+          }),
+        }),
+      });
+
+      const result = await retryWorkflowRun("wr-1");
+      expect(result).toEqual(updated);
+    });
+
+    it("throws when run is not found", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await expect(retryWorkflowRun("nonexistent")).rejects.toThrow("Workflow run not found");
+    });
+
+    it("throws when run is still running", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "wr-1", state: "running", retryCount: 0 }]),
+        }),
+      });
+
+      await expect(retryWorkflowRun("wr-1")).rejects.toThrow(/Cannot retry/);
+    });
+
+    it("throws when run is completed (terminal)", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "wr-1", state: "completed", retryCount: 0 }]),
+        }),
+      });
+
+      await expect(retryWorkflowRun("wr-1")).rejects.toThrow(/Cannot retry/);
+    });
+  });
+
+  describe("cancelWorkflowRun", () => {
+    it("cancels a running workflow run", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "wr-1", state: "running" }]),
+        }),
+      });
+
+      const updated = { id: "wr-1", state: "failed", errorMessage: "Cancelled by user" };
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([updated]),
+          }),
+        }),
+      });
+
+      const result = await cancelWorkflowRun("wr-1");
+      expect(result).toEqual(updated);
+    });
+
+    it("cancels a queued workflow run", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "wr-1", state: "queued" }]),
+        }),
+      });
+
+      const updated = { id: "wr-1", state: "failed", errorMessage: "Cancelled by user" };
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([updated]),
+          }),
+        }),
+      });
+
+      const result = await cancelWorkflowRun("wr-1");
+      expect(result).toEqual(updated);
+    });
+
+    it("throws when run is not found", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await expect(cancelWorkflowRun("nonexistent")).rejects.toThrow("Workflow run not found");
+    });
+
+    it("throws when run is already completed", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "wr-1", state: "completed" }]),
+        }),
+      });
+
+      await expect(cancelWorkflowRun("wr-1")).rejects.toThrow(/Cannot cancel/);
+    });
+  });
+
+  describe("getWorkflowRunLogs", () => {
+    it("returns logs for a workflow run", async () => {
+      const mockLogs = [
+        { id: "l-1", taskId: "t-1", content: "Building..." },
+        { id: "l-2", taskId: "t-2", content: "Testing..." },
+      ];
+
+      let selectCallCount = 0;
+      (db.select as any) = vi.fn().mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            selectCallCount++;
+            if (selectCallCount === 1) {
+              // getWorkflowRun
+              return Promise.resolve([{ id: "wr-1", state: "running" }]);
+            }
+            // getWorkflowRunLogs query
+            return {
+              orderBy: vi.fn().mockResolvedValue(mockLogs),
+            };
+          }),
+        }),
+      }));
+
+      const result = await getWorkflowRunLogs("wr-1", {});
+      expect(result).toEqual(mockLogs);
+    });
+
+    it("throws when run is not found", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await expect(getWorkflowRunLogs("nonexistent", {})).rejects.toThrow("Workflow run not found");
     });
   });
 });

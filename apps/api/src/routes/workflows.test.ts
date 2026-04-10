@@ -9,8 +9,12 @@ const mockCreateWorkflow = vi.fn();
 const mockGetWorkflowWithStats = vi.fn();
 const mockUpdateWorkflow = vi.fn();
 const mockDeleteWorkflow = vi.fn();
+const mockCreateWorkflowRun = vi.fn();
 const mockListWorkflowRuns = vi.fn();
 const mockGetWorkflowRun = vi.fn();
+const mockRetryWorkflowRun = vi.fn();
+const mockCancelWorkflowRun = vi.fn();
+const mockGetWorkflowRunLogs = vi.fn();
 
 vi.mock("../services/workflow-service.js", () => ({
   listWorkflowsWithStats: (...args: unknown[]) => mockListWorkflowsWithStats(...args),
@@ -18,8 +22,12 @@ vi.mock("../services/workflow-service.js", () => ({
   getWorkflowWithStats: (...args: unknown[]) => mockGetWorkflowWithStats(...args),
   updateWorkflow: (...args: unknown[]) => mockUpdateWorkflow(...args),
   deleteWorkflow: (...args: unknown[]) => mockDeleteWorkflow(...args),
+  createWorkflowRun: (...args: unknown[]) => mockCreateWorkflowRun(...args),
   listWorkflowRuns: (...args: unknown[]) => mockListWorkflowRuns(...args),
   getWorkflowRun: (...args: unknown[]) => mockGetWorkflowRun(...args),
+  retryWorkflowRun: (...args: unknown[]) => mockRetryWorkflowRun(...args),
+  cancelWorkflowRun: (...args: unknown[]) => mockCancelWorkflowRun(...args),
+  getWorkflowRunLogs: (...args: unknown[]) => mockGetWorkflowRunLogs(...args),
 }));
 
 import { workflowRoutes } from "./workflows.js";
@@ -232,6 +240,42 @@ describe("DELETE /api/workflows/:id", () => {
   });
 });
 
+// ─── Workflow Runs ───
+
+describe("POST /api/workflows/:id/runs", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("creates a workflow run", async () => {
+    mockCreateWorkflowRun.mockResolvedValue({ id: "run-1", state: "queued" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workflows/wf-1/runs",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(mockCreateWorkflowRun).toHaveBeenCalledWith("wf-1", {});
+  });
+
+  it("returns 400 when run creation fails", async () => {
+    mockCreateWorkflowRun.mockRejectedValue(new Error("Workflow not found"));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workflows/nonexistent/runs",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe("GET /api/workflows/:id/runs", () => {
   let app: FastifyInstance;
 
@@ -271,6 +315,110 @@ describe("GET /api/workflow-runs/:id", () => {
     mockGetWorkflowRun.mockResolvedValue(null);
 
     const res = await app.inject({ method: "GET", url: "/api/workflow-runs/nonexistent" });
+
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// ─── Workflow Run Operations ───
+
+describe("POST /api/workflow-runs/:id/retry", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("retries a failed workflow run", async () => {
+    mockRetryWorkflowRun.mockResolvedValue({ id: "run-1", state: "queued" });
+
+    const res = await app.inject({ method: "POST", url: "/api/workflow-runs/run-1/retry" });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockRetryWorkflowRun).toHaveBeenCalledWith("run-1");
+  });
+
+  it("returns 400 when retry fails", async () => {
+    mockRetryWorkflowRun.mockRejectedValue(
+      new Error('Cannot retry workflow run in state "running"'),
+    );
+
+    const res = await app.inject({ method: "POST", url: "/api/workflow-runs/run-1/retry" });
+
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("POST /api/workflow-runs/:id/cancel", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("cancels a running workflow run", async () => {
+    mockCancelWorkflowRun.mockResolvedValue({ id: "run-1", state: "failed" });
+
+    const res = await app.inject({ method: "POST", url: "/api/workflow-runs/run-1/cancel" });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockCancelWorkflowRun).toHaveBeenCalledWith("run-1");
+  });
+
+  it("returns 400 when cancel fails", async () => {
+    mockCancelWorkflowRun.mockRejectedValue(
+      new Error('Cannot cancel workflow run in state "completed"'),
+    );
+
+    const res = await app.inject({ method: "POST", url: "/api/workflow-runs/run-1/cancel" });
+
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("GET /api/workflow-runs/:id/logs", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns logs for a workflow run", async () => {
+    const logs = [
+      { id: "log-1", taskId: "t-1", content: "Building..." },
+      { id: "log-2", taskId: "t-2", content: "Testing..." },
+    ];
+    mockGetWorkflowRunLogs.mockResolvedValue(logs);
+
+    const res = await app.inject({ method: "GET", url: "/api/workflow-runs/run-1/logs" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().logs).toHaveLength(2);
+    expect(mockGetWorkflowRunLogs).toHaveBeenCalledWith("run-1", {});
+  });
+
+  it("passes query params to service", async () => {
+    mockGetWorkflowRunLogs.mockResolvedValue([]);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/workflow-runs/run-1/logs?logType=error&limit=10",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockGetWorkflowRunLogs).toHaveBeenCalledWith("run-1", {
+      logType: "error",
+      limit: 10,
+    });
+  });
+
+  it("returns 404 when run not found", async () => {
+    mockGetWorkflowRunLogs.mockRejectedValue(new Error("Workflow run not found"));
+
+    const res = await app.inject({ method: "GET", url: "/api/workflow-runs/nonexistent/logs" });
 
     expect(res.statusCode).toBe(404);
   });

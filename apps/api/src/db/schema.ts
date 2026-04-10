@@ -173,9 +173,13 @@ export const taskLogs = pgTable(
     content: text("content").notNull(),
     logType: text("log_type"), // "text" | "tool_use" | "tool_result" | "thinking" | "system" | "error" | "info"
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    workflowRunId: uuid("workflow_run_id"), // nullable FK to workflow_runs for aggregating logs across a run
     timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("task_logs_task_id_timestamp_idx").on(table.taskId, table.timestamp)],
+  (table) => [
+    index("task_logs_task_id_timestamp_idx").on(table.taskId, table.timestamp),
+    index("task_logs_workflow_run_id_idx").on(table.workflowRunId),
+  ],
 );
 
 const bytea = customType<{ data: Buffer }>({

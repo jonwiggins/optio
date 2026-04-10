@@ -1,6 +1,8 @@
 import { eq, desc, sql, and } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { workflows, workflowRuns, workflowTriggers } from "../db/schema.js";
+import { workflows, workflowRuns, workflowTriggers, taskLogs } from "../db/schema.js";
+import { WorkflowRunState, canTransitionWorkflowRun, transitionWorkflowRun } from "@optio/shared";
+import { logger } from "../logger.js";
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
 
@@ -211,6 +213,114 @@ export async function listWorkflowRuns(workflowId: string) {
 export async function getWorkflowRun(id: string) {
   const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, id));
   return run ?? null;
+}
+
+export async function createWorkflowRun(
+  workflowId: string,
+  opts?: { params?: Record<string, unknown>; triggerId?: string },
+) {
+  const workflow = await getWorkflow(workflowId);
+  if (!workflow) throw new Error("Workflow not found");
+  if (!workflow.enabled) throw new Error("Workflow is disabled");
+
+  const [run] = await db
+    .insert(workflowRuns)
+    .values({
+      workflowId,
+      triggerId: opts?.triggerId,
+      params: opts?.params,
+      state: WorkflowRunState.QUEUED,
+    })
+    .returning();
+
+  logger.info({ workflowRunId: run.id, workflowId }, "Workflow run created");
+  return run;
+}
+
+// ── Workflow Run Operations ─────────────────────────────────────────────────
+
+/**
+ * Retry a failed workflow run by transitioning it back to queued.
+ */
+export async function retryWorkflowRun(id: string) {
+  const run = await getWorkflowRun(id);
+  if (!run) throw new Error("Workflow run not found");
+
+  const currentState = run.state as WorkflowRunState;
+  if (!canTransitionWorkflowRun(currentState, WorkflowRunState.QUEUED)) {
+    throw new Error(`Cannot retry workflow run in state "${run.state}"`);
+  }
+
+  transitionWorkflowRun(currentState, WorkflowRunState.QUEUED);
+
+  const [updated] = await db
+    .update(workflowRuns)
+    .set({
+      state: WorkflowRunState.QUEUED,
+      retryCount: (run.retryCount ?? 0) + 1,
+      errorMessage: null,
+      finishedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(workflowRuns.id, id))
+    .returning();
+
+  logger.info({ workflowRunId: id }, "Workflow run retried");
+  return updated;
+}
+
+/**
+ * Cancel a running workflow run by transitioning it to failed.
+ */
+export async function cancelWorkflowRun(id: string) {
+  const run = await getWorkflowRun(id);
+  if (!run) throw new Error("Workflow run not found");
+
+  const currentState = run.state as WorkflowRunState;
+  if (!canTransitionWorkflowRun(currentState, WorkflowRunState.FAILED)) {
+    throw new Error(`Cannot cancel workflow run in state "${run.state}"`);
+  }
+
+  transitionWorkflowRun(currentState, WorkflowRunState.FAILED);
+
+  const [updated] = await db
+    .update(workflowRuns)
+    .set({
+      state: WorkflowRunState.FAILED,
+      errorMessage: "Cancelled by user",
+      finishedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(workflowRuns.id, id))
+    .returning();
+
+  logger.info({ workflowRunId: id }, "Workflow run cancelled");
+  return updated;
+}
+
+/**
+ * Get aggregated logs for a workflow run by querying taskLogs with workflowRunId.
+ */
+export async function getWorkflowRunLogs(id: string, opts: { logType?: string; limit?: number }) {
+  const run = await getWorkflowRun(id);
+  if (!run) throw new Error("Workflow run not found");
+
+  const conditions = [eq(taskLogs.workflowRunId, id)];
+  if (opts.logType) {
+    conditions.push(eq(taskLogs.logType, opts.logType));
+  }
+
+  let query = db
+    .select()
+    .from(taskLogs)
+    .where(and(...conditions))
+    .orderBy(taskLogs.timestamp);
+
+  if (opts.limit) {
+    query = query.limit(opts.limit) as typeof query;
+  }
+
+  return query;
 }
 
 // ── Workflow Triggers ─────────────────────────────────────────────────────────
