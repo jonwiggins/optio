@@ -120,7 +120,10 @@ export default function WorkflowsPage() {
             Workflows let you define reusable agent pipelines with triggers, parameters, and
             budgets.
           </p>
-          <Link href="/workflows/new" className="text-primary hover:underline text-sm mt-2 inline-block">
+          <Link
+            href="/workflows/new"
+            className="text-primary hover:underline text-sm mt-2 inline-block"
+          >
             Create your first workflow
           </Link>
         </div>
