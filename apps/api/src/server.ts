@@ -45,6 +45,7 @@ import { eventsWs } from "./ws/events.js";
 import { sessionTerminalWs } from "./ws/session-terminal.js";
 import { sessionChatWs } from "./ws/session-chat.js";
 import { optioChatWs } from "./ws/optio-chat.js";
+import { workflowRunLogStreamWs } from "./ws/workflow-run-log-stream.js";
 import authPlugin from "./plugins/auth.js";
 
 const loggerConfig =
@@ -136,6 +137,7 @@ export async function buildServer() {
   await app.register(sessionTerminalWs);
   await app.register(sessionChatWs);
   await app.register(optioChatWs);
+  await app.register(workflowRunLogStreamWs);
 
   // Global error handler for Zod validation
   app.setErrorHandler((error: FastifyError | Error, _req, reply) => {

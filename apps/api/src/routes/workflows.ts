@@ -259,20 +259,14 @@ export async function workflowRoutes(app: FastifyInstance) {
     }
   });
 
-  // Get aggregated logs for a workflow run
+  // Get logs for a workflow run
   app.get("/api/workflow-runs/:id/logs", async (req, reply) => {
     const { id } = idParamsSchema.parse(req.params);
+    const run = await workflowService.getWorkflowRun(id);
+    if (!run) return reply.status(404).send({ error: "Workflow run not found" });
     const query = logsQuerySchema.safeParse(req.query);
     const opts = query.success ? query.data : {};
-    try {
-      const logs = await workflowService.getWorkflowRunLogs(id, opts);
-      reply.send({ logs });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("not found")) {
-        return reply.status(404).send({ error: msg });
-      }
-      reply.status(400).send({ error: msg });
-    }
+    const logs = await workflowService.getWorkflowRunLogs(id, opts);
+    reply.send({ logs });
   });
 }

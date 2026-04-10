@@ -1,8 +1,9 @@
 import { eq, desc, sql, and, lte } from "drizzle-orm";
 import { CronExpressionParser } from "cron-parser";
 import { db } from "../db/client.js";
-import { workflows, workflowRuns, workflowTriggers, taskLogs } from "../db/schema.js";
+import { workflows, workflowRuns, workflowTriggers, workflowRunLogs, taskLogs } from "../db/schema.js";
 import { WorkflowRunState, canTransitionWorkflowRun, transitionWorkflowRun } from "@optio/shared";
+import { publishWorkflowRunEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
@@ -322,29 +323,46 @@ export async function cancelWorkflowRun(id: string) {
   return updated;
 }
 
-/**
- * Get aggregated logs for a workflow run by querying taskLogs with workflowRunId.
- */
-export async function getWorkflowRunLogs(id: string, opts: { logType?: string; limit?: number }) {
-  const run = await getWorkflowRun(id);
-  if (!run) throw new Error("Workflow run not found");
+// ── Workflow Run Logs ────────────────────────────────────────────────────────
 
-  const conditions = [eq(taskLogs.workflowRunId, id)];
-  if (opts.logType) {
-    conditions.push(eq(taskLogs.logType, opts.logType));
+export async function getWorkflowRunLogs(workflowRunId: string, opts?: { logType?: string; limit?: number }) {
+  const conditions = [eq(workflowRunLogs.workflowRunId, workflowRunId)];
+  if (opts?.logType) {
+    conditions.push(eq(workflowRunLogs.logType, opts.logType));
   }
 
   let query = db
     .select()
-    .from(taskLogs)
+    .from(workflowRunLogs)
     .where(and(...conditions))
-    .orderBy(taskLogs.timestamp);
+    .orderBy(workflowRunLogs.timestamp)
+    .$dynamic();
 
-  if (opts.limit) {
-    query = query.limit(opts.limit) as typeof query;
+  if (opts?.limit) {
+    query = query.limit(opts.limit);
   }
 
   return query;
+}
+
+export async function insertWorkflowRunLog(input: {
+  workflowRunId: string;
+  stream?: string;
+  content: string;
+  logType?: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const [log] = await db
+    .insert(workflowRunLogs)
+    .values({
+      workflowRunId: input.workflowRunId,
+      stream: input.stream ?? "stdout",
+      content: input.content,
+      logType: input.logType,
+      metadata: input.metadata,
+    })
+    .returning();
+  return log;
 }
 
 // ── Workflow Triggers ─────────────────────────────────────────────────────────
@@ -483,4 +501,67 @@ export async function markTriggerFired(id: string, cronExpression: string) {
     .update(workflowTriggers)
     .set({ lastFiredAt: now, nextFireAt, updatedAt: now })
     .where(eq(workflowTriggers.id, id));
+}
+
+// ── State transitions + event publishing ─────────────────────────────────────
+
+export async function transitionWorkflowRunState(
+  workflowRunId: string,
+  toState: WorkflowRunState,
+  extras?: {
+    costUsd?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    modelUsed?: string;
+    errorMessage?: string;
+  },
+) {
+  const run = await getWorkflowRun(workflowRunId);
+  if (!run) throw new Error(`Workflow run ${workflowRunId} not found`);
+
+  const fromState = run.state as WorkflowRunState;
+  transitionWorkflowRun(fromState, toState);
+
+  const updates: Record<string, unknown> = { state: toState, updatedAt: new Date() };
+  if (toState === "running") updates.startedAt = new Date();
+  if (toState === "completed" || toState === "failed") updates.finishedAt = new Date();
+  if (extras?.costUsd !== undefined) updates.costUsd = extras.costUsd;
+  if (extras?.inputTokens !== undefined) updates.inputTokens = extras.inputTokens;
+  if (extras?.outputTokens !== undefined) updates.outputTokens = extras.outputTokens;
+  if (extras?.modelUsed !== undefined) updates.modelUsed = extras.modelUsed;
+  if (extras?.errorMessage !== undefined) updates.errorMessage = extras.errorMessage;
+
+  await db.update(workflowRuns).set(updates).where(eq(workflowRuns.id, workflowRunId));
+
+  await publishWorkflowRunEvent({
+    type: "workflow_run:state_changed",
+    workflowRunId,
+    workflowId: run.workflowId,
+    fromState,
+    toState,
+    timestamp: new Date().toISOString(),
+    ...(extras ?? {}),
+  });
+}
+
+export async function appendWorkflowRunLog(input: {
+  workflowRunId: string;
+  stream?: string;
+  content: string;
+  logType?: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const log = await insertWorkflowRunLog(input);
+
+  await publishWorkflowRunEvent({
+    type: "workflow_run:log",
+    workflowRunId: input.workflowRunId,
+    stream: (log.stream as "stdout" | "stderr") ?? "stdout",
+    content: log.content,
+    timestamp: log.timestamp?.toISOString() ?? new Date().toISOString(),
+    logType: log.logType ?? undefined,
+    metadata: log.metadata ?? undefined,
+  });
+
+  return log;
 }
