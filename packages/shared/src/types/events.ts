@@ -10,6 +10,7 @@ export type WsEvent =
   | TaskStalledEvent
   | TaskRecoveredEvent
   | AuthFailedEvent
+  | AuthStatusChangedEvent
   | SessionCreatedEvent
   | SessionEndedEvent
   | TaskCommentEvent
@@ -57,6 +58,11 @@ export interface TaskPendingReasonEvent {
 export interface AuthFailedEvent {
   type: "auth:failed";
   message: string;
+  timestamp: string;
+}
+
+export interface AuthStatusChangedEvent {
+  type: "auth:status_changed";
   timestamp: string;
 }
 

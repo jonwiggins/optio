@@ -15,8 +15,15 @@ export function TokenRefreshBanner() {
     if (!token.trim()) return;
     setSaving(true);
     try {
-      await api.createSecret({ name: "CLAUDE_CODE_OAUTH_TOKEN", value: token.trim() });
-      toast.success("Token updated — tasks will use it on next run");
+      const result = await api.createSecret({
+        name: "CLAUDE_CODE_OAUTH_TOKEN",
+        value: token.trim(),
+      });
+      if (result.validation && !result.validation.valid) {
+        toast.error(`Token saved but validation failed: ${result.validation.error}`);
+      } else {
+        toast.success("Token updated — tasks will use it on next run");
+      }
       setToken("");
     } catch {
       toast.error("Failed to save token");
@@ -59,6 +66,65 @@ export function TokenRefreshBanner() {
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="Paste token here"
+          className="flex-1 px-3 py-1.5 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary font-mono"
+        />
+        <button
+          onClick={handleSave}
+          disabled={!token.trim() || saving}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+        >
+          {saving ? (
+            "Saving..."
+          ) : token.trim() ? (
+            <>
+              <Check className="w-3 h-3" />
+              Save Token
+            </>
+          ) : (
+            "Save Token"
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function GitHubTokenBanner() {
+  const [token, setToken] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!token.trim()) return;
+    setSaving(true);
+    try {
+      const result = await api.createSecret({ name: "GITHUB_TOKEN", value: token.trim() });
+      const validation = (result as any).validation;
+      if (validation && !validation.valid) {
+        toast.error(`Token saved but validation failed: ${validation.error}`);
+      } else {
+        toast.success("GitHub token updated");
+      }
+      setToken("");
+    } catch {
+      toast.error("Failed to save token");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="rounded-xl border border-error/30 bg-error/5 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="w-4 h-4 text-error shrink-0" />
+        <span className="text-sm font-medium text-text-heading">GitHub token invalid</span>
+        <span className="text-xs text-text-muted">— ticket sync and PR watching are failing</span>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="Paste GitHub token here"
           className="flex-1 px-3 py-1.5 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary font-mono"
         />
         <button

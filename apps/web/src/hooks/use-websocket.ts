@@ -57,6 +57,12 @@ export function useGlobalWebSocket() {
       window.dispatchEvent(new Event("optio:auth-failed"));
     });
 
+    // When an auth token is updated (via secrets page), immediately re-fetch
+    // auth status so the banner disappears without waiting for the poll interval.
+    client.on("auth:status_changed", () => {
+      window.dispatchEvent(new Event("optio:auth-status-changed"));
+    });
+
     client.on("task:pending_reason", (event) => {
       useStore
         .getState()

@@ -393,6 +393,13 @@
       "when": 1775793000000,
       "tag": "1775793000_workflow_run_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1775795000000,
+      "tag": "1775795000_auth_events",
+      "breakpoints": true
     }
   ]
 }

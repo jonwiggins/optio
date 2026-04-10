@@ -195,10 +195,13 @@ export const api = {
   },
 
   createSecret: (data: { name: string; value: string; scope?: string }) =>
-    request<{ name: string; scope: string }>("/api/secrets", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+    request<{ name: string; scope: string; validation?: { valid: boolean; error?: string } }>(
+      "/api/secrets",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    ),
 
   deleteSecret: (name: string, scope?: string) => {
     const qs = scope ? `?scope=${scope}` : "";
@@ -429,6 +432,7 @@ export const api = {
       usage: {
         available: boolean;
         hasRecentAuthFailure?: boolean;
+        authFailures?: { claude: boolean; github: boolean };
         fiveHour?: { utilization: number | null; resetsAt: string | null };
         sevenDay?: { utilization: number | null; resetsAt: string | null };
         sevenDaySonnet?: { utilization: number | null; resetsAt: string | null };

@@ -208,6 +208,20 @@ export const secrets = pgTable(
   ],
 );
 
+// ── Auth Events ─────────────────────────────────────────────────────────────
+// Lightweight table for recording auth failures from non-task contexts
+// (e.g. ticket-sync, pr-watcher) so the failure detector can surface them.
+export const authEvents = pgTable(
+  "auth_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tokenType: text("token_type").notNull(), // "claude" | "github"
+    errorMessage: text("error_message").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("auth_events_token_type_created_idx").on(table.tokenType, table.createdAt)],
+);
+
 export const repos = pgTable(
   "repos",
   {

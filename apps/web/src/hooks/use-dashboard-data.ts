@@ -98,10 +98,18 @@ export function useDashboardData() {
     };
     window.addEventListener("optio:auth-failed", onAuthFailed);
 
+    // Listen for auth:status_changed (token updated via secrets page) to immediately
+    // re-fetch usage so the banner disappears as soon as the watermark moves forward
+    const onAuthStatusChanged = () => {
+      refreshUsage();
+    };
+    window.addEventListener("optio:auth-status-changed", onAuthStatusChanged);
+
     return () => {
       clearInterval(interval);
       clearInterval(usageInterval);
       window.removeEventListener("optio:auth-failed", onAuthFailed);
+      window.removeEventListener("optio:auth-status-changed", onAuthStatusChanged);
     };
   }, [refresh, refreshUsage]);
 

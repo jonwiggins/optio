@@ -5,7 +5,10 @@ import {
   getClaudeUsage,
   invalidateCredentialsCache,
 } from "../services/auth-service.js";
-import { hasRecentClaudeAuthFailure } from "../services/auth-failure-detector.js";
+import {
+  hasRecentClaudeAuthFailure,
+  getRecentAuthFailures,
+} from "../services/auth-failure-detector.js";
 import { getOAuthProvider, getEnabledProviders, isAuthDisabled } from "../services/oauth/index.js";
 import {
   createSession,
@@ -129,22 +132,29 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/auth/usage", async (_req, reply) => {
-    const [usage, hasRecentAuthFailure] = await Promise.all([
+    const [usage, authFailures] = await Promise.all([
       getClaudeUsage(),
-      hasRecentClaudeAuthFailure().catch(() => false),
+      getRecentAuthFailures().catch(() => ({ claude: false, github: false })),
     ]);
-    reply.send({ usage: { ...usage, hasRecentAuthFailure } });
+    // hasRecentAuthFailure kept for backward compat (true if either token type has failures)
+    const hasRecentAuthFailure = authFailures.claude || authFailures.github;
+    reply.send({ usage: { ...usage, hasRecentAuthFailure, authFailures } });
   });
 
   app.post("/api/auth/refresh", async (_req, reply) => {
     invalidateCredentialsCache();
     const result = getClaudeAuthToken();
+    const authFailures = await getRecentAuthFailures().catch(() => ({
+      claude: false,
+      github: false,
+    }));
     reply.send({
       subscription: {
         available: result.available,
         expiresAt: result.expiresAt,
         error: result.error,
       },
+      authFailures,
     });
   });
 

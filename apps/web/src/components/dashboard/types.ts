@@ -20,6 +20,11 @@ export interface UsageData {
    * the usage response alone isn't a reliable signal.
    */
   hasRecentAuthFailure?: boolean;
+  /** Per-token-type auth failure status. */
+  authFailures?: {
+    claude: boolean;
+    github: boolean;
+  };
   fiveHour?: { utilization: number | null; resetsAt: string | null };
   sevenDay?: { utilization: number | null; resetsAt: string | null };
   sevenDaySonnet?: { utilization: number | null; resetsAt: string | null };

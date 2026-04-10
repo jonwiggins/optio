@@ -69,3 +69,37 @@ describe("UsagePanel → TokenRefreshBanner trigger", () => {
     expect(screen.queryByText(/OAuth token expired/i)).not.toBeInTheDocument();
   });
 });
+
+describe("UsagePanel → per-token-type banners", () => {
+  afterEach(() => cleanup());
+
+  it("shows only the Claude banner when authFailures.claude is true", () => {
+    render(<UsagePanel usage={makeUsage({ authFailures: { claude: true, github: false } })} />);
+    expect(screen.getByText(/OAuth token expired/i)).toBeInTheDocument();
+    expect(screen.queryByText(/GitHub token invalid/i)).not.toBeInTheDocument();
+  });
+
+  it("shows only the GitHub banner when authFailures.github is true", () => {
+    render(<UsagePanel usage={makeUsage({ authFailures: { claude: false, github: true } })} />);
+    expect(screen.queryByText(/OAuth token expired/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/GitHub token invalid/i)).toBeInTheDocument();
+  });
+
+  it("shows both banners simultaneously when both tokens are bad", () => {
+    render(<UsagePanel usage={makeUsage({ authFailures: { claude: true, github: true } })} />);
+    expect(screen.getByText(/OAuth token expired/i)).toBeInTheDocument();
+    expect(screen.getByText(/GitHub token invalid/i)).toBeInTheDocument();
+  });
+
+  it("shows no banners when both tokens are valid", () => {
+    render(<UsagePanel usage={makeUsage({ authFailures: { claude: false, github: false } })} />);
+    expect(screen.queryByText(/OAuth token expired/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/GitHub token invalid/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Claude Max Usage/i)).toBeInTheDocument();
+  });
+
+  it("GitHub banner includes descriptive text about ticket sync and PR watching", () => {
+    render(<UsagePanel usage={makeUsage({ authFailures: { claude: false, github: true } })} />);
+    expect(screen.getByText(/ticket sync and PR watching are failing/i)).toBeInTheDocument();
+  });
+});

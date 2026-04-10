@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { Gauge, Clock, Moon } from "lucide-react";
 import { getOffPeakInfo } from "@optio/shared";
-import { TokenRefreshBanner } from "@/components/token-refresh-banner";
+import { TokenRefreshBanner, GitHubTokenBanner } from "@/components/token-refresh-banner";
 import type { UsageData } from "./types.js";
 
 function UsageMeter({
@@ -59,16 +59,21 @@ function UsageMeter({
 export function UsagePanel({ usage }: { usage: UsageData | null }) {
   if (!usage) return null;
 
-  // Show the refresh banner when:
-  //   (a) usage itself signals an auth error (401/expired), OR
-  //   (b) the API detected a recent task auth failure in task logs.
-  // Case (b) catches the split-endpoint scenario where /organizations/usage
-  // returns 429 but /v1/messages returns 401 — the usage panel alone can't
-  // tell that tasks are actively failing.
-  const usageAuthError =
-    !usage.available && (usage.error?.includes("401") || usage.error?.includes("expired"));
-  if (usageAuthError || usage.hasRecentAuthFailure) {
-    return <TokenRefreshBanner />;
+  // Determine which auth banners to show using per-token-type failure status.
+  // Falls back to the legacy hasRecentAuthFailure for backward compat.
+  const claudeFailure =
+    usage.authFailures?.claude ??
+    (usage.hasRecentAuthFailure ||
+      (!usage.available && (usage.error?.includes("401") || usage.error?.includes("expired"))));
+  const githubFailure = usage.authFailures?.github ?? false;
+
+  if (claudeFailure || githubFailure) {
+    return (
+      <div className="space-y-3">
+        {claudeFailure && <TokenRefreshBanner />}
+        {githubFailure && <GitHubTokenBanner />}
+      </div>
+    );
   }
 
   // Usage endpoint hit a non-auth issue (e.g. 429, network) and there's no
