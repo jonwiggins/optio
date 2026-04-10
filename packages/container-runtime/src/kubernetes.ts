@@ -442,7 +442,12 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     try {
       await this.coreApi.listNamespacedPod({ namespace: this.namespace, limit: 1 });
       return true;
-    } catch {
+    } catch (err: unknown) {
+      // 403 Forbidden means the K8s API is reachable but we lack permission
+      // (e.g. no ClusterRole). The runtime is still available.
+      if (this.isForbiddenError(err)) {
+        return true;
+      }
       return false;
     }
   }

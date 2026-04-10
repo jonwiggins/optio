@@ -755,7 +755,23 @@ describe("KubernetesContainerRuntime", () => {
       expect(result).toBe(true);
     });
 
-    it("returns false when it throws", async () => {
+    it("returns true when listNamespacedPod returns 403 Forbidden (no ClusterRole)", async () => {
+      mockCoreApi.listNamespacedPod.mockRejectedValue({ statusCode: 403 });
+
+      const result = await runtime.ping();
+      expect(result).toBe(true);
+    });
+
+    it("returns true when listNamespacedPod returns 403 via response.httpStatusCode", async () => {
+      mockCoreApi.listNamespacedPod.mockRejectedValue({
+        response: { httpStatusCode: 403 },
+      });
+
+      const result = await runtime.ping();
+      expect(result).toBe(true);
+    });
+
+    it("returns false when it throws a non-403 error", async () => {
       mockCoreApi.listNamespacedPod.mockRejectedValue(new Error("connection refused"));
 
       const result = await runtime.ping();

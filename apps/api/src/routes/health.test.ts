@@ -18,7 +18,7 @@ vi.mock("../services/container-service.js", () => ({
   checkRuntimeHealth: (...args: unknown[]) => mockCheckRuntimeHealth(...args),
 }));
 
-import { healthRoutes } from "./health.js";
+import { healthRoutes, _resetHealthCache } from "./health.js";
 
 // ─── Helpers ───
 
@@ -34,6 +34,7 @@ describe("GET /api/health", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    _resetHealthCache();
     app = await buildTestApp();
   });
 
@@ -55,6 +56,31 @@ describe("GET /api/health", () => {
   it("returns 503 when database is down", async () => {
     mockDbExecute.mockRejectedValue(new Error("connection refused"));
     mockCheckRuntimeHealth.mockResolvedValue(true);
+
+    const res = await app.inject({ method: "GET", url: "/api/health" });
+
+    expect(res.statusCode).toBe(503);
+    const body = res.json();
+    expect(body.healthy).toBe(false);
+    expect(body.checks.database).toBe(false);
+  });
+
+  it("returns 200 when database is up but container runtime is down", async () => {
+    mockDbExecute.mockResolvedValue(undefined);
+    mockCheckRuntimeHealth.mockResolvedValue(false);
+
+    const res = await app.inject({ method: "GET", url: "/api/health" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.healthy).toBe(true);
+    expect(body.checks.database).toBe(true);
+    expect(body.checks.containerRuntime).toBe(false);
+  });
+
+  it("returns 503 only when database is down, regardless of container runtime", async () => {
+    mockDbExecute.mockRejectedValue(new Error("connection refused"));
+    mockCheckRuntimeHealth.mockResolvedValue(false);
 
     const res = await app.inject({ method: "GET", url: "/api/health" });
 

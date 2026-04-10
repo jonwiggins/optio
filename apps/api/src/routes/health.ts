@@ -10,6 +10,12 @@ let cachedRuntimeHealth: boolean | null = null;
 let cachedRuntimeHealthAt = 0;
 const RUNTIME_HEALTH_TTL_MS = 30_000;
 
+/** Reset cached runtime health (exported for tests). */
+export function _resetHealthCache() {
+  cachedRuntimeHealth = null;
+  cachedRuntimeHealthAt = 0;
+}
+
 export async function healthRoutes(app: FastifyInstance) {
   app.get("/api/health", async (_req, reply) => {
     const checks: Record<string, boolean> = {};
@@ -38,7 +44,10 @@ export async function healthRoutes(app: FastifyInstance) {
       cachedRuntimeHealthAt = Date.now();
     }
 
-    const healthy = Object.values(checks).every(Boolean);
+    // Only database is critical for API health. Container runtime being
+    // unavailable (e.g. no ClusterRole, K8s API unreachable) is a degraded
+    // state but should not cause liveness/readiness probes to fail.
+    const healthy = checks.database;
     const maxConcurrent = parseInt(process.env.OPTIO_MAX_CONCURRENT ?? "5", 10);
     reply
       .status(healthy ? 200 : 503)
