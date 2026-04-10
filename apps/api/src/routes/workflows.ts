@@ -44,10 +44,13 @@ const createTriggerSchema = z.object({
 });
 
 const updateTriggerSchema = z.object({
-  config: z.record(z.unknown()).optional(),
-  paramMapping: z.record(z.unknown()).optional(),
+  type: z.enum(["manual", "schedule", "webhook"]).optional(),
+  config: z.record(z.unknown()).nullable().optional(),
+  paramMapping: z.record(z.unknown()).nullable().optional(),
   enabled: z.boolean().optional(),
 });
+
+const triggerIdParamsSchema = z.object({ id: z.string(), triggerId: z.string() });
 
 const idParamsSchema = z.object({ id: z.string() });
 const limitQuerySchema = z.object({ limit: z.string().optional() });
@@ -196,37 +199,6 @@ export async function workflowRoutes(app: FastifyInstance) {
     }
   });
 
-  // Update a trigger
-  app.patch("/api/workflow-triggers/:id", async (req, reply) => {
-    const { id } = idParamsSchema.parse(req.params);
-    const input = updateTriggerSchema.parse(req.body);
-
-    // Validate cron expression if config is being updated with one
-    if (input.config?.cronExpression) {
-      try {
-        CronExpressionParser.parse(input.config.cronExpression as string);
-      } catch {
-        return reply.status(400).send({ error: "Invalid cron expression" });
-      }
-    }
-
-    try {
-      const trigger = await workflowService.updateWorkflowTrigger(id, input);
-      if (!trigger) return reply.status(404).send({ error: "Trigger not found" });
-      reply.send({ trigger });
-    } catch (err) {
-      reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
-    }
-  });
-
-  // Delete a trigger
-  app.delete("/api/workflow-triggers/:id", async (req, reply) => {
-    const { id } = idParamsSchema.parse(req.params);
-    const deleted = await workflowService.deleteWorkflowTrigger(id);
-    if (!deleted) return reply.status(404).send({ error: "Trigger not found" });
-    reply.status(204).send();
-  });
-
   // Get a single workflow run
   app.get("/api/workflow-runs/:id", async (req, reply) => {
     const { id } = idParamsSchema.parse(req.params);
@@ -274,5 +246,38 @@ export async function workflowRoutes(app: FastifyInstance) {
       }
       reply.status(400).send({ error: msg });
     }
+  });
+
+  // ── Workflow Triggers (update / delete) ─────────────────────────────────
+
+  // Update a trigger
+  app.patch("/api/workflows/:id/triggers/:triggerId", async (req, reply) => {
+    const { triggerId } = triggerIdParamsSchema.parse(req.params);
+    const input = updateTriggerSchema.parse(req.body);
+
+    // Validate cron expression if config is being updated with one
+    if (input.config?.cronExpression) {
+      try {
+        CronExpressionParser.parse(input.config.cronExpression as string);
+      } catch {
+        return reply.status(400).send({ error: "Invalid cron expression" });
+      }
+    }
+
+    try {
+      const trigger = await workflowService.updateWorkflowTrigger(triggerId, input);
+      if (!trigger) return reply.status(404).send({ error: "Trigger not found" });
+      reply.send({ trigger });
+    } catch (err) {
+      reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Delete a trigger
+  app.delete("/api/workflows/:id/triggers/:triggerId", async (req, reply) => {
+    const { triggerId } = triggerIdParamsSchema.parse(req.params);
+    const deleted = await workflowService.deleteWorkflowTrigger(triggerId);
+    if (!deleted) return reply.status(404).send({ error: "Trigger not found" });
+    reply.status(204).send();
   });
 }

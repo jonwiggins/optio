@@ -6,7 +6,7 @@ import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import { Skeleton } from "@/components/skeleton";
 import { toast } from "sonner";
-import { Workflow, Clock, Webhook, Hand, Play } from "lucide-react";
+import { Workflow, Clock, Webhook, Hand, Play, Plus } from "lucide-react";
 import { RunWorkflowDialog } from "@/components/run-workflow-dialog";
 
 interface WorkflowSummary {
@@ -101,6 +101,13 @@ export default function WorkflowsPage() {
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
+        <Link
+          href="/workflows/new"
+          className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          New Workflow
+        </Link>
       </div>
 
       {loading ? (
@@ -113,6 +120,9 @@ export default function WorkflowsPage() {
             Workflows let you define reusable agent pipelines with triggers, parameters, and
             budgets.
           </p>
+          <Link href="/workflows/new" className="text-primary hover:underline text-sm mt-2 inline-block">
+            Create your first workflow
+          </Link>
         </div>
       ) : (
         <div className="rounded-xl border border-border/50 bg-bg-card overflow-hidden">

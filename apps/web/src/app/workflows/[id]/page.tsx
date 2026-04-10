@@ -177,8 +177,8 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     try {
       const [wfRes, runsRes, triggersRes] = await Promise.all([
         api.getWorkflow(id),
-        api.getWorkflowRuns(id),
-        api.getWorkflowTriggers(id),
+        api.listWorkflowRuns(id),
+        api.listWorkflowTriggers(id),
       ]);
       setWorkflow(wfRes.workflow as WorkflowDetail);
       setRuns(runsRes.runs as WorkflowRun[]);

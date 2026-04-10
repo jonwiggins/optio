@@ -63,6 +63,7 @@ import {
   retryWorkflowRun,
   cancelWorkflowRun,
   getWorkflowRunLogs,
+  listWorkflowTriggers,
   createWorkflowTrigger,
   getWorkflowTrigger,
   updateWorkflowTrigger,
@@ -886,6 +887,137 @@ describe("workflow-service", () => {
       });
 
       await expect(getWorkflowRunLogs("nonexistent", {})).rejects.toThrow("Workflow run not found");
+    });
+  });
+
+  // ── Workflow Triggers ──────────────────────────────────────────────────
+
+  describe("listWorkflowTriggers", () => {
+    it("lists triggers for a workflow", async () => {
+      const triggers = [
+        { id: "t-1", type: "manual" },
+        { id: "t-2", type: "schedule" },
+      ];
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockResolvedValue(triggers),
+          }),
+        }),
+      });
+
+      const result = await listWorkflowTriggers("w-1");
+      expect(result).toEqual(triggers);
+    });
+  });
+
+  describe("createWorkflowTrigger", () => {
+    it("creates a trigger with required fields", async () => {
+      const created = { id: "t-1", workflowId: "w-1", type: "schedule" };
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([created]),
+        }),
+      });
+
+      const result = await createWorkflowTrigger({
+        workflowId: "w-1",
+        type: "schedule",
+      });
+
+      expect(result).toEqual(created);
+    });
+
+    it("passes config and paramMapping through", async () => {
+      let capturedValues: any;
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockImplementation((vals: any) => {
+          capturedValues = vals;
+          return { returning: vi.fn().mockResolvedValue([{ id: "t-1", ...vals }]) };
+        }),
+      });
+
+      await createWorkflowTrigger({
+        workflowId: "w-1",
+        type: "webhook",
+        config: { secret: "abc" },
+        paramMapping: { REPO: "$.repo" },
+        enabled: false,
+      });
+
+      expect(capturedValues.config).toEqual({ secret: "abc" });
+      expect(capturedValues.paramMapping).toEqual({ REPO: "$.repo" });
+      expect(capturedValues.enabled).toBe(false);
+    });
+
+    it("defaults enabled to true", async () => {
+      let capturedValues: any;
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockImplementation((vals: any) => {
+          capturedValues = vals;
+          return { returning: vi.fn().mockResolvedValue([{ id: "t-1", ...vals }]) };
+        }),
+      });
+
+      await createWorkflowTrigger({
+        workflowId: "w-1",
+        type: "manual",
+      });
+
+      expect(capturedValues.enabled).toBe(true);
+    });
+  });
+
+  describe("updateWorkflowTrigger", () => {
+    it("updates a trigger", async () => {
+      const updated = { id: "t-1", type: "webhook", enabled: false };
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([updated]),
+          }),
+        }),
+      });
+
+      const result = await updateWorkflowTrigger("t-1", { enabled: false });
+      expect(result).toEqual(updated);
+    });
+
+    it("returns null when trigger not found", async () => {
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      const result = await updateWorkflowTrigger("nonexistent", { enabled: true });
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("deleteWorkflowTrigger", () => {
+    it("returns true when deleted", async () => {
+      (db.delete as any) = vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: "t-1" }]),
+        }),
+      });
+
+      const result = await deleteWorkflowTrigger("t-1");
+      expect(result).toBe(true);
+    });
+
+    it("returns false when not found", async () => {
+      (db.delete as any) = vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const result = await deleteWorkflowTrigger("nonexistent");
+      expect(result).toBe(false);
     });
   });
 });

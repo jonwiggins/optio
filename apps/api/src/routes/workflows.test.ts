@@ -440,7 +440,38 @@ describe("GET /api/workflow-runs/:id/logs", () => {
   });
 });
 
-// ── Trigger routes ──────────────────────────────────────────────────────────
+// ── Workflow Trigger Routes ─────────────────────────────────────────────────
+
+describe("GET /api/workflows/:id/triggers", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("lists triggers for a workflow", async () => {
+    mockListWorkflowTriggers.mockResolvedValue([
+      { id: "t-1", type: "manual", enabled: true },
+      { id: "t-2", type: "schedule", enabled: false },
+    ]);
+
+    const res = await app.inject({ method: "GET", url: "/api/workflows/w-1/triggers" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().triggers).toHaveLength(2);
+    expect(mockListWorkflowTriggers).toHaveBeenCalledWith("w-1");
+  });
+
+  it("returns empty array when no triggers", async () => {
+    mockListWorkflowTriggers.mockResolvedValue([]);
+
+    const res = await app.inject({ method: "GET", url: "/api/workflows/w-1/triggers" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().triggers).toEqual([]);
+  });
+});
 
 describe("POST /api/workflows/:id/triggers", () => {
   let app: FastifyInstance;
@@ -512,9 +543,32 @@ describe("POST /api/workflows/:id/triggers", () => {
 
     expect(res.statusCode).toBe(201);
   });
+
+  it("rejects invalid trigger type", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workflows/w-1/triggers",
+      payload: { type: "invalid" },
+    });
+
+    expect(res.statusCode).toBe(500); // Zod throws
+  });
+
+  it("returns 400 on service error", async () => {
+    mockCreateWorkflowTrigger.mockRejectedValue(new Error("Duplicate trigger"));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workflows/w-1/triggers",
+      payload: { type: "manual" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("Duplicate trigger");
+  });
 });
 
-describe("PATCH /api/workflow-triggers/:id", () => {
+describe("PATCH /api/workflows/:id/triggers/:triggerId", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -523,11 +577,11 @@ describe("PATCH /api/workflow-triggers/:id", () => {
   });
 
   it("updates a trigger", async () => {
-    mockUpdateWorkflowTrigger.mockResolvedValue({ id: "t-1", enabled: false });
+    mockUpdateWorkflowTrigger.mockResolvedValue({ id: "t-1", type: "webhook", enabled: false });
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/workflow-triggers/t-1",
+      url: "/api/workflows/w-1/triggers/t-1",
       payload: { enabled: false },
     });
 
@@ -540,7 +594,7 @@ describe("PATCH /api/workflow-triggers/:id", () => {
 
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/workflow-triggers/nonexistent",
+      url: "/api/workflows/w-1/triggers/nonexistent",
       payload: { enabled: false },
     });
 
@@ -550,7 +604,7 @@ describe("PATCH /api/workflow-triggers/:id", () => {
   it("rejects invalid cron expression in config update", async () => {
     const res = await app.inject({
       method: "PATCH",
-      url: "/api/workflow-triggers/t-1",
+      url: "/api/workflows/w-1/triggers/t-1",
       payload: { config: { cronExpression: "bad cron" } },
     });
 
@@ -559,7 +613,7 @@ describe("PATCH /api/workflow-triggers/:id", () => {
   });
 });
 
-describe("DELETE /api/workflow-triggers/:id", () => {
+describe("DELETE /api/workflows/:id/triggers/:triggerId", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -570,7 +624,10 @@ describe("DELETE /api/workflow-triggers/:id", () => {
   it("deletes a trigger", async () => {
     mockDeleteWorkflowTrigger.mockResolvedValue(true);
 
-    const res = await app.inject({ method: "DELETE", url: "/api/workflow-triggers/t-1" });
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/workflows/w-1/triggers/t-1",
+    });
 
     expect(res.statusCode).toBe(204);
   });
@@ -580,7 +637,7 @@ describe("DELETE /api/workflow-triggers/:id", () => {
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/api/workflow-triggers/nonexistent",
+      url: "/api/workflows/w-1/triggers/nonexistent",
     });
 
     expect(res.statusCode).toBe(404);

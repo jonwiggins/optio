@@ -416,8 +416,9 @@ export async function createWorkflowTrigger(input: {
 export async function updateWorkflowTrigger(
   id: string,
   input: {
-    config?: Record<string, unknown>;
-    paramMapping?: Record<string, unknown>;
+    type?: string;
+    config?: Record<string, unknown> | null;
+    paramMapping?: Record<string, unknown> | null;
     enabled?: boolean;
   },
 ) {
@@ -425,12 +426,14 @@ export async function updateWorkflowTrigger(
   if (!existing) return null;
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.type !== undefined) updates.type = input.type;
   if (input.config !== undefined) updates.config = input.config;
   if (input.paramMapping !== undefined) updates.paramMapping = input.paramMapping;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
 
   // Recompute nextFireAt for schedule triggers
-  if (existing.type === "schedule") {
+  const effectiveType = (input.type ?? existing.type) as string;
+  if (effectiveType === "schedule") {
     const newConfig = input.config ?? (existing.config as Record<string, unknown> | null);
     const newEnabled = input.enabled ?? existing.enabled;
     const cronExpression = newConfig?.cronExpression as string | undefined;
@@ -454,6 +457,7 @@ export async function deleteWorkflowTrigger(id: string): Promise<boolean> {
   const deleted = await db.delete(workflowTriggers).where(eq(workflowTriggers.id, id)).returning();
   return deleted.length > 0;
 }
+
 
 // ── Schedule trigger evaluation ─────────────────────────────────────────────
 

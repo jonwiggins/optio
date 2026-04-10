@@ -1173,13 +1173,14 @@ export const api = {
     return request<{ runs: any[] }>(`/api/workflows/${workflowId}/runs${qs}`);
   },
 
+  getWorkflowRun: (id: string) => request<{ run: any }>(`/api/workflow-runs/${id}`),
+
+  // Workflow Triggers
   getWorkflowTriggers: (workflowId: string) =>
     request<{ triggers: any[] }>(`/api/workflows/${workflowId}/triggers`),
 
   listWorkflowTriggers: (workflowId: string) =>
     request<{ triggers: any[] }>(`/api/workflows/${workflowId}/triggers`),
-
-  getWorkflowRun: (id: string) => request<{ run: any }>(`/api/workflow-runs/${id}`),
 
   retryWorkflowRun: (id: string) =>
     request<{ run: any }>(`/api/workflow-runs/${id}/retry`, { method: "POST" }),
@@ -1194,4 +1195,29 @@ export const api = {
     const qs = params.toString();
     return request<{ logs: any[] }>(`/api/workflow-runs/${id}/logs${qs ? `?${qs}` : ""}`);
   },
+
+  createWorkflowTrigger: (
+    workflowId: string,
+    data: {
+      type: "manual" | "schedule" | "webhook";
+      config?: Record<string, unknown>;
+      paramMapping?: Record<string, unknown>;
+      enabled?: boolean;
+    },
+  ) =>
+    request<{ trigger: any }>(`/api/workflows/${workflowId}/triggers`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateWorkflowTrigger: (workflowId: string, triggerId: string, data: Record<string, unknown>) =>
+    request<{ trigger: any }>(`/api/workflows/${workflowId}/triggers/${triggerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteWorkflowTrigger: (workflowId: string, triggerId: string) =>
+    request<void>(`/api/workflows/${workflowId}/triggers/${triggerId}`, {
+      method: "DELETE",
+    }),
 };
