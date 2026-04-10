@@ -1,14 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
-import { formatRelativeTime } from "@/lib/utils";
+import { Skeleton } from "@/components/skeleton";
 import { toast } from "sonner";
-import { Loader2, Plus, Workflow, Play, Pause, Trash2 } from "lucide-react";
+import { Workflow, Clock, Webhook, Hand } from "lucide-react";
 
-interface WorkflowWithStats {
+interface WorkflowSummary {
   id: string;
   name: string;
   description: string | null;
@@ -18,20 +18,74 @@ interface WorkflowWithStats {
   maxConcurrent: number;
   maxRetries: number;
   createdAt: string;
+  updatedAt: string;
   runCount: number;
   lastRunAt: string | null;
-  totalCostUsd: string;
+  totalCostUsd: string | null;
+  triggerTypes: string[];
+}
+
+const TRIGGER_ICONS: Record<string, { icon: typeof Clock; label: string }> = {
+  manual: { icon: Hand, label: "Manual" },
+  schedule: { icon: Clock, label: "Schedule" },
+  webhook: { icon: Webhook, label: "Webhook" },
+};
+
+function formatDate(dateStr: string | null) {
+  if (!dateStr) return "\u2014";
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  return d.toLocaleDateString();
+}
+
+function formatCost(costStr: string | null) {
+  if (!costStr) return "$0.00";
+  const val = parseFloat(costStr);
+  if (isNaN(val) || val === 0) return "$0.00";
+  return `$${val.toFixed(2)}`;
+}
+
+function WorkflowTableSkeleton() {
+  return (
+    <div className="rounded-xl border border-border/50 bg-bg-card overflow-hidden">
+      <div className="border-b border-border/50 px-4 py-3">
+        <Skeleton className="h-4 w-32" />
+      </div>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-4 px-4 py-3.5 border-b border-border/30 last:border-b-0"
+        >
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-4 w-12" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-14" />
+          <Skeleton className="h-4 w-16" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function WorkflowsPage() {
   usePageTitle("Workflows");
-  const [workflows, setWorkflows] = useState<WorkflowWithStats[]>([]);
+  const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadWorkflows = useCallback(() => {
     api
       .listWorkflows()
-      .then((res) => setWorkflows(res.workflows as WorkflowWithStats[]))
+      .then((res) => setWorkflows(res.workflows as WorkflowSummary[]))
       .catch(() => toast.error("Failed to load workflows"))
       .finally(() => setLoading(false));
   }, []);
@@ -40,116 +94,99 @@ export default function WorkflowsPage() {
     loadWorkflows();
   }, [loadWorkflows]);
 
-  const handleToggle = async (wf: WorkflowWithStats) => {
-    try {
-      await api.updateWorkflow(wf.id, { enabled: !wf.enabled });
-      toast.success(wf.enabled ? "Workflow disabled" : "Workflow enabled");
-      loadWorkflows();
-    } catch {
-      toast.error("Failed to update workflow");
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await api.deleteWorkflow(id);
-      toast.success("Workflow deleted");
-      loadWorkflows();
-    } catch {
-      toast.error("Failed to delete workflow");
-    }
-  };
-
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
-        <Link
-          href="/workflows/new"
-          className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          New Workflow
-        </Link>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-text-muted">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" />
-          Loading...
-        </div>
+        <WorkflowTableSkeleton />
       ) : workflows.length === 0 ? (
-        <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
-          <Workflow className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>No workflows configured</p>
-          <p className="text-xs mt-1">
-            Create a workflow to define reusable multi-step agent pipelines.
+        <div className="text-center py-16 text-text-muted border border-dashed border-border rounded-lg">
+          <Workflow className="w-10 h-10 mx-auto mb-3 opacity-50" />
+          <p className="font-medium">No workflows yet</p>
+          <p className="text-sm mt-1">
+            Workflows let you define reusable agent pipelines with triggers, parameters, and
+            budgets.
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="rounded-xl border border-border/50 bg-bg-card overflow-hidden">
+          {/* Table header */}
+          <div className="grid grid-cols-[2fr_80px_120px_60px_100px_80px_70px] gap-2 px-4 py-2.5 border-b border-border/50 text-xs font-medium text-text-muted uppercase tracking-wider">
+            <span>Name</span>
+            <span>Status</span>
+            <span>Runtime</span>
+            <span className="text-right">Runs</span>
+            <span>Last Run</span>
+            <span className="text-right">Cost</span>
+            <span>Triggers</span>
+          </div>
+
+          {/* Table rows */}
           {workflows.map((wf) => (
             <Link
               key={wf.id}
               href={`/workflows/${wf.id}`}
-              className="block rounded-xl border border-border/50 bg-bg-card card-hover overflow-hidden"
+              className="grid grid-cols-[2fr_80px_120px_60px_100px_80px_70px] gap-2 items-center px-4 py-3 border-b border-border/30 last:border-b-0 hover:bg-bg-hover/50 transition-colors"
             >
-              <div className="flex items-center justify-between p-4">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-2 h-2 rounded-full shrink-0 ${wf.enabled ? "bg-green-500" : "bg-zinc-400"}`}
-                  />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium truncate">{wf.name}</span>
-                      <span className="text-[11px] text-text-muted bg-bg-hover px-1.5 py-0.5 rounded">
-                        {wf.agentRuntime}
-                      </span>
-                      {wf.model && (
-                        <span className="text-[11px] text-text-muted bg-bg-hover px-1.5 py-0.5 rounded">
-                          {wf.model}
-                        </span>
-                      )}
-                    </div>
-                    {wf.description && (
-                      <p className="text-xs text-text-muted truncate mt-0.5">{wf.description}</p>
-                    )}
-                    <div className="flex items-center gap-3 mt-1 text-xs text-text-muted">
-                      <span>
-                        {wf.runCount} run{wf.runCount !== 1 ? "s" : ""}
-                      </span>
-                      {wf.lastRunAt && <span>Last: {formatRelativeTime(wf.lastRunAt)}</span>}
-                      {parseFloat(wf.totalCostUsd) > 0 && (
-                        <span>${parseFloat(wf.totalCostUsd).toFixed(2)}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div
-                  className="flex items-center gap-1 shrink-0"
-                  onClick={(e) => e.preventDefault()}
+              {/* Name */}
+              <div className="min-w-0">
+                <span className="text-sm font-medium truncate block">{wf.name}</span>
+                {wf.description && (
+                  <span className="text-xs text-text-muted truncate block mt-0.5">
+                    {wf.description}
+                  </span>
+                )}
+              </div>
+
+              {/* Status */}
+              <div>
+                <span
+                  className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
+                    wf.enabled ? "bg-success/10 text-success" : "bg-text-muted/10 text-text-muted"
+                  }`}
                 >
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleToggle(wf);
-                    }}
-                    className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
-                    title={wf.enabled ? "Disable" : "Enable"}
-                  >
-                    {wf.enabled ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleDelete(wf.id);
-                    }}
-                    className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                    title="Delete"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      wf.enabled ? "bg-success" : "bg-text-muted/50"
+                    }`}
+                  />
+                  {wf.enabled ? "Active" : "Off"}
+                </span>
+              </div>
+
+              {/* Runtime */}
+              <span className="text-xs text-text-muted truncate">
+                {wf.agentRuntime}
+                {wf.model ? ` / ${wf.model}` : ""}
+              </span>
+
+              {/* Runs */}
+              <span className="text-sm text-right tabular-nums">{wf.runCount}</span>
+
+              {/* Last Run */}
+              <span className="text-xs text-text-muted">{formatDate(wf.lastRunAt)}</span>
+
+              {/* Cost */}
+              <span className="text-sm text-right tabular-nums">{formatCost(wf.totalCostUsd)}</span>
+
+              {/* Trigger icons */}
+              <div className="flex items-center gap-1">
+                {wf.triggerTypes.map((type) => {
+                  const info = TRIGGER_ICONS[type];
+                  if (!info) return null;
+                  const Icon = info.icon;
+                  return (
+                    <span key={type} title={info.label} className="text-text-muted hover:text-text">
+                      <Icon className="w-3.5 h-3.5" />
+                    </span>
+                  );
+                })}
+                {wf.triggerTypes.length === 0 && (
+                  <span className="text-xs text-text-muted/50">&mdash;</span>
+                )}
               </div>
             </Link>
           ))}

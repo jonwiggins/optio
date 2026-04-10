@@ -144,6 +144,18 @@ describe("api-client", () => {
     });
   });
 
+  describe("listWorkflows", () => {
+    it("fetches workflows list", async () => {
+      mockResponse({ workflows: [] });
+      const result = await api.listWorkflows();
+      expect(result).toEqual({ workflows: [] });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ headers: {} }),
+      );
+    });
+  });
+
   describe("retryTask", () => {
     it("sends POST to retry endpoint", async () => {
       mockResponse({ task: { id: "abc", state: "queued" } });

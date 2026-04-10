@@ -150,6 +150,27 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     ORDER BY w.created_at DESC
   `);
 
+  // Fetch trigger types for all returned workflows
+  const workflowIds = rows.map((r) => r.id);
+  const triggerMap: Record<string, string[]> = {};
+
+  if (workflowIds.length > 0) {
+    const triggers = await db
+      .select({
+        workflowId: workflowTriggers.workflowId,
+        type: workflowTriggers.type,
+      })
+      .from(workflowTriggers)
+      .where(sql`${workflowTriggers.workflowId} in ${workflowIds}`);
+
+    for (const t of triggers) {
+      if (!triggerMap[t.workflowId]) triggerMap[t.workflowId] = [];
+      if (!triggerMap[t.workflowId].includes(t.type)) {
+        triggerMap[t.workflowId].push(t.type);
+      }
+    }
+  }
+
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
@@ -172,6 +193,7 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     runCount: parseInt(r.run_count) || 0,
     lastRunAt: r.last_run_at || null,
     totalCostUsd: r.total_cost_usd,
+    triggerTypes: triggerMap[r.id] ?? [],
   }));
 }
 
