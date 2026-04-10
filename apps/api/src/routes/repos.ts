@@ -43,6 +43,7 @@ const updateRepoSchema = z.object({
   maxTurnsCoding: z.number().int().min(1).max(10000).optional(),
   maxTurnsReview: z.number().int().min(1).max(10000).optional(),
   autoResume: z.boolean().optional(),
+  planningModeEnabled: z.boolean().optional(),
   maxConcurrentTasks: z.number().int().min(1).max(50).optional(),
   maxPodInstances: z.number().int().min(1).max(20).optional(),
   maxAgentsPerPod: z.number().int().min(1).max(50).optional(),

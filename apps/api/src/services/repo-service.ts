@@ -34,6 +34,7 @@ export interface RepoRecord {
   maxTurnsCoding: number | null;
   maxTurnsReview: number | null;
   autoResume: boolean;
+  planningModeEnabled: boolean;
   maxConcurrentTasks: number;
   maxPodInstances: number;
   maxAgentsPerPod: number;

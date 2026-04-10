@@ -272,6 +272,10 @@ export function startTaskWorker() {
         const branchName = `${TASK_BRANCH_PREFIX}${task.id}`;
         const taskFilePath = TASK_FILE_PATH;
 
+        // Enable planning mode for fresh runs (not resumed) when repo has it enabled
+        const isPlanningRun =
+          !!repoConfig?.planningModeEnabled && !resumeSessionId && !reviewOverride;
+
         const renderedPrompt = renderPromptTemplate(promptConfig.template, {
           TASK_FILE: taskFilePath,
           BRANCH_NAME: branchName,
@@ -282,6 +286,7 @@ export function startTaskWorker() {
           DRAFT_PR: String(promptConfig.cautiousMode),
           ISSUE_NUMBER: task.ticketExternalId ?? "",
           GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
+          PLANNING_MODE: isPlanningRun ? "true" : "",
         });
 
         const taskFileContent = renderTaskFile({
@@ -872,14 +877,26 @@ export function startTaskWorker() {
               log.warn({ err }, "Failed to parse pr_review output — draft may need manual editing");
             }
           }
-          await repoPool.updateWorktreeState(taskId, "removed");
-          await taskService.transitionTask(
-            taskId,
-            TaskState.COMPLETED,
-            "agent_success",
-            result.summary,
-          );
-          log.info("Task completed");
+          // Planning mode: agent finished planning — wait for human approval
+          if (isPlanningRun && !isReviewTask) {
+            await repoPool.updateWorktreeState(taskId, "preserved");
+            await taskService.transitionTask(
+              taskId,
+              TaskState.NEEDS_ATTENTION,
+              "plan_review",
+              "Agent has created an implementation plan and is waiting for approval",
+            );
+            log.info("Planning phase complete — awaiting human review");
+          } else {
+            await repoPool.updateWorktreeState(taskId, "removed");
+            await taskService.transitionTask(
+              taskId,
+              TaskState.COMPLETED,
+              "agent_success",
+              result.summary,
+            );
+            log.info("Task completed");
+          }
         } else {
           await repoPool.updateWorktreeState(taskId, "dirty");
           await taskService.transitionTask(taskId, TaskState.FAILED, "agent_failure", result.error);

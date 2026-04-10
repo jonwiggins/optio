@@ -254,6 +254,7 @@ export const repos = pgTable(
     maxTurnsCoding: integer("max_turns_coding"), // null = use global default (250)
     maxTurnsReview: integer("max_turns_review"), // null = use global default (10)
     autoResume: boolean("auto_resume").notNull().default(false),
+    planningModeEnabled: boolean("planning_mode_enabled").notNull().default(false),
     maxConcurrentTasks: integer("max_concurrent_tasks").notNull().default(2),
     maxPodInstances: integer("max_pod_instances").notNull().default(1),
     maxAgentsPerPod: integer("max_agents_per_pod").notNull().default(2),

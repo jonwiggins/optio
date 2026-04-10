@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useState, useEffect } from "react";
+import { use, useState, useEffect, useRef, useCallback } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useTask } from "@/hooks/use-task";
 import { LogViewer } from "@/components/log-viewer";
@@ -35,7 +35,8 @@ import {
   X,
   Link2,
   MessageSquare,
-  Zap,
+  Square,
+  CheckCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
@@ -127,15 +128,42 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
 
   const [messageInput, setMessageInput] = useState("");
   const [messageSending, setMessageSending] = useState(false);
+  const [userMessages, setUserMessages] = useState<
+    { text: string; timestamp: string; status: "sending" | "sent" | "failed" }[]
+  >([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const autoResizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
+  }, []);
 
   const handleSendMessage = async (mode: "soft" | "interrupt" = "soft") => {
     if (!messageInput.trim()) return;
+    const text = messageInput;
     setMessageSending(true);
+    setUserMessages((prev) => [
+      ...prev,
+      { text, timestamp: new Date().toISOString(), status: "sending" },
+    ]);
     try {
-      await api.sendTaskMessage(id, messageInput, mode);
+      await api.sendTaskMessage(id, text, mode);
       setMessageInput("");
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+      setUserMessages((prev) =>
+        prev.map((m) => (m.text === text && m.status === "sending" ? { ...m, status: "sent" } : m)),
+      );
       toast.success(mode === "interrupt" ? "Interrupt sent" : "Message sent");
     } catch (err) {
+      setUserMessages((prev) =>
+        prev.map((m) =>
+          m.text === text && m.status === "sending" ? { ...m, status: "failed" } : m,
+        ),
+      );
       toast.error(err instanceof Error ? err.message : "Failed to send message");
     }
     setMessageSending(false);
@@ -149,6 +177,20 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       setResumePrompt("");
       await refresh();
     } catch {}
+    setActionLoading(false);
+  };
+
+  const handleApprovePlan = async () => {
+    setActionLoading(true);
+    try {
+      await api.resumeTask(
+        id,
+        "Plan approved. Proceed with implementation following your plan above.",
+      );
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to approve plan");
+    }
     setActionLoading(false);
   };
 
@@ -212,6 +254,12 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const canResume = ["needs_attention", "failed"].includes(task.state) && !!task.sessionId;
   const canMessage = task.state === "running" && task.agentType === "claude-code";
   const canForceRestart = ["needs_attention", "failed", "pr_opened"].includes(task.state);
+
+  // Detect plan review state: needs_attention with plan_review trigger
+  const isPlanReview =
+    task.state === "needs_attention" &&
+    events.length > 0 &&
+    events[events.length - 1]?.trigger === "plan_review";
 
   // (log filtering is handled by LogViewer component)
 
@@ -919,7 +967,7 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           {/* Log content via LogViewer */}
           <div className="flex-1 overflow-hidden">
             <ErrorBoundary label="Log viewer">
-              <LogViewer taskId={id} />
+              <LogViewer taskId={id} userMessages={userMessages} />
             </ErrorBoundary>
           </div>
 
@@ -927,34 +975,87 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           <div className="shrink-0 border-t border-border bg-bg-card px-4 py-2.5">
             {canMessage ? (
               /* Mid-task messaging bar (running claude-code tasks) */
-              <div className="flex gap-2 items-center">
-                <input
+              <div className="flex gap-2 items-end">
+                <textarea
+                  ref={textareaRef}
                   value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSendMessage("soft")}
+                  onChange={(e) => {
+                    setMessageInput(e.target.value);
+                    autoResizeTextarea();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage("soft");
+                    }
+                  }}
                   placeholder="Send a message to the running agent..."
-                  className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                  rows={1}
+                  className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-none"
                 />
                 <button
                   onClick={() => handleSendMessage("soft")}
                   disabled={!messageInput.trim() || messageSending}
                   title="Send message (agent picks it up at next turn)"
-                  className="px-3 py-2 rounded-md text-sm font-medium transition-colors bg-primary text-white hover:bg-primary-hover disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="px-3 py-2 rounded-md text-sm font-medium transition-colors bg-primary text-white hover:bg-primary-hover disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
                   {messageSending ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <Send className="w-4 h-4" />
                   )}
+                  <span className="hidden sm:inline">Send</span>
                 </button>
                 <button
                   onClick={() => handleSendMessage("interrupt")}
                   disabled={!messageInput.trim() || messageSending}
-                  title="Interrupt — urgent message with high priority"
-                  className="px-3 py-2 rounded-md text-sm font-medium transition-colors bg-warning text-white hover:bg-warning/90 disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="Stop — interrupt with urgent message"
+                  className="px-3 py-2 rounded-md text-sm font-medium transition-colors bg-warning text-white hover:bg-warning/90 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  <Zap className="w-4 h-4" />
+                  <Square className="w-4 h-4" />
+                  <span className="hidden sm:inline">Stop</span>
                 </button>
+              </div>
+            ) : isPlanReview && canResume ? (
+              /* Plan review bar */
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-sm">
+                  <Eye className="w-4 h-4 text-primary shrink-0" />
+                  <span className="text-primary font-medium">
+                    Plan ready for review — check the agent output above
+                  </span>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <input
+                    value={resumePrompt}
+                    onChange={(e) => setResumePrompt(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleResume()}
+                    placeholder="Send feedback or modifications to the plan..."
+                    className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                  />
+                  <button
+                    onClick={handleResume}
+                    disabled={!resumePrompt.trim() || actionLoading}
+                    title="Send feedback to the agent"
+                    className="px-3 py-2 rounded-md text-sm font-medium transition-colors bg-bg-hover text-text hover:bg-bg-hover/80 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span className="hidden sm:inline">Send Feedback</span>
+                  </button>
+                  <button
+                    onClick={handleApprovePlan}
+                    disabled={actionLoading}
+                    title="Approve the plan and start implementation"
+                    className="px-3 py-2 rounded-md text-sm font-medium transition-colors bg-success text-white hover:bg-success/90 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    {actionLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <CheckCircle className="w-4 h-4" />
+                    )}
+                    <span className="hidden sm:inline">Approve & Execute</span>
+                  </button>
+                </div>
               </div>
             ) : (
               /* Resume bar (for non-running or resumable tasks) */
