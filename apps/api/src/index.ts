@@ -60,7 +60,7 @@ async function main() {
   const { startPrWatcherWorker } = await import("./workers/pr-watcher-worker.js");
   const { startWebhookWorker } = await import("./workers/webhook-worker.js");
   const { startScheduleWorker } = await import("./workers/schedule-worker.js");
-  const { startWorkflowRunWorker } = await import("./workers/workflow-run-worker.js");
+  const { startWorkflowWorker } = await import("./workers/workflow-worker.js");
   const { getBullMQConnectionOptions } = await import("./services/redis-config.js");
   const { logTlsStackInfo, initTlsObservability } = await import("./services/tls-observability.js");
 
@@ -122,6 +122,7 @@ async function main() {
     cleanRepeatJobs("repo-cleanup"),
     cleanRepeatJobs("ticket-sync"),
     cleanRepeatJobs("schedule-checker"),
+    cleanRepeatJobs("workflow-runs"),
   ]);
 
   // Start BullMQ workers (each re-registers its repeat job)
@@ -144,8 +145,8 @@ async function main() {
   const scheduleWorker = startScheduleWorker();
   logger.info("Schedule worker started");
 
-  const workflowRunWorker = startWorkflowRunWorker();
-  logger.info("Workflow run worker started");
+  const workflowWorker = startWorkflowWorker();
+  logger.info("Workflow worker started");
 
   // Check if metrics-server is available
   checkMetricsServer().catch(() => {});
@@ -165,7 +166,7 @@ async function main() {
     await prWatcherWorker.close();
     await webhookWorker.close();
     await scheduleWorker.close();
-    await workflowRunWorker.close();
+    await workflowWorker.close();
     await app.close();
     // Flush pending OTel spans/metrics with 5s timeout
     await shutdownTelemetry();

@@ -16,6 +16,11 @@ const mockRetryWorkflowRun = vi.fn();
 const mockCancelWorkflowRun = vi.fn();
 const mockGetWorkflowRunLogs = vi.fn();
 
+const mockQueueAdd = vi.fn().mockResolvedValue({});
+vi.mock("../workers/workflow-worker.js", () => ({
+  workflowRunQueue: { add: (...args: unknown[]) => mockQueueAdd(...args) },
+}));
+
 vi.mock("../services/workflow-service.js", () => ({
   listWorkflowsWithStats: (...args: unknown[]) => mockListWorkflowsWithStats(...args),
   createWorkflow: (...args: unknown[]) => mockCreateWorkflow(...args),

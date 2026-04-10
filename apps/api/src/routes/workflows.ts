@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import * as workflowService from "../services/workflow-service.js";
+import { workflowRunQueue } from "../workers/workflow-worker.js";
 
 const createWorkflowSchema = z.object({
   name: z.string().min(1),
@@ -104,7 +105,7 @@ export async function workflowRoutes(app: FastifyInstance) {
 
   // ── Workflow Runs ─────────────────────────────────────────────────────────
 
-  // Create a workflow run
+  // Create a workflow run (enqueues it for the workflow worker)
   app.post("/api/workflows/:id/runs", async (req, reply) => {
     const { id } = idParamsSchema.parse(req.params);
     const parsed = runWorkflowBodySchema.safeParse(req.body);
@@ -113,6 +114,13 @@ export async function workflowRoutes(app: FastifyInstance) {
     }
     try {
       const run = await workflowService.createWorkflowRun(id, parsed.data);
+
+      await workflowRunQueue.add(
+        "process-workflow-run",
+        { workflowRunId: run.id },
+        { jobId: run.id },
+      );
+
       reply.status(201).send({ run });
     } catch (err) {
       reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

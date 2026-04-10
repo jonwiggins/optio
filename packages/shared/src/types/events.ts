@@ -1,5 +1,7 @@
 import type { TaskState } from "./task.js";
 import type { InteractiveSessionState } from "./session.js";
+import type { WorkflowRunState } from "./workflow.js";
+import type { AgentLogEntry } from "./agent-events.js";
 
 export type WsEvent =
   | TaskStateChangedEvent
@@ -13,7 +15,9 @@ export type WsEvent =
   | SessionEndedEvent
   | TaskCommentEvent
   | TaskMessageEvent
-  | TaskMessageDeliveredEvent;
+  | TaskMessageDeliveredEvent
+  | WorkflowRunStateChangedEvent
+  | WorkflowRunLogEvent;
 
 export interface TaskStateChangedEvent {
   type: "task:state_changed";
@@ -110,4 +114,18 @@ export interface TaskMessageDeliveredEvent {
   taskId: string;
   messageId: string;
   timestamp: string;
+}
+
+export interface WorkflowRunStateChangedEvent {
+  type: "workflow_run:state_changed";
+  workflowRunId: string;
+  fromState: WorkflowRunState;
+  toState: WorkflowRunState;
+  timestamp: string;
+}
+
+export interface WorkflowRunLogEvent {
+  type: "workflow_run:log";
+  workflowRunId: string;
+  entry: AgentLogEntry;
 }
