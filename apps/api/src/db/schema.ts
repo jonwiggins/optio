@@ -621,22 +621,6 @@ export const workflowRuns = pgTable(
   ],
 );
 
-export const workflowPods = pgTable(
-  "workflow_pods",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    workflowId: uuid("workflow_id")
-      .notNull()
-      .references(() => workflows.id, { onDelete: "cascade" }),
-    podName: text("pod_name").notNull(),
-    state: text("state").notNull().default("creating"), // "creating" | "ready" | "busy" | "failed"
-    activeRunCount: integer("active_run_count").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [index("workflow_pods_workflow_id_idx").on(table.workflowId)],
-);
-
 // ── MCP Servers ──────────────────────────────────────────────────────────────
 
 export const mcpServers = pgTable(
