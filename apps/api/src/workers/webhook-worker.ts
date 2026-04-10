@@ -6,6 +6,10 @@ import {
   getWebhook,
   type WebhookEvent,
 } from "../services/webhook-service.js";
+import { recordWebhookDelivery } from "../telemetry/metrics.js";
+import { emitWebhookDeliveryFailureLog } from "../telemetry/logs.js";
+import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
+import { injectTraceContextIntoJob } from "../telemetry/spans.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -21,7 +25,7 @@ export async function enqueueWebhookEvent(event: WebhookEvent, data: Record<stri
   for (const webhook of matchingWebhooks) {
     await webhookQueue.add(
       "deliver",
-      { webhookId: webhook.id, event, data },
+      injectTraceContextIntoJob({ webhookId: webhook.id, event, data }),
       {
         attempts: 3,
         backoff: { type: "exponential", delay: 5000 }, // 5s, 10s, 20s
@@ -40,7 +44,7 @@ export async function enqueueWebhookEvent(event: WebhookEvent, data: Record<stri
 export function startWebhookWorker() {
   const worker = new Worker(
     "webhooks",
-    async (job) => {
+    instrumentWorkerProcessor("webhook-worker", async (job) => {
       const { webhookId, event, data } = job.data as {
         webhookId: string;
         event: WebhookEvent;
@@ -57,14 +61,17 @@ export function startWebhookWorker() {
       const delivery = await deliverWebhook(webhook, event, data, attempt);
 
       if (!delivery.success) {
+        recordWebhookDelivery(event, false);
+        emitWebhookDeliveryFailureLog(webhookId, event, delivery.statusCode ?? 0);
         throw new Error(delivery.error ?? `Delivery failed with status ${delivery.statusCode}`);
       }
 
+      recordWebhookDelivery(event, true);
       logger.info(
         { webhookId, event, statusCode: delivery.statusCode },
         "Webhook delivered successfully",
       );
-    },
+    }),
     {
       connection: getBullMQConnectionOptions(),
       concurrency: 10,

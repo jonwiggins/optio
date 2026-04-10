@@ -126,6 +126,20 @@ export async function initTelemetry(): Promise<void> {
 }
 
 /**
+ * Register observable gauge callbacks that depend on external state (DB).
+ * Must be called after database is available.
+ */
+export async function registerMetricCallbacks(callbacks: {
+  queueDepth?: (attrs: Record<string, unknown>) => number;
+  activeTasks?: () => number;
+  podCount?: (attrs: Record<string, unknown>) => number;
+}): Promise<void> {
+  if (!isOtelEnabled()) return;
+  const { initMetrics } = await import("./telemetry/metrics.js");
+  initMetrics(callbacks);
+}
+
+/**
  * Gracefully shut down the OTel SDK, flushing any pending spans/metrics.
  * Returns a promise that resolves when shutdown is complete or after 5s timeout.
  */

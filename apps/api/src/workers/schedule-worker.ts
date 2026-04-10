@@ -4,6 +4,8 @@ import * as scheduleService from "../services/schedule-service.js";
 import * as taskService from "../services/task-service.js";
 import { taskQueue } from "./task-worker.js";
 import { logger } from "../logger.js";
+import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
+import { injectTraceContextIntoJob } from "../telemetry/spans.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -24,7 +26,7 @@ export function startScheduleWorker() {
 
   const worker = new Worker(
     "schedule-checker",
-    async () => {
+    instrumentWorkerProcessor("schedule-worker", async () => {
       const dueSchedules = await scheduleService.getDueSchedules();
       if (dueSchedules.length === 0) return;
 
@@ -54,16 +56,12 @@ export function startScheduleWorker() {
           });
 
           await taskService.transitionTask(task.id, TaskState.QUEUED, "schedule_trigger");
-          await taskQueue.add(
-            "process-task",
-            { taskId: task.id },
-            {
-              jobId: task.id,
-              priority: task.priority ?? 100,
-              attempts: task.maxRetries + 1,
-              backoff: { type: "exponential", delay: 5000 },
-            },
-          );
+          await taskQueue.add("process-task", injectTraceContextIntoJob({ taskId: task.id }), {
+            jobId: task.id,
+            priority: task.priority ?? 100,
+            attempts: task.maxRetries + 1,
+            backoff: { type: "exponential", delay: 5000 },
+          });
 
           await scheduleService.recordRun(schedule.id, task.id, "created");
           await scheduleService.markScheduleRan(schedule.id, schedule.cronExpression);
@@ -82,7 +80,7 @@ export function startScheduleWorker() {
           );
         }
       }
-    },
+    }),
     { connection: connectionOpts, concurrency: 1 },
   );
 

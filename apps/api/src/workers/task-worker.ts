@@ -33,6 +33,15 @@ import { getCredentialSecret } from "../services/credential-secret-service.js";
 import { subscribeToTaskMessages } from "../services/task-message-bus.js";
 import * as messageService from "../services/task-message-service.js";
 import { logger } from "../logger.js";
+import {
+  recordTaskComplete,
+  recordTaskDuration,
+  recordTaskCost,
+  recordTaskTokens,
+} from "../telemetry/metrics.js";
+import { emitCostReportLog } from "../telemetry/logs.js";
+import { withSpan, injectTraceContextIntoJob } from "../telemetry/spans.js";
+import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -63,7 +72,7 @@ function withClaimLock<T>(fn: () => Promise<T>): Promise<T> {
 export function startTaskWorker() {
   const worker = new Worker(
     "tasks",
-    async (job) => {
+    instrumentWorkerProcessor("task-worker", async (job) => {
       const {
         taskId,
         resumeSessionId,
@@ -206,11 +215,15 @@ export function startTaskWorker() {
 
         if (!claimed) {
           const jitter = Math.floor(Math.random() * 5000);
-          await taskQueue.add("process-task", job.data, {
-            jobId: `${taskId}-delayed-${Date.now()}`,
-            priority: currentTask.priority ?? 100,
-            delay: 10000 + jitter,
-          });
+          await taskQueue.add(
+            "process-task",
+            injectTraceContextIntoJob(job.data as Record<string, unknown>),
+            {
+              jobId: `${taskId}-delayed-${Date.now()}`,
+              priority: currentTask.priority ?? 100,
+              delay: 10000 + jitter,
+            },
+          );
           return;
         }
         log.info("Provisioning");
@@ -815,6 +828,29 @@ export function startTaskWorker() {
           await db.update(tasks).set(costFields).where(eq(tasks.id, taskId));
         }
 
+        // ── Telemetry: record cost and token metrics ──────────────────
+        const taskAttrs = {
+          agent_type: task.agentType,
+          model: result.model ?? "unknown",
+          repo_url: task.repoUrl,
+        };
+        if (result.costUsd != null) {
+          recordTaskCost(result.costUsd, taskAttrs);
+          emitCostReportLog(
+            taskId,
+            result.costUsd,
+            result.inputTokens ?? 0,
+            result.outputTokens ?? 0,
+            result.model ?? "unknown",
+          );
+        }
+        if (result.inputTokens != null) {
+          recordTaskTokens(result.inputTokens, { ...taskAttrs, direction: "input" });
+        }
+        if (result.outputTokens != null) {
+          recordTaskTokens(result.outputTokens, { ...taskAttrs, direction: "output" });
+        }
+
         // Pick the best PR URL.  Priority:
         //   1. capturedPrUrl — detected during streaming with repo validation
         //      and heuristics (branch matching, JSON-array filtering).
@@ -946,6 +982,26 @@ export function startTaskWorker() {
               .catch((err) => log.warn({ err }, "Failed to cascade failure to dependents"));
           }
         }
+
+        // ── Telemetry: record task completion metrics ─────────────────
+        if (completedTask) {
+          const terminalState = completedTask.state;
+          recordTaskComplete({
+            state: terminalState,
+            agent_type: task.agentType,
+            model: result.model ?? "unknown",
+            repo_url: task.repoUrl,
+          });
+          // Duration from task creation to terminal state
+          const startedAt = task.startedAt ?? task.createdAt;
+          if (startedAt) {
+            const durationS = (Date.now() - new Date(startedAt).getTime()) / 1000;
+            recordTaskDuration(durationS, {
+              terminal_state: terminalState,
+              agent_type: task.agentType,
+            });
+          }
+        }
       } catch (err) {
         // State race errors mean another worker claimed the task — not a real failure
         if (err instanceof taskService.StateRaceError) {
@@ -1031,7 +1087,7 @@ export function startTaskWorker() {
           await repoPool.releaseRepoPodTask(repoPodId).catch(() => {});
         }
       }
-    },
+    }),
     {
       connection: connectionOpts,
       concurrency: parseInt(process.env.OPTIO_MAX_CONCURRENT ?? "5", 10),

@@ -16,6 +16,9 @@ import * as taskService from "../services/task-service.js";
 import { cleanupExpiredSessions } from "../services/session-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { logger } from "../logger.js";
+import { recordPodHealthEvent } from "../telemetry/metrics.js";
+import { emitPodHealthEventLog } from "../telemetry/logs.js";
+import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -38,6 +41,10 @@ async function recordHealthEvent(
     message,
   });
   logger.info({ repoPodId, eventType, message }, "Pod health event");
+
+  // Telemetry: record pod health event metric and log
+  recordPodHealthEvent(eventType, repoUrl);
+  emitPodHealthEventLog(eventType, podName ?? "unknown", repoUrl, message);
 }
 
 export function startRepoCleanupWorker() {
@@ -64,7 +71,7 @@ export function startRepoCleanupWorker() {
 
   const worker = new Worker(
     "repo-cleanup",
-    async () => {
+    instrumentWorkerProcessor("repo-cleanup", async () => {
       const rt = getRuntime();
       const pods = await db.select().from(repoPods);
 
@@ -485,7 +492,7 @@ export function startRepoCleanupWorker() {
       } catch (err) {
         logger.warn({ err }, "Failed to clean up expired sessions");
       }
-    },
+    }),
     {
       connection: connectionOpts,
       concurrency: 1,

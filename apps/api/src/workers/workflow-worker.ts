@@ -18,6 +18,7 @@ import * as workflowPool from "../services/workflow-pool-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
 import { logger } from "../logger.js";
+import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -191,7 +192,7 @@ function withClaimLock<T>(fn: () => Promise<T>): Promise<T> {
 export function startWorkflowWorker() {
   const worker = new Worker(
     "workflow-runs",
-    async (job) => {
+    instrumentWorkerProcessor("workflow-worker", async (job) => {
       const { workflowRunId, provisioningRetryCount = 0 } = job.data as {
         workflowRunId: string;
         provisioningRetryCount?: number;
@@ -613,7 +614,7 @@ export function startWorkflowWorker() {
           await workflowPool.releaseRun(workflowPodId).catch(() => {});
         }
       }
-    },
+    }),
     {
       connection: connectionOpts,
       concurrency: parseInt(process.env.OPTIO_MAX_WORKFLOW_CONCURRENT ?? "5", 10),

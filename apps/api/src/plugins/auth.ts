@@ -6,6 +6,7 @@ import { isAuthDisabled } from "../services/oauth/index.js";
 import { getUserRole, ensureUserHasWorkspace } from "../services/workspace-service.js";
 import { listSecrets } from "../services/secret-service.js";
 import type { WorkspaceRole } from "@optio/shared";
+import { emitAuthFailureLog } from "../telemetry/logs.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -158,6 +159,7 @@ async function authPlugin(app: FastifyInstance) {
       parseCookie(req.headers.cookie, SESSION_COOKIE_NAME);
 
     if (!token) {
+      emitAuthFailureLog("no_credentials");
       return reply.status(401).send({ error: "Authentication required" });
     }
 
@@ -166,6 +168,7 @@ async function authPlugin(app: FastifyInstance) {
       ? await validateApiKey(token)
       : await validateSession(token);
     if (!user) {
+      emitAuthFailureLog("invalid_or_expired_session");
       return reply.status(401).send({ error: "Invalid or expired session" });
     }
 

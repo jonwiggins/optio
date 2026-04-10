@@ -12,6 +12,8 @@ import { updateSessionPr } from "../services/interactive-session-service.js";
 import { taskQueue } from "./task-worker.js";
 import { logger } from "../logger.js";
 import { recordAuthEvent } from "../services/auth-failure-detector.js";
+import { recordPrWatchCycleDuration } from "../telemetry/metrics.js";
+import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -152,7 +154,8 @@ export function startPrWatcherWorker() {
 
   const worker = new Worker(
     "pr-watcher",
-    async () => {
+    instrumentWorkerProcessor("pr-watcher", async () => {
+      const cycleStart = Date.now();
       // Per-cycle cache to avoid redundant token lookups / secret decryption
       const platformCache = new Map<string, { platform: GitPlatform; ri: RepoIdentifier }>();
       async function getCachedPlatform(
@@ -578,7 +581,10 @@ export function startPrWatcherWorker() {
       } catch (err) {
         logger.warn({ err }, "Failed to run review draft staleness check");
       }
-    },
+
+      // Record cycle duration metric
+      recordPrWatchCycleDuration((Date.now() - cycleStart) / 1000);
+    }),
     { connection: connectionOpts, concurrency: 1 },
   );
 

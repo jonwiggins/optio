@@ -48,6 +48,7 @@ import { sessionChatWs } from "./ws/session-chat.js";
 import { optioChatWs } from "./ws/optio-chat.js";
 import { workflowRunLogStreamWs } from "./ws/workflow-run-log-stream.js";
 import authPlugin from "./plugins/auth.js";
+import { httpMetricsPlugin } from "./plugins/http-metrics.js";
 
 const loggerConfig =
   process.env.NODE_ENV !== "production"
@@ -95,6 +96,9 @@ export async function buildServer() {
 
   // Auth plugin (validates session cookie on protected routes)
   await app.register(authPlugin);
+
+  // HTTP metrics plugin (request count, latency by route/method/status)
+  await app.register(httpMetricsPlugin);
 
   // REST routes
   await app.register(healthRoutes);
