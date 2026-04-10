@@ -1,7 +1,13 @@
 import { eq, desc, sql, and, lte } from "drizzle-orm";
 import { CronExpressionParser } from "cron-parser";
 import { db } from "../db/client.js";
-import { workflows, workflowRuns, workflowTriggers, workflowRunLogs, taskLogs } from "../db/schema.js";
+import {
+  workflows,
+  workflowRuns,
+  workflowTriggers,
+  workflowRunLogs,
+  taskLogs,
+} from "../db/schema.js";
 import { WorkflowRunState, canTransitionWorkflowRun, transitionWorkflowRun } from "@optio/shared";
 import { publishWorkflowRunEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
@@ -325,7 +331,10 @@ export async function cancelWorkflowRun(id: string) {
 
 // ── Workflow Run Logs ────────────────────────────────────────────────────────
 
-export async function getWorkflowRunLogs(workflowRunId: string, opts?: { logType?: string; limit?: number }) {
+export async function getWorkflowRunLogs(
+  workflowRunId: string,
+  opts?: { logType?: string; limit?: number },
+) {
   const conditions = [eq(workflowRunLogs.workflowRunId, workflowRunId)];
   if (opts?.logType) {
     conditions.push(eq(workflowRunLogs.logType, opts.logType));
