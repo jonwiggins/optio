@@ -354,3 +354,21 @@ export async function listWorkflowTriggers(workflowId: string) {
     .where(eq(workflowTriggers.workflowId, workflowId))
     .orderBy(desc(workflowTriggers.createdAt));
 }
+
+/**
+ * Look up an enabled webhook trigger by its `config.webhookPath` value.
+ * Returns null if no matching trigger exists.
+ */
+export async function getWebhookTriggerByPath(webhookPath: string) {
+  const allWebhookTriggers = await db
+    .select()
+    .from(workflowTriggers)
+    .where(eq(workflowTriggers.type, "webhook"));
+
+  const trigger = allWebhookTriggers.find((t) => {
+    const config = t.config as Record<string, unknown> | null;
+    return config?.webhookPath === webhookPath;
+  });
+
+  return trigger ?? null;
+}
