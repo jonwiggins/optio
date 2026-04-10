@@ -38,6 +38,12 @@ vi.mock("../db/schema.js", () => ({
     logType: "task_logs.log_type",
     timestamp: "task_logs.timestamp",
   },
+  workflowRunLogs: {
+    id: "workflow_run_logs.id",
+    workflowRunId: "workflow_run_logs.workflow_run_id",
+    logType: "workflow_run_logs.log_type",
+    timestamp: "workflow_run_logs.timestamp",
+  },
 }));
 
 vi.mock("../logger.js", () => ({
@@ -46,6 +52,13 @@ vi.mock("../logger.js", () => ({
     warn: vi.fn(),
     error: vi.fn(),
   },
+}));
+
+const { mockPublishWorkflowRunEvent } = vi.hoisted(() => ({
+  mockPublishWorkflowRunEvent: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("./event-bus.js", () => ({
+  publishWorkflowRunEvent: mockPublishWorkflowRunEvent,
 }));
 
 import { db } from "../db/client.js";
@@ -70,6 +83,9 @@ import {
   deleteWorkflowTrigger,
   getDueScheduleTriggers,
   markTriggerFired,
+  insertWorkflowRunLog,
+  transitionWorkflowRunState,
+  appendWorkflowRunLog,
 } from "./workflow-service.js";
 
 describe("workflow-service", () => {
@@ -698,7 +714,6 @@ describe("workflow-service", () => {
 
   describe("createWorkflowRun", () => {
     it("creates a run for an enabled workflow", async () => {
-      // First call: getWorkflow
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockResolvedValue([{ id: "wf-1", enabled: true }]),
@@ -853,40 +868,188 @@ describe("workflow-service", () => {
 
   describe("getWorkflowRunLogs", () => {
     it("returns logs for a workflow run", async () => {
-      const mockLogs = [
-        { id: "l-1", taskId: "t-1", content: "Building..." },
-        { id: "l-2", taskId: "t-2", content: "Testing..." },
+      const logs = [
+        { id: "l-1", content: "Hello", stream: "stdout" },
+        { id: "l-2", content: "Error!", stream: "stderr" },
       ];
+      const mockLimit = vi.fn().mockResolvedValue(logs);
+      const mock$dynamic = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockOrderBy = vi.fn().mockReturnValue({ $dynamic: mock$dynamic });
+      const mockWhere = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
+      const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
+      (db.select as any) = vi.fn().mockReturnValue({ from: mockFrom });
 
-      let selectCallCount = 0;
-      (db.select as any) = vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            selectCallCount++;
-            if (selectCallCount === 1) {
-              // getWorkflowRun
-              return Promise.resolve([{ id: "wr-1", state: "running" }]);
-            }
-            // getWorkflowRunLogs query
-            return {
-              orderBy: vi.fn().mockResolvedValue(mockLogs),
-            };
-          }),
-        }),
-      }));
-
-      const result = await getWorkflowRunLogs("wr-1", {});
-      expect(result).toEqual(mockLogs);
+      const result = await getWorkflowRunLogs("wr-1", { limit: 50 });
+      expect(result).toEqual(logs);
+      expect(mockLimit).toHaveBeenCalledWith(50);
     });
 
-    it("throws when run is not found", async () => {
+    it("returns all logs when no limit specified", async () => {
+      const logs = [{ id: "l-1", content: "Hello" }];
+      const mock$dynamic = vi.fn().mockResolvedValue(logs);
+      const mockOrderBy = vi.fn().mockReturnValue({ $dynamic: mock$dynamic });
+      const mockWhere = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
+      const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
+      (db.select as any) = vi.fn().mockReturnValue({ from: mockFrom });
+
+      const result = await getWorkflowRunLogs("wr-1");
+      expect(result).toEqual(logs);
+    });
+  });
+
+  describe("insertWorkflowRunLog", () => {
+    it("inserts a log entry and returns it", async () => {
+      const log = {
+        id: "l-1",
+        workflowRunId: "wr-1",
+        stream: "stdout",
+        content: "Hello world",
+        logType: "text",
+        metadata: null,
+        timestamp: new Date(),
+      };
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([log]),
+        }),
+      });
+
+      const result = await insertWorkflowRunLog({
+        workflowRunId: "wr-1",
+        content: "Hello world",
+        logType: "text",
+      });
+      expect(result).toEqual(log);
+    });
+
+    it("defaults stream to stdout", async () => {
+      let capturedValues: any;
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockImplementation((vals: any) => {
+          capturedValues = vals;
+          return { returning: vi.fn().mockResolvedValue([{ id: "l-1", ...vals }]) };
+        }),
+      });
+
+      await insertWorkflowRunLog({
+        workflowRunId: "wr-1",
+        content: "test",
+      });
+      expect(capturedValues.stream).toBe("stdout");
+    });
+  });
+
+  describe("transitionWorkflowRunState", () => {
+    it("transitions state and publishes event", async () => {
+      const run = { id: "wr-1", workflowId: "w-1", state: "queued" };
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([run]),
+        }),
+      });
+      const mockSet = vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue(undefined),
+      });
+      (db.update as any) = vi.fn().mockReturnValue({ set: mockSet });
+
+      await transitionWorkflowRunState("wr-1", "running" as any);
+
+      expect(db.update).toHaveBeenCalled();
+      expect(mockPublishWorkflowRunEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "workflow_run:state_changed",
+          workflowRunId: "wr-1",
+          workflowId: "w-1",
+          fromState: "queued",
+          toState: "running",
+        }),
+      );
+    });
+
+    it("throws when workflow run not found", async () => {
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockResolvedValue([]),
         }),
       });
 
-      await expect(getWorkflowRunLogs("nonexistent", {})).rejects.toThrow("Workflow run not found");
+      await expect(transitionWorkflowRunState("nonexistent", "running" as any)).rejects.toThrow(
+        "Workflow run nonexistent not found",
+      );
+    });
+
+    it("throws on invalid state transition", async () => {
+      const run = { id: "wr-1", workflowId: "w-1", state: "completed" };
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([run]),
+        }),
+      });
+
+      await expect(transitionWorkflowRunState("wr-1", "running" as any)).rejects.toThrow(
+        "Invalid workflow run transition",
+      );
+    });
+
+    it("includes extras in the published event", async () => {
+      const run = { id: "wr-1", workflowId: "w-1", state: "running" };
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([run]),
+        }),
+      });
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(undefined),
+        }),
+      });
+
+      await transitionWorkflowRunState("wr-1", "completed" as any, {
+        costUsd: "1.50",
+        modelUsed: "claude-sonnet",
+      });
+
+      expect(mockPublishWorkflowRunEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          costUsd: "1.50",
+          modelUsed: "claude-sonnet",
+        }),
+      );
+    });
+  });
+
+  describe("appendWorkflowRunLog", () => {
+    it("inserts log and publishes event", async () => {
+      const log = {
+        id: "l-1",
+        workflowRunId: "wr-1",
+        stream: "stdout",
+        content: "Running tests...",
+        logType: "text",
+        metadata: null,
+        timestamp: new Date("2026-01-01"),
+      };
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([log]),
+        }),
+      });
+
+      const result = await appendWorkflowRunLog({
+        workflowRunId: "wr-1",
+        content: "Running tests...",
+        logType: "text",
+      });
+
+      expect(result).toEqual(log);
+      expect(mockPublishWorkflowRunEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "workflow_run:log",
+          workflowRunId: "wr-1",
+          stream: "stdout",
+          content: "Running tests...",
+        }),
+      );
     });
   });
 

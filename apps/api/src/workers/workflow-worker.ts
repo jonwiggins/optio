@@ -140,6 +140,7 @@ function buildInitialStreamMessage(prompt: string): string {
 
 async function transitionRun(
   runId: string,
+  workflowId: string,
   currentState: WorkflowRunState,
   newState: WorkflowRunState,
   fields?: Record<string, unknown>,
@@ -164,6 +165,7 @@ async function transitionRun(
   await publishEvent({
     type: "workflow_run:state_changed",
     workflowRunId: runId,
+    workflowId,
     fromState: currentState,
     toState: newState,
     timestamp: new Date().toISOString(),
@@ -212,9 +214,15 @@ export function startWorkflowWorker() {
         }
         if (!workflow.enabled) {
           log.info("Workflow is disabled, failing run");
-          await transitionRun(workflowRunId, WorkflowRunState.QUEUED, WorkflowRunState.FAILED, {
-            errorMessage: "Workflow is disabled",
-          });
+          await transitionRun(
+            workflowRunId,
+            run.workflowId,
+            WorkflowRunState.QUEUED,
+            WorkflowRunState.FAILED,
+            {
+              errorMessage: "Workflow is disabled",
+            },
+          );
           return;
         }
 
@@ -247,6 +255,7 @@ export function startWorkflowWorker() {
           // Claim: transition to running
           const transitioned = await transitionRun(
             workflowRunId,
+            workflow.id,
             WorkflowRunState.QUEUED,
             WorkflowRunState.RUNNING,
             { startedAt: new Date() },
@@ -437,7 +446,11 @@ export function startWorkflowWorker() {
               await publishEvent({
                 type: "workflow_run:log",
                 workflowRunId,
-                entry,
+                stream: "stdout",
+                content: entry.content,
+                timestamp: entry.timestamp,
+                logType: entry.type,
+                metadata: entry.metadata,
               });
             }
           }
@@ -450,7 +463,11 @@ export function startWorkflowWorker() {
             await publishEvent({
               type: "workflow_run:log",
               workflowRunId,
-              entry,
+              stream: "stdout",
+              content: entry.content,
+              timestamp: entry.timestamp,
+              logType: entry.type,
+              metadata: entry.metadata,
             });
           }
         }
@@ -469,18 +486,30 @@ export function startWorkflowWorker() {
         if (result.model) costFields.modelUsed = result.model;
 
         if (result.success) {
-          await transitionRun(workflowRunId, WorkflowRunState.RUNNING, WorkflowRunState.COMPLETED, {
-            ...costFields,
-            output: { summary: result.summary },
-            finishedAt: new Date(),
-          });
+          await transitionRun(
+            workflowRunId,
+            workflow.id,
+            WorkflowRunState.RUNNING,
+            WorkflowRunState.COMPLETED,
+            {
+              ...costFields,
+              output: { summary: result.summary },
+              finishedAt: new Date(),
+            },
+          );
           log.info("Workflow run completed");
         } else {
-          await transitionRun(workflowRunId, WorkflowRunState.RUNNING, WorkflowRunState.FAILED, {
-            ...costFields,
-            errorMessage: result.error ?? "Agent execution failed",
-            finishedAt: new Date(),
-          });
+          await transitionRun(
+            workflowRunId,
+            workflow.id,
+            WorkflowRunState.RUNNING,
+            WorkflowRunState.FAILED,
+            {
+              ...costFields,
+              errorMessage: result.error ?? "Agent execution failed",
+              finishedAt: new Date(),
+            },
+          );
           log.warn({ error: result.error }, "Workflow run failed");
 
           // ── Retry with exponential backoff ────────────────────────
@@ -491,10 +520,16 @@ export function startWorkflowWorker() {
               "Retrying workflow run",
             );
             // Transition back to queued
-            await transitionRun(workflowRunId, WorkflowRunState.FAILED, WorkflowRunState.QUEUED, {
-              retryCount: currentRetry + 1,
-              errorMessage: null,
-            });
+            await transitionRun(
+              workflowRunId,
+              workflow.id,
+              WorkflowRunState.FAILED,
+              WorkflowRunState.QUEUED,
+              {
+                retryCount: currentRetry + 1,
+                errorMessage: null,
+              },
+            );
             // Exponential backoff: 5s, 10s, 20s, 40s, ...
             const backoffDelay = 5000 * Math.pow(2, currentRetry);
             const jitter = Math.floor(Math.random() * 3000);
@@ -523,11 +558,18 @@ export function startWorkflowWorker() {
                   { provisioningRetryCount: provisioningRetryCount + 1 },
                   "Provisioning error, re-queuing",
                 );
-                await transitionRun(workflowRunId, fromState, WorkflowRunState.FAILED, {
-                  errorMessage: String(err),
-                });
                 await transitionRun(
                   workflowRunId,
+                  currentRun.workflowId,
+                  fromState,
+                  WorkflowRunState.FAILED,
+                  {
+                    errorMessage: String(err),
+                  },
+                );
+                await transitionRun(
+                  workflowRunId,
+                  currentRun.workflowId,
                   WorkflowRunState.FAILED,
                   WorkflowRunState.QUEUED,
                 );
@@ -549,10 +591,16 @@ export function startWorkflowWorker() {
 
             // Terminal failure
             if (canTransitionWorkflowRun(fromState, WorkflowRunState.FAILED)) {
-              await transitionRun(workflowRunId, fromState, WorkflowRunState.FAILED, {
-                errorMessage: String(err),
-                finishedAt: new Date(),
-              });
+              await transitionRun(
+                workflowRunId,
+                currentRun.workflowId,
+                fromState,
+                WorkflowRunState.FAILED,
+                {
+                  errorMessage: String(err),
+                  finishedAt: new Date(),
+                },
+              );
             }
           }
         } catch {

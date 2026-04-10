@@ -630,6 +630,24 @@ export const workflowRuns = pgTable(
   ],
 );
 
+export const workflowRunLogs = pgTable(
+  "workflow_run_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowRunId: uuid("workflow_run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    stream: text("stream").notNull().default("stdout"),
+    content: text("content").notNull(),
+    logType: text("log_type"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("workflow_run_logs_run_id_timestamp_idx").on(table.workflowRunId, table.timestamp),
+  ],
+);
+
 // ── MCP Servers ──────────────────────────────────────────────────────────────
 
 export const mcpServers = pgTable(

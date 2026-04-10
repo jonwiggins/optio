@@ -407,6 +407,7 @@ describe("GET /api/workflow-runs/:id/logs", () => {
       { id: "log-1", taskId: "t-1", content: "Building..." },
       { id: "log-2", taskId: "t-2", content: "Testing..." },
     ];
+    mockGetWorkflowRun.mockResolvedValue({ id: "run-1", state: "running" });
     mockGetWorkflowRunLogs.mockResolvedValue(logs);
 
     const res = await app.inject({ method: "GET", url: "/api/workflow-runs/run-1/logs" });
@@ -417,6 +418,7 @@ describe("GET /api/workflow-runs/:id/logs", () => {
   });
 
   it("passes query params to service", async () => {
+    mockGetWorkflowRun.mockResolvedValue({ id: "run-1", state: "running" });
     mockGetWorkflowRunLogs.mockResolvedValue([]);
 
     const res = await app.inject({
@@ -432,7 +434,7 @@ describe("GET /api/workflow-runs/:id/logs", () => {
   });
 
   it("returns 404 when run not found", async () => {
-    mockGetWorkflowRunLogs.mockRejectedValue(new Error("Workflow run not found"));
+    mockGetWorkflowRun.mockResolvedValue(null);
 
     const res = await app.inject({ method: "GET", url: "/api/workflow-runs/nonexistent/logs" });
 

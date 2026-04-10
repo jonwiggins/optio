@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WsClient, getWsBaseUrl } from "./ws-client";
+import { WsClient, getWsBaseUrl, createWorkflowRunLogClient } from "./ws-client";
 
 class MockWebSocket {
   static OPEN = 1;
@@ -274,5 +274,39 @@ describe("getWsBaseUrl", () => {
     // @ts-expect-error -- simulating SSR by removing window
     delete globalThis.window;
     expect(getWsBaseUrl()).toBe("ws://localhost:4000");
+  });
+});
+
+describe("createWorkflowRunLogClient", () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubEnv("NEXT_PUBLIC_WS_URL", "ws://localhost:4000");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("creates a WsClient with the correct URL", () => {
+    const client = createWorkflowRunLogClient("wr-123");
+    client.connect();
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0].url).toBe("ws://localhost:4000/ws/workflow-runs/wr-123/logs");
+  });
+
+  it("passes token provider to the client", async () => {
+    vi.useFakeTimers();
+    const tokenProvider = vi.fn().mockResolvedValue("my-token");
+    const client = createWorkflowRunLogClient("wr-456", tokenProvider);
+    client.connect();
+
+    await vi.runAllTimersAsync();
+
+    expect(tokenProvider).toHaveBeenCalled();
+    const ws = MockWebSocket.instances[0];
+    expect(ws.protocols).toEqual(["optio-ws-v1", "optio-auth-my-token"]);
+    vi.useRealTimers();
   });
 });
