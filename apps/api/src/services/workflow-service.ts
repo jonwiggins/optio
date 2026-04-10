@@ -224,12 +224,13 @@ export async function getWorkflowWithStats(id: string) {
 
 // ── Workflow Runs ────────────────────────────────────────────────────────────
 
-export async function listWorkflowRuns(workflowId: string) {
+export async function listWorkflowRuns(workflowId: string, limit = 50) {
   return db
     .select()
     .from(workflowRuns)
     .where(eq(workflowRuns.workflowId, workflowId))
-    .orderBy(desc(workflowRuns.createdAt));
+    .orderBy(desc(workflowRuns.createdAt))
+    .limit(limit);
 }
 
 export async function getWorkflowRun(id: string) {

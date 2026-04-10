@@ -6,7 +6,8 @@ import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import { Skeleton } from "@/components/skeleton";
 import { toast } from "sonner";
-import { Workflow, Clock, Webhook, Hand } from "lucide-react";
+import { Workflow, Clock, Webhook, Hand, Play } from "lucide-react";
+import { RunWorkflowDialog } from "@/components/run-workflow-dialog";
 
 interface WorkflowSummary {
   id: string;
@@ -17,6 +18,7 @@ interface WorkflowSummary {
   enabled: boolean;
   maxConcurrent: number;
   maxRetries: number;
+  paramsSchema: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
   runCount: number;
@@ -81,6 +83,7 @@ export default function WorkflowsPage() {
   usePageTitle("Workflows");
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [runTarget, setRunTarget] = useState<WorkflowSummary | null>(null);
 
   const loadWorkflows = useCallback(() => {
     api
@@ -114,7 +117,7 @@ export default function WorkflowsPage() {
       ) : (
         <div className="rounded-xl border border-border/50 bg-bg-card overflow-hidden">
           {/* Table header */}
-          <div className="grid grid-cols-[2fr_80px_120px_60px_100px_80px_70px] gap-2 px-4 py-2.5 border-b border-border/50 text-xs font-medium text-text-muted uppercase tracking-wider">
+          <div className="grid grid-cols-[2fr_80px_120px_60px_100px_80px_70px_40px] gap-2 px-4 py-2.5 border-b border-border/50 text-xs font-medium text-text-muted uppercase tracking-wider">
             <span>Name</span>
             <span>Status</span>
             <span>Runtime</span>
@@ -122,6 +125,7 @@ export default function WorkflowsPage() {
             <span>Last Run</span>
             <span className="text-right">Cost</span>
             <span>Triggers</span>
+            <span></span>
           </div>
 
           {/* Table rows */}
@@ -129,7 +133,7 @@ export default function WorkflowsPage() {
             <Link
               key={wf.id}
               href={`/workflows/${wf.id}`}
-              className="grid grid-cols-[2fr_80px_120px_60px_100px_80px_70px] gap-2 items-center px-4 py-3 border-b border-border/30 last:border-b-0 hover:bg-bg-hover/50 transition-colors"
+              className="grid grid-cols-[2fr_80px_120px_60px_100px_80px_70px_40px] gap-2 items-center px-4 py-3 border-b border-border/30 last:border-b-0 hover:bg-bg-hover/50 transition-colors"
             >
               {/* Name */}
               <div className="min-w-0">
@@ -188,9 +192,34 @@ export default function WorkflowsPage() {
                   <span className="text-xs text-text-muted/50">&mdash;</span>
                 )}
               </div>
+
+              {/* Run action */}
+              <div>
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setRunTarget(wf);
+                  }}
+                  disabled={!wf.enabled}
+                  className="p-1.5 rounded-md hover:bg-primary/10 text-text-muted hover:text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  title={wf.enabled ? "Run workflow" : "Workflow is disabled"}
+                >
+                  <Play className="w-4 h-4" />
+                </button>
+              </div>
             </Link>
           ))}
         </div>
+      )}
+
+      {runTarget && (
+        <RunWorkflowDialog
+          workflowId={runTarget.id}
+          workflowName={runTarget.name}
+          paramsSchema={runTarget.paramsSchema}
+          onClose={() => setRunTarget(null)}
+          onRun={loadWorkflows}
+        />
       )}
     </div>
   );

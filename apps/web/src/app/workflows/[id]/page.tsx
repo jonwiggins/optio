@@ -27,6 +27,7 @@ import {
   CircleDot,
   Timer,
 } from "lucide-react";
+import { RunWorkflowDialog } from "@/components/run-workflow-dialog";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ interface WorkflowDetail {
   name: string;
   description: string | null;
   promptTemplate: string;
+  paramsSchema: Record<string, unknown> | null;
   agentRuntime: string;
   model: string | null;
   maxTurns: number | null;
@@ -167,6 +169,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
   const [actionLoading, setActionLoading] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
   const [activeTab, setActiveTab] = useState<"runs" | "triggers" | "config">("runs");
+  const [showRunDialog, setShowRunDialog] = useState(false);
 
   usePageTitle(workflow?.name ?? "Workflow");
 
@@ -292,6 +295,14 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowRunDialog(true)}
+            disabled={!workflow.enabled || actionLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-primary text-white hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={workflow.enabled ? "Run this workflow" : "Workflow is disabled"}
+          >
+            <Play className="w-4 h-4" /> Run
+          </button>
+          <button
             onClick={() => refresh()}
             disabled={actionLoading}
             className="p-2 rounded-md hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
@@ -400,6 +411,17 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
       {activeTab === "triggers" && <TriggersList triggers={triggers} />}
       {activeTab === "config" && (
         <ConfigPanel workflow={workflow} showPrompt={showPrompt} setShowPrompt={setShowPrompt} />
+      )}
+
+      {/* Run dialog */}
+      {showRunDialog && (
+        <RunWorkflowDialog
+          workflowId={workflow.id}
+          workflowName={workflow.name}
+          paramsSchema={workflow.paramsSchema}
+          onClose={() => setShowRunDialog(false)}
+          onRun={refresh}
+        />
       )}
     </div>
   );
@@ -599,6 +621,15 @@ function ConfigPanel({
           </div>
         </div>
       </div>
+
+      {workflow.paramsSchema && (
+        <div className="rounded-lg border border-border/50 bg-bg-card p-4">
+          <h3 className="text-sm font-medium mb-2">Parameter Schema</h3>
+          <pre className="text-xs text-text-muted bg-bg rounded-md p-3 overflow-x-auto whitespace-pre-wrap border border-border/30 max-h-40">
+            {JSON.stringify(workflow.paramsSchema, null, 2)}
+          </pre>
+        </div>
+      )}
 
       <div className="rounded-lg border border-border/50 bg-bg-card p-4">
         <button

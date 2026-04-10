@@ -1159,10 +1159,24 @@ export const api = {
 
   deleteWorkflow: (id: string) => request<void>(`/api/workflows/${id}`, { method: "DELETE" }),
 
+  runWorkflow: (workflowId: string, params?: Record<string, unknown> | null) =>
+    request<{ run: any }>(`/api/workflows/${workflowId}/runs`, {
+      method: "POST",
+      body: JSON.stringify({ params: params ?? null }),
+    }),
+
   getWorkflowRuns: (workflowId: string) =>
     request<{ runs: any[] }>(`/api/workflows/${workflowId}/runs`),
 
+  listWorkflowRuns: (workflowId: string, limit?: number) => {
+    const qs = limit ? `?limit=${limit}` : "";
+    return request<{ runs: any[] }>(`/api/workflows/${workflowId}/runs${qs}`);
+  },
+
   getWorkflowTriggers: (workflowId: string) =>
+    request<{ triggers: any[] }>(`/api/workflows/${workflowId}/triggers`),
+
+  listWorkflowTriggers: (workflowId: string) =>
     request<{ triggers: any[] }>(`/api/workflows/${workflowId}/triggers`),
 
   getWorkflowRun: (id: string) => request<{ run: any }>(`/api/workflow-runs/${id}`),
