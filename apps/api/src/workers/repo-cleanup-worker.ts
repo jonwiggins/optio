@@ -9,6 +9,7 @@ import {
   deleteNetworkPolicy,
   killOrphanedAgentInPod,
 } from "../services/repo-pool-service.js";
+import { cleanupIdleWorkflowPods } from "../services/workflow-pool-service.js";
 import { getRuntime } from "../services/container-service.js";
 import { TaskState, DEFAULT_STALL_THRESHOLD_MS } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
@@ -463,6 +464,16 @@ export function startRepoCleanupWorker() {
       const cleaned = await cleanupIdleRepoPods();
       if (cleaned > 0) {
         logger.info({ cleaned }, "Cleaned up idle repo pods");
+      }
+
+      // Clean up idle workflow pods
+      try {
+        const workflowCleaned = await cleanupIdleWorkflowPods();
+        if (workflowCleaned > 0) {
+          logger.info({ workflowCleaned }, "Cleaned up idle workflow pods");
+        }
+      } catch (err) {
+        logger.warn({ err }, "Failed to clean up idle workflow pods");
       }
 
       // Clean up expired auth sessions

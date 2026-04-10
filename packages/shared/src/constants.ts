@@ -31,6 +31,29 @@ const K8S_NAME_MAX = 63;
  * for uniqueness. Names are valid K8s resource names (lowercase, alphanumeric +
  * hyphens, max 63 chars). Long owner/repo names are truncated gracefully.
  */
+/**
+ * Generate a human-readable pod name for a workflow run.
+ *
+ * Format: `optio-wf-<runId-prefix>-<hash>` where hash is a 4-char hex suffix
+ * for uniqueness. Names are valid K8s resource names.
+ */
+export function generateWorkflowPodName(workflowRunId: string): string {
+  const prefix = "optio-wf-";
+  const suffixLen = 5; // 4-char hash + 1 hyphen
+  const maxBodyLen = K8S_NAME_MAX - prefix.length - suffixLen;
+
+  // Use first portion of the run ID (already a UUID), sanitized
+  const sanitized = workflowRunId
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, maxBodyLen);
+
+  const hash = Math.random().toString(16).slice(2, 6);
+  return `${prefix}${sanitized}-${hash}`;
+}
+
 export function generateRepoPodName(repoUrl: string): string {
   // Extract owner/repo from URL patterns like:
   //   https://github.com/owner/repo.git

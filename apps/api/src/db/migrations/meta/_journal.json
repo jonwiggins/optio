@@ -365,6 +365,13 @@
       "when": 1775791846000,
       "tag": "1775791846_replace_workflow_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1775792368000,
+      "tag": "1775792368_workflow_pods",
+      "breakpoints": true
     }
   ]
 }
