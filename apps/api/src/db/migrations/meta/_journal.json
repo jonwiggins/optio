@@ -365,6 +365,34 @@
       "when": 1775791846000,
       "tag": "1775791846_replace_workflow_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1775792368000,
+      "tag": "1775792368_workflow_pods",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1775792464000,
+      "tag": "1775792464_workflow_run_logs",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1775794444000,
+      "tag": "1775794444_workflow_trigger_schedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1775793000000,
+      "tag": "1775793000_workflow_run_logs",
+      "breakpoints": true
     }
   ]
 }

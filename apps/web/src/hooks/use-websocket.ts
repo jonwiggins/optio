@@ -90,6 +90,11 @@ export function useGlobalWebSocket() {
       });
     });
 
+    client.on("workflow_run:state_changed", (event) => {
+      // Dispatch a DOM event so workflow pages can react to state changes
+      window.dispatchEvent(new CustomEvent("optio:workflow-run-state-changed", { detail: event }));
+    });
+
     return () => {
       client.disconnect();
     };

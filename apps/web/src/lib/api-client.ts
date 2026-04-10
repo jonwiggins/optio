@@ -1125,4 +1125,99 @@ export const api = {
     request<{ ok: boolean; recycled: number }>(`/api/repos/${repoId}/pods/recycle`, {
       method: "POST",
     }),
+
+  // Workflows
+  listWorkflows: () => request<{ workflows: any[] }>("/api/workflows"),
+
+  getWorkflow: (id: string) => request<{ workflow: any }>(`/api/workflows/${id}`),
+
+  createWorkflow: (data: {
+    name: string;
+    description?: string;
+    promptTemplate: string;
+    agentRuntime?: string;
+    model?: string;
+    maxTurns?: number;
+    budgetUsd?: string;
+    maxConcurrent?: number;
+    maxRetries?: number;
+    warmPoolSize?: number;
+    enabled?: boolean;
+    environmentSpec?: Record<string, unknown>;
+    paramsSchema?: Record<string, unknown>;
+  }) =>
+    request<{ workflow: any }>("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateWorkflow: (id: string, data: Record<string, unknown>) =>
+    request<{ workflow: any }>(`/api/workflows/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteWorkflow: (id: string) => request<void>(`/api/workflows/${id}`, { method: "DELETE" }),
+
+  runWorkflow: (workflowId: string, params?: Record<string, unknown> | null) =>
+    request<{ run: any }>(`/api/workflows/${workflowId}/runs`, {
+      method: "POST",
+      body: JSON.stringify({ params: params ?? null }),
+    }),
+
+  getWorkflowRuns: (workflowId: string) =>
+    request<{ runs: any[] }>(`/api/workflows/${workflowId}/runs`),
+
+  listWorkflowRuns: (workflowId: string, limit?: number) => {
+    const qs = limit ? `?limit=${limit}` : "";
+    return request<{ runs: any[] }>(`/api/workflows/${workflowId}/runs${qs}`);
+  },
+
+  getWorkflowRun: (id: string) => request<{ run: any }>(`/api/workflow-runs/${id}`),
+
+  // Workflow Triggers
+  getWorkflowTriggers: (workflowId: string) =>
+    request<{ triggers: any[] }>(`/api/workflows/${workflowId}/triggers`),
+
+  listWorkflowTriggers: (workflowId: string) =>
+    request<{ triggers: any[] }>(`/api/workflows/${workflowId}/triggers`),
+
+  retryWorkflowRun: (id: string) =>
+    request<{ run: any }>(`/api/workflow-runs/${id}/retry`, { method: "POST" }),
+
+  cancelWorkflowRun: (id: string) =>
+    request<{ run: any }>(`/api/workflow-runs/${id}/cancel`, { method: "POST" }),
+
+  getWorkflowRunLogs: (id: string, opts?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    if (opts?.offset != null) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    return request<{ logs: any[] }>(`/api/workflow-runs/${id}/logs${qs ? `?${qs}` : ""}`);
+  },
+
+  createWorkflowTrigger: (
+    workflowId: string,
+    data: {
+      type: "manual" | "schedule" | "webhook";
+      config?: Record<string, unknown>;
+      paramMapping?: Record<string, unknown>;
+      enabled?: boolean;
+    },
+  ) =>
+    request<{ trigger: any }>(`/api/workflows/${workflowId}/triggers`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateWorkflowTrigger: (workflowId: string, triggerId: string, data: Record<string, unknown>) =>
+    request<{ trigger: any }>(`/api/workflows/${workflowId}/triggers/${triggerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteWorkflowTrigger: (workflowId: string, triggerId: string) =>
+    request<void>(`/api/workflows/${workflowId}/triggers/${triggerId}`, {
+      method: "DELETE",
+    }),
 };

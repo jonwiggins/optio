@@ -27,10 +27,10 @@ describe("WorkflowTriggerType enum", () => {
 
 describe("WorkflowPodState enum", () => {
   it("has the expected values", () => {
-    expect(WorkflowPodState.CREATING).toBe("creating");
+    expect(WorkflowPodState.PROVISIONING).toBe("provisioning");
     expect(WorkflowPodState.READY).toBe("ready");
-    expect(WorkflowPodState.BUSY).toBe("busy");
-    expect(WorkflowPodState.FAILED).toBe("failed");
+    expect(WorkflowPodState.ERROR).toBe("error");
+    expect(WorkflowPodState.TERMINATING).toBe("terminating");
   });
 });
 

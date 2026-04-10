@@ -173,9 +173,13 @@ export const taskLogs = pgTable(
     content: text("content").notNull(),
     logType: text("log_type"), // "text" | "tool_use" | "tool_result" | "thinking" | "system" | "error" | "info"
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    workflowRunId: uuid("workflow_run_id"), // nullable FK to workflow_runs for aggregating logs across a run
     timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("task_logs_task_id_timestamp_idx").on(table.taskId, table.timestamp)],
+  (table) => [
+    index("task_logs_task_id_timestamp_idx").on(table.taskId, table.timestamp),
+    index("task_logs_workflow_run_id_idx").on(table.workflowRunId),
+  ],
 );
 
 const bytea = customType<{ data: Buffer }>({
@@ -584,10 +588,15 @@ export const workflowTriggers = pgTable(
     config: jsonb("config").$type<Record<string, unknown>>(),
     paramMapping: jsonb("param_mapping").$type<Record<string, unknown>>(),
     enabled: boolean("enabled").notNull().default(true),
+    lastFiredAt: timestamp("last_fired_at", { withTimezone: true }),
+    nextFireAt: timestamp("next_fire_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("workflow_triggers_workflow_id_idx").on(table.workflowId)],
+  (table) => [
+    index("workflow_triggers_workflow_id_idx").on(table.workflowId),
+    index("workflow_triggers_schedule_due_idx").on(table.enabled, table.nextFireAt),
+  ],
 );
 
 export const workflowRuns = pgTable(
@@ -621,20 +630,22 @@ export const workflowRuns = pgTable(
   ],
 );
 
-export const workflowPods = pgTable(
-  "workflow_pods",
+export const workflowRunLogs = pgTable(
+  "workflow_run_logs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    workflowId: uuid("workflow_id")
+    workflowRunId: uuid("workflow_run_id")
       .notNull()
-      .references(() => workflows.id, { onDelete: "cascade" }),
-    podName: text("pod_name").notNull(),
-    state: text("state").notNull().default("creating"), // "creating" | "ready" | "busy" | "failed"
-    activeRunCount: integer("active_run_count").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    stream: text("stream").notNull().default("stdout"),
+    content: text("content").notNull(),
+    logType: text("log_type"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("workflow_pods_workflow_id_idx").on(table.workflowId)],
+  (table) => [
+    index("workflow_run_logs_run_id_timestamp_idx").on(table.workflowRunId, table.timestamp),
+  ],
 );
 
 // ── MCP Servers ──────────────────────────────────────────────────────────────
@@ -869,5 +880,37 @@ export const repoSharedDirectories = pgTable(
     unique("repo_shared_dirs_repo_name_key").on(table.repoId, table.name),
     index("repo_shared_dirs_repo_id_idx").on(table.repoId),
     index("repo_shared_dirs_workspace_idx").on(table.workspaceId),
+  ],
+);
+
+// ── Workflow Pods ──────────────────────────────────────────────────────────────
+
+export const workflowPodStateEnum = pgEnum("workflow_pod_state", [
+  "provisioning",
+  "ready",
+  "error",
+  "terminating",
+]);
+
+export const workflowPods = pgTable(
+  "workflow_pods",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowRunId: uuid("workflow_run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    podName: text("pod_name"),
+    podId: text("pod_id"),
+    state: workflowPodStateEnum("state").notNull().default("provisioning"),
+    activeRunCount: integer("active_run_count").notNull().default(0),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("workflow_pods_run_id_idx").on(table.workflowRunId),
+    index("workflow_pods_workspace_id_idx").on(table.workspaceId),
   ],
 );

@@ -128,3 +128,10 @@ export function createTerminalClient(taskId: string, tokenProvider?: TokenProvid
 export function createSessionTerminalClient(sessionId: string): WsClient {
   return new WsClient(`${getWsBaseUrl()}/ws/sessions/${sessionId}/terminal`);
 }
+
+export function createWorkflowRunLogClient(
+  workflowRunId: string,
+  tokenProvider?: TokenProvider,
+): WsClient {
+  return new WsClient(`${getWsBaseUrl()}/ws/workflow-runs/${workflowRunId}/logs`, tokenProvider);
+}

@@ -33,17 +33,20 @@ import { dependencyRoutes } from "./routes/dependencies.js";
 import { workflowTriggerRoutes } from "./routes/workflow-triggers.js";
 import { mcpServerRoutes } from "./routes/mcp-servers.js";
 import { skillRoutes } from "./routes/skills.js";
+import { workflowRoutes } from "./routes/workflows.js";
 import { sharedDirectoryRoutes } from "./routes/shared-directories.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { optioRoutes } from "./routes/optio.js";
 import { optioSettingsRoutes } from "./routes/optio-settings.js";
 import githubAppRoutes from "./routes/github-app.js";
 import { githubTokenRoutes } from "./routes/github-token.js";
+import { hookRoutes } from "./routes/hooks.js";
 import { logStreamWs } from "./ws/log-stream.js";
 import { eventsWs } from "./ws/events.js";
 import { sessionTerminalWs } from "./ws/session-terminal.js";
 import { sessionChatWs } from "./ws/session-chat.js";
 import { optioChatWs } from "./ws/optio-chat.js";
+import { workflowRunLogStreamWs } from "./ws/workflow-run-log-stream.js";
 import authPlugin from "./plugins/auth.js";
 
 const loggerConfig =
@@ -121,12 +124,14 @@ export async function buildServer() {
   await app.register(workflowTriggerRoutes);
   await app.register(mcpServerRoutes);
   await app.register(skillRoutes);
+  await app.register(workflowRoutes);
   await app.register(sharedDirectoryRoutes);
   await app.register(notificationRoutes);
   await app.register(optioRoutes);
   await app.register(optioSettingsRoutes);
   await app.register(githubAppRoutes);
   await app.register(githubTokenRoutes);
+  await app.register(hookRoutes);
 
   // WebSocket routes
   await app.register(logStreamWs);
@@ -134,6 +139,7 @@ export async function buildServer() {
   await app.register(sessionTerminalWs);
   await app.register(sessionChatWs);
   await app.register(optioChatWs);
+  await app.register(workflowRunLogStreamWs);
 
   // Global error handler for Zod validation
   app.setErrorHandler((error: FastifyError | Error, _req, reply) => {

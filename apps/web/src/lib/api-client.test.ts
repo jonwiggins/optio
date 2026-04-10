@@ -144,6 +144,18 @@ describe("api-client", () => {
     });
   });
 
+  describe("listWorkflows", () => {
+    it("fetches workflows list", async () => {
+      mockResponse({ workflows: [] });
+      const result = await api.listWorkflows();
+      expect(result).toEqual({ workflows: [] });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows",
+        expect.objectContaining({ headers: {} }),
+      );
+    });
+  });
+
   describe("retryTask", () => {
     it("sends POST to retry endpoint", async () => {
       mockResponse({ task: { id: "abc", state: "queued" } });
@@ -200,6 +212,141 @@ describe("api-client", () => {
       mockResponse({ cancelled: 2, total: 4 });
       const result = await api.bulkCancelActive();
       expect(result).toEqual({ cancelled: 2, total: 4 });
+    });
+  });
+
+  describe("workflow run operations", () => {
+    it("retryWorkflowRun sends POST", async () => {
+      mockResponse({ run: { id: "run-1", state: "queued" } });
+      const result = await api.retryWorkflowRun("run-1");
+      expect(result).toEqual({ run: { id: "run-1", state: "queued" } });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflow-runs/run-1/retry",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("cancelWorkflowRun sends POST", async () => {
+      mockResponse({ run: { id: "run-1", state: "failed" } });
+      const result = await api.cancelWorkflowRun("run-1");
+      expect(result).toEqual({ run: { id: "run-1", state: "failed" } });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflow-runs/run-1/cancel",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("getWorkflowRunLogs fetches logs without params", async () => {
+      mockResponse({ logs: [{ content: "test" }] });
+      const result = await api.getWorkflowRunLogs("run-1");
+      expect(result).toEqual({ logs: [{ content: "test" }] });
+      expect(fetchMock).toHaveBeenCalledWith("/api/workflow-runs/run-1/logs", expect.any(Object));
+    });
+
+    it("getWorkflowRunLogs appends query params", async () => {
+      mockResponse({ logs: [] });
+      await api.getWorkflowRunLogs("run-1", { limit: 100, offset: 50 });
+      const url = fetchMock.mock.calls[0][0] as string;
+      expect(url).toContain("limit=100");
+      expect(url).toContain("offset=50");
+    });
+  });
+
+  // ── Workflow API methods ─────────────────────────────────────────────────
+
+  describe("getWorkflow", () => {
+    it("fetches a single workflow", async () => {
+      mockResponse({ workflow: { id: "w-1", name: "Deploy" } });
+      const result = await api.getWorkflow("w-1");
+      expect(result.workflow.name).toBe("Deploy");
+      expect(fetchMock).toHaveBeenCalledWith("/api/workflows/w-1", expect.any(Object));
+    });
+  });
+
+  describe("createWorkflow", () => {
+    it("sends POST with workflow data", async () => {
+      mockResponse({ workflow: { id: "w-1" } });
+      await api.createWorkflow({
+        name: "Deploy",
+        promptTemplate: "Do the thing",
+      });
+      const [url, opts] = fetchMock.mock.calls[0];
+      expect(url).toBe("/api/workflows");
+      expect(opts.method).toBe("POST");
+      const body = JSON.parse(opts.body);
+      expect(body.name).toBe("Deploy");
+      expect(body.promptTemplate).toBe("Do the thing");
+    });
+  });
+
+  describe("updateWorkflow", () => {
+    it("sends PATCH with updates", async () => {
+      mockResponse({ workflow: { id: "w-1", name: "Updated" } });
+      await api.updateWorkflow("w-1", { name: "Updated" });
+      const [url, opts] = fetchMock.mock.calls[0];
+      expect(url).toBe("/api/workflows/w-1");
+      expect(opts.method).toBe("PATCH");
+    });
+  });
+
+  describe("deleteWorkflow", () => {
+    it("sends DELETE request", async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        json: () => Promise.resolve(null),
+      });
+      await api.deleteWorkflow("w-1");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows/w-1",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+  });
+
+  describe("listWorkflowTriggers", () => {
+    it("fetches triggers for a workflow", async () => {
+      mockResponse({ triggers: [{ id: "t-1", type: "manual" }] });
+      const result = await api.listWorkflowTriggers("w-1");
+      expect(result.triggers).toHaveLength(1);
+      expect(fetchMock).toHaveBeenCalledWith("/api/workflows/w-1/triggers", expect.any(Object));
+    });
+  });
+
+  describe("createWorkflowTrigger", () => {
+    it("sends POST with trigger data", async () => {
+      mockResponse({ trigger: { id: "t-1" } });
+      await api.createWorkflowTrigger("w-1", { type: "schedule" });
+      const [url, opts] = fetchMock.mock.calls[0];
+      expect(url).toBe("/api/workflows/w-1/triggers");
+      expect(opts.method).toBe("POST");
+      const body = JSON.parse(opts.body);
+      expect(body.type).toBe("schedule");
+    });
+  });
+
+  describe("updateWorkflowTrigger", () => {
+    it("sends PATCH with trigger updates", async () => {
+      mockResponse({ trigger: { id: "t-1" } });
+      await api.updateWorkflowTrigger("w-1", "t-1", { enabled: false });
+      const [url, opts] = fetchMock.mock.calls[0];
+      expect(url).toBe("/api/workflows/w-1/triggers/t-1");
+      expect(opts.method).toBe("PATCH");
+    });
+  });
+
+  describe("deleteWorkflowTrigger", () => {
+    it("sends DELETE request for trigger", async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        json: () => Promise.resolve(null),
+      });
+      await api.deleteWorkflowTrigger("w-1", "t-1");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflows/w-1/triggers/t-1",
+        expect.objectContaining({ method: "DELETE" }),
+      );
     });
   });
 });

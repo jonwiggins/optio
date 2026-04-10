@@ -41,6 +41,8 @@ export interface WorkflowTrigger {
   config?: Record<string, unknown> | null;
   paramMapping?: Record<string, unknown> | null;
   enabled: boolean;
+  lastFiredAt?: Date | null;
+  nextFireAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -67,18 +69,22 @@ export interface WorkflowRun {
 }
 
 export enum WorkflowPodState {
-  CREATING = "creating",
+  PROVISIONING = "provisioning",
   READY = "ready",
-  BUSY = "busy",
-  FAILED = "failed",
+  ERROR = "error",
+  TERMINATING = "terminating",
 }
 
 export interface WorkflowPod {
   id: string;
-  workflowId: string;
-  podName: string;
+  workflowRunId: string;
+  workspaceId?: string | null;
+  podName: string | null;
+  podId: string | null;
   state: WorkflowPodState;
   activeRunCount: number;
+  lastRunAt?: Date | null;
+  errorMessage?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
