@@ -425,7 +425,9 @@ describe("workflow-service", () => {
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockResolvedValue(runs),
+            orderBy: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue(runs),
+            }),
           }),
         }),
       });

@@ -6,6 +6,7 @@ import type { FastifyInstance } from "fastify";
 
 const mockListWorkflowsWithStats = vi.fn();
 const mockCreateWorkflow = vi.fn();
+const mockGetWorkflow = vi.fn();
 const mockGetWorkflowWithStats = vi.fn();
 const mockUpdateWorkflow = vi.fn();
 const mockDeleteWorkflow = vi.fn();
@@ -15,10 +16,12 @@ const mockGetWorkflowRun = vi.fn();
 const mockRetryWorkflowRun = vi.fn();
 const mockCancelWorkflowRun = vi.fn();
 const mockGetWorkflowRunLogs = vi.fn();
+const mockListWorkflowTriggers = vi.fn();
 
 vi.mock("../services/workflow-service.js", () => ({
   listWorkflowsWithStats: (...args: unknown[]) => mockListWorkflowsWithStats(...args),
   createWorkflow: (...args: unknown[]) => mockCreateWorkflow(...args),
+  getWorkflow: (...args: unknown[]) => mockGetWorkflow(...args),
   getWorkflowWithStats: (...args: unknown[]) => mockGetWorkflowWithStats(...args),
   updateWorkflow: (...args: unknown[]) => mockUpdateWorkflow(...args),
   deleteWorkflow: (...args: unknown[]) => mockDeleteWorkflow(...args),
@@ -28,6 +31,7 @@ vi.mock("../services/workflow-service.js", () => ({
   retryWorkflowRun: (...args: unknown[]) => mockRetryWorkflowRun(...args),
   cancelWorkflowRun: (...args: unknown[]) => mockCancelWorkflowRun(...args),
   getWorkflowRunLogs: (...args: unknown[]) => mockGetWorkflowRunLogs(...args),
+  listWorkflowTriggers: (...args: unknown[]) => mockListWorkflowTriggers(...args),
 }));
 
 import { workflowRoutes } from "./workflows.js";
@@ -285,13 +289,14 @@ describe("GET /api/workflows/:id/runs", () => {
   });
 
   it("lists runs for a workflow", async () => {
+    mockGetWorkflow.mockResolvedValue({ id: "w-1", workspaceId: "ws-1", enabled: true });
     mockListWorkflowRuns.mockResolvedValue([{ id: "run-1" }, { id: "run-2" }]);
 
     const res = await app.inject({ method: "GET", url: "/api/workflows/w-1/runs" });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().runs).toHaveLength(2);
-    expect(mockListWorkflowRuns).toHaveBeenCalledWith("w-1");
+    expect(mockListWorkflowRuns).toHaveBeenCalledWith("w-1", 50);
   });
 });
 
