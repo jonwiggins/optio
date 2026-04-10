@@ -636,9 +636,7 @@ describe("workflow-service", () => {
         }),
       });
 
-      await expect(getWorkflowRunLogs("nonexistent", {})).rejects.toThrow(
-        "Workflow run not found",
-      );
+      await expect(getWorkflowRunLogs("nonexistent", {})).rejects.toThrow("Workflow run not found");
     });
   });
 });

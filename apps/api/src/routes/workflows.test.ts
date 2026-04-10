@@ -340,7 +340,9 @@ describe("POST /api/workflow-runs/:id/retry", () => {
   });
 
   it("returns 400 when retry fails", async () => {
-    mockRetryWorkflowRun.mockRejectedValue(new Error("Cannot retry workflow run in state \"running\""));
+    mockRetryWorkflowRun.mockRejectedValue(
+      new Error('Cannot retry workflow run in state "running"'),
+    );
 
     const res = await app.inject({ method: "POST", url: "/api/workflow-runs/run-1/retry" });
 
@@ -366,7 +368,9 @@ describe("POST /api/workflow-runs/:id/cancel", () => {
   });
 
   it("returns 400 when cancel fails", async () => {
-    mockCancelWorkflowRun.mockRejectedValue(new Error("Cannot cancel workflow run in state \"completed\""));
+    mockCancelWorkflowRun.mockRejectedValue(
+      new Error('Cannot cancel workflow run in state "completed"'),
+    );
 
     const res = await app.inject({ method: "POST", url: "/api/workflow-runs/run-1/cancel" });
 

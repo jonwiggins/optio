@@ -1,11 +1,7 @@
 import { eq, desc, sql, and } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workflows, workflowRuns, workflowTriggers, taskLogs } from "../db/schema.js";
-import {
-  WorkflowRunState,
-  canTransitionWorkflowRun,
-  transitionWorkflowRun,
-} from "@optio/shared";
+import { WorkflowRunState, canTransitionWorkflowRun, transitionWorkflowRun } from "@optio/shared";
 import { logger } from "../logger.js";
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
@@ -305,10 +301,7 @@ export async function cancelWorkflowRun(id: string) {
 /**
  * Get aggregated logs for a workflow run by querying taskLogs with workflowRunId.
  */
-export async function getWorkflowRunLogs(
-  id: string,
-  opts: { logType?: string; limit?: number },
-) {
+export async function getWorkflowRunLogs(id: string, opts: { logType?: string; limit?: number }) {
   const run = await getWorkflowRun(id);
   if (!run) throw new Error("Workflow run not found");
 
