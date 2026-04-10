@@ -96,6 +96,7 @@ import {
   reconcileActiveTaskCounts,
   deleteNetworkPolicy,
   killOrphanedAgentInPod,
+  parseJsonEnv,
 } from "./repo-pool-service.js";
 
 // ── resolveImage ────────────────────────────────────────────────────
@@ -766,5 +767,181 @@ describe("killOrphanedAgentInPod", () => {
     expect(result).toBe(false);
     // Should still attempt worktree cleanup
     expect(mockRuntimeExec).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── parseJsonEnv ─────────────────────────────────────────────────────
+
+describe("parseJsonEnv", () => {
+  it("returns undefined when value is undefined", () => {
+    expect(parseJsonEnv("TEST_VAR", undefined)).toBeUndefined();
+  });
+
+  it("returns undefined when value is empty string", () => {
+    expect(parseJsonEnv("TEST_VAR", "")).toBeUndefined();
+  });
+
+  it("parses valid JSON object", () => {
+    const result = parseJsonEnv("TEST_VAR", '{"disktype":"ssd"}');
+    expect(result).toEqual({ disktype: "ssd" });
+  });
+
+  it("parses valid JSON array", () => {
+    const result = parseJsonEnv(
+      "TEST_VAR",
+      '[{"key":"gpu","operator":"Exists","effect":"NoSchedule"}]',
+    );
+    expect(result).toEqual([{ key: "gpu", operator: "Exists", effect: "NoSchedule" }]);
+  });
+
+  it("throws a descriptive error for malformed JSON", () => {
+    expect(() => parseJsonEnv("OPTIO_AGENT_NODE_SELECTOR", "{bad json}")).toThrow(
+      /Invalid JSON in OPTIO_AGENT_NODE_SELECTOR/,
+    );
+  });
+
+  it("includes the original value in the error message", () => {
+    expect(() => parseJsonEnv("OPTIO_AGENT_TOLERATIONS", "not-json")).toThrow(/not-json/);
+  });
+});
+
+// ── nodeSelector / tolerations env var integration ────────────────────
+
+describe("getOrCreateRepoPod — nodeSelector and tolerations env vars", () => {
+  function mockGetOrCreateFlow(opts: {
+    existingPods?: any[];
+    podCount?: number;
+    insertedPod?: any;
+  }) {
+    const dbMock = db as any;
+
+    const orderByResult = opts.existingPods ?? [];
+    const chainableWithOrderBy = {
+      orderBy: vi.fn().mockResolvedValue(orderByResult),
+    };
+
+    let whereCallCount = 0;
+    dbMock.where.mockImplementation(() => {
+      whereCallCount++;
+      if (whereCallCount === 1) return chainableWithOrderBy;
+      if (whereCallCount === 2) return Promise.resolve([{ count: opts.podCount ?? 0 }]);
+      return Promise.resolve([]);
+    });
+
+    if (opts.insertedPod) {
+      dbMock.returning.mockResolvedValueOnce([opts.insertedPod]);
+    }
+  }
+
+  const origNodeSelector = process.env.OPTIO_AGENT_NODE_SELECTOR;
+  const origTolerations = process.env.OPTIO_AGENT_TOLERATIONS;
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    (db as any).where.mockReset().mockReturnThis();
+    if (origNodeSelector !== undefined) {
+      process.env.OPTIO_AGENT_NODE_SELECTOR = origNodeSelector;
+    } else {
+      delete process.env.OPTIO_AGENT_NODE_SELECTOR;
+    }
+    if (origTolerations !== undefined) {
+      process.env.OPTIO_AGENT_TOLERATIONS = origTolerations;
+    } else {
+      delete process.env.OPTIO_AGENT_TOLERATIONS;
+    }
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (db as any).where.mockReset().mockReturnThis();
+  });
+
+  it("passes parsed nodeSelector to the container spec", async () => {
+    process.env.OPTIO_AGENT_NODE_SELECTOR = '{"disktype":"ssd"}';
+    delete process.env.OPTIO_AGENT_TOLERATIONS;
+
+    mockGetOrCreateFlow({
+      existingPods: [],
+      podCount: 0,
+      insertedPod: {
+        id: "pod-1",
+        repoUrl: "https://github.com/org/repo",
+        repoBranch: "main",
+        state: "provisioning",
+        instanceIndex: 0,
+      },
+    });
+
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
+
+    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+    const spec = mockRuntimeCreate.mock.calls[0][0];
+    expect(spec.nodeSelector).toEqual({ disktype: "ssd" });
+  });
+
+  it("passes parsed tolerations to the container spec", async () => {
+    delete process.env.OPTIO_AGENT_NODE_SELECTOR;
+    process.env.OPTIO_AGENT_TOLERATIONS =
+      '[{"key":"gpu","operator":"Exists","effect":"NoSchedule"}]';
+
+    mockGetOrCreateFlow({
+      existingPods: [],
+      podCount: 0,
+      insertedPod: {
+        id: "pod-1",
+        repoUrl: "https://github.com/org/repo",
+        repoBranch: "main",
+        state: "provisioning",
+        instanceIndex: 0,
+      },
+    });
+
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
+
+    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+    const spec = mockRuntimeCreate.mock.calls[0][0];
+    expect(spec.tolerations).toEqual([{ key: "gpu", operator: "Exists", effect: "NoSchedule" }]);
+  });
+
+  it("throws a descriptive error when OPTIO_AGENT_NODE_SELECTOR contains malformed JSON", async () => {
+    process.env.OPTIO_AGENT_NODE_SELECTOR = "{bad json}";
+    delete process.env.OPTIO_AGENT_TOLERATIONS;
+
+    mockGetOrCreateFlow({
+      existingPods: [],
+      podCount: 0,
+      insertedPod: {
+        id: "pod-1",
+        repoUrl: "https://github.com/org/repo",
+        repoBranch: "main",
+        state: "provisioning",
+        instanceIndex: 0,
+      },
+    });
+
+    await expect(getOrCreateRepoPod("https://github.com/org/repo", "main", {})).rejects.toThrow(
+      /Invalid JSON in OPTIO_AGENT_NODE_SELECTOR/,
+    );
+  });
+
+  it("throws a descriptive error when OPTIO_AGENT_TOLERATIONS contains malformed JSON", async () => {
+    delete process.env.OPTIO_AGENT_NODE_SELECTOR;
+    process.env.OPTIO_AGENT_TOLERATIONS = "not valid json";
+
+    mockGetOrCreateFlow({
+      existingPods: [],
+      podCount: 0,
+      insertedPod: {
+        id: "pod-1",
+        repoUrl: "https://github.com/org/repo",
+        repoBranch: "main",
+        state: "provisioning",
+        instanceIndex: 0,
+      },
+    });
+
+    await expect(getOrCreateRepoPod("https://github.com/org/repo", "main", {})).rejects.toThrow(
+      /Invalid JSON in OPTIO_AGENT_TOLERATIONS/,
+    );
   });
 });

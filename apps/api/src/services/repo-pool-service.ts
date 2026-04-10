@@ -24,6 +24,22 @@ import {
 
 const IDLE_TIMEOUT_MS = parseInt(process.env.OPTIO_REPO_POD_IDLE_MS ?? "600000", 10); // 10 min default
 
+/**
+ * Parse a JSON-encoded environment variable, returning `undefined` when unset/empty.
+ * Throws a descriptive error (including the variable name and raw value) on malformed JSON
+ * so operators can quickly identify typos in values.yaml or Helm overrides.
+ */
+export function parseJsonEnv(name: string, value: string | undefined): unknown {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    throw new Error(
+      `Invalid JSON in ${name}: ${err instanceof Error ? err.message : err} (raw value: ${value})`,
+    );
+  }
+}
+
 export interface RepoPod {
   id: string;
   repoUrl: string;
@@ -361,10 +377,20 @@ spec:
           }
         : {}),
       ...(process.env.OPTIO_AGENT_NODE_SELECTOR
-        ? { nodeSelector: JSON.parse(process.env.OPTIO_AGENT_NODE_SELECTOR) }
+        ? {
+            nodeSelector: parseJsonEnv(
+              "OPTIO_AGENT_NODE_SELECTOR",
+              process.env.OPTIO_AGENT_NODE_SELECTOR,
+            ) as Record<string, string>,
+          }
         : {}),
       ...(process.env.OPTIO_AGENT_TOLERATIONS
-        ? { tolerations: JSON.parse(process.env.OPTIO_AGENT_TOLERATIONS) }
+        ? {
+            tolerations: parseJsonEnv(
+              "OPTIO_AGENT_TOLERATIONS",
+              process.env.OPTIO_AGENT_TOLERATIONS,
+            ) as unknown[],
+          }
         : {}),
     };
 
