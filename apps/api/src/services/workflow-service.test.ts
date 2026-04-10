@@ -970,6 +970,13 @@ describe("workflow-service", () => {
 
   describe("updateWorkflowTrigger", () => {
     it("updates a trigger", async () => {
+      // Mock getWorkflowTrigger (db.select)
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "t-1", type: "webhook", enabled: true }]),
+        }),
+      });
+
       const updated = { id: "t-1", type: "webhook", enabled: false };
       (db.update as any) = vi.fn().mockReturnValue({
         set: vi.fn().mockReturnValue({
@@ -984,11 +991,10 @@ describe("workflow-service", () => {
     });
 
     it("returns null when trigger not found", async () => {
-      (db.update as any) = vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            returning: vi.fn().mockResolvedValue([]),
-          }),
+      // Mock getWorkflowTrigger returning null
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
         }),
       });
 

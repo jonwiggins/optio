@@ -458,7 +458,6 @@ export async function deleteWorkflowTrigger(id: string): Promise<boolean> {
   return deleted.length > 0;
 }
 
-
 // ── Schedule trigger evaluation ─────────────────────────────────────────────
 
 export async function getDueScheduleTriggers() {
