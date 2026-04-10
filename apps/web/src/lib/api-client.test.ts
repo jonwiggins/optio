@@ -214,4 +214,41 @@ describe("api-client", () => {
       expect(result).toEqual({ cancelled: 2, total: 4 });
     });
   });
+
+  describe("workflow run operations", () => {
+    it("retryWorkflowRun sends POST", async () => {
+      mockResponse({ run: { id: "run-1", state: "queued" } });
+      const result = await api.retryWorkflowRun("run-1");
+      expect(result).toEqual({ run: { id: "run-1", state: "queued" } });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflow-runs/run-1/retry",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("cancelWorkflowRun sends POST", async () => {
+      mockResponse({ run: { id: "run-1", state: "failed" } });
+      const result = await api.cancelWorkflowRun("run-1");
+      expect(result).toEqual({ run: { id: "run-1", state: "failed" } });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workflow-runs/run-1/cancel",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("getWorkflowRunLogs fetches logs without params", async () => {
+      mockResponse({ logs: [{ content: "test" }] });
+      const result = await api.getWorkflowRunLogs("run-1");
+      expect(result).toEqual({ logs: [{ content: "test" }] });
+      expect(fetchMock).toHaveBeenCalledWith("/api/workflow-runs/run-1/logs", expect.any(Object));
+    });
+
+    it("getWorkflowRunLogs appends query params", async () => {
+      mockResponse({ logs: [] });
+      await api.getWorkflowRunLogs("run-1", { limit: 100, offset: 50 });
+      const url = fetchMock.mock.calls[0][0] as string;
+      expect(url).toContain("limit=100");
+      expect(url).toContain("offset=50");
+    });
+  });
 });

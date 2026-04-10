@@ -396,7 +396,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
       </div>
 
       {/* Tab content */}
-      {activeTab === "runs" && <RunsTable runs={runs} />}
+      {activeTab === "runs" && <RunsTable runs={runs} workflowId={id} />}
       {activeTab === "triggers" && <TriggersList triggers={triggers} />}
       {activeTab === "config" && (
         <ConfigPanel workflow={workflow} showPrompt={showPrompt} setShowPrompt={setShowPrompt} />
@@ -407,7 +407,8 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
 
 // ── Runs table ─────────────────────────────────────────────────────────────────
 
-function RunsTable({ runs }: { runs: WorkflowRun[] }) {
+function RunsTable({ runs, workflowId }: { runs: WorkflowRun[]; workflowId: string }) {
+  const router = useRouter();
   if (runs.length === 0) {
     return (
       <div className="text-center py-8 text-text-muted border border-dashed border-border rounded-lg">
@@ -435,10 +436,13 @@ function RunsTable({ runs }: { runs: WorkflowRun[] }) {
           {runs.map((run) => (
             <tr
               key={run.id}
-              className="border-b border-border/30 last:border-0 hover:bg-bg-hover/40"
+              className="border-b border-border/30 last:border-0 hover:bg-bg-hover/40 cursor-pointer"
+              onClick={() => router.push(`/workflows/${workflowId}/runs/${run.id}`)}
             >
               <td className="px-4 py-2.5">
-                <RunStateBadge state={run.state} />
+                <Link href={`/workflows/${workflowId}/runs/${run.id}`}>
+                  <RunStateBadge state={run.state} />
+                </Link>
               </td>
               <td className="px-4 py-2.5 text-text-muted text-xs">
                 {run.startedAt

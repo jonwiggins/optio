@@ -1166,4 +1166,18 @@ export const api = {
     request<{ triggers: any[] }>(`/api/workflows/${workflowId}/triggers`),
 
   getWorkflowRun: (id: string) => request<{ run: any }>(`/api/workflow-runs/${id}`),
+
+  retryWorkflowRun: (id: string) =>
+    request<{ run: any }>(`/api/workflow-runs/${id}/retry`, { method: "POST" }),
+
+  cancelWorkflowRun: (id: string) =>
+    request<{ run: any }>(`/api/workflow-runs/${id}/cancel`, { method: "POST" }),
+
+  getWorkflowRunLogs: (id: string, opts?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    if (opts?.offset != null) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    return request<{ logs: any[] }>(`/api/workflow-runs/${id}/logs${qs ? `?${qs}` : ""}`);
+  },
 };

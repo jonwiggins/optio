@@ -24,6 +24,8 @@ export function useLogs(taskId: string) {
 
   // Load historical logs, then connect WebSocket for live streaming
   useEffect(() => {
+    if (!taskId) return;
+
     // Buffer live events until historical logs are merged into state.
     // `merged` flips to true only AFTER setLogs is called with historical data,
     // closing the race where live events bypass dedup.

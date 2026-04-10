@@ -99,8 +99,19 @@ function HighlightedText({ text, search }: { text: string; search: string }) {
   );
 }
 
-export function LogViewer({ taskId }: { taskId: string }) {
-  const { logs, connected, capped, clear } = useLogs(taskId);
+interface LogViewerProps {
+  taskId?: string;
+  externalLogs?: {
+    logs: LogEntry[];
+    connected: boolean;
+    capped: boolean;
+    clear: () => void;
+  };
+}
+
+export function LogViewer({ taskId, externalLogs }: LogViewerProps) {
+  const internal = useLogs(taskId ?? "");
+  const { logs, connected, capped, clear } = externalLogs ?? internal;
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [showThinking, setShowThinking] = useState(false);
@@ -218,6 +229,7 @@ export function LogViewer({ taskId }: { taskId: string }) {
 
   const handleExport = useCallback(
     (format: string) => {
+      if (!taskId) return;
       const url = api.exportTaskLogs(taskId, { format });
       window.open(url, "_blank");
       setShowExportMenu(false);
@@ -408,41 +420,43 @@ export function LogViewer({ taskId }: { taskId: string }) {
           >
             <Search className="w-3.5 h-3.5" />
           </button>
-          {/* Export dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => setShowExportMenu(!showExportMenu)}
-              className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted/50 hover:text-text-muted transition-colors"
-              title="Export logs"
-            >
-              <Download className="w-3.5 h-3.5" />
-            </button>
-            {showExportMenu && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 glass-tooltip rounded-lg py-1 min-w-[140px]">
-                  <button
-                    onClick={() => handleExport("json")}
-                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
-                  >
-                    Export as JSON
-                  </button>
-                  <button
-                    onClick={() => handleExport("plaintext")}
-                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
-                  >
-                    Export as Text
-                  </button>
-                  <button
-                    onClick={() => handleExport("markdown")}
-                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
-                  >
-                    Export as Markdown
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+          {/* Export dropdown (only available when taskId is set) */}
+          {taskId && (
+            <div className="relative">
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted/50 hover:text-text-muted transition-colors"
+                title="Export logs"
+              >
+                <Download className="w-3.5 h-3.5" />
+              </button>
+              {showExportMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-20 glass-tooltip rounded-lg py-1 min-w-[140px]">
+                    <button
+                      onClick={() => handleExport("json")}
+                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
+                    >
+                      Export as JSON
+                    </button>
+                    <button
+                      onClick={() => handleExport("plaintext")}
+                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
+                    >
+                      Export as Text
+                    </button>
+                    <button
+                      onClick={() => handleExport("markdown")}
+                      className="w-full px-3 py-1.5 text-left text-xs hover:bg-bg-hover transition-colors"
+                    >
+                      Export as Markdown
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <button
             onClick={clear}
             className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted/50 hover:text-text-muted transition-colors"
