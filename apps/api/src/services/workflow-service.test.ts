@@ -26,6 +26,7 @@ vi.mock("../db/schema.js", () => ({
   workflowTriggers: {
     id: "workflow_triggers.id",
     workflowId: "workflow_triggers.workflow_id",
+    type: "workflow_triggers.type",
   },
   taskLogs: {
     id: "task_logs.id",
@@ -237,6 +238,12 @@ describe("workflow-service", () => {
   });
 
   describe("listWorkflowsWithStats", () => {
+    function mockTriggerQuery(triggers: Array<{ workflowId: string; type: string }>) {
+      const mockWhere = vi.fn().mockResolvedValue(triggers);
+      const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
+      (db.select as any) = vi.fn().mockReturnValue({ from: mockFrom });
+    }
+
     it("returns workflows with aggregate stats", async () => {
       (db.execute as any) = vi.fn().mockResolvedValue([
         {
@@ -263,6 +270,10 @@ describe("workflow-service", () => {
           total_cost_usd: "4.5000",
         },
       ]);
+      mockTriggerQuery([
+        { workflowId: "w-1", type: "manual" },
+        { workflowId: "w-1", type: "schedule" },
+      ]);
 
       const result = await listWorkflowsWithStats("ws-1");
 
@@ -272,6 +283,7 @@ describe("workflow-service", () => {
       expect(result[0].lastRunAt).toBe("2026-01-15T00:00:00Z");
       expect(result[0].totalCostUsd).toBe("4.5000");
       expect(result[0].name).toBe("Deploy Pipeline");
+      expect(result[0].triggerTypes).toEqual(["manual", "schedule"]);
     });
 
     it("returns empty array when no workflows exist", async () => {
@@ -308,12 +320,14 @@ describe("workflow-service", () => {
           total_cost_usd: "0",
         },
       ]);
+      mockTriggerQuery([]);
 
       const result = await listWorkflowsWithStats();
 
       expect(result[0].runCount).toBe(0);
       expect(result[0].lastRunAt).toBeNull();
       expect(result[0].totalCostUsd).toBe("0");
+      expect(result[0].triggerTypes).toEqual([]);
     });
   });
 
