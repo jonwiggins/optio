@@ -27,6 +27,9 @@ vi.mock("../db/schema.js", () => ({
     id: "workflow_triggers.id",
     workflowId: "workflow_triggers.workflow_id",
     type: "workflow_triggers.type",
+    enabled: "workflow_triggers.enabled",
+    nextFireAt: "workflow_triggers.next_fire_at",
+    createdAt: "workflow_triggers.created_at",
   },
   taskLogs: {
     id: "task_logs.id",
@@ -60,6 +63,12 @@ import {
   retryWorkflowRun,
   cancelWorkflowRun,
   getWorkflowRunLogs,
+  createWorkflowTrigger,
+  getWorkflowTrigger,
+  updateWorkflowTrigger,
+  deleteWorkflowTrigger,
+  getDueScheduleTriggers,
+  markTriggerFired,
 } from "./workflow-service.js";
 
 describe("workflow-service", () => {
@@ -459,6 +468,230 @@ describe("workflow-service", () => {
 
       const result = await getWorkflowRun("nonexistent");
       expect(result).toBeNull();
+    });
+  });
+
+  // ── Workflow Trigger CRUD ───────────────────────────────────────────────────
+
+  describe("createWorkflowTrigger", () => {
+    it("creates a schedule trigger with computed nextFireAt", async () => {
+      let capturedValues: any;
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockImplementation((vals: any) => {
+          capturedValues = vals;
+          return { returning: vi.fn().mockResolvedValue([{ id: "t-1", ...vals }]) };
+        }),
+      });
+
+      const result = await createWorkflowTrigger({
+        workflowId: "w-1",
+        type: "schedule",
+        config: { cronExpression: "0 0 * * *" },
+      });
+
+      expect(capturedValues.type).toBe("schedule");
+      expect(capturedValues.enabled).toBe(true);
+      expect(capturedValues.nextFireAt).toBeInstanceOf(Date);
+    });
+
+    it("creates a manual trigger without nextFireAt", async () => {
+      let capturedValues: any;
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockImplementation((vals: any) => {
+          capturedValues = vals;
+          return { returning: vi.fn().mockResolvedValue([{ id: "t-2", ...vals }]) };
+        }),
+      });
+
+      await createWorkflowTrigger({
+        workflowId: "w-1",
+        type: "manual",
+      });
+
+      expect(capturedValues.nextFireAt).toBeNull();
+    });
+
+    it("sets nextFireAt to null when disabled", async () => {
+      let capturedValues: any;
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockImplementation((vals: any) => {
+          capturedValues = vals;
+          return { returning: vi.fn().mockResolvedValue([{ id: "t-3", ...vals }]) };
+        }),
+      });
+
+      await createWorkflowTrigger({
+        workflowId: "w-1",
+        type: "schedule",
+        config: { cronExpression: "0 0 * * *" },
+        enabled: false,
+      });
+
+      expect(capturedValues.nextFireAt).toBeNull();
+    });
+  });
+
+  describe("getWorkflowTrigger", () => {
+    it("returns trigger when found", async () => {
+      const trigger = { id: "t-1", type: "schedule" };
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([trigger]),
+        }),
+      });
+
+      const result = await getWorkflowTrigger("t-1");
+      expect(result).toEqual(trigger);
+    });
+
+    it("returns null when not found", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const result = await getWorkflowTrigger("nonexistent");
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("updateWorkflowTrigger", () => {
+    it("updates and recomputes nextFireAt for schedule trigger", async () => {
+      // Mock getWorkflowTrigger
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            {
+              id: "t-1",
+              type: "schedule",
+              config: { cronExpression: "0 0 * * *" },
+              enabled: true,
+            },
+          ]),
+        }),
+      });
+
+      let capturedSet: any;
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockImplementation((vals: any) => {
+          capturedSet = vals;
+          return {
+            where: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([{ id: "t-1" }]),
+            }),
+          };
+        }),
+      });
+
+      await updateWorkflowTrigger("t-1", {
+        config: { cronExpression: "*/5 * * * *" },
+      });
+
+      expect(capturedSet.config).toEqual({ cronExpression: "*/5 * * * *" });
+      expect(capturedSet.nextFireAt).toBeInstanceOf(Date);
+    });
+
+    it("clears nextFireAt when disabling a schedule trigger", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            {
+              id: "t-1",
+              type: "schedule",
+              config: { cronExpression: "0 0 * * *" },
+              enabled: true,
+            },
+          ]),
+        }),
+      });
+
+      let capturedSet: any;
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockImplementation((vals: any) => {
+          capturedSet = vals;
+          return {
+            where: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([{ id: "t-1" }]),
+            }),
+          };
+        }),
+      });
+
+      await updateWorkflowTrigger("t-1", { enabled: false });
+
+      expect(capturedSet.nextFireAt).toBeNull();
+    });
+
+    it("returns null when trigger not found", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const result = await updateWorkflowTrigger("nonexistent", { enabled: false });
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("deleteWorkflowTrigger", () => {
+    it("returns true when deleted", async () => {
+      (db.delete as any) = vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: "t-1" }]),
+        }),
+      });
+
+      const result = await deleteWorkflowTrigger("t-1");
+      expect(result).toBe(true);
+    });
+
+    it("returns false when not found", async () => {
+      (db.delete as any) = vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      const result = await deleteWorkflowTrigger("nonexistent");
+      expect(result).toBe(false);
+    });
+  });
+
+  describe("markTriggerFired", () => {
+    it("updates lastFiredAt and computes new nextFireAt", async () => {
+      let capturedSet: any;
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockImplementation((vals: any) => {
+          capturedSet = vals;
+          return { where: vi.fn().mockResolvedValue(undefined) };
+        }),
+      });
+
+      await markTriggerFired("t-1", "0 0 * * *");
+
+      expect(capturedSet.lastFiredAt).toBeInstanceOf(Date);
+      expect(capturedSet.nextFireAt).toBeInstanceOf(Date);
+      expect(capturedSet.nextFireAt.getTime()).toBeGreaterThan(capturedSet.lastFiredAt.getTime());
+    });
+  });
+
+  describe("getDueScheduleTriggers", () => {
+    it("queries for enabled schedule triggers past their nextFireAt", async () => {
+      const rows = [
+        {
+          trigger: { id: "t-1", type: "schedule" },
+          workflow: { id: "w-1", name: "Deploy" },
+        },
+      ];
+      const mockWhere = vi.fn().mockResolvedValue(rows);
+      const mockInnerJoin = vi.fn().mockReturnValue({ where: mockWhere });
+      const mockFrom = vi.fn().mockReturnValue({ innerJoin: mockInnerJoin });
+      (db.select as any) = vi.fn().mockReturnValue({ from: mockFrom });
+
+      const result = await getDueScheduleTriggers();
+      expect(result).toEqual(rows);
     });
   });
 

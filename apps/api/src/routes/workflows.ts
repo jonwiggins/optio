@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { CronExpressionParser } from "cron-parser";
 import * as workflowService from "../services/workflow-service.js";
 import { workflowRunQueue } from "../workers/workflow-worker.js";
 
@@ -33,6 +34,19 @@ const updateWorkflowSchema = z.object({
   enabled: z.boolean().optional(),
   environmentSpec: z.record(z.unknown()).nullable().optional(),
   paramsSchema: z.record(z.unknown()).nullable().optional(),
+});
+
+const createTriggerSchema = z.object({
+  type: z.enum(["manual", "schedule", "webhook"]),
+  config: z.record(z.unknown()).optional(),
+  paramMapping: z.record(z.unknown()).optional(),
+  enabled: z.boolean().optional(),
+});
+
+const updateTriggerSchema = z.object({
+  config: z.record(z.unknown()).optional(),
+  paramMapping: z.record(z.unknown()).optional(),
+  enabled: z.boolean().optional(),
 });
 
 const idParamsSchema = z.object({ id: z.string() });
@@ -144,6 +158,73 @@ export async function workflowRoutes(app: FastifyInstance) {
     const { limit } = limitQuerySchema.parse(req.query);
     const runs = await workflowService.listWorkflowRuns(id, limit ? parseInt(limit, 10) : 50);
     reply.send({ runs });
+  });
+
+  // List triggers for a workflow
+  app.get("/api/workflows/:id/triggers", async (req, reply) => {
+    const { id } = idParamsSchema.parse(req.params);
+    const triggers = await workflowService.listWorkflowTriggers(id);
+    reply.send({ triggers });
+  });
+
+  // Create a trigger for a workflow
+  app.post("/api/workflows/:id/triggers", async (req, reply) => {
+    const { id } = idParamsSchema.parse(req.params);
+    const input = createTriggerSchema.parse(req.body);
+
+    // Validate cron expression for schedule triggers
+    if (input.type === "schedule") {
+      const cronExpression = input.config?.cronExpression;
+      if (!cronExpression || typeof cronExpression !== "string") {
+        return reply.status(400).send({ error: "Schedule triggers require config.cronExpression" });
+      }
+      try {
+        CronExpressionParser.parse(cronExpression);
+      } catch {
+        return reply.status(400).send({ error: "Invalid cron expression" });
+      }
+    }
+
+    try {
+      const trigger = await workflowService.createWorkflowTrigger({
+        workflowId: id,
+        ...input,
+      });
+      reply.status(201).send({ trigger });
+    } catch (err) {
+      reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Update a trigger
+  app.patch("/api/workflow-triggers/:id", async (req, reply) => {
+    const { id } = idParamsSchema.parse(req.params);
+    const input = updateTriggerSchema.parse(req.body);
+
+    // Validate cron expression if config is being updated with one
+    if (input.config?.cronExpression) {
+      try {
+        CronExpressionParser.parse(input.config.cronExpression as string);
+      } catch {
+        return reply.status(400).send({ error: "Invalid cron expression" });
+      }
+    }
+
+    try {
+      const trigger = await workflowService.updateWorkflowTrigger(id, input);
+      if (!trigger) return reply.status(404).send({ error: "Trigger not found" });
+      reply.send({ trigger });
+    } catch (err) {
+      reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Delete a trigger
+  app.delete("/api/workflow-triggers/:id", async (req, reply) => {
+    const { id } = idParamsSchema.parse(req.params);
+    const deleted = await workflowService.deleteWorkflowTrigger(id);
+    if (!deleted) return reply.status(404).send({ error: "Trigger not found" });
+    reply.status(204).send();
   });
 
   // Get a single workflow run

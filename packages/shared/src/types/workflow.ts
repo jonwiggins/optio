@@ -41,6 +41,8 @@ export interface WorkflowTrigger {
   config?: Record<string, unknown> | null;
   paramMapping?: Record<string, unknown> | null;
   enabled: boolean;
+  lastFiredAt?: Date | null;
+  nextFireAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

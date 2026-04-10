@@ -588,10 +588,15 @@ export const workflowTriggers = pgTable(
     config: jsonb("config").$type<Record<string, unknown>>(),
     paramMapping: jsonb("param_mapping").$type<Record<string, unknown>>(),
     enabled: boolean("enabled").notNull().default(true),
+    lastFiredAt: timestamp("last_fired_at", { withTimezone: true }),
+    nextFireAt: timestamp("next_fire_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("workflow_triggers_workflow_id_idx").on(table.workflowId)],
+  (table) => [
+    index("workflow_triggers_workflow_id_idx").on(table.workflowId),
+    index("workflow_triggers_schedule_due_idx").on(table.enabled, table.nextFireAt),
+  ],
 );
 
 export const workflowRuns = pgTable(

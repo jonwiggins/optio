@@ -1,4 +1,5 @@
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc, sql, and, lte } from "drizzle-orm";
+import { CronExpressionParser } from "cron-parser";
 import { db } from "../db/client.js";
 import { workflows, workflowRuns, workflowTriggers, taskLogs } from "../db/schema.js";
 import { WorkflowRunState, canTransitionWorkflowRun, transitionWorkflowRun } from "@optio/shared";
@@ -372,4 +373,114 @@ export async function getWebhookTriggerByPath(webhookPath: string) {
   });
 
   return trigger ?? null;
+}
+
+export async function getWorkflowTrigger(id: string) {
+  const [trigger] = await db.select().from(workflowTriggers).where(eq(workflowTriggers.id, id));
+  return trigger ?? null;
+}
+
+function computeNextFire(cronExpression: string): Date {
+  const interval = CronExpressionParser.parse(cronExpression);
+  return interval.next().toDate();
+}
+
+export async function createWorkflowTrigger(input: {
+  workflowId: string;
+  type: string;
+  config?: Record<string, unknown>;
+  paramMapping?: Record<string, unknown>;
+  enabled?: boolean;
+}) {
+  const enabled = input.enabled ?? true;
+  let nextFireAt: Date | null = null;
+
+  if (input.type === "schedule" && enabled && input.config?.cronExpression) {
+    nextFireAt = computeNextFire(input.config.cronExpression as string);
+  }
+
+  const [trigger] = await db
+    .insert(workflowTriggers)
+    .values({
+      workflowId: input.workflowId,
+      type: input.type,
+      config: input.config ?? null,
+      paramMapping: input.paramMapping ?? null,
+      enabled,
+      nextFireAt,
+    })
+    .returning();
+  return trigger;
+}
+
+export async function updateWorkflowTrigger(
+  id: string,
+  input: {
+    config?: Record<string, unknown>;
+    paramMapping?: Record<string, unknown>;
+    enabled?: boolean;
+  },
+) {
+  const existing = await getWorkflowTrigger(id);
+  if (!existing) return null;
+
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.config !== undefined) updates.config = input.config;
+  if (input.paramMapping !== undefined) updates.paramMapping = input.paramMapping;
+  if (input.enabled !== undefined) updates.enabled = input.enabled;
+
+  // Recompute nextFireAt for schedule triggers
+  if (existing.type === "schedule") {
+    const newConfig = input.config ?? (existing.config as Record<string, unknown> | null);
+    const newEnabled = input.enabled ?? existing.enabled;
+    const cronExpression = newConfig?.cronExpression as string | undefined;
+
+    if (newEnabled && cronExpression) {
+      updates.nextFireAt = computeNextFire(cronExpression);
+    } else {
+      updates.nextFireAt = null;
+    }
+  }
+
+  const [trigger] = await db
+    .update(workflowTriggers)
+    .set(updates)
+    .where(eq(workflowTriggers.id, id))
+    .returning();
+  return trigger ?? null;
+}
+
+export async function deleteWorkflowTrigger(id: string): Promise<boolean> {
+  const deleted = await db.delete(workflowTriggers).where(eq(workflowTriggers.id, id)).returning();
+  return deleted.length > 0;
+}
+
+// ── Schedule trigger evaluation ─────────────────────────────────────────────
+
+export async function getDueScheduleTriggers() {
+  const now = new Date();
+  return db
+    .select({
+      trigger: workflowTriggers,
+      workflow: workflows,
+    })
+    .from(workflowTriggers)
+    .innerJoin(workflows, eq(workflowTriggers.workflowId, workflows.id))
+    .where(
+      and(
+        eq(workflowTriggers.type, "schedule"),
+        eq(workflowTriggers.enabled, true),
+        eq(workflows.enabled, true),
+        lte(workflowTriggers.nextFireAt, now),
+      ),
+    );
+}
+
+export async function markTriggerFired(id: string, cronExpression: string) {
+  const now = new Date();
+  const nextFireAt = computeNextFire(cronExpression);
+  await db
+    .update(workflowTriggers)
+    .set({ lastFiredAt: now, nextFireAt, updatedAt: now })
+    .where(eq(workflowTriggers.id, id));
 }

@@ -17,6 +17,9 @@ const mockRetryWorkflowRun = vi.fn();
 const mockCancelWorkflowRun = vi.fn();
 const mockGetWorkflowRunLogs = vi.fn();
 const mockListWorkflowTriggers = vi.fn();
+const mockCreateWorkflowTrigger = vi.fn();
+const mockUpdateWorkflowTrigger = vi.fn();
+const mockDeleteWorkflowTrigger = vi.fn();
 
 const mockQueueAdd = vi.fn().mockResolvedValue({});
 vi.mock("../workers/workflow-worker.js", () => ({
@@ -37,6 +40,9 @@ vi.mock("../services/workflow-service.js", () => ({
   cancelWorkflowRun: (...args: unknown[]) => mockCancelWorkflowRun(...args),
   getWorkflowRunLogs: (...args: unknown[]) => mockGetWorkflowRunLogs(...args),
   listWorkflowTriggers: (...args: unknown[]) => mockListWorkflowTriggers(...args),
+  createWorkflowTrigger: (...args: unknown[]) => mockCreateWorkflowTrigger(...args),
+  updateWorkflowTrigger: (...args: unknown[]) => mockUpdateWorkflowTrigger(...args),
+  deleteWorkflowTrigger: (...args: unknown[]) => mockDeleteWorkflowTrigger(...args),
 }));
 
 import { workflowRoutes } from "./workflows.js";
@@ -429,6 +435,153 @@ describe("GET /api/workflow-runs/:id/logs", () => {
     mockGetWorkflowRunLogs.mockRejectedValue(new Error("Workflow run not found"));
 
     const res = await app.inject({ method: "GET", url: "/api/workflow-runs/nonexistent/logs" });
+
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+// ── Trigger routes ──────────────────────────────────────────────────────────
+
+describe("POST /api/workflows/:id/triggers", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("creates a schedule trigger", async () => {
+    mockCreateWorkflowTrigger.mockResolvedValue({
+      id: "t-1",
+      type: "schedule",
+      config: { cronExpression: "0 0 * * *" },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workflows/w-1/triggers",
+      payload: {
+        type: "schedule",
+        config: { cronExpression: "0 0 * * *" },
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json().trigger.type).toBe("schedule");
+    expect(mockCreateWorkflowTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowId: "w-1", type: "schedule" }),
+    );
+  });
+
+  it("rejects schedule trigger without cronExpression", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workflows/w-1/triggers",
+      payload: {
+        type: "schedule",
+        config: {},
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("cronExpression");
+  });
+
+  it("rejects schedule trigger with invalid cron expression", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workflows/w-1/triggers",
+      payload: {
+        type: "schedule",
+        config: { cronExpression: "not valid" },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("Invalid cron");
+  });
+
+  it("creates a manual trigger without cron validation", async () => {
+    mockCreateWorkflowTrigger.mockResolvedValue({ id: "t-2", type: "manual" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workflows/w-1/triggers",
+      payload: { type: "manual" },
+    });
+
+    expect(res.statusCode).toBe(201);
+  });
+});
+
+describe("PATCH /api/workflow-triggers/:id", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("updates a trigger", async () => {
+    mockUpdateWorkflowTrigger.mockResolvedValue({ id: "t-1", enabled: false });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/workflow-triggers/t-1",
+      payload: { enabled: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().trigger.enabled).toBe(false);
+  });
+
+  it("returns 404 when trigger not found", async () => {
+    mockUpdateWorkflowTrigger.mockResolvedValue(null);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/workflow-triggers/nonexistent",
+      payload: { enabled: false },
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("rejects invalid cron expression in config update", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/workflow-triggers/t-1",
+      payload: { config: { cronExpression: "bad cron" } },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("Invalid cron");
+  });
+});
+
+describe("DELETE /api/workflow-triggers/:id", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("deletes a trigger", async () => {
+    mockDeleteWorkflowTrigger.mockResolvedValue(true);
+
+    const res = await app.inject({ method: "DELETE", url: "/api/workflow-triggers/t-1" });
+
+    expect(res.statusCode).toBe(204);
+  });
+
+  it("returns 404 when trigger not found", async () => {
+    mockDeleteWorkflowTrigger.mockResolvedValue(false);
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/workflow-triggers/nonexistent",
+    });
 
     expect(res.statusCode).toBe(404);
   });

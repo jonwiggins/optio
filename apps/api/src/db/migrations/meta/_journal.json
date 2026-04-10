@@ -379,6 +379,13 @@
       "when": 1775792464000,
       "tag": "1775792464_workflow_run_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1775794444000,
+      "tag": "1775794444_workflow_trigger_schedule",
+      "breakpoints": true
     }
   ]
 }
