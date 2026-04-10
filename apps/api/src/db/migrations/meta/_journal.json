@@ -372,6 +372,13 @@
       "when": 1775792368000,
       "tag": "1775792368_workflow_pods",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1775792464000,
+      "tag": "1775792464_workflow_run_logs",
+      "breakpoints": true
     }
   ]
 }
