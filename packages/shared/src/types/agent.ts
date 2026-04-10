@@ -2,6 +2,7 @@ export type ClaudeAuthMode = "api-key" | "max-subscription";
 export type CodexAuthMode = "api-key" | "app-server";
 export type CopilotAuthMode = "github-token";
 export type GeminiAuthMode = "api-key" | "vertex-ai";
+export type OpenClawAuthMode = "api-key";
 
 export interface AgentTaskInput {
   taskId: string;
@@ -29,6 +30,8 @@ export interface AgentTaskInput {
   copilotEffort?: string;
   opencodeModel?: string;
   opencodeAgent?: string;
+  openclawModel?: string;
+  openclawAgent?: string;
   geminiAuthMode?: GeminiAuthMode;
   geminiModel?: string;
   geminiApprovalMode?: "default" | "auto_edit" | "yolo";

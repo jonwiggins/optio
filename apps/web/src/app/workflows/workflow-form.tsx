@@ -65,6 +65,7 @@ const AGENT_RUNTIMES = [
   { value: "copilot", label: "GitHub Copilot" },
   { value: "opencode", label: "OpenCode (Experimental)" },
   { value: "gemini", label: "Google Gemini" },
+  { value: "openclaw", label: "OpenClaw (Experimental)" },
 ];
 
 const TRIGGER_TYPES = [

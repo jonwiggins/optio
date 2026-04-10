@@ -92,6 +92,17 @@ const ERROR_PATTERNS: Array<{
     }),
   },
   {
+    pattern: /OPENCLAW_API_KEY/i,
+    classify: () => ({
+      category: "auth",
+      title: "OpenClaw API key missing",
+      description: "No OpenClaw API key is configured and the OpenClaw agent cannot authenticate.",
+      remedy:
+        "Go to Secrets and add OPENCLAW_API_KEY, or provide an ANTHROPIC_API_KEY or OPENAI_API_KEY instead.",
+      retryable: true,
+    }),
+  },
+  {
     pattern: /COPILOT_GITHUB_TOKEN|copilot.*auth|copilot.*unauthorized|subscription.*required/i,
     classify: () => ({
       category: "auth",

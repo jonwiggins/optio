@@ -50,6 +50,9 @@ RUN curl -fsSL https://opencode.ai/install | bash \
 # Google Gemini CLI
 RUN npm install -g @google/gemini-cli
 
+# OpenClaw CLI (experimental)
+RUN npm install -g openclaw || echo "WARN: openclaw install failed; openclaw agent will not be available in this image"
+
 # Python 3 (minimal — needed for setup file injection)
 RUN apt-get update && apt-get install -y python3 \
     && rm -rf /var/lib/apt/lists/*

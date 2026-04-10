@@ -19,6 +19,7 @@ import { parseCodexEvent } from "../services/codex-event-parser.js";
 import { parseCopilotEvent } from "../services/copilot-event-parser.js";
 import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
 import { parseGeminiEvent } from "../services/gemini-event-parser.js";
+import { parseOpenClawEvent } from "../services/openclaw-event-parser.js";
 import { checkExistingPr } from "../services/pr-detection-service.js";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
@@ -670,7 +671,9 @@ export function startTaskWorker() {
                     ? parseOpenCodeEvent(line, taskId)
                     : task.agentType === "gemini"
                       ? parseGeminiEvent(line, taskId)
-                      : parseClaudeEvent(line, taskId);
+                      : task.agentType === "openclaw"
+                        ? parseOpenClawEvent(line, taskId)
+                        : parseClaudeEvent(line, taskId);
             if (parsed.sessionId && !sessionId) {
               sessionId = parsed.sessionId;
               await taskService.updateTaskSession(taskId, sessionId);
@@ -770,7 +773,9 @@ export function startTaskWorker() {
                   ? parseOpenCodeEvent(lineBuf, taskId)
                   : task.agentType === "gemini"
                     ? parseGeminiEvent(lineBuf, taskId)
-                    : parseClaudeEvent(lineBuf, taskId);
+                    : task.agentType === "openclaw"
+                      ? parseOpenClawEvent(lineBuf, taskId)
+                      : parseClaudeEvent(lineBuf, taskId);
           for (const entry of parsed.entries) {
             await taskService.appendTaskLog(
               taskId,
@@ -1365,6 +1370,18 @@ export function buildAgentCommand(
         `  --approval-mode yolo${geminiModelFlag}`,
       ];
     }
+    case "openclaw": {
+      const openclawModelFlag = env.OPTIO_OPENCLAW_MODEL
+        ? ` --model ${JSON.stringify(env.OPTIO_OPENCLAW_MODEL)}`
+        : "";
+      const openclawAgentFlag = env.OPTIO_OPENCLAW_AGENT
+        ? ` --agent ${JSON.stringify(env.OPTIO_OPENCLAW_AGENT)}`
+        : "";
+      return [
+        `echo "[optio] Running OpenClaw (experimental)..."`,
+        `openclaw agent --output-format stream-json${openclawModelFlag}${openclawAgentFlag} "$OPTIO_PROMPT"`,
+      ];
+    }
     default:
       return [`echo "Unknown agent type: ${agentType}" && exit 1`];
   }
@@ -1424,6 +1441,21 @@ export function inferExitCode(agentType: string, logs: string): number {
       const hasModelError = /model.*not found|model_not_found|does not exist.*model/i.test(logs);
       const hasTurnLimit = /turn.?limit|exit code 53/i.test(logs);
       return hasErrorEvent || hasAuthError || hasQuotaError || hasModelError || hasTurnLimit
+        ? 1
+        : 0;
+    }
+    case "openclaw": {
+      // OpenClaw: similar to OpenCode — look for error events and provider-specific failures
+      const hasErrorEvent = logs.includes('"type":"error"') || logs.includes('"type": "error"');
+      const hasApiErrorEnvelope = /"error"\s*:\s*\{\s*"message"/.test(logs);
+      const hasAuthError =
+        /ANTHROPIC_API_KEY|OPENAI_API_KEY|OPENCLAW_API_KEY|invalid.*api.?key|unauthorized|authentication.*failed/i.test(
+          logs,
+        );
+      const hasModelError = /model_not_found|model.*not found|does not exist.*model/i.test(logs);
+      const hasFatalError =
+        logs.includes("fatal:") || logs.includes("Error: authentication_failed");
+      return hasErrorEvent || hasApiErrorEnvelope || hasAuthError || hasModelError || hasFatalError
         ? 1
         : 0;
     }

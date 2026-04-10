@@ -250,6 +250,7 @@ export default function NewTaskPage() {
               <option value="copilot">GitHub Copilot</option>
               <option value="opencode">OpenCode (Experimental)</option>
               <option value="gemini">Google Gemini</option>
+              <option value="openclaw">OpenClaw (Experimental)</option>
             </select>
           </div>
         </div>

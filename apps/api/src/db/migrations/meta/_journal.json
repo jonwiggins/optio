@@ -407,6 +407,13 @@
       "when": 1775809203000,
       "tag": "1775809203_planning_mode_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1775855324000,
+      "tag": "1775855324_openclaw_repo_columns",
+      "breakpoints": true
     }
   ]
 }

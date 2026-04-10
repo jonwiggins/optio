@@ -58,6 +58,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [copilotEffort, setCopilotEffort] = useState("");
   const [geminiModel, setGeminiModel] = useState("gemini-2.5-pro");
   const [geminiApprovalMode, setGeminiApprovalMode] = useState("yolo");
+  const [openclawModel, setOpenclawModel] = useState("");
   const [maxTurnsCoding, setMaxTurnsCoding] = useState(250);
   const [maxTurnsReview, setMaxTurnsReview] = useState(30);
   const [autoResume, setAutoResume] = useState(false);
@@ -135,6 +136,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setCopilotEffort(r.copilotEffort ?? "");
         setGeminiModel(r.geminiModel ?? "gemini-2.5-pro");
         setGeminiApprovalMode(r.geminiApprovalMode ?? "yolo");
+        setOpenclawModel(r.openclawModel ?? "");
         setMaxTurnsCoding(r.maxTurnsCoding ?? 250);
         setMaxTurnsReview(r.maxTurnsReview ?? 30);
         setReviewEnabled(r.reviewEnabled ?? false);
@@ -207,6 +209,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         copilotEffort: copilotEffort || undefined,
         geminiModel: geminiModel || undefined,
         geminiApprovalMode: geminiApprovalMode || undefined,
+        openclawModel: openclawModel || undefined,
         maxTurnsCoding,
         maxTurnsReview,
         reviewEnabled,
@@ -879,6 +882,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
           <option value="copilot">GitHub Copilot</option>
           <option value="opencode">OpenCode (Experimental)</option>
           <option value="gemini">Google Gemini</option>
+          <option value="openclaw">OpenClaw (Experimental)</option>
         </select>
       </section>
 
@@ -1021,6 +1025,23 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               <option value="default">Default</option>
             </select>
           </div>
+        </div>
+      </section>
+
+      {/* OpenClaw Settings */}
+      <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
+        <h2 className="text-sm font-medium">OpenClaw Settings</h2>
+        <p className="text-xs text-text-muted">
+          Configure OpenClaw model when using the OpenClaw agent for this repo.
+        </p>
+        <div>
+          <label className="block text-xs text-text-muted mb-1">Model</label>
+          <input
+            value={openclawModel}
+            onChange={(e) => setOpenclawModel(e.target.value)}
+            placeholder="Default (auto-detect)"
+            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+          />
         </div>
       </section>
 

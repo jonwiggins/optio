@@ -251,6 +251,8 @@ export const repos = pgTable(
     opencodeProvider: text("opencode_provider"), // "anthropic" | "openai" | ... for default provider inference
     geminiModel: text("gemini_model").default("gemini-2.5-pro"),
     geminiApprovalMode: text("gemini_approval_mode").default("yolo"), // "default" | "auto_edit" | "yolo"
+    openclawModel: text("openclaw_model"), // model selection, null = OpenClaw default
+    openclawAgent: text("openclaw_agent"), // named agent/preset, null = default
     maxTurnsCoding: integer("max_turns_coding"), // null = use global default (250)
     maxTurnsReview: integer("max_turns_review"), // null = use global default (10)
     autoResume: boolean("auto_resume").notNull().default(false),
