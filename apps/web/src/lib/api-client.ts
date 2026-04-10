@@ -1125,4 +1125,45 @@ export const api = {
     request<{ ok: boolean; recycled: number }>(`/api/repos/${repoId}/pods/recycle`, {
       method: "POST",
     }),
+
+  // Workflows
+  listWorkflows: () => request<{ workflows: any[] }>("/api/workflows"),
+
+  getWorkflow: (id: string) => request<{ workflow: any }>(`/api/workflows/${id}`),
+
+  createWorkflow: (data: {
+    name: string;
+    description?: string;
+    promptTemplate: string;
+    agentRuntime?: string;
+    model?: string;
+    maxTurns?: number;
+    budgetUsd?: string;
+    maxConcurrent?: number;
+    maxRetries?: number;
+    warmPoolSize?: number;
+    enabled?: boolean;
+    environmentSpec?: Record<string, unknown>;
+    paramsSchema?: Record<string, unknown>;
+  }) =>
+    request<{ workflow: any }>("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateWorkflow: (id: string, data: Record<string, unknown>) =>
+    request<{ workflow: any }>(`/api/workflows/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteWorkflow: (id: string) => request<void>(`/api/workflows/${id}`, { method: "DELETE" }),
+
+  getWorkflowRuns: (workflowId: string) =>
+    request<{ runs: any[] }>(`/api/workflows/${workflowId}/runs`),
+
+  getWorkflowTriggers: (workflowId: string) =>
+    request<{ triggers: any[] }>(`/api/workflows/${workflowId}/triggers`),
+
+  getWorkflowRun: (id: string) => request<{ run: any }>(`/api/workflow-runs/${id}`),
 };

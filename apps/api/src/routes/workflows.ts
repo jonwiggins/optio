@@ -96,6 +96,13 @@ export async function workflowRoutes(app: FastifyInstance) {
     reply.send({ runs });
   });
 
+  // List triggers for a workflow
+  app.get("/api/workflows/:id/triggers", async (req, reply) => {
+    const { id } = idParamsSchema.parse(req.params);
+    const triggers = await workflowService.listWorkflowTriggers(id);
+    reply.send({ triggers });
+  });
+
   // Get a single workflow run
   app.get("/api/workflow-runs/:id", async (req, reply) => {
     const { id } = idParamsSchema.parse(req.params);

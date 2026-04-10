@@ -17,6 +17,7 @@ import {
   Clock,
   FileText,
   Bot,
+  Workflow,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
 import { WorkspaceSwitcher } from "./workspace-switcher";
@@ -30,6 +31,7 @@ const MAIN_NAV = [
   { href: "/cluster", label: "Cluster", icon: Server },
   { href: "/costs", label: "Costs", icon: DollarSign },
   { href: "/schedules", label: "Schedules", icon: Clock },
+  { href: "/workflows", label: "Workflows", icon: Workflow },
   { href: "/templates", label: "Templates", icon: FileText },
 ];
 

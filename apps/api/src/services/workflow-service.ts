@@ -1,6 +1,6 @@
 import { eq, desc, sql, and } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { workflows, workflowRuns } from "../db/schema.js";
+import { workflows, workflowRuns, workflowTriggers } from "../db/schema.js";
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
 
@@ -211,4 +211,14 @@ export async function listWorkflowRuns(workflowId: string) {
 export async function getWorkflowRun(id: string) {
   const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, id));
   return run ?? null;
+}
+
+// ── Workflow Triggers ─────────────────────────────────────────────────────────
+
+export async function listWorkflowTriggers(workflowId: string) {
+  return db
+    .select()
+    .from(workflowTriggers)
+    .where(eq(workflowTriggers.workflowId, workflowId))
+    .orderBy(desc(workflowTriggers.createdAt));
 }
