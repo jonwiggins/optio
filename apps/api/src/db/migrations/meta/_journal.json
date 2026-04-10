@@ -358,6 +358,13 @@
       "when": 1775627754000,
       "tag": "1775627754_api_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1775791878000,
+      "tag": "1775791878_replace_workflow_tables",
+      "breakpoints": true
     }
   ]
 }

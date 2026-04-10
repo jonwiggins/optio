@@ -350,15 +350,6 @@ export async function transitionTask(
       .catch((err) => logger.warn({ err, taskId: id }, "Failed to cascade failure to dependents"));
   }
 
-  // Update workflow run status if this task is part of a workflow
-  if (updated[0].workflowRunId) {
-    import("./workflow-service.js")
-      .then(({ checkWorkflowRunCompletion }) =>
-        checkWorkflowRunCompletion(updated[0].workflowRunId!),
-      )
-      .catch((err) => logger.warn({ err, taskId: id }, "Failed to update workflow run status"));
-  }
-
   return updated[0];
 }
 

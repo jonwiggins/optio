@@ -131,39 +131,62 @@ export interface ReviewDraft {
   updatedAt: string;
 }
 
-export interface WorkflowStep {
-  id: string;
-  title: string;
-  prompt: string;
-  repoUrl?: string;
-  agentType?: string;
-  dependsOn?: string[];
-  condition?: {
-    type: "always" | "if_pr_opened" | "if_ci_passes" | "if_cost_under";
-    value?: string;
-  };
+// ── Workflow types (new data model) ──────────────────────────────────────────
+
+export enum WorkflowState {
+  QUEUED = "queued",
+  RUNNING = "running",
+  COMPLETED = "completed",
+  FAILED = "failed",
 }
 
-export interface WorkflowTemplate {
+export type WorkflowTriggerType = "manual" | "schedule" | "webhook";
+
+export interface Workflow {
   id: string;
   name: string;
-  description?: string;
   workspaceId?: string;
-  steps: WorkflowStep[];
-  status: "draft" | "active" | "archived";
-  createdBy?: string;
+  environmentSpec?: Record<string, unknown>;
+  promptTemplate: string;
+  paramsSchema?: Record<string, unknown>;
+  agentRuntime: string;
+  model?: string;
+  maxTurns?: number;
+  budgetUsd?: string;
+  maxConcurrent: number;
+  maxRetries: number;
+  warmPoolSize: number;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface WorkflowTrigger {
+  id: string;
+  workflowId: string;
+  type: WorkflowTriggerType;
+  config?: Record<string, unknown>;
+  paramMapping?: Record<string, unknown>;
+  enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface WorkflowRun {
   id: string;
-  workflowTemplateId: string;
-  workspaceId?: string;
-  status: "running" | "paused" | "completed" | "failed" | "cancelled";
-  taskMapping?: Record<string, string>;
-  createdBy?: string;
+  workflowId: string;
+  triggerId?: string;
+  params?: Record<string, unknown>;
+  state: WorkflowState;
+  output?: Record<string, unknown>;
+  costUsd?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  modelUsed?: string;
+  errorMessage?: string;
+  sessionId?: string;
+  podName?: string;
+  retryCount: number;
   createdAt: Date;
   updatedAt: Date;
-  completedAt?: Date;
 }

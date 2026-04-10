@@ -1,147 +1,146 @@
 import { eq, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { workflowTemplates, workflowRuns, tasks } from "../db/schema.js";
-import { TaskState, detectCycle, type DagEdge } from "@optio/shared";
-import * as taskService from "./task-service.js";
-import * as dependencyService from "./dependency-service.js";
-import { taskQueue } from "../workers/task-worker.js";
+import { workflows, workflowTriggers, workflowRuns, workflowPods } from "../db/schema.js";
+import {
+  WorkflowState,
+  canTransitionWorkflow,
+  InvalidWorkflowTransitionError,
+} from "@optio/shared";
 import { logger } from "../logger.js";
 
-// ── Workflow Template CRUD ───────────────────────────────────────────────────
+// ── Workflow CRUD ────────────────────────────────────────────────────────────
 
-export async function listWorkflowTemplates(workspaceId?: string) {
-  let query = db.select().from(workflowTemplates).orderBy(desc(workflowTemplates.createdAt));
+export async function listWorkflows(workspaceId?: string) {
+  let query = db.select().from(workflows).orderBy(desc(workflows.createdAt));
   if (workspaceId) {
-    query = query.where(eq(workflowTemplates.workspaceId, workspaceId)) as typeof query;
+    query = query.where(eq(workflows.workspaceId, workspaceId)) as typeof query;
   }
   return query;
 }
 
-export async function getWorkflowTemplate(id: string) {
-  const [template] = await db.select().from(workflowTemplates).where(eq(workflowTemplates.id, id));
-  return template ?? null;
+export async function getWorkflow(id: string) {
+  const [workflow] = await db.select().from(workflows).where(eq(workflows.id, id));
+  return workflow ?? null;
 }
 
-export async function createWorkflowTemplate(input: {
+export async function createWorkflow(input: {
   name: string;
-  description?: string;
-  steps: Array<{
-    id: string;
-    title: string;
-    prompt: string;
-    repoUrl?: string;
-    agentType?: string;
-    dependsOn?: string[];
-    condition?: { type: string; value?: string };
-  }>;
-  status?: string;
   workspaceId?: string;
-  createdBy?: string;
+  environmentSpec?: Record<string, unknown>;
+  promptTemplate: string;
+  paramsSchema?: Record<string, unknown>;
+  agentRuntime?: string;
+  model?: string;
+  maxTurns?: number;
+  budgetUsd?: string;
+  maxConcurrent?: number;
+  maxRetries?: number;
+  warmPoolSize?: number;
+  enabled?: boolean;
 }) {
-  // Validate DAG — no cycles in step dependencies
-  const edges: DagEdge[] = [];
-  for (const step of input.steps) {
-    for (const dep of step.dependsOn ?? []) {
-      edges.push({ from: step.id, to: dep });
-    }
-  }
-  const cycle = detectCycle(edges);
-  if (cycle) {
-    throw new Error(`Circular dependency in workflow steps: ${cycle.join(" → ")}`);
-  }
-
-  // Validate all dependsOn references point to valid step IDs
-  const stepIds = new Set(input.steps.map((s) => s.id));
-  for (const step of input.steps) {
-    for (const dep of step.dependsOn ?? []) {
-      if (!stepIds.has(dep)) {
-        throw new Error(`Step "${step.id}" depends on unknown step "${dep}"`);
-      }
-    }
-  }
-
-  const [template] = await db
-    .insert(workflowTemplates)
+  const [workflow] = await db
+    .insert(workflows)
     .values({
       name: input.name,
-      description: input.description,
-      steps: input.steps,
-      status: input.status ?? "draft",
       workspaceId: input.workspaceId,
-      createdBy: input.createdBy,
+      environmentSpec: input.environmentSpec,
+      promptTemplate: input.promptTemplate,
+      paramsSchema: input.paramsSchema,
+      agentRuntime: input.agentRuntime ?? "claude-code",
+      model: input.model,
+      maxTurns: input.maxTurns,
+      budgetUsd: input.budgetUsd,
+      maxConcurrent: input.maxConcurrent ?? 1,
+      maxRetries: input.maxRetries ?? 3,
+      warmPoolSize: input.warmPoolSize ?? 0,
+      enabled: input.enabled ?? true,
     })
     .returning();
-  return template;
+  return workflow;
 }
 
-export async function updateWorkflowTemplate(
+export async function updateWorkflow(
   id: string,
   input: {
     name?: string;
-    description?: string;
-    steps?: Array<{
-      id: string;
-      title: string;
-      prompt: string;
-      repoUrl?: string;
-      agentType?: string;
-      dependsOn?: string[];
-      condition?: { type: string; value?: string };
-    }>;
-    status?: string;
+    environmentSpec?: Record<string, unknown>;
+    promptTemplate?: string;
+    paramsSchema?: Record<string, unknown>;
+    agentRuntime?: string;
+    model?: string;
+    maxTurns?: number;
+    budgetUsd?: string;
+    maxConcurrent?: number;
+    maxRetries?: number;
+    warmPoolSize?: number;
+    enabled?: boolean;
   },
 ) {
-  // Validate DAG if steps are being updated
-  if (input.steps) {
-    const edges: DagEdge[] = [];
-    for (const step of input.steps) {
-      for (const dep of step.dependsOn ?? []) {
-        edges.push({ from: step.id, to: dep });
-      }
-    }
-    const cycle = detectCycle(edges);
-    if (cycle) {
-      throw new Error(`Circular dependency in workflow steps: ${cycle.join(" → ")}`);
-    }
-    const stepIds = new Set(input.steps.map((s) => s.id));
-    for (const step of input.steps) {
-      for (const dep of step.dependsOn ?? []) {
-        if (!stepIds.has(dep)) {
-          throw new Error(`Step "${step.id}" depends on unknown step "${dep}"`);
-        }
-      }
-    }
-  }
-
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (input.name !== undefined) updates.name = input.name;
-  if (input.description !== undefined) updates.description = input.description;
-  if (input.steps !== undefined) updates.steps = input.steps;
-  if (input.status !== undefined) updates.status = input.status;
+  if (input.environmentSpec !== undefined) updates.environmentSpec = input.environmentSpec;
+  if (input.promptTemplate !== undefined) updates.promptTemplate = input.promptTemplate;
+  if (input.paramsSchema !== undefined) updates.paramsSchema = input.paramsSchema;
+  if (input.agentRuntime !== undefined) updates.agentRuntime = input.agentRuntime;
+  if (input.model !== undefined) updates.model = input.model;
+  if (input.maxTurns !== undefined) updates.maxTurns = input.maxTurns;
+  if (input.budgetUsd !== undefined) updates.budgetUsd = input.budgetUsd;
+  if (input.maxConcurrent !== undefined) updates.maxConcurrent = input.maxConcurrent;
+  if (input.maxRetries !== undefined) updates.maxRetries = input.maxRetries;
+  if (input.warmPoolSize !== undefined) updates.warmPoolSize = input.warmPoolSize;
+  if (input.enabled !== undefined) updates.enabled = input.enabled;
 
-  const [updated] = await db
-    .update(workflowTemplates)
-    .set(updates)
-    .where(eq(workflowTemplates.id, id))
-    .returning();
+  const [updated] = await db.update(workflows).set(updates).where(eq(workflows.id, id)).returning();
   return updated ?? null;
 }
 
-export async function deleteWorkflowTemplate(id: string): Promise<boolean> {
-  const deleted = await db
-    .delete(workflowTemplates)
-    .where(eq(workflowTemplates.id, id))
+export async function deleteWorkflow(id: string): Promise<boolean> {
+  const deleted = await db.delete(workflows).where(eq(workflows.id, id)).returning();
+  return deleted.length > 0;
+}
+
+// ── Workflow Triggers ────────────────────────────────────────────────────────
+
+export async function listWorkflowTriggers(workflowId: string) {
+  return db
+    .select()
+    .from(workflowTriggers)
+    .where(eq(workflowTriggers.workflowId, workflowId))
+    .orderBy(desc(workflowTriggers.createdAt));
+}
+
+export async function createWorkflowTrigger(input: {
+  workflowId: string;
+  type: "manual" | "schedule" | "webhook";
+  config?: Record<string, unknown>;
+  paramMapping?: Record<string, unknown>;
+  enabled?: boolean;
+}) {
+  const [trigger] = await db
+    .insert(workflowTriggers)
+    .values({
+      workflowId: input.workflowId,
+      type: input.type,
+      config: input.config,
+      paramMapping: input.paramMapping,
+      enabled: input.enabled ?? true,
+    })
     .returning();
+  return trigger;
+}
+
+export async function deleteWorkflowTrigger(id: string): Promise<boolean> {
+  const deleted = await db.delete(workflowTriggers).where(eq(workflowTriggers.id, id)).returning();
   return deleted.length > 0;
 }
 
 // ── Workflow Runs ────────────────────────────────────────────────────────────
 
-export async function listWorkflowRuns(templateId: string) {
+export async function listWorkflowRuns(workflowId: string) {
   return db
     .select()
     .from(workflowRuns)
-    .where(eq(workflowRuns.workflowTemplateId, templateId))
+    .where(eq(workflowRuns.workflowId, workflowId))
     .orderBy(desc(workflowRuns.createdAt));
 }
 
@@ -150,144 +149,102 @@ export async function getWorkflowRun(id: string) {
   return run ?? null;
 }
 
-/**
- * Instantiate and run a workflow from a template.
- * Creates tasks for each step and wires up dependencies between them.
- */
-export async function runWorkflow(
-  templateId: string,
-  opts?: { workspaceId?: string; createdBy?: string; repoUrlOverride?: string },
-) {
-  const template = await getWorkflowTemplate(templateId);
-  if (!template) throw new Error("Workflow template not found");
-  if (template.status === "archived") throw new Error("Cannot run an archived workflow");
+export async function createWorkflowRun(input: {
+  workflowId: string;
+  triggerId?: string;
+  params?: Record<string, unknown>;
+}) {
+  const workflow = await getWorkflow(input.workflowId);
+  if (!workflow) throw new Error("Workflow not found");
+  if (!workflow.enabled) throw new Error("Workflow is disabled");
 
-  const steps = template.steps as Array<{
-    id: string;
-    title: string;
-    prompt: string;
-    repoUrl?: string;
-    agentType?: string;
-    dependsOn?: string[];
-    condition?: { type: string; value?: string };
-  }>;
-
-  // Create the workflow run record
   const [run] = await db
     .insert(workflowRuns)
     .values({
-      workflowTemplateId: templateId,
-      workspaceId: opts?.workspaceId,
-      createdBy: opts?.createdBy,
-      status: "running",
-      taskMapping: {},
+      workflowId: input.workflowId,
+      triggerId: input.triggerId,
+      params: input.params,
+      state: "queued",
     })
     .returning();
 
-  const taskMapping: Record<string, string> = {};
-
-  // Create tasks for each step
-  for (const step of steps) {
-    const repoUrl = opts?.repoUrlOverride ?? step.repoUrl;
-    if (!repoUrl) {
-      throw new Error(`Step "${step.id}" has no repoUrl and no override was provided`);
-    }
-    const task = await taskService.createTask({
-      title: step.title,
-      prompt: step.prompt,
-      repoUrl,
-      agentType: step.agentType ?? "claude-code", // workflow steps define their own agent; repo default not used here
-      workspaceId: opts?.workspaceId ?? null,
-      createdBy: opts?.createdBy,
-    });
-    taskMapping[step.id] = task.id;
-
-    // Store workflow run ID on the task
-    await db.update(tasks).set({ workflowRunId: run.id }).where(eq(tasks.id, task.id));
-  }
-
-  // Wire up dependencies between tasks based on step definitions
-  for (const step of steps) {
-    if (step.dependsOn && step.dependsOn.length > 0) {
-      const taskId = taskMapping[step.id];
-      const depTaskIds = step.dependsOn.map((depStepId) => {
-        const depTaskId = taskMapping[depStepId];
-        if (!depTaskId) throw new Error(`Missing task for step "${depStepId}"`);
-        return depTaskId;
-      });
-      await dependencyService.addDependencies(taskId, depTaskIds);
-    }
-  }
-
-  // Update run with task mapping
-  await db
-    .update(workflowRuns)
-    .set({ taskMapping, updatedAt: new Date() })
-    .where(eq(workflowRuns.id, run.id));
-
-  // Start tasks that have no dependencies (roots)
-  for (const step of steps) {
-    const taskId = taskMapping[step.id];
-    const hasDeps = step.dependsOn && step.dependsOn.length > 0;
-
-    if (hasDeps) {
-      // Task waits for dependencies
-      await taskService.transitionTask(taskId, TaskState.WAITING_ON_DEPS, "workflow_start");
-    } else {
-      // No dependencies — queue immediately
-      await taskService.transitionTask(taskId, TaskState.QUEUED, "workflow_start");
-      await taskQueue.add(
-        "process-task",
-        { taskId },
-        { jobId: `${taskId}-workflow-${Date.now()}`, priority: 100 },
-      );
-    }
-  }
-
-  logger.info(
-    { workflowRunId: run.id, templateId, taskCount: steps.length },
-    "Workflow run started",
-  );
-
-  return { ...run, taskMapping };
+  logger.info({ workflowRunId: run.id, workflowId: input.workflowId }, "Workflow run created");
+  return run;
 }
 
-/**
- * Check if a workflow run is complete (all tasks are terminal).
- * Called by the task worker after any task in a workflow finishes.
- */
-export async function checkWorkflowRunCompletion(workflowRunId: string): Promise<void> {
-  const run = await getWorkflowRun(workflowRunId);
-  if (!run || run.status !== "running") return;
+export async function transitionWorkflowRun(
+  id: string,
+  toState: WorkflowState,
+  updates?: {
+    output?: Record<string, unknown>;
+    costUsd?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    modelUsed?: string;
+    errorMessage?: string;
+    sessionId?: string;
+    podName?: string;
+  },
+): Promise<void> {
+  const run = await getWorkflowRun(id);
+  if (!run) throw new Error("Workflow run not found");
 
-  const mapping = (run.taskMapping ?? {}) as Record<string, string>;
-  const taskIds = Object.values(mapping);
-  if (taskIds.length === 0) return;
-
-  const allTasks = await Promise.all(taskIds.map((id) => taskService.getTask(id)));
-
-  const allCompleted = allTasks.every((t) => t?.state === TaskState.COMPLETED);
-  const anyFailed = allTasks.some(
-    (t) => t?.state === TaskState.FAILED || t?.state === TaskState.CANCELLED,
-  );
-  const allTerminal = allTasks.every(
-    (t) =>
-      t?.state === TaskState.COMPLETED ||
-      t?.state === TaskState.FAILED ||
-      t?.state === TaskState.CANCELLED,
-  );
-
-  if (allCompleted) {
-    await db
-      .update(workflowRuns)
-      .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
-      .where(eq(workflowRuns.id, workflowRunId));
-    logger.info({ workflowRunId }, "Workflow run completed");
-  } else if (allTerminal && anyFailed) {
-    await db
-      .update(workflowRuns)
-      .set({ status: "failed", completedAt: new Date(), updatedAt: new Date() })
-      .where(eq(workflowRuns.id, workflowRunId));
-    logger.info({ workflowRunId }, "Workflow run failed");
+  const fromState = run.state as WorkflowState;
+  if (!canTransitionWorkflow(fromState, toState)) {
+    throw new InvalidWorkflowTransitionError(fromState, toState);
   }
+
+  const setValues: Record<string, unknown> = {
+    state: toState,
+    updatedAt: new Date(),
+  };
+  if (updates?.output !== undefined) setValues.output = updates.output;
+  if (updates?.costUsd !== undefined) setValues.costUsd = updates.costUsd;
+  if (updates?.inputTokens !== undefined) setValues.inputTokens = updates.inputTokens;
+  if (updates?.outputTokens !== undefined) setValues.outputTokens = updates.outputTokens;
+  if (updates?.modelUsed !== undefined) setValues.modelUsed = updates.modelUsed;
+  if (updates?.errorMessage !== undefined) setValues.errorMessage = updates.errorMessage;
+  if (updates?.sessionId !== undefined) setValues.sessionId = updates.sessionId;
+  if (updates?.podName !== undefined) setValues.podName = updates.podName;
+
+  // Increment retryCount when re-queuing from failed
+  if (fromState === WorkflowState.FAILED && toState === WorkflowState.QUEUED) {
+    setValues.retryCount = run.retryCount + 1;
+  }
+
+  await db.update(workflowRuns).set(setValues).where(eq(workflowRuns.id, id));
+
+  logger.info({ workflowRunId: id, from: fromState, to: toState }, "Workflow run transitioned");
+}
+
+// ── Workflow Pods ────────────────────────────────────────────────────────────
+
+export async function listWorkflowPods(workflowId: string) {
+  return db
+    .select()
+    .from(workflowPods)
+    .where(eq(workflowPods.workflowId, workflowId))
+    .orderBy(desc(workflowPods.createdAt));
+}
+
+export async function getWorkflowPod(id: string) {
+  const [pod] = await db.select().from(workflowPods).where(eq(workflowPods.id, id));
+  return pod ?? null;
+}
+
+export async function createWorkflowPod(input: { workflowId: string; podName?: string }) {
+  const [pod] = await db
+    .insert(workflowPods)
+    .values({
+      workflowId: input.workflowId,
+      podName: input.podName,
+      state: "provisioning",
+    })
+    .returning();
+  return pod;
+}
+
+export async function deleteWorkflowPod(id: string): Promise<boolean> {
+  const deleted = await db.delete(workflowPods).where(eq(workflowPods.id, id)).returning();
+  return deleted.length > 0;
 }

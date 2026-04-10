@@ -882,48 +882,51 @@ export const api = {
   removeTaskDependency: (taskId: string, depTaskId: string) =>
     request<void>(`/api/tasks/${taskId}/dependencies/${depTaskId}`, { method: "DELETE" }),
 
-  // Workflow Templates
-  listWorkflows: () => request<{ templates: any[] }>("/api/workflow-templates"),
+  // Workflows
+  listWorkflows: () => request<{ workflows: any[] }>("/api/workflows"),
 
-  getWorkflow: (id: string) => request<{ template: any }>(`/api/workflow-templates/${id}`),
+  getWorkflow: (id: string) => request<{ workflow: any }>(`/api/workflows/${id}`),
 
   createWorkflow: (data: {
     name: string;
-    description?: string;
-    steps: Array<{
-      id: string;
-      title: string;
-      prompt: string;
-      repoUrl?: string;
-      agentType?: string;
-      dependsOn?: string[];
-    }>;
-    status?: string;
+    promptTemplate: string;
+    agentRuntime?: string;
+    model?: string;
+    maxTurns?: number;
+    budgetUsd?: string;
+    maxConcurrent?: number;
+    maxRetries?: number;
+    warmPoolSize?: number;
+    enabled?: boolean;
+    environmentSpec?: Record<string, unknown>;
+    paramsSchema?: Record<string, unknown>;
   }) =>
-    request<{ template: any }>("/api/workflow-templates", {
+    request<{ workflow: any }>("/api/workflows", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   updateWorkflow: (id: string, data: Record<string, unknown>) =>
-    request<{ template: any }>(`/api/workflow-templates/${id}`, {
+    request<{ workflow: any }>(`/api/workflows/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
 
-  deleteWorkflow: (id: string) =>
-    request<void>(`/api/workflow-templates/${id}`, { method: "DELETE" }),
+  deleteWorkflow: (id: string) => request<void>(`/api/workflows/${id}`, { method: "DELETE" }),
 
-  runWorkflow: (templateId: string, data?: { repoUrlOverride?: string }) =>
-    request<{ workflowRun: any }>(`/api/workflow-templates/${templateId}/run`, {
+  runWorkflow: (
+    workflowId: string,
+    data?: { triggerId?: string; params?: Record<string, unknown> },
+  ) =>
+    request<{ run: any }>(`/api/workflows/${workflowId}/runs`, {
       method: "POST",
       body: JSON.stringify(data ?? {}),
     }),
 
-  getWorkflowRuns: (templateId: string) =>
-    request<{ runs: any[] }>(`/api/workflow-templates/${templateId}/runs`),
+  getWorkflowRuns: (workflowId: string) =>
+    request<{ runs: any[] }>(`/api/workflows/${workflowId}/runs`),
 
-  getWorkflowRun: (id: string) => request<{ workflowRun: any }>(`/api/workflow-runs/${id}`),
+  getWorkflowRun: (id: string) => request<{ run: any }>(`/api/workflow-runs/${id}`),
 
   // MCP Servers
   listMcpServers: (scope?: string) => {

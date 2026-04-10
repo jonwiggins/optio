@@ -105,16 +105,19 @@ vi.mock("../services/interactive-session-service.js", () => ({
 }));
 
 // workflows.ts mocks
-const mockRunWorkflow = vi.fn();
+const mockCreateWorkflowRun = vi.fn();
 vi.mock("../services/workflow-service.js", () => ({
-  listWorkflowTemplates: vi.fn().mockResolvedValue([]),
-  getWorkflowTemplate: vi.fn().mockResolvedValue(null),
-  createWorkflowTemplate: vi.fn(),
-  updateWorkflowTemplate: vi.fn(),
-  deleteWorkflowTemplate: vi.fn(),
-  runWorkflow: (...args: unknown[]) => mockRunWorkflow(...args),
+  listWorkflows: vi.fn().mockResolvedValue([]),
+  getWorkflow: vi.fn().mockResolvedValue(null),
+  createWorkflow: vi.fn(),
+  updateWorkflow: vi.fn(),
+  deleteWorkflow: vi.fn(),
+  listWorkflowTriggers: vi.fn().mockResolvedValue([]),
+  createWorkflowTrigger: vi.fn(),
+  deleteWorkflowTrigger: vi.fn(),
   listWorkflowRuns: vi.fn().mockResolvedValue([]),
   getWorkflowRun: vi.fn().mockResolvedValue(null),
+  createWorkflowRun: (...args: unknown[]) => mockCreateWorkflowRun(...args),
 }));
 
 // tasks.ts mocks
@@ -322,30 +325,30 @@ describe("workflows route body validation", () => {
     await app.ready();
   });
 
-  it("rejects POST /api/workflow-templates/:id/run with wrong type for repoUrl", async () => {
+  it("rejects POST /api/workflows/:id/runs with wrong type for triggerId", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/workflow-templates/t1/run",
-      payload: { repoUrl: 42 },
+      url: "/api/workflows/t1/runs",
+      payload: { triggerId: 42 },
     });
     expect(res.statusCode).toBe(400);
   });
 
-  it("accepts POST /api/workflow-templates/:id/run with valid optional body", async () => {
-    mockRunWorkflow.mockResolvedValue({ id: "run-1" });
+  it("accepts POST /api/workflows/:id/runs with valid optional body", async () => {
+    mockCreateWorkflowRun.mockResolvedValue({ id: "run-1", state: "queued" });
     const res = await app.inject({
       method: "POST",
-      url: "/api/workflow-templates/t1/run",
-      payload: { repoUrl: "https://github.com/org/repo" },
+      url: "/api/workflows/t1/runs",
+      payload: { triggerId: "tr-1" },
     });
     expect(res.statusCode).toBe(201);
   });
 
-  it("accepts POST /api/workflow-templates/:id/run with empty body", async () => {
-    mockRunWorkflow.mockResolvedValue({ id: "run-1" });
+  it("accepts POST /api/workflows/:id/runs with empty body", async () => {
+    mockCreateWorkflowRun.mockResolvedValue({ id: "run-1", state: "queued" });
     const res = await app.inject({
       method: "POST",
-      url: "/api/workflow-templates/t1/run",
+      url: "/api/workflows/t1/runs",
       payload: {},
     });
     expect(res.statusCode).toBe(201);

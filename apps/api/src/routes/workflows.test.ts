@@ -4,24 +4,30 @@ import type { FastifyInstance } from "fastify";
 
 // ─── Mocks ───
 
-const mockListWorkflowTemplates = vi.fn();
-const mockGetWorkflowTemplate = vi.fn();
-const mockCreateWorkflowTemplate = vi.fn();
-const mockUpdateWorkflowTemplate = vi.fn();
-const mockDeleteWorkflowTemplate = vi.fn();
-const mockRunWorkflow = vi.fn();
+const mockListWorkflows = vi.fn();
+const mockGetWorkflow = vi.fn();
+const mockCreateWorkflow = vi.fn();
+const mockUpdateWorkflow = vi.fn();
+const mockDeleteWorkflow = vi.fn();
+const mockListWorkflowTriggers = vi.fn();
+const mockCreateWorkflowTrigger = vi.fn();
+const mockDeleteWorkflowTrigger = vi.fn();
 const mockListWorkflowRuns = vi.fn();
 const mockGetWorkflowRun = vi.fn();
+const mockCreateWorkflowRun = vi.fn();
 
 vi.mock("../services/workflow-service.js", () => ({
-  listWorkflowTemplates: (...args: unknown[]) => mockListWorkflowTemplates(...args),
-  getWorkflowTemplate: (...args: unknown[]) => mockGetWorkflowTemplate(...args),
-  createWorkflowTemplate: (...args: unknown[]) => mockCreateWorkflowTemplate(...args),
-  updateWorkflowTemplate: (...args: unknown[]) => mockUpdateWorkflowTemplate(...args),
-  deleteWorkflowTemplate: (...args: unknown[]) => mockDeleteWorkflowTemplate(...args),
-  runWorkflow: (...args: unknown[]) => mockRunWorkflow(...args),
+  listWorkflows: (...args: unknown[]) => mockListWorkflows(...args),
+  getWorkflow: (...args: unknown[]) => mockGetWorkflow(...args),
+  createWorkflow: (...args: unknown[]) => mockCreateWorkflow(...args),
+  updateWorkflow: (...args: unknown[]) => mockUpdateWorkflow(...args),
+  deleteWorkflow: (...args: unknown[]) => mockDeleteWorkflow(...args),
+  listWorkflowTriggers: (...args: unknown[]) => mockListWorkflowTriggers(...args),
+  createWorkflowTrigger: (...args: unknown[]) => mockCreateWorkflowTrigger(...args),
+  deleteWorkflowTrigger: (...args: unknown[]) => mockDeleteWorkflowTrigger(...args),
   listWorkflowRuns: (...args: unknown[]) => mockListWorkflowRuns(...args),
   getWorkflowRun: (...args: unknown[]) => mockGetWorkflowRun(...args),
+  createWorkflowRun: (...args: unknown[]) => mockCreateWorkflowRun(...args),
 }));
 
 import { workflowRoutes } from "./workflows.js";
@@ -40,9 +46,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
   return app;
 }
 
-const mockStep = { id: "step-1", title: "Step 1", prompt: "Do step 1" };
-
-describe("GET /api/workflow-templates", () => {
+describe("GET /api/workflows", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -50,18 +54,18 @@ describe("GET /api/workflow-templates", () => {
     app = await buildTestApp();
   });
 
-  it("lists templates scoped to workspace", async () => {
-    mockListWorkflowTemplates.mockResolvedValue([{ id: "wf-1", name: "Deploy" }]);
+  it("lists workflows scoped to workspace", async () => {
+    mockListWorkflows.mockResolvedValue([{ id: "wf-1", name: "Deploy" }]);
 
-    const res = await app.inject({ method: "GET", url: "/api/workflow-templates" });
+    const res = await app.inject({ method: "GET", url: "/api/workflows" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().templates).toHaveLength(1);
-    expect(mockListWorkflowTemplates).toHaveBeenCalledWith("ws-1");
+    expect(res.json().workflows).toHaveLength(1);
+    expect(mockListWorkflows).toHaveBeenCalledWith("ws-1");
   });
 });
 
-describe("POST /api/workflow-templates", () => {
+describe("POST /api/workflows", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -69,33 +73,34 @@ describe("POST /api/workflow-templates", () => {
     app = await buildTestApp();
   });
 
-  it("creates a workflow template", async () => {
-    mockCreateWorkflowTemplate.mockResolvedValue({ id: "wf-1", name: "Deploy" });
+  it("creates a workflow", async () => {
+    mockCreateWorkflow.mockResolvedValue({ id: "wf-1", name: "Deploy" });
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/workflow-templates",
-      payload: { name: "Deploy", steps: [mockStep] },
+      url: "/api/workflows",
+      payload: { name: "Deploy", promptTemplate: "Do the deploy" },
     });
 
     expect(res.statusCode).toBe(201);
-    expect(mockCreateWorkflowTemplate).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Deploy", workspaceId: "ws-1", createdBy: "user-1" }),
+    expect(mockCreateWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Deploy", workspaceId: "ws-1" }),
     );
   });
 
-  it("rejects empty steps array (Zod throws)", async () => {
+  it("rejects missing promptTemplate", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/workflow-templates",
-      payload: { name: "Empty", steps: [] },
+      url: "/api/workflows",
+      payload: { name: "Deploy" },
     });
 
+    // Zod validation error
     expect(res.statusCode).toBe(500);
   });
 });
 
-describe("POST /api/workflow-templates/:id/run", () => {
+describe("POST /api/workflows/:id/runs", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -103,28 +108,27 @@ describe("POST /api/workflow-templates/:id/run", () => {
     app = await buildTestApp();
   });
 
-  it("runs a workflow", async () => {
-    mockRunWorkflow.mockResolvedValue({ id: "run-1", status: "running" });
+  it("creates a workflow run", async () => {
+    mockCreateWorkflowRun.mockResolvedValue({ id: "run-1", state: "queued" });
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/workflow-templates/wf-1/run",
+      url: "/api/workflows/wf-1/runs",
       payload: {},
     });
 
     expect(res.statusCode).toBe(201);
-    expect(mockRunWorkflow).toHaveBeenCalledWith(
-      "wf-1",
-      expect.objectContaining({ workspaceId: "ws-1" }),
+    expect(mockCreateWorkflowRun).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowId: "wf-1" }),
     );
   });
 
-  it("returns 400 when run fails", async () => {
-    mockRunWorkflow.mockRejectedValue(new Error("Template not found"));
+  it("returns 400 when run creation fails", async () => {
+    mockCreateWorkflowRun.mockRejectedValue(new Error("Workflow not found"));
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/workflow-templates/nonexistent/run",
+      url: "/api/workflows/nonexistent/runs",
       payload: {},
     });
 
@@ -152,6 +156,31 @@ describe("GET /api/workflow-runs/:id", () => {
     mockGetWorkflowRun.mockResolvedValue(null);
 
     const res = await app.inject({ method: "GET", url: "/api/workflow-runs/nonexistent" });
+
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("DELETE /api/workflows/:id", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("deletes a workflow", async () => {
+    mockDeleteWorkflow.mockResolvedValue(true);
+
+    const res = await app.inject({ method: "DELETE", url: "/api/workflows/wf-1" });
+
+    expect(res.statusCode).toBe(204);
+  });
+
+  it("returns 404 for nonexistent workflow", async () => {
+    mockDeleteWorkflow.mockResolvedValue(false);
+
+    const res = await app.inject({ method: "DELETE", url: "/api/workflows/nonexistent" });
 
     expect(res.statusCode).toBe(404);
   });

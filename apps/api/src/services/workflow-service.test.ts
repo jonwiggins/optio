@@ -10,35 +10,26 @@ vi.mock("../db/client.js", () => ({
 }));
 
 vi.mock("../db/schema.js", () => ({
-  workflowTemplates: {
-    id: "workflow_templates.id",
-    workspaceId: "workflow_templates.workspace_id",
-    createdAt: "workflow_templates.created_at",
+  workflows: {
+    id: "workflows.id",
+    workspaceId: "workflows.workspace_id",
+    createdAt: "workflows.created_at",
+  },
+  workflowTriggers: {
+    id: "workflow_triggers.id",
+    workflowId: "workflow_triggers.workflow_id",
+    createdAt: "workflow_triggers.created_at",
   },
   workflowRuns: {
     id: "workflow_runs.id",
-    workflowTemplateId: "workflow_runs.workflow_template_id",
+    workflowId: "workflow_runs.workflow_id",
+    state: "workflow_runs.state",
     createdAt: "workflow_runs.created_at",
   },
-  tasks: {
-    id: "tasks.id",
-    workflowRunId: "tasks.workflow_run_id",
-  },
-}));
-
-vi.mock("./task-service.js", () => ({
-  getTask: vi.fn(),
-  createTask: vi.fn(),
-  transitionTask: vi.fn(),
-}));
-
-vi.mock("./dependency-service.js", () => ({
-  addDependencies: vi.fn(),
-}));
-
-vi.mock("../workers/task-worker.js", () => ({
-  taskQueue: {
-    add: vi.fn(),
+  workflowPods: {
+    id: "workflow_pods.id",
+    workflowId: "workflow_pods.workflow_id",
+    createdAt: "workflow_pods.created_at",
   },
 }));
 
@@ -55,28 +46,29 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
-// Must mock @optio/shared detectCycle
 vi.mock("@optio/shared", async () => {
   const actual = await vi.importActual("@optio/shared");
-  return {
-    ...actual,
-  };
+  return { ...actual };
 });
 
 import { db } from "../db/client.js";
-import * as taskService from "./task-service.js";
-import * as dependencyService from "./dependency-service.js";
-import { taskQueue } from "../workers/task-worker.js";
 import {
-  listWorkflowTemplates,
-  getWorkflowTemplate,
-  createWorkflowTemplate,
-  updateWorkflowTemplate,
-  deleteWorkflowTemplate,
+  listWorkflows,
+  getWorkflow,
+  createWorkflow,
+  updateWorkflow,
+  deleteWorkflow,
+  listWorkflowTriggers,
+  createWorkflowTrigger,
+  deleteWorkflowTrigger,
   listWorkflowRuns,
   getWorkflowRun,
-  runWorkflow,
-  checkWorkflowRunCompletion,
+  createWorkflowRun,
+  transitionWorkflowRun,
+  listWorkflowPods,
+  getWorkflowPod,
+  createWorkflowPod,
+  deleteWorkflowPod,
 } from "./workflow-service.js";
 
 describe("workflow-service", () => {
@@ -84,43 +76,44 @@ describe("workflow-service", () => {
     vi.clearAllMocks();
   });
 
-  describe("listWorkflowTemplates", () => {
-    it("lists all templates ordered by createdAt", async () => {
-      const templates = [{ id: "wt-1", name: "Deploy" }];
-      const mockWhere = vi.fn().mockResolvedValue(templates);
+  // ── Workflow CRUD ──────────────────────────────────────────────────────────
+
+  describe("listWorkflows", () => {
+    it("lists all workflows ordered by createdAt", async () => {
+      const items = [{ id: "wf-1", name: "Deploy" }];
+      const mockWhere = vi.fn().mockResolvedValue(items);
       const mockOrderBy = vi.fn().mockReturnValue({ where: mockWhere });
       const mockFrom = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
       (db.select as any) = vi.fn().mockReturnValue({ from: mockFrom });
 
-      // Without workspaceId, should not call where
-      mockOrderBy.mockResolvedValue(templates);
-      const result = await listWorkflowTemplates();
-      expect(result).toEqual(templates);
+      mockOrderBy.mockResolvedValue(items);
+      const result = await listWorkflows();
+      expect(result).toEqual(items);
     });
 
     it("filters by workspaceId when provided", async () => {
-      const templates = [{ id: "wt-1", name: "Deploy" }];
-      const mockWhere = vi.fn().mockResolvedValue(templates);
+      const items = [{ id: "wf-1", name: "Deploy" }];
+      const mockWhere = vi.fn().mockResolvedValue(items);
       const mockOrderBy = vi.fn().mockReturnValue({ where: mockWhere });
       const mockFrom = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
       (db.select as any) = vi.fn().mockReturnValue({ from: mockFrom });
 
-      const result = await listWorkflowTemplates("ws-1");
+      const result = await listWorkflows("ws-1");
       expect(mockWhere).toHaveBeenCalled();
     });
   });
 
-  describe("getWorkflowTemplate", () => {
-    it("returns template when found", async () => {
-      const template = { id: "wt-1", name: "Deploy" };
+  describe("getWorkflow", () => {
+    it("returns workflow when found", async () => {
+      const workflow = { id: "wf-1", name: "Deploy" };
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([template]),
+          where: vi.fn().mockResolvedValue([workflow]),
         }),
       });
 
-      const result = await getWorkflowTemplate("wt-1");
-      expect(result).toEqual(template);
+      const result = await getWorkflow("wf-1");
+      expect(result).toEqual(workflow);
     });
 
     it("returns null when not found", async () => {
@@ -130,73 +123,53 @@ describe("workflow-service", () => {
         }),
       });
 
-      const result = await getWorkflowTemplate("nonexistent");
+      const result = await getWorkflow("nonexistent");
       expect(result).toBeNull();
     });
   });
 
-  describe("createWorkflowTemplate", () => {
-    it("creates a template with valid DAG", async () => {
-      const created = { id: "wt-1", name: "Pipeline", steps: [] };
+  describe("createWorkflow", () => {
+    it("creates a workflow with required fields", async () => {
+      const created = { id: "wf-1", name: "Pipeline", promptTemplate: "Do stuff" };
       (db.insert as any) = vi.fn().mockReturnValue({
         values: vi.fn().mockReturnValue({
           returning: vi.fn().mockResolvedValue([created]),
         }),
       });
 
-      const result = await createWorkflowTemplate({
+      const result = await createWorkflow({
         name: "Pipeline",
-        steps: [
-          { id: "step-a", title: "Build", prompt: "Build the app" },
-          { id: "step-b", title: "Test", prompt: "Run tests", dependsOn: ["step-a"] },
-        ],
+        promptTemplate: "Do stuff",
       });
 
       expect(result).toEqual(created);
     });
 
-    it("throws on circular dependency", async () => {
-      await expect(
-        createWorkflowTemplate({
-          name: "Bad",
-          steps: [
-            { id: "a", title: "A", prompt: "...", dependsOn: ["b"] },
-            { id: "b", title: "B", prompt: "...", dependsOn: ["a"] },
-          ],
-        }),
-      ).rejects.toThrow(/[Cc]ircular dependency/);
-    });
-
-    it("throws on unknown step reference", async () => {
-      await expect(
-        createWorkflowTemplate({
-          name: "Bad",
-          steps: [{ id: "a", title: "A", prompt: "...", dependsOn: ["nonexistent"] }],
-        }),
-      ).rejects.toThrow(/unknown step/);
-    });
-
-    it("uses default status 'draft' when not specified", async () => {
+    it("uses default values for optional fields", async () => {
       let capturedValues: any;
       (db.insert as any) = vi.fn().mockReturnValue({
         values: vi.fn().mockImplementation((vals: any) => {
           capturedValues = vals;
-          return { returning: vi.fn().mockResolvedValue([{ id: "wt-1", ...vals }]) };
+          return { returning: vi.fn().mockResolvedValue([{ id: "wf-1", ...vals }]) };
         }),
       });
 
-      await createWorkflowTemplate({
+      await createWorkflow({
         name: "Test",
-        steps: [{ id: "a", title: "A", prompt: "Do it" }],
+        promptTemplate: "Do it",
       });
 
-      expect(capturedValues.status).toBe("draft");
+      expect(capturedValues.agentRuntime).toBe("claude-code");
+      expect(capturedValues.maxConcurrent).toBe(1);
+      expect(capturedValues.maxRetries).toBe(3);
+      expect(capturedValues.warmPoolSize).toBe(0);
+      expect(capturedValues.enabled).toBe(true);
     });
   });
 
-  describe("updateWorkflowTemplate", () => {
-    it("updates template fields", async () => {
-      const updated = { id: "wt-1", name: "Updated" };
+  describe("updateWorkflow", () => {
+    it("updates workflow fields", async () => {
+      const updated = { id: "wf-1", name: "Updated" };
       (db.update as any) = vi.fn().mockReturnValue({
         set: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
@@ -205,22 +178,11 @@ describe("workflow-service", () => {
         }),
       });
 
-      const result = await updateWorkflowTemplate("wt-1", { name: "Updated" });
+      const result = await updateWorkflow("wf-1", { name: "Updated" });
       expect(result).toEqual(updated);
     });
 
-    it("validates DAG when steps are updated", async () => {
-      await expect(
-        updateWorkflowTemplate("wt-1", {
-          steps: [
-            { id: "a", title: "A", prompt: "...", dependsOn: ["b"] },
-            { id: "b", title: "B", prompt: "...", dependsOn: ["a"] },
-          ],
-        }),
-      ).rejects.toThrow(/[Cc]ircular dependency/);
-    });
-
-    it("returns null when template not found", async () => {
+    it("returns null when workflow not found", async () => {
       (db.update as any) = vi.fn().mockReturnValue({
         set: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
@@ -229,37 +191,71 @@ describe("workflow-service", () => {
         }),
       });
 
-      const result = await updateWorkflowTemplate("nonexistent", { name: "X" });
+      const result = await updateWorkflow("nonexistent", { name: "X" });
       expect(result).toBeNull();
     });
   });
 
-  describe("deleteWorkflowTemplate", () => {
-    it("returns true when template is deleted", async () => {
+  describe("deleteWorkflow", () => {
+    it("returns true when deleted", async () => {
       (db.delete as any) = vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([{ id: "wt-1" }]),
+          returning: vi.fn().mockResolvedValue([{ id: "wf-1" }]),
         }),
       });
 
-      const result = await deleteWorkflowTemplate("wt-1");
+      const result = await deleteWorkflow("wf-1");
       expect(result).toBe(true);
     });
 
-    it("returns false when template not found", async () => {
+    it("returns false when not found", async () => {
       (db.delete as any) = vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
           returning: vi.fn().mockResolvedValue([]),
         }),
       });
 
-      const result = await deleteWorkflowTemplate("nonexistent");
+      const result = await deleteWorkflow("nonexistent");
       expect(result).toBe(false);
     });
   });
 
+  // ── Workflow Triggers ──────────────────────────────────────────────────────
+
+  describe("createWorkflowTrigger", () => {
+    it("creates a trigger", async () => {
+      const created = { id: "tr-1", workflowId: "wf-1", type: "manual" };
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([created]),
+        }),
+      });
+
+      const result = await createWorkflowTrigger({
+        workflowId: "wf-1",
+        type: "manual",
+      });
+      expect(result).toEqual(created);
+    });
+  });
+
+  describe("deleteWorkflowTrigger", () => {
+    it("returns true when deleted", async () => {
+      (db.delete as any) = vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: "tr-1" }]),
+        }),
+      });
+
+      const result = await deleteWorkflowTrigger("tr-1");
+      expect(result).toBe(true);
+    });
+  });
+
+  // ── Workflow Runs ──────────────────────────────────────────────────────────
+
   describe("listWorkflowRuns", () => {
-    it("lists runs for a template", async () => {
+    it("lists runs for a workflow", async () => {
       const runs = [{ id: "wr-1" }, { id: "wr-2" }];
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
@@ -269,14 +265,14 @@ describe("workflow-service", () => {
         }),
       });
 
-      const result = await listWorkflowRuns("wt-1");
+      const result = await listWorkflowRuns("wf-1");
       expect(result).toEqual(runs);
     });
   });
 
   describe("getWorkflowRun", () => {
     it("returns run when found", async () => {
-      const run = { id: "wr-1", status: "running" };
+      const run = { id: "wr-1", state: "queued" };
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockResolvedValue([run]),
@@ -299,159 +295,61 @@ describe("workflow-service", () => {
     });
   });
 
-  describe("runWorkflow", () => {
-    it("creates tasks and wires dependencies for a workflow", async () => {
-      // Mock getWorkflowTemplate
+  describe("createWorkflowRun", () => {
+    it("creates a run for an enabled workflow", async () => {
+      // Mock getWorkflow
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([
-            {
-              id: "wt-1",
-              status: "active",
-              steps: [
-                {
-                  id: "build",
-                  title: "Build",
-                  prompt: "Build it",
-                  repoUrl: "https://github.com/o/r",
-                },
-                {
-                  id: "test",
-                  title: "Test",
-                  prompt: "Test it",
-                  repoUrl: "https://github.com/o/r",
-                  dependsOn: ["build"],
-                },
-              ],
-            },
-          ]),
+          where: vi.fn().mockResolvedValue([{ id: "wf-1", enabled: true }]),
         }),
       });
 
-      // Mock insert for workflow run
+      // Mock insert
       (db.insert as any) = vi.fn().mockReturnValue({
         values: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([{ id: "wr-1", taskMapping: {} }]),
+          returning: vi
+            .fn()
+            .mockResolvedValue([{ id: "wr-1", workflowId: "wf-1", state: "queued" }]),
         }),
       });
 
-      // Mock update for tasks and workflow run
-      (db.update as any) = vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue(undefined),
-        }),
-      });
-
-      let taskCount = 0;
-      vi.mocked(taskService.createTask).mockImplementation(async () => {
-        taskCount++;
-        return { id: `task-${taskCount}`, maxRetries: 3 } as any;
-      });
-
-      const result = await runWorkflow("wt-1");
-
-      expect(taskService.createTask).toHaveBeenCalledTimes(2);
-      expect(dependencyService.addDependencies).toHaveBeenCalledWith("task-2", ["task-1"]);
-      // Build step has no deps → queued
-      expect(taskService.transitionTask).toHaveBeenCalledWith("task-1", "queued", "workflow_start");
-      // Test step has deps → waiting_on_deps
-      expect(taskService.transitionTask).toHaveBeenCalledWith(
-        "task-2",
-        "waiting_on_deps",
-        "workflow_start",
-      );
-      expect(taskQueue.add).toHaveBeenCalledTimes(1); // Only root task queued
+      const result = await createWorkflowRun({ workflowId: "wf-1" });
+      expect(result.state).toBe("queued");
     });
 
-    it("throws when template not found", async () => {
+    it("throws when workflow not found", async () => {
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockResolvedValue([]),
         }),
       });
 
-      await expect(runWorkflow("nonexistent")).rejects.toThrow("Workflow template not found");
+      await expect(createWorkflowRun({ workflowId: "nonexistent" })).rejects.toThrow(
+        "Workflow not found",
+      );
     });
 
-    it("throws when template is archived", async () => {
+    it("throws when workflow is disabled", async () => {
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([{ id: "wt-1", status: "archived", steps: [] }]),
+          where: vi.fn().mockResolvedValue([{ id: "wf-1", enabled: false }]),
         }),
       });
 
-      await expect(runWorkflow("wt-1")).rejects.toThrow("Cannot run an archived workflow");
-    });
-
-    it("throws when step has no repoUrl and no override", async () => {
-      (db.select as any) = vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([
-            {
-              id: "wt-1",
-              status: "active",
-              steps: [{ id: "s1", title: "S1", prompt: "..." }],
-            },
-          ]),
-        }),
-      });
-
-      (db.insert as any) = vi.fn().mockReturnValue({
-        values: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([{ id: "wr-1", taskMapping: {} }]),
-        }),
-      });
-
-      await expect(runWorkflow("wt-1")).rejects.toThrow(/no repoUrl/);
+      await expect(createWorkflowRun({ workflowId: "wf-1" })).rejects.toThrow(
+        "Workflow is disabled",
+      );
     });
   });
 
-  describe("checkWorkflowRunCompletion", () => {
-    it("marks run as completed when all tasks completed", async () => {
-      let selectCallCount = 0;
-      (db.select as any) = vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            selectCallCount++;
-            if (selectCallCount === 1) {
-              return Promise.resolve([
-                { id: "wr-1", status: "running", taskMapping: { a: "t-1", b: "t-2" } },
-              ]);
-            }
-            return Promise.resolve([]);
-          }),
-        }),
-      }));
-
-      vi.mocked(taskService.getTask)
-        .mockResolvedValueOnce({ id: "t-1", state: "completed" } as any)
-        .mockResolvedValueOnce({ id: "t-2", state: "completed" } as any);
-
-      (db.update as any) = vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue(undefined),
-        }),
-      });
-
-      await checkWorkflowRunCompletion("wr-1");
-
-      expect(db.update).toHaveBeenCalled();
-    });
-
-    it("marks run as failed when all terminal but some failed", async () => {
+  describe("transitionWorkflowRun", () => {
+    it("transitions from queued to running", async () => {
+      // Mock getWorkflowRun
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi
-            .fn()
-            .mockResolvedValue([
-              { id: "wr-1", status: "running", taskMapping: { a: "t-1", b: "t-2" } },
-            ]),
+          where: vi.fn().mockResolvedValue([{ id: "wr-1", state: "queued", retryCount: 0 }]),
         }),
       });
-
-      vi.mocked(taskService.getTask)
-        .mockResolvedValueOnce({ id: "t-1", state: "completed" } as any)
-        .mockResolvedValueOnce({ id: "t-2", state: "failed" } as any);
 
       (db.update as any) = vi.fn().mockReturnValue({
         set: vi.fn().mockReturnValue({
@@ -459,43 +357,61 @@ describe("workflow-service", () => {
         }),
       });
 
-      await checkWorkflowRunCompletion("wr-1");
-
+      await expect(transitionWorkflowRun("wr-1", "running" as any)).resolves.not.toThrow();
       expect(db.update).toHaveBeenCalled();
     });
 
-    it("does nothing when run is not found", async () => {
+    it("throws on invalid transition", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "wr-1", state: "completed", retryCount: 0 }]),
+        }),
+      });
+
+      await expect(transitionWorkflowRun("wr-1", "running" as any)).rejects.toThrow(
+        /Invalid workflow state transition/,
+      );
+    });
+
+    it("throws when run not found", async () => {
       (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockResolvedValue([]),
         }),
       });
 
-      await checkWorkflowRunCompletion("nonexistent");
-
-      expect(db.update).not.toHaveBeenCalled();
+      await expect(transitionWorkflowRun("nonexistent", "running" as any)).rejects.toThrow(
+        "Workflow run not found",
+      );
     });
+  });
 
-    it("does nothing when tasks are still running", async () => {
-      (db.select as any) = vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi
-            .fn()
-            .mockResolvedValue([
-              { id: "wr-1", status: "running", taskMapping: { a: "t-1", b: "t-2" } },
-            ]),
+  // ── Workflow Pods ──────────────────────────────────────────────────────────
+
+  describe("createWorkflowPod", () => {
+    it("creates a pod", async () => {
+      const created = { id: "wp-1", workflowId: "wf-1", state: "provisioning" };
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([created]),
         }),
       });
 
-      vi.mocked(taskService.getTask)
-        .mockResolvedValueOnce({ id: "t-1", state: "completed" } as any)
-        .mockResolvedValueOnce({ id: "t-2", state: "running" } as any);
+      const result = await createWorkflowPod({ workflowId: "wf-1" });
+      expect(result).toEqual(created);
+    });
+  });
 
-      (db.update as any) = vi.fn();
+  describe("deleteWorkflowPod", () => {
+    it("returns true when deleted", async () => {
+      (db.delete as any) = vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: "wp-1" }]),
+        }),
+      });
 
-      await checkWorkflowRunCompletion("wr-1");
-
-      expect(db.update).not.toHaveBeenCalled();
+      const result = await deleteWorkflowPod("wp-1");
+      expect(result).toBe(true);
     });
   });
 });
