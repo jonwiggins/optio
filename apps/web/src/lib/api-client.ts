@@ -882,49 +882,6 @@ export const api = {
   removeTaskDependency: (taskId: string, depTaskId: string) =>
     request<void>(`/api/tasks/${taskId}/dependencies/${depTaskId}`, { method: "DELETE" }),
 
-  // Workflow Templates
-  listWorkflows: () => request<{ templates: any[] }>("/api/workflow-templates"),
-
-  getWorkflow: (id: string) => request<{ template: any }>(`/api/workflow-templates/${id}`),
-
-  createWorkflow: (data: {
-    name: string;
-    description?: string;
-    steps: Array<{
-      id: string;
-      title: string;
-      prompt: string;
-      repoUrl?: string;
-      agentType?: string;
-      dependsOn?: string[];
-    }>;
-    status?: string;
-  }) =>
-    request<{ template: any }>("/api/workflow-templates", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  updateWorkflow: (id: string, data: Record<string, unknown>) =>
-    request<{ template: any }>(`/api/workflow-templates/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    }),
-
-  deleteWorkflow: (id: string) =>
-    request<void>(`/api/workflow-templates/${id}`, { method: "DELETE" }),
-
-  runWorkflow: (templateId: string, data?: { repoUrlOverride?: string }) =>
-    request<{ workflowRun: any }>(`/api/workflow-templates/${templateId}/run`, {
-      method: "POST",
-      body: JSON.stringify(data ?? {}),
-    }),
-
-  getWorkflowRuns: (templateId: string) =>
-    request<{ runs: any[] }>(`/api/workflow-templates/${templateId}/runs`),
-
-  getWorkflowRun: (id: string) => request<{ workflowRun: any }>(`/api/workflow-runs/${id}`),
-
   // MCP Servers
   listMcpServers: (scope?: string) => {
     const qs = scope ? `?scope=${encodeURIComponent(scope)}` : "";

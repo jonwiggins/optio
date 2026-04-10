@@ -16,7 +16,6 @@ import {
   Terminal,
   Clock,
   FileText,
-  GitBranch,
   Bot,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
@@ -32,7 +31,6 @@ const MAIN_NAV = [
   { href: "/costs", label: "Costs", icon: DollarSign },
   { href: "/schedules", label: "Schedules", icon: Clock },
   { href: "/templates", label: "Templates", icon: FileText },
-  { href: "/workflows", label: "Workflows", icon: GitBranch },
 ];
 
 const SECONDARY_NAV = [

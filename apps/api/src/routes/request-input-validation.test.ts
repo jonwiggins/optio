@@ -104,19 +104,6 @@ vi.mock("../services/interactive-session-service.js", () => ({
   getActiveSessionCount: (...args: unknown[]) => mockGetActiveSessionCount(...args),
 }));
 
-// workflows.ts mocks
-const mockRunWorkflow = vi.fn();
-vi.mock("../services/workflow-service.js", () => ({
-  listWorkflowTemplates: vi.fn().mockResolvedValue([]),
-  getWorkflowTemplate: vi.fn().mockResolvedValue(null),
-  createWorkflowTemplate: vi.fn(),
-  updateWorkflowTemplate: vi.fn(),
-  deleteWorkflowTemplate: vi.fn(),
-  runWorkflow: (...args: unknown[]) => mockRunWorkflow(...args),
-  listWorkflowRuns: vi.fn().mockResolvedValue([]),
-  getWorkflowRun: vi.fn().mockResolvedValue(null),
-}));
-
 // tasks.ts mocks
 vi.mock("../services/task-service.js", () => ({
   getTask: vi.fn().mockResolvedValue(null),
@@ -137,8 +124,6 @@ vi.mock("../services/git-token-service.js", () => ({
 import { ticketRoutes } from "./tickets.js";
 import { prReviewRoutes } from "./pr-reviews.js";
 import { sessionRoutes } from "./sessions.js";
-import { workflowRoutes } from "./workflows.js";
-
 // ─── Helpers ───
 
 function decorateApp(app: FastifyInstance) {
@@ -306,47 +291,6 @@ describe("sessions route body validation", () => {
       method: "POST",
       url: "/api/sessions/s1/prs",
       payload: { prUrl: "https://github.com/org/repo/pull/1", prNumber: 1 },
-    });
-    expect(res.statusCode).toBe(201);
-  });
-});
-
-describe("workflows route body validation", () => {
-  let app: FastifyInstance;
-
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    app = Fastify({ logger: false });
-    decorateApp(app);
-    await workflowRoutes(app);
-    await app.ready();
-  });
-
-  it("rejects POST /api/workflow-templates/:id/run with wrong type for repoUrl", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/workflow-templates/t1/run",
-      payload: { repoUrl: 42 },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("accepts POST /api/workflow-templates/:id/run with valid optional body", async () => {
-    mockRunWorkflow.mockResolvedValue({ id: "run-1" });
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/workflow-templates/t1/run",
-      payload: { repoUrl: "https://github.com/org/repo" },
-    });
-    expect(res.statusCode).toBe(201);
-  });
-
-  it("accepts POST /api/workflow-templates/:id/run with empty body", async () => {
-    mockRunWorkflow.mockResolvedValue({ id: "run-1" });
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/workflow-templates/t1/run",
-      payload: {},
     });
     expect(res.statusCode).toBe(201);
   });

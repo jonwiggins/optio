@@ -928,13 +928,6 @@ export function startTaskWorker() {
               .cascadeFailure(taskId)
               .catch((err) => log.warn({ err }, "Failed to cascade failure to dependents"));
           }
-          // Update workflow run status if part of a workflow
-          if (completedTask.workflowRunId) {
-            const { checkWorkflowRunCompletion } = await import("../services/workflow-service.js");
-            await checkWorkflowRunCompletion(completedTask.workflowRunId).catch((err) =>
-              log.warn({ err }, "Failed to update workflow run status"),
-            );
-          }
         }
       } catch (err) {
         // State race errors mean another worker claimed the task — not a real failure
