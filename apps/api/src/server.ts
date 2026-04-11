@@ -8,6 +8,14 @@ import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import websocket from "@fastify/websocket";
+import {
+  validatorCompiler,
+  serializerCompiler,
+  createJsonSchemaTransform,
+  createJsonSchemaTransformObject,
+  ResponseSerializationError,
+} from "fastify-type-provider-zod";
+import { namedSchemas } from "./schemas/registry.js";
 import { healthRoutes } from "./routes/health.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { secretRoutes } from "./routes/secrets.js";
@@ -65,6 +73,20 @@ export async function buildServer() {
 
   const app = Fastify({ logger: loggerConfig });
 
+  // Wire the Zod type provider's validator + serializer compilers.
+  // - validatorCompiler: validates req.body / req.query / req.params / req.headers
+  //   against the Zod schemas attached via `schema: { body, querystring, params }`.
+  //   Validation failures surface as a Fastify FST_ERR_VALIDATION error whose
+  //   `.validation` array contains entries with `.params.issue` (ZodIssue) —
+  //   the error handler below detects this shape and renders the standard
+  //   `{ error, details }` envelope.
+  // - serializerCompiler: validates response bodies against `schema.response[code]`
+  //   and throws `ResponseSerializationError` on mismatch. Useful as a dev-time
+  //   safety net; production behavior is unchanged because it only fires when a
+  //   route declares a response schema AND the response doesn't match.
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+
   // Plugins
   const allowedOrigins = process.env.OPTIO_ALLOWED_ORIGINS
     ? process.env.OPTIO_ALLOWED_ORIGINS.split(",").map((o) => o.trim())
@@ -76,12 +98,25 @@ export async function buildServer() {
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
-  await app.register(rateLimit, {
-    max: 100,
-    timeWindow: "1 minute",
-    allowList: ["127.0.0.1", "::1"],
-    redis: new Redis(redisConnectionUrl, { tls: redisTlsOptions }),
-  });
+  // Rate limit is backed by Redis in normal operation. The
+  // `OPTIO_SKIP_RATE_LIMIT_REDIS` flag lets the OpenAPI dump script build
+  // the server without a Redis connection — it registers the plugin
+  // in-memory, which is fine because nothing actually serves traffic
+  // during the dump.
+  if (process.env.OPTIO_SKIP_RATE_LIMIT_REDIS === "1") {
+    await app.register(rateLimit, {
+      max: 100,
+      timeWindow: "1 minute",
+      allowList: ["127.0.0.1", "::1"],
+    });
+  } else {
+    await app.register(rateLimit, {
+      max: 100,
+      timeWindow: "1 minute",
+      allowList: ["127.0.0.1", "::1"],
+      redis: new Redis(redisConnectionUrl, { tls: redisTlsOptions }),
+    });
+  }
   await app.register(formbody);
   await app.register(websocket, {
     options: {
@@ -103,22 +138,99 @@ export async function buildServer() {
   await app.register(httpMetricsPlugin);
 
   // OpenAPI spec generation. Must be registered before routes so it can
-  // collect their definitions. Routes mostly validate with Zod inside
-  // handlers rather than declaring Fastify schemas, so the generated doc
-  // lists paths and methods but does not describe request/response bodies.
+  // collect their definitions as they register.
+  //
+  // `transform` converts Zod route schemas (attached via `schema: { body, ... }`)
+  // into JSON Schema. `transformObject` walks the finished spec and replaces
+  // structurally-identical shapes with `$ref`s into `components.schemas`,
+  // using the named schema registry as the source of truth for ref names.
+  //
+  // Routes are migrated to the type provider incrementally; any route that
+  // hasn't been migrated still renders without body/response details (the
+  // transform short-circuits on routes with no Zod schemas).
   await app.register(swagger, {
     openapi: {
       openapi: "3.0.3",
       info: {
         title: "Optio API",
         description:
-          "Workflow orchestration API for AI coding agents. Most routes validate " +
-          "input with Zod inside handlers, so request/response bodies are not " +
-          "reflected in this spec — see the source for exact shapes.",
+          "Workflow orchestration API for AI coding agents. Tasks submitted " +
+          "here spin up isolated Kubernetes pods running Claude Code, OpenAI " +
+          "Codex, or GitHub Copilot against a configured repository. This " +
+          "document is the contract used by the web UI, the CLI, and any " +
+          "client generated via `openapi-typescript`.",
         version: process.env.OPTIO_VERSION ?? "dev",
       },
       servers: [{ url: "/", description: "Current host" }],
+      tags: [
+        {
+          name: "Tasks",
+          description:
+            "Core task lifecycle: create, list, retrieve, retry, cancel, subtasks, dependencies, bulk operations, comments, and messages.",
+        },
+        { name: "Workflows", description: "Workflow templates, runs, triggers, and schedules." },
+        {
+          name: "Sessions",
+          description:
+            "Interactive sessions: persistent workspaces with a terminal and agent chat.",
+        },
+        { name: "Reviews & PRs", description: "Code review agent, PR review drafts, issue sync." },
+        {
+          name: "Repos & Integrations",
+          description:
+            "Repositories, webhooks, MCP servers, skills, prompt templates, task templates, shared directories, ticket providers, Slack.",
+        },
+        { name: "Cluster", description: "Pods, pod health, runtime cluster operations." },
+        { name: "Workspaces", description: "Workspaces, memberships, notifications." },
+        {
+          name: "Auth & Sessions",
+          description: "Login, token exchange, GitHub App install, personal access tokens.",
+        },
+        {
+          name: "Setup & Settings",
+          description: "Initial setup, global settings, secrets, Optio assistant.",
+        },
+        { name: "System", description: "Health, internal hooks." },
+      ],
+      components: {
+        securitySchemes: {
+          cookieAuth: {
+            type: "apiKey",
+            in: "cookie",
+            name: "optio_session",
+            description:
+              "HttpOnly session cookie set by the OAuth login flow. Value is " +
+              "an opaque session ID validated against the sessions table.",
+          },
+          bearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "Opaque token",
+            description:
+              "Authorization: Bearer <token>. Personal Access Tokens are " +
+              "prefixed `optio_pat_` and validated against the api_keys " +
+              "table; regular session tokens use the same table as cookieAuth " +
+              "and are the right choice for CLI / server-to-server access.",
+          },
+        },
+      },
+      // Default: every route requires one of the two schemes above.
+      // Public routes override per-route with `security: []`.
+      security: [{ cookieAuth: [] }, { bearerAuth: [] }],
     },
+    // Hide any route matching these URL patterns — WebSocket upgrades,
+    // internal hooks that clients never call, and the swagger UI itself.
+    transform: createJsonSchemaTransform({
+      skipList: [
+        "/docs",
+        "/docs/json",
+        "/docs/yaml",
+        "/docs/static/*",
+        "/docs/uiConfig",
+        "/docs/initOAuth",
+      ],
+    }),
+    transformObject: createJsonSchemaTransformObject({ schemas: namedSchemas }),
   });
   await app.register(swaggerUi, {
     routePrefix: "/docs",
@@ -171,11 +283,64 @@ export async function buildServer() {
   await app.register(optioChatWs);
   await app.register(workflowRunLogStreamWs);
 
-  // Global error handler for Zod validation
+  // Global error handler.
+  //
+  // Validation errors arrive in two shapes during the incremental migration
+  // to the Zod type provider:
+  //
+  //   1. **Type provider** (new): Fastify throws a FST_ERR_VALIDATION error
+  //      whose `.validation` array contains entries with
+  //      `.params.issue` (a ZodIssue). Detect via presence of
+  //      `err.validation[0].params.issue`.
+  //   2. **Legacy hand-thrown** (routes still using `schema.parse(req.body)`
+  //      inside the handler): a raw `ZodError` with `name === "ZodError"`.
+  //      Keep this branch until every route is migrated; it's removed in the
+  //      final phase of the OpenAPI rollout.
+  //
+  // Both branches MUST produce the same client-visible `{ error, details }`
+  // envelope — field-names-only in production, full message in development.
+  // Contract is locked by tests in `server.test.ts`.
   app.setErrorHandler((error: FastifyError | Error, _req, reply) => {
+    const isDev = process.env.NODE_ENV !== "production";
+
+    // Branch 1: type-provider validation error
+    type FpvIssue = { path: (string | number)[] };
+    type FpvValidationEntry = {
+      instancePath?: string;
+      params?: { issue?: FpvIssue; zodError?: unknown };
+    };
+    const fpvValidation = (error as unknown as { validation?: unknown }).validation as
+      | FpvValidationEntry[]
+      | undefined;
+    const isFpvZodValidation =
+      Array.isArray(fpvValidation) && fpvValidation.length > 0 && !!fpvValidation[0]?.params?.issue;
+
+    if (isFpvZodValidation) {
+      app.log.error({ err: error }, "Zod schema validation error (type provider)");
+      if (isDev) {
+        return reply.status(400).send({
+          error: "Validation error",
+          details: JSON.stringify(fpvValidation),
+        });
+      }
+      const fields = fpvValidation
+        .map((v) => v.params?.issue?.path?.join(".") ?? "")
+        .filter(Boolean);
+      const details = fields.length
+        ? `Invalid fields: ${fields.join(", ")}`
+        : "Invalid request body";
+      return reply.status(400).send({ error: "Validation error", details });
+    }
+
+    // Branch 1b: response-side serializer mismatch (dev-time safety net)
+    if (error instanceof ResponseSerializationError) {
+      app.log.error({ err: error }, "Response serialization error");
+      return reply.status(500).send({ error: "Internal server error" });
+    }
+
+    // Branch 2: legacy hand-thrown ZodError (pre-migration routes)
     if (error.name === "ZodError") {
       app.log.error(error, "Zod validation error");
-      const isDev = process.env.NODE_ENV !== "production";
       if (isDev) {
         return reply.status(400).send({ error: "Validation error", details: error.message });
       }
@@ -186,6 +351,7 @@ export async function buildServer() {
         : "Invalid request body";
       return reply.status(400).send({ error: "Validation error", details });
     }
+
     if (error.name === "InvalidTransitionError") {
       return reply.status(409).send({ error: error.message });
     }

@@ -264,3 +264,108 @@ describe("Zod error sanitization", () => {
     await testApp.close();
   });
 });
+
+describe("Zod type provider error envelope", () => {
+  // Distinct from "Zod error sanitization" above: that suite verifies
+  // hand-thrown ZodErrors from in-handler `.parse()` calls. This suite
+  // verifies the type-provider-driven validation path (schema attached
+  // via `schema: { body|querystring }`), which produces a different
+  // error shape internally but must render the same `{ error, details }`
+  // envelope to clients.
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  it("returns field names only for type-provider body errors in production", async () => {
+    process.env.NODE_ENV = "production";
+    const testApp = await buildServer();
+    const { z } = await import("zod");
+    testApp.post(
+      "/api/setup/test-fpv-prod",
+      {
+        schema: {
+          body: z.object({
+            name: z.string(),
+            nested: z.object({ age: z.number() }),
+          }),
+        },
+      },
+      async () => ({ ok: true }),
+    );
+
+    const res = await testApp.inject({
+      method: "POST",
+      url: "/api/setup/test-fpv-prod",
+      payload: { name: 123, nested: { age: "not-a-number" } },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error).toBe("Validation error");
+    expect(body.details).toContain("Invalid fields:");
+    expect(body.details).toContain("name");
+    expect(body.details).toContain("nested.age");
+    expect(body.details).not.toContain("Expected string");
+    expect(body.details).not.toContain("Expected number");
+
+    await testApp.close();
+  });
+
+  it("returns serialized validation JSON in development", async () => {
+    process.env.NODE_ENV = "development";
+    const testApp = await buildServer();
+    const { z } = await import("zod");
+    testApp.post(
+      "/api/setup/test-fpv-dev",
+      {
+        schema: { body: z.object({ name: z.string() }) },
+      },
+      async () => ({ ok: true }),
+    );
+
+    const res = await testApp.inject({
+      method: "POST",
+      url: "/api/setup/test-fpv-dev",
+      payload: { name: 123 },
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error).toBe("Validation error");
+    expect(body.details).toBeDefined();
+    expect(body.details.length).toBeGreaterThan(0);
+
+    await testApp.close();
+  });
+
+  it("reports querystring field names in production", async () => {
+    process.env.NODE_ENV = "production";
+    const testApp = await buildServer();
+    const { z } = await import("zod");
+    testApp.get(
+      "/api/setup/test-fpv-query",
+      {
+        schema: {
+          querystring: z.object({
+            limit: z.coerce.number().int().min(1),
+          }),
+        },
+      },
+      async () => ({ ok: true }),
+    );
+
+    const res = await testApp.inject({
+      method: "GET",
+      url: "/api/setup/test-fpv-query?limit=-5",
+    });
+
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error).toBe("Validation error");
+    expect(body.details).toContain("limit");
+
+    await testApp.close();
+  });
+});

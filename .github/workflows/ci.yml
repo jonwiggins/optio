@@ -46,6 +46,26 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo test
 
+  openapi-lint:
+    name: OpenAPI Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate OpenAPI spec
+        run: pnpm --filter @optio/api openapi:dump
+      - name: Lint OpenAPI spec
+        run: pnpm --filter @optio/api openapi:lint
+      - name: Verify spec generates valid TypeScript
+        run: |
+          pnpm --filter @optio/api openapi:types
+          cd apps/api && npx tsc --noEmit --target es2022 --module esnext --moduleResolution bundler openapi.generated.d.ts
+
   build-web:
     name: Build Web
     runs-on: ubuntu-latest

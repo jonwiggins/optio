@@ -1,0 +1,26 @@
+extends:
+  - minimal
+
+# Rollout note (see plan): this configuration is intentionally lenient
+# during the phased OpenAPI migration. Every rule in the `recommended`
+# preset currently trips hundreds of times because unmigrated routes have
+# no schemas attached. As each phase lands, the corresponding routes get
+# fully-typed, and the rules below are flipped from `off` → `warn` → `error`.
+#
+# When Phase 9 completes, extend from `recommended` instead of `minimal`
+# and delete this block.
+
+rules:
+  no-server-example.com: off
+  operation-operationId: warn
+  operation-summary: warn
+  operation-description: off
+  operation-4xx-response: off
+  operation-2xx-response: off
+  tag-description: warn
+  no-empty-servers: off
+  no-unresolved-refs: error
+  no-identical-paths: error
+  path-params-defined: error
+  info-license: off
+  info-contact: off
