@@ -306,6 +306,24 @@ export async function createWorkflowRun(
     .returning();
 
   logger.info({ workflowRunId: run.id, workflowId }, "Workflow run created");
+
+  // Fire outbound webhook (fire-and-forget). Dynamic import to avoid a cycle
+  // with workers/webhook-worker -> services/workflow-service.
+  import("../workers/webhook-worker.js")
+    .then(({ enqueueWebhookEvent }) =>
+      enqueueWebhookEvent("workflow_run.queued", {
+        runId: run.id,
+        workflowId: workflow.id,
+        workflowName: workflow.name,
+        state: run.state,
+        params: run.params ?? null,
+        retryCount: run.retryCount,
+      }),
+    )
+    .catch((err) =>
+      logger.warn({ err, runId: run.id }, "Failed to enqueue workflow_run.queued webhook"),
+    );
+
   return run;
 }
 

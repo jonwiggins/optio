@@ -1227,4 +1227,43 @@ export const api = {
     request<void>(`/api/workflows/${workflowId}/triggers/${triggerId}`, {
       method: "DELETE",
     }),
+
+  // Webhooks (outbound notifications fired on task/workflow events)
+  listWebhooks: () => request<{ webhooks: any[] }>("/api/webhooks"),
+
+  getWebhook: (id: string) => request<{ webhook: any }>(`/api/webhooks/${id}`),
+
+  createWebhook: (data: { url: string; events: string[]; secret?: string; description?: string }) =>
+    request<{ webhook: any }>("/api/webhooks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateWebhook: (
+    id: string,
+    data: {
+      url?: string;
+      events?: string[];
+      secret?: string | null;
+      description?: string | null;
+      active?: boolean;
+    },
+  ) =>
+    request<{ webhook: any }>(`/api/webhooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteWebhook: (id: string) => request<void>(`/api/webhooks/${id}`, { method: "DELETE" }),
+
+  testWebhook: (id: string, event?: string) =>
+    request<{ delivery: any }>(`/api/webhooks/${id}/test`, {
+      method: "POST",
+      body: JSON.stringify(event ? { event } : {}),
+    }),
+
+  listWebhookDeliveries: (id: string, limit?: number) => {
+    const qs = limit ? `?limit=${limit}` : "";
+    return request<{ deliveries: any[] }>(`/api/webhooks/${id}/deliveries${qs}`);
+  },
 };

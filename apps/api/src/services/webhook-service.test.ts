@@ -121,13 +121,17 @@ describe("signPayload", () => {
 });
 
 describe("VALID_EVENTS", () => {
-  it("contains all expected webhook events", () => {
+  it("contains all expected task and workflow run webhook events", () => {
     expect(VALID_EVENTS).toContain("task.completed");
     expect(VALID_EVENTS).toContain("task.failed");
     expect(VALID_EVENTS).toContain("task.needs_attention");
     expect(VALID_EVENTS).toContain("task.pr_opened");
     expect(VALID_EVENTS).toContain("review.completed");
-    expect(VALID_EVENTS).toHaveLength(5);
+    expect(VALID_EVENTS).toContain("workflow_run.queued");
+    expect(VALID_EVENTS).toContain("workflow_run.started");
+    expect(VALID_EVENTS).toContain("workflow_run.completed");
+    expect(VALID_EVENTS).toContain("workflow_run.failed");
+    expect(VALID_EVENTS).toHaveLength(9);
   });
 });
 

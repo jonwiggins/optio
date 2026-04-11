@@ -18,6 +18,7 @@ import {
   FileText,
   Bot,
   GitBranch,
+  Webhook,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
 import { WorkspaceSwitcher } from "./workspace-switcher";
@@ -37,6 +38,7 @@ const MAIN_NAV = [
 
 const SECONDARY_NAV = [
   { href: "/secrets", label: "Secrets", icon: KeyRound },
+  { href: "/webhooks", label: "Webhooks", icon: Webhook },
   { href: "/workspace-settings", label: "Workspace", icon: Building2 },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

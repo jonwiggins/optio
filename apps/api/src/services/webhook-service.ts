@@ -11,7 +11,11 @@ export type WebhookEvent =
   | "task.failed"
   | "task.needs_attention"
   | "task.pr_opened"
-  | "review.completed";
+  | "review.completed"
+  | "workflow_run.queued"
+  | "workflow_run.started"
+  | "workflow_run.completed"
+  | "workflow_run.failed";
 
 export const VALID_EVENTS: WebhookEvent[] = [
   "task.completed",
@@ -19,6 +23,10 @@ export const VALID_EVENTS: WebhookEvent[] = [
   "task.needs_attention",
   "task.pr_opened",
   "review.completed",
+  "workflow_run.queued",
+  "workflow_run.started",
+  "workflow_run.completed",
+  "workflow_run.failed",
 ];
 
 export interface WebhookRecord {
@@ -128,6 +136,47 @@ export async function getWebhook(id: string): Promise<WebhookRecord | null> {
   return decryptWebhookRow(webhook);
 }
 
+export interface UpdateWebhookInput {
+  url?: string;
+  events?: WebhookEvent[];
+  secret?: string | null;
+  description?: string | null;
+  active?: boolean;
+}
+
+export async function updateWebhook(
+  id: string,
+  input: UpdateWebhookInput,
+): Promise<WebhookRecord | null> {
+  const existing = await db.select().from(webhooks).where(eq(webhooks.id, id));
+  if (existing.length === 0) return null;
+
+  const updates: Partial<typeof webhooks.$inferInsert> = { updatedAt: new Date() };
+
+  if (input.url !== undefined) updates.url = input.url;
+  if (input.events !== undefined) updates.events = input.events;
+  if (input.description !== undefined) updates.description = input.description;
+  if (input.active !== undefined) updates.active = input.active;
+
+  // Secret: null clears, string sets, undefined leaves alone
+  if (input.secret === null) {
+    updates.encryptedSecret = null;
+    updates.secretIv = null;
+    updates.secretAuthTag = null;
+  } else if (typeof input.secret === "string" && input.secret.length > 0) {
+    const url = input.url ?? existing[0].url;
+    const aad = Buffer.from(`webhook:${url}:secret`);
+    const blob = encrypt(input.secret, aad);
+    updates.encryptedSecret = blob.ciphertext;
+    updates.secretIv = blob.iv;
+    updates.secretAuthTag = blob.authTag;
+    updates.secretAlg = blob.alg;
+  }
+
+  const [updated] = await db.update(webhooks).set(updates).where(eq(webhooks.id, id)).returning();
+  return decryptWebhookRow(updated);
+}
+
 export async function deleteWebhook(id: string) {
   const result = await db.delete(webhooks).where(eq(webhooks.id, id)).returning();
   return result.length > 0;
@@ -152,65 +201,105 @@ export async function signPayload(payload: string, secret: string): Promise<stri
   return sig.toString("hex");
 }
 
+const EVENT_EMOJI: Record<WebhookEvent, string> = {
+  "task.completed": ":white_check_mark:",
+  "task.failed": ":x:",
+  "task.needs_attention": ":warning:",
+  "task.pr_opened": ":rocket:",
+  "review.completed": ":mag:",
+  "workflow_run.queued": ":hourglass_flowing_sand:",
+  "workflow_run.started": ":arrow_forward:",
+  "workflow_run.completed": ":white_check_mark:",
+  "workflow_run.failed": ":x:",
+};
+
+const EVENT_TEXT: Record<WebhookEvent, string> = {
+  "task.completed": "Task Completed",
+  "task.failed": "Task Failed",
+  "task.needs_attention": "Task Needs Attention",
+  "task.pr_opened": "PR Opened",
+  "review.completed": "Review Completed",
+  "workflow_run.queued": "Workflow Run Queued",
+  "workflow_run.started": "Workflow Run Started",
+  "workflow_run.completed": "Workflow Run Completed",
+  "workflow_run.failed": "Workflow Run Failed",
+};
+
 /**
- * Build a Slack-compatible payload with blocks for task details.
+ * Build a Slack-compatible payload with blocks for task or workflow run details.
  */
 function buildSlackPayload(
   event: WebhookEvent,
   data: Record<string, unknown>,
 ): Record<string, unknown> {
-  const taskTitle = (data.taskTitle as string) ?? "Unknown task";
-  const taskId = (data.taskId as string) ?? "";
-  const repoUrl = (data.repoUrl as string) ?? "";
-  const prUrl = data.prUrl as string | undefined;
+  const header = `${EVENT_EMOJI[event] ?? ""} ${EVENT_TEXT[event] ?? event}`;
   const errorMessage = data.errorMessage as string | undefined;
-
-  const statusEmoji: Record<string, string> = {
-    "task.completed": ":white_check_mark:",
-    "task.failed": ":x:",
-    "task.needs_attention": ":warning:",
-    "task.pr_opened": ":rocket:",
-    "review.completed": ":mag:",
-  };
-
-  const statusText: Record<string, string> = {
-    "task.completed": "Task Completed",
-    "task.failed": "Task Failed",
-    "task.needs_attention": "Task Needs Attention",
-    "task.pr_opened": "PR Opened",
-    "review.completed": "Review Completed",
-  };
 
   const blocks: Record<string, unknown>[] = [
     {
       type: "header",
-      text: {
-        type: "plain_text",
-        text: `${statusEmoji[event] ?? ""} ${statusText[event] ?? event}`,
-        emoji: true,
-      },
+      text: { type: "plain_text", text: header, emoji: true },
     },
-    {
+  ];
+
+  let fallbackTitle: string;
+
+  if (event.startsWith("workflow_run.")) {
+    // Workflow run payload
+    const workflowName = (data.workflowName as string) ?? "Unknown workflow";
+    const runId = (data.runId as string) ?? "";
+    const costUsd = data.costUsd as string | undefined;
+    const durationMs = data.durationMs as number | undefined;
+    const modelUsed = data.modelUsed as string | undefined;
+    fallbackTitle = workflowName;
+
+    blocks.push({
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*Workflow:*\n${workflowName}` },
+        { type: "mrkdwn", text: `*Run:*\n\`${runId.slice(0, 8)}\`` },
+      ],
+    });
+
+    const extras: { type: string; text: string }[] = [];
+    if (modelUsed) extras.push({ type: "mrkdwn", text: `*Model:*\n${modelUsed}` });
+    if (costUsd) extras.push({ type: "mrkdwn", text: `*Cost:*\n$${Number(costUsd).toFixed(2)}` });
+    if (durationMs != null) {
+      const sec = Math.round(durationMs / 1000);
+      extras.push({ type: "mrkdwn", text: `*Duration:*\n${sec}s` });
+    }
+    if (extras.length > 0) {
+      blocks.push({ type: "section", fields: extras });
+    }
+  } else {
+    // Task / review payload
+    const taskTitle = (data.taskTitle as string) ?? "Unknown task";
+    const taskId = (data.taskId as string) ?? "";
+    const repoUrl = (data.repoUrl as string) ?? "";
+    const prUrl = data.prUrl as string | undefined;
+    fallbackTitle = taskTitle;
+
+    blocks.push({
       type: "section",
       fields: [
         { type: "mrkdwn", text: `*Task:*\n${taskTitle}` },
         { type: "mrkdwn", text: `*ID:*\n\`${taskId}\`` },
       ],
-    },
-  ];
-
-  if (repoUrl) {
-    blocks.push({
-      type: "section",
-      fields: [{ type: "mrkdwn", text: `*Repository:*\n${repoUrl}` }],
     });
-  }
 
-  if (prUrl) {
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: `*Pull Request:* <${prUrl}|View PR>` },
-    });
+    if (repoUrl) {
+      blocks.push({
+        type: "section",
+        fields: [{ type: "mrkdwn", text: `*Repository:*\n${repoUrl}` }],
+      });
+    }
+
+    if (prUrl) {
+      blocks.push({
+        type: "section",
+        text: { type: "mrkdwn", text: `*Pull Request:* <${prUrl}|View PR>` },
+      });
+    }
   }
 
   if (errorMessage) {
@@ -225,7 +314,7 @@ function buildSlackPayload(
 
   // Slack requires a top-level `text` as fallback for notifications
   return {
-    text: `${statusText[event] ?? event}: ${taskTitle}`,
+    text: `${EVENT_TEXT[event] ?? event}: ${fallbackTitle}`,
     blocks,
   };
 }
