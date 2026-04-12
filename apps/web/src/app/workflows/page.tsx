@@ -80,7 +80,7 @@ function WorkflowTableSkeleton() {
 }
 
 export default function WorkflowsPage() {
-  usePageTitle("Workflows");
+  usePageTitle("Agent Workflows");
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [runTarget, setRunTarget] = useState<WorkflowSummary | null>(null);
@@ -89,7 +89,7 @@ export default function WorkflowsPage() {
     api
       .listWorkflows()
       .then((res) => setWorkflows(res.workflows as WorkflowSummary[]))
-      .catch(() => toast.error("Failed to load workflows"))
+      .catch(() => toast.error("Failed to load agent workflows"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -100,13 +100,13 @@ export default function WorkflowsPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Agent Workflows</h1>
         <Link
           href="/workflows/new"
           className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
         >
           <Plus className="w-4 h-4" />
-          New Workflow
+          New Agent Workflow
         </Link>
       </div>
 
@@ -115,16 +115,16 @@ export default function WorkflowsPage() {
       ) : workflows.length === 0 ? (
         <div className="text-center py-16 text-text-muted border border-dashed border-border rounded-lg">
           <Workflow className="w-10 h-10 mx-auto mb-3 opacity-50" />
-          <p className="font-medium">No workflows yet</p>
+          <p className="font-medium">No agent workflows yet</p>
           <p className="text-sm mt-1">
-            Workflows let you define reusable agent pipelines with triggers, parameters, and
+            Agent workflows let you define reusable agent pipelines with triggers, parameters, and
             budgets.
           </p>
           <Link
             href="/workflows/new"
             className="text-primary hover:underline text-sm mt-2 inline-block"
           >
-            Create your first workflow
+            Create your first agent workflow
           </Link>
         </div>
       ) : (
@@ -215,7 +215,7 @@ export default function WorkflowsPage() {
                   }}
                   disabled={!wf.enabled}
                   className="p-1.5 rounded-md hover:bg-primary/10 text-text-muted hover:text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  title={wf.enabled ? "Run workflow" : "Workflow is disabled"}
+                  title={wf.enabled ? "Run agent workflow" : "Agent workflow is disabled"}
                 >
                   <Play className="w-4 h-4" />
                 </button>

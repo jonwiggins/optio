@@ -33,7 +33,7 @@ export function RunWorkflowDialog({
     try {
       const hasParams = Object.keys(params).length > 0;
       const res = await api.runWorkflow(workflowId, hasParams ? params : null);
-      toast.success("Workflow run started");
+      toast.success("Agent workflow run started");
       onRun?.();
       onClose();
       const runId = (res as any).run?.id;
@@ -41,7 +41,7 @@ export function RunWorkflowDialog({
         router.push(`/workflows/${workflowId}/runs/${runId}`);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to start workflow run";
+      const msg = err instanceof Error ? err.message : "Failed to start agent workflow run";
       setError(msg);
       toast.error(msg);
     } finally {
@@ -62,7 +62,7 @@ export function RunWorkflowDialog({
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
             <Play className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-medium">Run Workflow</h2>
+            <h2 className="text-sm font-medium">Run Agent Workflow</h2>
           </div>
           <button
             onClick={onClose}

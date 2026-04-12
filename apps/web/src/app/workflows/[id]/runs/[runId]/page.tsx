@@ -132,7 +132,7 @@ export default function WorkflowRunDetailPage({
   const [activeTab, setActiveTab] = useState<"logs" | "output" | "params">("logs");
   const [showParams, setShowParams] = useState(true);
 
-  usePageTitle(run ? `Run ${run.id.slice(0, 8)}` : "Workflow Run");
+  usePageTitle(run ? `Run ${run.id.slice(0, 8)}` : "Agent Workflow Run");
 
   const isActive = run?.state === "running" || run?.state === "queued";
 
@@ -146,7 +146,7 @@ export default function WorkflowRunDetailPage({
       setWorkflow({ id: wfRes.workflow.id, name: wfRes.workflow.name });
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load workflow run");
+      setError(err instanceof Error ? err.message : "Failed to load agent workflow run");
     } finally {
       setLoading(false);
     }
@@ -198,7 +198,7 @@ export default function WorkflowRunDetailPage({
     return (
       <div className="flex items-center justify-center py-20 text-text-muted">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
-        Loading workflow run...
+        Loading agent workflow run...
       </div>
     );
   }
@@ -211,11 +211,11 @@ export default function WorkflowRunDetailPage({
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Workflow
+          Back to Agent Workflow
         </Link>
         <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
           <XCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>{error ?? "Workflow run not found"}</p>
+          <p>{error ?? "Agent workflow run not found"}</p>
         </div>
       </div>
     );
@@ -235,11 +235,11 @@ export default function WorkflowRunDetailPage({
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 text-sm text-text-muted mb-4">
         <Link href="/workflows" className="hover:text-text transition-colors">
-          Workflows
+          Agent Workflows
         </Link>
         <span>/</span>
         <Link href={`/workflows/${workflowId}`} className="hover:text-text transition-colors">
-          {workflow?.name ?? "Workflow"}
+          {workflow?.name ?? "Agent Workflow"}
         </Link>
         <span>/</span>
         <span className="text-text">Run {run.id.slice(0, 8)}</span>

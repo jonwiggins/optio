@@ -174,7 +174,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
   const [activeTab, setActiveTab] = useState<"runs" | "triggers" | "config">("runs");
   const [showRunDialog, setShowRunDialog] = useState(false);
 
-  usePageTitle(workflow?.name ?? "Workflow");
+  usePageTitle(workflow?.name ?? "Agent Workflow");
 
   const refresh = useCallback(async () => {
     try {
@@ -211,10 +211,10 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     setActionLoading(true);
     try {
       await api.updateWorkflow(id, { enabled: !workflow.enabled });
-      toast.success(workflow.enabled ? "Workflow disabled" : "Workflow enabled");
+      toast.success(workflow.enabled ? "Agent workflow disabled" : "Agent workflow enabled");
       await refresh();
     } catch {
-      toast.error("Failed to update workflow");
+      toast.error("Failed to update agent workflow");
     } finally {
       setActionLoading(false);
     }
@@ -224,24 +224,24 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     setActionLoading(true);
     try {
       const res = await api.cloneWorkflow(id);
-      toast.success("Workflow duplicated");
+      toast.success("Agent workflow duplicated");
       router.push(`/workflows/${res.workflow.id}/edit`);
     } catch {
-      toast.error("Failed to duplicate workflow");
+      toast.error("Failed to duplicate agent workflow");
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm("Delete this workflow and all its runs? This cannot be undone.")) return;
+    if (!confirm("Delete this agent workflow and all its runs? This cannot be undone.")) return;
     setActionLoading(true);
     try {
       await api.deleteWorkflow(id);
-      toast.success("Workflow deleted");
+      toast.success("Agent workflow deleted");
       router.push("/workflows");
     } catch {
-      toast.error("Failed to delete workflow");
+      toast.error("Failed to delete agent workflow");
     } finally {
       setActionLoading(false);
     }
@@ -253,7 +253,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     return (
       <div className="flex items-center justify-center py-20 text-text-muted">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
-        Loading workflow...
+        Loading agent workflow...
       </div>
     );
   }
@@ -266,11 +266,11 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Workflows
+          Back to Agent Workflows
         </Link>
         <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
           <XCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>{error ?? "Workflow not found"}</p>
+          <p>{error ?? "Agent workflow not found"}</p>
         </div>
       </div>
     );
@@ -291,7 +291,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
         className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
       >
         <ArrowLeft className="w-4 h-4" />
-        Back to Workflows
+        Back to Agent Workflows
       </Link>
 
       <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
@@ -315,7 +315,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
             onClick={() => setShowRunDialog(true)}
             disabled={!workflow.enabled || actionLoading}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-primary text-white hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title={workflow.enabled ? "Run this workflow" : "Workflow is disabled"}
+            title={workflow.enabled ? "Run this agent workflow" : "Agent workflow is disabled"}
           >
             <Play className="w-4 h-4" /> Run
           </button>
@@ -630,7 +630,8 @@ function TriggersList({
         <Zap className="w-6 h-6 mx-auto mb-2 opacity-50" />
         <p className="text-sm">No triggers configured</p>
         <p className="text-xs mt-1 mb-3">
-          Triggers define how this workflow is started (manually, on schedule, or via webhook).
+          Triggers define how this agent workflow is started (manually, on schedule, or via
+          webhook).
         </p>
         <Link
           href={`/workflows/${workflowId}/edit`}
@@ -732,7 +733,7 @@ function ConfigPanel({
       <div className="rounded-lg border border-border/50 bg-bg-card p-4">
         <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
           <Settings className="w-4 h-4 text-text-muted" />
-          Workflow Configuration
+          Agent Workflow Configuration
         </h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
           <div>

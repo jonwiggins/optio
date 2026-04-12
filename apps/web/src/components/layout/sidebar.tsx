@@ -33,7 +33,7 @@ const MAIN_NAV = [
   { href: "/connections", label: "Connections", icon: Plug },
   { href: "/cluster", label: "Cluster", icon: Server },
   { href: "/costs", label: "Costs", icon: DollarSign },
-  { href: "/workflows", label: "Workflows", icon: GitBranch },
+  { href: "/workflows", label: "Agent Workflows", icon: GitBranch },
   { href: "/schedules", label: "Schedules", icon: Clock },
   { href: "/templates", label: "Templates", icon: FileText },
 ];
