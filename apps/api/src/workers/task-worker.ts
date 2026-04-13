@@ -1310,6 +1310,17 @@ export async function reconcileOrphanedTasks() {
   // Check if a PR was already opened —
   // if so, transition directly to pr_opened to avoid redoing work.
   for (const task of [...orphanedProvisioning, ...orphanedRunning]) {
+    // Re-read the task to get its current state — it may have been
+    // completed or cancelled between the initial query and now.
+    const [current] = await db.select().from(tasks).where(eq(tasks.id, task.id));
+    if (!current || (current.state !== "running" && current.state !== "provisioning")) {
+      logger.info(
+        { taskId: task.id, state: current?.state ?? "deleted" },
+        "Skipping reconciliation — task already transitioned",
+      );
+      continue;
+    }
+
     const taskWsId = task.workspaceId ?? null;
     const isReview = task.taskType === "review";
     let existingPr = null;
@@ -1321,7 +1332,7 @@ export async function reconcileOrphanedTasks() {
       }
     }
 
-    if (existingPr && task.state === "running") {
+    if (existingPr && current.state === "running") {
       // running → pr_opened is a valid transition
       logger.info(
         { taskId: task.id, prUrl: existingPr.url },
@@ -1334,7 +1345,7 @@ export async function reconcileOrphanedTasks() {
         "startup_reconcile",
         existingPr.url,
       );
-    } else if (existingPr && task.state === "provisioning") {
+    } else if (existingPr && current.state === "provisioning") {
       // provisioning → pr_opened is NOT valid; fail → re-queue and
       // the pre-agent PR check will short-circuit it to pr_opened
       logger.info(
