@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { isSsrfSafeUrl } from "../utils/ssrf.js";
 import * as webhookService from "../services/webhook-service.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { WebhookSchema, WebhookDeliverySchema } from "../schemas/integration.js";
 
@@ -140,6 +141,13 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
       const webhook = await webhookService.createWebhook(req.body, req.user?.id, workspaceId);
+      logAction({
+        userId: req.user?.id,
+        action: "webhook.create",
+        params: { url: req.body.url, events: req.body.events },
+        result: { id: webhook.id },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({
         webhook: { ...webhook, secret: webhook.secret ? "••••••" : null },
       });
@@ -171,6 +179,13 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
       }
       const updated = await webhookService.updateWebhook(id, req.body);
       if (!updated) return reply.status(404).send({ error: "Webhook not found" });
+      logAction({
+        userId: req.user?.id,
+        action: "webhook.update",
+        params: { webhookId: id, ...req.body },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.send({
         webhook: { ...updated, secret: updated.secret ? "••••••" : null },
       });
@@ -199,6 +214,13 @@ export async function webhookRoutes(rawApp: FastifyInstance) {
       }
       const deleted = await webhookService.deleteWebhook(id);
       if (!deleted) return reply.status(404).send({ error: "Webhook not found" });
+      logAction({
+        userId: req.user?.id,
+        action: "webhook.delete",
+        params: { webhookId: id },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.status(204).send(null);
     },
   );

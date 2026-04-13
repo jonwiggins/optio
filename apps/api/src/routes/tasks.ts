@@ -9,6 +9,7 @@ import { taskQueue } from "../workers/task-worker.js";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { requireRole } from "../plugins/auth.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   TaskSchema,
@@ -381,6 +382,13 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         createdBy: req.user?.id,
         workspaceId: req.user?.workspaceId ?? null,
       });
+      logAction({
+        userId: req.user?.id,
+        action: "task.create",
+        params: { taskId: task.id, title: taskInput.title, repoUrl: taskInput.repoUrl },
+        result: { id: task.id },
+        success: true,
+      }).catch(() => {});
 
       const hasDeps = dependsOn && dependsOn.length > 0;
       if (hasDeps) {
@@ -458,6 +466,13 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         undefined,
         req.user?.id,
       );
+      logAction({
+        userId: req.user?.id,
+        action: "task.cancel",
+        params: { taskId: id },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.send({ task });
     },
   );
@@ -505,6 +520,13 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           attempts: 1,
         },
       );
+      logAction({
+        userId: req.user?.id,
+        action: "task.retry",
+        params: { taskId: id },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.send({ task });
     },
   );
@@ -554,6 +576,13 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           attempts: 1,
         },
       );
+      logAction({
+        userId: req.user?.id,
+        action: "task.force_redo",
+        params: { taskId: id },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.send({ task });
     },
   );
@@ -798,6 +827,13 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       try {
         const { launchReview } = await import("../services/review-service.js");
         const reviewTaskId = await launchReview(id);
+        logAction({
+          userId: req.user?.id,
+          action: "task.review",
+          params: { taskId: id },
+          result: { reviewTaskId },
+          success: true,
+        }).catch(() => {});
         reply.status(201).send({ reviewTaskId });
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -859,6 +895,13 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       );
 
       const task = await taskService.getTask(id);
+      logAction({
+        userId: req.user?.id,
+        action: "task.run_now",
+        params: { taskId: id },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.send({ task });
     },
   );
@@ -902,6 +945,13 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           .set({ priority: i + 1, updatedAt: new Date() })
           .where(eq(tasks.id, body.taskIds[i]));
       }
+      logAction({
+        userId: req.user?.id,
+        action: "task.reorder",
+        params: { taskIds: body.taskIds },
+        result: { reordered: body.taskIds.length },
+        success: true,
+      }).catch(() => {});
       reply.send({ ok: true, reordered: body.taskIds.length });
     },
   );

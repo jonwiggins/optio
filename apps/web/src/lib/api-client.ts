@@ -1260,4 +1260,42 @@ export const api = {
 
   deleteConnectionAssignment: (id: string) =>
     request<void>(`/api/connection-assignments/${id}`, { method: "DELETE" }),
+
+  // Activity feed
+  getActivityFeed: (params?: {
+    days?: number;
+    type?: string;
+    userId?: string;
+    resourceType?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params) {
+      for (const [key, val] of Object.entries(params)) {
+        if (val != null && val !== "") qs.set(key, String(val));
+      }
+    }
+    const query = qs.toString();
+    return request<{
+      items: Array<{
+        id: string;
+        type: "action" | "task_event" | "auth_event" | "infra_event";
+        timestamp: string;
+        actor?: { id: string; displayName: string; avatarUrl?: string | null } | null;
+        action: string;
+        resourceType: string;
+        resourceId?: string | null;
+        summary: string;
+        details?: Record<string, unknown> | null;
+      }>;
+      total: number;
+      stats: {
+        actions: number;
+        taskEvents: number;
+        authEvents: number;
+        infraEvents: number;
+      };
+    }>(`/api/activity${query ? `?${query}` : ""}`);
+  },
 };

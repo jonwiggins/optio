@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as connectionService from "../services/connection-service.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   ConnectionProviderSchema,
@@ -154,6 +155,13 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
       const provider = await connectionService.createProvider(req.body, workspaceId);
+      logAction({
+        userId: req.user?.id,
+        action: "connection_provider.create",
+        params: { slug: req.body.slug, name: req.body.name },
+        result: { id: provider.id },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({ provider });
     },
   );
@@ -193,6 +201,13 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
       const conn = await connectionService.createConnection(req.body, workspaceId);
+      logAction({
+        userId: req.user?.id,
+        action: "connection.create",
+        params: { name: req.body.name, providerSlug: req.body.providerSlug },
+        result: { id: conn.id },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({ connection: conn });
     },
   );
@@ -241,6 +256,13 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Connection not found" });
       }
       const conn = await connectionService.updateConnection(req.params.id, req.body);
+      logAction({
+        userId: req.user?.id,
+        action: "connection.update",
+        params: { connectionId: req.params.id, ...req.body },
+        result: { id: req.params.id },
+        success: true,
+      }).catch(() => {});
       reply.send({ connection: conn });
     },
   );
@@ -265,6 +287,13 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Connection not found" });
       }
       await connectionService.deleteConnection(req.params.id);
+      logAction({
+        userId: req.user?.id,
+        action: "connection.delete",
+        params: { connectionId: req.params.id },
+        result: { id: req.params.id },
+        success: true,
+      }).catch(() => {});
       reply.status(204).send(null);
     },
   );
@@ -333,6 +362,13 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       const conn = await connectionService.getConnection(req.params.id);
       if (!conn) return reply.status(404).send({ error: "Connection not found" });
       const assignment = await connectionService.createAssignment(req.params.id, req.body);
+      logAction({
+        userId: req.user?.id,
+        action: "connection.assign",
+        params: { connectionId: req.params.id, ...req.body },
+        result: { id: assignment.id },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({ assignment });
     },
   );
@@ -352,6 +388,13 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const assignment = await connectionService.updateAssignment(req.params.id, req.body);
+      logAction({
+        userId: req.user?.id,
+        action: "connection_assignment.update",
+        params: { assignmentId: req.params.id, ...req.body },
+        result: { id: req.params.id },
+        success: true,
+      }).catch(() => {});
       reply.send({ assignment });
     },
   );
@@ -370,6 +413,13 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       await connectionService.deleteAssignment(req.params.id);
+      logAction({
+        userId: req.user?.id,
+        action: "connection_assignment.delete",
+        params: { assignmentId: req.params.id },
+        result: { id: req.params.id },
+        success: true,
+      }).catch(() => {});
       reply.status(204).send(null);
     },
   );

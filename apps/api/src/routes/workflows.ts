@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as workflowService from "../services/workflow-service.js";
 import { workflowRunQueue } from "../workers/workflow-worker.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   WorkflowSchema,
@@ -164,6 +165,13 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
           workspaceId: req.user?.workspaceId ?? undefined,
           createdBy: req.user?.id,
         });
+        logAction({
+          userId: req.user?.id,
+          action: "workflow.create",
+          params: { name: input.name },
+          result: { id: workflow.id },
+          success: true,
+        }).catch(() => {});
         reply.status(201).send({ workflow });
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -221,6 +229,18 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       try {
         const workflow = await workflowService.updateWorkflow(id, input);
         if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
+        logAction({
+          userId: req.user?.id,
+          action:
+            input.enabled !== undefined
+              ? input.enabled
+                ? "workflow.enable"
+                : "workflow.disable"
+              : "workflow.update",
+          params: { workflowId: id, ...input },
+          result: { id },
+          success: true,
+        }).catch(() => {});
         reply.send({ workflow });
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -252,6 +272,13 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         createdBy: req.user?.id,
       });
       if (!cloned) return reply.status(404).send({ error: "Workflow not found" });
+      logAction({
+        userId: req.user?.id,
+        action: "workflow.clone",
+        params: { sourceWorkflowId: id },
+        result: { id: cloned.id },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({ workflow: cloned });
     },
   );
@@ -275,6 +302,13 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const deleted = await workflowService.deleteWorkflow(id);
       if (!deleted) return reply.status(404).send({ error: "Workflow not found" });
+      logAction({
+        userId: req.user?.id,
+        action: "workflow.delete",
+        params: { workflowId: id },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.status(204).send(null);
     },
   );
@@ -311,6 +345,13 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
           { jobId: run.id },
         );
 
+        logAction({
+          userId: req.user?.id,
+          action: "workflow_run.create",
+          params: { workflowId: id },
+          result: { id: run.id },
+          success: true,
+        }).catch(() => {});
         reply.status(201).send({ run });
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -390,6 +431,13 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       try {
         const run = await workflowService.retryWorkflowRun(id);
+        logAction({
+          userId: req.user?.id,
+          action: "workflow_run.retry",
+          params: { workflowRunId: id },
+          result: { id },
+          success: true,
+        }).catch(() => {});
         reply.send({ run });
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -416,6 +464,13 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       try {
         const run = await workflowService.cancelWorkflowRun(id);
+        logAction({
+          userId: req.user?.id,
+          action: "workflow_run.cancel",
+          params: { workflowRunId: id },
+          result: { id },
+          success: true,
+        }).catch(() => {});
         reply.send({ run });
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

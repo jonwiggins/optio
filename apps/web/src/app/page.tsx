@@ -9,6 +9,7 @@ import {
   ClusterSummary,
   ActiveSessions,
   RecentTasks,
+  RecentActivity,
   PodsList,
   WelcomeHero,
   PerformanceSummary,
@@ -156,7 +157,11 @@ export default function OverviewPage() {
       <ActiveSessions sessions={activeSessions} activeCount={activeSessionCount} />
 
       <div className="grid md:grid-cols-2 gap-8">
+        <RecentActivity />
         <RecentTasks tasks={recentTasks} />
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-8">
         <PodsList
           pods={pods}
           events={events}

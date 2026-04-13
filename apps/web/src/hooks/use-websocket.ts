@@ -101,6 +101,11 @@ export function useGlobalWebSocket() {
       window.dispatchEvent(new CustomEvent("optio:workflow-run-state-changed", { detail: event }));
     });
 
+    client.on("activity:new", () => {
+      // Dispatch a DOM event so the activity page and dashboard widget can refresh
+      window.dispatchEvent(new Event("optio:activity-new"));
+    });
+
     return () => {
       client.disconnect();
     };

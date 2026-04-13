@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as optioSettingsService from "../services/optio-settings-service.js";
+import { logAction } from "../services/optio-action-service.js";
 
 const updateSettingsSchema = z
   .object({
@@ -60,6 +61,13 @@ export async function optioSettingsRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
       const settings = await optioSettingsService.upsertSettings(req.body, workspaceId);
+      logAction({
+        userId: req.user?.id,
+        action: "settings.update",
+        params: { ...req.body },
+        result: {},
+        success: true,
+      }).catch(() => {});
       reply.send({ settings });
     },
   );

@@ -2,6 +2,7 @@ import { eq, desc, and, gte, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { optioActions, users } from "../db/schema.js";
 import type { OptioAction } from "@optio/shared";
+import { publishEvent } from "./event-bus.js";
 
 // ── Sensitive key patterns to strip from params ─────────────────────────────
 
@@ -50,6 +51,19 @@ export async function logAction(input: LogActionInput): Promise<OptioAction> {
       conversationSnippet: input.conversationSnippet ?? null,
     })
     .returning();
+
+  // Publish real-time activity event (non-blocking)
+  const [resourceType] = input.action.split(".");
+  publishEvent({
+    type: "activity:new",
+    action: input.action,
+    userId: input.userId,
+    resourceType,
+    resourceId: (input.params?.id ?? input.result?.id) as string | undefined,
+    summary: `${input.action} ${input.success ? "succeeded" : "failed"}`,
+    timestamp: new Date().toISOString(),
+  }).catch(() => {});
+
   return row as unknown as OptioAction;
 }
 

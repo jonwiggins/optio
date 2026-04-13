@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireRole } from "../plugins/auth.js";
 import * as prReviewService from "../services/pr-review-service.js";
 import { logger } from "../logger.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   ReviewDraftSchema,
@@ -128,6 +129,13 @@ export async function prReviewRoutes(rawApp: FastifyInstance) {
           workspaceId: req.user?.workspaceId ?? undefined,
           createdBy: req.user?.id,
         });
+        logAction({
+          userId: req.user?.id,
+          action: "review.launch",
+          params: { prUrl: req.body.prUrl },
+          result: result as Record<string, unknown>,
+          success: true,
+        }).catch(() => {});
         reply.status(201).send(result);
       } catch (err: unknown) {
         logger.warn({ err, prUrl: req.body.prUrl }, "Failed to launch PR review");

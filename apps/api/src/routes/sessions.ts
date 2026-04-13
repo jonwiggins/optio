@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import * as sessionService from "../services/interactive-session-service.js";
 import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   InteractiveSessionSchema,
@@ -209,6 +210,13 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
         userId,
         workspaceId: req.user?.workspaceId ?? null,
       });
+      logAction({
+        userId: req.user?.id,
+        action: "session.create",
+        params: { repoUrl: input.repoUrl },
+        result: { id: session.id },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({ session });
     },
   );
@@ -242,6 +250,13 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
 
       try {
         const updated = await sessionService.endSession(id);
+        logAction({
+          userId: req.user?.id,
+          action: "session.end",
+          params: { sessionId: id },
+          result: { id },
+          success: true,
+        }).catch(() => {});
         reply.send({ session: updated });
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

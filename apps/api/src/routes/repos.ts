@@ -12,6 +12,7 @@ import {
 import { requireRole } from "../plugins/auth.js";
 import { getGitHubToken } from "../services/github-token-service.js";
 import { isSsrfSafeUrl } from "../utils/ssrf.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { RepoSchema } from "../schemas/integration.js";
 
@@ -179,6 +180,13 @@ export async function repoRoutes(rawApp: FastifyInstance) {
         /* non-critical */
       }
 
+      logAction({
+        userId: req.user?.id,
+        action: "repo.create",
+        params: { repoUrl: body.repoUrl, fullName: body.fullName },
+        result: { id: repo.id },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({ repo });
     },
   );
@@ -252,6 +260,13 @@ export async function repoRoutes(rawApp: FastifyInstance) {
 
       const repo = await repoService.updateRepo(id, body);
       if (!repo) return reply.status(404).send({ error: "Repo not found" });
+      logAction({
+        userId: req.user?.id,
+        action: "repo.update",
+        params: { repoId: id, ...body },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.send({ repo });
     },
   );
@@ -280,6 +295,13 @@ export async function repoRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Repo not found" });
       }
       await repoService.deleteRepo(id);
+      logAction({
+        userId: req.user?.id,
+        action: "repo.delete",
+        params: { repoId: id, repoUrl: existing.repoUrl },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.status(204).send(null);
     },
   );

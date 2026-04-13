@@ -8,6 +8,7 @@ import { TaskState } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { requireRole } from "../plugins/auth.js";
+import { logAction } from "../services/optio-action-service.js";
 
 const RetriedResponseSchema = z
   .object({
@@ -69,6 +70,13 @@ export async function bulkRoutes(rawApp: FastifyInstance) {
           // Skip tasks that can't transition
         }
       }
+      logAction({
+        userId: req.user?.id,
+        action: "task.bulk_retry",
+        params: {},
+        result: { retried, total: failedTasks.length },
+        success: true,
+      }).catch(() => {});
       reply.send({ retried, total: failedTasks.length });
     },
   );
@@ -117,6 +125,13 @@ export async function bulkRoutes(rawApp: FastifyInstance) {
           // Skip tasks that can't transition
         }
       }
+      logAction({
+        userId: req.user?.id,
+        action: "task.bulk_cancel",
+        params: {},
+        result: { cancelled, total: allActive.length },
+        success: true,
+      }).catch(() => {});
       reply.send({ cancelled, total: allActive.length });
     },
   );

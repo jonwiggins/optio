@@ -5,6 +5,7 @@ import * as secretService from "../services/secret-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { invalidateCredentialsCache } from "../services/auth-service.js";
 import { publishEvent } from "../services/event-bus.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 
 const scopeQuerySchema = z
@@ -147,6 +148,13 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         }).catch(() => {});
       }
 
+      logAction({
+        userId: req.user?.id,
+        action: "secret.upsert",
+        params: { name: input.name, scope: input.scope ?? "global" },
+        result: { name: input.name },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({
         name: input.name,
         scope: input.scope ?? "global",
@@ -173,6 +181,13 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       const { name } = req.params;
       const workspaceId = req.user?.workspaceId ?? null;
       await secretService.deleteSecret(name, req.query.scope, workspaceId);
+      logAction({
+        userId: req.user?.id,
+        action: "secret.delete",
+        params: { name },
+        result: { name },
+        success: true,
+      }).catch(() => {});
       reply.status(204).send(null);
     },
   );

@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workflows } from "../db/schema.js";
 import * as triggerService from "../services/workflow-trigger-service.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { WorkflowTriggerSchema } from "../schemas/workflow.js";
 
@@ -156,6 +157,13 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
           paramMapping: input.paramMapping,
           enabled: input.enabled,
         });
+        logAction({
+          userId: req.user?.id,
+          action: "workflow_trigger.create",
+          params: { workflowId: id, type: input.type },
+          result: { id: trigger.id },
+          success: true,
+        }).catch(() => {});
         reply.status(201).send({ trigger });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -218,6 +226,13 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
       try {
         const trigger = await triggerService.updateTrigger(triggerId, input);
         if (!trigger) return reply.status(404).send({ error: "Trigger not found" });
+        logAction({
+          userId: req.user?.id,
+          action: "workflow_trigger.update",
+          params: { workflowId: id, triggerId },
+          result: { id: triggerId },
+          success: true,
+        }).catch(() => {});
         reply.send({ trigger });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -260,6 +275,13 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
       }
 
       await triggerService.deleteTrigger(triggerId);
+      logAction({
+        userId: req.user?.id,
+        action: "workflow_trigger.delete",
+        params: { workflowId: id, triggerId },
+        result: { id: triggerId },
+        success: true,
+      }).catch(() => {});
       reply.status(204).send(null);
     },
   );

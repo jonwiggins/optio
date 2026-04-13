@@ -17,7 +17,8 @@ export type WsEvent =
   | TaskMessageEvent
   | TaskMessageDeliveredEvent
   | WorkflowRunStateChangedEvent
-  | WorkflowRunLogEvent;
+  | WorkflowRunLogEvent
+  | ActivityNewEvent;
 
 export interface TaskStateChangedEvent {
   type: "task:state_changed";
@@ -118,6 +119,18 @@ export interface TaskMessageDeliveredEvent {
   type: "task:message_delivered" | "task:message_acked";
   taskId: string;
   messageId: string;
+  timestamp: string;
+}
+
+// ── Activity Events ─────────────────────────────────────────────────────────
+
+export interface ActivityNewEvent {
+  type: "activity:new";
+  action: string;
+  userId?: string;
+  resourceType?: string;
+  resourceId?: string;
+  summary: string;
   timestamp: string;
 }
 

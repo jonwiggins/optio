@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as mcpService from "../services/mcp-server-service.js";
+import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { McpServerSchema } from "../schemas/integration.js";
 
@@ -100,6 +101,13 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
       const server = await mcpService.createMcpServer(req.body, workspaceId);
+      logAction({
+        userId: req.user?.id,
+        action: "mcp_server.create",
+        params: { name: req.body.name, command: req.body.command },
+        result: { id: server.id },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({ server });
     },
   );
@@ -126,6 +134,13 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "MCP server not found" });
       }
       const server = await mcpService.updateMcpServer(id, req.body);
+      logAction({
+        userId: req.user?.id,
+        action: "mcp_server.update",
+        params: { mcpServerId: id, ...req.body },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.send({ server });
     },
   );
@@ -151,6 +166,13 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "MCP server not found" });
       }
       await mcpService.deleteMcpServer(id);
+      logAction({
+        userId: req.user?.id,
+        action: "mcp_server.delete",
+        params: { mcpServerId: id },
+        result: { id },
+        success: true,
+      }).catch(() => {});
       reply.status(204).send(null);
     },
   );
@@ -203,6 +225,13 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
         { ...req.body, repoUrl: repo.repoUrl },
         workspaceId,
       );
+      logAction({
+        userId: req.user?.id,
+        action: "mcp_server.create",
+        params: { name: req.body.name, repoId: id },
+        result: { id: server.id },
+        success: true,
+      }).catch(() => {});
       reply.status(201).send({ server });
     },
   );
