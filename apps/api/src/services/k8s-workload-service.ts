@@ -31,6 +31,8 @@ import {
   V1PersistentVolumeClaim,
   V1PersistentVolumeClaimSpec,
   V1VolumeResourceRequirements,
+  KubernetesObjectApi,
+  PatchStrategy,
 } from "@kubernetes/client-node";
 import type { ContainerSpec } from "@optio/shared";
 import { logger } from "../logger.js";
@@ -48,6 +50,7 @@ export class K8sWorkloadManager {
   private appsApi: AppsV1Api;
   private batchApi: BatchV1Api;
   private coreApi: CoreV1Api;
+  private objectApi: KubernetesObjectApi;
   private namespace: string;
 
   constructor(namespace: string = NAMESPACE) {
@@ -57,6 +60,7 @@ export class K8sWorkloadManager {
     this.appsApi = this.kubeConfig.makeApiClient(AppsV1Api);
     this.batchApi = this.kubeConfig.makeApiClient(BatchV1Api);
     this.coreApi = this.kubeConfig.makeApiClient(CoreV1Api);
+    this.objectApi = KubernetesObjectApi.makeApiClient(this.kubeConfig);
   }
 
   // ── StatefulSet methods (repo pods) ─────────────────────────────────────────
@@ -142,12 +146,16 @@ export class K8sWorkloadManager {
    * Scale a StatefulSet to the target replica count.
    */
   async scale(name: string, replicas: number): Promise<void> {
-    await this.appsApi.patchNamespacedStatefulSetScale({
+    const currentScale = await this.appsApi.readNamespacedStatefulSetScale({
       name,
       namespace: this.namespace,
-      body: { spec: { replicas } },
-      contentType: "application/merge-patch+json",
-    } as any);
+    });
+    currentScale.spec = { ...currentScale.spec, replicas };
+    await this.appsApi.replaceNamespacedStatefulSetScale({
+      name,
+      namespace: this.namespace,
+      body: currentScale,
+    });
     logger.info({ name, replicas }, "StatefulSet scaled");
   }
 
@@ -288,12 +296,22 @@ export class K8sWorkloadManager {
     }
 
     try {
-      await this.coreApi.patchNamespacedPod({
-        name: podName,
-        namespace: this.namespace,
-        body: { metadata: { annotations: patch } },
-        contentType: "application/merge-patch+json",
-      } as any);
+      await this.objectApi.patch(
+        {
+          apiVersion: "v1",
+          kind: "Pod",
+          metadata: {
+            name: podName,
+            namespace: this.namespace,
+            annotations: patch,
+          },
+        } as any,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        PatchStrategy.MergePatch,
+      );
     } catch (err: unknown) {
       if (!this.isNotFoundError(err)) {
         logger.warn({ err, podName }, "Failed to patch pod annotations");
