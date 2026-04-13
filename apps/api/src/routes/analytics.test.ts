@@ -12,6 +12,18 @@ vi.mock("../db/client.js", () => ({
   },
 }));
 
+const mockGetPerformance = vi.fn();
+const mockGetAgents = vi.fn();
+const mockGetFailures = vi.fn();
+const mockGetPrs = vi.fn();
+
+vi.mock("../services/analytics-service.js", () => ({
+  getPerformanceAnalytics: (...args: unknown[]) => mockGetPerformance(...args),
+  getAgentAnalytics: (...args: unknown[]) => mockGetAgents(...args),
+  getFailureAnalytics: (...args: unknown[]) => mockGetFailures(...args),
+  getPrAnalytics: (...args: unknown[]) => mockGetPrs(...args),
+}));
+
 import { analyticsRoutes } from "./analytics.js";
 
 // ─── Helpers ───
@@ -194,5 +206,176 @@ describe("GET /api/analytics/costs", () => {
     expect(res.statusCode).toBe(200);
     // Verify that db.execute was called (the repoUrl filter is embedded in SQL)
     expect(mockExecute).toHaveBeenCalledTimes(10);
+  });
+});
+
+describe("GET /api/analytics/performance", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns performance analytics with default params", async () => {
+    mockGetPerformance.mockResolvedValueOnce({
+      durations: {
+        avgWallClock: 3600,
+        p50WallClock: 3000,
+        p95WallClock: 7200,
+        avgExecution: 3000,
+        p50Execution: 2500,
+        p95Execution: 6000,
+        avgQueueWait: 600,
+        taskCount: 10,
+      },
+      successRate: 80,
+      successRateTrend: 5,
+      tasksPerDay: [{ date: "2026-04-10", total: 5, succeeded: 4, failed: 1 }],
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/analytics/performance",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.durations.avgWallClock).toBe(3600);
+    expect(body.successRate).toBe(80);
+    expect(body.tasksPerDay).toHaveLength(1);
+  });
+
+  it("passes filters to service", async () => {
+    mockGetPerformance.mockResolvedValueOnce({
+      durations: {
+        avgWallClock: 0,
+        p50WallClock: 0,
+        p95WallClock: 0,
+        avgExecution: 0,
+        p50Execution: 0,
+        p95Execution: 0,
+        avgQueueWait: 0,
+        taskCount: 0,
+      },
+      successRate: 0,
+      successRateTrend: 0,
+      tasksPerDay: [],
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/analytics/performance?days=7&agentType=claude&repoUrl=https://github.com/org/repo",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockGetPerformance).toHaveBeenCalledWith({
+      days: 7,
+      agentType: "claude",
+      repoUrl: "https://github.com/org/repo",
+      workspaceId: "ws-1",
+    });
+  });
+});
+
+describe("GET /api/analytics/agents", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns agent comparison analytics", async () => {
+    mockGetAgents.mockResolvedValueOnce({
+      agents: [
+        {
+          agentType: "claude",
+          taskCount: 15,
+          successRate: 80,
+          avgDuration: 1800,
+          avgCost: "1.5000",
+          avgRetries: 0.5,
+          models: [{ model: "claude-sonnet-4-6", taskCount: 10, avgCost: "1.2000" }],
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/analytics/agents",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.agents).toHaveLength(1);
+    expect(body.agents[0].agentType).toBe("claude");
+  });
+});
+
+describe("GET /api/analytics/failures", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns failure analytics", async () => {
+    mockGetFailures.mockResolvedValueOnce({
+      errorMessages: [{ message: "ImagePullBackOff", count: 5 }],
+      failureByRepo: [],
+      failureByAgent: [],
+      failureByModel: [],
+      retrySuccessRate: 67,
+      retriedCount: 6,
+      retrySucceededCount: 4,
+      stallCount: 3,
+      stallRecoveryRate: 67,
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/analytics/failures?days=7",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.errorMessages).toHaveLength(1);
+    expect(body.retrySuccessRate).toBe(67);
+  });
+});
+
+describe("GET /api/analytics/prs", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns PR lifecycle metrics", async () => {
+    mockGetPrs.mockResolvedValueOnce({
+      totalPrs: 20,
+      merged: 15,
+      closed: 2,
+      open: 3,
+      ciPassRate: 90,
+      reviewApprovalRate: 80,
+      autoMergeRate: 75,
+      avgMergeTime: 7200,
+      mergeCount: 15,
+      funnel: { prOpened: 20, ciPassed: 18, reviewApproved: 16, merged: 15 },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/analytics/prs",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.totalPrs).toBe(20);
+    expect(body.funnel.merged).toBe(15);
   });
 });

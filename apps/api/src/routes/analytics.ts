@@ -5,7 +5,19 @@ import { z } from "zod";
 import { db } from "../db/client.js";
 import { requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
-import { CostAnalyticsSchema } from "../schemas/workspace.js";
+import {
+  CostAnalyticsSchema,
+  PerformanceAnalyticsSchema,
+  AgentAnalyticsSchema,
+  FailureAnalyticsSchema,
+  PrAnalyticsSchema,
+} from "../schemas/workspace.js";
+import {
+  getPerformanceAnalytics,
+  getAgentAnalytics,
+  getFailureAnalytics,
+  getPrAnalytics,
+} from "../services/analytics-service.js";
 
 const costsQuerySchema = z
   .object({
@@ -20,6 +32,37 @@ const costsQuerySchema = z
     repoUrl: z.string().optional().describe("Optional repo URL filter"),
   })
   .describe("Query parameters for cost analytics");
+
+const performanceQuerySchema = z
+  .object({
+    days: z.coerce.number().int().min(1).max(365).optional().default(30),
+    repoUrl: z.string().optional(),
+    agentType: z.string().optional(),
+  })
+  .describe("Query parameters for performance analytics");
+
+const agentQuerySchema = z
+  .object({
+    days: z.coerce.number().int().min(1).max(365).optional().default(30),
+    repoUrl: z.string().optional(),
+  })
+  .describe("Query parameters for agent analytics");
+
+const failureQuerySchema = z
+  .object({
+    days: z.coerce.number().int().min(1).max(365).optional().default(30),
+    repoUrl: z.string().optional(),
+    agentType: z.string().optional(),
+  })
+  .describe("Query parameters for failure analytics");
+
+const prQuerySchema = z
+  .object({
+    days: z.coerce.number().int().min(1).max(365).optional().default(30),
+    repoUrl: z.string().optional(),
+    agentType: z.string().optional(),
+  })
+  .describe("Query parameters for PR analytics");
 
 export async function analyticsRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -395,6 +438,129 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
           createdAt: r.created_at,
         })),
       });
+    },
+  );
+
+  // ── Performance Analytics ────────────────────────────────────────────────
+
+  app.get(
+    "/api/analytics/performance",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "getPerformanceAnalytics",
+        summary: "Get task performance analytics",
+        description:
+          "Return task duration metrics (avg/p50/p95), success rate with trend, " +
+          "and tasks-per-day time series. Filterable by days, repoUrl, agentType.",
+        tags: ["Analytics"],
+        querystring: performanceQuerySchema,
+        response: {
+          200: PerformanceAnalyticsSchema,
+          400: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const result = await getPerformanceAnalytics({
+        days: req.query.days,
+        repoUrl: req.query.repoUrl || null,
+        agentType: req.query.agentType || null,
+        workspaceId: req.user?.workspaceId || null,
+      });
+      reply.send(result);
+    },
+  );
+
+  // ── Agent Comparison Analytics ───────────────────────────────────────────
+
+  app.get(
+    "/api/analytics/agents",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "getAgentAnalytics",
+        summary: "Get per-agent-type comparison analytics",
+        description:
+          "Return task count, success rate, avg duration, avg cost, avg retries, " +
+          "and model breakdown for each agent type.",
+        tags: ["Analytics"],
+        querystring: agentQuerySchema,
+        response: {
+          200: AgentAnalyticsSchema,
+          400: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const result = await getAgentAnalytics({
+        days: req.query.days,
+        repoUrl: req.query.repoUrl || null,
+        workspaceId: req.user?.workspaceId || null,
+      });
+      reply.send(result);
+    },
+  );
+
+  // ── Failure Analytics ────────────────────────────────────────────────────
+
+  app.get(
+    "/api/analytics/failures",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "getFailureAnalytics",
+        summary: "Get failure pattern analysis",
+        description:
+          "Return top error messages, failure rates by repo/agent/model, " +
+          "retry success rate, and stall frequency.",
+        tags: ["Analytics"],
+        querystring: failureQuerySchema,
+        response: {
+          200: FailureAnalyticsSchema,
+          400: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const result = await getFailureAnalytics({
+        days: req.query.days,
+        repoUrl: req.query.repoUrl || null,
+        agentType: req.query.agentType || null,
+        workspaceId: req.user?.workspaceId || null,
+      });
+      reply.send(result);
+    },
+  );
+
+  // ── PR Lifecycle Analytics ───────────────────────────────────────────────
+
+  app.get(
+    "/api/analytics/prs",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "getPrAnalytics",
+        summary: "Get PR lifecycle metrics",
+        description:
+          "Return PR open→merge time, CI pass rate, review approval rate, " +
+          "auto-merge success rate, and PR lifecycle funnel.",
+        tags: ["Analytics"],
+        querystring: prQuerySchema,
+        response: {
+          200: PrAnalyticsSchema,
+          400: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const result = await getPrAnalytics({
+        days: req.query.days,
+        repoUrl: req.query.repoUrl || null,
+        agentType: req.query.agentType || null,
+        workspaceId: req.user?.workspaceId || null,
+      });
+      reply.send(result);
     },
   );
 }

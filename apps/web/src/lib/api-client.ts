@@ -570,6 +570,115 @@ export const api = {
     }>(`/api/analytics/costs${query ? `?${query}` : ""}`);
   },
 
+  getPerformanceAnalytics: (params?: { days?: number; repoUrl?: string; agentType?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.days) qs.set("days", String(params.days));
+    if (params?.repoUrl) qs.set("repoUrl", params.repoUrl);
+    if (params?.agentType) qs.set("agentType", params.agentType);
+    const query = qs.toString();
+    return request<{
+      durations: {
+        avgWallClock: number;
+        p50WallClock: number;
+        p95WallClock: number;
+        avgExecution: number;
+        p50Execution: number;
+        p95Execution: number;
+        avgQueueWait: number;
+        taskCount: number;
+      };
+      successRate: number;
+      successRateTrend: number;
+      tasksPerDay: Array<{
+        date: string;
+        total: number;
+        succeeded: number;
+        failed: number;
+      }>;
+    }>(`/api/analytics/performance${query ? `?${query}` : ""}`);
+  },
+
+  getAgentAnalytics: (params?: { days?: number; repoUrl?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.days) qs.set("days", String(params.days));
+    if (params?.repoUrl) qs.set("repoUrl", params.repoUrl);
+    const query = qs.toString();
+    return request<{
+      agents: Array<{
+        agentType: string;
+        taskCount: number;
+        successRate: number;
+        avgDuration: number;
+        avgCost: string;
+        avgRetries: number;
+        models: Array<{
+          model: string;
+          taskCount: number;
+          avgCost: string;
+        }>;
+      }>;
+    }>(`/api/analytics/agents${query ? `?${query}` : ""}`);
+  },
+
+  getFailureAnalytics: (params?: { days?: number; repoUrl?: string; agentType?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.days) qs.set("days", String(params.days));
+    if (params?.repoUrl) qs.set("repoUrl", params.repoUrl);
+    if (params?.agentType) qs.set("agentType", params.agentType);
+    const query = qs.toString();
+    return request<{
+      errorMessages: Array<{ message: string; count: number }>;
+      failureByRepo: Array<{
+        repoUrl: string;
+        total: number;
+        failed: number;
+        failureRate: number;
+      }>;
+      failureByAgent: Array<{
+        agentType: string;
+        total: number;
+        failed: number;
+        failureRate: number;
+      }>;
+      failureByModel: Array<{
+        model: string;
+        total: number;
+        failed: number;
+        failureRate: number;
+      }>;
+      retrySuccessRate: number;
+      retriedCount: number;
+      retrySucceededCount: number;
+      stallCount: number;
+      stallRecoveryRate: number;
+    }>(`/api/analytics/failures${query ? `?${query}` : ""}`);
+  },
+
+  getPrAnalytics: (params?: { days?: number; repoUrl?: string; agentType?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.days) qs.set("days", String(params.days));
+    if (params?.repoUrl) qs.set("repoUrl", params.repoUrl);
+    if (params?.agentType) qs.set("agentType", params.agentType);
+    const query = qs.toString();
+    return request<{
+      totalPrs: number;
+      merged: number;
+      closed: number;
+      open: number;
+      ciPassRate: number;
+      reviewApprovalRate: number;
+      autoMergeRate: number;
+      avgMergeTime: number;
+      mergeCount: number;
+      funnel: {
+        prOpened: number;
+        ciPassed: number;
+        reviewApproved: number;
+        merged: number;
+      };
+    }>(`/api/analytics/prs${query ? `?${query}` : ""}`);
+  },
+
   assignIssue: (data: {
     issueNumber: number;
     repoId: string;

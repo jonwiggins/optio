@@ -18,6 +18,7 @@ import {
   GitBranch,
   Webhook,
   Plug,
+  BarChart3,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
 import { WorkspaceSwitcher } from "./workspace-switcher";
@@ -26,6 +27,7 @@ import { useOptioChatStore } from "@/hooks/use-optio-chat";
 const MAIN_NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/workflows", label: "Agent Workflows", icon: GitBranch },
   { href: "/sessions", label: "Sessions", icon: Terminal },
   { href: "/repos", label: "Repos", icon: FolderGit2 },
