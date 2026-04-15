@@ -135,10 +135,11 @@ function getETDate(ref: Date, targetHourET: number): Date {
     `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(targetHourET).padStart(2, "0")}:00:00`,
   );
 
-  // Get what hour ET thinks this is
-  const { hour: guessHour } = getETComponents(guess);
-  const drift = guessHour - targetHourET;
-  guess.setHours(guess.getHours() - drift);
+  // Get what ET thinks this is, including minutes (sub-hour timezone offsets like IST = UTC+5:30
+  // would otherwise introduce a 30-minute drift when using setHours in local time).
+  const { hour: guessHour, minute: guessMinute } = getETComponents(guess);
+  const driftMs = (guessHour - targetHourET) * 60 * 60 * 1000 + guessMinute * 60 * 1000;
+  guess.setTime(guess.getTime() - driftMs);
 
   return guess;
 }
