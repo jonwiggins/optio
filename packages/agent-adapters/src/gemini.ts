@@ -100,10 +100,13 @@ export class GeminiAdapter implements AgentAdapter {
     const approvalMode = input.geminiApprovalMode ?? "yolo";
     const authType = input.geminiAuthMode === "vertex-ai" ? "vertex-ai" : "gemini-api-key";
     const maxSessionTurns = input.maxTurnsCoding ?? 250;
+    // "yolo" is not a valid settings.json enum (valid: 'default' | 'auto_edit' | 'plan').
+    // Yolo mode is applied via the --approval-mode CLI flag; settings.json uses "auto_edit".
+    const settingsApprovalMode = approvalMode === "yolo" ? "auto_edit" : approvalMode;
     const geminiSettings = {
       security: { auth: { selectedType: authType } },
       model: { maxSessionTurns },
-      general: { defaultApprovalMode: approvalMode },
+      general: { defaultApprovalMode: settingsApprovalMode },
       telemetry: { enabled: false },
     };
     setupFiles.push({

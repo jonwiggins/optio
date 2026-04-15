@@ -115,7 +115,8 @@ export function parseGeminiEvent(
 
   // Tool result
   if (event.type === "tool_result") {
-    const output = typeof event.output === "string" ? event.output : JSON.stringify(event.output);
+    const output =
+      typeof event.output === "string" ? event.output : (JSON.stringify(event.output) ?? "");
     const trimmed = output.length > 300 ? output.slice(0, 300) + "\u2026" : output;
     if (trimmed.trim()) {
       entries.push({

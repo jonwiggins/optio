@@ -1703,7 +1703,7 @@ export function buildAgentCommand(
         ? ` -m ${JSON.stringify(env.OPTIO_GEMINI_MODEL)}`
         : "";
       return [
-        `echo "[optio] Running Google Gemini${opts?.isReview ? " (review)" : ""}..."`,
+        `echo "[optio] Running Gemini..."`,
         `gemini -p "$OPTIO_PROMPT" \\`,
         `  --output-format stream-json \\`,
         `  --approval-mode yolo${geminiModelFlag}`,
@@ -1796,12 +1796,15 @@ export function inferExitCode(agentType: string, logs: string): number {
     }
     case "gemini": {
       const hasErrorEvent = logs.includes('"type":"error"') || logs.includes('"type": "error"');
-      const hasAuthError = /GEMINI_API_KEY|GOOGLE_API_KEY|permission denied|unauthorized/i.test(
-        logs,
-      );
+      // Match auth errors by error-descriptive patterns only (not bare env var names which
+      // could appear in diagnostic output and cause false positives).
+      const hasAuthError =
+        /api.?key.*(?:invalid|not valid|missing)|invalid.*api.?key|api_key_invalid|permission denied|unauthorized/i.test(
+          logs,
+        );
       const hasQuotaError = /quota|resource.?exhausted|rate.?limit/i.test(logs);
       const hasModelError = /model.*not found|model_not_found|does not exist.*model/i.test(logs);
-      const hasTurnLimit = /turn.?limit|exit code 53/i.test(logs);
+      const hasTurnLimit = /turn.?limit|exit:?\s*53\b/i.test(logs);
       return hasErrorEvent || hasAuthError || hasQuotaError || hasModelError || hasTurnLimit
         ? 1
         : 0;
