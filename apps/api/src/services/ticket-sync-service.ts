@@ -37,8 +37,11 @@ export async function syncAllTickets(): Promise<number> {
         );
         const credentials = JSON.parse(secretJson);
         mergedConfig = { ...mergedConfig, ...credentials };
-      } catch {
-        // No secrets stored for this provider — use config as-is
+      } catch (secretErr) {
+        logger.warn(
+          { err: secretErr, source: providerConfig.source, id: providerConfig.id },
+          "[ticket-sync] Failed to retrieve secret for provider — using config as-is",
+        );
       }
 
       // GitHub fallback: if no token was supplied via config or provider secret,
