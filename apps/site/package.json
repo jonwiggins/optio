@@ -7,6 +7,7 @@
     "dev": "next dev --port 3200",
     "build": "next build",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "next lint"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "tailwindcss": "^4.1.8",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.1"
   }
 }

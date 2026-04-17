@@ -239,8 +239,8 @@ export default function ConnectionsPage() {
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {[
           {
-            title: "Workflows",
-            href: "/docs/guides/workflows",
+            title: "Standalone Tasks",
+            href: "/docs/guides/standalone-tasks",
             description: "Run standalone agent jobs with triggers",
           },
           {

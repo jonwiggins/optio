@@ -30,7 +30,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/docs/guides/connecting-repos",
     "/docs/guides/review-agents",
     "/docs/guides/integrations",
-    "/docs/guides/workflows",
+    "/docs/guides/standalone-tasks",
     "/docs/guides/scheduled-tasks",
     "/docs/api-reference",
     "/docs/deployment",

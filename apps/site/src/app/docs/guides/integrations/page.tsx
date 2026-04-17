@@ -512,8 +512,8 @@ export default function IntegrationsPage() {
             description: "Give agents access to external services via MCP",
           },
           {
-            title: "Workflows",
-            href: "/docs/guides/workflows",
+            title: "Standalone Tasks",
+            href: "/docs/guides/standalone-tasks",
             description: "Reusable agent jobs with triggers",
           },
           {
