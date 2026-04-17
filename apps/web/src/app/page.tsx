@@ -12,9 +12,7 @@ import {
   RecentActivity,
   PodsList,
   WelcomeHero,
-  PerformanceSummary,
   AgentComparison,
-  FailureInsights,
 } from "@/components/dashboard";
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { UpdateBanner } from "@/components/update-banner";
@@ -138,12 +136,7 @@ export default function OverviewPage() {
         </button>
       )}
 
-      <PerformanceSummary />
-
-      <div className="grid md:grid-cols-2 gap-4">
-        <AgentComparison />
-        <FailureInsights />
-      </div>
+      <AgentComparison />
 
       <UsagePanel usage={usage} onRefresh={refreshUsage} />
 
