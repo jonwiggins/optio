@@ -10,6 +10,10 @@ import {
   killOrphanedAgentInPod,
 } from "../services/repo-pool-service.js";
 import { cleanupIdleWorkflowPods } from "../services/workflow-pool-service.js";
+import {
+  cleanupZombieWorkflowRuns,
+  cleanupOrphanedRepoTasks,
+} from "../services/zombie-cleanup-service.js";
 import { getRuntime } from "../services/container-service.js";
 import { isStatefulSetEnabled, getWorkloadManager } from "../services/k8s-workload-service.js";
 import { TaskState, DEFAULT_STALL_THRESHOLD_MS } from "@optio/shared";
@@ -520,6 +524,26 @@ export function startRepoCleanupWorker() {
         }
       } catch (err) {
         logger.warn({ err }, "Failed to clean up idle workflow pods");
+      }
+
+      // Detect zombie workflow_runs (running but pod terminated/gone)
+      try {
+        const zombieRuns = await cleanupZombieWorkflowRuns();
+        if (zombieRuns > 0) {
+          logger.info({ zombieRuns }, "Cleaned up zombie workflow runs");
+        }
+      } catch (err) {
+        logger.warn({ err }, "Failed to clean up zombie workflow runs");
+      }
+
+      // Detect orphaned repo tasks (running but pod record gone)
+      try {
+        const orphanedTasks = await cleanupOrphanedRepoTasks();
+        if (orphanedTasks > 0) {
+          logger.info({ orphanedTasks }, "Cleaned up orphaned repo tasks");
+        }
+      } catch (err) {
+        logger.warn({ err }, "Failed to clean up orphaned repo tasks");
       }
 
       // Clean up expired auth sessions
