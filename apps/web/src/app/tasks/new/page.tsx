@@ -152,7 +152,12 @@ export default function NewTaskPage() {
             ? { cronExpression: trigger.cronExpression!.trim() }
             : trigger.type === "webhook"
               ? { path: trigger.webhookPath }
-              : {};
+              : trigger.type === "ticket"
+                ? {
+                    source: trigger.ticketSource ?? "github",
+                    ...(trigger.ticketLabels?.length ? { labels: trigger.ticketLabels } : {}),
+                  }
+                : {};
         await api.createTaskTrigger(createdId, {
           type: trigger.type,
           config,

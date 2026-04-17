@@ -14,6 +14,7 @@ import {
   PlayCircle,
   Plus,
   Save,
+  Ticket,
   Trash2,
   Webhook,
   AlertCircle,
@@ -183,7 +184,12 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
           ? { cronExpression: newTrigger.cronExpression!.trim() }
           : newTrigger.type === "webhook"
             ? { path: newTrigger.webhookPath }
-            : {};
+            : newTrigger.type === "ticket"
+              ? {
+                  source: newTrigger.ticketSource ?? "github",
+                  ...(newTrigger.ticketLabels?.length ? { labels: newTrigger.ticketLabels } : {}),
+                }
+              : {};
       await api.createTaskConfigTrigger(id, {
         type: newTrigger.type,
         config: cfg,
@@ -439,6 +445,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
                   <div className="flex items-center gap-2 mb-1">
                     {t.type === "schedule" && <Clock className="w-4 h-4 text-text-muted" />}
                     {t.type === "webhook" && <Webhook className="w-4 h-4 text-text-muted" />}
+                    {t.type === "ticket" && <Ticket className="w-4 h-4 text-text-muted" />}
                     <span className="font-medium capitalize">{t.type}</span>
                     <span
                       className={`text-xs px-2 py-0.5 rounded ${t.enabled ? "bg-primary/10 text-primary" : "bg-bg text-text-muted"}`}

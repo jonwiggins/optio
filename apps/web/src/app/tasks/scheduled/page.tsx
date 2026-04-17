@@ -4,12 +4,22 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
 import { usePageTitle } from "@/hooks/use-page-title";
-import { Clock, Loader2, Pause, Play, PlayCircle, Plus, Trash2, Webhook } from "lucide-react";
+import {
+  Clock,
+  Loader2,
+  Pause,
+  Play,
+  PlayCircle,
+  Plus,
+  Ticket,
+  Trash2,
+  Webhook,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface Trigger {
   id: string;
-  type: "manual" | "schedule" | "webhook";
+  type: "manual" | "schedule" | "webhook" | "ticket";
   config: Record<string, any> | null;
   enabled: boolean;
   lastFiredAt: string | null;
@@ -137,7 +147,8 @@ export default function ScheduledTasksPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Scheduled Tasks</h1>
           <p className="text-sm text-text-muted mt-1">
-            Reusable task blueprints that spawn fresh tasks on a schedule, webhook, or manual run.
+            Reusable task blueprints that spawn fresh tasks on a schedule, webhook, ticket event, or
+            manual run.
           </p>
         </div>
         <Link
@@ -169,6 +180,7 @@ export default function ScheduledTasksPage() {
           {configs.map((config) => {
             const schedTrigger = config.triggers?.find((t) => t.type === "schedule");
             const webhookTrigger = config.triggers?.find((t) => t.type === "webhook");
+            const ticketTrigger = config.triggers?.find((t) => t.type === "ticket");
             return (
               <div
                 key={config.id}
@@ -199,6 +211,15 @@ export default function ScheduledTasksPage() {
                         <span className="inline-flex items-center gap-1.5">
                           <Webhook className="w-3 h-3" />
                           {webhookTrigger.config?.path}
+                        </span>
+                      )}
+                      {ticketTrigger && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Ticket className="w-3 h-3" />
+                          {ticketTrigger.config?.source}
+                          {Array.isArray(ticketTrigger.config?.labels) &&
+                            ticketTrigger.config!.labels.length > 0 &&
+                            ` [${(ticketTrigger.config!.labels as string[]).join(", ")}]`}
                         </span>
                       )}
                       {schedTrigger && (

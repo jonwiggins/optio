@@ -57,7 +57,11 @@ export default function ScheduledTasksPage() {
           to <strong className="text-text-heading">Schedule</strong>.
         </li>
         <li>Fill in the usual repo + title + prompt + agent fields.</li>
-        <li>Pick a trigger type (schedule or webhook) and provide its config.</li>
+        <li>
+          Pick a trigger type (schedule, webhook, or ticket) and provide its config. For ticket
+          triggers, choose the source (GitHub, Linear, Jira, or Notion) and optionally filter by
+          labels.
+        </li>
         <li>
           Click <strong className="text-text-heading">Create Schedule</strong>.
         </li>
