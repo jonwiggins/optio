@@ -2,7 +2,7 @@
 
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
-import { RefreshCw, Bot } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import {
   PipelineStatsBar,
   UsagePanel,
@@ -14,12 +14,10 @@ import {
   WelcomeHero,
   AgentComparison,
 } from "@/components/dashboard";
-import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { UpdateBanner } from "@/components/update-banner";
 
 export default function OverviewPage() {
   usePageTitle("Overview");
-  const optioChat = useOptioChatStore();
   const {
     taskStats,
     recentTasks,
@@ -113,28 +111,6 @@ export default function OverviewPage() {
       <UpdateBanner />
 
       <PipelineStatsBar taskStats={taskStats} />
-
-      {(taskStats?.failed ?? 0) > 0 && (
-        <button
-          onClick={() => {
-            optioChat.setPrefillInput(
-              `${taskStats!.failed} task${taskStats!.failed === 1 ? "" : "s"} failed today - can you help me investigate?`,
-            );
-            optioChat.open();
-          }}
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-lg border border-error/15 bg-error/5 hover:bg-error/8 transition-colors text-left group"
-        >
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/15 transition-colors">
-            <Bot className="w-4 h-4 text-primary" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-text">
-              {taskStats!.failed} task{taskStats!.failed === 1 ? "" : "s"} failed today
-            </p>
-            <p className="text-xs text-text-muted mt-0.5">Ask Optio to help investigate</p>
-          </div>
-        </button>
-      )}
 
       <AgentComparison />
 
