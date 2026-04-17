@@ -156,7 +156,9 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
     async (_req, reply) => {
       const providers = await db.select().from(ticketProviders);
 
-      // Annotate each provider with recent auth failure status
+      // Annotate each provider with auth failure status from both:
+      // 1. The provider row itself (last_error, consecutive_failures)
+      // 2. Legacy auth_events table for backwards compat
       const cutoff = new Date(Date.now() - RECENT_AUTH_FAILURE_WINDOW_MS);
       const failedRows = await db
         .selectDistinct({ source: authEvents.source })
@@ -169,7 +171,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       );
       const annotated = providers.map((p) => ({
         ...p,
-        hasAuthFailure: failedIds.has(p.id),
+        hasAuthFailure: failedIds.has(p.id) || (p.consecutiveFailures ?? 0) > 0,
       }));
 
       reply.send({ providers: annotated });
@@ -262,6 +264,39 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       await db.delete(ticketProviders).where(eq(ticketProviders.id, id));
       await deleteSecret(`ticket-provider:${id}`, "ticket-provider");
       reply.status(204).send(null);
+    },
+  );
+
+  app.patch(
+    "/api/tickets/providers/:id/re-enable",
+    {
+      schema: {
+        operationId: "reEnableTicketProvider",
+        summary: "Re-enable a ticket provider",
+        description:
+          "Clear error state and re-enable a ticket provider that was auto-disabled " +
+          "after consecutive sync failures. Use after refreshing the provider's token.",
+        tags: ["Repos & Integrations"],
+        params: IdParamsSchema,
+        response: { 200: ProviderResponseSchema, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params;
+      const [provider] = await db
+        .update(ticketProviders)
+        .set({
+          enabled: true,
+          lastError: null,
+          lastErrorAt: null,
+          consecutiveFailures: 0,
+        })
+        .where(eq(ticketProviders.id, id))
+        .returning();
+      if (!provider) {
+        return reply.status(404).send({ error: "Provider not found" });
+      }
+      reply.send({ provider });
     },
   );
 

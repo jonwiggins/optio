@@ -225,6 +225,9 @@ export const api = {
   deleteTicketProvider: (id: string) =>
     request<void>(`/api/tickets/providers/${id}`, { method: "DELETE" }),
 
+  reEnableTicketProvider: (id: string) =>
+    request<{ provider: any }>(`/api/tickets/providers/${id}/re-enable`, { method: "PATCH" }),
+
   // Prompt templates
   getEffectiveTemplate: (repoUrl?: string) => {
     const qs = repoUrl ? `?repoUrl=${encodeURIComponent(repoUrl)}` : "";

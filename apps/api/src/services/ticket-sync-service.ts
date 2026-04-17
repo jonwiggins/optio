@@ -11,6 +11,9 @@ import { retrieveSecret } from "./secret-service.js";
 import { logger } from "../logger.js";
 import { recordAuthEvent } from "./auth-failure-detector.js";
 
+/** Auto-disable a provider after this many consecutive failures. */
+const MAX_CONSECUTIVE_FAILURES = 5;
+
 export async function syncAllTickets(): Promise<number> {
   const providers = await db
     .select()
@@ -39,6 +42,18 @@ export async function syncAllTickets(): Promise<number> {
 
       const provider = getTicketProvider(providerConfig.source as TicketSource);
       const tickets = await provider.fetchActionableTickets(mergedConfig);
+
+      // Success — clear any previous error state
+      if ((providerConfig as any).consecutiveFailures > 0 || (providerConfig as any).lastError) {
+        await db
+          .update(ticketProviders)
+          .set({
+            lastError: null,
+            lastErrorAt: null,
+            consecutiveFailures: 0,
+          })
+          .where(eq(ticketProviders.id, providerConfig.id));
+      }
 
       for (const ticket of tickets) {
         // Construct repo URL: use the ticket's repo field, or fall back to provider config
@@ -176,10 +191,46 @@ export async function syncAllTickets(): Promise<number> {
         }
       }
     } catch (err: any) {
-      logger.error(
-        { err, provider: providerConfig.source },
-        "Failed to sync tickets from provider",
-      );
+      const errorMessage = err?.message ?? String(err);
+      const prevFailures = (providerConfig as any).consecutiveFailures ?? 0;
+      const newFailures = prevFailures + 1;
+      const prevError = (providerConfig as any).lastError;
+
+      // Rate-limit logging: downgrade to debug when the same error repeats
+      const isRepeat = prevFailures > 0 && prevError === errorMessage;
+      if (isRepeat) {
+        logger.debug(
+          { err, provider: providerConfig.source },
+          "Repeated failure to sync tickets from provider",
+        );
+      } else {
+        logger.error(
+          { err, provider: providerConfig.source },
+          "Failed to sync tickets from provider",
+        );
+      }
+
+      // Persist the error on the provider row
+      const updateFields: Record<string, unknown> = {
+        lastError: errorMessage,
+        lastErrorAt: new Date(),
+        consecutiveFailures: newFailures,
+      };
+
+      // Auto-disable after N consecutive failures
+      if (newFailures >= MAX_CONSECUTIVE_FAILURES) {
+        updateFields.enabled = false;
+        logger.warn(
+          { provider: providerConfig.source, providerId: providerConfig.id, failures: newFailures },
+          "Auto-disabled ticket provider after repeated failures",
+        );
+      }
+
+      await db
+        .update(ticketProviders)
+        .set(updateFields)
+        .where(eq(ticketProviders.id, providerConfig.id));
+
       if (err?.status === 401 || err?.message?.includes("Bad credentials")) {
         recordAuthEvent(
           "github",

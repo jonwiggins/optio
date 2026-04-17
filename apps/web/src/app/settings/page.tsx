@@ -1241,6 +1241,19 @@ export default function SettingsPage() {
     }
   };
 
+  const handleReEnableProvider = async (id: string) => {
+    try {
+      await api.reEnableTicketProvider(id);
+      const res = await api.listTicketProviders();
+      setProviders(res.providers);
+      toast.success("Provider re-enabled");
+    } catch (err) {
+      toast.error("Failed to re-enable provider", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  };
+
   const providerFields: Record<string, { key: string; label: string; type?: string }[]> = {
     github: [
       { key: "owner", label: "Owner" },
@@ -1311,33 +1324,64 @@ export default function SettingsPage() {
           {providers.length > 0 ? (
             <div className="space-y-2">
               {providers.map((p: any) => (
-                <div key={p.id} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`w-2 h-2 rounded-full ${p.hasAuthFailure ? "bg-error" : p.enabled ? "bg-success" : "bg-text-muted"}`}
-                    />
-                    <span className="capitalize">{p.source}</span>
-                    {p.hasAuthFailure && (
-                      <span className="text-xs text-error font-medium">Token invalid</span>
-                    )}
-                    <span className="text-xs text-text-muted">
-                      {p.source === "github" &&
-                        p.config?.owner &&
-                        `${p.config.owner}/${p.config.repo}`}
-                      {p.source === "notion" &&
-                        p.config?.databaseId &&
-                        `Database: ${p.config.databaseId}`}
-                      {p.source === "linear" && p.config?.teamId && `Team: ${p.config.teamId}`}
-                      {p.source === "jira" && p.config?.baseUrl && `${p.config.baseUrl}`}
-                    </span>
+                <div key={p.id} className="space-y-1">
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full ${p.hasAuthFailure ? "bg-error" : p.enabled ? "bg-success" : "bg-text-muted"}`}
+                      />
+                      <span className="capitalize">{p.source}</span>
+                      {!p.enabled && (
+                        <span className="text-xs text-error font-medium">Disabled</span>
+                      )}
+                      {p.hasAuthFailure && p.enabled && (
+                        <span className="text-xs text-error font-medium">Token invalid</span>
+                      )}
+                      <span className="text-xs text-text-muted">
+                        {p.source === "github" &&
+                          p.config?.owner &&
+                          `${p.config.owner}/${p.config.repo}`}
+                        {p.source === "notion" &&
+                          p.config?.databaseId &&
+                          `Database: ${p.config.databaseId}`}
+                        {p.source === "linear" && p.config?.teamId && `Team: ${p.config.teamId}`}
+                        {p.source === "jira" && p.config?.baseUrl && `${p.config.baseUrl}`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {(p.hasAuthFailure || !p.enabled) && (
+                        <button
+                          onClick={() => handleReEnableProvider(p.id)}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                          title="Clear errors and re-enable this provider"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Re-enable
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteProvider(p.id)}
+                        className="p-1 rounded hover:bg-error/10 text-text-muted hover:text-error transition-colors"
+                        title="Remove provider"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => handleDeleteProvider(p.id)}
-                    className="p-1 rounded hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                    title="Remove provider"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {p.lastError && (
+                    <div className="ml-4 p-2 rounded bg-error/5 border border-error/20">
+                      <p className="text-xs text-error">{p.lastError}</p>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        {p.lastErrorAt &&
+                          `Last failure: ${new Date(p.lastErrorAt).toLocaleString()}`}
+                        {p.consecutiveFailures > 0 &&
+                          ` (${p.consecutiveFailures} consecutive failures)`}
+                      </p>
+                      <p className="text-xs text-text-muted mt-1">
+                        Refresh your token and click Re-enable to resume syncing.
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

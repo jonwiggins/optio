@@ -298,6 +298,9 @@ export const ticketProviders = pgTable("ticket_providers", {
   source: text("source").notNull(),
   config: jsonb("config").$type<Record<string, unknown>>().notNull(),
   enabled: boolean("enabled").notNull().default(true),
+  lastError: text("last_error"),
+  lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
