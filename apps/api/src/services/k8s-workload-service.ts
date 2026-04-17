@@ -36,14 +36,12 @@ import {
   PatchStrategy,
 } from "@kubernetes/client-node";
 import type { ContainerSpec } from "@optio/shared";
+import { parseIntEnv } from "@optio/shared";
 import { logger } from "../logger.js";
 
 const NAMESPACE = process.env.OPTIO_NAMESPACE ?? "optio";
-const TERMINATION_GRACE_PERIOD = parseInt(
-  process.env.OPTIO_TERMINATION_GRACE_PERIOD_SECONDS ?? "300",
-  10,
-);
-const POD_READY_TIMEOUT_MS = parseInt(process.env.OPTIO_POD_READY_TIMEOUT_MS ?? "300000", 10);
+const TERMINATION_GRACE_PERIOD = parseIntEnv("OPTIO_TERMINATION_GRACE_PERIOD_SECONDS", 300);
+const POD_READY_TIMEOUT_MS = parseIntEnv("OPTIO_POD_READY_TIMEOUT_MS", 300000);
 const POD_READY_POLL_MS = 1_000;
 
 export class K8sWorkloadManager {

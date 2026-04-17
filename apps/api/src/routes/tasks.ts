@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { TaskState, isTaskStalled, getSilentDuration } from "@optio/shared";
+import { TaskState, isTaskStalled, getSilentDuration, parseIntEnv } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import * as dependencyService from "../services/dependency-service.js";
 import * as unifiedTaskService from "../services/unified-task-service.js";
@@ -238,7 +238,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         });
 
         // Enrich running tasks with isStalled flag (lightweight — no lastLogSummary)
-        const globalThreshold = parseInt(process.env.OPTIO_STALL_THRESHOLD_MS ?? "300000", 10);
+        const globalThreshold = parseIntEnv("OPTIO_STALL_THRESHOLD_MS", 300000);
         const now = new Date();
         const enriched = taskList.map((t) => ({
           ...t,

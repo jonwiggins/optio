@@ -3,6 +3,7 @@ import {
   WorkflowRunState,
   canTransitionWorkflowRun,
   DEFAULT_MAX_TURNS_CODING,
+  parseIntEnv,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
@@ -288,7 +289,7 @@ export function startWorkflowWorker() {
         // ── Concurrency check ─────────────────────────────────────────
         const claimed = await withClaimLock(async () => {
           // Global workflow concurrency
-          const globalMax = parseInt(process.env.OPTIO_MAX_WORKFLOW_CONCURRENT ?? "5", 10);
+          const globalMax = parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5);
           const allRuns = await db
             .select()
             .from(workflowRuns)
@@ -671,7 +672,7 @@ export function startWorkflowWorker() {
     }),
     {
       connection: connectionOpts,
-      concurrency: parseInt(process.env.OPTIO_MAX_WORKFLOW_CONCURRENT ?? "5", 10),
+      concurrency: parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5),
       lockDuration: 600_000, // 10 min lock (workflows can run long)
       stalledInterval: 300_000, // check for stalls every 5 min
       maxStalledCount: 3,

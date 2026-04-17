@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db/client.js";
 import { checkRuntimeHealth } from "../services/container-service.js";
 import { sql } from "drizzle-orm";
+import { parseIntEnv } from "@optio/shared";
 import { isOtelEnabled } from "../telemetry.js";
 
 // Cache runtime health to avoid slow k8s API calls on every health check.
@@ -79,7 +80,7 @@ export async function healthRoutes(rawApp: FastifyInstance) {
       // unavailable (e.g. no ClusterRole, K8s API unreachable) is a degraded
       // state but should not cause liveness/readiness probes to fail.
       const healthy = checks.database;
-      const maxConcurrent = parseInt(process.env.OPTIO_MAX_CONCURRENT ?? "5", 10);
+      const maxConcurrent = parseIntEnv("OPTIO_MAX_CONCURRENT", 5);
       reply
         .status(healthy ? 200 : 503)
         .send({ healthy, checks, maxConcurrent, otelEnabled: isOtelEnabled() });

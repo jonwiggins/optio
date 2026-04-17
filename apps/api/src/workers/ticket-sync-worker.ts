@@ -1,4 +1,5 @@
 import { Queue, Worker } from "bullmq";
+import { parseIntEnv } from "@optio/shared";
 import { logger } from "../logger.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
@@ -14,7 +15,7 @@ export function startTicketSyncWorker(syncFn: () => Promise<unknown>) {
     {},
     {
       repeat: {
-        every: parseInt(process.env.OPTIO_TICKET_SYNC_INTERVAL ?? "60000", 10), // default: 60s
+        every: parseIntEnv("OPTIO_TICKET_SYNC_INTERVAL", 60000), // default: 60s
       },
     },
   );

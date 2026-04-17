@@ -1,7 +1,7 @@
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { taskDependencies, tasks } from "../db/schema.js";
-import { TaskState, detectCycle, type DagEdge, getOffPeakInfo } from "@optio/shared";
+import { TaskState, detectCycle, type DagEdge, getOffPeakInfo, parseIntEnv } from "@optio/shared";
 import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { logger } from "../logger.js";
@@ -229,7 +229,7 @@ export async function computePendingReason(taskId: string): Promise<string | nul
 
   // Check concurrency limits for queued tasks
   if (task.state === "queued") {
-    const globalMax = parseInt(process.env.OPTIO_MAX_CONCURRENT ?? "5", 10);
+    const globalMax = parseIntEnv("OPTIO_MAX_CONCURRENT", 5);
     const [{ count: activeCount }] = await db
       .select({ count: sql<number>`count(*)` })
       .from(tasks)

@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, taskEvents, sessionPrs, interactiveSessions, reviewDrafts } from "../db/schema.js";
 import type { GitPlatform, RepoIdentifier } from "@optio/shared";
-import { TaskState, parsePrUrl } from "@optio/shared";
+import { TaskState, parsePrUrl, parseIntEnv } from "@optio/shared";
 import { getGitPlatformForRepo, getGitToken } from "../services/git-token-service.js";
 import type { GitTokenContext } from "../services/git-token-service.js";
 import { createGitPlatform } from "../services/git-platform/index.js";
@@ -147,7 +147,7 @@ export function startPrWatcherWorker() {
     {},
     {
       repeat: {
-        every: parseInt(process.env.OPTIO_PR_WATCH_INTERVAL ?? "30000", 10),
+        every: parseIntEnv("OPTIO_PR_WATCH_INTERVAL", 30000),
       },
     },
   );

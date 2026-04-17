@@ -6,6 +6,7 @@ import {
   transition,
   normalizeRepoUrl,
   DEFAULT_STALL_THRESHOLD_MS,
+  parseIntEnv,
   type CreateTaskInput,
 } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
@@ -650,7 +651,7 @@ export function getStallThresholdForRepo(
   if (repoConfig?.stallThresholdMs != null) {
     return repoConfig.stallThresholdMs;
   }
-  return parseInt(process.env.OPTIO_STALL_THRESHOLD_MS ?? String(DEFAULT_STALL_THRESHOLD_MS), 10);
+  return parseIntEnv("OPTIO_STALL_THRESHOLD_MS", DEFAULT_STALL_THRESHOLD_MS);
 }
 
 /**

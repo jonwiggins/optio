@@ -15,6 +15,8 @@
  * which only works before the instrumented modules are loaded.
  */
 
+import { parseIntEnv } from "@optio/shared";
+
 let shutdownFn: (() => Promise<void>) | null = null;
 
 /**
@@ -53,7 +55,7 @@ export async function initTelemetry(): Promise<void> {
   }
 
   const samplingRatio = parseFloat(process.env.OPTIO_OTEL_SAMPLING_RATIO ?? "1.0");
-  const metricsIntervalMs = parseInt(process.env.OPTIO_OTEL_METRICS_INTERVAL_MS ?? "60000", 10);
+  const metricsIntervalMs = parseIntEnv("OPTIO_OTEL_METRICS_INTERVAL_MS", 60000);
 
   const resource = new Resource({
     [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME ?? "optio-api",

@@ -12,8 +12,9 @@ import { logger } from "../logger.js";
 import { resolveImage } from "./repo-pool-service.js";
 import { getWorkloadManager, isStatefulSetEnabled } from "./k8s-workload-service.js";
 import type { RepoImageConfig } from "@optio/shared";
+import { parseIntEnv } from "@optio/shared";
 
-const IDLE_TIMEOUT_MS = parseInt(process.env.OPTIO_WORKFLOW_POD_IDLE_MS ?? "600000", 10); // 10 min default
+const IDLE_TIMEOUT_MS = parseIntEnv("OPTIO_WORKFLOW_POD_IDLE_MS", 600000); // 10 min default
 
 export interface WorkflowPod {
   id: string;

@@ -12,6 +12,7 @@ import {
   classifyError,
   parseRepoUrl,
   parsePrUrl,
+  parseIntEnv,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
@@ -178,7 +179,7 @@ export function startTaskWorker() {
         const effectiveRepoConcurrency = maxAgentsPerPod * maxPodInstances;
 
         const claimed = await withClaimLock(async () => {
-          const globalMax = parseInt(process.env.OPTIO_MAX_CONCURRENT ?? "5", 10);
+          const globalMax = parseIntEnv("OPTIO_MAX_CONCURRENT", 5);
 
           // Global concurrency check
           const [{ count: activeCount }] = await db
@@ -1284,7 +1285,7 @@ export function startTaskWorker() {
     }),
     {
       connection: connectionOpts,
-      concurrency: parseInt(process.env.OPTIO_MAX_CONCURRENT ?? "5", 10),
+      concurrency: parseIntEnv("OPTIO_MAX_CONCURRENT", 5),
       // Task jobs run for minutes/hours — BullMQ defaults (30s lock, 30s stall
       // check, max 1 stall) are far too aggressive and cause "job stalled" failures.
       lockDuration: 600_000, // 10 min lock

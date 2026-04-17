@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { parseIntEnv } from "@optio/shared";
 import { initTelemetry, shutdownTelemetry, registerMetricCallbacks } from "./telemetry.js";
 import { logger } from "./logger.js";
 
@@ -18,7 +19,7 @@ process.on("unhandledRejection", (reason, promise) => {
   throw reason;
 });
 
-const PORT = parseInt(process.env.API_PORT ?? "4000", 10);
+const PORT = parseIntEnv("API_PORT", 4000);
 const HOST = process.env.API_HOST ?? "0.0.0.0";
 
 async function checkMetricsServer() {

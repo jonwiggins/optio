@@ -1,6 +1,7 @@
 import { Queue, Worker } from "bullmq";
 import * as workflowService from "../services/workflow-service.js";
 import * as taskConfigService from "../services/task-config-service.js";
+import { parseIntEnv } from "@optio/shared";
 import { logger } from "../logger.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
@@ -21,7 +22,7 @@ export function startWorkflowTriggerWorker() {
     {},
     {
       repeat: {
-        every: parseInt(process.env.OPTIO_WORKFLOW_TRIGGER_INTERVAL ?? "60000", 10),
+        every: parseIntEnv("OPTIO_WORKFLOW_TRIGGER_INTERVAL", 60000),
       },
     },
   );

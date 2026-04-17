@@ -27,10 +27,11 @@ import {
   PROXIED_SECRET_ENV_VARS,
   type SecretProxySecrets,
 } from "./envoy-sidecar.js";
+import { parseIntEnv } from "@optio/shared";
 import { withSpan } from "../telemetry/spans.js";
 
-const IDLE_TIMEOUT_MS = parseInt(process.env.OPTIO_REPO_POD_IDLE_MS ?? "600000", 10); // 10 min default
-const REPO_INIT_TIMEOUT_MS = parseInt(process.env.OPTIO_REPO_INIT_TIMEOUT_MS ?? "120000", 10); // 2 min default
+const IDLE_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_POD_IDLE_MS", 600000); // 10 min default
+const REPO_INIT_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_INIT_TIMEOUT_MS", 120000); // 2 min default
 if (Number.isNaN(REPO_INIT_TIMEOUT_MS) || REPO_INIT_TIMEOUT_MS <= 0) {
   throw new Error("OPTIO_REPO_INIT_TIMEOUT_MS must be a positive integer");
 }
