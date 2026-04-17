@@ -589,29 +589,24 @@ export default function ApiReferencePage() {
         ]}
       />
 
-      <h2 className="mt-10 text-2xl font-bold text-text-heading">Schedules</h2>
-      <RouteTable
-        routes={[
-          { method: "GET", path: "/api/schedules", description: "List scheduled/recurring tasks" },
-          { method: "POST", path: "/api/schedules", description: "Create a schedule" },
-          { method: "PATCH", path: "/api/schedules/:id", description: "Update a schedule" },
-          { method: "DELETE", path: "/api/schedules/:id", description: "Delete a schedule" },
-        ]}
-      />
-
-      <h2 className="mt-10 text-2xl font-bold text-text-heading">Workflows</h2>
+      <h2 className="mt-10 text-2xl font-bold text-text-heading">Legacy Aliases</h2>
       <p className="mt-3 text-text-muted leading-relaxed">
-        Multi-step workflow automation with templates and run tracking.
+        The following endpoints are retained for backward compatibility. New integrations should use
+        the unified{" "}
+        <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">/api/tasks</code>{" "}
+        surface documented above.
       </p>
       <RouteTable
         routes={[
-          { method: "GET", path: "/api/jobs", description: "List workflow templates" },
-          { method: "POST", path: "/api/jobs", description: "Create a workflow template" },
-          { method: "POST", path: "/api/jobs/:id/run", description: "Execute a workflow" },
           {
             method: "GET",
-            path: "/api/jobs/:id/runs",
-            description: "List runs for a workflow",
+            path: "/api/jobs/*",
+            description: "Standalone Task alias (use /api/tasks?type=standalone)",
+          },
+          {
+            method: "GET",
+            path: "/api/task-configs/*",
+            description: "Repo Task blueprint alias (use /api/tasks?type=repo-blueprint)",
           },
         ]}
       />
