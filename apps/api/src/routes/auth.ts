@@ -73,6 +73,7 @@ const AuthStatusResponseSchema = z
         expiresAt: z.string().optional().nullable(),
         error: z.string().optional(),
         expired: z.boolean(),
+        lastValidated: z.string().optional().nullable(),
       })
       .passthrough(),
   })
@@ -252,9 +253,27 @@ export async function authRoutes(rawApp: FastifyInstance) {
         } catch {}
       }
 
-      // Validate the token against the Anthropic API if we have one
+      // Check the background worker's cached validation first to avoid
+      // an extra API call on every status poll
       let expired = false;
-      if (result.available && result.token) {
+      let lastValidated: string | null = null;
+      try {
+        const { getCachedTokenValidation } = await import("../workers/token-validation-worker.js");
+        const cached = await getCachedTokenValidation();
+        if (cached) {
+          lastValidated = cached.lastValidated;
+          if (cached.tokenExists && !cached.valid) {
+            expired = true;
+            result.available = false;
+            result.error = cached.error ?? "OAuth token has expired — please paste a new one";
+          }
+        }
+      } catch {
+        // Worker cache unavailable — fall through to live validation
+      }
+
+      // If no cached result, validate the token against the Anthropic API directly
+      if (!expired && lastValidated === null && result.available && result.token) {
         try {
           const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
             headers: {
@@ -267,6 +286,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
             result.available = false;
             result.error = "OAuth token has expired — please paste a new one";
           }
+          lastValidated = new Date().toISOString();
         } catch {
           // Network error — don't mark as expired, just skip validation
         }
@@ -278,6 +298,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           expiresAt: result.expiresAt,
           error: result.error,
           expired,
+          lastValidated,
         },
       });
     },

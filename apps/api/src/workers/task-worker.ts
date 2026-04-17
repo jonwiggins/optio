@@ -618,6 +618,24 @@ export function startTaskWorker() {
 
         // For oauth-token mode, read the token from the secrets store
         if (claudeAuthMode === "oauth-token") {
+          // Pre-flight: check the cached validation from the background worker
+          // to fail fast before wasting ~10s on pod provisioning + worktree setup
+          try {
+            const { getCachedTokenValidation } = await import("./token-validation-worker.js");
+            const cached = await getCachedTokenValidation();
+            if (cached?.tokenExists && !cached.valid) {
+              throw new Error(
+                "Claude OAuth token is expired (detected by pre-flight validation). " +
+                  "Go to Secrets to update CLAUDE_CODE_OAUTH_TOKEN, or re-run 'claude setup-token'.",
+              );
+            }
+          } catch (preflight) {
+            // Re-throw if it's our own validation error; swallow infra errors
+            if (preflight instanceof Error && preflight.message.includes("pre-flight")) {
+              throw preflight;
+            }
+          }
+
           const oauthToken = await retrieveSecretWithFallback(
             "CLAUDE_CODE_OAUTH_TOKEN",
             "global",

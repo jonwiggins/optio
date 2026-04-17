@@ -135,4 +135,26 @@ describe("classifyError", () => {
     expect(classifyError(undefined).category).toBe("unknown");
     expect(classifyError("").category).toBe("unknown");
   });
+
+  it("classifies expired OAuth token and links to Secrets page", () => {
+    const result = classifyError("OAuth token has expired during task execution");
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Authentication token expired");
+    expect(result.remedy).toContain("Secrets");
+    expect(result.remedy).toContain("CLAUDE_CODE_OAUTH_TOKEN");
+  });
+
+  it("classifies 401 authentication error with secrets link", () => {
+    const result = classifyError("401 authentication error from Anthropic API");
+    expect(result.category).toBe("auth");
+    expect(result.remedy).toContain("Secrets");
+  });
+
+  it("classifies token expired with pre-flight check message", () => {
+    const result = classifyError(
+      "Claude OAuth token is expired (detected by pre-flight validation). Go to Secrets to update CLAUDE_CODE_OAUTH_TOKEN.",
+    );
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Authentication token expired");
+  });
 });

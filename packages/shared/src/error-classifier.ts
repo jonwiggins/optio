@@ -58,14 +58,20 @@ const ERROR_PATTERNS: Array<{
     }),
   },
   {
-    pattern: /OAuth token has expired|authentication_failed|token.*expired|401.*authentication/i,
+    pattern:
+      /OAuth token has expired|authentication_failed|token.*expired|401.*authentication|pre-flight validation/i,
     classify: () => ({
       category: "auth",
       title: "Authentication token expired",
       description:
-        "The Claude Code OAuth token has expired. The agent cannot authenticate with the Anthropic API.",
+        "The Claude Code OAuth token has expired. The agent cannot authenticate with the Anthropic API. " +
+        "Keychain-sourced tokens expire roughly every hour.",
       remedy:
-        "Refresh your token by running this in a terminal:\n\nsecurity find-generic-password -s \"Claude Code-credentials\" -w | python3 -c \"import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])\" | pbcopy\n\nThen go to Secrets, update CLAUDE_CODE_OAUTH_TOKEN with the new token, and retry the failed tasks.",
+        "Go to Secrets and update CLAUDE_CODE_OAUTH_TOKEN with a fresh token.\n\n" +
+        "To copy from your macOS Keychain, run:\n" +
+        "  security find-generic-password -s \"Claude Code-credentials\" -w | python3 -c \"import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])\" | pbcopy\n\n" +
+        "Or re-run 'claude setup-token' to go through the setup flow again.\n" +
+        "Retry the failed tasks after updating the token.",
       retryable: true,
     }),
   },

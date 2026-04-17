@@ -61,6 +61,7 @@ async function main() {
   const { startWebhookWorker } = await import("./workers/webhook-worker.js");
   const { startWorkflowWorker } = await import("./workers/workflow-worker.js");
   const { startWorkflowTriggerWorker } = await import("./workers/workflow-trigger-worker.js");
+  const { startTokenValidationWorker } = await import("./workers/token-validation-worker.js");
   const { getBullMQConnectionOptions } = await import("./services/redis-config.js");
   const { logTlsStackInfo, initTlsObservability } = await import("./services/tls-observability.js");
 
@@ -184,6 +185,7 @@ async function main() {
     cleanRepeatJobs("ticket-sync"),
     cleanRepeatJobs("workflow-runs"),
     cleanRepeatJobs("workflow-trigger-checker"),
+    cleanRepeatJobs("token-validation"),
   ]);
 
   // Start BullMQ workers (each re-registers its repeat job)
@@ -209,6 +211,9 @@ async function main() {
   const workflowTriggerWorker = startWorkflowTriggerWorker();
   logger.info("Workflow trigger worker started");
 
+  const tokenValidationWorker = startTokenValidationWorker();
+  logger.info("Token validation worker started");
+
   // Check if metrics-server is available
   checkMetricsServer().catch(() => {});
 
@@ -228,6 +233,7 @@ async function main() {
     await webhookWorker.close();
     await workflowWorker.close();
     await workflowTriggerWorker.close();
+    await tokenValidationWorker.close();
     await app.close();
     // Flush pending OTel spans/metrics with 5s timeout
     await shutdownTelemetry();

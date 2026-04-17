@@ -419,7 +419,13 @@ export const api = {
 
   getAuthStatus: () =>
     request<{
-      subscription: { available: boolean; expiresAt?: string; error?: string; expired?: boolean };
+      subscription: {
+        available: boolean;
+        expiresAt?: string;
+        error?: string;
+        expired?: boolean;
+        lastValidated?: string | null;
+      };
     }>("/api/auth/status"),
 
   refreshAuth: () =>
