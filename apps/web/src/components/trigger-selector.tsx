@@ -8,15 +8,20 @@
  * shape. Webhook paths are auto-generated if the user doesn't supply one.
  */
 
-import { useMemo } from "react";
-import { Clock, Play, Webhook } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Clock, Play, Webhook, Ticket } from "lucide-react";
 
-export type TriggerType = "manual" | "schedule" | "webhook";
+export type TriggerType = "manual" | "schedule" | "webhook" | "ticket";
+
+export const TICKET_SOURCES = ["github", "linear", "jira", "notion"] as const;
+export type TicketSource = (typeof TICKET_SOURCES)[number];
 
 export interface TriggerConfig {
   type: TriggerType;
   cronExpression?: string;
   webhookPath?: string;
+  ticketSource?: TicketSource;
+  ticketLabels?: string[];
 }
 
 const CRON_PRESETS: Array<{ label: string; expr: string }> = [
@@ -59,6 +64,10 @@ export function TriggerSelector({ value, onChange, hideManual = false, label }: 
     if (t === "schedule") next.cronExpression = value.cronExpression ?? "0 9 * * *";
     if (t === "webhook")
       next.webhookPath = value.webhookPath ?? `hook-${Math.random().toString(36).slice(2, 10)}`;
+    if (t === "ticket") {
+      next.ticketSource = value.ticketSource ?? "github";
+      next.ticketLabels = value.ticketLabels ?? [];
+    }
     onChange(next);
   };
 
@@ -85,6 +94,12 @@ export function TriggerSelector({ value, onChange, hideManual = false, label }: 
           label="Webhook"
           active={value.type === "webhook"}
           onClick={() => setType("webhook")}
+        />
+        <TriggerTypeButton
+          icon={<Ticket className="w-3.5 h-3.5" />}
+          label="Ticket"
+          active={value.type === "ticket"}
+          onClick={() => setType("ticket")}
         />
       </div>
 
@@ -130,6 +145,115 @@ export function TriggerSelector({ value, onChange, hideManual = false, label }: 
           </p>
         </div>
       )}
+
+      {value.type === "ticket" && (
+        <TicketConfigPanel
+          source={value.ticketSource ?? "github"}
+          labels={value.ticketLabels ?? []}
+          onSourceChange={(source) => onChange({ ...value, ticketSource: source })}
+          onLabelsChange={(labels) => onChange({ ...value, ticketLabels: labels })}
+        />
+      )}
+    </div>
+  );
+}
+
+function TicketConfigPanel({
+  source,
+  labels,
+  onSourceChange,
+  onLabelsChange,
+}: {
+  source: TicketSource;
+  labels: string[];
+  onSourceChange: (source: TicketSource) => void;
+  onLabelsChange: (labels: string[]) => void;
+}) {
+  const [labelInput, setLabelInput] = useState("");
+
+  const addLabel = () => {
+    const trimmed = labelInput.trim();
+    if (trimmed && !labels.includes(trimmed)) {
+      onLabelsChange([...labels, trimmed]);
+    }
+    setLabelInput("");
+  };
+
+  const removeLabel = (label: string) => {
+    onLabelsChange(labels.filter((l) => l !== label));
+  };
+
+  return (
+    <div className="p-3 rounded-lg bg-bg-card border border-border space-y-3">
+      <div>
+        <label htmlFor="ticket-source" className="block text-xs text-text-muted mb-1">
+          Source
+        </label>
+        <select
+          id="ticket-source"
+          value={source}
+          onChange={(e) => onSourceChange(e.target.value as TicketSource)}
+          className="w-full px-3 py-2 rounded bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+        >
+          {TICKET_SOURCES.map((s) => (
+            <option key={s} value={s}>
+              {s.charAt(0).toUpperCase() + s.slice(1)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label htmlFor="ticket-labels" className="block text-xs text-text-muted mb-1">
+          Labels <span className="text-text-muted/60">(optional)</span>
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            id="ticket-labels"
+            type="text"
+            value={labelInput}
+            onChange={(e) => setLabelInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addLabel();
+              }
+            }}
+            placeholder="e.g. cve, bug"
+            className="flex-1 px-3 py-2 rounded bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+          />
+          <button
+            type="button"
+            onClick={addLabel}
+            className="px-3 py-2 rounded bg-bg border border-border text-sm text-text-muted hover:text-text transition-colors"
+          >
+            Add
+          </button>
+        </div>
+        {labels.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {labels.map((label) => (
+              <span
+                key={label}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-primary/10 text-primary text-xs"
+              >
+                {label}
+                <button
+                  type="button"
+                  onClick={() => removeLabel(label)}
+                  className="hover:text-primary/70 transition-colors"
+                  aria-label={`Remove ${label}`}
+                >
+                  &times;
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-text-muted/60 mt-1">
+          Only tickets with at least one matching label will fire this trigger. Leave empty to match
+          all tickets from the source.
+        </p>
+      </div>
     </div>
   );
 }

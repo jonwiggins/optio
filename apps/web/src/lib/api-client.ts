@@ -1465,7 +1465,7 @@ export const api = {
   createTaskConfigTrigger: (
     id: string,
     data: {
-      type: "manual" | "schedule" | "webhook";
+      type: "manual" | "schedule" | "webhook" | "ticket";
       config?: Record<string, unknown>;
       paramMapping?: Record<string, unknown>;
       enabled?: boolean;
