@@ -30,9 +30,12 @@ export default function DocsIndex() {
     <>
       <h1 className="text-3xl font-bold text-text-heading">Documentation</h1>
       <p className="mt-4 text-text-muted leading-relaxed">
-        Optio is a workflow orchestration system for AI coding agents. It drives tickets to merged
-        PRs with autonomous feedback loops, runs reusable agent workflows on schedules and webhooks,
-        and connects agents to external services like Notion, Slack, Linear, and PostgreSQL via MCP.
+        Optio is an orchestration system for AI coding agents. One primary concept — a{" "}
+        <strong>Task</strong> — configures the agent to do something. Attach a repo and the Task
+        drives tickets to merged PRs with an autonomous feedback loop; leave the repo off and the
+        Task runs the agent standalone (reports, triage, automations) with no git checkout. Either
+        flavor supports schedule, webhook, and ticket triggers, and connects agents to external
+        services like Notion, Slack, Linear, and PostgreSQL via MCP.
       </p>
       <p className="mt-3 text-text-muted leading-relaxed">
         New here?{" "}

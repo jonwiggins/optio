@@ -99,8 +99,9 @@ export default function WorkflowsPage() {
       </ul>
 
       <div className="mt-4">
-        <CodeBlock title="API: Create a standalone task">{`POST /api/jobs
+        <CodeBlock title="API: Create a standalone task">{`POST /api/tasks
 {
+  "type": "standalone",
   "name": "Weekly Security Report",
   "description": "Scans dependencies and generates a vulnerability summary",
   "agentRuntime": "claude-code",
@@ -154,7 +155,7 @@ Output as markdown.`}</CodeBlock>
         body.
       </p>
       <div className="mt-3">
-        <CodeBlock title="API: Trigger a manual run">{`POST /api/jobs/:id/runs
+        <CodeBlock title="API: Trigger a manual run">{`POST /api/tasks/:id/runs
 {
   "params": {
     "REPO_NAME": "optio",
@@ -169,7 +170,7 @@ Output as markdown.`}</CodeBlock>
         seconds.
       </p>
       <div className="mt-3">
-        <CodeBlock title="API: Create a schedule trigger">{`POST /api/jobs/:id/triggers
+        <CodeBlock title="API: Create a schedule trigger">{`POST /api/tasks/:id/triggers
 {
   "type": "schedule",
   "config": {
@@ -191,7 +192,7 @@ Output as markdown.`}</CodeBlock>
         path that you can point third-party services at.
       </p>
       <div className="mt-3">
-        <CodeBlock title="API: Create a webhook trigger">{`POST /api/jobs/:id/triggers
+        <CodeBlock title="API: Create a webhook trigger">{`POST /api/tasks/:id/triggers
 {
   "type": "webhook",
   "config": {
@@ -272,7 +273,7 @@ Output as markdown.`}</CodeBlock>
         cancel running ones from the dashboard.
       </p>
       <div className="mt-4">
-        <CodeBlock title="API: List runs for a workflow">{`GET /api/jobs/:id/runs`}</CodeBlock>
+        <CodeBlock title="API: List runs for a workflow">{`GET /api/tasks/:id/runs`}</CodeBlock>
       </div>
       <div className="mt-3">
         <CodeBlock title="API: Get run details and logs">{`GET /api/workflow-runs/:runId

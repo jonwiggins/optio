@@ -14,44 +14,61 @@ export default function CreatingTasksPage() {
     <>
       <h1 className="text-3xl font-bold text-text-heading">Creating Tasks</h1>
       <p className="mt-4 text-text-muted leading-relaxed">
-        Tasks are the primary unit of work in Optio. Each task represents a single agent run against
-        a repository — the agent reads the prompt, writes code, and opens a pull request. You can
-        create tasks from multiple sources.
+        A <strong>Task</strong> is the unit of agent work in Optio. Every Task has a{" "}
+        <strong>Who</strong> (agent), <strong>What</strong> (prompt), <strong>When</strong>{" "}
+        (trigger), <strong>Why</strong> (description), and an optional <strong>Where</strong> (repo
+        + branch). Attach a repo and the Task becomes a <strong>Repo Task</strong> that opens a PR;
+        leave it off and it&apos;s a <strong>Standalone Task</strong> that runs the agent in an
+        isolated pod with no git checkout.
       </p>
 
       <h2 className="mt-10 text-2xl font-bold text-text-heading">From the Dashboard</h2>
       <p className="mt-3 text-text-muted leading-relaxed">
-        The fastest way to create a task is through the web UI.
+        The fastest way to create a Task is through the web UI.
       </p>
       <ol className="mt-3 list-decimal pl-5 space-y-2 text-[14px] text-text-muted">
         <li>
-          Navigate to <strong className="text-text-heading">Tasks &rarr; New Task</strong>
+          Navigate to <strong className="text-text-heading">Tasks &rarr; New Task</strong>.
         </li>
         <li>
-          Select the target <strong className="text-text-heading">repository</strong> from the
-          dropdown
+          At the top of the form, pick <strong className="text-text-heading">Repo Task</strong>{" "}
+          (opens a PR) or <strong className="text-text-heading">Standalone Task</strong> (runs
+          without a PR). The outcome banner underneath makes it explicit.
         </li>
         <li>
-          Enter a <strong className="text-text-heading">title</strong> — this becomes the branch
-          name and PR title
+          Choose <strong className="text-text-heading">Run now</strong> or{" "}
+          <strong className="text-text-heading">Schedule</strong>. Scheduled Tasks become{" "}
+          <em>reusable blueprints</em> — each trigger firing spawns a fresh run.
         </li>
         <li>
-          Write a <strong className="text-text-heading">description</strong> — this is the prompt
-          the agent receives. Be specific about what to implement, where to make changes, and any
-          constraints
+          Fill in the <strong className="text-text-heading">title</strong> (becomes the PR title and
+          branch name for Repo Tasks) and <strong className="text-text-heading">prompt</strong>.
+          Prompts support <code>{"{{param}}"}</code> substitution on scheduled/webhook firings.
         </li>
         <li>
-          Optionally set <strong className="text-text-heading">priority</strong> (lower number =
-          higher priority)
+          Pick an <strong className="text-text-heading">agent</strong> (Claude Code, Codex, Copilot,
+          Gemini, OpenCode).
         </li>
         <li>
-          Click <strong className="text-text-heading">Create Task</strong>
+          For Repo Tasks, select the <strong className="text-text-heading">repository</strong> and
+          branch. For Standalone, this section is hidden.
+        </li>
+        <li>
+          Click <strong className="text-text-heading">Start Task</strong> (or{" "}
+          <strong className="text-text-heading">Save Schedule</strong>). The label adapts to the
+          mode.
         </li>
       </ol>
       <p className="mt-3 text-text-muted leading-relaxed">
-        The task enters the queue and is picked up by the task worker. You can watch live logs in
-        the task detail view as the agent works.
+        The task enters the queue and is picked up by the worker. Watch live logs in the task detail
+        view.
       </p>
+
+      <Callout type="info">
+        Scheduled Tasks live at <code>/tasks/scheduled</code>. Standalone Tasks are reachable via
+        the <strong>Standalone</strong> tab on <code>/tasks</code> or directly at <code>/jobs</code>
+        .
+      </Callout>
 
       <Callout type="tip">
         Write prompts the way you would write a detailed GitHub Issue. Include the &quot;what&quot;
