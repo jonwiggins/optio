@@ -308,6 +308,19 @@ export async function createWorkflowRun(
 
   logger.info({ workflowRunId: run.id, workflowId }, "Workflow run created");
 
+  // Enqueue for the workflow-worker to pick up. Dynamic import avoids a cycle
+  // between services/workflow-service and workers/workflow-worker. This is
+  // the ONE place every run-creation path hits — keeping the enqueue here
+  // means trigger firings, webhook ingress, and the unified /api/tasks
+  // endpoints all get processed without each caller remembering to enqueue.
+  import("../workers/workflow-worker.js")
+    .then(({ workflowRunQueue }) =>
+      workflowRunQueue.add("process-workflow-run", { workflowRunId: run.id }, { jobId: run.id }),
+    )
+    .catch((err) =>
+      logger.error({ err, runId: run.id }, "Failed to enqueue workflow run for processing"),
+    );
+
   // Fire outbound webhook (fire-and-forget). Dynamic import to avoid a cycle
   // with workers/webhook-worker -> services/workflow-service.
   import("../workers/webhook-worker.js")

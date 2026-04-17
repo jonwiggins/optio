@@ -337,13 +337,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params;
       try {
+        // createWorkflowRun enqueues on workflowRunQueue internally
         const run = await workflowService.createWorkflowRun(id, req.body);
-
-        await workflowRunQueue.add(
-          "process-workflow-run",
-          { workflowRunId: run.id },
-          { jobId: run.id },
-        );
 
         logAction({
           userId: req.user?.id,

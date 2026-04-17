@@ -43,7 +43,7 @@ const TERMINATION_GRACE_PERIOD = parseInt(
   process.env.OPTIO_TERMINATION_GRACE_PERIOD_SECONDS ?? "300",
   10,
 );
-const POD_READY_TIMEOUT_MS = 120_000;
+const POD_READY_TIMEOUT_MS = parseInt(process.env.OPTIO_POD_READY_TIMEOUT_MS ?? "300000", 10);
 const POD_READY_POLL_MS = 1_000;
 
 export class K8sWorkloadManager {
@@ -530,13 +530,14 @@ export class K8sWorkloadManager {
     }
 
     // Pod-level security context for StatefulSets — ensures PVC mounts are
-    // writable by the agent user (UID/GID 1000). fsGroup sets the group owner
-    // of all files in mounted volumes.
+    // writable by the agent user (UID/GID 1001). fsGroup sets the group owner
+    // of all files in mounted volumes. UID 1001 matches the `agent` user
+    // created in images/base.Dockerfile and owns /workspace in the image.
     if (restartPolicy === "Always") {
       const podSecCtx = new V1PodSecurityContext();
-      podSecCtx.fsGroup = 1000;
-      podSecCtx.runAsUser = 1000;
-      podSecCtx.runAsGroup = 1000;
+      podSecCtx.fsGroup = 1001;
+      podSecCtx.runAsUser = 1001;
+      podSecCtx.runAsGroup = 1001;
       podSpec.securityContext = podSecCtx;
     }
 
@@ -548,8 +549,42 @@ export class K8sWorkloadManager {
     }
 
     // Init containers
+    const initContainers: V1Container[] = [];
+
+    // For StatefulSets, prepend an initContainer that chowns the home PVC
+    // mount to UID 1001 (the `agent` user in images/base.Dockerfile). This
+    // is necessary because some storage classes (docker-desktop's hostpath,
+    // GKE default) don't honor the pod's fsGroup setting, leaving the mount
+    // root-owned and unwritable by the main container. Running chown as
+    // root (UID 0) here is safe — it only touches the volume mount before
+    // the main container starts.
+    if (restartPolicy === "Always") {
+      const permInit = new V1Container();
+      permInit.name = "home-perm-fix";
+      permInit.image = spec.image;
+      permInit.imagePullPolicy = spec.imagePullPolicy ?? "IfNotPresent";
+      permInit.command = ["sh", "-c", "chown -R 1001:1001 /home/agent && chmod 755 /home/agent"];
+      const initSec = new V1SecurityContext();
+      initSec.runAsUser = 0;
+      initSec.runAsGroup = 0;
+      initSec.capabilities = new V1Capabilities();
+      initSec.capabilities.drop = ["ALL"];
+      initSec.capabilities.add = ["CHOWN", "FOWNER", "DAC_OVERRIDE"];
+      permInit.securityContext = initSec;
+      const initMount = new V1VolumeMount();
+      initMount.name = "home";
+      initMount.mountPath = "/home/agent";
+      permInit.volumeMounts = [initMount];
+      initContainers.push(permInit);
+    }
+
     if (spec.initContainers && spec.initContainers.length > 0) {
-      podSpec.initContainers = spec.initContainers.map((ic) => ic.raw as V1Container);
+      for (const ic of spec.initContainers) {
+        initContainers.push(ic.raw as V1Container);
+      }
+    }
+    if (initContainers.length > 0) {
+      podSpec.initContainers = initContainers;
     }
 
     // Build labels for the template
@@ -603,9 +638,13 @@ export class K8sWorkloadManager {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
+      // Workflow pods are labeled with `app.kubernetes.io/instance=${jobName}`
+      // (set by our pod template builder). The standard K8s `job-name` label
+      // isn't reliably added by the Job controller here, so we use the more
+      // specific instance label we control.
       const pods = await this.coreApi.listNamespacedPod({
         namespace: this.namespace,
-        labelSelector: `job-name=${jobName}`,
+        labelSelector: `app.kubernetes.io/instance=${jobName}`,
       });
 
       if (pods.items && pods.items.length > 0) {
