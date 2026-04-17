@@ -157,6 +157,22 @@ describe("state-machine", () => {
     });
   });
 
+  describe("completed-without-PR escalation path", () => {
+    it("supports running → needs_attention → queued for repo tasks without a PR", () => {
+      let state = TaskState.RUNNING;
+      state = transition(state, TaskState.NEEDS_ATTENTION);
+      state = transition(state, TaskState.QUEUED);
+      expect(state).toBe(TaskState.QUEUED);
+    });
+
+    it("supports running → needs_attention → cancelled if user cancels", () => {
+      let state = TaskState.RUNNING;
+      state = transition(state, TaskState.NEEDS_ATTENTION);
+      state = transition(state, TaskState.CANCELLED);
+      expect(state).toBe(TaskState.CANCELLED);
+    });
+  });
+
   describe("dependency lifecycle (waiting_on_deps)", () => {
     it("allows pending → waiting_on_deps when task has dependencies", () => {
       expect(canTransition(TaskState.PENDING, TaskState.WAITING_ON_DEPS)).toBe(true);

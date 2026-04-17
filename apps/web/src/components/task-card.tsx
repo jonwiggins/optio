@@ -26,6 +26,8 @@ function formatAttentionReason(reason: string): string {
   if (reason.includes("ci_failing") || reason.includes("CI checks")) return "CI checks failing";
   if (reason.includes("merge_conflicts") || reason.includes("conflicts")) return "Merge conflicts";
   if (reason.includes("changes_requested") || reason.includes("review")) return "Changes requested";
+  if (reason.includes("completed_without_pr") || reason.includes("did not open a pull request"))
+    return "Completed without PR";
   return reason.length > 60 ? reason.slice(0, 60) + "..." : reason;
 }
 
