@@ -31,6 +31,8 @@ Optio is an orchestration system for AI coding agents. Think of it as "CI/CD whe
 
 **Backend-naming note.** For historical reasons the tables are `tasks` (Repo Tasks' one-time runs), `task_configs` (Repo Task blueprints), and `workflows` / `workflow_runs` / `workflow_triggers` (Standalone Tasks and their shared trigger surface). User-facing copy never uses "Workflow" or "Job" — everything is "Task" / "Repo Task" / "Standalone Task" in the UI. The legacy `/api/workflows` path was renamed to `/api/jobs` at the HTTP layer and the `/jobs/*` web routes remain for Standalone detail/runs.
 
+For the long-form explanation of how the two flavors map to the three internal types, the polymorphic HTTP layer, and how the UI presents them, see `docs/tasks.md`.
+
 **Unified `/api/tasks` HTTP layer.** All three kinds (`repo-task`, `repo-blueprint`, `standalone`) are reachable through one polymorphic HTTP resource:
 
 - `GET /api/tasks?type=repo-task|repo-blueprint|standalone|all` — unified list
@@ -138,6 +140,7 @@ These are well-documented in code; read the relevant service files for details:
 - **Triggers** (`workflow-trigger-service.ts`, `workflow-trigger-worker.ts`): polymorphic trigger table (`workflow_triggers`) keyed by `(target_type, target_id)`. `target_type="job"` dispatches to `createWorkflowRun`; `target_type="task_config"` dispatches to `instantiateTask`. Schedule trigger worker polls every 60s (`OPTIO_WORKFLOW_TRIGGER_INTERVAL`).
 - **Templates** (`prompt-template-service.ts`, routes in `prompt-templates.ts`): reusable prompt templates with `kind` discriminator (`prompt` / `review` / `job` / `task`). `renderTemplateString(template, params)` handles `{{param}}` substitution + `{{#if}}` blocks. UI at `/templates`.
 - **Connections** (`connection-service.ts`): external service integrations via MCP. Built-in providers: Notion, GitHub, Slack, Linear, PostgreSQL, Sentry, Filesystem. Also supports custom MCP servers and HTTP APIs. Three-layer model: providers (catalog) → connections (configured instances) → assignments (per-repo/agent-type rules). Injected into agent pods at task runtime via `getConnectionsForTask()` in task-worker
+- **Reconciliation control plane** (`workers/reconcile-worker.ts`, `services/reconcile-{snapshot,executor,queue}.ts`, `packages/shared/src/reconcile/`): K8s-style reconciler for Repo Task runs (`tasks`) and Standalone runs (`workflow_runs`). Pure decision functions consume a frozen `WorldSnapshot` and return a typed `Action`; the executor applies it under CAS so concurrent passes can't trample each other. Periodic resync (`OPTIO_RECONCILE_RESYNC_INTERVAL`, 5 min) catches lost events. Off by default; enable with `OPTIO_RECONCILE_ENABLED=true`. Ships in shadow mode (`OPTIO_RECONCILE_SHADOW=true`) — decisions are logged but not applied. Schema: `control_intent`, `reconcile_backoff_until`, `reconcile_attempts` columns on both `tasks` and `workflow_runs`. See `docs/reconciliation.md`
 - **Task dependencies**: `task_dependencies` table for multi-step pipelines
 - **Cost tracking**: `GET /api/analytics/costs` with daily/repo/type breakdowns, UI at `/costs`
 - **Error classification**: `packages/shared/src/error-classifier.ts` pattern-matches errors into categories with remedies

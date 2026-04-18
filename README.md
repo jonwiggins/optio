@@ -5,13 +5,17 @@
 [![CI](https://github.com/jonwiggins/optio/actions/workflows/ci.yml/badge.svg)](https://github.com/jonwiggins/optio/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-Optio orchestrates AI coding agents across three modes:
+Optio has one user-facing concept — a **Task** — with one attribute that flips the pipeline behind it: does the task have a repo?
 
-- **Tasks** — turn tickets into merged pull requests. Submit a task (manually, from a GitHub Issue, Linear, Jira, or Notion), and Optio provisions an isolated environment, runs an AI agent, opens a PR, monitors CI, triggers code review, auto-fixes failures, and merges when everything passes.
-- **Agent Workflows** — run reusable, parameterized agent jobs on a schedule, via webhook, or on demand. Generate reports, triage alerts, audit dependencies — anything that doesn't need a repo checkout.
+- **Repo Tasks** — turn tickets into merged pull requests. Submit a task (manually, from a GitHub Issue, Linear, Jira, or Notion), and Optio provisions an isolated environment, runs an AI agent, opens a PR, monitors CI, triggers code review, auto-fixes failures, and merges when everything passes.
+- **Standalone Tasks** — run reusable, parameterized agent work with no repo checkout. Generate reports, triage alerts, audit dependencies, query a database, post to Slack — anything that doesn't need to land as a PR.
 - **Connections** — give your agents access to external services. Connect Notion, Slack, Linear, GitHub, PostgreSQL, Sentry, or any MCP-compatible server, and Optio injects them into agent pods at runtime.
 
-The feedback loop is what makes tasks different. When CI fails, the agent is automatically resumed with the failure context. When a reviewer requests changes, the agent picks up the review comments and pushes a fix. When everything passes, the PR is squash-merged and the issue is closed. You describe the work; Optio drives it to completion.
+Both flavors share the same trigger types (manual, schedule, webhook, ticket), the same prompt-template engine, the same real-time log streaming, and the same `/api/tasks` HTTP surface. The difference is whether the agent runs against a worktree or in an empty pod. See [docs/tasks.md](./docs/tasks.md) for the full breakdown.
+
+The feedback loop is what makes Repo Tasks different. When CI fails, the agent is automatically resumed with the failure context. When a reviewer requests changes, the agent picks up the review comments and pushes a fix. When everything passes, the PR is squash-merged and the issue is closed. You describe the work; Optio drives it to completion.
+
+Under the hood, all task and pod state changes flow through a [Kubernetes-style reconciliation control plane](./docs/reconciliation.md) — a pure-decision-plus-CAS-executor loop with periodic resync that keeps runs from getting stuck on lost events.
 
 <p align="center">
   <img src="docs/screenshots/overview.png" alt="Optio dashboard showing 10 running tasks, 19 completed, with Claude Max usage, active pods, and recent task activity" width="100%"/>
@@ -25,7 +29,7 @@ The feedback loop is what makes tasks different. When CI fails, the agent is aut
 
 ## How It Works
 
-### Tasks — ticket to merged PR
+### Repo Tasks — ticket to merged PR
 
 ```
 You create a task          Optio runs the agent           Optio closes the loop
@@ -46,20 +50,20 @@ You create a task          Optio runs the agent           Optio closes the loop
 5. **Feedback loop** — CI failures, merge conflicts, and review feedback automatically resume the agent with context
 6. **Completion** — PR is squash-merged, linked issues are closed, costs are recorded
 
-### Agent Workflows — reusable agent jobs
+### Standalone Tasks — reusable agent work without a repo
 
 ```
-You define a workflow       Optio triggers it              Optio runs & tracks
+You define a task           Optio triggers it              Optio runs & tracks
 ────────────────────        ─────────────────              ───────────────────
 
   Prompt template           Manual (UI / API)              Provision isolated pod
   {{PARAM}} variables  ──→  Cron schedule          ──→     Execute agent with params
   Agent + model config      Webhook from external          Stream logs in real time
-  Budget & retry limits     service                        Track cost & token usage
+  Budget & retry limits     Ticket events                  Track cost & token usage
                                                            Auto-retry on failure
 ```
 
-Workflows are standalone agent executions — no git repo required. Define a prompt template with `{{PARAM}}` placeholders, configure triggers (manual, cron schedule, or webhook), and let Optio handle execution, retries, and cost tracking.
+Standalone Tasks run an agent in an isolated pod with no git checkout. Define a prompt template with `{{PARAM}}` placeholders, configure triggers (manual, cron schedule, webhook, or ticket), and let Optio handle execution, retries, and cost tracking. Repo Tasks can also be saved as **blueprints** with the same trigger types — see [docs/tasks.md](./docs/tasks.md).
 
 ### Connections — extend agent capabilities
 
@@ -70,12 +74,13 @@ Connections give your agents access to external tools and data at runtime. Confi
 ## Key Features
 
 - **Autonomous feedback loop** — auto-resumes the agent on CI failures, merge conflicts, and review feedback; auto-merges when everything passes
-- **Agent Workflows** — reusable, parameterized agent jobs triggered manually, on a cron schedule, or via webhook, with real-time log streaming, cost tracking, and auto-retry
+- **Repo Tasks and Standalone Tasks** — one Task concept, two pipelines. Repo Tasks land code via PRs; Standalone Tasks run agents in empty pods for reports, triage, and ops. Both share triggers (manual / schedule / webhook / ticket), templates, and the unified `/api/tasks` HTTP layer
 - **Connections** — plug external services (Notion, Slack, Linear, GitHub, PostgreSQL, Sentry, custom MCP servers) into agent pods with fine-grained access control per repo and agent type
 - **Pod-per-repo architecture** — one long-lived Kubernetes pod per repo with git worktree isolation, multi-pod scaling, and idle cleanup
 - **Code review agent** — automatically launches a review agent as a subtask, with a separate prompt and model
 - **Multi-agent support** — run Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, or OpenCode with per-repo model and prompt configuration
 - **GitHub Issues, Linear, Jira, and Notion intake** — assign issues to Optio from the UI or via ticket sync
+- **Reconciliation control plane** — K8s-style pure-decision-plus-CAS-executor loop with periodic resync; keeps tasks and pods from getting stuck on lost events. Ships in shadow mode behind a feature flag
 - **Real-time dashboard** — live log streaming, pipeline progress, cost analytics, and cluster health
 
 ## Architecture
@@ -89,10 +94,11 @@ Connections give your agents access to external tools and data at runtime. Confi
 │  Dashboard   │     │  ├─ Task Queue     │     │  │ ├─ worktree 1  ⚡    │  │
 │  Tasks       │     │  ├─ PR Watcher     │     │  │ ├─ worktree 2  ⚡    │  │
 │  Repos       │     │  ├─ Workflow Queue │     │  │ └─ worktree N  ⚡    │  │
-│  Workflows   │     │  ├─ Health Mon     │     │  └─────────────────────┘  │
-│  Connections │     │  └─ Ticket Sync    │     │  ┌── Workflow Pod ──────┐ │
-│  Cluster     │     │                    │     │  │ isolated agent  ⚡    │ │
-│  Costs       │     │  Services:         │     │  └─────────────────────┘  │
+│  Standalone  │     │  ├─ Reconciler     │     │  └─────────────────────┘  │
+│  Connections │     │  ├─ Health Mon     │     │  ┌── Standalone Pod ────┐ │
+│  Cluster     │     │  └─ Ticket Sync    │     │  │ isolated agent  ⚡    │ │
+│  Costs       │     │                    │     │  └─────────────────────┘  │
+│              │     │  Services:         │     │                           │
 │              │     │  ├─ Repo Pool      │     │                           │
 │              │     │  ├─ Workflow Pool  │     │  MCP servers injected via │
 │              │     │  ├─ Connections    │     │  Connections at runtime    │
@@ -201,10 +207,11 @@ helm uninstall optio -n optio
 
 ```
 apps/
-  api/          Fastify API server, BullMQ workers, WebSocket endpoints,
-                workflow engine, connection service, review service, OAuth
+  api/          Fastify API server, BullMQ workers (incl. reconciler),
+                WebSocket endpoints, standalone-task engine, connection service,
+                review service, OAuth
   web/          Next.js dashboard with real-time streaming, cost analytics,
-                workflow management, connection catalog
+                Repo / Standalone Task management, connection catalog
   site/         Documentation site (GitHub Pages)
   cli/          Terminal client for Optio
 
