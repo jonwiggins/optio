@@ -3,6 +3,7 @@ import {
   buildAgentCommand,
   buildInitialClaudeStreamMessage,
   inferExitCode,
+  shouldEscalateNoPr,
 } from "./task-worker.js";
 
 describe("buildAgentCommand", () => {
@@ -384,5 +385,58 @@ describe("inferExitCode", () => {
       expect(inferExitCode("some-future-agent", "fatal: error")).toBe(1);
       expect(inferExitCode("some-future-agent", "all good")).toBe(0);
     });
+  });
+});
+
+describe("shouldEscalateNoPr", () => {
+  const defaults = {
+    success: true,
+    isReviewTask: false,
+    isPlanningRun: false,
+    hasRepoUrl: true,
+    detectedPrUrl: undefined as string | undefined | null,
+  };
+
+  it("escalates when a repo task succeeds without a PR", () => {
+    expect(shouldEscalateNoPr(defaults)).toBe(true);
+  });
+
+  it("does not escalate when a PR was detected", () => {
+    expect(
+      shouldEscalateNoPr({ ...defaults, detectedPrUrl: "https://github.com/org/repo/pull/42" }),
+    ).toBe(false);
+  });
+
+  it("does not escalate when the agent failed", () => {
+    expect(shouldEscalateNoPr({ ...defaults, success: false })).toBe(false);
+  });
+
+  it("does not escalate for review tasks", () => {
+    expect(shouldEscalateNoPr({ ...defaults, isReviewTask: true })).toBe(false);
+  });
+
+  it("does not escalate for planning runs", () => {
+    expect(shouldEscalateNoPr({ ...defaults, isPlanningRun: true })).toBe(false);
+  });
+
+  it("does not escalate for standalone tasks (no repo)", () => {
+    expect(shouldEscalateNoPr({ ...defaults, hasRepoUrl: false })).toBe(false);
+  });
+
+  it("does not escalate when detectedPrUrl is null", () => {
+    // null is treated as falsy — same as undefined
+    expect(shouldEscalateNoPr({ ...defaults, detectedPrUrl: null })).toBe(true);
+  });
+
+  it("does not escalate when all exemptions apply simultaneously", () => {
+    expect(
+      shouldEscalateNoPr({
+        success: false,
+        isReviewTask: true,
+        isPlanningRun: true,
+        hasRepoUrl: false,
+        detectedPrUrl: "https://github.com/org/repo/pull/1",
+      }),
+    ).toBe(false);
   });
 });

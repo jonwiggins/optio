@@ -1101,6 +1101,49 @@ export function startTaskWorker() {
               "Agent has created an implementation plan and is waiting for approval",
             );
             log.info("Planning phase complete — awaiting human review");
+          } else if (
+            shouldEscalateNoPr({
+              success: result.success,
+              isReviewTask,
+              isPlanningRun,
+              hasRepoUrl: !!task.repoUrl,
+              detectedPrUrl,
+            })
+          ) {
+            // Repo Task completed without opening a PR. Before escalating,
+            // check the API as a fallback — the agent may have pushed a PR
+            // that wasn't captured in log output.
+            let apiFallbackPr: ExistingPr | null = null;
+            try {
+              apiFallbackPr = await checkExistingPr(task.repoUrl, taskId, taskWorkspaceId);
+            } catch {
+              // Non-fatal — proceed with escalation
+            }
+
+            if (apiFallbackPr) {
+              await taskService.updateTaskPr(taskId, apiFallbackPr.url);
+              await repoPool.updateWorktreeState(taskId, "preserved");
+              await taskService.transitionTask(
+                taskId,
+                TaskState.PR_OPENED,
+                "pr_detected_api",
+                apiFallbackPr.url,
+              );
+              log.info(
+                { prUrl: apiFallbackPr.url },
+                "PR found via API fallback after successful agent exit",
+              );
+            } else {
+              await repoPool.updateWorktreeState(taskId, "preserved");
+              await taskService.transitionTask(
+                taskId,
+                TaskState.NEEDS_ATTENTION,
+                "completed_without_pr",
+                "Agent completed successfully but did not open a pull request. " +
+                  "The work may need to be committed and pushed manually, or the agent can be restarted to open a PR.",
+              );
+              log.warn("Repo Task completed without opening a PR — escalating to needs_attention");
+            }
           } else {
             await repoPool.updateWorktreeState(taskId, "removed");
             await taskService.transitionTask(
@@ -1659,6 +1702,29 @@ export function buildAgentCommand(
     default:
       return [`echo "Unknown agent type: ${agentType}" && exit 1`];
   }
+}
+
+/**
+ * Determines whether a Repo Task that completed successfully should be
+ * escalated to needs_attention because no PR was opened.
+ *
+ * Repo Tasks are expected to produce a PR. If the agent exits cleanly without
+ * opening one, the work didn't ship — the user should be notified so they can
+ * resume or restart the agent.
+ */
+export function shouldEscalateNoPr(opts: {
+  success: boolean;
+  isReviewTask: boolean;
+  isPlanningRun: boolean;
+  hasRepoUrl: boolean;
+  detectedPrUrl: string | undefined | null;
+}): boolean {
+  if (!opts.success) return false;
+  if (opts.isReviewTask) return false;
+  if (opts.isPlanningRun) return false;
+  if (!opts.hasRepoUrl) return false;
+  if (opts.detectedPrUrl) return false;
+  return true;
 }
 
 /** Infer exit code from agent logs based on agent-specific error patterns */
