@@ -125,7 +125,7 @@ export default function OverviewPage() {
 
       <ActiveSessions sessions={activeSessions} activeCount={activeSessionCount} />
 
-      <div className="grid md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
         <RecentTasks tasks={recentTasks} />
         <PodsList
           pods={pods}
@@ -133,9 +133,8 @@ export default function OverviewPage() {
           recentTasks={recentTasks}
           repoPodRecords={repoPodRecords ?? []}
         />
+        <RecentActivity />
       </div>
-
-      <RecentActivity />
     </div>
   );
 }
