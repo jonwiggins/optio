@@ -125,19 +125,16 @@ export default function OverviewPage() {
 
       <ActiveSessions sessions={activeSessions} activeCount={activeSessionCount} />
 
-      <div className="grid md:grid-cols-2 gap-8">
-        <RecentActivity />
-        <RecentTasks tasks={recentTasks} />
-      </div>
+      <RecentTasks tasks={recentTasks} />
 
-      <div className="grid md:grid-cols-2 gap-8">
-        <PodsList
-          pods={pods}
-          events={events}
-          recentTasks={recentTasks}
-          repoPodRecords={repoPodRecords ?? []}
-        />
-      </div>
+      <PodsList
+        pods={pods}
+        events={events}
+        recentTasks={recentTasks}
+        repoPodRecords={repoPodRecords ?? []}
+      />
+
+      <RecentActivity />
     </div>
   );
 }

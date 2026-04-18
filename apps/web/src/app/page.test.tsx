@@ -23,9 +23,9 @@ vi.mock("@/components/dashboard", () => ({
   UsagePanel: () => null,
   ClusterSummary: () => null,
   ActiveSessions: () => null,
-  RecentTasks: () => null,
-  RecentActivity: () => null,
-  PodsList: () => null,
+  RecentTasks: () => <div data-testid="recent-tasks" />,
+  RecentActivity: () => <div data-testid="recent-activity" />,
+  PodsList: () => <div data-testid="pods-list" />,
   WelcomeHero: () => <div data-testid="welcome-hero" />,
   PerformanceSummary: () => null,
   AgentComparison: () => null,
@@ -90,5 +90,28 @@ describe("OverviewPage — failed-tasks banner removed", () => {
 
     expect(screen.getByText("Overview")).toBeInTheDocument();
     expect(screen.getByTestId("pipeline-stats")).toBeInTheDocument();
+  });
+});
+
+describe("OverviewPage — section ordering", () => {
+  afterEach(() => cleanup());
+
+  it("renders Recent Tasks before Pods before Recent Activity", () => {
+    render(<OverviewPage />);
+
+    const recentTasks = screen.getByTestId("recent-tasks");
+    const podsList = screen.getByTestId("pods-list");
+    const recentActivity = screen.getByTestId("recent-activity");
+
+    // compareDocumentPosition bit 4 (DOCUMENT_POSITION_FOLLOWING) means the
+    // argument node comes after the reference node in document order.
+    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+
+    // Recent Tasks should come before Pods
+    expect(recentTasks.compareDocumentPosition(podsList) & FOLLOWING).toBeTruthy();
+    // Pods should come before Recent Activity
+    expect(podsList.compareDocumentPosition(recentActivity) & FOLLOWING).toBeTruthy();
+    // Recent Tasks should come before Recent Activity
+    expect(recentTasks.compareDocumentPosition(recentActivity) & FOLLOWING).toBeTruthy();
   });
 });
