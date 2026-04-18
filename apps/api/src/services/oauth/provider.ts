@@ -13,6 +13,8 @@ export interface OAuthUser {
 
 export interface OAuthProvider {
   name: string;
+  /** Optional async initialization (e.g. OIDC discovery). Called before authorizeUrl(). */
+  prepare?(): Promise<void>;
   authorizeUrl(state: string): string;
   exchangeCode(code: string): Promise<OAuthTokens>;
   fetchUser(accessToken: string): Promise<OAuthUser>;

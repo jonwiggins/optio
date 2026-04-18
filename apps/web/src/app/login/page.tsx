@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api-client";
-import { Zap, Loader2 } from "lucide-react";
+import { Zap, Loader2, KeyRound } from "lucide-react";
 
 const PROVIDER_ICONS: Record<string, React.ReactNode> = {
   github: (
@@ -113,7 +113,7 @@ export default function LoginPage() {
                 href={`/api/auth/${provider.name}/login`}
                 className="flex items-center justify-center gap-3 w-full px-4 py-3 rounded-lg border border-border bg-bg-card text-sm font-medium hover:bg-bg-hover transition-colors"
               >
-                {PROVIDER_ICONS[provider.name]}
+                {PROVIDER_ICONS[provider.name] ?? <KeyRound className="w-5 h-5" />}
                 Sign in with {provider.displayName}
               </a>
             ))}

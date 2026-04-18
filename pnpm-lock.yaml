@@ -134,6 +134,9 @@ importers:
       ioredis:
         specifier: ^5.6.1
         version: 5.10.1
+      jose:
+        specifier: ^6.2.2
+        version: 6.2.2
       pino:
         specifier: ^9.6.0
         version: 9.14.0

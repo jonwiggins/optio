@@ -114,7 +114,7 @@ When a limit is hit, task is re-queued with 10s delay.
 
 ### Authentication
 
-**Web UI**: Multi-provider OAuth (GitHub, Google, GitLab). Enable by setting `<PROVIDER>_OAUTH_CLIENT_ID` + `<PROVIDER>_OAUTH_CLIENT_SECRET`. Sessions use SHA256-hashed tokens (30-day TTL). Local dev bypass: `OPTIO_AUTH_DISABLED=true`.
+**Web UI**: Multi-provider OAuth (GitHub, Google, GitLab, generic OIDC). Enable by setting `<PROVIDER>_OAUTH_CLIENT_ID` + `<PROVIDER>_OAUTH_CLIENT_SECRET` (or `OIDC_ISSUER_URL` + `OIDC_CLIENT_ID` + `OIDC_CLIENT_SECRET` for generic OIDC). Sessions use SHA256-hashed tokens (30-day TTL). Local dev bypass: `OPTIO_AUTH_DISABLED=true`.
 
 **Claude Code** (three modes, selected in setup wizard):
 

@@ -127,6 +127,11 @@ export default function ConfigurationPage() {
               ["GITLAB_OAUTH_CLIENT_ID", "—", "GitLab OAuth client ID"],
               ["GITLAB_OAUTH_CLIENT_SECRET", "—", "GitLab OAuth client secret"],
               ["GITLAB_OAUTH_BASE_URL", "https://gitlab.com", "Base URL for self-hosted GitLab"],
+              ["OIDC_ISSUER_URL", "—", "OIDC issuer URL (enables generic OIDC provider)"],
+              ["OIDC_CLIENT_ID", "—", "OIDC client ID"],
+              ["OIDC_CLIENT_SECRET", "—", "OIDC client secret"],
+              ["OIDC_DISPLAY_NAME", "SSO", "Login button label"],
+              ["OIDC_SCOPES", "openid email profile", "Space-separated OIDC scopes"],
             ].map(([name, def, desc]) => (
               <tr key={name}>
                 <td className="px-4 py-3 font-mono text-text-heading">{name}</td>
@@ -151,6 +156,30 @@ export default function ConfigurationPage() {
         </code>
         .
       </Callout>
+
+      <h3 className="mt-6 text-lg font-semibold text-text-heading">Generic OIDC Provider</h3>
+      <p className="mt-3 text-text-muted leading-relaxed">
+        Any OpenID Connect-compatible identity provider (Keycloak, Authentik, Authelia, Zitadel,
+        Okta, Auth0, etc.) can be used via the generic OIDC provider. Set{" "}
+        <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">
+          OIDC_ISSUER_URL
+        </code>{" "}
+        to the issuer URL and configure the client credentials. The discovery document is fetched
+        automatically from{" "}
+        <code className="rounded bg-bg-hover px-1.5 py-0.5 text-[13px] font-mono">
+          {"<issuer>/.well-known/openid-configuration"}
+        </code>
+        .
+      </p>
+      <div className="mt-3">
+        <CodeBlock title="Keycloak example">{`OIDC_ISSUER_URL=https://auth.example.com/realms/optio
+OIDC_CLIENT_ID=optio
+OIDC_CLIENT_SECRET=your-client-secret
+OIDC_DISPLAY_NAME="Company SSO"
+
+# Register the callback URL in your IdP:
+# {PUBLIC_URL}/api/auth/oidc/callback`}</CodeBlock>
+      </div>
 
       <h2 className="mt-10 text-2xl font-bold text-text-heading">Helm Chart Values</h2>
       <p className="mt-3 text-text-muted leading-relaxed">

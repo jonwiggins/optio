@@ -413,6 +413,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
       const state = randomBytes(16).toString("hex");
       await addOAuthState(state, providerName);
 
+      if (provider.prepare) await provider.prepare();
       const url = provider.authorizeUrl(state);
       reply.redirect(url);
     },
@@ -714,6 +715,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
       const oauthState = randomBytes(16).toString("hex") + "." + cliState;
       await addOAuthState(oauthState, provider);
 
+      if (oauthProvider.prepare) await oauthProvider.prepare();
       const url = oauthProvider.authorizeUrl(oauthState);
       reply.send({ url });
     },

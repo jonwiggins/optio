@@ -293,6 +293,13 @@ auth:
     clientId: ""
     clientSecret: ""
     # baseUrl: https://gitlab.com  # Self-hosted GitLab URL
+  # Generic OIDC provider (Keycloak, Authentik, Authelia, Zitadel, Okta, Auth0, etc.)
+  oidc:
+    issuerUrl: ""       # e.g. https://auth.example.com/realms/optio
+    clientId: ""
+    clientSecret: ""
+    displayName: "SSO"  # Button label: "Sign in with {displayName}"
+    scopes: ""          # Defaults to "openid email profile" if empty
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GitHub webhook signature validation
