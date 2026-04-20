@@ -216,6 +216,31 @@ export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       logger.warn({ status: res.status, body }, "Failed to fetch Claude usage");
+
+      // On auth-failure status codes, surface the failure immediately so the
+      // UI shows the re-auth banner without waiting for the next poll cycle.
+      if (res.status === 401 || res.status === 403) {
+        const errorMsg = `Usage API returned ${res.status}`;
+        try {
+          const { recordAuthEvent } = await import("./auth-failure-detector.js");
+          await recordAuthEvent("claude", errorMsg, "usage-endpoint");
+        } catch {
+          // non-fatal — best-effort recording
+        }
+        try {
+          const { publishEvent } = await import("./event-bus.js");
+          await publishEvent({
+            type: "auth:failed",
+            message:
+              "Claude Code OAuth token has expired. Go to Secrets to paste a new token, or re-run 'claude setup-token'.",
+            timestamp: new Date().toISOString(),
+          });
+        } catch {
+          // non-fatal — best-effort notification
+        }
+        invalidateUsageCache();
+      }
+
       return { available: false, error: `Usage API returned ${res.status}` };
     }
 
