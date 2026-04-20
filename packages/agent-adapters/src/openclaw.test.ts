@@ -228,6 +228,14 @@ describe("OpenClawAdapter", () => {
       expect(result.outputTokens).toBe(500);
     });
 
+    it("includes cache_read and cache_creation tokens in input total", () => {
+      const logs =
+        '{"type":"message","role":"assistant","content":"Done","usage":{"input_tokens":50,"output_tokens":200,"cache_creation_input_tokens":1000,"cache_read_input_tokens":5000}}';
+      const result = adapter.parseResult(0, logs);
+      expect(result.inputTokens).toBe(6050);
+      expect(result.outputTokens).toBe(200);
+    });
+
     it("extracts token usage from OpenAI-style naming", () => {
       const logs =
         '{"type":"message","role":"assistant","content":"Done","usage":{"prompt_tokens":2000,"completion_tokens":1000}}';

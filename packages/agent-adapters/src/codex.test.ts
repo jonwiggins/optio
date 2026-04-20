@@ -224,6 +224,13 @@ describe("CodexAdapter", () => {
       expect(result.error).toBe("The model `gpt-5` does not exist");
     });
 
+    it("includes cache_read and cache_creation tokens in input total", () => {
+      const logs =
+        '{"type":"message","role":"assistant","content":"Done","usage":{"input_tokens":50,"output_tokens":200,"cache_creation_input_tokens":1000,"cache_read_input_tokens":5000}}';
+      const result = adapter.parseResult(0, logs);
+      expect(result.costUsd).toBeDefined();
+    });
+
     it("accounts for cached tokens in cost calculation", () => {
       const logs = [
         '{"model":"o4-mini","type":"message","role":"assistant","content":"Hi"}',

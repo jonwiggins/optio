@@ -324,5 +324,21 @@ describe("GeminiAdapter", () => {
       expect(result.outputTokens).toBe(500);
       expect(result.costUsd).toBeDefined();
     });
+
+    it("includes cache_read and cache_creation tokens from inline usage in input total", () => {
+      const logs =
+        '{"type":"message","role":"assistant","content":"Done","usage":{"input_tokens":50,"output_tokens":200,"cache_creation_input_tokens":1000,"cache_read_input_tokens":5000}}';
+      const result = adapter.parseResult(0, logs);
+      expect(result.inputTokens).toBe(6050);
+      expect(result.outputTokens).toBe(200);
+    });
+
+    it("includes cache tokens from per-model stats in input total", () => {
+      const logs =
+        '{"type":"result","stats":{"gemini-2.5-pro":{"input_tokens":50,"output_tokens":200,"cache_creation_input_tokens":1000,"cache_read_input_tokens":5000}}}';
+      const result = adapter.parseResult(0, logs);
+      expect(result.inputTokens).toBe(6050);
+      expect(result.outputTokens).toBe(200);
+    });
   });
 });

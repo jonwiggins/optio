@@ -183,6 +183,9 @@ export class OpenClawAdapter implements AgentAdapter {
       if (usage) {
         if (usage.input_tokens) totalInputTokens += usage.input_tokens;
         if (usage.output_tokens) totalOutputTokens += usage.output_tokens;
+        if (usage.cache_creation_input_tokens)
+          totalInputTokens += usage.cache_creation_input_tokens;
+        if (usage.cache_read_input_tokens) totalInputTokens += usage.cache_read_input_tokens;
         if (usage.prompt_tokens) totalInputTokens += usage.prompt_tokens;
         if (usage.completion_tokens) totalOutputTokens += usage.completion_tokens;
       }

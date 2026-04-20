@@ -206,12 +206,20 @@ export class GeminiAdapter implements AgentAdapter {
               const s = value as Record<string, unknown>;
               if (typeof s.input_tokens === "number") totalInputTokens += s.input_tokens;
               if (typeof s.output_tokens === "number") totalOutputTokens += s.output_tokens;
+              if (typeof s.cache_creation_input_tokens === "number")
+                totalInputTokens += s.cache_creation_input_tokens;
+              if (typeof s.cache_read_input_tokens === "number")
+                totalInputTokens += s.cache_read_input_tokens;
               if (!model) model = key;
             }
           }
           // Also handle flat stats: { input_tokens, output_tokens }
           if (typeof stats.input_tokens === "number") totalInputTokens += stats.input_tokens;
           if (typeof stats.output_tokens === "number") totalOutputTokens += stats.output_tokens;
+          if (typeof stats.cache_creation_input_tokens === "number")
+            totalInputTokens += stats.cache_creation_input_tokens;
+          if (typeof stats.cache_read_input_tokens === "number")
+            totalInputTokens += stats.cache_read_input_tokens;
         }
       }
 
@@ -220,6 +228,9 @@ export class GeminiAdapter implements AgentAdapter {
       if (usage) {
         if (usage.input_tokens) totalInputTokens += usage.input_tokens;
         if (usage.output_tokens) totalOutputTokens += usage.output_tokens;
+        if (usage.cache_creation_input_tokens)
+          totalInputTokens += usage.cache_creation_input_tokens;
+        if (usage.cache_read_input_tokens) totalInputTokens += usage.cache_read_input_tokens;
       }
     }
 

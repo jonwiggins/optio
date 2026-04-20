@@ -239,6 +239,25 @@ describe("ClaudeCodeAdapter", () => {
       expect(result.outputTokens).toBe(125);
     });
 
+    it("includes cache_read and cache_creation tokens in input total", () => {
+      const logs = [
+        '{"type":"assistant","message":{"usage":{"input_tokens":50,"output_tokens":200,"cache_creation_input_tokens":1000,"cache_read_input_tokens":5000}}}',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.inputTokens).toBe(6050);
+      expect(result.outputTokens).toBe(200);
+    });
+
+    it("accumulates cache tokens across multiple assistant messages", () => {
+      const logs = [
+        '{"type":"assistant","message":{"usage":{"input_tokens":50,"output_tokens":100,"cache_creation_input_tokens":1000,"cache_read_input_tokens":0}}}',
+        '{"type":"assistant","message":{"usage":{"input_tokens":10,"output_tokens":80,"cache_read_input_tokens":1000}}}',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.inputTokens).toBe(2060);
+      expect(result.outputTokens).toBe(180);
+    });
+
     it("extracts error from result event with is_error=true when exitCode is non-zero", () => {
       const logs = '{"type":"result","is_error":true,"result":"API rate limit exceeded"}';
       const result = adapter.parseResult(1, logs);

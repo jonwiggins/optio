@@ -113,8 +113,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
         // Accumulate token usage from assistant messages
         if (event.type === "assistant" && event.message?.usage) {
-          totalInputTokens += event.message.usage.input_tokens || 0;
-          totalOutputTokens += event.message.usage.output_tokens || 0;
+          const usage = event.message.usage;
+          totalInputTokens +=
+            (usage.input_tokens || 0) +
+            (usage.cache_creation_input_tokens || 0) +
+            (usage.cache_read_input_tokens || 0);
+          totalOutputTokens += usage.output_tokens || 0;
           if (!model && event.message.model) {
             model = event.message.model;
           }
