@@ -196,6 +196,12 @@ postgresql:
   image:
     repository: postgres
     tag: "16"
+  # Use PGDATA subdirectory pattern (recommended for PostgreSQL 18+).
+  # When true, creates /var/lib/postgresql/data/pgdata subdirectory to avoid
+  # conflicts with PVC metadata (lost+found). Required for fresh PostgreSQL 18+
+  # deployments. BREAKING: Defaults to false for existing deployments to preserve data.
+  # Set to true for new installs or after manual migration (see chart NOTES).
+  usePgdataSubdirectory: false
   resources:
     requests:
       cpu: 100m

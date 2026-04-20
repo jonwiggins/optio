@@ -60,3 +60,22 @@ For Docker Desktop / kind / minikube, also patch with --kubelet-insecure-tls:
     -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 
 Without metrics-server, CPU and memory usage will show as "N/A".
+
+{{- if and .Values.postgresql.enabled (not .Values.postgresql.usePgdataSubdirectory) }}
+
+---
+
+POSTGRESQL DATA DIRECTORY
+
+PostgreSQL is using the PVC mount root as the data directory.
+
+For PostgreSQL 18+ or to avoid conflicts with PVC metadata (lost+found),
+consider enabling the subdirectory pattern in values.yaml:
+
+  postgresql:
+    usePgdataSubdirectory: true
+
+⚠️  WARNING: This is a BREAKING CHANGE for existing deployments.
+Enabling this on an existing database will cause data loss unless you
+manually migrate first. See CHANGELOG for migration instructions.
+{{- end }}

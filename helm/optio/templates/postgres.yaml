@@ -50,8 +50,27 @@ spec:
         runAsUser: 999
         runAsGroup: 999
         fsGroup: 999
-      {{- if .Values.postgresql.tls.enabled }}
+        fsGroupChangePolicy: OnRootMismatch
       initContainers:
+        - name: init-pgdata
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              chown -R 999:999 /var/lib/postgresql/data
+              chmod 700 /var/lib/postgresql/data
+              {{- if .Values.postgresql.usePgdataSubdirectory }}
+              mkdir -p /var/lib/postgresql/data/pgdata
+              chmod 700 /var/lib/postgresql/data/pgdata
+              chown 999:999 /var/lib/postgresql/data/pgdata
+              {{- end }}
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+        {{- if .Values.postgresql.tls.enabled }}
         - name: init-tls
           image: busybox:1.36
           securityContext:
@@ -72,7 +91,7 @@ spec:
               readOnly: true
             - name: postgres-tls
               mountPath: /etc/postgres-tls
-      {{- end }}
+        {{- end }}
       containers:
         - name: postgres
           image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
@@ -93,6 +112,10 @@ spec:
             - "ssl_min_protocol_version=TLSv1.3"
           {{- end }}
           env:
+            {{- if .Values.postgresql.usePgdataSubdirectory }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            {{- end }}
             - name: POSTGRES_DB
               value: {{ .Values.postgresql.auth.database }}
             - name: POSTGRES_USER
