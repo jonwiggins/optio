@@ -160,6 +160,7 @@ spec:
   ports:
     - port: {{ .Values.api.port }}
       targetPort: {{ .Values.api.port }}
+      appProtocol: kubernetes.io/ws  # WebSocket support for /ws/* endpoints
       {{- if and (eq .Values.api.service.type "NodePort") .Values.api.service.nodePort }}
       nodePort: {{ .Values.api.service.nodePort }}
       {{- end }}

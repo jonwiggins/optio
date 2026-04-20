@@ -13,8 +13,12 @@ metadata:
   {{- end }}
 spec:
   parentRefs:
+    {{- if .Values.gatewayAPI.parentRefs }}
+    {{- toYaml .Values.gatewayAPI.parentRefs | nindent 4 }}
+    {{- else }}
     - name: {{ .Release.Name }}-gateway
       namespace: {{ .Values.namespace }}
+    {{- end }}
   {{- if .Values.gatewayAPI.hostname }}
   hostnames:
     - {{ .Values.gatewayAPI.hostname | quote }}

@@ -1,5 +1,5 @@
 {{- include "optio.validateNetworking" . }}
-{{- if and .Values.gatewayAPI.enabled (.Capabilities.APIVersions.Has "gateway.networking.k8s.io/v1") }}
+{{- if and .Values.gatewayAPI.enabled (.Capabilities.APIVersions.Has "gateway.networking.k8s.io/v1") (not .Values.gatewayAPI.parentRefs) }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
