@@ -8,6 +8,7 @@ import * as taskService from "./task-service.js";
 import * as taskConfigService from "./task-config-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { retrieveSecret } from "./secret-service.js";
+import { getGitHubToken } from "./github-token-service.js";
 import { logger } from "../logger.js";
 import { recordAuthEvent } from "./auth-failure-detector.js";
 
@@ -38,6 +39,20 @@ export async function syncAllTickets(): Promise<number> {
         mergedConfig = { ...mergedConfig, ...credentials };
       } catch {
         // No secrets stored for this provider — use config as-is
+      }
+
+      // GitHub fallback: if no token was supplied via config or provider secret,
+      // resolve one via the centralized token service (GitHub App installation
+      // token → PAT). Lets users run ticket sync with only a GitHub App configured.
+      if (providerConfig.source === "github" && !(mergedConfig as { token?: string }).token) {
+        try {
+          (mergedConfig as { token?: string }).token = await getGitHubToken({ server: true });
+        } catch (err) {
+          logger.warn(
+            { err, providerId: providerConfig.id },
+            "[ticket-sync] No GitHub token available from app/PAT fallback",
+          );
+        }
       }
 
       const provider = getTicketProvider(providerConfig.source as TicketSource);

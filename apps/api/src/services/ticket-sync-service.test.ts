@@ -45,6 +45,10 @@ vi.mock("./secret-service.js", () => ({
   retrieveSecret: vi.fn(),
 }));
 
+vi.mock("./github-token-service.js", () => ({
+  getGitHubToken: vi.fn(),
+}));
+
 vi.mock("../logger.js", () => ({
   logger: {
     info: vi.fn(),
@@ -60,6 +64,7 @@ import { getTicketProvider } from "@optio/ticket-providers";
 import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { retrieveSecret } from "./secret-service.js";
+import { getGitHubToken } from "./github-token-service.js";
 import { syncAllTickets } from "./ticket-sync-service.js";
 import { logger } from "../logger.js";
 
@@ -106,6 +111,8 @@ describe("ticket-sync-service", () => {
     vi.clearAllMocks();
     // Default: no secrets stored
     vi.mocked(retrieveSecret).mockRejectedValue(new Error("Secret not found"));
+    // Default: no GitHub App / PAT available (triggers warn but doesn't throw)
+    vi.mocked(getGitHubToken).mockRejectedValue(new Error("No GitHub token available"));
   });
 
   it("syncs new tickets and creates tasks", async () => {
@@ -510,6 +517,83 @@ describe("ticket-sync-service", () => {
         enabled: false,
       }),
     );
+  });
+
+  it("falls back to getGitHubToken for GitHub providers without a configured token", async () => {
+    mockDbSelect([
+      {
+        id: "p1",
+        source: "github",
+        config: { owner: "o", repo: "r" },
+        enabled: true,
+      },
+    ]);
+
+    vi.mocked(getGitHubToken).mockResolvedValue("ghs_app_installation_token");
+
+    const mockProvider = {
+      fetchActionableTickets: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(getTicketProvider).mockReturnValue(mockProvider as any);
+
+    await syncAllTickets();
+
+    expect(getGitHubToken).toHaveBeenCalledWith({ server: true });
+    const configPassedToProvider = mockProvider.fetchActionableTickets.mock.calls[0][0];
+    expect(configPassedToProvider.token).toBe("ghs_app_installation_token");
+  });
+
+  it("does not call getGitHubToken when a token is already supplied via config", async () => {
+    mockDbSelect([
+      {
+        id: "p1",
+        source: "github",
+        config: { owner: "o", repo: "r", token: "inline-token" },
+        enabled: true,
+      },
+    ]);
+
+    vi.mocked(getTicketProvider).mockReturnValue({
+      fetchActionableTickets: vi.fn().mockResolvedValue([]),
+    } as any);
+
+    await syncAllTickets();
+
+    expect(getGitHubToken).not.toHaveBeenCalled();
+  });
+
+  it("does not call getGitHubToken when a token is supplied via provider secret", async () => {
+    mockDbSelect([
+      { id: "p1", source: "github", config: { owner: "o", repo: "r" }, enabled: true },
+    ]);
+    vi.mocked(retrieveSecret).mockResolvedValue(JSON.stringify({ token: "secret-token" }));
+
+    vi.mocked(getTicketProvider).mockReturnValue({
+      fetchActionableTickets: vi.fn().mockResolvedValue([]),
+    } as any);
+
+    await syncAllTickets();
+
+    expect(getGitHubToken).not.toHaveBeenCalled();
+  });
+
+  it("does not call getGitHubToken for non-github providers", async () => {
+    mockDbSelect([
+      {
+        id: "p1",
+        source: "jira",
+        config: { baseUrl: "https://j.example.com", email: "a@b.com" },
+        enabled: true,
+      },
+    ]);
+
+    vi.mocked(getTicketProvider).mockReturnValue({
+      fetchActionableTickets: vi.fn().mockResolvedValue([]),
+    } as any);
+
+    await syncAllTickets();
+
+    expect(getGitHubToken).not.toHaveBeenCalled();
   });
 
   it("downgrades repeated sync errors to debug level", async () => {
