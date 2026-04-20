@@ -12,7 +12,7 @@
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { workflowRuns, workflowPods, tasks, repoPods } from "../db/schema.js";
+import { workflowRuns, tasks, repoPods } from "../db/schema.js";
 import { WorkflowRunState, TaskState } from "@optio/shared";
 import { getRuntime } from "./container-service.js";
 import { getWorkflow } from "./workflow-service.js";
@@ -111,17 +111,19 @@ async function failZombieRun(run: typeof workflowRuns.$inferSelect, reason: stri
 
   logger.info({ runId: run.id, workflowId: run.workflowId, reason }, "Zombie workflow run failed");
 
-  // 2. Release the workflow pod's activeRunCount
-  try {
-    const [pod] = await db
-      .select()
-      .from(workflowPods)
-      .where(eq(workflowPods.workflowRunId, run.id));
-    if (pod) {
-      await releaseRun(pod.id);
+  // 2. Release the workflow pod's activeRunCount. The run points at its
+  //    assigned pod via podId; once released we clear it so the counter
+  //    and pod assignment stay consistent.
+  if (run.podId) {
+    try {
+      await releaseRun(run.podId);
+      await db
+        .update(workflowRuns)
+        .set({ podId: null, updatedAt: new Date() })
+        .where(eq(workflowRuns.id, run.id));
+    } catch (err) {
+      logger.warn({ err, runId: run.id }, "Failed to release workflow pod for zombie run");
     }
-  } catch (err) {
-    logger.warn({ err, runId: run.id }, "Failed to release workflow pod for zombie run");
   }
 
   // 3. Retry if within budget

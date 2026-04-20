@@ -9,6 +9,7 @@ import {
   WorkflowSchema,
   WorkflowRunSchema,
   WorkflowRunLogEntrySchema,
+  WorkflowRunStatsSchema,
 } from "../schemas/workflow.js";
 
 const createWorkflowSchema = z
@@ -31,6 +32,22 @@ const createWorkflowSchema = z
       .min(0)
       .optional()
       .describe("Number of warm pods kept ready for fast runs"),
+    maxPodInstances: z
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .optional()
+      .describe(
+        "Pod replicas for this workflow. Extra pods spin up when demand exceeds single-pod capacity.",
+      ),
+    maxAgentsPerPod: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .optional()
+      .describe("Max concurrent agents (runs) in a single pod."),
     enabled: z.boolean().optional().describe("If false, new runs are blocked"),
     environmentSpec: z
       .record(z.unknown())
@@ -55,6 +72,8 @@ const updateWorkflowSchema = z
     maxConcurrent: z.number().int().positive().optional(),
     maxRetries: z.number().int().min(0).optional(),
     warmPoolSize: z.number().int().min(0).optional(),
+    maxPodInstances: z.number().int().min(1).max(20).optional(),
+    maxAgentsPerPod: z.number().int().min(1).max(50).optional(),
     enabled: z.boolean().optional(),
     environmentSpec: z.record(z.unknown()).nullable().optional(),
     paramsSchema: z.record(z.unknown()).nullable().optional(),
@@ -116,8 +135,36 @@ const WorkflowRunLogsResponseSchema = z
   })
   .describe("Paginated logs for a workflow run");
 
+const WorkflowRunStatsResponseSchema = z
+  .object({
+    stats: WorkflowRunStatsSchema,
+  })
+  .describe("Aggregated workflow-run counts for the current workspace");
+
 export async function workflowRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
+
+  app.get(
+    "/api/jobs/stats",
+    {
+      schema: {
+        operationId: "getWorkflowRunStats",
+        summary: "Get aggregated workflow run stats",
+        description:
+          "Returns counts of `workflow_runs` grouped by state for the current " +
+          "workspace. No pagination — mirrors `/api/tasks/stats` so dashboards " +
+          "can render a standalone-run stats bar symmetrically with repo-tasks.",
+        tags: ["Workflows"],
+        response: {
+          200: WorkflowRunStatsResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const stats = await workflowService.getWorkflowRunStats(req.user?.workspaceId ?? null);
+      reply.send({ stats });
+    },
+  );
 
   app.get(
     "/api/jobs",

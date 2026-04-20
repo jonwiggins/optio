@@ -61,6 +61,7 @@ function makeRun(overrides: Record<string, unknown> = {}) {
     workflowId: "wf-1",
     state: "running",
     podName: "wf-pod-run-1",
+    podId: null as string | null,
     retryCount: 0,
     updatedAt: OLD_DATE,
     startedAt: OLD_DATE,
@@ -216,20 +217,10 @@ describe("cleanupZombieWorkflowRuns", () => {
   });
 
   it("releases the workflow pod on zombie detection", async () => {
-    const run = makeRun();
-    // First select returns running runs, second returns the pod record
-    let selectCallCount = 0;
-    const selectMock = {
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockImplementation(() => {
-          selectCallCount++;
-          if (selectCallCount === 1) return Promise.resolve([run]);
-          // Pod lookup
-          return Promise.resolve([{ id: "pod-1", workflowRunId: "run-1" }]);
-        }),
-      }),
-    };
-    (db.select as ReturnType<typeof vi.fn>).mockReturnValue(selectMock);
+    // Runs carry their pod assignment directly on the row (podId column).
+    // Zombie cleanup reads that pointer rather than looking up workflow_pods.
+    const run = makeRun({ podId: "pod-1" });
+    mockSelectChain([run]);
     mockRuntimeStatus("failed", "Terminated");
     (getWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 

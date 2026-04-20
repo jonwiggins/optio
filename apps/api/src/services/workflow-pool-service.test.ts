@@ -1,27 +1,43 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mocks ───────────────────────────────────────────────────────────
+//
+// Drizzle queries look like `db.select().from().where().orderBy().limit()`,
+// where every step is a thenable. The helper below returns a Promise that also
+// carries `.orderBy()` / `.limit()` methods so the exact call shape the
+// production code uses (which varies by branch) resolves without surprise.
 
-vi.mock("../db/client.js", () => ({
-  db: {
+function thenableRows(rows: unknown): any {
+  const promise: any = Promise.resolve(rows);
+  promise.orderBy = () => thenableRows(rows);
+  promise.limit = () => thenableRows(rows);
+  return promise;
+}
+
+// Created inside the mock factory (which is hoisted). We export-capture the
+// same object via a getter so the test body can manipulate mock behavior.
+vi.mock("../db/client.js", () => {
+  const m = {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    orderBy: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
+    where: vi.fn(),
+    orderBy: vi.fn(),
+    limit: vi.fn(),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     values: vi.fn().mockReturnThis(),
     returning: vi.fn().mockResolvedValue([]),
     delete: vi.fn().mockReturnThis(),
-  },
-}));
+  };
+  return { db: m };
+});
 
 vi.mock("../db/schema.js", () => ({
   workflowPods: {
     id: "id",
-    workflowRunId: "workflowRunId",
+    workflowId: "workflowId",
+    instanceIndex: "instanceIndex",
     workspaceId: "workspaceId",
     state: "state",
     activeRunCount: "activeRunCount",
@@ -30,6 +46,11 @@ vi.mock("../db/schema.js", () => ({
     podId: "podId",
     lastRunAt: "lastRunAt",
     errorMessage: "errorMessage",
+  },
+  workflowRuns: {
+    id: "id",
+    state: "state",
+    podId: "podId",
   },
 }));
 
@@ -68,32 +89,61 @@ vi.mock("./k8s-workload-service.js", () => ({
   getWorkloadManager: vi.fn(),
 }));
 
+vi.mock("./repo-pool-service.js", () => ({
+  resolveImage: () => "optio-agent:latest",
+}));
+
 import { db } from "../db/client.js";
 import {
   getOrCreateWorkflowPod,
-  createWorkflowPod,
   execRunInPod,
   releaseRun,
   cleanupIdleWorkflowPods,
   listWorkflowPods,
 } from "./workflow-pool-service.js";
 
+const dbMock = db as unknown as {
+  select: ReturnType<typeof vi.fn>;
+  from: ReturnType<typeof vi.fn>;
+  where: ReturnType<typeof vi.fn>;
+  orderBy: ReturnType<typeof vi.fn>;
+  limit: ReturnType<typeof vi.fn>;
+  update: ReturnType<typeof vi.fn>;
+  set: ReturnType<typeof vi.fn>;
+  insert: ReturnType<typeof vi.fn>;
+  values: ReturnType<typeof vi.fn>;
+  returning: ReturnType<typeof vi.fn>;
+  delete: ReturnType<typeof vi.fn>;
+};
+
+function resetDbMock() {
+  dbMock.select.mockReset().mockReturnThis();
+  dbMock.from.mockReset().mockReturnThis();
+  dbMock.where.mockReset();
+  dbMock.orderBy.mockReset();
+  dbMock.limit.mockReset();
+  dbMock.update.mockReset().mockReturnThis();
+  dbMock.set.mockReset().mockReturnThis();
+  dbMock.insert.mockReset().mockReturnThis();
+  dbMock.values.mockReset().mockReturnThis();
+  dbMock.returning.mockReset().mockResolvedValue([]);
+  dbMock.delete.mockReset().mockReturnThis();
+}
+
 // ── releaseRun ──────────────────────────────────────────────────────
 
 describe("releaseRun", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetDbMock();
+    dbMock.where.mockResolvedValue([]);
   });
 
   it("decrements the active run count via DB update", async () => {
-    vi.mocked(db.update(undefined as any).set(undefined as any).where as any).mockResolvedValueOnce(
-      [],
-    );
-
     await releaseRun("pod-1");
 
-    expect(db.update).toHaveBeenCalled();
-    expect(db.update(undefined as any).set).toHaveBeenCalledWith(
+    expect(dbMock.update).toHaveBeenCalled();
+    expect(dbMock.set).toHaveBeenCalledWith(
       expect.objectContaining({
         updatedAt: expect.any(Date),
       }),
@@ -106,10 +156,11 @@ describe("releaseRun", () => {
 describe("cleanupIdleWorkflowPods", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetDbMock();
   });
 
   it("returns 0 when no idle pods exist", async () => {
-    vi.mocked(db.select().from(undefined as any).where as any).mockResolvedValueOnce([]);
+    dbMock.where.mockReturnValueOnce(thenableRows([]));
 
     const cleaned = await cleanupIdleWorkflowPods();
     expect(cleaned).toBe(0);
@@ -118,17 +169,18 @@ describe("cleanupIdleWorkflowPods", () => {
   it("destroys idle pods and removes their records", async () => {
     const idlePod = {
       id: "pod-1",
-      workflowRunId: "wf-run-1",
-      podName: "optio-wf-abc123-def4",
+      workflowId: "wf-1",
+      instanceIndex: 0,
+      podName: "optio-wf-wf1-0-abcd",
       podId: "k8s-pod-id-1",
       state: "ready",
       activeRunCount: 0,
     };
 
-    vi.mocked(db.select().from(undefined as any).where as any).mockResolvedValueOnce([idlePod]);
+    dbMock.where.mockReturnValueOnce(thenableRows([idlePod]));
+    dbMock.where.mockResolvedValue([]); // later delete() calls
 
     mockRuntimeDestroy.mockResolvedValueOnce(undefined);
-    vi.mocked(db.delete(undefined as any).where as any).mockResolvedValueOnce(undefined);
 
     const cleaned = await cleanupIdleWorkflowPods();
     expect(cleaned).toBe(1);
@@ -138,11 +190,12 @@ describe("cleanupIdleWorkflowPods", () => {
     });
   });
 
-  it("continues cleanup even if one pod fails to destroy", async () => {
+  it("scales down LIFO — higher instance indices first", async () => {
     const pods = [
       {
-        id: "pod-1",
-        workflowRunId: "wf-run-1",
+        id: "pod-0",
+        workflowId: "wf-1",
+        instanceIndex: 0,
         podName: "pod-a",
         podId: "id-a",
         state: "ready",
@@ -150,7 +203,17 @@ describe("cleanupIdleWorkflowPods", () => {
       },
       {
         id: "pod-2",
-        workflowRunId: "wf-run-2",
+        workflowId: "wf-1",
+        instanceIndex: 2,
+        podName: "pod-c",
+        podId: "id-c",
+        state: "ready",
+        activeRunCount: 0,
+      },
+      {
+        id: "pod-1",
+        workflowId: "wf-1",
+        instanceIndex: 1,
         podName: "pod-b",
         podId: "id-b",
         state: "ready",
@@ -158,13 +221,44 @@ describe("cleanupIdleWorkflowPods", () => {
       },
     ];
 
-    vi.mocked(db.select().from(undefined as any).where as any).mockResolvedValueOnce(pods);
+    dbMock.where.mockReturnValueOnce(thenableRows(pods));
+    dbMock.where.mockResolvedValue([]);
+    mockRuntimeDestroy.mockResolvedValue(undefined);
+
+    await cleanupIdleWorkflowPods();
+
+    const destroyOrder = mockRuntimeDestroy.mock.calls.map((c) => c[0].name);
+    expect(destroyOrder).toEqual(["pod-c", "pod-b", "pod-a"]);
+  });
+
+  it("continues cleanup even if one pod fails to destroy", async () => {
+    const pods = [
+      {
+        id: "pod-1",
+        workflowId: "wf-1",
+        instanceIndex: 0,
+        podName: "pod-a",
+        podId: "id-a",
+        state: "ready",
+        activeRunCount: 0,
+      },
+      {
+        id: "pod-2",
+        workflowId: "wf-2",
+        instanceIndex: 0,
+        podName: "pod-b",
+        podId: "id-b",
+        state: "ready",
+        activeRunCount: 0,
+      },
+    ];
+
+    dbMock.where.mockReturnValueOnce(thenableRows(pods));
+    dbMock.where.mockResolvedValue([]);
 
     mockRuntimeDestroy
       .mockRejectedValueOnce(new Error("Failed to destroy"))
       .mockResolvedValueOnce(undefined);
-
-    vi.mocked(db.delete(undefined as any).where as any).mockResolvedValue(undefined);
 
     const cleaned = await cleanupIdleWorkflowPods();
     // First pod fails, second succeeds
@@ -174,15 +268,16 @@ describe("cleanupIdleWorkflowPods", () => {
   it("skips destroy if pod has no podName", async () => {
     const pod = {
       id: "pod-1",
-      workflowRunId: "wf-run-1",
+      workflowId: "wf-1",
+      instanceIndex: 0,
       podName: null,
       podId: null,
       state: "ready",
       activeRunCount: 0,
     };
 
-    vi.mocked(db.select().from(undefined as any).where as any).mockResolvedValueOnce([pod]);
-    vi.mocked(db.delete(undefined as any).where as any).mockResolvedValue(undefined);
+    dbMock.where.mockReturnValueOnce(thenableRows([pod]));
+    dbMock.where.mockResolvedValue([]);
 
     const cleaned = await cleanupIdleWorkflowPods();
     expect(cleaned).toBe(1);
@@ -195,15 +290,16 @@ describe("cleanupIdleWorkflowPods", () => {
 describe("listWorkflowPods", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetDbMock();
   });
 
   it("returns all workflow pods from the database", async () => {
     const mockPods = [
-      { id: "pod-1", workflowRunId: "wf-1", podName: "p1", state: "ready" },
-      { id: "pod-2", workflowRunId: "wf-2", podName: "p2", state: "provisioning" },
+      { id: "pod-1", workflowId: "wf-1", instanceIndex: 0, podName: "p1", state: "ready" },
+      { id: "pod-2", workflowId: "wf-1", instanceIndex: 1, podName: "p2", state: "provisioning" },
     ];
 
-    vi.mocked(db.select().from as any).mockResolvedValueOnce(mockPods);
+    dbMock.from.mockResolvedValueOnce(mockPods);
 
     const result = await listWorkflowPods();
     expect(result).toEqual(mockPods);
@@ -213,63 +309,53 @@ describe("listWorkflowPods", () => {
 // ── getOrCreateWorkflowPod ──────────────────────────────────────────
 
 describe("getOrCreateWorkflowPod", () => {
-  function mockGetOrCreateFlow(opts: { existingPods?: any[]; insertedPod?: any }) {
-    const dbMock = db as any;
-
-    let whereCallCount = 0;
-    dbMock.where.mockImplementation(() => {
-      whereCallCount++;
-      if (whereCallCount === 1) {
-        // existing pods query
-        return Promise.resolve(opts.existingPods ?? []);
-      }
-      // Remaining calls: update queries
-      return Promise.resolve([]);
-    });
-
-    if (opts.insertedPod) {
-      dbMock.returning.mockResolvedValueOnce([opts.insertedPod]);
-    }
-  }
-
   beforeEach(() => {
     vi.clearAllMocks();
-    (db as any).where.mockReset().mockReturnThis();
+    resetDbMock();
   });
 
-  it("returns existing ready pod when available", async () => {
+  it("returns an existing ready pod with capacity (least-loaded)", async () => {
     const existingPod = {
       id: "pod-1",
-      workflowRunId: "wf-run-1",
-      podName: "optio-wf-abc-1234",
+      workflowId: "wf-1",
+      instanceIndex: 0,
+      podName: "optio-wf-wf1-0-abcd",
       podId: "k8s-id",
       state: "ready",
       activeRunCount: 0,
     };
 
-    mockGetOrCreateFlow({ existingPods: [existingPod] });
+    // First `.where(...).orderBy(...)` returns the existing pod list.
+    dbMock.where.mockReturnValueOnce(thenableRows([existingPod]));
     mockRuntimeStatus.mockResolvedValueOnce({ state: "running" });
 
-    const pod = await getOrCreateWorkflowPod("wf-run-1", {});
+    const pod = await getOrCreateWorkflowPod("wf-1", { maxAgentsPerPod: 2, maxPodInstances: 1 });
     expect(pod.id).toBe("pod-1");
     expect(pod.state).toBe("ready");
   });
 
-  it("creates a new pod when none exists", async () => {
+  it("creates a new pod when none exists and under instance limit", async () => {
     const insertedPod = {
       id: "pod-new",
-      workflowRunId: "wf-run-1",
+      workflowId: "wf-1",
+      instanceIndex: 0,
       state: "provisioning",
     };
 
-    mockGetOrCreateFlow({
-      existingPods: [],
-      insertedPod,
-    });
+    // 1. Existing pods (empty)
+    dbMock.where.mockReturnValueOnce(thenableRows([]));
+    // 2. Count query — under maxPodInstances
+    dbMock.where.mockReturnValueOnce(thenableRows([{ count: 0 }]));
+    // 3. pickNextInstanceIndex — no current pods
+    dbMock.where.mockReturnValueOnce(thenableRows([]));
+    // 4. Update after create (and any subsequent update)
+    dbMock.where.mockResolvedValue([]);
 
-    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-wf-abc-def4" });
+    dbMock.returning.mockResolvedValueOnce([insertedPod]);
 
-    const pod = await getOrCreateWorkflowPod("wf-run-1", {});
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-wf-wf1-0-abcd" });
+
+    const pod = await getOrCreateWorkflowPod("wf-1", { maxAgentsPerPod: 2, maxPodInstances: 1 });
     expect(pod.state).toBe("ready");
     expect(mockRuntimeCreate).toHaveBeenCalled();
   });
@@ -277,7 +363,8 @@ describe("getOrCreateWorkflowPod", () => {
   it("cleans up error pods and creates a new one", async () => {
     const errorPod = {
       id: "pod-err",
-      workflowRunId: "wf-run-1",
+      workflowId: "wf-1",
+      instanceIndex: 0,
       podName: "optio-wf-err",
       podId: "k8s-err",
       state: "error",
@@ -285,20 +372,29 @@ describe("getOrCreateWorkflowPod", () => {
     };
     const insertedPod = {
       id: "pod-new",
-      workflowRunId: "wf-run-1",
+      workflowId: "wf-1",
+      instanceIndex: 0,
       state: "provisioning",
     };
 
-    mockGetOrCreateFlow({
-      existingPods: [errorPod],
-      insertedPod,
-    });
+    // 1. Existing pods (one in error state)
+    dbMock.where.mockReturnValueOnce(thenableRows([errorPod]));
+    // 2. Delete result for error pod
+    dbMock.where.mockResolvedValueOnce(undefined);
+    // 3. Count query — under maxPodInstances
+    dbMock.where.mockReturnValueOnce(thenableRows([{ count: 0 }]));
+    // 4. pickNextInstanceIndex
+    dbMock.where.mockReturnValueOnce(thenableRows([]));
+    // 5+. Remaining updates
+    dbMock.where.mockResolvedValue([]);
 
-    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-wf-new-abc1" });
+    dbMock.returning.mockResolvedValueOnce([insertedPod]);
 
-    const pod = await getOrCreateWorkflowPod("wf-run-1", {});
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-wf-new-abcd" });
+
+    const pod = await getOrCreateWorkflowPod("wf-1", { maxAgentsPerPod: 2, maxPodInstances: 1 });
     expect(pod.state).toBe("ready");
-    expect(db.delete).toHaveBeenCalled(); // error pod record deleted
+    expect(dbMock.delete).toHaveBeenCalled(); // error pod record deleted
   });
 });
 
@@ -323,13 +419,16 @@ describe("execRunInPod", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetDbMock();
+    dbMock.where.mockResolvedValue([]);
   });
 
   it("increments active run count and returns exec session", async () => {
     const pod = {
       id: "pod-1",
-      workflowRunId: "wf-run-1",
-      podName: "optio-wf-abc-def4",
+      workflowId: "wf-1",
+      instanceIndex: 0,
+      podName: "optio-wf-wf1-0-abcd",
       podId: "k8s-id",
       state: "ready",
       activeRunCount: 0,
@@ -337,19 +436,19 @@ describe("execRunInPod", () => {
 
     const mockSession = makeExecSession("output");
     mockRuntimeExec.mockResolvedValueOnce(mockSession);
-    vi.mocked(db.update(undefined as any).set(undefined as any).where as any).mockResolvedValue([]);
 
-    const session = await execRunInPod(pod, "step-1", ["echo", "hello"], { KEY: "val" });
+    const session = await execRunInPod(pod, "run-1", ["echo", "hello"], { KEY: "val" });
     expect(session).toBeDefined();
-    expect(db.update).toHaveBeenCalled();
+    expect(dbMock.update).toHaveBeenCalled();
     expect(mockRuntimeExec).toHaveBeenCalled();
   });
 
-  it("passes env vars in the exec script", async () => {
+  it("passes env vars and per-run working dir in the exec script", async () => {
     const pod = {
       id: "pod-1",
-      workflowRunId: "wf-run-1",
-      podName: "optio-wf-abc-def4",
+      workflowId: "wf-1",
+      instanceIndex: 0,
+      podName: "optio-wf-wf1-0-abcd",
       podId: "k8s-id",
       state: "ready",
       activeRunCount: 0,
@@ -357,15 +456,15 @@ describe("execRunInPod", () => {
 
     const mockSession = makeExecSession("");
     mockRuntimeExec.mockResolvedValueOnce(mockSession);
-    vi.mocked(db.update(undefined as any).set(undefined as any).where as any).mockResolvedValue([]);
 
-    await execRunInPod(pod, "step-1", ["echo", "test"], { MY_VAR: "hello" });
+    await execRunInPod(pod, "run-1", ["echo", "test"], { MY_VAR: "hello" });
 
-    // Verify exec was called with bash -c and the script includes env setup
     const execCall = mockRuntimeExec.mock.calls[0];
     expect(execCall[1][0]).toBe("bash");
     expect(execCall[1][1]).toBe("-c");
     // The script should contain the base64-encoded env
     expect(execCall[1][2]).toContain("base64");
+    // And cd into per-run working directory
+    expect(execCall[1][2]).toContain("/workspace/runs/run-1");
   });
 });

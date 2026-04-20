@@ -31,6 +31,11 @@ export const WorkflowSchema = z
     maxConcurrent: z.number().int().describe("Max concurrent runs for this workflow"),
     maxRetries: z.number().int().describe("Max retry attempts on run failure"),
     warmPoolSize: z.number().int().describe("Warm pod pool target size"),
+    maxPodInstances: z
+      .number()
+      .int()
+      .describe("Pod replicas; extra pods spin up as demand exceeds single-pod capacity"),
+    maxAgentsPerPod: z.number().int().describe("Max concurrent runs (agents) in a single pod"),
     enabled: z.boolean().describe("If false, new runs are blocked"),
     environmentSpec: z.unknown().describe("Optional Kubernetes env overrides (arbitrary JSON)"),
     paramsSchema: z.unknown().describe("Optional JSON Schema describing allowed run params"),
@@ -103,6 +108,16 @@ export const WorkflowRunLogEntrySchema = z
   })
   .passthrough()
   .describe("Log entry emitted during a workflow run");
+
+export const WorkflowRunStatsSchema = z
+  .object({
+    total: z.number().int(),
+    queued: z.number().int(),
+    running: z.number().int(),
+    failed: z.number().int(),
+    completed: z.number().int(),
+  })
+  .describe("Counts of workflow runs grouped by state");
 
 export const CronValidationResultSchema = z
   .object({

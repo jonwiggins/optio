@@ -92,24 +92,34 @@ describe("generateStatefulSetName", () => {
 });
 
 describe("generateWorkflowJobName", () => {
-  it("generates a name from a UUID", () => {
-    const name = generateWorkflowJobName("550e8400-e29b-41d4-a716-446655440000");
-    expect(name).toBe("optio-wfj-550e8400-e29b-41d4-a716-446655440000");
+  it("encodes the workflow id + instance index", () => {
+    const name = generateWorkflowJobName("550e8400-e29b-41d4-a716-446655440000", 0);
+    expect(name).toBe("optio-wfj-550e8400-e29b-41d4-a716-446655440000-0");
   });
 
-  it("is deterministic", () => {
+  it("differentiates instances in the same workflow", () => {
+    const id = "550e8400-e29b-41d4-a716-446655440000";
+    expect(generateWorkflowJobName(id, 0)).not.toBe(generateWorkflowJobName(id, 1));
+  });
+
+  it("is deterministic for the same workflow and instance", () => {
     const id = "abc-123-def";
-    expect(generateWorkflowJobName(id)).toBe(generateWorkflowJobName(id));
+    expect(generateWorkflowJobName(id, 2)).toBe(generateWorkflowJobName(id, 2));
   });
 
-  it("fits within 63 chars", () => {
+  it("fits within 63 chars even for long ids", () => {
     const longId = "a".repeat(80);
-    const name = generateWorkflowJobName(longId);
+    const name = generateWorkflowJobName(longId, 19);
     expect(name.length).toBeLessThanOrEqual(63);
   });
 
   it("produces valid K8s names", () => {
-    const name = generateWorkflowJobName("550e8400-e29b-41d4-a716-446655440000");
+    const name = generateWorkflowJobName("550e8400-e29b-41d4-a716-446655440000", 3);
     expect(name).toMatch(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/);
+  });
+
+  it("defaults instance index to 0 when omitted", () => {
+    const id = "550e8400-e29b-41d4-a716-446655440000";
+    expect(generateWorkflowJobName(id)).toBe(generateWorkflowJobName(id, 0));
   });
 });

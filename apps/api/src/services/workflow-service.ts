@@ -41,6 +41,8 @@ export async function createWorkflow(input: {
   maxConcurrent?: number;
   maxRetries?: number;
   warmPoolSize?: number;
+  maxPodInstances?: number;
+  maxAgentsPerPod?: number;
   enabled?: boolean;
   environmentSpec?: Record<string, unknown>;
   paramsSchema?: Record<string, unknown>;
@@ -60,6 +62,8 @@ export async function createWorkflow(input: {
       maxConcurrent: input.maxConcurrent ?? 2,
       maxRetries: input.maxRetries ?? 1,
       warmPoolSize: input.warmPoolSize ?? 0,
+      maxPodInstances: input.maxPodInstances ?? 1,
+      maxAgentsPerPod: input.maxAgentsPerPod ?? 2,
       enabled: input.enabled ?? true,
       environmentSpec: input.environmentSpec,
       paramsSchema: input.paramsSchema,
@@ -83,6 +87,8 @@ export async function updateWorkflow(
     maxConcurrent?: number;
     maxRetries?: number;
     warmPoolSize?: number;
+    maxPodInstances?: number;
+    maxAgentsPerPod?: number;
     enabled?: boolean;
     environmentSpec?: Record<string, unknown> | null;
     paramsSchema?: Record<string, unknown> | null;
@@ -119,6 +125,8 @@ export async function cloneWorkflow(
     maxConcurrent: source.maxConcurrent ?? undefined,
     maxRetries: source.maxRetries ?? undefined,
     warmPoolSize: source.warmPoolSize ?? undefined,
+    maxPodInstances: source.maxPodInstances ?? undefined,
+    maxAgentsPerPod: source.maxAgentsPerPod ?? undefined,
     enabled: false, // clones start disabled
     environmentSpec: (source.environmentSpec as Record<string, unknown>) ?? undefined,
     paramsSchema: (source.paramsSchema as Record<string, unknown>) ?? undefined,
@@ -144,6 +152,50 @@ export async function cloneWorkflow(
 
 // ── Enriched list/get with aggregate run stats ───────────────────────────────
 
+/**
+ * Global per-state counts across all workflow runs for a workspace. Drives
+ * the Standalone stats bar on the overview dashboard — shape mirrors
+ * `getTaskStats()` so the frontend can treat it symmetrically.
+ */
+export async function getWorkflowRunStats(workspaceId?: string | null) {
+  const wsFilter = workspaceId ? sql`AND w.workspace_id = ${workspaceId}` : sql``;
+
+  const rows = await db.execute<{ state: string; count: string }>(sql`
+    SELECT wr.state, COUNT(*)::text AS count
+    FROM workflow_runs wr
+    JOIN workflows w ON w.id = wr.workflow_id
+    WHERE 1=1 ${wsFilter}
+    GROUP BY wr.state
+  `);
+
+  let total = 0;
+  let queued = 0;
+  let running = 0;
+  let failed = 0;
+  let completed = 0;
+
+  for (const row of rows) {
+    const count = parseInt(row.count, 10) || 0;
+    total += count;
+    switch (row.state) {
+      case "queued":
+        queued += count;
+        break;
+      case "running":
+        running += count;
+        break;
+      case "failed":
+        failed += count;
+        break;
+      case "completed":
+        completed += count;
+        break;
+    }
+  }
+
+  return { total, queued, running, failed, completed };
+}
+
 export async function listWorkflowsWithStats(workspaceId?: string) {
   const wsFilter = workspaceId ? sql`AND w.workspace_id = ${workspaceId}` : sql``;
 
@@ -161,6 +213,8 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     max_concurrent: number;
     max_retries: number;
     warm_pool_size: number;
+    max_pod_instances: number;
+    max_agents_per_pod: number;
     enabled: boolean;
     environment_spec: unknown;
     created_by: string | null;
@@ -169,6 +223,10 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     run_count: string;
     last_run_at: string | null;
     total_cost_usd: string;
+    recent_queued: string;
+    recent_running: string;
+    recent_failed: string;
+    recent_completed: string;
   }>(sql`
     SELECT
       w.id,
@@ -184,6 +242,8 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
       w.max_concurrent,
       w.max_retries,
       w.warm_pool_size,
+      w.max_pod_instances,
+      w.max_agents_per_pod,
       w.enabled,
       w.environment_spec,
       w.created_by,
@@ -191,7 +251,19 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
       w.updated_at,
       COUNT(DISTINCT wr.id)::text AS run_count,
       MAX(wr.created_at)::text AS last_run_at,
-      COALESCE(SUM(CAST(wr.cost_usd AS NUMERIC)), 0)::text AS total_cost_usd
+      COALESCE(SUM(CAST(wr.cost_usd AS NUMERIC)), 0)::text AS total_cost_usd,
+      COUNT(*) FILTER (
+        WHERE wr.state = 'queued' AND wr.created_at > NOW() - INTERVAL '7 days'
+      )::text AS recent_queued,
+      COUNT(*) FILTER (
+        WHERE wr.state = 'running' AND wr.created_at > NOW() - INTERVAL '7 days'
+      )::text AS recent_running,
+      COUNT(*) FILTER (
+        WHERE wr.state = 'failed' AND wr.created_at > NOW() - INTERVAL '7 days'
+      )::text AS recent_failed,
+      COUNT(*) FILTER (
+        WHERE wr.state = 'completed' AND wr.created_at > NOW() - INTERVAL '7 days'
+      )::text AS recent_completed
     FROM workflows w
     LEFT JOIN workflow_runs wr ON wr.workflow_id = w.id
     WHERE 1=1 ${wsFilter}
@@ -235,6 +307,8 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     maxConcurrent: r.max_concurrent,
     maxRetries: r.max_retries,
     warmPoolSize: r.warm_pool_size,
+    maxPodInstances: r.max_pod_instances,
+    maxAgentsPerPod: r.max_agents_per_pod,
     enabled: r.enabled,
     environmentSpec: r.environment_spec,
     createdBy: r.created_by,
@@ -243,6 +317,12 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     runCount: parseInt(r.run_count) || 0,
     lastRunAt: r.last_run_at || null,
     totalCostUsd: r.total_cost_usd,
+    recentStats: {
+      queued: parseInt(r.recent_queued) || 0,
+      running: parseInt(r.recent_running) || 0,
+      failed: parseInt(r.recent_failed) || 0,
+      completed: parseInt(r.recent_completed) || 0,
+    },
     triggerTypes: triggerMap[r.id] ?? [],
   }));
 }

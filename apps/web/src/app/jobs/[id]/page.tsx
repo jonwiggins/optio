@@ -49,6 +49,8 @@ interface WorkflowDetail {
   maxConcurrent: number;
   maxRetries: number;
   warmPoolSize: number;
+  maxPodInstances: number;
+  maxAgentsPerPod: number;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -695,6 +697,14 @@ function ConfigPanel({
           <div>
             <span className="text-text-muted text-xs block mb-0.5">Warm Pool</span>
             <span className="font-medium">{workflow.warmPoolSize}</span>
+          </div>
+          <div>
+            <span className="text-text-muted text-xs block mb-0.5">Max Pod Instances</span>
+            <span className="font-medium">{workflow.maxPodInstances ?? 1}</span>
+          </div>
+          <div>
+            <span className="text-text-muted text-xs block mb-0.5">Max Agents Per Pod</span>
+            <span className="font-medium">{workflow.maxAgentsPerPod ?? 2}</span>
           </div>
           <div>
             <span className="text-text-muted text-xs block mb-0.5">Created</span>

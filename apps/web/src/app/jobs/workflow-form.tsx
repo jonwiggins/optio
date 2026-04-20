@@ -36,6 +36,9 @@ interface WorkflowFormData {
   maxConcurrent: number;
   maxRetries: number;
   warmPoolSize: number;
+  // Pod scaling — mirrors repo pod settings
+  maxPodInstances: number;
+  maxAgentsPerPod: number;
   // Prompt
   promptTemplate: string;
   // Params
@@ -89,6 +92,8 @@ const DEFAULT_FORM: WorkflowFormData = {
   maxConcurrent: 2,
   maxRetries: 1,
   warmPoolSize: 0,
+  maxPodInstances: 1,
+  maxAgentsPerPod: 2,
   promptTemplate: "",
   paramsSchema: "",
 };
@@ -323,6 +328,8 @@ export function WorkflowForm({
         maxConcurrent: initialData.maxConcurrent ?? 2,
         maxRetries: initialData.maxRetries ?? 1,
         warmPoolSize: initialData.warmPoolSize ?? 0,
+        maxPodInstances: initialData.maxPodInstances ?? 1,
+        maxAgentsPerPod: initialData.maxAgentsPerPod ?? 2,
         promptTemplate: initialData.promptTemplate ?? "",
         paramsSchema: prettyJson(initialData.paramsSchema),
       };
@@ -426,6 +433,8 @@ export function WorkflowForm({
         maxConcurrent: form.maxConcurrent,
         maxRetries: form.maxRetries,
         warmPoolSize: form.warmPoolSize,
+        maxPodInstances: form.maxPodInstances,
+        maxAgentsPerPod: form.maxAgentsPerPod,
         environmentSpec: tryParseJson(form.environmentSpec) ?? undefined,
         paramsSchema: tryParseJson(form.paramsSchema) ?? undefined,
       };
@@ -628,41 +637,83 @@ export function WorkflowForm({
         </button>
 
         {showAdvanced && (
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm text-text-muted mb-1.5">Max Concurrent</label>
-              <NumberInput
-                min={1}
-                max={50}
-                value={form.maxConcurrent}
-                onChange={(v) => setForm((f) => ({ ...f, maxConcurrent: v }))}
-                fallback={2}
-                className={INPUT_CLASS}
-              />
+          <>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm text-text-muted mb-1.5">Max Concurrent</label>
+                <NumberInput
+                  min={1}
+                  max={50}
+                  value={form.maxConcurrent}
+                  onChange={(v) => setForm((f) => ({ ...f, maxConcurrent: v }))}
+                  fallback={2}
+                  className={INPUT_CLASS}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-text-muted mb-1.5">Max Retries</label>
+                <NumberInput
+                  min={0}
+                  max={10}
+                  value={form.maxRetries}
+                  onChange={(v) => setForm((f) => ({ ...f, maxRetries: v }))}
+                  fallback={1}
+                  className={INPUT_CLASS}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-text-muted mb-1.5">Warm Pool</label>
+                <NumberInput
+                  min={0}
+                  max={10}
+                  value={form.warmPoolSize}
+                  onChange={(v) => setForm((f) => ({ ...f, warmPoolSize: v }))}
+                  fallback={0}
+                  className={INPUT_CLASS}
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm text-text-muted mb-1.5">Max Retries</label>
-              <NumberInput
-                min={0}
-                max={10}
-                value={form.maxRetries}
-                onChange={(v) => setForm((f) => ({ ...f, maxRetries: v }))}
-                fallback={1}
-                className={INPUT_CLASS}
-              />
+
+            <div className="pt-2">
+              <h3 className="text-xs font-medium text-text-muted">Pod Scaling</h3>
+              <p className="text-[10px] text-text-muted/60">
+                Control how many pod replicas are created for this task and how many runs share a
+                single pod. Runs within the same workflow share pods; new pods spin up only when
+                demand exceeds single-pod capacity.
+              </p>
             </div>
-            <div>
-              <label className="block text-sm text-text-muted mb-1.5">Warm Pool</label>
-              <NumberInput
-                min={0}
-                max={10}
-                value={form.warmPoolSize}
-                onChange={(v) => setForm((f) => ({ ...f, warmPoolSize: v }))}
-                fallback={0}
-                className={INPUT_CLASS}
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-text-muted mb-1.5">Max pod instances</label>
+                <NumberInput
+                  min={1}
+                  max={20}
+                  value={form.maxPodInstances}
+                  onChange={(v) => setForm((f) => ({ ...f, maxPodInstances: v }))}
+                  fallback={1}
+                  className={INPUT_CLASS}
+                />
+                <p className="text-[10px] text-text-muted/60 mt-1">
+                  Pod replicas for this task. Extra pods are created when demand exceeds single-pod
+                  capacity.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-text-muted mb-1.5">Max agents per pod</label>
+                <NumberInput
+                  min={1}
+                  max={50}
+                  value={form.maxAgentsPerPod}
+                  onChange={(v) => setForm((f) => ({ ...f, maxAgentsPerPod: v }))}
+                  fallback={2}
+                  className={INPUT_CLASS}
+                />
+                <p className="text-[10px] text-text-muted/60 mt-1">
+                  Max concurrent runs (agents) in a single pod.
+                </p>
+              </div>
             </div>
-          </div>
+          </>
         )}
       </section>
 

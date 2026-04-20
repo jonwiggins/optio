@@ -419,9 +419,13 @@ export function startWorkflowWorker() {
           }
         }
 
-        // ── Provision pod ─────────────────────────────────────────────
+        // ── Provision pod (shared across runs within the workflow) ────
         const envSpec = workflow.environmentSpec as Record<string, string> | null;
-        const pod = await workflowPool.getOrCreateWorkflowPod(workflowRunId, env, {
+        const pod = await workflowPool.getOrCreateWorkflowPod(workflow.id, {
+          // Same-pod retry affinity — prefer the pod the previous attempt used.
+          preferredPodId: run.lastPodId ?? undefined,
+          maxAgentsPerPod: workflow.maxAgentsPerPod,
+          maxPodInstances: workflow.maxPodInstances,
           workspaceId,
           cpuRequest: envSpec?.cpuRequest ?? null,
           cpuLimit: envSpec?.cpuLimit ?? null,
@@ -430,10 +434,16 @@ export function startWorkflowWorker() {
         });
         workflowPodId = pod.id;
 
-        // Record pod name on the run
+        // Record the assigned pod on the run so reconcile/zombie code can find
+        // it, and remember it as lastPodId for retry affinity.
         await db
           .update(workflowRuns)
-          .set({ podName: pod.podName, updatedAt: new Date() })
+          .set({
+            podName: pod.podName,
+            podId: pod.id,
+            lastPodId: pod.id,
+            updatedAt: new Date(),
+          })
           .where(eq(workflowRuns.id, workflowRunId));
 
         log.info({ podName: pod.podName }, "Workflow pod ready, executing agent");
@@ -667,9 +677,16 @@ export function startWorkflowWorker() {
         }
         throw err;
       } finally {
-        // Release pod task count
+        // Release the pool slot so activeRunCount reflects only live runs.
+        // Clearing pod_id on the run keeps reconcileActiveRunCounts accurate
+        // if the worker later crashes; lastPodId is preserved for retry affinity.
         if (workflowPodId) {
           await workflowPool.releaseRun(workflowPodId).catch(() => {});
+          await db
+            .update(workflowRuns)
+            .set({ podId: null, updatedAt: new Date() })
+            .where(eq(workflowRuns.id, workflowRunId))
+            .catch(() => {});
         }
       }
     }),

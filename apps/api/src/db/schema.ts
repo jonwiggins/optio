@@ -566,6 +566,10 @@ export const workflows = pgTable(
     maxConcurrent: integer("max_concurrent").notNull().default(2),
     maxRetries: integer("max_retries").notNull().default(1),
     warmPoolSize: integer("warm_pool_size").notNull().default(0),
+    // Pod pooling — mirrors repos.maxPodInstances / maxAgentsPerPod. Runs share
+    // pods within a workflow, scaling out to maxPodInstances replicas.
+    maxPodInstances: integer("max_pod_instances").notNull().default(1),
+    maxAgentsPerPod: integer("max_agents_per_pod").notNull().default(2),
     enabled: boolean("enabled").notNull().default(true),
     createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -623,6 +627,13 @@ export const workflowRuns = pgTable(
     errorMessage: text("error_message"),
     sessionId: text("session_id"),
     podName: text("pod_name"),
+    // FK to the workflow pod currently running this run. Null when queued or
+    // released. Cleared on completion so activeRunCount reflects live runs.
+    podId: uuid("pod_id"),
+    // Retry affinity — the last pod that ran this, even after release. Used to
+    // prefer same-pod retries (mirrors tasks.lastPodId). Not a hard FK so pod
+    // cleanup doesn't require nulling out historical references.
+    lastPodId: uuid("last_pod_id"),
     retryCount: integer("retry_count").notNull().default(0),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -638,6 +649,7 @@ export const workflowRuns = pgTable(
     index("workflow_runs_workflow_id_idx").on(table.workflowId),
     index("workflow_runs_trigger_id_idx").on(table.triggerId),
     index("workflow_runs_state_idx").on(table.state),
+    index("workflow_runs_pod_id_idx").on(table.podId),
   ],
 );
 
@@ -1000,13 +1012,17 @@ export const workflowPodStateEnum = pgEnum("workflow_pod_state", [
   "terminating",
 ]);
 
+// Workflow pods are pooled per-workflow, scaled out to workflows.maxPodInstances
+// replicas, each hosting up to workflows.maxAgentsPerPod concurrent runs. Keyed
+// by (workflow_id, instance_index) — mirrors repo_pods shape.
 export const workflowPods = pgTable(
   "workflow_pods",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    workflowRunId: uuid("workflow_run_id")
+    workflowId: uuid("workflow_id")
       .notNull()
-      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    instanceIndex: integer("instance_index").notNull().default(0),
     workspaceId: uuid("workspace_id"),
     podName: text("pod_name"),
     podId: text("pod_id"),
@@ -1020,7 +1036,8 @@ export const workflowPods = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index("workflow_pods_run_id_idx").on(table.workflowRunId),
+    unique("workflow_pods_workflow_instance_key").on(table.workflowId, table.instanceIndex),
+    index("workflow_pods_workflow_id_idx").on(table.workflowId),
     index("workflow_pods_workspace_id_idx").on(table.workspaceId),
   ],
 );

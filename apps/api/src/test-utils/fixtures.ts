@@ -127,6 +127,8 @@ export const mockWorkflow = {
   maxConcurrent: 1,
   maxRetries: 0,
   warmPoolSize: 0,
+  maxPodInstances: 1,
+  maxAgentsPerPod: 2,
   enabled: true,
   environmentSpec: null,
   paramsSchema: null,

@@ -1100,6 +1100,17 @@ export const api = {
   // Workflows
   listWorkflows: () => request<{ workflows: any[] }>("/api/jobs"),
 
+  getJobStats: () =>
+    request<{
+      stats: {
+        total: number;
+        queued: number;
+        running: number;
+        failed: number;
+        completed: number;
+      };
+    }>("/api/jobs/stats"),
+
   getWorkflow: (id: string) => request<{ workflow: any }>(`/api/jobs/${id}`),
 
   createWorkflow: (data: {
@@ -1113,6 +1124,8 @@ export const api = {
     maxConcurrent?: number;
     maxRetries?: number;
     warmPoolSize?: number;
+    maxPodInstances?: number;
+    maxAgentsPerPod?: number;
     enabled?: boolean;
     environmentSpec?: Record<string, unknown>;
     paramsSchema?: Record<string, unknown>;

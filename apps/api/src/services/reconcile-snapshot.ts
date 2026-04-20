@@ -309,16 +309,26 @@ async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus |
 }
 
 async function loadPodStatusForWorkflowRun(runId: string): Promise<PodStatus | null> {
-  const [row] = await db
+  // Runs now share pods across a workflow; find the assigned pod via the
+  // `pod_id` pointer on workflow_runs. Null when the run has been released
+  // (terminal) or hasn't been scheduled onto a pod yet.
+  const [runRow] = await db
+    .select({ podId: workflowRuns.podId })
+    .from(workflowRuns)
+    .where(eq(workflowRuns.id, runId))
+    .limit(1);
+  if (!runRow?.podId) return null;
+
+  const [pod] = await db
     .select()
     .from(workflowPods)
-    .where(eq(workflowPods.workflowRunId, runId))
+    .where(eq(workflowPods.id, runRow.podId))
     .limit(1);
-  if (!row) return null;
+  if (!pod) return null;
   return {
-    podName: row.podName ?? row.id,
-    phase: mapWorkflowPodPhase(row.state),
-    lastError: row.errorMessage ?? null,
+    podName: pod.podName ?? pod.id,
+    phase: mapWorkflowPodPhase(pod.state),
+    lastError: pod.errorMessage ?? null,
   };
 }
 

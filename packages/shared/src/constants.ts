@@ -32,18 +32,20 @@ const K8S_NAME_MAX = 63;
  * hyphens, max 63 chars). Long owner/repo names are truncated gracefully.
  */
 /**
- * Generate a human-readable pod name for a workflow run.
+ * Generate a human-readable pod name for a pooled workflow pod.
  *
- * Format: `optio-wf-<runId-prefix>-<hash>` where hash is a 4-char hex suffix
- * for uniqueness. Names are valid K8s resource names.
+ * Format: `optio-wf-<workflowId-prefix>-<instanceIndex>-<hash>` where hash is a
+ * 4-char hex suffix and instanceIndex is the pool slot. Names are valid K8s
+ * resource names. The random suffix differentiates replacement pods created
+ * after the previous one errored or was removed.
  */
-export function generateWorkflowPodName(workflowRunId: string): string {
+export function generateWorkflowPodName(workflowId: string, instanceIndex = 0): string {
   const prefix = "optio-wf-";
-  const suffixLen = 5; // 4-char hash + 1 hyphen
-  const maxBodyLen = K8S_NAME_MAX - prefix.length - suffixLen;
+  const idxSuffix = `-${instanceIndex}`;
+  const hashSuffix = "-xxxx"; // placeholder — 5 chars
+  const maxBodyLen = K8S_NAME_MAX - prefix.length - idxSuffix.length - hashSuffix.length;
 
-  // Use first portion of the run ID (already a UUID), sanitized
-  const sanitized = workflowRunId
+  const sanitized = workflowId
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
@@ -51,7 +53,7 @@ export function generateWorkflowPodName(workflowRunId: string): string {
     .slice(0, maxBodyLen);
 
   const hash = Math.random().toString(16).slice(2, 6);
-  return `${prefix}${sanitized}-${hash}`;
+  return `${prefix}${sanitized}${idxSuffix}-${hash}`;
 }
 
 export function generateRepoPodName(repoUrl: string): string {
@@ -129,20 +131,22 @@ export function generateStatefulSetName(repoUrl: string): string {
 }
 
 /**
- * Generate a deterministic K8s Job name for a workflow run.
+ * Generate a deterministic K8s Job name for a pooled workflow pod.
  *
- * Format: `optio-wfj-<runId>` — uses the full UUID (36 chars) since it
- * fits within the 63-char K8s limit. No random suffix needed because
- * workflow run IDs are already unique.
+ * Format: `optio-wfj-<workflowId>-<instanceIndex>` — deterministic so that
+ * multiple API replicas produce the same name for the same pool slot. The
+ * Job hosts one long-lived pod that handles multiple concurrent runs, up to
+ * the workflow's maxAgentsPerPod.
  */
-export function generateWorkflowJobName(workflowRunId: string): string {
+export function generateWorkflowJobName(workflowId: string, instanceIndex = 0): string {
   const prefix = "optio-wfj-";
-  const sanitized = workflowRunId
+  const idxSuffix = `-${instanceIndex}`;
+  const sanitized = workflowId
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, K8S_NAME_MAX - prefix.length);
+    .slice(0, K8S_NAME_MAX - prefix.length - idxSuffix.length);
 
-  return `${prefix}${sanitized}`;
+  return `${prefix}${sanitized}${idxSuffix}`;
 }
