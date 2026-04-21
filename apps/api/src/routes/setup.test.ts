@@ -95,14 +95,14 @@ describe("GET /api/setup/status", () => {
     expect(res.json().steps.anyAgentKey.done).toBe(false);
   });
 
-  it("returns not set up when runtime is unhealthy", async () => {
+  it("stays set up when runtime is unhealthy but keys exist", async () => {
     mockListSecrets.mockResolvedValue([{ name: "ANTHROPIC_API_KEY" }, { name: "GITHUB_TOKEN" }]);
     mockRetrieveSecret.mockRejectedValue(new Error("not found"));
     mockCheckRuntimeHealth.mockResolvedValue(false);
 
     const res = await app.inject({ method: "GET", url: "/api/setup/status" });
 
-    expect(res.json().isSetUp).toBe(false);
+    expect(res.json().isSetUp).toBe(true);
     expect(res.json().steps.runtime.done).toBe(false);
   });
 

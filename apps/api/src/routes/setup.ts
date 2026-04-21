@@ -171,7 +171,9 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         /* non-critical */
       }
 
-      const isSetUp = hasAnyAgentKey && hasGitToken && runtimeHealthy;
+      // Runtime health is a separate step for the wizard; it must not gate
+      // isSetUp, or a container-runtime blip traps users in the wizard.
+      const isSetUp = hasAnyAgentKey && hasGitToken;
 
       reply.send({
         isSetUp,
