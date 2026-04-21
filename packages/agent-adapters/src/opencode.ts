@@ -149,6 +149,8 @@ export class OpenCodeAdapter implements AgentAdapter {
         if (!errorMessage && isRawTextError(line)) {
           errorMessage = line.trim();
           hasError = true;
+          // Log raw error for diagnostics (helps catch API key issues, auth failures, etc.)
+          console.warn(`[opencode] Raw error: ${errorMessage}`);
         }
         continue;
       }

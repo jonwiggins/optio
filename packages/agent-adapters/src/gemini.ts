@@ -175,6 +175,8 @@ export class GeminiAdapter implements AgentAdapter {
         if (!errorMessage && isRawTextError(line)) {
           errorMessage = line.trim();
           hasError = true;
+          // Log raw error for diagnostics (helps catch API key issues, auth failures, etc.)
+          console.warn(`[gemini] Raw error: ${errorMessage}`);
         }
         continue;
       }
