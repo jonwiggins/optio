@@ -811,3 +811,135 @@ describe("reconcileRepo — terminal states", () => {
     expect(reconcileRepo(s).kind).toBe("noop");
   });
 });
+
+// ── Non-coding task types never drive PR-reactive actions ───────────────────
+
+describe("reconcileRepo — non-coding task types", () => {
+  const autoMergeReadySettings = {
+    stallThresholdMs: 300_000,
+    autoMerge: true,
+    cautiousMode: false,
+    autoResume: true,
+    reviewEnabled: true,
+    reviewTrigger: "on_ci_pass" as const,
+    offPeakOnly: false,
+    offPeakActive: false,
+    hasReviewSubtask: false,
+    maxAutoResumes: 10,
+    recentAutoResumeCount: 0,
+  };
+
+  it("sanity: coding task with the same inputs DOES auto-merge", () => {
+    // Paired positive test — if this breaks, the negative tests below are
+    // passing for the wrong reason.
+    const s = snapshot(
+      { taskType: "coding" },
+      {
+        state: TaskState.PR_OPENED,
+        prUrl: "https://github.com/acme/repo/pull/1",
+        prNumber: 1,
+        prChecksStatus: "passing",
+      },
+      {
+        pr: makePr({ checksStatus: "passing" }),
+        settings: autoMergeReadySettings,
+      },
+    );
+    expect(reconcileRepo(s).kind).toBe("autoMergePr");
+  });
+
+  it("pr_review with leaked prUrl + passing CI does NOT auto-merge (PR_OPENED)", () => {
+    // Regression guard for the external-PR-review bug: an external-review task
+    // whose prUrl points at someone else's PR must never trigger auto-merge,
+    // even if all the surface gates (autoMerge, CI, no blocking subtasks) line up.
+    const s = snapshot(
+      { taskType: "pr_review" },
+      {
+        state: TaskState.PR_OPENED,
+        prUrl: "https://github.com/acme/repo/pull/1",
+        prNumber: 1,
+        prChecksStatus: "passing",
+      },
+      {
+        pr: makePr({ checksStatus: "passing" }),
+        settings: autoMergeReadySettings,
+      },
+    );
+    const action = reconcileRepo(s);
+    expect(action.kind).not.toBe("autoMergePr");
+    expect(action.kind).not.toBe("launchReview");
+    expect(action.kind).not.toBe("resumeAgent");
+  });
+
+  it("pr_review with leaked prUrl does NOT launchReview on CI pass", () => {
+    const s = snapshot(
+      { taskType: "pr_review" },
+      {
+        state: TaskState.PR_OPENED,
+        prUrl: "https://github.com/acme/repo/pull/1",
+        prNumber: 1,
+        prChecksStatus: null,
+      },
+      {
+        pr: makePr({ checksStatus: "passing" }),
+        settings: autoMergeReadySettings,
+      },
+    );
+    expect(reconcileRepo(s).kind).not.toBe("launchReview");
+  });
+
+  it("pr_review RUNNING with leaked prUrl does NOT promote to PR_OPENED", () => {
+    // decideRunning must not inherit the PR lifecycle for non-coding types.
+    const s = snapshot(
+      { taskType: "pr_review" },
+      {
+        state: TaskState.RUNNING,
+        prUrl: "https://github.com/acme/repo/pull/1",
+        prNumber: 1,
+        lastActivityAt: NOW,
+      },
+    );
+    const action = reconcileRepo(s);
+    if (action.kind === "transition") {
+      expect(action.to).not.toBe(TaskState.PR_OPENED);
+    }
+  });
+
+  it("review subtask with leaked prUrl does NOT auto-merge", () => {
+    // Same guard protects internal review subtasks too — defence in depth,
+    // in case the snapshot loader ever regresses and populates PR state.
+    const s = snapshot(
+      { taskType: "review", parentTaskId: "parent-1", blocksParent: true },
+      {
+        state: TaskState.PR_OPENED,
+        prUrl: "https://github.com/acme/repo/pull/1",
+        prNumber: 1,
+        prChecksStatus: "passing",
+      },
+      {
+        pr: makePr({ checksStatus: "passing" }),
+        settings: autoMergeReadySettings,
+      },
+    );
+    expect(reconcileRepo(s).kind).not.toBe("autoMergePr");
+  });
+
+  it("pr_review FAILED with open PR does NOT auto-merge on recovery", () => {
+    // FAILED with an open PR still passes through decideFromPrStatus — ensure
+    // the non-coding guard covers that path too.
+    const s = snapshot(
+      { taskType: "pr_review" },
+      {
+        state: TaskState.FAILED,
+        prUrl: "https://github.com/acme/repo/pull/1",
+        prNumber: 1,
+        prChecksStatus: "passing",
+      },
+      {
+        pr: makePr({ checksStatus: "passing" }),
+        settings: autoMergeReadySettings,
+      },
+    );
+    expect(reconcileRepo(s).kind).not.toBe("autoMergePr");
+  });
+});

@@ -98,6 +98,10 @@ export const tasks = pgTable(
     agentType: text("agent_type").notNull(),
     containerId: text("container_id"),
     sessionId: text("session_id"),
+    // Only set for coding tasks (taskType="coding"): the PR this task
+    // opened. External pr_review tasks reference a PR via review_drafts
+    // instead — do NOT write prUrl/prNumber for them, or the reconciler
+    // will treat the external PR as this task's own output and auto-merge it.
     prUrl: text("pr_url"),
     prNumber: integer("pr_number"),
     prState: text("pr_state"), // "open" | "merged" | "closed"

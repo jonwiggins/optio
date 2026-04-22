@@ -87,7 +87,11 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
       readErrors.push({ source: "capacity", message: String(err) });
       return null;
     }),
-    row.taskType === "review"
+    // Only coding tasks own a PR. "review" subtasks and external "pr_review"
+    // tasks reference PRs through other tables (parent task / review_drafts),
+    // so never load PR status for them — that's what keeps them out of the
+    // PR-reactive state machine (auto-merge, auto-resume, launch-review).
+    row.taskType !== "coding" && row.taskType !== null
       ? Promise.resolve(null)
       : loadPrStatus(run, row.createdBy ?? null).catch((err) => {
           readErrors.push({ source: "pr", message: String(err) });
@@ -180,7 +184,7 @@ function loadRepoRun(row: typeof tasks.$inferSelect, ref: RunRef): Run {
     agentType: row.agentType,
     prompt: row.prompt,
     title: row.title,
-    taskType: (row.taskType as "coding" | "review") ?? "coding",
+    taskType: (row.taskType as "coding" | "review" | "pr_review") ?? "coding",
     maxRetries: row.maxRetries,
     priority: row.priority,
     ignoreOffPeak: row.ignoreOffPeak,

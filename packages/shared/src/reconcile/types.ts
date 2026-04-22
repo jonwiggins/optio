@@ -28,7 +28,17 @@ export interface RepoRunSpec {
   agentType: string;
   prompt: string;
   title: string;
-  taskType: "coding" | "review";
+  /**
+   * "coding" — agent opens a PR; full PR-reactive state machine applies
+   *   (auto-merge, auto-resume on CI fail, review triggers).
+   * "review" — internal review subtask of a coding task; no PR of its own.
+   * "pr_review" — external PR review; references a PR via `review_drafts`,
+   *   not `tasks.prUrl`. Reconciler treats this as non-PR-reactive.
+   *
+   * Only "coding" tasks drive PR-reactive behavior. New task types default
+   * to non-reactive unless explicitly opted into the coding branch.
+   */
+  taskType: "coding" | "review" | "pr_review";
   maxRetries: number;
   priority: number;
   ignoreOffPeak: boolean;

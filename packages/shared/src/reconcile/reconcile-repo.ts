@@ -269,10 +269,12 @@ function decideProvisioning(snapshot: WorldSnapshot): RepoAction {
 
 function decideRunning(snapshot: WorldSnapshot): RepoAction {
   if (snapshot.run.kind !== "repo") return { kind: "noop", reason: "wrong_kind" };
-  const { status } = snapshot.run;
+  const { spec, status } = snapshot.run;
 
-  // PR was just detected in agent output; promote.
-  if (status.prUrl && status.state === TaskState.RUNNING) {
+  // PR was just detected in agent output; promote. Only coding tasks follow
+  // the PR lifecycle — pr_review tasks reference someone else's PR and never
+  // enter PR_OPENED even if a prUrl is set on the row.
+  if (spec.taskType === "coding" && status.prUrl && status.state === TaskState.RUNNING) {
     return {
       kind: "transition",
       to: TaskState.PR_OPENED,
@@ -337,7 +339,15 @@ function decideFailed(snapshot: WorldSnapshot): RepoAction {
 /** Map PR status into an action. Mirrors determinePrAction in pr-watcher-worker. */
 function decideFromPrStatus(snapshot: WorldSnapshot, allowFailComplete: boolean): RepoAction {
   if (snapshot.run.kind !== "repo") return { kind: "noop", reason: "wrong_kind" };
-  const { status } = snapshot.run;
+  const { spec, status } = snapshot.run;
+  // Only coding tasks own the PR attached to their row. Review subtasks and
+  // external pr_review tasks must never drive PR-reactive actions (auto-merge,
+  // auto-resume, launch-review) — the PR they reference isn't theirs.
+  // Defence-in-depth: even if a stray prUrl write ever leaks through, this
+  // guard prevents the reconciler from acting on it.
+  if (spec.taskType !== "coding") {
+    return { kind: "noop", reason: `pr_machinery_disabled_for_${spec.taskType}` };
+  }
   const pr = snapshot.pr;
   if (!pr) {
     return { kind: "noop", reason: "pr_info_not_yet_available" };
