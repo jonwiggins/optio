@@ -18,6 +18,7 @@ vi.mock("../db/schema.js", () => ({
     name: "secrets.name",
     scope: "secrets.scope",
     workspaceId: "secrets.workspace_id",
+    userId: "secrets.user_id",
     encryptedValue: "secrets.encrypted_value",
     iv: "secrets.iv",
     authTag: "secrets.auth_tag",
@@ -47,6 +48,7 @@ interface MockSecretData {
   name: string;
   scope: string;
   value: string; // plaintext - will be encrypted when retrieved
+  userId?: string | null;
 }
 
 // ── Drizzle Expression Parser ───────────────────────────────────────────────
@@ -87,6 +89,8 @@ describe("secret-service", () => {
   let deleteSecret: typeof import("./secret-service.js").deleteSecret;
   let resolveSecretsForTask: typeof import("./secret-service.js").resolveSecretsForTask;
   let resolveSecretsForSetup: typeof import("./secret-service.js").resolveSecretsForSetup;
+  let retrieveSecretWithFallback: typeof import("./secret-service.js").retrieveSecretWithFallback;
+  let IDENTITY_SECRET_DENYLIST: typeof import("./secret-service.js").IDENTITY_SECRET_DENYLIST;
   let ALG_AES_256_GCM_V1: number;
 
   // ── Data-Driven Mock Helper ─────────────────────────────────────────────────
@@ -105,6 +109,7 @@ describe("secret-service", () => {
           const matches = mockSecrets.filter((s) => {
             if (filters.scope && s.scope !== filters.scope) return false;
             if (filters.name && s.name !== filters.name) return false;
+            if (filters.user_id && s.userId !== filters.user_id) return false;
             return true;
           });
 
@@ -143,6 +148,8 @@ describe("secret-service", () => {
     deleteSecret = mod.deleteSecret;
     resolveSecretsForTask = mod.resolveSecretsForTask;
     resolveSecretsForSetup = mod.resolveSecretsForSetup;
+    retrieveSecretWithFallback = mod.retrieveSecretWithFallback;
+    IDENTITY_SECRET_DENYLIST = mod.IDENTITY_SECRET_DENYLIST;
     ALG_AES_256_GCM_V1 = mod.ALG_AES_256_GCM_V1;
   });
 
@@ -671,6 +678,181 @@ describe("secret-service", () => {
 
       const result = await resolveSecretsForSetup("https://github.com/owner/empty-repo");
       expect(result).toEqual({});
+    });
+
+    it("excludes user-scoped secrets even when names match global/repo", async () => {
+      const repoUrl = "https://github.com/owner/repo";
+      setupSecretStoreMock([
+        { name: "NPM_TOKEN", scope: "global", value: "npm-global" },
+        { name: "CLAUDE_CODE_OAUTH_TOKEN", scope: "user", value: "user-oauth", userId: "u-1" },
+      ]);
+
+      const result = await resolveSecretsForSetup(repoUrl);
+      // user-scoped rows must not appear in setup secrets
+      expect(result.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+      expect(result.NPM_TOKEN).toBe("npm-global");
+    });
+
+    it("filters out identity-denylist names from setup secrets", async () => {
+      const repoUrl = "https://github.com/owner/repo";
+      setupSecretStoreMock([
+        { name: "NPM_TOKEN", scope: "global", value: "npm-value" },
+        { name: "CLAUDE_CODE_OAUTH_TOKEN", scope: "global", value: "should-be-blocked" },
+        { name: "ANTHROPIC_API_KEY", scope: "global", value: "should-be-blocked" },
+        { name: "OPENAI_API_KEY", scope: "global", value: "should-be-blocked" },
+        { name: "GEMINI_API_KEY", scope: "global", value: "should-be-blocked" },
+      ]);
+
+      const result = await resolveSecretsForSetup(repoUrl);
+      expect(result.NPM_TOKEN).toBe("npm-value");
+      expect(result.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+      expect(result.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(result.OPENAI_API_KEY).toBeUndefined();
+      expect(result.GEMINI_API_KEY).toBeUndefined();
+    });
+  });
+
+  describe("IDENTITY_SECRET_DENYLIST", () => {
+    it("contains the known identity secret names", () => {
+      expect(IDENTITY_SECRET_DENYLIST).toContain("CLAUDE_CODE_OAUTH_TOKEN");
+      expect(IDENTITY_SECRET_DENYLIST).toContain("ANTHROPIC_API_KEY");
+      expect(IDENTITY_SECRET_DENYLIST).toContain("OPENAI_API_KEY");
+      expect(IDENTITY_SECRET_DENYLIST).toContain("GEMINI_API_KEY");
+    });
+  });
+
+  describe("user-scoped secrets", () => {
+    it("storeSecret with user scope requires userId", async () => {
+      await expect(storeSecret("TOKEN", "val", "user")).rejects.toThrow("userId is required");
+    });
+
+    it("storeSecret rejects userId for non-user scopes", async () => {
+      await expect(storeSecret("TOKEN", "val", "global", null, "u-1")).rejects.toThrow(
+        "userId can only be set",
+      );
+    });
+
+    it("retrieveSecretWithFallback resolves user → workspace-global → global", async () => {
+      // Set up mock to return user-scoped secret on first call
+      const aad = buildSecretAAD("ANTHROPIC_API_KEY", "user", null);
+      const blob = encrypt("user-api-key", aad);
+
+      let callCount = 0;
+      (db.select as any) = vi.fn().mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            callCount++;
+            // First call: user-scoped lookup succeeds
+            if (callCount === 1) {
+              return Promise.resolve([
+                {
+                  id: "user-secret",
+                  name: "ANTHROPIC_API_KEY",
+                  scope: "user",
+                  encryptedValue: blob.ciphertext,
+                  iv: blob.iv,
+                  authTag: blob.authTag,
+                  alg: blob.alg,
+                },
+              ]);
+            }
+            return Promise.resolve([]);
+          }),
+        }),
+      }));
+
+      const result = await retrieveSecretWithFallback("ANTHROPIC_API_KEY", "global", "ws-1", "u-1");
+      expect(result).toBe("user-api-key");
+    });
+
+    it("retrieveSecretWithFallback falls back to global when user scope is empty", async () => {
+      const aad = buildSecretAAD("ANTHROPIC_API_KEY", "global", null);
+      const blob = encrypt("global-api-key", aad);
+
+      let callCount = 0;
+      (db.select as any) = vi.fn().mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            callCount++;
+            // First call: user-scoped lookup fails (empty)
+            if (callCount === 1) return Promise.resolve([]);
+            // Second call: workspace-scoped lookup fails
+            if (callCount === 2) return Promise.resolve([]);
+            // Third call: global lookup succeeds
+            return Promise.resolve([
+              {
+                id: "global-secret",
+                name: "ANTHROPIC_API_KEY",
+                scope: "global",
+                encryptedValue: blob.ciphertext,
+                iv: blob.iv,
+                authTag: blob.authTag,
+                alg: blob.alg,
+              },
+            ]);
+          }),
+        }),
+      }));
+
+      const result = await retrieveSecretWithFallback("ANTHROPIC_API_KEY", "global", "ws-1", "u-1");
+      expect(result).toBe("global-api-key");
+    });
+
+    it("retrieveSecretWithFallback without userId gets existing behavior", async () => {
+      const aad = buildSecretAAD("GITHUB_TOKEN", "global", "ws-1");
+      const blob = encrypt("ws-github-token", aad);
+
+      (db.select as any) = vi.fn().mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            {
+              id: "ws-secret",
+              name: "GITHUB_TOKEN",
+              scope: "global",
+              encryptedValue: blob.ciphertext,
+              iv: blob.iv,
+              authTag: blob.authTag,
+              alg: blob.alg,
+            },
+          ]),
+        }),
+      }));
+
+      const result = await retrieveSecretWithFallback("GITHUB_TOKEN", "global", "ws-1");
+      expect(result).toBe("ws-github-token");
+    });
+
+    it("listSecrets filters by userId when provided", async () => {
+      const mockRows = [
+        {
+          id: "1",
+          name: "ANTHROPIC_API_KEY",
+          scope: "user",
+          userId: "u-1",
+          encryptedValue: Buffer.from("x"),
+          iv: Buffer.from("x"),
+          authTag: Buffer.from("x"),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ];
+
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(mockRows) }),
+      });
+
+      const result = await listSecrets("user", null, "u-1");
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe("ANTHROPIC_API_KEY");
+    });
+
+    it("deleteSecret with user scope uses userId in conditions", async () => {
+      const whereMock = vi.fn().mockResolvedValue(undefined);
+      (db.delete as any) = vi.fn().mockReturnValue({ where: whereMock });
+
+      await deleteSecret("MY_TOKEN", "user", null, "u-1");
+      expect(db.delete).toHaveBeenCalled();
+      expect(whereMock).toHaveBeenCalled();
     });
   });
 });

@@ -557,10 +557,12 @@ export function startTaskWorker() {
             ...(!isGitHubAppConfigured() ? ["GITHUB_TOKEN"] : []),
           ]),
         ];
+        const taskUserId = task.createdBy ?? null;
         const resolvedSecrets = await resolveSecretsForTask(
           secretNames,
           task.repoUrl,
           taskWorkspaceId,
+          taskUserId,
         );
         const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
 
@@ -646,6 +648,7 @@ export function startTaskWorker() {
             "CLAUDE_CODE_OAUTH_TOKEN",
             "global",
             taskWorkspaceId,
+            taskUserId,
           ).catch(() => null);
           if (oauthToken) {
             allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;

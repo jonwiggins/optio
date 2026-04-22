@@ -30,17 +30,23 @@ describe("GET /api/secrets", () => {
     app = await buildTestApp();
   });
 
-  it("lists secrets with workspace scoping", async () => {
-    mockListSecrets.mockResolvedValue([
-      { name: "GITHUB_TOKEN", scope: "global" },
-      { name: "ANTHROPIC_API_KEY", scope: "global" },
-    ]);
+  it("lists secrets with workspace scoping and includes user-scoped secrets", async () => {
+    // First call: workspace-scoped secrets, second call: user-scoped secrets
+    mockListSecrets
+      .mockResolvedValueOnce([
+        { name: "GITHUB_TOKEN", scope: "global" },
+        { name: "NPM_TOKEN", scope: "global" },
+      ])
+      .mockResolvedValueOnce([{ name: "ANTHROPIC_API_KEY", scope: "user", userId: "user-1" }]);
 
     const res = await app.inject({ method: "GET", url: "/api/secrets" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().secrets).toHaveLength(2);
-    expect(mockListSecrets).toHaveBeenCalledWith(undefined, "ws-1");
+    expect(res.json().secrets).toHaveLength(3);
+    // Workspace-scoped call: listSecrets(scope, workspaceId)
+    expect(mockListSecrets).toHaveBeenNthCalledWith(1, undefined, "ws-1");
+    // User-scoped call: listSecrets("user", null, userId)
+    expect(mockListSecrets).toHaveBeenNthCalledWith(2, "user", null, "user-1");
   });
 
   it("passes scope query parameter", async () => {
@@ -49,7 +55,23 @@ describe("GET /api/secrets", () => {
     const res = await app.inject({ method: "GET", url: "/api/secrets?scope=repo:my-repo" });
 
     expect(res.statusCode).toBe(200);
-    expect(mockListSecrets).toHaveBeenCalledWith("repo:my-repo", "ws-1");
+    // With scope filter, still queries both workspace and user-scoped
+    expect(mockListSecrets).toHaveBeenNthCalledWith(1, "repo:my-repo", "ws-1");
+    expect(mockListSecrets).toHaveBeenNthCalledWith(2, "user", null, "user-1");
+  });
+
+  it("returns only user-scoped secrets when scope=user", async () => {
+    mockListSecrets.mockResolvedValue([
+      { name: "ANTHROPIC_API_KEY", scope: "user", userId: "user-1" },
+    ]);
+
+    const res = await app.inject({ method: "GET", url: "/api/secrets?scope=user" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().secrets).toHaveLength(1);
+    // Only one call: user-scoped
+    expect(mockListSecrets).toHaveBeenCalledTimes(1);
+    expect(mockListSecrets).toHaveBeenCalledWith("user", null, "user-1");
   });
 });
 
@@ -77,6 +99,7 @@ describe("POST /api/secrets", () => {
       "super-secret-value",
       undefined,
       "ws-1",
+      null,
     );
   });
 
@@ -91,7 +114,28 @@ describe("POST /api/secrets", () => {
 
     expect(res.statusCode).toBe(201);
     expect(res.json()).toEqual({ name: "REPO_KEY", scope: "repo:my-repo" });
-    expect(mockStoreSecret).toHaveBeenCalledWith("REPO_KEY", "val", "repo:my-repo", "ws-1");
+    expect(mockStoreSecret).toHaveBeenCalledWith("REPO_KEY", "val", "repo:my-repo", "ws-1", null);
+  });
+
+  it("creates a user-scoped secret with caller userId", async () => {
+    mockStoreSecret.mockResolvedValue(undefined);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/secrets",
+      payload: { name: "MY_USER_TOKEN", value: "tok-123", scope: "user" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toEqual({ name: "MY_USER_TOKEN", scope: "user" });
+    // userId should be set to the caller's id ("user-1" from test harness)
+    expect(mockStoreSecret).toHaveBeenCalledWith(
+      "MY_USER_TOKEN",
+      "tok-123",
+      "user",
+      "ws-1",
+      "user-1",
+    );
   });
 
   it("rejects missing name (Zod throws)", async () => {
@@ -142,7 +186,7 @@ describe("DELETE /api/secrets/:name", () => {
     });
 
     expect(res.statusCode).toBe(204);
-    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_SECRET", undefined, "ws-1");
+    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_SECRET", undefined, "ws-1", null);
   });
 
   it("passes scope query parameter when deleting", async () => {
@@ -154,6 +198,19 @@ describe("DELETE /api/secrets/:name", () => {
     });
 
     expect(res.statusCode).toBe(204);
-    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_SECRET", "repo:r", "ws-1");
+    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_SECRET", "repo:r", "ws-1", null);
+  });
+
+  it("deletes user-scoped secret with caller userId", async () => {
+    mockDeleteSecret.mockResolvedValue(undefined);
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/secrets/MY_TOKEN?scope=user",
+    });
+
+    expect(res.statusCode).toBe(204);
+    // userId should be set to the caller's id ("user-1") for user-scoped deletion
+    expect(mockDeleteSecret).toHaveBeenCalledWith("MY_TOKEN", "user", "ws-1", "user-1");
   });
 });

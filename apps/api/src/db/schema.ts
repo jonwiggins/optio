@@ -204,12 +204,19 @@ export const secrets = pgTable(
     authTag: bytea("auth_tag").notNull(),
     alg: smallint("alg").notNull().default(1), // 1 = AES_256_GCM_V1
     workspaceId: uuid("workspace_id"), // nullable for backward compat
+    userId: uuid("user_id").references(() => users.id), // nullable; set iff scope = "user"
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    unique("secrets_name_scope_ws_key").on(table.name, table.scope, table.workspaceId),
+    unique("secrets_name_scope_ws_user_key").on(
+      table.name,
+      table.scope,
+      table.workspaceId,
+      table.userId,
+    ),
     index("secrets_workspace_id_idx").on(table.workspaceId),
+    index("secrets_user_id_idx").on(table.userId),
   ],
 );
 

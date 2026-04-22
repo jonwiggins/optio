@@ -353,11 +353,13 @@ export function startWorkflowWorker() {
 
         // ── Resolve secrets ───────────────────────────────────────────
         const workspaceId = workflow.workspaceId ?? null;
+        const workflowUserId = workflow.createdBy ?? null;
         const adapter = getAdapter(workflow.agentRuntime);
         const resolvedSecrets = await resolveSecretsForTask(
           adapter.validateSecrets([]).missing,
           "",
           workspaceId,
+          workflowUserId,
         );
 
         // Resolve auth mode for the agent runtime
@@ -386,6 +388,7 @@ export function startWorkflowWorker() {
             "ANTHROPIC_API_KEY",
             "global",
             workspaceId,
+            workflowUserId,
           ).catch(() => null);
           if (apiKey) env.ANTHROPIC_API_KEY = apiKey as string;
         }
@@ -396,6 +399,7 @@ export function startWorkflowWorker() {
             "CLAUDE_CODE_OAUTH_TOKEN",
             "global",
             workspaceId,
+            workflowUserId,
           ).catch(() => null);
           if (oauthToken) {
             env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;

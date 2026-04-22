@@ -10,7 +10,7 @@ import { ErrorResponseSchema } from "../schemas/common.js";
 
 const scopeQuerySchema = z
   .object({
-    scope: z.string().optional().describe("Optional scope filter (e.g. `global`, `repo`)"),
+    scope: z.string().optional().describe("Optional scope filter (e.g. `global`, `repo`, `user`)"),
   })
   .describe("Query parameters for scope-filtering");
 
@@ -24,7 +24,10 @@ const createSecretSchema = z
   .object({
     name: z.string().min(1).describe("Secret name (uppercase env-var style)"),
     value: z.string().min(1).describe("Secret value (encrypted at rest)"),
-    scope: z.string().optional().describe("Optional scope; defaults to `global`"),
+    scope: z
+      .string()
+      .optional()
+      .describe("Optional scope; defaults to `global`. Use `user` for per-user secrets."),
   })
   .describe("Body for creating/updating a secret");
 
@@ -100,7 +103,9 @@ export async function secretRoutes(rawApp: FastifyInstance) {
         operationId: "listSecrets",
         summary: "List secrets",
         description:
-          "Return secret names (not values) in the current workspace. Any member can view.",
+          "Return secret names (not values) in the current workspace. " +
+          "Includes the caller's user-scoped secrets plus workspace global/repo secrets. " +
+          "Any member can view.",
         tags: ["Setup & Settings"],
         querystring: scopeQuerySchema,
         response: { 200: SecretsListResponseSchema },
@@ -108,8 +113,21 @@ export async function secretRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
-      const secrets = await secretService.listSecrets(req.query.scope, workspaceId);
-      reply.send({ secrets });
+      const userId = req.user?.id ?? null;
+      const scope = req.query.scope;
+
+      if (scope === "user") {
+        // User-scoped: only return the caller's own secrets
+        const userSecrets = userId ? await secretService.listSecrets("user", null, userId) : [];
+        reply.send({ secrets: userSecrets });
+      } else {
+        // Workspace secrets (global/repo) + caller's user-scoped secrets
+        const wsSecrets = await secretService.listSecrets(scope, workspaceId);
+        const userSecrets = userId ? await secretService.listSecrets("user", null, userId) : [];
+        // Merge: workspace-level first, then user-level (dedup by name not needed — different scopes)
+        const allSecrets = [...wsSecrets, ...userSecrets];
+        reply.send({ secrets: allSecrets });
+      }
     },
   );
 
@@ -125,7 +143,9 @@ export async function secretRoutes(rawApp: FastifyInstance) {
           "(`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`) " +
           "trigger a best-effort validation probe, credential cache " +
           "invalidation, and a WebSocket `auth:status_changed` event so the " +
-          "UI picks up the change immediately. Requires `admin` role.",
+          "UI picks up the change immediately. Use `scope: 'user'` for " +
+          "per-user identity tokens. Requires `admin` role (or any role for " +
+          "user-scoped secrets).",
         tags: ["Setup & Settings"],
         body: createSecretSchema,
         response: { 201: SecretCreatedResponseSchema },
@@ -134,7 +154,18 @@ export async function secretRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const input = req.body;
       const workspaceId = req.user?.workspaceId ?? null;
-      await secretService.storeSecret(input.name, input.value, input.scope, workspaceId);
+      const userId = req.user?.id ?? null;
+
+      // For user-scoped secrets, force userId to the caller's own ID
+      const effectiveUserId = input.scope === "user" ? userId : null;
+
+      await secretService.storeSecret(
+        input.name,
+        input.value,
+        input.scope,
+        workspaceId,
+        effectiveUserId,
+      );
 
       const isAuthSecret = AUTH_SECRET_NAMES.has(input.name);
       let validation: { valid: boolean; error?: string } | undefined;
@@ -170,7 +201,9 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       schema: {
         operationId: "deleteSecret",
         summary: "Delete a secret",
-        description: "Delete a secret by name. Requires `admin` role. Returns 204 on success.",
+        description:
+          "Delete a secret by name. User-scoped secrets can only be deleted by their owner. " +
+          "Requires `admin` role (or any role for user-scoped secrets). Returns 204 on success.",
         tags: ["Setup & Settings"],
         params: nameParamsSchema,
         querystring: scopeQuerySchema,
@@ -180,7 +213,13 @@ export async function secretRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { name } = req.params;
       const workspaceId = req.user?.workspaceId ?? null;
-      await secretService.deleteSecret(name, req.query.scope, workspaceId);
+      const userId = req.user?.id ?? null;
+      const scope = req.query.scope;
+
+      // For user-scoped secrets, force userId to the caller's own ID
+      const effectiveUserId = scope === "user" ? userId : null;
+
+      await secretService.deleteSecret(name, scope, workspaceId, effectiveUserId);
       logAction({
         userId: req.user?.id,
         action: "secret.delete",

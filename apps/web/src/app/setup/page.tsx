@@ -404,10 +404,14 @@ export default function SetupPage() {
       await api.createSecret({ name: "CLAUDE_AUTH_MODE", value: claudeAuthMode });
 
       if (claudeAuthMode === "api-key" && anthropicKey.trim() && anthropicValidated) {
-        await api.createSecret({ name: "ANTHROPIC_API_KEY", value: anthropicKey });
+        await api.createSecret({ name: "ANTHROPIC_API_KEY", value: anthropicKey, scope: "user" });
       }
       if (claudeAuthMode === "oauth-token" && oauthToken.trim()) {
-        await api.createSecret({ name: "CLAUDE_CODE_OAUTH_TOKEN", value: oauthToken });
+        await api.createSecret({
+          name: "CLAUDE_CODE_OAUTH_TOKEN",
+          value: oauthToken,
+          scope: "user",
+        });
       }
       // Save Codex auth mode and credentials
       if (codexAuthMode === "app-server" && codexAppServerUrl.trim()) {
@@ -415,7 +419,7 @@ export default function SetupPage() {
         await api.createSecret({ name: "CODEX_APP_SERVER_URL", value: codexAppServerUrl.trim() });
       } else if (openaiKey.trim() && openaiValidated) {
         await api.createSecret({ name: "CODEX_AUTH_MODE", value: "api-key" });
-        await api.createSecret({ name: "OPENAI_API_KEY", value: openaiKey });
+        await api.createSecret({ name: "OPENAI_API_KEY", value: openaiKey, scope: "user" });
       }
       // Save Copilot token
       if (copilotToken.trim() && copilotValidated) {
@@ -446,7 +450,7 @@ export default function SetupPage() {
         }
       } else if (geminiKey.trim() && geminiValidated) {
         await api.createSecret({ name: "GEMINI_AUTH_MODE", value: "api-key" });
-        await api.createSecret({ name: "GEMINI_API_KEY", value: geminiKey });
+        await api.createSecret({ name: "GEMINI_API_KEY", value: geminiKey, scope: "user" });
       }
       goNext();
     } catch (err) {

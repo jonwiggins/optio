@@ -45,6 +45,7 @@ export function TokenRefreshBanner({ onSaved }: { onSaved?: () => void | Promise
       const result = await api.createSecret({
         name: "CLAUDE_CODE_OAUTH_TOKEN",
         value: token.trim(),
+        scope: "user",
       });
       if (result.validation && !result.validation.valid) {
         toast.error(`Token saved but validation failed: ${result.validation.error}`);

@@ -332,18 +332,30 @@ export async function streamAnthropicResponse(
  * Retrieve the Anthropic API credentials from the secrets store.
  * Returns the raw key or token for use with the Messages API.
  */
-async function getAnthropicAuth(log: {
-  warn: (obj: unknown, msg: string) => void;
-}): Promise<{ apiKey?: string; oauthToken?: string }> {
+async function getAnthropicAuth(
+  log: { warn: (obj: unknown, msg: string) => void },
+  userId?: string | null,
+): Promise<{ apiKey?: string; oauthToken?: string }> {
   try {
-    const { retrieveSecret } = await import("../services/secret-service.js");
+    const { retrieveSecret, retrieveSecretWithFallback } =
+      await import("../services/secret-service.js");
     const authMode = (await retrieveSecret("CLAUDE_AUTH_MODE").catch(() => null)) as string | null;
 
     if (authMode === "api-key") {
-      const apiKey = await retrieveSecret("ANTHROPIC_API_KEY").catch(() => null);
+      const apiKey = await retrieveSecretWithFallback(
+        "ANTHROPIC_API_KEY",
+        "global",
+        undefined,
+        userId,
+      ).catch(() => null);
       return apiKey ? { apiKey: apiKey as string } : {};
     } else if (authMode === "oauth-token") {
-      const token = await retrieveSecret("CLAUDE_CODE_OAUTH_TOKEN").catch(() => null);
+      const token = await retrieveSecretWithFallback(
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "global",
+        undefined,
+        userId,
+      ).catch(() => null);
       return token ? { oauthToken: token as string } : {};
     } else if (authMode === "max-subscription") {
       const { getClaudeAuthToken } = await import("../services/auth-service.js");
@@ -589,7 +601,7 @@ export async function optioChatWs(app: FastifyInstance) {
       send({ type: "status", status: "thinking" });
 
       // Get Anthropic credentials
-      const auth = await getAnthropicAuth(log);
+      const auth = await getAnthropicAuth(log, userId);
       if (!auth.apiKey && !auth.oauthToken) {
         send({
           type: "error",
@@ -645,7 +657,7 @@ export async function optioChatWs(app: FastifyInstance) {
     const continueAfterDecision = async (approved: boolean, feedback?: string) => {
       send({ type: "status", status: approved ? "executing" : "thinking" });
 
-      const auth = await getAnthropicAuth(log);
+      const auth = await getAnthropicAuth(log, userId);
       if (!auth.apiKey && !auth.oauthToken) {
         send({ type: "error", message: "No Anthropic credentials configured" });
         isProcessing = false;

@@ -491,6 +491,13 @@
       "when": 1776825057000,
       "tag": "1776825057_external_pr_auto_review",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1777012800000,
+      "tag": "1777012800_user_scoped_secrets",
+      "breakpoints": true
     }
   ]
 }

@@ -29,6 +29,18 @@ const WEAK_KEY_VALUES = new Set([
   "default",
 ]);
 
+/**
+ * Identity secret names that must never be injected into shared pod env
+ * via resolveSecretsForSetup. Belt-and-suspenders defense: even if someone
+ * stores an identity token at global scope, it won't leak into pod env.
+ */
+export const IDENTITY_SECRET_DENYLIST = new Set([
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+]);
+
 function getEncryptionKey(): Buffer {
   const key = process.env.OPTIO_ENCRYPTION_KEY;
   if (!key) throw new Error("OPTIO_ENCRYPTION_KEY is not set");
@@ -108,7 +120,16 @@ export async function storeSecret(
   value: string,
   scope = "global",
   workspaceId?: string | null,
+  userId?: string | null,
 ): Promise<void> {
+  // Enforce CHECK semantics: scope = "user" iff userId is set
+  if (scope === "user" && !userId) {
+    throw new Error("userId is required when scope is 'user'");
+  }
+  if (scope !== "user" && userId) {
+    throw new Error("userId can only be set when scope is 'user'");
+  }
+
   const aad = buildSecretAAD(name, scope, workspaceId);
   const { alg, ciphertext, iv, authTag } = encrypt(value, aad);
 
@@ -116,8 +137,14 @@ export async function storeSecret(
   const conditions = [eq(secrets.name, name), eq(secrets.scope, scope)];
   if (workspaceId) {
     conditions.push(eq(secrets.workspaceId, workspaceId));
-  } else if (scope !== "global") {
+  } else if (scope !== "global" && scope !== "user") {
     conditions.push(isNull(secrets.workspaceId));
+  }
+  if (userId) {
+    conditions.push(eq(secrets.userId, userId));
+  } else if (scope !== "user") {
+    // For non-user scopes, match rows with null userId
+    conditions.push(isNull(secrets.userId));
   }
 
   // Try update first, then insert
@@ -140,6 +167,7 @@ export async function storeSecret(
       authTag,
       alg,
       workspaceId: workspaceId ?? undefined,
+      userId: userId ?? undefined,
     });
   }
 }
@@ -148,14 +176,24 @@ export async function retrieveSecret(
   name: string,
   scope = "global",
   workspaceId?: string | null,
+  userId?: string | null,
 ): Promise<string> {
   const conditions = [eq(secrets.name, name), eq(secrets.scope, scope)];
-  if (workspaceId) {
-    conditions.push(eq(secrets.workspaceId, workspaceId));
-  } else if (scope !== "global") {
-    // For non-global scopes, always apply a workspace filter to prevent
-    // cross-workspace secret leakage when workspaceId is omitted.
-    conditions.push(isNull(secrets.workspaceId));
+  if (scope === "user") {
+    if (userId) {
+      conditions.push(eq(secrets.userId, userId));
+    } else {
+      throw new Error("userId is required to retrieve a user-scoped secret");
+    }
+  } else {
+    if (workspaceId) {
+      conditions.push(eq(secrets.workspaceId, workspaceId));
+    } else if (scope !== "global") {
+      // For non-global scopes, always apply a workspace filter to prevent
+      // cross-workspace secret leakage when workspaceId is omitted.
+      conditions.push(isNull(secrets.workspaceId));
+    }
+    conditions.push(isNull(secrets.userId));
   }
 
   const [secret] = await db
@@ -179,10 +217,12 @@ export async function retrieveSecret(
 export async function listSecrets(
   scope?: string,
   workspaceId?: string | null,
+  userId?: string | null,
 ): Promise<SecretRef[]> {
   const conditions = [];
   if (scope) conditions.push(eq(secrets.scope, scope));
   if (workspaceId) conditions.push(eq(secrets.workspaceId, workspaceId));
+  if (userId) conditions.push(eq(secrets.userId, userId));
 
   const query =
     conditions.length > 0
@@ -196,6 +236,7 @@ export async function listSecrets(
     id: r.id,
     name: r.name,
     scope: r.scope,
+    userId: r.userId,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   }));
@@ -205,21 +246,43 @@ export async function deleteSecret(
   name: string,
   scope = "global",
   workspaceId?: string | null,
+  userId?: string | null,
 ): Promise<void> {
   const conditions = [eq(secrets.name, name), eq(secrets.scope, scope)];
   if (workspaceId) conditions.push(eq(secrets.workspaceId, workspaceId));
+  if (userId) {
+    conditions.push(eq(secrets.userId, userId));
+  }
   await db.delete(secrets).where(and(...conditions));
 }
 
 /**
- * Retrieve a secret with workspace-then-global fallback.
- * If workspaceId is provided, tries workspace-scoped first, then global.
+ * Retrieve a secret with user → workspace → global fallback.
+ *
+ * Lookup order when userId is provided:
+ *   1. (name, scope="user", userId=userId)
+ *   2. (name, scope=scope, workspaceId=workspaceId)
+ *   3. (name, scope=scope, workspaceId=null)   [global fallback]
+ *
+ * When userId is not provided, falls back to the original behavior:
+ *   1. (name, scope=scope, workspaceId=workspaceId)
+ *   2. (name, scope=scope, workspaceId=null)
  */
 export async function retrieveSecretWithFallback(
   name: string,
   scope = "global",
   workspaceId?: string | null,
+  userId?: string | null,
 ): Promise<string> {
+  // Step 1: try user-scoped lookup if userId is provided
+  if (userId) {
+    try {
+      return await retrieveSecret(name, "user", undefined, userId);
+    } catch {
+      // Not found at user scope — fall through
+    }
+  }
+  // Step 2: try workspace-scoped lookup
   if (workspaceId) {
     try {
       return await retrieveSecret(name, scope, workspaceId);
@@ -227,6 +290,7 @@ export async function retrieveSecretWithFallback(
       // Not found in workspace — fall through to global
     }
   }
+  // Step 3: global fallback
   return retrieveSecret(name, scope);
 }
 
@@ -234,19 +298,20 @@ export async function resolveSecretsForTask(
   requiredSecrets: string[],
   scope = "global",
   workspaceId?: string | null,
+  userId?: string | null,
 ): Promise<Record<string, string>> {
   const resolved: Record<string, string> = {};
   for (const name of requiredSecrets) {
     if (scope !== "global") {
       // Try repo-scoped secret first, fall back to global
       try {
-        resolved[name] = await retrieveSecretWithFallback(name, scope, workspaceId);
+        resolved[name] = await retrieveSecretWithFallback(name, scope, workspaceId, userId);
         continue;
       } catch {
         // Not found at repo scope — fall through to global
       }
     }
-    resolved[name] = await retrieveSecretWithFallback(name, "global", workspaceId);
+    resolved[name] = await retrieveSecretWithFallback(name, "global", workspaceId, userId);
   }
   return resolved;
 }
@@ -254,12 +319,17 @@ export async function resolveSecretsForTask(
 /**
  * Resolve all secrets available for setup commands (global + repo-scoped).
  * Repo-scoped secrets take precedence over global secrets with the same name.
+ *
+ * SECURITY: User-scoped secrets (scope="user") are excluded by construction —
+ * listSecrets only queries "global" and repoUrl scopes. Additionally, known
+ * identity secret names are filtered via IDENTITY_SECRET_DENYLIST as a
+ * belt-and-suspenders defense against identity tokens leaking into pod env.
  */
 export async function resolveSecretsForSetup(
   repoUrl: string,
   workspaceId?: string | null,
 ): Promise<Record<string, string>> {
-  // Get all global and repo-scoped secret names
+  // Get all global and repo-scoped secret names (never "user" scope)
   const globalSecrets = await listSecrets("global", workspaceId);
   const repoSecrets = await listSecrets(repoUrl, workspaceId);
 
@@ -270,6 +340,11 @@ export async function resolveSecretsForSetup(
 
   if (allNames.length === 0) return {};
 
-  // Resolve with repo→global fallback
-  return resolveSecretsForTask(allNames, repoUrl, workspaceId);
+  // Filter out identity secret names that must never be in pod env
+  const safeNames = allNames.filter((n) => !IDENTITY_SECRET_DENYLIST.has(n));
+
+  if (safeNames.length === 0) return {};
+
+  // Resolve with repo→global fallback (no userId — setup is pod-level, not user-level)
+  return resolveSecretsForTask(safeNames, repoUrl, workspaceId);
 }
