@@ -106,6 +106,10 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       const secrets = await listSecrets();
       const secretNames = secrets.map((s) => s.name);
 
+      // This endpoint is public (no req.user) so it cannot decrypt
+      // workspace-scoped secrets: the AAD binding (`name|scope|workspaceId`,
+      // see #319) requires the caller's workspaceId. Inferring mode from the
+      // set of stored secret names avoids that read-after-write asymmetry.
       const hasAnthropicKey = secretNames.includes("ANTHROPIC_API_KEY");
       const hasOpenAIKey = secretNames.includes("OPENAI_API_KEY");
       const hasGitToken =
@@ -113,29 +117,10 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         isGitHubAppConfigured() ||
         secretNames.includes("GITLAB_TOKEN");
 
-      let usingSubscription = false;
-      let hasOauthToken = false;
-      try {
-        const authMode = await retrieveSecret("CLAUDE_AUTH_MODE").catch(() => null);
-        if (authMode === "max-subscription") {
-          usingSubscription = isSubscriptionAvailable();
-        }
-        if (authMode === "oauth-token") {
-          hasOauthToken = secretNames.includes("CLAUDE_CODE_OAUTH_TOKEN");
-        }
-      } catch {
-        /* non-critical */
-      }
+      const usingSubscription = isSubscriptionAvailable();
+      const hasOauthToken = secretNames.includes("CLAUDE_CODE_OAUTH_TOKEN");
 
-      let hasCodexAppServer = false;
-      try {
-        const codexAuthMode = await retrieveSecret("CODEX_AUTH_MODE").catch(() => null);
-        if (codexAuthMode === "app-server") {
-          hasCodexAppServer = secretNames.includes("CODEX_APP_SERVER_URL");
-        }
-      } catch {
-        /* non-critical */
-      }
+      const hasCodexAppServer = secretNames.includes("CODEX_APP_SERVER_URL");
 
       const hasCopilotToken = secretNames.includes("COPILOT_GITHUB_TOKEN");
 
@@ -143,15 +128,10 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       const opencodeConfigured = hasAnthropicKey || hasOpenAIKey || hasOpencodeBaseUrl;
 
       const hasGeminiKey = secretNames.includes("GEMINI_API_KEY");
-      let hasGeminiVertexAi = false;
-      try {
-        const geminiAuthMode = await retrieveSecret("GEMINI_AUTH_MODE").catch(() => null);
-        if (geminiAuthMode === "vertex-ai") {
-          hasGeminiVertexAi = true;
-        }
-      } catch {
-        /* non-critical */
-      }
+      // Vertex AI mode is signaled by GOOGLE_CLOUD_PROJECT (written by the
+      // wizard alongside GEMINI_AUTH_MODE="vertex-ai") — distinct from API
+      // key mode.
+      const hasGeminiVertexAi = secretNames.includes("GOOGLE_CLOUD_PROJECT");
 
       const hasAnyAgentKey =
         hasAnthropicKey ||

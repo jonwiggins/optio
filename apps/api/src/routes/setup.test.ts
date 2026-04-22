@@ -122,6 +122,57 @@ describe("GET /api/setup/status", () => {
     expect(res.json().isSetUp).toBe(true);
     expect(res.json().steps.anyAgentKey.done).toBe(true);
   });
+
+  it("detects OAuth token mode by name when CLAUDE_AUTH_MODE cannot be decrypted", async () => {
+    // Regression: public setup/status has no req.user context, so it can't
+    // build the AAD that workspace-scoped CLAUDE_AUTH_MODE rows need.
+    // The endpoint must infer the mode from CLAUDE_CODE_OAUTH_TOKEN's presence
+    // in the secret names rather than calling retrieveSecret.
+    mockListSecrets.mockResolvedValue([
+      { name: "GITHUB_TOKEN" },
+      { name: "CLAUDE_AUTH_MODE" },
+      { name: "CLAUDE_CODE_OAUTH_TOKEN" },
+    ]);
+    mockRetrieveSecret.mockRejectedValue(new Error("decrypt failed: AAD mismatch"));
+    mockCheckRuntimeHealth.mockResolvedValue(true);
+
+    const res = await app.inject({ method: "GET", url: "/api/setup/status" });
+
+    expect(res.json().isSetUp).toBe(true);
+    expect(res.json().steps.anyAgentKey.done).toBe(true);
+  });
+
+  it("detects Codex app-server mode by name when CODEX_AUTH_MODE cannot be decrypted", async () => {
+    mockListSecrets.mockResolvedValue([
+      { name: "GITHUB_TOKEN" },
+      { name: "CODEX_AUTH_MODE" },
+      { name: "CODEX_APP_SERVER_URL" },
+    ]);
+    mockRetrieveSecret.mockRejectedValue(new Error("decrypt failed: AAD mismatch"));
+    mockCheckRuntimeHealth.mockResolvedValue(true);
+
+    const res = await app.inject({ method: "GET", url: "/api/setup/status" });
+
+    expect(res.json().isSetUp).toBe(true);
+    expect(res.json().steps.codexAppServer.done).toBe(true);
+    expect(res.json().steps.anyAgentKey.done).toBe(true);
+  });
+
+  it("detects Gemini Vertex AI mode by name when GEMINI_AUTH_MODE cannot be decrypted", async () => {
+    mockListSecrets.mockResolvedValue([
+      { name: "GITHUB_TOKEN" },
+      { name: "GEMINI_AUTH_MODE" },
+      { name: "GOOGLE_CLOUD_PROJECT" },
+    ]);
+    mockRetrieveSecret.mockRejectedValue(new Error("decrypt failed: AAD mismatch"));
+    mockCheckRuntimeHealth.mockResolvedValue(true);
+
+    const res = await app.inject({ method: "GET", url: "/api/setup/status" });
+
+    expect(res.json().isSetUp).toBe(true);
+    expect(res.json().steps.geminiKey.done).toBe(true);
+    expect(res.json().steps.anyAgentKey.done).toBe(true);
+  });
 });
 
 describe("POST /api/setup/validate/github-token", () => {
