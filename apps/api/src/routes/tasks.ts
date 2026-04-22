@@ -240,7 +240,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         // Enrich running tasks with isStalled flag (lightweight — no lastLogSummary)
         const globalThreshold = parseIntEnv("OPTIO_STALL_THRESHOLD_MS", 300000);
         const now = new Date();
-        const enriched = taskList.map((t) => ({
+        const hydrated = await taskService.hydratePrReviewPrUrls(taskList);
+        const enriched = hydrated.map((t) => ({
           ...t,
           type: "repo-task" as const,
           isStalled: isTaskStalled(t, now, globalThreshold),
@@ -349,11 +350,12 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       // Try the repo-task (tasks table) path first — this is the most common
       // case and returns the full enriched shape (pendingReason, pipelineProgress,
       // stallInfo).
-      const task = await taskService.getTask(id);
-      if (task) {
-        if (workspaceId && task.workspaceId !== workspaceId) {
+      const rawTask = await taskService.getTask(id);
+      if (rawTask) {
+        if (workspaceId && rawTask.workspaceId !== workspaceId) {
           return reply.status(404).send({ error: "Task not found" });
         }
+        const [task] = await taskService.hydratePrReviewPrUrls([rawTask]);
 
         let pendingReason: string | null = null;
         if (["pending", "waiting_on_deps", "queued"].includes(task.state)) {

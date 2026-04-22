@@ -68,6 +68,50 @@ export async function getTask(id: string) {
   return task ?? null;
 }
 
+/**
+ * Fill `prUrl`/`prNumber` on pr_review tasks for HTTP responses. The columns
+ * stay null on the row — that's what keeps the reconciler from treating the
+ * external PR as our own — so we denormalize at the read boundary.
+ *
+ * Resolution order for pr_review rows: existing column value (legacy rows
+ * that predate the fix) → matching review_drafts row (root review tasks) →
+ * `metadata.prUrl`/`metadata.prNumber` (chat-turn tasks, which don't own a
+ * draft). Non-pr_review rows pass through unchanged.
+ */
+export async function hydratePrReviewPrUrls<T extends typeof tasks.$inferSelect>(
+  rows: T[],
+): Promise<T[]> {
+  const reviewIds = rows.filter((r) => r.taskType === "pr_review").map((r) => r.id);
+  if (reviewIds.length === 0) return rows;
+
+  const drafts = await db
+    .select({
+      taskId: reviewDrafts.taskId,
+      prUrl: reviewDrafts.prUrl,
+      prNumber: reviewDrafts.prNumber,
+    })
+    .from(reviewDrafts)
+    .where(
+      sql`${reviewDrafts.taskId} IN (${sql.join(
+        reviewIds.map((id) => sql`${id}`),
+        sql`, `,
+      )})`,
+    );
+
+  const byTaskId = new Map(drafts.map((d) => [d.taskId, d]));
+  return rows.map((r) => {
+    if (r.taskType !== "pr_review") return r;
+    if (r.prUrl) return r;
+    const d = byTaskId.get(r.id);
+    if (d) return { ...r, prUrl: d.prUrl, prNumber: d.prNumber };
+    const meta = r.metadata as { prUrl?: unknown; prNumber?: unknown } | null;
+    const metaPrUrl = typeof meta?.prUrl === "string" ? meta.prUrl : null;
+    const metaPrNumber = typeof meta?.prNumber === "number" ? meta.prNumber : null;
+    if (metaPrUrl) return { ...r, prUrl: metaPrUrl, prNumber: metaPrNumber };
+    return r;
+  });
+}
+
 export async function listTasks(opts?: {
   state?: string;
   limit?: number;
@@ -196,7 +240,8 @@ export async function searchTasks(opts: SearchTasksOpts) {
     nextCursor = Buffer.from(`${last.createdAt.toISOString()}|${last.id}`).toString("base64");
   }
 
-  return { tasks: items, nextCursor, hasMore };
+  const hydrated = await hydratePrReviewPrUrls(items);
+  return { tasks: hydrated, nextCursor, hasMore };
 }
 
 export async function transitionTask(

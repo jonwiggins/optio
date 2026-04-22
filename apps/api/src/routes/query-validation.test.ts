@@ -38,6 +38,7 @@ vi.mock("../services/task-service.js", () => ({
   transitionTask: vi.fn(),
   getAllTaskLogs: vi.fn().mockResolvedValue([]),
   forceRedoTask: vi.fn(),
+  hydratePrReviewPrUrls: async (rows: unknown[]) => rows,
 }));
 
 vi.mock("../services/dependency-service.js", () => ({

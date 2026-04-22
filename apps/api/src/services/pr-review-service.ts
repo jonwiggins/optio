@@ -215,11 +215,11 @@ export async function launchPrReview(input: {
     workspaceId: input.workspaceId ?? null,
   });
 
-  // Set taskType to pr_review
-  await db
-    .update(tasks)
-    .set({ taskType: "pr_review", prUrl: input.prUrl, prNumber })
-    .where(eq(tasks.id, task.id));
+  // Set taskType to pr_review. Deliberately do NOT persist prUrl/prNumber on
+  // the task row — those columns mean "the PR this task opened" for coding
+  // tasks, and the reconciler will try to auto-merge anything it finds there.
+  // The external PR being reviewed is tracked on review_drafts instead.
+  await db.update(tasks).set({ taskType: "pr_review" }).where(eq(tasks.id, task.id));
 
   // Create or promote review draft row
   const origin = input.origin ?? "manual";
@@ -703,10 +703,8 @@ export async function postReviewChat(input: {
     workspaceId: input.workspaceId ?? null,
   });
 
-  await db
-    .update(tasks)
-    .set({ taskType: "pr_review", prUrl: draft.prUrl, prNumber: draft.prNumber })
-    .where(eq(tasks.id, turnTask.id));
+  // See note in launchPrReview: prUrl/prNumber stay null on pr_review rows.
+  await db.update(tasks).set({ taskType: "pr_review" }).where(eq(tasks.id, turnTask.id));
 
   // Look up the repo config — needed for claudeModel override on resume.
   const { getRepoByUrl } = await import("./repo-service.js");
