@@ -6,8 +6,10 @@ import { usePageTitle } from "@/hooks/use-page-title";
 import { useWorkflowRunLogs } from "@/hooks/use-workflow-run-logs";
 import { LogViewer } from "@/components/log-viewer";
 import { TokenRefreshBanner } from "@/components/token-refresh-banner";
-import { StateBadge } from "@/components/state-badge";
-import { MetadataCard } from "@/components/metadata-card";
+import { DetailHeader } from "@/components/detail-header";
+import { PrStatusBar } from "@/components/pr-status-bar";
+import { WorkflowRunPipelineTimeline } from "@/components/workflow-run-pipeline-timeline";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { api } from "@/lib/api-client";
 import { classifyError } from "@optio/shared";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/utils";
@@ -20,18 +22,12 @@ import {
   RotateCcw,
   StopCircle,
   Clock,
-  DollarSign,
-  Hash,
   Bot,
-  Server,
+  Hash,
   ChevronDown,
   ChevronRight,
-  AlertTriangle,
-  CheckCircle2,
-  Timer,
+  AlertCircle,
   Braces,
-  FileText,
-  Activity,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -76,8 +72,9 @@ export default function WorkflowRunDetailPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"logs" | "output" | "params">("logs");
-  const [showParams, setShowParams] = useState(true);
+  const [showTimeline, setShowTimeline] = useState(true);
+  const [outputCollapsed, setOutputCollapsed] = useState(false);
+  const [paramsCollapsed, setParamsCollapsed] = useState(true);
 
   usePageTitle(run ? `Run ${run.id.slice(0, 8)}` : "Task Run");
 
@@ -103,15 +100,14 @@ export default function WorkflowRunDetailPage({
     refresh();
   }, [refresh]);
 
-  // Auto-refresh while active
   useEffect(() => {
     if (!isActive) return;
     const interval = setInterval(refresh, 5000);
     return () => clearInterval(interval);
   }, [isActive, refresh]);
 
-  // Logs hook
-  const logData = useWorkflowRunLogs(runId, isActive ?? false);
+  // Live log streaming via WebSocket — same hook contract as task/review pages.
+  const externalLogs = useWorkflowRunLogs(runId, isActive ?? false);
 
   const handleRetry = async () => {
     setActionLoading(true);
@@ -139,13 +135,11 @@ export default function WorkflowRunDetailPage({
     }
   };
 
-  // ── Loading / Error states ─────────────────────────────────────────────────
-
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20 text-text-muted">
+      <div className="flex items-center justify-center h-full text-text-muted">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
-        Loading job run...
+        Loading run...
       </div>
     );
   }
@@ -168,282 +162,267 @@ export default function WorkflowRunDetailPage({
     );
   }
 
-  // ── Computed values ─────────────────────────────────────────────────────────
-
   const classifiedError = run.errorMessage ? classifyError(run.errorMessage) : null;
   const duration = run.startedAt
     ? formatDuration(run.startedAt, run.finishedAt ?? undefined)
     : null;
   const canRetry = run.state === "failed";
   const canCancel = run.state === "running" || run.state === "queued";
+  const hasOutput = run.output && Object.keys(run.output).length > 0;
+  const hasParams = run.params && Object.keys(run.params).length > 0;
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-1.5 text-sm text-text-muted mb-4">
-        <Link href="/jobs" className="hover:text-text transition-colors">
-          Standalone
-        </Link>
-        <span>/</span>
-        <Link href={`/jobs/${workflowId}`} className="hover:text-text transition-colors">
-          {workflow?.name ?? "Task"}
-        </Link>
-        <span>/</span>
-        <span className="text-text">Run {run.id.slice(0, 8)}</span>
-      </div>
-
-      {/* Header */}
-      <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <StateBadge state={run.state} />
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">Run {run.id.slice(0, 8)}</h1>
-            <p className="text-sm text-text-muted mt-0.5">
-              Created {formatRelativeTime(run.createdAt)}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <div className="flex flex-col h-full">
+      <DetailHeader
+        title={`Run ${run.id.slice(0, 8)}`}
+        subtitle={
+          <Link
+            href={`/jobs/${workflowId}`}
+            className="inline-flex items-center gap-1 hover:text-primary"
+          >
+            <ArrowLeft className="w-3 h-3" />
+            {workflow?.name ?? "Standalone task"}
+          </Link>
+        }
+        state={run.state}
+        metaItems={
+          [
+            run.modelUsed ? (
+              <>
+                <Bot className="w-3 h-3" />
+                {run.modelUsed}
+              </>
+            ) : null,
+            duration ? (
+              <>
+                <Clock className="w-3 h-3" />
+                {duration}
+              </>
+            ) : (
+              <>
+                <Clock className="w-3 h-3" />
+                {formatRelativeTime(run.createdAt)}
+              </>
+            ),
+            run.retryCount > 0 ? (
+              <>
+                <RotateCcw className="w-3 h-3" />
+                retry {run.retryCount}
+              </>
+            ) : null,
+          ].filter(Boolean) as React.ReactNode[]
+        }
+        rightSlot={
           <button
-            onClick={() => refresh()}
-            disabled={actionLoading}
-            className="p-2 rounded-md hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
+            onClick={refresh}
+            className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted transition-colors"
             title="Refresh"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
-          {canRetry && (
-            <button
-              onClick={handleRetry}
-              disabled={actionLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm hover:bg-primary/10 text-text-muted hover:text-primary transition-colors"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Retry
-            </button>
-          )}
-          {canCancel && (
-            <button
-              onClick={handleCancel}
-              disabled={actionLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-muted hover:text-error hover:bg-error/10 transition-colors"
-            >
-              <StopCircle className="w-4 h-4" />
-              Cancel
-            </button>
-          )}
-        </div>
-      </div>
+        }
+        actions={
+          <>
+            {canRetry && (
+              <button
+                onClick={handleRetry}
+                disabled={actionLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors disabled:opacity-50"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Retry
+              </button>
+            )}
+            {canCancel && (
+              <button
+                onClick={handleCancel}
+                disabled={actionLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-error/10 text-error text-xs hover:bg-error/20 transition-colors disabled:opacity-50"
+              >
+                <StopCircle className="w-3 h-3" />
+                Cancel
+              </button>
+            )}
+          </>
+        }
+      />
 
-      {/* Active indicator */}
-      {isActive && (
-        <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-sm text-primary">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          Run is {run.state} — auto-refreshing
-        </div>
-      )}
-
-      {/* Metadata bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <MetadataCard icon={Timer} label="Duration" value={duration ?? "\u2014"} />
-        <MetadataCard
-          icon={DollarSign}
-          label="Cost"
-          value={run.costUsd ? `$${parseFloat(run.costUsd).toFixed(2)}` : "\u2014"}
-        />
-        <MetadataCard icon={Bot} label="Model" value={run.modelUsed ?? "\u2014"} />
-        <MetadataCard
-          icon={Hash}
-          label="Tokens"
-          value={
-            run.inputTokens != null && run.outputTokens != null
-              ? `${(run.inputTokens / 1000).toFixed(1)}k / ${(run.outputTokens / 1000).toFixed(1)}k`
-              : "\u2014"
-          }
-        />
-      </div>
-
-      {/* Secondary metadata */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <MetadataCard icon={Server} label="Pod" value={run.podName ?? "\u2014"} />
-        <MetadataCard
-          icon={Activity}
-          label="Session"
-          value={run.sessionId?.slice(0, 8) ?? "\u2014"}
-        />
-        <MetadataCard icon={RotateCcw} label="Retry Count" value={String(run.retryCount)} />
-        <MetadataCard
-          icon={Clock}
-          label="Started"
-          value={run.startedAt ? formatRelativeTime(run.startedAt) : "\u2014"}
-        />
-      </div>
-
-      {/* Auth-specific banner — matches the overview panel + normal task page */}
-      {classifiedError?.category === "auth" && (
-        <div className="mb-6">
-          <TokenRefreshBanner onSaved={refresh} />
-        </div>
-      )}
-
-      {/* Error panel (non-auth errors only — auth has its own rich banner above) */}
-      {classifiedError && classifiedError.category !== "auth" && (
-        <div className="mb-6 rounded-lg border border-error/30 bg-error/5 p-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-error shrink-0 mt-0.5" />
-            <div className="min-w-0 flex-1">
-              <h3 className="text-sm font-medium text-error">{classifiedError.title}</h3>
-              <p className="text-sm text-text-muted mt-1">{classifiedError.description}</p>
-              {classifiedError.remedy && (
-                <div className="mt-2 text-xs text-text-muted bg-bg rounded-md p-2 font-mono whitespace-pre-wrap border border-border/30">
-                  {classifiedError.remedy}
-                </div>
-              )}
-              <div className="flex items-center gap-3 mt-2 text-xs text-text-muted">
-                <span className="capitalize">{classifiedError.category}</span>
-                {classifiedError.retryable && (
-                  <span className="text-primary flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" /> Retryable
+      {/* Status bar — hosts the Timeline toggle on the right and surfaces
+          glanceable run economics (cost, tokens) on the left when present. */}
+      <div className="shrink-0 border-b border-border bg-bg-card px-4 py-2">
+        <div className="max-w-5xl mx-auto">
+          <PrStatusBar
+            actions={
+              <>
+                {run.costUsd && (
+                  <span className="text-text-muted">
+                    Cost: ${parseFloat(run.costUsd).toFixed(4)}
                   </span>
                 )}
+                {run.inputTokens != null && run.outputTokens != null && (
+                  <span className="text-text-muted">
+                    {(run.inputTokens / 1000).toFixed(1)}k / {(run.outputTokens / 1000).toFixed(1)}k
+                  </span>
+                )}
+                <button
+                  onClick={() => setShowTimeline(!showTimeline)}
+                  className={cn(
+                    "px-2 py-0.5 rounded text-xs transition-colors",
+                    showTimeline
+                      ? "bg-primary/10 text-primary"
+                      : "text-text-muted hover:bg-bg-hover",
+                  )}
+                >
+                  Timeline
+                </button>
+              </>
+            }
+          />
+        </div>
+      </div>
+
+      {/* Auth banner — same recovery surface as task/review pages */}
+      {classifiedError?.category === "auth" && (
+        <div className="shrink-0 border-b border-border bg-bg-card">
+          <div className="max-w-5xl mx-auto px-4 py-3">
+            <TokenRefreshBanner onSaved={refresh} />
+          </div>
+        </div>
+      )}
+
+      {/* Classified error banner — matches /tasks/[id] and /reviews/[id] */}
+      {classifiedError && classifiedError.category !== "auth" && (
+        <div className="shrink-0 border-b border-error/20 bg-error/5">
+          <div className="max-w-5xl mx-auto px-4 py-3">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-error shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <div>
+                  <h3 className="text-sm font-medium text-error">{classifiedError.title}</h3>
+                  <p className="text-xs text-error/70 mt-0.5">{classifiedError.description}</p>
+                </div>
+                {classifiedError.remedy && (
+                  <div className="p-2.5 rounded-md bg-bg/50 border border-border">
+                    <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
+                      Suggested fix
+                    </div>
+                    <pre className="text-xs text-text/80 whitespace-pre-wrap font-mono">
+                      {classifiedError.remedy}
+                    </pre>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  {classifiedError.retryable && canRetry && (
+                    <button
+                      onClick={handleRetry}
+                      disabled={actionLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      Retry
+                    </button>
+                  )}
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-error/10 text-error">
+                    {classifiedError.category}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-          {run.errorMessage && (
-            <details className="mt-3">
-              <summary className="text-xs text-text-muted cursor-pointer hover:text-text">
-                Raw error message
-              </summary>
-              <pre className="mt-2 text-xs text-error/80 bg-bg rounded-md p-2 overflow-x-auto whitespace-pre-wrap border border-border/30">
-                {run.errorMessage}
-              </pre>
-            </details>
+        </div>
+      )}
+
+      {/* Main content: log column + timeline sidebar — mirrors /tasks/[id] */}
+      <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* Output widget — collapsible, only when present */}
+          {hasOutput && (
+            <div className="shrink-0 border-b border-border bg-bg-card">
+              <button
+                onClick={() => setOutputCollapsed((v) => !v)}
+                className="w-full flex items-center gap-2 px-4 py-2 text-xs hover:bg-bg-hover transition-colors"
+              >
+                {outputCollapsed ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                )}
+                <Braces className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                <span className="font-medium text-text-muted">Output</span>
+                <span className="text-[10px] text-text-muted/70">
+                  {Object.keys(run.output ?? {}).length}{" "}
+                  {Object.keys(run.output ?? {}).length === 1 ? "field" : "fields"}
+                </span>
+              </button>
+              {!outputCollapsed && (
+                <div className="px-4 pb-3 max-h-[40vh] overflow-y-auto">
+                  <pre className="text-xs text-text/80 bg-bg rounded-md p-3 overflow-x-auto whitespace-pre-wrap border border-border/30 font-mono">
+                    {JSON.stringify(run.output, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
           )}
+
+          {/* Params widget — collapsible, only when present, default collapsed */}
+          {hasParams && (
+            <div className="shrink-0 border-b border-border bg-bg-card">
+              <button
+                onClick={() => setParamsCollapsed((v) => !v)}
+                className="w-full flex items-center gap-2 px-4 py-2 text-xs hover:bg-bg-hover transition-colors"
+              >
+                {paramsCollapsed ? (
+                  <ChevronRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                )}
+                <Hash className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                <span className="font-medium text-text-muted">Parameters</span>
+                <span className="text-[10px] text-text-muted/70">
+                  {Object.keys(run.params ?? {}).length}
+                </span>
+              </button>
+              {!paramsCollapsed && (
+                <div className="px-4 pb-3 space-y-1.5 max-h-[30vh] overflow-y-auto">
+                  {Object.entries(run.params ?? {}).map(([key, value]) => (
+                    <div key={key} className="flex items-start gap-3 text-xs">
+                      <span className="text-text-muted font-mono shrink-0 pt-0.5 min-w-[120px]">
+                        {key}
+                      </span>
+                      <span className="text-text font-mono break-all">
+                        {typeof value === "string" ? value : JSON.stringify(value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Logs */}
+          <div className="flex-1 overflow-hidden">
+            <ErrorBoundary label="Workflow run log viewer">
+              <LogViewer externalLogs={externalLogs} />
+            </ErrorBoundary>
+          </div>
         </div>
-      )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-4 border-b border-border">
-        {(
-          [
-            { key: "logs", label: "Logs", icon: FileText },
-            { key: "output", label: "Output", icon: Braces },
-            { key: "params", label: "Parameters", icon: Hash },
-          ] as const
-        ).map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key)}
-            className={cn(
-              "flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-              activeTab === key
-                ? "border-primary text-text"
-                : "border-transparent text-text-muted hover:text-text",
-            )}
-          >
-            <Icon className="w-3.5 h-3.5" />
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      {activeTab === "logs" && (
-        <div className="rounded-lg border border-border/50 overflow-hidden">
-          <LogViewer
-            externalLogs={{
-              logs: logData.logs,
-              connected: logData.connected,
-              capped: logData.capped,
-              clear: logData.clear,
-            }}
-          />
-        </div>
-      )}
-
-      {activeTab === "output" && <OutputPanel output={run.output} />}
-
-      {activeTab === "params" && (
-        <ParamsPanel params={run.params} showParams={showParams} setShowParams={setShowParams} />
-      )}
-    </div>
-  );
-}
-
-// ── Output panel ────────────────────────────────────────────────────────────
-
-function OutputPanel({ output }: { output: Record<string, unknown> | null }) {
-  if (!output) {
-    return (
-      <div className="text-center py-8 text-text-muted border border-dashed border-border rounded-lg">
-        <Braces className="w-6 h-6 mx-auto mb-2 opacity-50" />
-        <p className="text-sm">No output data</p>
-        <p className="text-xs mt-1">Output will appear here when the run completes.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border border-border/50 bg-bg-card p-4">
-      <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-        <Braces className="w-4 h-4 text-text-muted" />
-        Run Output
-      </h3>
-      <pre className="text-xs text-text-muted bg-bg rounded-md p-3 overflow-x-auto whitespace-pre-wrap border border-border/30 max-h-[500px] overflow-y-auto">
-        {JSON.stringify(output, null, 2)}
-      </pre>
-    </div>
-  );
-}
-
-// ── Params panel ────────────────────────────────────────────────────────────
-
-function ParamsPanel({
-  params,
-  showParams,
-  setShowParams,
-}: {
-  params: Record<string, unknown> | null;
-  showParams: boolean;
-  setShowParams: (v: boolean) => void;
-}) {
-  if (!params || Object.keys(params).length === 0) {
-    return (
-      <div className="text-center py-8 text-text-muted border border-dashed border-border rounded-lg">
-        <Hash className="w-6 h-6 mx-auto mb-2 opacity-50" />
-        <p className="text-sm">No parameters</p>
-        <p className="text-xs mt-1">This run was started without any parameters.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border border-border/50 bg-bg-card p-4">
-      <button
-        onClick={() => setShowParams(!showParams)}
-        className="text-sm font-medium flex items-center gap-2 w-full text-left"
-      >
-        {showParams ? (
-          <ChevronDown className="w-4 h-4 text-text-muted" />
-        ) : (
-          <ChevronRight className="w-4 h-4 text-text-muted" />
-        )}
-        <span className="flex-1">Run Parameters</span>
-        <span className="text-xs text-text-muted">{Object.keys(params).length} params</span>
-      </button>
-      {showParams && (
-        <div className="mt-3 space-y-2">
-          {Object.entries(params).map(([key, value]) => (
-            <div key={key} className="flex items-start gap-3 text-sm">
-              <span className="text-text-muted font-mono text-xs shrink-0 pt-0.5">{key}</span>
-              <span className="text-text font-mono text-xs break-all">
-                {typeof value === "string" ? value : JSON.stringify(value)}
+        {/* Timeline sidebar — mirrors /tasks/[id] and /reviews/[id] */}
+        {showTimeline && (
+          <div className="hidden md:flex w-80 shrink-0 border-l border-border overflow-auto bg-bg-card flex-col">
+            <div className="flex items-center gap-1 p-2 border-b border-border">
+              <span className="px-2.5 py-1 rounded text-xs bg-primary/10 text-primary font-medium">
+                Pipeline
               </span>
             </div>
-          ))}
-        </div>
-      )}
+            <div className="flex-1 overflow-auto p-3">
+              <ErrorBoundary label="Workflow run pipeline timeline">
+                <WorkflowRunPipelineTimeline run={run} />
+              </ErrorBoundary>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

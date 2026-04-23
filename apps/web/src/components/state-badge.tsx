@@ -109,6 +109,19 @@ const STATE_CONFIG: Record<
     dotColor: "bg-success",
     glowClass: "badge-glow-success",
   },
+  // Workflow blueprint enablement states
+  enabled: {
+    label: "Enabled",
+    color: "text-success",
+    dotColor: "bg-success",
+    glowClass: "badge-glow-success",
+  },
+  disabled: {
+    label: "Disabled",
+    color: "text-text-muted",
+    dotColor: "bg-text-muted",
+    glowClass: "badge-glow-muted",
+  },
 };
 
 export function StateBadge({

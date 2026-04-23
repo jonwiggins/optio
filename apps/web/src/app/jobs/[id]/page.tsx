@@ -22,16 +22,15 @@ import {
   Zap,
   Webhook,
   Calendar,
-  CheckCircle2,
   XCircle,
   CircleDot,
-  Timer,
   Pencil,
   Copy,
   CopyPlus,
 } from "lucide-react";
 import { RunWorkflowDialog } from "@/components/run-workflow-dialog";
 import { StateBadge } from "@/components/state-badge";
+import { DetailHeader } from "@/components/detail-header";
 import { MetadataCard } from "@/components/metadata-card";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -232,169 +231,164 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
   const successRate = runs.length > 0 ? Math.round((completedRuns / runs.length) * 100) : 0;
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <Link
-        href="/jobs"
-        className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Back to Standalone
-      </Link>
-
-      <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <div
-            className={cn(
-              "w-2.5 h-2.5 rounded-full shrink-0",
-              workflow.enabled ? "bg-green-500" : "bg-zinc-400",
-            )}
-          />
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{workflow.name}</h1>
-            {workflow.description && (
-              <p className="text-sm text-text-muted mt-0.5">{workflow.description}</p>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowRunDialog(true)}
-            disabled={!workflow.enabled || actionLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-primary text-white hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title={workflow.enabled ? "Run this task" : "Task is disabled"}
-          >
-            <Play className="w-4 h-4" /> Run
-          </button>
-          <Link
-            href={`/jobs/${id}/edit`}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
-          >
-            <Pencil className="w-4 h-4" /> Edit
+    <>
+      <DetailHeader
+        title={workflow.name}
+        subtitle={
+          <Link href="/jobs" className="inline-flex items-center gap-1 hover:text-primary">
+            <ArrowLeft className="w-3 h-3" />
+            Standalone
           </Link>
-          <button
-            onClick={handleDuplicate}
-            disabled={actionLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
-            title="Duplicate workflow"
-          >
-            <CopyPlus className="w-4 h-4" /> Duplicate
-          </button>
+        }
+        state={workflow.enabled ? "enabled" : "disabled"}
+        metaItems={
+          workflow.description
+            ? [<span className="text-text-muted">{workflow.description}</span>]
+            : undefined
+        }
+        rightSlot={
           <button
             onClick={() => refresh()}
             disabled={actionLoading}
-            className="p-2 rounded-md hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
+            className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted transition-colors"
             title="Refresh"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
-          <button
-            onClick={handleToggleEnabled}
-            disabled={actionLoading}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors",
-              workflow.enabled
-                ? "hover:bg-warning/10 text-text-muted hover:text-warning"
-                : "hover:bg-success/10 text-text-muted hover:text-success",
-            )}
-          >
-            {workflow.enabled ? (
-              <>
-                <Pause className="w-4 h-4" /> Disable
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" /> Enable
-              </>
-            )}
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={actionLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-text-muted hover:text-error hover:bg-error/10 transition-colors"
-          >
-            <Trash2 className="w-4 h-4" /> Delete
-          </button>
+        }
+        actions={
+          <>
+            <button
+              onClick={() => setShowRunDialog(true)}
+              disabled={!workflow.enabled || actionLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title={workflow.enabled ? "Run this task" : "Task is disabled"}
+            >
+              <Play className="w-3 h-3" /> Run
+            </button>
+            <Link
+              href={`/jobs/${id}/edit`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg text-text-muted text-xs hover:bg-bg-hover hover:text-text transition-colors"
+            >
+              <Pencil className="w-3 h-3" /> Edit
+            </Link>
+            <button
+              onClick={handleDuplicate}
+              disabled={actionLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg text-text-muted text-xs hover:bg-bg-hover hover:text-text transition-colors"
+              title="Duplicate workflow"
+            >
+              <CopyPlus className="w-3 h-3" /> Duplicate
+            </button>
+            <button
+              onClick={handleToggleEnabled}
+              disabled={actionLoading}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors",
+                workflow.enabled
+                  ? "bg-warning/10 text-warning hover:bg-warning/20"
+                  : "bg-success/10 text-success hover:bg-success/20",
+              )}
+            >
+              {workflow.enabled ? (
+                <>
+                  <Pause className="w-3 h-3" /> Disable
+                </>
+              ) : (
+                <>
+                  <Play className="w-3 h-3" /> Enable
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={actionLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-error/10 text-error text-xs hover:bg-error/20 transition-colors"
+            >
+              <Trash2 className="w-3 h-3" /> Delete
+            </button>
+          </>
+        }
+      />
+
+      <div className="p-6 max-w-5xl mx-auto">
+        {/* Stats bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <MetadataCard icon={Hash} label="Total Runs" value={workflow.runCount} size="lg" />
+          <MetadataCard
+            icon={Activity}
+            label="Success Rate"
+            value={runs.length > 0 ? `${successRate}%` : "\u2014"}
+            size="lg"
+          />
+          <MetadataCard
+            icon={DollarSign}
+            label="Total Cost"
+            value={`$${parseFloat(workflow.totalCostUsd).toFixed(2)}`}
+            size="lg"
+          />
+          <MetadataCard
+            icon={Clock}
+            label="Last Run"
+            value={workflow.lastRunAt ? formatRelativeTime(workflow.lastRunAt) : "\u2014"}
+            size="lg"
+          />
         </div>
-      </div>
 
-      {/* Stats bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <MetadataCard icon={Hash} label="Total Runs" value={workflow.runCount} size="lg" />
-        <MetadataCard
-          icon={Activity}
-          label="Success Rate"
-          value={runs.length > 0 ? `${successRate}%` : "\u2014"}
-          size="lg"
-        />
-        <MetadataCard
-          icon={DollarSign}
-          label="Total Cost"
-          value={`$${parseFloat(workflow.totalCostUsd).toFixed(2)}`}
-          size="lg"
-        />
-        <MetadataCard
-          icon={Clock}
-          label="Last Run"
-          value={workflow.lastRunAt ? formatRelativeTime(workflow.lastRunAt) : "\u2014"}
-          size="lg"
-        />
-      </div>
+        {/* Active runs indicator */}
+        {activeRuns > 0 && (
+          <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-sm text-primary">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            {activeRuns} run{activeRuns !== 1 ? "s" : ""} active — auto-refreshing
+          </div>
+        )}
 
-      {/* Active runs indicator */}
-      {activeRuns > 0 && (
-        <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-sm text-primary">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          {activeRuns} run{activeRuns !== 1 ? "s" : ""} active — auto-refreshing
+        {/* Tabs */}
+        <div className="flex gap-1 mb-4 border-b border-border">
+          {(["runs", "triggers", "config"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+                activeTab === tab
+                  ? "border-primary text-text"
+                  : "border-transparent text-text-muted hover:text-text",
+              )}
+            >
+              {tab === "runs" && `Runs (${runs.length})`}
+              {tab === "triggers" && `Triggers (${triggers.length})`}
+              {tab === "config" && "Configuration"}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-4 border-b border-border">
-        {(["runs", "triggers", "config"] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={cn(
-              "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-              activeTab === tab
-                ? "border-primary text-text"
-                : "border-transparent text-text-muted hover:text-text",
-            )}
-          >
-            {tab === "runs" && `Runs (${runs.length})`}
-            {tab === "triggers" && `Triggers (${triggers.length})`}
-            {tab === "config" && "Configuration"}
-          </button>
-        ))}
+        {/* Tab content */}
+        {activeTab === "runs" && (
+          <RunsTable
+            runs={runs}
+            workflowId={id}
+            onRunClick={() => workflow.enabled && setShowRunDialog(true)}
+            canRun={workflow.enabled}
+          />
+        )}
+        {activeTab === "triggers" && <TriggersList triggers={triggers} workflowId={id} />}
+        {activeTab === "config" && (
+          <ConfigPanel workflow={workflow} showPrompt={showPrompt} setShowPrompt={setShowPrompt} />
+        )}
+
+        {/* Run dialog */}
+        {showRunDialog && (
+          <RunWorkflowDialog
+            workflowId={workflow.id}
+            workflowName={workflow.name}
+            paramsSchema={workflow.paramsSchema}
+            onClose={() => setShowRunDialog(false)}
+            onRun={refresh}
+          />
+        )}
       </div>
-
-      {/* Tab content */}
-      {activeTab === "runs" && (
-        <RunsTable
-          runs={runs}
-          workflowId={id}
-          onRunClick={() => workflow.enabled && setShowRunDialog(true)}
-          canRun={workflow.enabled}
-        />
-      )}
-      {activeTab === "triggers" && <TriggersList triggers={triggers} workflowId={id} />}
-      {activeTab === "config" && (
-        <ConfigPanel workflow={workflow} showPrompt={showPrompt} setShowPrompt={setShowPrompt} />
-      )}
-
-      {/* Run dialog */}
-      {showRunDialog && (
-        <RunWorkflowDialog
-          workflowId={workflow.id}
-          workflowName={workflow.name}
-          paramsSchema={workflow.paramsSchema}
-          onClose={() => setShowRunDialog(false)}
-          onRun={refresh}
-        />
-      )}
-    </div>
+    </>
   );
 }
 
