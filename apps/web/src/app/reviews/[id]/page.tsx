@@ -396,17 +396,26 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         }
       />
 
-      {(prStatus?.checksStatus || prStatus?.reviewStatus || prStatus?.prState) && (
-        <div className="shrink-0 border-b border-border bg-bg-card px-4 py-3">
-          <div className="max-w-5xl mx-auto">
-            <PrStatusBar
-              checksStatus={prStatus?.checksStatus}
-              reviewStatus={prStatus?.reviewStatus}
-              prState={prStatus?.prState}
-            />
-          </div>
+      <div className="shrink-0 border-b border-border bg-bg-card px-4 py-2">
+        <div className="max-w-5xl mx-auto">
+          <PrStatusBar
+            checksStatus={prStatus?.checksStatus}
+            reviewStatus={prStatus?.reviewStatus}
+            prState={prStatus?.prState}
+            actions={
+              <button
+                onClick={() => setShowTimeline(!showTimeline)}
+                className={cn(
+                  "px-2 py-0.5 rounded text-xs transition-colors",
+                  showTimeline ? "bg-primary/10 text-primary" : "text-text-muted hover:bg-bg-hover",
+                )}
+              >
+                Timeline
+              </button>
+            }
+          />
         </div>
-      )}
+      </div>
 
       {review.errorMessage &&
         review.state === "failed" &&
@@ -752,19 +761,6 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
               </div>
             </div>
           )}
-
-          {/* Toolbar (timeline toggle) — same shape as the task page */}
-          <div className="shrink-0 flex items-center justify-end px-4 py-1 border-b border-border bg-bg">
-            <button
-              onClick={() => setShowTimeline(!showTimeline)}
-              className={cn(
-                "px-2 py-0.5 rounded text-xs transition-colors",
-                showTimeline ? "bg-primary/10 text-primary" : "text-text-muted hover:bg-bg-hover",
-              )}
-            >
-              Timeline
-            </button>
-          </div>
 
           {/* Logs */}
           <div className="flex-1 overflow-hidden">
