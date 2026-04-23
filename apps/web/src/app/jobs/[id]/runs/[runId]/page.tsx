@@ -74,7 +74,7 @@ export default function WorkflowRunDetailPage({
   const [actionLoading, setActionLoading] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
   const [outputCollapsed, setOutputCollapsed] = useState(false);
-  const [paramsCollapsed, setParamsCollapsed] = useState(true);
+  const [paramsCollapsed, setParamsCollapsed] = useState(false);
 
   usePageTitle(run ? `Run ${run.id.slice(0, 8)}` : "Task Run");
 
@@ -335,65 +335,69 @@ export default function WorkflowRunDetailPage({
       {/* Main content: log column + timeline sidebar — mirrors /tasks/[id] */}
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* Output widget — collapsible, only when present */}
-          {hasOutput && (
-            <div className="shrink-0 border-b border-border bg-bg-card">
-              <button
-                onClick={() => setOutputCollapsed((v) => !v)}
-                className="w-full flex items-center gap-2 px-4 py-2 text-xs hover:bg-bg-hover transition-colors"
-              >
-                {outputCollapsed ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                )}
-                <Braces className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                <span className="font-medium text-text-muted">Output</span>
-                <span className="text-[10px] text-text-muted/70">
-                  {Object.keys(run.output ?? {}).length}{" "}
-                  {Object.keys(run.output ?? {}).length === 1 ? "field" : "fields"}
-                </span>
-              </button>
-              {!outputCollapsed && (
-                <div className="px-4 pb-3 max-h-[40vh] overflow-y-auto">
-                  <pre className="text-xs text-text/80 bg-bg rounded-md p-3 overflow-x-auto whitespace-pre-wrap border border-border/30 font-mono">
-                    {JSON.stringify(run.output, null, 2)}
-                  </pre>
+          {/* Output + Params widgets — side-by-side when both present so the
+              params row stays glanceable next to the run's structured output.
+              Each is independently collapsible. */}
+          {(hasOutput || hasParams) && (
+            <div className="shrink-0 border-b border-border bg-bg-card grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-border">
+              {hasParams && (
+                <div className="min-w-0">
+                  <button
+                    onClick={() => setParamsCollapsed((v) => !v)}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-xs hover:bg-bg-hover transition-colors"
+                  >
+                    {paramsCollapsed ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                    )}
+                    <Hash className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                    <span className="font-medium text-text-muted">Parameters</span>
+                    <span className="text-[10px] text-text-muted/70">
+                      {Object.keys(run.params ?? {}).length}
+                    </span>
+                  </button>
+                  {!paramsCollapsed && (
+                    <div className="px-4 pb-3 space-y-1.5 max-h-[40vh] overflow-y-auto">
+                      {Object.entries(run.params ?? {}).map(([key, value]) => (
+                        <div key={key} className="flex items-start gap-3 text-xs">
+                          <span className="text-text-muted font-mono shrink-0 pt-0.5 min-w-[100px]">
+                            {key}
+                          </span>
+                          <span className="text-text font-mono break-all">
+                            {typeof value === "string" ? value : JSON.stringify(value)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Params widget — collapsible, only when present, default collapsed */}
-          {hasParams && (
-            <div className="shrink-0 border-b border-border bg-bg-card">
-              <button
-                onClick={() => setParamsCollapsed((v) => !v)}
-                className="w-full flex items-center gap-2 px-4 py-2 text-xs hover:bg-bg-hover transition-colors"
-              >
-                {paramsCollapsed ? (
-                  <ChevronRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                )}
-                <Hash className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                <span className="font-medium text-text-muted">Parameters</span>
-                <span className="text-[10px] text-text-muted/70">
-                  {Object.keys(run.params ?? {}).length}
-                </span>
-              </button>
-              {!paramsCollapsed && (
-                <div className="px-4 pb-3 space-y-1.5 max-h-[30vh] overflow-y-auto">
-                  {Object.entries(run.params ?? {}).map(([key, value]) => (
-                    <div key={key} className="flex items-start gap-3 text-xs">
-                      <span className="text-text-muted font-mono shrink-0 pt-0.5 min-w-[120px]">
-                        {key}
-                      </span>
-                      <span className="text-text font-mono break-all">
-                        {typeof value === "string" ? value : JSON.stringify(value)}
-                      </span>
+              {hasOutput && (
+                <div className="min-w-0">
+                  <button
+                    onClick={() => setOutputCollapsed((v) => !v)}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-xs hover:bg-bg-hover transition-colors"
+                  >
+                    {outputCollapsed ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                    )}
+                    <Braces className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                    <span className="font-medium text-text-muted">Output</span>
+                    <span className="text-[10px] text-text-muted/70">
+                      {Object.keys(run.output ?? {}).length}{" "}
+                      {Object.keys(run.output ?? {}).length === 1 ? "field" : "fields"}
+                    </span>
+                  </button>
+                  {!outputCollapsed && (
+                    <div className="px-4 pb-3 max-h-[40vh] overflow-y-auto">
+                      <pre className="text-xs text-text/80 bg-bg rounded-md p-3 overflow-x-auto whitespace-pre-wrap border border-border/30 font-mono">
+                        {JSON.stringify(run.output, null, 2)}
+                      </pre>
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>
