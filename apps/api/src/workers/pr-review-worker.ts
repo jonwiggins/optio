@@ -619,12 +619,17 @@ export function startPrReviewWorker() {
           await transitionRun(runId, PrReviewRunState.FAILED, {
             errorMessage: result.error ?? "Agent failed",
           });
-          await prReviewService.transitionPrReview(
-            run.prReviewId,
-            PrReviewState.FAILED,
-            "run_failed",
-            { message: result.error ?? "Agent run failed", runId },
-          );
+          // Chat runs are follow-up turns on an already-produced draft; their
+          // failure is a conversational hiccup, not grounds to invalidate the
+          // review. Only initial/rereview runs flip the parent to FAILED.
+          if (run.kind !== "chat") {
+            await prReviewService.transitionPrReview(
+              run.prReviewId,
+              PrReviewState.FAILED,
+              "run_failed",
+              { message: result.error ?? "Agent run failed", runId },
+            );
+          }
         }
 
         await enqueueReconcile(
@@ -635,12 +640,14 @@ export function startPrReviewWorker() {
         log.error({ err }, "PR review run failed");
         const msg = err instanceof Error ? err.message : String(err);
         await transitionRun(runId, PrReviewRunState.FAILED, { errorMessage: msg }).catch(() => {});
-        await prReviewService
-          .transitionPrReview(run.prReviewId, PrReviewState.FAILED, "worker_exception", {
-            message: msg,
-            runId,
-          })
-          .catch(() => {});
+        if (run.kind !== "chat") {
+          await prReviewService
+            .transitionPrReview(run.prReviewId, PrReviewState.FAILED, "worker_exception", {
+              message: msg,
+              runId,
+            })
+            .catch(() => {});
+        }
       } finally {
         if (repoPodId) {
           await repoPool.releaseRepoPodTask(repoPodId).catch(() => {});

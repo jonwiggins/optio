@@ -13,7 +13,8 @@ import { LogViewer } from "@/components/log-viewer";
 import { DetailHeader } from "@/components/detail-header";
 import { StatePipelineStrip } from "@/components/state-pipeline-strip";
 import { PrStatusBar } from "@/components/pr-status-bar";
-import { ChatTranscript, ChatComposer, type ChatMessage } from "@/components/chat-box";
+import { ChatComposer } from "@/components/chat-box";
+import type { UserMessage } from "@/components/log-viewer";
 import { ReviewPipelineTimeline } from "@/components/review-pipeline-timeline";
 import {
   Loader2,
@@ -81,7 +82,10 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   const [loading, setLoading] = useState(true);
   const [runs, setRuns] = useState<any[]>([]);
   const [prStatus, setPrStatus] = useState<any>(null);
-  const [chat, setChat] = useState<ChatMessage[]>([]);
+  // User-sent chat turns, rendered inline in the log stream via LogViewer's
+  // userMessages prop. Hydrated from the persisted chat history on load so
+  // past user turns still appear after a refresh.
+  const [userMessages, setUserMessages] = useState<UserMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const [showTimeline, setShowTimeline] = useState(true);
@@ -124,10 +128,25 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
           .catch(() => {});
       }
 
+      // Hydrate inline user messages from persisted chat history (user role
+      // only — assistant replies live in the log stream already).
       if (["ready", "stale", "submitted"].includes(r.review.state)) {
         api
           .listPrReviewChat(id)
-          .then((res) => setChat(res.messages))
+          .then((res) => {
+            setUserMessages((prev) => {
+              // Don't clobber locally-sent messages whose IDs start with "local-".
+              const localOnly = prev.filter((m) => m.timestamp.startsWith("local-"));
+              const hydrated: UserMessage[] = res.messages
+                .filter((m) => m.role === "user")
+                .map((m) => ({
+                  text: m.content,
+                  timestamp: m.createdAt,
+                  status: "sent" as const,
+                }));
+              return [...hydrated, ...localOnly];
+            });
+          })
           .catch(() => {});
       }
     } catch (err: any) {
@@ -251,25 +270,26 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   const handleSendChat = async () => {
     if (!chatInput.trim() || chatSending) return;
     const msg = chatInput.trim();
+    const sentAt = new Date().toISOString();
     setChatInput("");
-    setChat((prev) => [
-      ...prev,
-      {
-        id: `local-${Date.now()}`,
-        role: "user",
-        content: msg,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
+    setUserMessages((prev) => [...prev, { text: msg, timestamp: sentAt, status: "sending" }]);
     setChatSending(true);
     try {
       await api.postPrReviewChat(id, msg);
-      toast.success("Sent to agent");
+      setUserMessages((prev) =>
+        prev.map((m) =>
+          m.text === msg && m.timestamp === sentAt && m.status === "sending"
+            ? { ...m, status: "sent" }
+            : m,
+        ),
+      );
+      // Refresh the review periodically so state transitions (and any verdict
+      // patch the agent makes during chat) surface quickly. The assistant's
+      // textual reply shows up in the log stream.
       const start = Date.now();
       const tick = setInterval(async () => {
         const res = await api.listPrReviewChat(id).catch(() => null);
         if (res) {
-          setChat(res.messages);
           const hasAssistantReply = res.messages.some(
             (m) => m.role === "assistant" && new Date(m.createdAt).getTime() > start,
           );
@@ -281,6 +301,13 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         }
       }, 3000);
     } catch (err: any) {
+      setUserMessages((prev) =>
+        prev.map((m) =>
+          m.text === msg && m.timestamp === sentAt && m.status === "sending"
+            ? { ...m, status: "failed" }
+            : m,
+        ),
+      );
       toast.error(err.message || "Failed to send");
       setChatSending(false);
     }
@@ -765,14 +792,16 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
           {/* Logs */}
           <div className="flex-1 overflow-hidden">
             <ErrorBoundary label="Review log viewer">
-              <LogViewer externalLogs={externalLogs} />
+              <LogViewer externalLogs={externalLogs} userMessages={userMessages} />
             </ErrorBoundary>
           </div>
 
-          {/* Chat composer at the bottom — only when the agent has produced a draft */}
+          {/* Chat composer at the bottom — only when the agent has produced a
+              draft. User turns render inline in the log stream above (via
+              LogViewer's userMessages), and the agent's reply comes back as
+              part of the chat run's log output. */}
           {hasDraft && (
             <div className="shrink-0 border-t border-border bg-bg-card px-4 py-2.5">
-              <ChatTranscript messages={chat} pending={chatSending} />
               <ChatComposer
                 value={chatInput}
                 onChange={setChatInput}
