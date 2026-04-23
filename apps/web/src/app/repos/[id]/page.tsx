@@ -16,6 +16,8 @@ import {
   Lock,
   Globe,
   GitPullRequest,
+  Eye,
+  Bot,
   ChevronDown,
   ChevronRight,
   Terminal,
@@ -30,6 +32,15 @@ import { formatRelativeTime, formatDuration } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { SharedDirectoriesSection } from "@/components/shared-directories-section";
+
+const AGENT_TABS = [
+  { value: "claude-code", label: "Claude Code" },
+  { value: "codex", label: "OpenAI Codex" },
+  { value: "copilot", label: "GitHub Copilot" },
+  { value: "opencode", label: "OpenCode" },
+  { value: "gemini", label: "Google Gemini" },
+  { value: "openclaw", label: "OpenClaw" },
+] as const;
 
 export default function RepoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -48,6 +59,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [autoMerge, setAutoMerge] = useState(false);
   const [cautiousMode, setCautiousMode] = useState(false);
   const [defaultAgentType, setDefaultAgentType] = useState("claude-code");
+  const [activeAgentTab, setActiveAgentTab] = useState("claude-code");
   const [promptOverride, setPromptOverride] = useState("");
   const [useCustomPrompt, setUseCustomPrompt] = useState(false);
   const [defaultBranch, setDefaultBranch] = useState("main");
@@ -132,6 +144,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setAutoMerge(r.autoMerge);
         setCautiousMode(r.cautiousMode ?? false);
         setDefaultAgentType(r.defaultAgentType ?? "claude-code");
+        setActiveAgentTab(r.defaultAgentType ?? "claude-code");
         setAutoResume(r.autoResume ?? false);
         setPlanningModeEnabled(r.planningModeEnabled ?? false);
         setMaxConcurrentTasks(r.maxConcurrentTasks ?? 2);
@@ -667,10 +680,12 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
       <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-0">
         <div className="flex items-center gap-2 mb-1">
           <GitPullRequest className="w-4 h-4 text-text-muted" />
-          <h2 className="text-sm font-medium">PR Lifecycle</h2>
+          <h2 className="text-sm font-medium">PR Lifecycle (Optio-opened PRs)</h2>
         </div>
         <p className="text-xs text-text-muted mb-4">
-          Configure what happens after the coding agent opens a pull request.
+          Configure what happens after an Optio coding task opens a pull request. These settings do
+          not apply to PRs opened by humans or other bots — see{" "}
+          <span className="text-text">External PR Review</span> below.
         </p>
 
         {/* Cautious Mode */}
@@ -732,7 +747,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               }}
               className="w-4 h-4 rounded"
             />
-            <span className="text-sm">Enable automatic code review</span>
+            <span className="text-sm">Enable automatic review of Optio-opened PRs</span>
           </label>
 
           {reviewEnabled && (
@@ -878,122 +893,6 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                   </div>
                 )}
               </div>
-
-              {/* External PR auto-review */}
-              <div className="mt-4 pt-4 border-t border-border/50 space-y-3">
-                <div>
-                  <h4 className="text-sm font-medium mb-1">External PR auto-review</h4>
-                  <p className="text-xs text-text-muted">
-                    Review pull requests on this repo that were NOT opened by an Optio task. Optio
-                    polls the platform for open PRs and spawns a review agent per the selected mode.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs text-text-muted mb-1">Mode</label>
-                  <select
-                    value={externalReviewMode}
-                    onChange={(e) =>
-                      setExternalReviewMode(e.target.value as typeof externalReviewMode)
-                    }
-                    className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                  >
-                    <option value="off">Off</option>
-                    <option value="on_request">On request only (manual)</option>
-                    <option value="on_pr_hold">Auto-review on PR open — hold draft in Optio</option>
-                    <option value="on_pr_post">
-                      Auto-review on PR open — post to GitHub/GitLab
-                    </option>
-                  </select>
-                </div>
-
-                {(externalReviewMode === "on_pr_hold" || externalReviewMode === "on_pr_post") && (
-                  <div className="space-y-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={externalReviewWaitForCi}
-                        onChange={(e) => setExternalReviewWaitForCi(e.target.checked)}
-                        className="w-4 h-4 rounded"
-                      />
-                      <span className="text-sm">
-                        Wait for CI to finish before starting the review
-                      </span>
-                    </label>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={externalReviewSkipDrafts}
-                          onChange={(e) => setExternalReviewSkipDrafts(e.target.checked)}
-                          className="w-4 h-4 rounded"
-                        />
-                        <span className="text-sm">Skip draft PRs</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={externalReviewSkipOptioAuthored}
-                          onChange={(e) => setExternalReviewSkipOptioAuthored(e.target.checked)}
-                          className="w-4 h-4 rounded"
-                        />
-                        <span className="text-sm">Skip PRs from Optio tasks</span>
-                      </label>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">
-                          Only these authors (comma-separated)
-                        </label>
-                        <input
-                          value={externalReviewIncludeAuthors}
-                          onChange={(e) => setExternalReviewIncludeAuthors(e.target.value)}
-                          placeholder="leave empty for all"
-                          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">
-                          Skip authors (comma-separated)
-                        </label>
-                        <input
-                          value={externalReviewExcludeAuthors}
-                          onChange={(e) => setExternalReviewExcludeAuthors(e.target.value)}
-                          placeholder="dependabot, renovate"
-                          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">
-                          Only these labels
-                        </label>
-                        <input
-                          value={externalReviewIncludeLabels}
-                          onChange={(e) => setExternalReviewIncludeLabels(e.target.value)}
-                          placeholder="leave empty for all"
-                          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-text-muted mb-1">
-                          Skip these labels
-                        </label>
-                        <input
-                          value={externalReviewExcludeLabels}
-                          onChange={(e) => setExternalReviewExcludeLabels(e.target.value)}
-                          placeholder="wip, skip-review"
-                          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           )}
         </PipelineStage>
@@ -1041,228 +940,381 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         </PipelineStage>
       </section>
 
-      {/* Default Agent */}
+      {/* External PR Review */}
       <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-        <h2 className="text-sm font-medium">Default Agent</h2>
-        <p className="text-xs text-text-muted">
-          Choose the default coding agent for new tasks on this repo. Users can override per-task.
+        <div className="flex items-center gap-2 mb-1">
+          <Eye className="w-4 h-4 text-text-muted" />
+          <h2 className="text-sm font-medium">External PR Review</h2>
+        </div>
+        <p className="text-xs text-text-muted mb-4">
+          Review pull requests opened on this repo by anyone other than an Optio coding task —
+          humans, Dependabot, Renovate, etc. Optio polls the platform for open PRs and spawns a
+          review agent per the selected mode. Independent of the PR Lifecycle settings above.
         </p>
-        <select
-          value={defaultAgentType}
-          onChange={(e) => setDefaultAgentType(e.target.value)}
-          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-        >
-          <option value="claude-code">Claude Code</option>
-          <option value="codex">OpenAI Codex</option>
-          <option value="copilot">GitHub Copilot</option>
-          <option value="opencode">OpenCode (Experimental)</option>
-          <option value="gemini">Google Gemini</option>
-          <option value="openclaw">OpenClaw (Experimental)</option>
-        </select>
-      </section>
 
-      {/* Agent Settings */}
-      <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-        <h2 className="text-sm font-medium">Agent Settings</h2>
-        <p className="text-xs text-text-muted">
-          Configure the Claude Code model and behavior for this repo.
-        </p>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Model</label>
-            <select
-              value={claudeModel}
-              onChange={(e) => setClaudeModel(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            >
-              <option value="sonnet">Sonnet 4.6</option>
-              <option value="opus">Opus 4.6</option>
-              <option value="haiku">Haiku 4.5</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Context Window</label>
-            <select
-              value={claudeContextWindow}
-              onChange={(e) => setClaudeContextWindow(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            >
-              <option value="200k">200K tokens</option>
-              <option value="1m">1M tokens</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Effort Level</label>
-            <select
-              value={claudeEffort}
-              onChange={(e) => setClaudeEffort(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </div>
-          <div className="flex items-end pb-1">
+        <div>
+          <label className="block text-xs text-text-muted mb-1">Mode</label>
+          <select
+            value={externalReviewMode}
+            onChange={(e) => setExternalReviewMode(e.target.value as typeof externalReviewMode)}
+            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+          >
+            <option value="off">Off</option>
+            <option value="on_request">On request only (manual)</option>
+            <option value="on_pr_hold">Auto-review on PR open — hold draft in Optio</option>
+            <option value="on_pr_post">Auto-review on PR open — post to GitHub/GitLab</option>
+          </select>
+          <p className="text-[10px] text-text-muted/60 mt-1">
+            {externalReviewMode === "off" &&
+              "External PRs will not be reviewed automatically or tracked by Optio."}
+            {externalReviewMode === "on_request" &&
+              "Optio will not auto-generate reviews. You can trigger one manually from the PR view."}
+            {externalReviewMode === "on_pr_hold" &&
+              "Optio will auto-generate a review and hold it as a draft for you to edit and submit manually — nothing is posted to the platform until you approve."}
+            {externalReviewMode === "on_pr_post" &&
+              "Optio will auto-generate AND auto-post the review as a comment on the PR."}
+          </p>
+        </div>
+
+        {(externalReviewMode === "on_pr_hold" || externalReviewMode === "on_pr_post") && (
+          <div className="space-y-3 pt-2">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
-                checked={claudeThinking}
-                onChange={(e) => setClaudeThinking(e.target.checked)}
+                checked={externalReviewWaitForCi}
+                onChange={(e) => setExternalReviewWaitForCi(e.target.checked)}
                 className="w-4 h-4 rounded"
               />
-              <span className="text-sm">Extended Thinking</span>
+              <span className="text-sm">Wait for CI to finish before starting the review</span>
             </label>
+
+            <div className="grid grid-cols-2 gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={externalReviewSkipDrafts}
+                  onChange={(e) => setExternalReviewSkipDrafts(e.target.checked)}
+                  className="w-4 h-4 rounded"
+                />
+                <span className="text-sm">Skip draft PRs</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={externalReviewSkipOptioAuthored}
+                  onChange={(e) => setExternalReviewSkipOptioAuthored(e.target.checked)}
+                  className="w-4 h-4 rounded"
+                />
+                <span className="text-sm">Skip PRs from Optio tasks</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-text-muted mb-1">
+                  Only these authors (comma-separated)
+                </label>
+                <input
+                  value={externalReviewIncludeAuthors}
+                  onChange={(e) => setExternalReviewIncludeAuthors(e.target.value)}
+                  placeholder="leave empty for all"
+                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">
+                  Skip authors (comma-separated)
+                </label>
+                <input
+                  value={externalReviewExcludeAuthors}
+                  onChange={(e) => setExternalReviewExcludeAuthors(e.target.value)}
+                  placeholder="dependabot, renovate"
+                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Only these labels</label>
+                <input
+                  value={externalReviewIncludeLabels}
+                  onChange={(e) => setExternalReviewIncludeLabels(e.target.value)}
+                  placeholder="leave empty for all"
+                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Skip these labels</label>
+                <input
+                  value={externalReviewExcludeLabels}
+                  onChange={(e) => setExternalReviewExcludeLabels(e.target.value)}
+                  placeholder="wip, skip-review"
+                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+              </div>
+            </div>
           </div>
-        </div>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Max Turns</label>
-          <NumberInput
-            min={1}
-            max={1000}
-            value={maxTurnsCoding}
-            onChange={(v) => setMaxTurnsCoding(v)}
-            fallback={250}
-            placeholder="250"
-            className="w-48 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-          />
-        </div>
+        )}
       </section>
 
-      {/* Copilot Settings */}
-      <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-        <h2 className="text-sm font-medium">Copilot Settings</h2>
-        <p className="text-xs text-text-muted">
-          Configure GitHub Copilot model and behavior when using the Copilot agent for this repo.
-        </p>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Model</label>
-            <select
-              value={copilotModel}
-              onChange={(e) => setCopilotModel(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            >
-              <option value="">Default</option>
-              <option value="claude-sonnet-4.5">Claude Sonnet 4.5</option>
-              <option value="gpt-5">GPT-5</option>
-              <option value="gpt-5.2">GPT-5.2</option>
-              <option value="gpt-5.4">GPT-5.4</option>
-              <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Reasoning Effort</label>
-            <select
-              value={copilotEffort}
-              onChange={(e) => setCopilotEffort(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            >
-              <option value="">Default</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </div>
+      {/* Agent Configuration */}
+      <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Bot className="w-4 h-4 text-text-muted" />
+          <h2 className="text-sm font-medium">Agent Configuration</h2>
         </div>
-      </section>
-
-      {/* OpenCode Settings */}
-      <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-        <h2 className="text-sm font-medium">OpenCode Settings</h2>
         <p className="text-xs text-text-muted">
-          Configure OpenCode model, agent, and custom endpoint. Use a custom base URL to connect to
-          local or self-hosted OpenAI-compatible inference servers (vLLM, lightllm, Ollama, etc.).
+          Configure each agent&apos;s settings for this repo. Tabs are just for navigation — the
+          agent with the <span className="text-text">default</span> pill is the one used for new
+          tasks (users can override per-task). All agents&apos; settings are saved together.
         </p>
-        <div className="grid grid-cols-2 gap-4">
+
+        {/* Tabs */}
+        <div className="flex flex-wrap gap-1 border-b border-border/50">
+          {AGENT_TABS.map((agent) => {
+            const isActive = activeAgentTab === agent.value;
+            const isDefault = defaultAgentType === agent.value;
+            return (
+              <button
+                key={agent.value}
+                type="button"
+                onClick={() => setActiveAgentTab(agent.value)}
+                className={cn(
+                  "px-3 py-2 text-sm border-b-2 transition-colors whitespace-nowrap -mb-px",
+                  isActive
+                    ? "border-primary text-text font-medium"
+                    : "border-transparent text-text-muted hover:text-text",
+                )}
+              >
+                {agent.label}
+                {isDefault && (
+                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-normal align-middle">
+                    default
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Default indicator / Set as default action */}
+        <div className="flex items-center justify-between text-xs">
+          {activeAgentTab === defaultAgentType ? (
+            <span className="text-text-muted">
+              This is the default agent for new tasks on this repo.
+            </span>
+          ) : (
+            <>
+              <span className="text-text-muted">Viewing settings — not the current default.</span>
+              <button
+                type="button"
+                onClick={() => setDefaultAgentType(activeAgentTab)}
+                className="px-3 py-1 rounded-md border border-border hover:border-primary hover:text-primary transition-colors"
+              >
+                Set as default
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Claude Code tab */}
+        {activeAgentTab === "claude-code" && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Model</label>
+                <select
+                  value={claudeModel}
+                  onChange={(e) => setClaudeModel(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                >
+                  <option value="sonnet">Sonnet 4.6</option>
+                  <option value="opus">Opus 4.6</option>
+                  <option value="haiku">Haiku 4.5</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Context Window</label>
+                <select
+                  value={claudeContextWindow}
+                  onChange={(e) => setClaudeContextWindow(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                >
+                  <option value="200k">200K tokens</option>
+                  <option value="1m">1M tokens</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Effort Level</label>
+                <select
+                  value={claudeEffort}
+                  onChange={(e) => setClaudeEffort(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+              <div className="flex items-end pb-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={claudeThinking}
+                    onChange={(e) => setClaudeThinking(e.target.checked)}
+                    className="w-4 h-4 rounded"
+                  />
+                  <span className="text-sm">Extended Thinking</span>
+                </label>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Max Turns</label>
+              <NumberInput
+                min={1}
+                max={1000}
+                value={maxTurnsCoding}
+                onChange={(v) => setMaxTurnsCoding(v)}
+                fallback={250}
+                placeholder="250"
+                className="w-48 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Codex tab */}
+        {activeAgentTab === "codex" && (
+          <p className="text-xs text-text-muted italic py-2">
+            OpenAI Codex uses its built-in defaults. No per-repo configuration is required.
+          </p>
+        )}
+
+        {/* Copilot tab */}
+        {activeAgentTab === "copilot" && (
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Model</label>
+              <select
+                value={copilotModel}
+                onChange={(e) => setCopilotModel(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              >
+                <option value="">Default</option>
+                <option value="claude-sonnet-4.5">Claude Sonnet 4.5</option>
+                <option value="gpt-5">GPT-5</option>
+                <option value="gpt-5.2">GPT-5.2</option>
+                <option value="gpt-5.4">GPT-5.4</option>
+                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Reasoning Effort</label>
+              <select
+                value={copilotEffort}
+                onChange={(e) => setCopilotEffort(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              >
+                <option value="">Default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* OpenCode tab */}
+        {activeAgentTab === "opencode" && (
+          <div className="space-y-3">
+            <p className="text-xs text-text-muted">
+              Use a custom base URL to connect to local or self-hosted OpenAI-compatible inference
+              servers (vLLM, lightllm, Ollama, etc.).
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Model</label>
+                <input
+                  value={opencodeModel}
+                  onChange={(e) => setOpencodeModel(e.target.value)}
+                  placeholder="Default (auto-detect)"
+                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+                <p className="text-xs text-text-muted mt-1">
+                  e.g. anthropic/claude-sonnet-4, openai/gpt-4o, meta-llama/Llama-3.1-70B
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Agent</label>
+                <input
+                  value={opencodeAgent}
+                  onChange={(e) => setOpencodeAgent(e.target.value)}
+                  placeholder="Default"
+                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Custom Base URL</label>
+              <input
+                value={opencodeBaseUrl}
+                onChange={(e) => setOpencodeBaseUrl(e.target.value)}
+                placeholder="https://your-inference-server/v1"
+                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              />
+              <p className="text-xs text-text-muted mt-1">
+                OpenAI-compatible endpoint URL. When set, API keys are optional — a placeholder key
+                is used if none is configured in Secrets.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Gemini tab */}
+        {activeAgentTab === "gemini" && (
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Model</label>
+              <select
+                value={geminiModel}
+                onChange={(e) => setGeminiModel(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              >
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                <option value="gemini-3-pro">Gemini 3 Pro</option>
+                <option value="gemini-3-flash">Gemini 3 Flash</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Approval Mode</label>
+              <select
+                value={geminiApprovalMode}
+                onChange={(e) => setGeminiApprovalMode(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              >
+                <option value="yolo">Yolo (skip all approvals)</option>
+                <option value="auto_edit">Auto Edit</option>
+                <option value="default">Default</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* OpenClaw tab */}
+        {activeAgentTab === "openclaw" && (
           <div>
             <label className="block text-xs text-text-muted mb-1">Model</label>
             <input
-              value={opencodeModel}
-              onChange={(e) => setOpencodeModel(e.target.value)}
+              value={openclawModel}
+              onChange={(e) => setOpenclawModel(e.target.value)}
               placeholder="Default (auto-detect)"
               className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
             />
-            <p className="text-xs text-text-muted mt-1">
-              e.g. anthropic/claude-sonnet-4, openai/gpt-4o, meta-llama/Llama-3.1-70B
-            </p>
           </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Agent</label>
-            <input
-              value={opencodeAgent}
-              onChange={(e) => setOpencodeAgent(e.target.value)}
-              placeholder="Default"
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Custom Base URL</label>
-          <input
-            value={opencodeBaseUrl}
-            onChange={(e) => setOpencodeBaseUrl(e.target.value)}
-            placeholder="https://your-inference-server/v1"
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-          />
-          <p className="text-xs text-text-muted mt-1">
-            OpenAI-compatible endpoint URL. When set, API keys are optional — a placeholder key is
-            used if none is configured in Secrets.
-          </p>
-        </div>
-      </section>
-
-      {/* Gemini Settings */}
-      <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-        <h2 className="text-sm font-medium">Gemini Settings</h2>
-        <p className="text-xs text-text-muted">
-          Configure Google Gemini model and behavior when using the Gemini agent for this repo.
-        </p>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Model</label>
-            <select
-              value={geminiModel}
-              onChange={(e) => setGeminiModel(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            >
-              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-              <option value="gemini-3-pro">Gemini 3 Pro</option>
-              <option value="gemini-3-flash">Gemini 3 Flash</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Approval Mode</label>
-            <select
-              value={geminiApprovalMode}
-              onChange={(e) => setGeminiApprovalMode(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            >
-              <option value="yolo">Yolo (skip all approvals)</option>
-              <option value="auto_edit">Auto Edit</option>
-              <option value="default">Default</option>
-            </select>
-          </div>
-        </div>
-      </section>
-
-      {/* OpenClaw Settings */}
-      <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-        <h2 className="text-sm font-medium">OpenClaw Settings</h2>
-        <p className="text-xs text-text-muted">
-          Configure OpenClaw model when using the OpenClaw agent for this repo.
-        </p>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Model</label>
-          <input
-            value={openclawModel}
-            onChange={(e) => setOpenclawModel(e.target.value)}
-            placeholder="Default (auto-detect)"
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-          />
-        </div>
+        )}
       </section>
 
       {/* Cache Directories */}
