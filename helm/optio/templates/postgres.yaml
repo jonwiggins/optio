@@ -64,6 +64,12 @@ spec:
             capabilities:
               drop:
                 - ALL
+              # chown/chmod require these caps even when running as UID 0;
+              # `drop: ALL` alone leaves root unable to change ownership.
+              add:
+                - CHOWN
+                - FOWNER
+                - DAC_OVERRIDE
           command: ['sh', '-c']
           args:
             - |
@@ -83,6 +89,10 @@ spec:
             capabilities:
               drop:
                 - ALL
+              add:
+                - CHOWN
+                - FOWNER
+                - DAC_OVERRIDE
           command: ['sh', '-c']
           args:
             - |
