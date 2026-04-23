@@ -218,6 +218,7 @@ Key `values.yaml` settings:
 - Image defaults point to GHCR (`ghcr.io/jonwiggins/optio-*`). Set `agent.image.prefix` to `optio-` for local dev
 - `postgresql.enabled` / `redis.enabled` — set to `false` and use `externalDatabase.url` / `externalRedis.url` for managed services
 - `encryption.key` — **required**, generate with `openssl rand -hex 32`
+- `serviceAccount.name` / `serviceAccount.annotations` — used by API/web pods (K8s API access) and agent pods (workload identity). Example for GKE: `iam.gke.io/gcp-service-account: optio@PROJECT_ID.iam.gserviceaccount.com`
 - Local dev overrides in `helm/optio/values.local.yaml` (`setup-local.sh` applies automatically)
 
 ## Troubleshooting

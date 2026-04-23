@@ -24,7 +24,16 @@ export async function createSession(input: {
     OPTIO_REPO_BRANCH: repoBranch,
   };
 
-  // Try to find a GitHub token for the pod
+  // Add git credential helper URLs
+  const apiInternalUrl =
+    process.env.OPTIO_API_INTERNAL_URL ?? `http://localhost:${process.env.API_PORT ?? "4000"}`;
+  env.OPTIO_GIT_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials`;
+
+  // Add credential secret for authentication
+  const { getCredentialSecret } = await import("../routes/github-app.js");
+  env.OPTIO_CREDENTIAL_SECRET = getCredentialSecret();
+
+  // Try to find a GitHub token for the pod (fallback for old images without credential helper)
   try {
     const { getGitHubToken } = await import("./github-token-service.js");
     const ghToken = input.userId

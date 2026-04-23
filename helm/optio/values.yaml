@@ -478,6 +478,10 @@ rbac:
 serviceAccount:
   create: true
   name: optio
+  # Annotations for the service account (e.g., for GKE Workload Identity).
+  # Used by both API/web pods (for K8s API access) and agent pods (for cloud service auth).
+  # Example for GKE Workload Identity:
+  #   iam.gke.io/gcp-service-account: optio@PROJECT_ID.iam.gserviceaccount.com
   annotations: {}
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -35,6 +35,8 @@ export interface ContainerSpec {
   annotations?: Record<string, string>;
   /** Override the default termination grace period (seconds). */
   terminationGracePeriodSeconds?: number;
+  /** Kubernetes service account name for the pod (for workload identity). */
+  serviceAccountName?: string;
 }
 
 export interface VolumeMount {

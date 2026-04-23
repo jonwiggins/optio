@@ -76,25 +76,69 @@ export class K8sWorkloadManager {
   }): Promise<{ name: string; replicas: number }> {
     const { name, spec, homePvcSize, homePvcStorageClass } = opts;
 
+    logger.info({ name, serviceAccountName: spec.serviceAccountName }, "ensureStatefulSet called");
+
     // Ensure the headless Service exists
     await this.ensureHeadlessService(name, spec.labels);
+    logger.info({ name }, "Headless service ensured");
 
     // Check if StatefulSet already exists
+    let existingSts: V1StatefulSet | null = null;
     try {
-      const existing = await this.appsApi.readNamespacedStatefulSet({
+      existingSts = await this.appsApi.readNamespacedStatefulSet({
         name,
         namespace: this.namespace,
       });
+      logger.info({ name, replicas: existingSts.spec?.replicas }, "StatefulSet already exists");
+
+      // Build desired pod template to compare with existing
+      const desiredPodTemplate = this.buildPodTemplate(spec, name, "Always");
+
+      // Check if pod template needs updating (environment variables might have changed)
+      const currentEnv = existingSts.spec?.template?.spec?.containers?.[0]?.env ?? [];
+      const desiredEnv = desiredPodTemplate.spec?.containers?.[0]?.env ?? [];
+      const currentServiceAccount = existingSts.spec?.template?.spec?.serviceAccountName;
+      const desiredServiceAccount = desiredPodTemplate.spec?.serviceAccountName;
+
+      const envChanged = JSON.stringify(currentEnv) !== JSON.stringify(desiredEnv);
+      const serviceAccountChanged = currentServiceAccount !== desiredServiceAccount;
+
+      if (envChanged || serviceAccountChanged) {
+        logger.info(
+          { name, envChanged, serviceAccountChanged },
+          "StatefulSet pod template needs update",
+        );
+
+        // Update the StatefulSet's pod template
+        existingSts.spec!.template = desiredPodTemplate;
+
+        await this.appsApi.replaceNamespacedStatefulSet({
+          name,
+          namespace: this.namespace,
+          body: existingSts,
+        });
+        logger.info({ name }, "StatefulSet pod template updated");
+      }
+
       return {
         name,
-        replicas: existing.spec?.replicas ?? 0,
+        replicas: existingSts.spec?.replicas ?? 0,
       };
     } catch (err: unknown) {
-      if (!this.isNotFoundError(err)) throw err;
+      if (!this.isNotFoundError(err)) {
+        logger.error({ err, name }, "Error checking StatefulSet existence");
+        throw err;
+      }
+      logger.info({ name }, "StatefulSet does not exist, will create");
     }
 
     // Build the StatefulSet
+    logger.info({ name }, "Building pod template");
     const podTemplate = this.buildPodTemplate(spec, name, "Always");
+    logger.info(
+      { name, serviceAccountName: podTemplate.spec?.serviceAccountName },
+      "Pod template built",
+    );
     const matchLabels: Record<string, string> = {
       "app.kubernetes.io/instance": name,
     };
@@ -120,15 +164,25 @@ export class K8sWorkloadManager {
       volumeClaimTemplates: this.buildVolumeClaimTemplates(homePvcSize, homePvcStorageClass),
     };
 
+    logger.info(
+      {
+        name,
+        namespace: this.namespace,
+        serviceAccountName: sts.spec?.template.spec?.serviceAccountName,
+      },
+      "Creating StatefulSet",
+    );
     try {
       await this.appsApi.createNamespacedStatefulSet({
         namespace: this.namespace,
         body: sts,
       });
-      logger.info({ name }, "StatefulSet created");
+      logger.info({ name }, "StatefulSet created successfully");
     } catch (err: unknown) {
+      logger.error({ err, name, namespace: this.namespace }, "Error creating StatefulSet");
       // Another API replica may have created it concurrently (409 Conflict)
       if (this.isConflictError(err)) {
+        logger.info({ name }, "StatefulSet already exists (conflict), reading existing");
         const existing = await this.appsApi.readNamespacedStatefulSet({
           name,
           namespace: this.namespace,
@@ -323,7 +377,9 @@ export class K8sWorkloadManager {
    */
   async waitForPodRunning(podName: string, timeoutMs = POD_READY_TIMEOUT_MS): Promise<void> {
     const deadline = Date.now() + timeoutMs;
+    logger.info({ podName, timeoutMs }, "Waiting for pod to reach Running state");
 
+    let lastPhase: string | undefined;
     while (Date.now() < deadline) {
       try {
         const pod = await this.coreApi.readNamespacedPodStatus({
@@ -331,16 +387,34 @@ export class K8sWorkloadManager {
           namespace: this.namespace,
         });
         const phase = pod.status?.phase;
-        if (phase === "Running") return;
-        if (phase === "Succeeded" || phase === "Failed") return;
+        if (phase !== lastPhase) {
+          logger.info({ podName, phase, conditions: pod.status?.conditions }, "Pod phase changed");
+          lastPhase = phase;
+        }
+        if (phase === "Running") {
+          logger.info({ podName }, "Pod is Running");
+          return;
+        }
+        if (phase === "Succeeded" || phase === "Failed") {
+          logger.info({ podName, phase }, "Pod reached terminal state");
+          return;
+        }
       } catch (err: unknown) {
         // Pod may not exist yet (StatefulSet scaling up)
-        if (!this.isNotFoundError(err)) throw err;
+        if (!this.isNotFoundError(err)) {
+          logger.error({ err, podName }, "Error reading pod status");
+          throw err;
+        }
+        if (lastPhase !== "NotFound") {
+          logger.info({ podName }, "Pod not found yet");
+          lastPhase = "NotFound";
+        }
       }
 
       await this.sleep(POD_READY_POLL_MS);
     }
 
+    logger.error({ podName, timeoutMs }, "Timed out waiting for pod");
     throw new Error(
       `Timed out waiting for pod "${podName}" to reach Running state after ${timeoutMs / 1000}s`,
     );
@@ -525,6 +599,9 @@ export class K8sWorkloadManager {
     }
     if (spec.tolerations && spec.tolerations.length > 0) {
       podSpec.tolerations = spec.tolerations as V1PodSpec["tolerations"];
+    }
+    if (spec.serviceAccountName) {
+      podSpec.serviceAccountName = spec.serviceAccountName;
     }
 
     // Pod-level security context for StatefulSets — ensures PVC mounts are

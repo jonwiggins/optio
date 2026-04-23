@@ -107,6 +107,10 @@ spec:
               value: {{ .Values.agent.statefulSet.enabled | quote }}
             - name: OPTIO_TERMINATION_GRACE_PERIOD_SECONDS
               value: {{ .Values.agent.statefulSet.terminationGracePeriodSeconds | quote }}
+            - name: OPTIO_SERVICE_ACCOUNT_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.serviceAccountName
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           readinessProbe:
