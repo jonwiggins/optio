@@ -61,6 +61,7 @@ import { sessionTerminalWs } from "./ws/session-terminal.js";
 import { sessionChatWs } from "./ws/session-chat.js";
 import { optioChatWs } from "./ws/optio-chat.js";
 import { workflowRunLogStreamWs } from "./ws/workflow-run-log-stream.js";
+import { prReviewLogStreamWs } from "./ws/pr-review-log-stream.js";
 import authPlugin from "./plugins/auth.js";
 import { httpMetricsPlugin } from "./plugins/http-metrics.js";
 
@@ -295,6 +296,7 @@ export async function buildServer() {
   await app.register(sessionChatWs);
   await app.register(optioChatWs);
   await app.register(workflowRunLogStreamWs);
+  await app.register(prReviewLogStreamWs);
 
   // Global error handler.
   //

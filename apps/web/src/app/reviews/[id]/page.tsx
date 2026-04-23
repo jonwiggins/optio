@@ -1,11 +1,19 @@
 "use client";
 
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
+import { usePrReviewLogs } from "@/hooks/use-pr-review-logs";
+import { classifyError } from "@optio/shared";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { LogViewer } from "@/components/log-viewer";
+import { DetailHeader } from "@/components/detail-header";
+import { StatePipelineStrip } from "@/components/state-pipeline-strip";
+import { PrStatusBar } from "@/components/pr-status-bar";
+import { ChatTranscript, ChatComposer, type ChatMessage } from "@/components/chat-box";
 import {
   Loader2,
   Check,
@@ -13,6 +21,7 @@ import {
   MessageSquare,
   Send,
   AlertTriangle,
+  AlertCircle,
   RefreshCw,
   GitMerge,
   ChevronDown,
@@ -50,7 +59,7 @@ interface Review {
   updatedAt: string;
 }
 
-const STATE_STRIP = [
+const PIPELINE_STEPS = [
   { key: "queued", label: "Queued" },
   { key: "waiting_ci", label: "CI" },
   { key: "reviewing", label: "Reviewing" },
@@ -58,61 +67,23 @@ const STATE_STRIP = [
   { key: "submitted", label: "Submitted" },
 ];
 
-function StateStrip({ state }: { state: string }) {
-  const idx = STATE_STRIP.findIndex((s) => s.key === state);
-  const effectiveIdx = state === "stale" ? 3 : state === "failed" ? -1 : idx;
-  return (
-    <div className="flex items-center gap-1 text-[11px]">
-      {STATE_STRIP.map((s, i) => (
-        <div key={s.key} className="flex items-center gap-1">
-          <span
-            className={cn(
-              "px-2 py-0.5 rounded-md font-medium",
-              i < effectiveIdx
-                ? "bg-success/10 text-success"
-                : i === effectiveIdx
-                  ? state === "stale"
-                    ? "bg-error/10 text-error"
-                    : "bg-primary/10 text-primary"
-                  : "bg-bg text-text-muted",
-            )}
-          >
-            {s.label}
-          </span>
-          {i < STATE_STRIP.length - 1 && <span className="text-text-muted/30">›</span>}
-        </div>
-      ))}
-      {state === "stale" && (
-        <span className="ml-2 px-2 py-0.5 rounded-md bg-error/10 text-error font-medium">
-          Stale
-        </span>
-      )}
-      {state === "failed" && (
-        <span className="ml-2 px-2 py-0.5 rounded-md bg-error/10 text-error font-medium">
-          Failed
-        </span>
-      )}
-      {state === "cancelled" && (
-        <span className="ml-2 px-2 py-0.5 rounded-md bg-bg text-text-muted font-medium">
-          Cancelled
-        </span>
-      )}
-    </div>
-  );
+function pipelineCurrentIndex(state: string): number {
+  if (state === "stale") return 3; // sits on "Ready" but coloured as error via flag
+  if (state === "failed" || state === "cancelled") return -1;
+  const idx = PIPELINE_STEPS.findIndex((s) => s.key === state);
+  return idx;
 }
 
 export default function ReviewDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const router = useRouter();
+  const _router = useRouter();
 
   const [review, setReview] = useState<Review | null>(null);
   const [loading, setLoading] = useState(true);
   const [runs, setRuns] = useState<any[]>([]);
-  const [logs, setLogs] = useState<any[]>([]);
-  const [logRunId, setLogRunId] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
   const [prStatus, setPrStatus] = useState<any>(null);
-  const [chat, setChat] = useState<any[]>([]);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
 
@@ -130,6 +101,10 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   const [mergeMethod, setMergeMethod] = useState<"squash" | "merge" | "rebase">("squash");
   const [mergeMenuOpen, setMergeMenuOpen] = useState(false);
 
+  // Live log streaming via WebSocket — same hook contract as the task page's
+  // useLogs, plugged into LogViewer's externalLogs prop.
+  const externalLogs = usePrReviewLogs(id);
+
   usePageTitle(review ? `Review: PR #${review.prNumber}` : "Review");
 
   const fetchAll = useCallback(async () => {
@@ -142,7 +117,6 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
       setComments(r.review.fileComments ?? []);
       setDirty(false);
 
-      // PR status (CI etc.)
       if (r.review.prUrl) {
         api
           .getPrStatus(r.review.prUrl)
@@ -176,26 +150,6 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
     const t = setInterval(fetchAll, 5000);
     return () => clearInterval(t);
   }, [review?.state, chatSending, fetchAll]);
-
-  const loadLogs = useCallback(async () => {
-    try {
-      const res = await api.listPrReviewLogs(id);
-      setLogs(res.logs);
-      setLogRunId(res.runId ?? null);
-    } catch {}
-  }, [id]);
-
-  useEffect(() => {
-    if (showLogs) loadLogs();
-  }, [showLogs, loadLogs]);
-
-  // Refresh logs while reviewing.
-  useEffect(() => {
-    if (!review || !showLogs) return;
-    if (review.state !== "reviewing" && review.state !== "queued") return;
-    const t = setInterval(loadLogs, 3000);
-    return () => clearInterval(t);
-  }, [review?.state, showLogs, loadLogs]);
 
   if (loading) {
     return (
@@ -305,8 +259,6 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
       ...prev,
       {
         id: `local-${Date.now()}`,
-        prReviewId: id,
-        runId: null,
         role: "user",
         content: msg,
         createdAt: new Date().toISOString(),
@@ -316,14 +268,13 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
     try {
       await api.postPrReviewChat(id, msg);
       toast.success("Sent to agent");
-      // Poll for response
       const start = Date.now();
       const tick = setInterval(async () => {
         const res = await api.listPrReviewChat(id).catch(() => null);
         if (res) {
           setChat(res.messages);
           const hasAssistantReply = res.messages.some(
-            (m, i) => m.role === "assistant" && new Date(m.createdAt).getTime() > start,
+            (m) => m.role === "assistant" && new Date(m.createdAt).getTime() > start,
           );
           if (hasAssistantReply || Date.now() - start > 300_000) {
             clearInterval(tick);
@@ -357,93 +308,154 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
     setDirty(true);
   };
 
+  const pipelineCurrent = pipelineCurrentIndex(review.state);
+  const terminal =
+    review.state === "stale"
+      ? { label: "Stale", tone: "error" as const }
+      : review.state === "failed"
+        ? { label: "Failed", tone: "error" as const }
+        : review.state === "cancelled"
+          ? { label: "Cancelled", tone: "muted" as const }
+          : undefined;
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="shrink-0 p-4 border-b border-border bg-bg-card">
-        <div className="max-w-5xl mx-auto flex flex-col gap-3">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 mb-1 text-xs text-text-muted">
-                <GitPullRequest className="w-3.5 h-3.5" />
-                <span>
-                  {review.repoOwner}/{review.repoName} · #{review.prNumber}
-                </span>
-                <a
-                  href={review.prUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 hover:text-primary"
-                >
-                  View on {review.prUrl.includes("gitlab") ? "GitLab" : "GitHub"}
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-              <h1 className="text-lg font-bold tracking-tight">Review: PR #{review.prNumber}</h1>
-              <div className="flex items-center gap-3 mt-2 flex-wrap">
-                <StateStrip state={review.state} />
-                {review.origin === "auto" && (
-                  <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary">
-                    <Zap className="w-3 h-3" />
-                    Auto
-                  </span>
-                )}
-                <span className="text-[11px] text-text-muted">
-                  Updated {formatRelativeTime(review.updatedAt)}
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              {["ready", "stale", "submitted", "failed"].includes(review.state) && (
-                <button
-                  onClick={handleReReview}
-                  disabled={reReviewing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 disabled:opacity-50"
-                  title="Launch a fresh review run"
-                >
-                  {reReviewing ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <RotateCcw className="w-3 h-3" />
-                  )}
-                  Re-review
-                </button>
-              )}
-              {!["cancelled", "submitted"].includes(review.state) && (
-                <button
-                  onClick={handleCancel}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-error/10 text-error text-xs hover:bg-error/20"
-                >
-                  <XCircle className="w-3 h-3" />
-                  Cancel
-                </button>
-              )}
+      <DetailHeader
+        title={`Review: PR #${review.prNumber}`}
+        subtitle={
+          <>
+            <GitPullRequest className="w-3.5 h-3.5" />
+            <span>
+              {review.repoOwner}/{review.repoName} · #{review.prNumber}
+            </span>
+            <a
+              href={review.prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 hover:text-primary"
+            >
+              View on {review.prUrl.includes("gitlab") ? "GitLab" : "GitHub"}
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </>
+        }
+        state={review.state}
+        extraBadges={
+          review.origin === "auto" ? (
+            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary">
+              <Zap className="w-3 h-3" />
+              Auto
+            </span>
+          ) : null
+        }
+        metaItems={[
+          <>
+            <Clock className="w-3 h-3" />
+            Updated {formatRelativeTime(review.updatedAt)}
+          </>,
+        ]}
+        rightSlot={
+          <>
+            {["ready", "stale", "submitted", "failed"].includes(review.state) && (
               <button
-                onClick={fetchAll}
-                className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted"
-                title="Refresh"
+                onClick={handleReReview}
+                disabled={reReviewing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 disabled:opacity-50"
+                title="Launch a fresh review run"
               >
-                <RefreshCw className="w-4 h-4" />
+                {reReviewing ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <RotateCcw className="w-3 h-3" />
+                )}
+                Re-review
               </button>
-            </div>
-          </div>
-        </div>
-      </div>
+            )}
+            {!["cancelled", "submitted"].includes(review.state) && (
+              <button
+                onClick={handleCancel}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-error/10 text-error text-xs hover:bg-error/20"
+              >
+                <XCircle className="w-3 h-3" />
+                Cancel
+              </button>
+            )}
+            <button
+              onClick={fetchAll}
+              className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted"
+              title="Refresh"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </>
+        }
+        actions={
+          <StatePipelineStrip
+            steps={PIPELINE_STEPS}
+            current={pipelineCurrent}
+            errorAtCurrent={review.state === "stale"}
+            terminal={terminal}
+          />
+        }
+      />
 
-      {/* Error banner */}
-      {review.errorMessage && review.state === "failed" && (
-        <div className="shrink-0 border-b border-error/20 bg-error/5 px-4 py-3">
-          <div className="max-w-5xl mx-auto flex items-start gap-2 text-sm text-error">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-            <div>
-              <div className="font-medium">Review failed</div>
-              <div className="text-xs opacity-80 mt-0.5 whitespace-pre-wrap">
-                {review.errorMessage}
-              </div>
-            </div>
+      {/* PR status bar (CI / review / merge state) */}
+      {(prStatus?.checksStatus || prStatus?.reviewStatus || prStatus?.prState) && (
+        <div className="shrink-0 border-b border-border bg-bg-card px-4 py-3">
+          <div className="max-w-5xl mx-auto">
+            <PrStatusBar
+              checksStatus={prStatus?.checksStatus}
+              reviewStatus={prStatus?.reviewStatus}
+              prState={prStatus?.prState}
+            />
           </div>
         </div>
       )}
+
+      {/* Error banner with classified remedy */}
+      {review.errorMessage &&
+        review.state === "failed" &&
+        (() => {
+          const classified = classifyError(review.errorMessage);
+          return (
+            <div className="shrink-0 border-b border-error/20 bg-error/5">
+              <div className="max-w-5xl mx-auto px-4 py-3">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-error shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div>
+                      <h3 className="text-sm font-medium text-error">{classified.title}</h3>
+                      <p className="text-xs text-error/70 mt-0.5">{classified.description}</p>
+                    </div>
+                    <div className="p-2.5 rounded-md bg-bg/50 border border-border">
+                      <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
+                        Suggested fix
+                      </div>
+                      <pre className="text-xs text-text/80 whitespace-pre-wrap font-mono">
+                        {classified.remedy}
+                      </pre>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {classified.retryable && (
+                        <button
+                          onClick={handleReReview}
+                          disabled={reReviewing}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          Re-review
+                        </button>
+                      )}
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-error/10 text-error">
+                        {classified.category}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* Stale banner */}
       {review.state === "stale" && (
@@ -641,23 +653,6 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {prStatus && (
-                    <span className="flex items-center gap-1.5 text-xs text-text-muted">
-                      <span
-                        className={cn(
-                          "w-2 h-2 rounded-full",
-                          prStatus.checksStatus === "passing"
-                            ? "bg-success"
-                            : prStatus.checksStatus === "failing"
-                              ? "bg-error"
-                              : prStatus.checksStatus === "pending"
-                                ? "bg-warning animate-pulse"
-                                : "bg-text-muted/30",
-                        )}
-                      />
-                      CI: {prStatus.checksStatus}
-                    </span>
-                  )}
                   <div className="relative">
                     <div className="flex">
                       <button
@@ -729,64 +724,19 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
               <p className="text-[11px] text-text-muted mb-2">
                 Ask follow-up questions. The agent may update the draft above.
               </p>
-              {chat.length > 0 && (
-                <div className="space-y-2 mb-3 max-h-72 overflow-y-auto pr-1">
-                  {chat.map((m) => (
-                    <div
-                      key={m.id}
-                      className={cn(
-                        "rounded-md p-2 text-xs whitespace-pre-wrap",
-                        m.role === "user"
-                          ? "bg-primary/10 text-text border border-primary/20"
-                          : "bg-bg border border-border text-text-muted",
-                      )}
-                    >
-                      <div className="text-[10px] uppercase tracking-wide opacity-60 mb-1">
-                        {m.role === "user" ? "You" : "Agent"}
-                      </div>
-                      {m.content}
-                    </div>
-                  ))}
-                  {chatSending && (
-                    <div className="flex items-center gap-2 text-xs text-text-muted">
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      Agent is thinking...
-                    </div>
-                  )}
-                </div>
-              )}
-              <div className="flex items-end gap-2">
-                <textarea
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendChat();
-                    }
-                  }}
-                  rows={2}
-                  placeholder="Ask the reviewer a question, or request a change..."
-                  disabled={chatSending}
-                  className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-primary focus:ring-1 focus:ring-primary/20 focus:outline-none resize-y disabled:opacity-60"
-                />
-                <button
-                  onClick={handleSendChat}
-                  disabled={chatSending || !chatInput.trim()}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50"
-                >
-                  {chatSending ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <Send className="w-3 h-3" />
-                  )}
-                  Send
-                </button>
-              </div>
+              <ChatTranscript messages={chat} pending={chatSending} />
+              <ChatComposer
+                value={chatInput}
+                onChange={setChatInput}
+                onSend={handleSendChat}
+                sending={chatSending}
+                placeholder="Ask the reviewer a question, or request a change..."
+                rows={2}
+              />
             </div>
           )}
 
-          {/* Runs + logs (collapsible) */}
+          {/* Runs (collapsible header) + agent logs */}
           <div className="rounded-lg border border-border bg-bg-card">
             <button
               onClick={() => setShowLogs((v) => !v)}
@@ -829,19 +779,11 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
                     )}
                   </div>
                 ))}
-                {logs.length > 0 && (
-                  <div className="font-mono text-[11px] bg-bg border border-border rounded p-2 max-h-80 overflow-auto">
-                    <div className="text-text-muted mb-1">Logs for run {logRunId?.slice(0, 8)}</div>
-                    {logs.map((l: any) => (
-                      <div key={l.id} className="whitespace-pre-wrap break-all">
-                        {l.logType && (
-                          <span className="text-text-muted/60 mr-1">[{l.logType}]</span>
-                        )}
-                        {l.content}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div className="h-96 border border-border rounded overflow-hidden">
+                  <ErrorBoundary label="Review log viewer">
+                    <LogViewer externalLogs={externalLogs} />
+                  </ErrorBoundary>
+                </div>
               </div>
             )}
           </div>

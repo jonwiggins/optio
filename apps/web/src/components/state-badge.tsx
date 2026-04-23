@@ -75,6 +75,40 @@ const STATE_CONFIG: Record<
     dotColor: "bg-text-muted",
     glowClass: "badge-glow-muted",
   },
+  // PR review-specific states
+  waiting_ci: {
+    label: "Waiting CI",
+    color: "text-warning",
+    dotColor: "bg-warning",
+    glowClass: "badge-glow-warning",
+    pulse: true,
+  },
+  reviewing: {
+    label: "Reviewing",
+    color: "text-primary",
+    dotColor: "bg-primary",
+    glowClass: "badge-glow-primary",
+    pulse: true,
+  },
+  ready: {
+    label: "Ready",
+    color: "text-success",
+    dotColor: "bg-success",
+    glowClass: "badge-glow-success",
+  },
+  stale: {
+    label: "Stale",
+    color: "text-warning",
+    dotColor: "bg-warning",
+    glowClass: "badge-glow-warning",
+    emphasis: true,
+  },
+  submitted: {
+    label: "Submitted",
+    color: "text-success",
+    dotColor: "bg-success",
+    glowClass: "badge-glow-success",
+  },
 };
 
 export function StateBadge({

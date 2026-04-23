@@ -135,3 +135,10 @@ export function createWorkflowRunLogClient(
 ): WsClient {
   return new WsClient(`${getWsBaseUrl()}/ws/workflow-runs/${workflowRunId}/logs`, tokenProvider);
 }
+
+export function createPrReviewLogClient(
+  prReviewId: string,
+  tokenProvider?: TokenProvider,
+): WsClient {
+  return new WsClient(`${getWsBaseUrl()}/ws/pr-reviews/${prReviewId}/logs`, tokenProvider);
+}

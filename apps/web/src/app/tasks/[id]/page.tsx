@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useState, useEffect, useRef, useCallback } from "react";
+import { use, useState, useEffect } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useTask } from "@/hooks/use-task";
 import { LogViewer } from "@/components/log-viewer";
 import { PipelineTimeline } from "@/components/pipeline-timeline";
 import { ActivityFeed } from "@/components/activity-feed";
+import { DetailHeader } from "@/components/detail-header";
+import { PrStatusBar } from "@/components/pr-status-bar";
+import { ChatComposer } from "@/components/chat-box";
 import { StateBadge } from "@/components/state-badge";
 import { TokenRefreshBanner } from "@/components/token-refresh-banner";
 import { api } from "@/lib/api-client";
@@ -31,9 +34,6 @@ import {
   Eye,
   Plus,
   X,
-  Link2,
-  MessageSquare,
-  Square,
   CheckCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -148,14 +148,6 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const [userMessages, setUserMessages] = useState<
     { text: string; timestamp: string; status: "sending" | "sent" | "failed" }[]
   >([]);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const autoResizeTextarea = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
-  }, []);
 
   const handleSendMessage = async (mode: "soft" | "interrupt" = "soft") => {
     if (!messageInput.trim()) return;
@@ -168,9 +160,6 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     try {
       await api.sendTaskMessage(id, text, mode);
       setMessageInput("");
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto";
-      }
       setUserMessages((prev) =>
         prev.map((m) => (m.text === text && m.status === "sending" ? { ...m, status: "sent" } : m)),
       );
@@ -282,32 +271,35 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="shrink-0 p-4 border-b border-border bg-bg-card">
-        <div className="flex flex-col gap-3 max-w-5xl mx-auto">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-lg font-bold tracking-tight">{task.title}</h1>
-                <StateBadge state={task.state} isStalled={stallInfo?.isStalled} />
-              </div>
-              <div className="flex items-center gap-4 mt-2 text-xs text-text-muted flex-wrap">
-                <span className="flex items-center gap-1">
-                  <GitBranch className="w-3 h-3" />
-                  {repoName}
-                </span>
-                <span className="flex items-center gap-1 capitalize">
-                  <Bot className="w-3 h-3" />
-                  {task.agentType.replace("-", " ")}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {formatRelativeTime(task.createdAt)}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
+      <DetailHeader
+        title={task.title}
+        state={task.state}
+        isStalled={stallInfo?.isStalled}
+        metaItems={[
+          <>
+            <GitBranch className="w-3 h-3" />
+            {repoName}
+          </>,
+          <span className="flex items-center gap-1 capitalize">
+            <Bot className="w-3 h-3" />
+            {task.agentType.replace("-", " ")}
+          </span>,
+          <>
+            <Clock className="w-3 h-3" />
+            {formatRelativeTime(task.createdAt)}
+          </>,
+        ]}
+        rightSlot={
+          <button
+            onClick={refresh}
+            className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        }
+        actions={
+          <>
             {task.prUrl && (
               <a
                 href={task.prUrl}
@@ -372,16 +364,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               <Bot className="w-3 h-3" />
               Ask Optio
             </button>
-            <button
-              onClick={refresh}
-              className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted transition-colors"
-              title="Refresh"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Pending reason */}
       {pendingReason && (
@@ -565,90 +550,42 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           (task.prState && task.prState !== "open")) && (
           <div className="shrink-0 border-b border-border bg-bg-card px-4 py-3">
             <div className="max-w-5xl mx-auto">
-              <div className="flex items-center gap-4 text-xs">
-                {/* CI Checks */}
-                {task.prChecksStatus && task.prChecksStatus !== "none" && (
-                  <span
-                    className={cn(
-                      "flex items-center gap-1",
-                      task.prChecksStatus === "passing"
-                        ? "text-success"
-                        : task.prChecksStatus === "failing"
-                          ? "text-error"
-                          : "text-warning",
+              <PrStatusBar
+                checksStatus={task.prChecksStatus}
+                reviewStatus={task.prReviewStatus}
+                prState={task.prState}
+                actions={
+                  <>
+                    {task.costUsd && (
+                      <span className="text-text-muted">
+                        Cost: ${parseFloat(task.costUsd).toFixed(4)}
+                      </span>
                     )}
-                  >
-                    <span
-                      className={cn(
-                        "w-2 h-2 rounded-full",
-                        task.prChecksStatus === "passing"
-                          ? "bg-success"
-                          : task.prChecksStatus === "failing"
-                            ? "bg-error"
-                            : "bg-warning",
-                      )}
-                    />
-                    CI: {task.prChecksStatus}
-                  </span>
-                )}
-
-                {/* Review Status */}
-                {task.prReviewStatus && task.prReviewStatus !== "none" && (
-                  <span
-                    className={cn(
-                      "flex items-center gap-1",
-                      task.prReviewStatus === "approved"
-                        ? "text-success"
-                        : task.prReviewStatus === "changes_requested"
-                          ? "text-warning"
-                          : "text-text-muted",
+                    {task.state === "pr_opened" && (
+                      <button
+                        onClick={async () => {
+                          setActionLoading(true);
+                          try {
+                            await api.launchReview(id);
+                            toast.success("Review agent launched");
+                            refresh();
+                          } catch (err) {
+                            toast.error(
+                              err instanceof Error ? err.message : "Failed to launch review",
+                            );
+                          }
+                          setActionLoading(false);
+                        }}
+                        disabled={actionLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 disabled:opacity-50"
+                      >
+                        <Eye className="w-3 h-3" />
+                        Request Review
+                      </button>
                     )}
-                  >
-                    Review:{" "}
-                    {task.prReviewStatus === "changes_requested"
-                      ? "changes requested"
-                      : task.prReviewStatus}
-                  </span>
-                )}
-
-                {/* PR State */}
-                {task.prState && task.prState !== "open" && (
-                  <span className={task.prState === "merged" ? "text-success" : "text-text-muted"}>
-                    {task.prState}
-                  </span>
-                )}
-
-                {/* Cost */}
-                {task.costUsd && (
-                  <span className="text-text-muted ml-auto">
-                    Cost: ${parseFloat(task.costUsd).toFixed(4)}
-                  </span>
-                )}
-
-                {/* Request Review */}
-                {task.state === "pr_opened" && (
-                  <button
-                    onClick={async () => {
-                      setActionLoading(true);
-                      try {
-                        const res = await api.launchReview(id);
-                        toast.success("Review agent launched");
-                        refresh();
-                      } catch (err) {
-                        toast.error(err instanceof Error ? err.message : "Failed to launch review");
-                      }
-                      setActionLoading(false);
-                    }}
-                    disabled={actionLoading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 disabled:opacity-50 ml-auto"
-                  >
-                    <Eye className="w-3 h-3" />
-                    Request Review
-                  </button>
-                )}
-              </div>
-
-              {/* Review comments if changes requested */}
+                  </>
+                }
+              />
               {task.prReviewStatus === "changes_requested" && task.prReviewComments && (
                 <div className="mt-2 p-2 rounded-md bg-warning/5 border border-warning/20 text-xs">
                   <div className="font-medium text-warning mb-1">Review feedback:</div>
@@ -929,47 +866,16 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           <div className="shrink-0 border-t border-border bg-bg-card px-4 py-2.5">
             {canMessage ? (
               /* Mid-task messaging bar (running claude-code tasks) */
-              <div className="flex gap-2 items-end">
-                <textarea
-                  ref={textareaRef}
-                  value={messageInput}
-                  onChange={(e) => {
-                    setMessageInput(e.target.value);
-                    autoResizeTextarea();
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage("soft");
-                    }
-                  }}
-                  placeholder="Send a message to the running agent..."
-                  rows={1}
-                  className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-none"
-                />
-                <button
-                  onClick={() => handleSendMessage("soft")}
-                  disabled={!messageInput.trim() || messageSending}
-                  title="Send message (agent picks it up at next turn)"
-                  className="px-3 py-2 rounded-md text-sm font-medium transition-colors bg-primary text-white hover:bg-primary-hover disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
-                >
-                  {messageSending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  <span className="hidden sm:inline">Send</span>
-                </button>
-                <button
-                  onClick={() => handleSendMessage("interrupt")}
-                  disabled={!messageInput.trim() || messageSending}
-                  title="Stop — interrupt with urgent message"
-                  className="px-3 py-2 rounded-md text-sm font-medium transition-colors bg-warning text-white hover:bg-warning/90 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
-                >
-                  <Square className="w-4 h-4" />
-                  <span className="hidden sm:inline">Stop</span>
-                </button>
-              </div>
+              <ChatComposer
+                value={messageInput}
+                onChange={setMessageInput}
+                onSend={() => handleSendMessage("soft")}
+                onInterrupt={() => handleSendMessage("interrupt")}
+                sending={messageSending}
+                placeholder="Send a message to the running agent..."
+                sendLabel="Send"
+                interruptLabel="Stop"
+              />
             ) : isPlanReview && canResume ? (
               /* Plan review bar */
               <div className="space-y-2">

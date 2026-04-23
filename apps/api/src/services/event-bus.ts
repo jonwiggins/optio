@@ -22,9 +22,12 @@ export async function publishEvent(event: WsEvent): Promise<void> {
 
   await redis.publish(channel, JSON.stringify(enrichedEvent));
 
-  // Also publish to task-specific channel for targeted subscriptions
+  // Also publish to entity-specific channels for targeted subscriptions
   if ("taskId" in event) {
     await redis.publish(`optio:task:${event.taskId}`, JSON.stringify(enrichedEvent));
+  }
+  if ("prReviewId" in event && event.prReviewId) {
+    await redis.publish(`optio:pr-review:${event.prReviewId}`, JSON.stringify(enrichedEvent));
   }
 }
 
