@@ -154,6 +154,38 @@ describe("interactive-session-service", () => {
         expect.any(Object),
       );
     });
+
+    it("includes git credential env vars in pod env", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      });
+
+      vi.mocked(getOrCreateRepoPod).mockResolvedValue({
+        id: "pod-1",
+        podName: "pod-1",
+      } as any);
+
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          returning: vi
+            .fn()
+            .mockResolvedValue([{ id: "session-1", state: "active", podId: "pod-1" }]),
+        }),
+      });
+
+      await createSession({ repoUrl: "https://github.com/o/r" });
+
+      expect(getOrCreateRepoPod).toHaveBeenCalled();
+      const callArgs = vi.mocked(getOrCreateRepoPod).mock.calls[0];
+      const env = callArgs[2];
+
+      // Verify git credential env vars are set
+      expect(env.OPTIO_GIT_CREDENTIAL_URL).toBeDefined();
+      expect(env.OPTIO_GIT_CREDENTIAL_URL).toContain("/api/internal/git-credentials");
+      expect(env.OPTIO_CREDENTIAL_SECRET).toBe("test-secret");
+    });
   });
 
   describe("getSession", () => {

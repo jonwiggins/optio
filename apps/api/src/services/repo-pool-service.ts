@@ -35,7 +35,10 @@ const REPO_INIT_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_INIT_TIMEOUT_MS", 120000); 
 if (Number.isNaN(REPO_INIT_TIMEOUT_MS) || REPO_INIT_TIMEOUT_MS <= 0) {
   throw new Error("OPTIO_REPO_INIT_TIMEOUT_MS must be a positive integer");
 }
-const SERVICE_ACCOUNT_NAME = process.env.OPTIO_SERVICE_ACCOUNT_NAME; // K8s service account for workload identity
+
+function getServiceAccountName(): string | undefined {
+  return process.env.OPTIO_SERVICE_ACCOUNT_NAME;
+}
 
 /**
  * Parse a JSON-encoded environment variable, returning `undefined` when unset/empty.
@@ -421,7 +424,7 @@ spec:
             ) as unknown[],
           }
         : {}),
-      ...(SERVICE_ACCOUNT_NAME ? { serviceAccountName: SERVICE_ACCOUNT_NAME } : {}),
+      ...(getServiceAccountName() ? { serviceAccountName: getServiceAccountName() } : {}),
     };
 
     // Add Envoy sidecar containers and volumes when secret proxy is enabled
@@ -667,7 +670,7 @@ async function createRepoPodViaStatefulSet(
             ) as unknown[],
           }
         : {}),
-      ...(SERVICE_ACCOUNT_NAME ? { serviceAccountName: SERVICE_ACCOUNT_NAME } : {}),
+      ...(getServiceAccountName() ? { serviceAccountName: getServiceAccountName() } : {}),
     };
 
     // Add Envoy sidecar if secret proxy is enabled
@@ -768,7 +771,7 @@ async function createRepoPodViaStatefulSet(
       {
         stsName,
         serviceAccountName: spec.serviceAccountName,
-        SERVICE_ACCOUNT_NAME_ENV: SERVICE_ACCOUNT_NAME,
+        SERVICE_ACCOUNT_NAME_ENV: getServiceAccountName(),
       },
       "Calling ensureStatefulSet",
     );

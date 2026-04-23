@@ -950,3 +950,211 @@ describe("getOrCreateRepoPod — nodeSelector and tolerations env vars", () => {
     );
   });
 });
+
+describe("getOrCreateRepoPod — stale provisioning pod cleanup", () => {
+  function mockGetOrCreateFlow(opts: {
+    existingPods?: any[];
+    podCount?: number;
+    insertedPod?: any;
+  }) {
+    const dbMock = db as any;
+
+    // Build full chain for existing pods lookup: select().from().where().orderBy()
+    const orderByMock = vi.fn().mockResolvedValue(opts.existingPods ?? []);
+    const whereMockForList = vi.fn().mockReturnValue({
+      orderBy: orderByMock,
+    });
+    const fromMockForList = vi.fn().mockReturnValue({
+      where: whereMockForList,
+    });
+
+    // Build chain for count query: select().from().where()
+    const whereMockForCount = vi.fn().mockResolvedValue([{ count: opts.podCount ?? 0 }]);
+    const fromMockForCount = vi.fn().mockReturnValue({
+      where: whereMockForCount,
+    });
+
+    let selectCallCount = 0;
+    dbMock.select.mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        // First call: existing pods query
+        return { from: fromMockForList };
+      } else {
+        // Second call: count query
+        return { from: fromMockForCount };
+      }
+    });
+
+    if (opts.insertedPod) {
+      dbMock.returning.mockResolvedValueOnce([opts.insertedPod]);
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (db as any).where.mockReset().mockReturnThis();
+    (db as any).select.mockReset().mockReturnThis();
+  });
+
+  it("deletes provisioning pods older than 10 minutes", async () => {
+    const elevenMinutesAgo = new Date(Date.now() - 11 * 60 * 1000);
+    const stalePod = {
+      id: "stale-pod",
+      repoUrl: "https://github.com/org/repo",
+      state: "provisioning",
+      createdAt: elevenMinutesAgo,
+      podName: "stale-pod-name",
+    };
+
+    mockGetOrCreateFlow({
+      existingPods: [stalePod],
+      podCount: 0,
+      insertedPod: {
+        id: "new-pod",
+        repoUrl: "https://github.com/org/repo",
+        repoBranch: "main",
+        state: "provisioning",
+        instanceIndex: 0,
+      },
+    });
+
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-new" });
+
+    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+
+    // Verify the stale pod was deleted
+    expect((db as any).delete).toHaveBeenCalled();
+  });
+
+  it("does not delete provisioning pods younger than 10 minutes", async () => {
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const freshPod = {
+      id: "fresh-pod",
+      repoUrl: "https://github.com/org/repo",
+      state: "ready", // Mark as ready to avoid waitForPodReady loop
+      createdAt: fiveMinutesAgo,
+      podName: "fresh-pod-name",
+      activeTaskCount: 0,
+    };
+
+    mockGetOrCreateFlow({
+      existingPods: [freshPod],
+      podCount: 1,
+    });
+
+    mockRuntimeStatus.mockResolvedValueOnce({ state: "running" });
+
+    const result = await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+
+    // Verify we didn't delete the fresh pod
+    expect((db as any).delete).not.toHaveBeenCalled();
+    expect(result.id).toBe("fresh-pod");
+  });
+});
+
+describe("getOrCreateRepoPod — service account propagation", () => {
+  function mockGetOrCreateFlow(opts: {
+    existingPods?: any[];
+    podCount?: number;
+    insertedPod?: any;
+  }) {
+    const dbMock = db as any;
+
+    // Build full chain for existing pods lookup: select().from().where().orderBy()
+    const orderByMock = vi.fn().mockResolvedValue(opts.existingPods ?? []);
+    const whereMockForList = vi.fn().mockReturnValue({
+      orderBy: orderByMock,
+    });
+    const fromMockForList = vi.fn().mockReturnValue({
+      where: whereMockForList,
+    });
+
+    // Build chain for count query: select().from().where()
+    const whereMockForCount = vi.fn().mockResolvedValue([{ count: opts.podCount ?? 0 }]);
+    const fromMockForCount = vi.fn().mockReturnValue({
+      where: whereMockForCount,
+    });
+
+    let selectCallCount = 0;
+    dbMock.select.mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        // First call: existing pods query
+        return { from: fromMockForList };
+      } else {
+        // Second call: count query
+        return { from: fromMockForCount };
+      }
+    });
+
+    if (opts.insertedPod) {
+      dbMock.returning.mockResolvedValueOnce([opts.insertedPod]);
+    }
+  }
+
+  const origServiceAccountName = process.env.OPTIO_SERVICE_ACCOUNT_NAME;
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    (db as any).where.mockReset().mockReturnThis();
+    (db as any).select.mockReset().mockReturnThis();
+    if (origServiceAccountName !== undefined) {
+      process.env.OPTIO_SERVICE_ACCOUNT_NAME = origServiceAccountName;
+    } else {
+      delete process.env.OPTIO_SERVICE_ACCOUNT_NAME;
+    }
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (db as any).where.mockReset().mockReturnThis();
+    (db as any).select.mockReset().mockReturnThis();
+  });
+
+  it("passes service account name from env to container spec", async () => {
+    process.env.OPTIO_SERVICE_ACCOUNT_NAME = "optio-workload-identity";
+
+    mockGetOrCreateFlow({
+      existingPods: [],
+      podCount: 0,
+      insertedPod: {
+        id: "pod-1",
+        repoUrl: "https://github.com/org/repo",
+        repoBranch: "main",
+        state: "provisioning",
+        instanceIndex: 0,
+      },
+    });
+
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
+
+    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+
+    const spec = mockRuntimeCreate.mock.calls[0][0];
+    expect(spec.serviceAccountName).toBe("optio-workload-identity");
+  });
+
+  it("omits service account name when env var not set", async () => {
+    delete process.env.OPTIO_SERVICE_ACCOUNT_NAME;
+
+    mockGetOrCreateFlow({
+      existingPods: [],
+      podCount: 0,
+      insertedPod: {
+        id: "pod-1",
+        repoUrl: "https://github.com/org/repo",
+        repoBranch: "main",
+        state: "provisioning",
+        instanceIndex: 0,
+      },
+    });
+
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
+
+    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+
+    const spec = mockRuntimeCreate.mock.calls[0][0];
+    expect(spec.serviceAccountName).toBeUndefined();
+  });
+});
