@@ -1230,7 +1230,9 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
               <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
               <option value="gemini-3-pro">Gemini 3 Pro</option>
-              <option value="gemini-3-flash">Gemini 3 Flash</option>
+              <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
+              <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+              <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite Preview</option>
             </select>
           </div>
           <div>
