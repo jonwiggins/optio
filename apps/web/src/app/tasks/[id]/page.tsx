@@ -543,58 +543,63 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           );
         })()}
 
-      {/* PR Status */}
-      {task.prUrl &&
-        ((task.prChecksStatus && task.prChecksStatus !== "none") ||
-          (task.prReviewStatus && task.prReviewStatus !== "none") ||
-          (task.prState && task.prState !== "open")) && (
-          <div className="shrink-0 border-b border-border bg-bg-card px-4 py-3">
-            <div className="max-w-5xl mx-auto">
-              <PrStatusBar
-                checksStatus={task.prChecksStatus}
-                reviewStatus={task.prReviewStatus}
-                prState={task.prState}
-                actions={
-                  <>
-                    {task.costUsd && (
-                      <span className="text-text-muted">
-                        Cost: ${parseFloat(task.costUsd).toFixed(4)}
-                      </span>
-                    )}
-                    {task.state === "pr_opened" && (
-                      <button
-                        onClick={async () => {
-                          setActionLoading(true);
-                          try {
-                            await api.launchReview(id);
-                            toast.success("Review agent launched");
-                            refresh();
-                          } catch (err) {
-                            toast.error(
-                              err instanceof Error ? err.message : "Failed to launch review",
-                            );
-                          }
-                          setActionLoading(false);
-                        }}
-                        disabled={actionLoading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 disabled:opacity-50"
-                      >
-                        <Eye className="w-3 h-3" />
-                        Request Review
-                      </button>
-                    )}
-                  </>
-                }
-              />
-              {task.prReviewStatus === "changes_requested" && task.prReviewComments && (
-                <div className="mt-2 p-2 rounded-md bg-warning/5 border border-warning/20 text-xs">
-                  <div className="font-medium text-warning mb-1">Review feedback:</div>
-                  <pre className="text-text-muted whitespace-pre-wrap">{task.prReviewComments}</pre>
-                </div>
-              )}
+      {/* PR Status — also hosts the Timeline toggle so both pages put it in
+          the same place. The row always renders to give Timeline a stable home. */}
+      <div className="shrink-0 border-b border-border bg-bg-card px-4 py-2">
+        <div className="max-w-5xl mx-auto">
+          <PrStatusBar
+            checksStatus={task.prChecksStatus}
+            reviewStatus={task.prReviewStatus}
+            prState={task.prState}
+            actions={
+              <>
+                {task.costUsd && (
+                  <span className="text-text-muted">
+                    Cost: ${parseFloat(task.costUsd).toFixed(4)}
+                  </span>
+                )}
+                {task.state === "pr_opened" && (
+                  <button
+                    onClick={async () => {
+                      setActionLoading(true);
+                      try {
+                        await api.launchReview(id);
+                        toast.success("Review agent launched");
+                        refresh();
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : "Failed to launch review");
+                      }
+                      setActionLoading(false);
+                    }}
+                    disabled={actionLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 disabled:opacity-50"
+                  >
+                    <Eye className="w-3 h-3" />
+                    Request Review
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowTimeline(!showTimeline)}
+                  className={cn(
+                    "px-2 py-0.5 rounded text-xs transition-colors",
+                    showTimeline
+                      ? "bg-primary/10 text-primary"
+                      : "text-text-muted hover:bg-bg-hover",
+                  )}
+                >
+                  Timeline
+                </button>
+              </>
+            }
+          />
+          {task.prReviewStatus === "changes_requested" && task.prReviewComments && (
+            <div className="mt-2 p-2 rounded-md bg-warning/5 border border-warning/20 text-xs">
+              <div className="font-medium text-warning mb-1">Review feedback:</div>
+              <pre className="text-text-muted whitespace-pre-wrap">{task.prReviewComments}</pre>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+      </div>
 
       {/* Dependencies */}
       <div className="shrink-0 border-b border-border bg-bg px-4 py-2.5">
@@ -842,19 +847,6 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       <div className="flex-1 flex overflow-hidden">
         {/* Log panel */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* Log viewer + events toggle */}
-          <div className="shrink-0 flex items-center justify-end px-4 py-1 border-b border-border bg-bg">
-            <button
-              onClick={() => setShowTimeline(!showTimeline)}
-              className={cn(
-                "px-2 py-0.5 rounded text-xs transition-colors",
-                showTimeline ? "bg-primary/10 text-primary" : "text-text-muted hover:bg-bg-hover",
-              )}
-            >
-              Timeline
-            </button>
-          </div>
-
           {/* Log content via LogViewer */}
           <div className="flex-1 overflow-hidden">
             <ErrorBoundary label="Log viewer">
