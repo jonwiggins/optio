@@ -14,6 +14,7 @@ import { DetailHeader } from "@/components/detail-header";
 import { StatePipelineStrip } from "@/components/state-pipeline-strip";
 import { PrStatusBar } from "@/components/pr-status-bar";
 import { ChatTranscript, ChatComposer, type ChatMessage } from "@/components/chat-box";
+import { ReviewPipelineTimeline } from "@/components/review-pipeline-timeline";
 import {
   Loader2,
   Check,
@@ -25,13 +26,11 @@ import {
   RefreshCw,
   GitMerge,
   ChevronDown,
-  ChevronUp,
   Plus,
   Trash2,
   ExternalLink,
   Clock,
   Zap,
-  Bot,
   GitPullRequest,
   XCircle,
   RotateCcw,
@@ -68,10 +67,9 @@ const PIPELINE_STEPS = [
 ];
 
 function pipelineCurrentIndex(state: string): number {
-  if (state === "stale") return 3; // sits on "Ready" but coloured as error via flag
+  if (state === "stale") return 3;
   if (state === "failed" || state === "cancelled") return -1;
-  const idx = PIPELINE_STEPS.findIndex((s) => s.key === state);
-  return idx;
+  return PIPELINE_STEPS.findIndex((s) => s.key === state);
 }
 
 export default function ReviewDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -81,11 +79,11 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
   const [review, setReview] = useState<Review | null>(null);
   const [loading, setLoading] = useState(true);
   const [runs, setRuns] = useState<any[]>([]);
-  const [showLogs, setShowLogs] = useState(false);
   const [prStatus, setPrStatus] = useState<any>(null);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(true);
 
   // Editable fields
   const [summary, setSummary] = useState("");
@@ -124,7 +122,6 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
           .catch(() => {});
       }
 
-      // Chat only if the draft has produced output.
       if (["ready", "stale", "submitted"].includes(r.review.state)) {
         api
           .listPrReviewChat(id)
@@ -167,11 +164,9 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
 
   const isEditable = ["ready", "stale"].includes(review.state);
   const isWorking = ["queued", "waiting_ci", "reviewing"].includes(review.state);
+  const hasDraft = ["ready", "stale", "submitted"].includes(review.state);
   const prIsOpen = prStatus?.prState === "open";
   const checksOk = prStatus?.checksStatus === "passing" || prStatus?.checksStatus === "none";
-  // We only hard-disable merge when the PR is already merged/closed — merging
-  // with failing CI is the user's call (GitHub will enforce branch protection
-  // rules server-side).
   const canMerge = prIsOpen;
   const mergeBlockedReason = !prStatus
     ? "Loading PR status..."
@@ -399,7 +394,6 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         }
       />
 
-      {/* PR status bar (CI / review / merge state) */}
       {(prStatus?.checksStatus || prStatus?.reviewStatus || prStatus?.prState) && (
         <div className="shrink-0 border-b border-border bg-bg-card px-4 py-3">
           <div className="max-w-5xl mx-auto">
@@ -412,7 +406,6 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         </div>
       )}
 
-      {/* Error banner with classified remedy */}
       {review.errorMessage &&
         review.state === "failed" &&
         (() => {
@@ -457,7 +450,6 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
           );
         })()}
 
-      {/* Stale banner */}
       {review.state === "stale" && (
         <div className="shrink-0 border-b border-warning/20 bg-warning/5 px-4 py-3">
           <div className="max-w-5xl mx-auto flex items-center gap-2 text-sm text-warning">
@@ -467,327 +459,301 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         </div>
       )}
 
-      {/* Body */}
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-5xl mx-auto p-4 space-y-4">
-          {/* Working state */}
-          {isWorking && (
-            <div className="rounded-lg border border-border bg-bg-card p-4">
-              <div className="flex items-center gap-2 text-sm">
-                {review.state === "waiting_ci" ? (
-                  <Clock className="w-4 h-4 text-text-muted" />
-                ) : (
-                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                )}
-                <span className="font-medium">
-                  {review.state === "waiting_ci"
-                    ? "Waiting for CI to finish..."
-                    : review.state === "queued"
-                      ? "Queued — run will start shortly"
-                      : "Agent is reviewing the PR..."}
-                </span>
-              </div>
-              <p className="text-xs text-text-muted mt-1">
-                The draft will appear here when the agent is done.
-              </p>
-            </div>
-          )}
-
-          {/* Draft editor (ready/stale/submitted) */}
-          {(isEditable || review.state === "submitted") && (
-            <div className="rounded-lg border border-border bg-bg-card p-4 space-y-4">
-              {/* Verdict */}
-              <div>
-                <label className="text-xs font-medium text-text-muted mb-2 block">Verdict</label>
-                <div className="flex gap-2">
-                  {[
-                    { value: "approve", label: "Approve", Icon: Check, color: "success" },
-                    {
-                      value: "request_changes",
-                      label: "Request Changes",
-                      Icon: X,
-                      color: "error",
-                    },
-                    {
-                      value: "comment",
-                      label: "Comment",
-                      Icon: MessageSquare,
-                      color: "text-muted",
-                    },
-                  ].map(({ value, label, Icon, color }) => (
-                    <button
-                      key={value}
-                      disabled={!isEditable}
-                      onClick={() => {
-                        setVerdict(value);
-                        setDirty(true);
-                      }}
-                      className={cn(
-                        "flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
-                        verdict === value
-                          ? `bg-${color}/10 text-${color} border-${color}/30`
-                          : "bg-bg border-border text-text-muted hover:bg-bg-hover",
-                      )}
-                    >
-                      <Icon className="w-3.5 h-3.5" />
-                      {label}
-                    </button>
-                  ))}
+      {/* Main content: logs + sidebar — mirrors /tasks/[id] */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Log column */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          {/* Verdict + summary widget — only when the draft is ready */}
+          {hasDraft && (
+            <div className="shrink-0 border-b border-border bg-bg-card max-h-[55vh] overflow-y-auto">
+              <div className="max-w-5xl mx-auto p-4 space-y-4">
+                {/* Verdict */}
+                <div>
+                  <label className="text-xs font-medium text-text-muted mb-2 block">Verdict</label>
+                  <div className="flex gap-2">
+                    {[
+                      { value: "approve", label: "Approve", Icon: Check, color: "success" },
+                      {
+                        value: "request_changes",
+                        label: "Request Changes",
+                        Icon: X,
+                        color: "error",
+                      },
+                      {
+                        value: "comment",
+                        label: "Comment",
+                        Icon: MessageSquare,
+                        color: "text-muted",
+                      },
+                    ].map(({ value, label, Icon, color }) => (
+                      <button
+                        key={value}
+                        disabled={!isEditable}
+                        onClick={() => {
+                          setVerdict(value);
+                          setDirty(true);
+                        }}
+                        className={cn(
+                          "flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                          verdict === value
+                            ? `bg-${color}/10 text-${color} border-${color}/30`
+                            : "bg-bg border-border text-text-muted hover:bg-bg-hover",
+                        )}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* Summary */}
-              <div>
-                <label className="text-xs font-medium text-text-muted mb-2 block">
-                  Review Summary
-                </label>
-                <textarea
-                  value={summary}
-                  readOnly={!isEditable}
-                  onChange={(e) => {
-                    setSummary(e.target.value);
-                    setDirty(true);
-                  }}
-                  rows={6}
-                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-primary focus:ring-1 focus:ring-primary/20 focus:outline-none resize-y disabled:opacity-70"
-                  placeholder="Review summary..."
-                />
-              </div>
+                {/* Summary */}
+                <div>
+                  <label className="text-xs font-medium text-text-muted mb-2 block">
+                    Review Summary
+                  </label>
+                  <textarea
+                    value={summary}
+                    readOnly={!isEditable}
+                    onChange={(e) => {
+                      setSummary(e.target.value);
+                      setDirty(true);
+                    }}
+                    rows={5}
+                    className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-primary focus:ring-1 focus:ring-primary/20 focus:outline-none resize-y disabled:opacity-70"
+                    placeholder="Review summary..."
+                  />
+                </div>
 
-              {/* Inline comments */}
-              <div>
-                <label className="text-xs font-medium text-text-muted mb-2 block">
-                  Inline Comments ({comments.length})
-                </label>
-                <div className="space-y-2">
-                  {comments.map((c, i) => (
-                    <div key={i} className="flex gap-2 p-2 rounded-md bg-bg border border-border">
-                      <div className="flex-1 space-y-1.5">
-                        <div className="flex gap-2">
-                          <input
-                            value={c.path ?? ""}
+                {/* Inline comments */}
+                <div>
+                  <label className="text-xs font-medium text-text-muted mb-2 block">
+                    Inline Comments ({comments.length})
+                  </label>
+                  <div className="space-y-2">
+                    {comments.map((c, i) => (
+                      <div key={i} className="flex gap-2 p-2 rounded-md bg-bg border border-border">
+                        <div className="flex-1 space-y-1.5">
+                          <div className="flex gap-2">
+                            <input
+                              value={c.path ?? ""}
+                              readOnly={!isEditable}
+                              onChange={(e) => updateComment(i, "path", e.target.value)}
+                              placeholder="file/path.ts"
+                              className="flex-1 px-2 py-1 rounded bg-bg-card border border-border text-xs focus:border-primary focus:outline-none"
+                            />
+                            <input
+                              value={c.line ?? ""}
+                              readOnly={!isEditable}
+                              onChange={(e) =>
+                                updateComment(
+                                  i,
+                                  "line",
+                                  e.target.value ? parseInt(e.target.value) : undefined,
+                                )
+                              }
+                              placeholder="Line"
+                              type="text"
+                              inputMode="numeric"
+                              className="w-20 px-2 py-1 rounded bg-bg-card border border-border text-xs focus:border-primary focus:outline-none"
+                            />
+                          </div>
+                          <textarea
+                            value={c.body ?? ""}
                             readOnly={!isEditable}
-                            onChange={(e) => updateComment(i, "path", e.target.value)}
-                            placeholder="file/path.ts"
-                            className="flex-1 px-2 py-1 rounded bg-bg-card border border-border text-xs focus:border-primary focus:outline-none"
-                          />
-                          <input
-                            value={c.line ?? ""}
-                            readOnly={!isEditable}
-                            onChange={(e) =>
-                              updateComment(
-                                i,
-                                "line",
-                                e.target.value ? parseInt(e.target.value) : undefined,
-                              )
-                            }
-                            placeholder="Line"
-                            type="text"
-                            inputMode="numeric"
-                            className="w-20 px-2 py-1 rounded bg-bg-card border border-border text-xs focus:border-primary focus:outline-none"
+                            onChange={(e) => updateComment(i, "body", e.target.value)}
+                            placeholder="Comment..."
+                            rows={2}
+                            className="w-full px-2 py-1 rounded bg-bg-card border border-border text-xs focus:border-primary focus:outline-none resize-y"
                           />
                         </div>
-                        <textarea
-                          value={c.body ?? ""}
-                          readOnly={!isEditable}
-                          onChange={(e) => updateComment(i, "body", e.target.value)}
-                          placeholder="Comment..."
-                          rows={2}
-                          className="w-full px-2 py-1 rounded bg-bg-card border border-border text-xs focus:border-primary focus:outline-none resize-y"
-                        />
-                      </div>
-                      {isEditable && (
-                        <button
-                          onClick={() => removeComment(i)}
-                          className="text-text-muted hover:text-error transition-colors p-1 self-start"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {isEditable && (
-                    <button
-                      onClick={addComment}
-                      className="flex items-center gap-1 text-xs text-primary hover:text-primary-hover"
-                    >
-                      <Plus className="w-3 h-3" />
-                      Add comment
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center justify-between gap-3 pt-2 border-t border-border">
-                <div className="flex items-center gap-2">
-                  {isEditable && dirty && (
-                    <button
-                      onClick={handleSave}
-                      disabled={saving}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg border border-border text-xs text-text-muted hover:bg-bg-hover disabled:opacity-50"
-                    >
-                      {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                      Save Draft
-                    </button>
-                  )}
-                  {isEditable && (
-                    <button
-                      onClick={handleSubmit}
-                      disabled={submitting || !verdict}
-                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50"
-                    >
-                      {submitting ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Send className="w-3 h-3" />
-                      )}
-                      Submit Review
-                    </button>
-                  )}
-                  {review.state === "submitted" && (
-                    <span className="inline-flex items-center gap-1 text-xs text-success">
-                      <Check className="w-3.5 h-3.5" />
-                      Submitted{review.autoSubmitted ? " automatically" : ""}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <div className="flex">
-                      <button
-                        onClick={handleMerge}
-                        disabled={merging || !canMerge}
-                        title={mergeBlockedReason || `Merge with ${mergeMethod} strategy`}
-                        className={cn(
-                          "flex items-center gap-1.5 px-3 py-1.5 rounded-l-md text-xs font-medium border disabled:opacity-50",
-                          !checksOk && prIsOpen
-                            ? "bg-warning/10 text-warning hover:bg-warning/20 border-warning/30"
-                            : "bg-success/10 text-success hover:bg-success/20 border-success/20",
+                        {isEditable && (
+                          <button
+                            onClick={() => removeComment(i)}
+                            className="text-text-muted hover:text-error transition-colors p-1 self-start"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
+                      </div>
+                    ))}
+                    {isEditable && (
+                      <button
+                        onClick={addComment}
+                        className="flex items-center gap-1 text-xs text-primary hover:text-primary-hover"
                       >
-                        {merging ? (
+                        <Plus className="w-3 h-3" />
+                        Add comment
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-between gap-3 pt-2 border-t border-border">
+                  <div className="flex items-center gap-2">
+                    {isEditable && dirty && (
+                      <button
+                        onClick={handleSave}
+                        disabled={saving}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg border border-border text-xs text-text-muted hover:bg-bg-hover disabled:opacity-50"
+                      >
+                        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                        Save Draft
+                      </button>
+                    )}
+                    {isEditable && (
+                      <button
+                        onClick={handleSubmit}
+                        disabled={submitting || !verdict}
+                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50"
+                      >
+                        {submitting ? (
                           <Loader2 className="w-3 h-3 animate-spin" />
                         ) : (
-                          <GitMerge className="w-3 h-3" />
+                          <Send className="w-3 h-3" />
                         )}
-                        {!checksOk && prIsOpen ? "Merge anyway" : "Merge"}
+                        Submit Review
                       </button>
-                      <button
-                        onClick={() => setMergeMenuOpen((v) => !v)}
-                        className={cn(
-                          "px-1.5 py-1.5 rounded-r-md text-xs border border-l-0",
-                          !checksOk && prIsOpen
-                            ? "bg-warning/10 text-warning hover:bg-warning/20 border-warning/30"
-                            : "bg-success/10 text-success hover:bg-success/20 border-success/20",
-                        )}
-                      >
-                        <ChevronDown className="w-3 h-3" />
-                      </button>
-                    </div>
-                    {mergeMenuOpen && (
-                      <div className="absolute right-0 top-full mt-1 bg-bg-card border border-border rounded-md shadow-lg z-10 py-1 min-w-[140px]">
-                        {(["squash", "merge", "rebase"] as const).map((m) => (
-                          <button
-                            key={m}
-                            onClick={() => {
-                              setMergeMethod(m);
-                              setMergeMenuOpen(false);
-                            }}
-                            className={cn(
-                              "w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover",
-                              mergeMethod === m ? "text-primary font-medium" : "text-text",
-                            )}
-                          >
-                            {m === "squash"
-                              ? "Squash and merge"
-                              : m === "rebase"
-                                ? "Rebase and merge"
-                                : "Create a merge commit"}
-                          </button>
-                        ))}
-                      </div>
                     )}
+                    {review.state === "submitted" && (
+                      <span className="inline-flex items-center gap-1 text-xs text-success">
+                        <Check className="w-3.5 h-3.5" />
+                        Submitted{review.autoSubmitted ? " automatically" : ""}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <div className="flex">
+                        <button
+                          onClick={handleMerge}
+                          disabled={merging || !canMerge}
+                          title={mergeBlockedReason || `Merge with ${mergeMethod} strategy`}
+                          className={cn(
+                            "flex items-center gap-1.5 px-3 py-1.5 rounded-l-md text-xs font-medium border disabled:opacity-50",
+                            !checksOk && prIsOpen
+                              ? "bg-warning/10 text-warning hover:bg-warning/20 border-warning/30"
+                              : "bg-success/10 text-success hover:bg-success/20 border-success/20",
+                          )}
+                        >
+                          {merging ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <GitMerge className="w-3 h-3" />
+                          )}
+                          {!checksOk && prIsOpen ? "Merge anyway" : "Merge"}
+                        </button>
+                        <button
+                          onClick={() => setMergeMenuOpen((v) => !v)}
+                          className={cn(
+                            "px-1.5 py-1.5 rounded-r-md text-xs border border-l-0",
+                            !checksOk && prIsOpen
+                              ? "bg-warning/10 text-warning hover:bg-warning/20 border-warning/30"
+                              : "bg-success/10 text-success hover:bg-success/20 border-success/20",
+                          )}
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                        </button>
+                      </div>
+                      {mergeMenuOpen && (
+                        <div className="absolute right-0 top-full mt-1 bg-bg-card border border-border rounded-md shadow-lg z-10 py-1 min-w-[140px]">
+                          {(["squash", "merge", "rebase"] as const).map((m) => (
+                            <button
+                              key={m}
+                              onClick={() => {
+                                setMergeMethod(m);
+                                setMergeMenuOpen(false);
+                              }}
+                              className={cn(
+                                "w-full text-left px-3 py-1.5 text-xs hover:bg-bg-hover",
+                                mergeMethod === m ? "text-primary font-medium" : "text-text",
+                              )}
+                            >
+                              {m === "squash"
+                                ? "Squash and merge"
+                                : m === "rebase"
+                                  ? "Rebase and merge"
+                                  : "Create a merge commit"}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Chat */}
-          {["ready", "stale", "submitted"].includes(review.state) && (
-            <div className="rounded-lg border border-border bg-bg-card p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Bot className="w-3.5 h-3.5 text-primary" />
-                <span className="text-xs font-medium">Chat with the reviewer</span>
+          {/* Working state hint while there's nothing to show yet */}
+          {isWorking && (
+            <div className="shrink-0 border-b border-border bg-bg px-4 py-2">
+              <div className="max-w-5xl mx-auto flex items-center gap-2 text-xs text-text-muted">
+                {review.state === "waiting_ci" ? (
+                  <Clock className="w-3.5 h-3.5" />
+                ) : (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                )}
+                {review.state === "waiting_ci"
+                  ? "Waiting for CI to finish — the agent will start reviewing once checks complete."
+                  : review.state === "queued"
+                    ? "Queued — a worker will pick this up shortly."
+                    : "Agent is reviewing the PR. The draft will appear above when it's done."}
               </div>
-              <p className="text-[11px] text-text-muted mb-2">
-                Ask follow-up questions. The agent may update the draft above.
-              </p>
+            </div>
+          )}
+
+          {/* Toolbar (timeline toggle) — same shape as the task page */}
+          <div className="shrink-0 flex items-center justify-end px-4 py-1 border-b border-border bg-bg">
+            <button
+              onClick={() => setShowTimeline(!showTimeline)}
+              className={cn(
+                "px-2 py-0.5 rounded text-xs transition-colors",
+                showTimeline ? "bg-primary/10 text-primary" : "text-text-muted hover:bg-bg-hover",
+              )}
+            >
+              Timeline
+            </button>
+          </div>
+
+          {/* Logs */}
+          <div className="flex-1 overflow-hidden">
+            <ErrorBoundary label="Review log viewer">
+              <LogViewer externalLogs={externalLogs} />
+            </ErrorBoundary>
+          </div>
+
+          {/* Chat composer at the bottom — only when the agent has produced a draft */}
+          {hasDraft && (
+            <div className="shrink-0 border-t border-border bg-bg-card px-4 py-2.5">
               <ChatTranscript messages={chat} pending={chatSending} />
               <ChatComposer
                 value={chatInput}
                 onChange={setChatInput}
                 onSend={handleSendChat}
                 sending={chatSending}
-                placeholder="Ask the reviewer a question, or request a change..."
-                rows={2}
+                placeholder="Ask the reviewer a follow-up, or request a change..."
               />
             </div>
           )}
-
-          {/* Runs (collapsible header) + agent logs */}
-          <div className="rounded-lg border border-border bg-bg-card">
-            <button
-              onClick={() => setShowLogs((v) => !v)}
-              className="w-full flex items-center justify-between gap-2 p-3 text-xs font-medium text-text-muted hover:bg-bg-hover transition-colors"
-            >
-              <span className="flex items-center gap-1.5">
-                {showLogs ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                Agent runs ({runs.length}) &amp; logs
-              </span>
-            </button>
-            {showLogs && (
-              <div className="border-t border-border p-3 space-y-3">
-                {runs.map((r) => (
-                  <div key={r.id} className="p-2 rounded bg-bg border border-border text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium capitalize">{r.kind}</span>
-                      <span
-                        className={cn(
-                          "px-1.5 py-0.5 rounded-md text-[10px]",
-                          r.state === "completed"
-                            ? "bg-success/10 text-success"
-                            : r.state === "failed"
-                              ? "bg-error/10 text-error"
-                              : r.state === "running"
-                                ? "bg-warning/10 text-warning"
-                                : "bg-bg-card text-text-muted",
-                        )}
-                      >
-                        {r.state}
-                      </span>
-                      <span className="text-text-muted ml-auto">
-                        {formatRelativeTime(r.createdAt)}
-                      </span>
-                      {r.costUsd && (
-                        <span className="text-text-muted">${parseFloat(r.costUsd).toFixed(4)}</span>
-                      )}
-                    </div>
-                    {r.errorMessage && (
-                      <div className="mt-1 text-error text-[11px]">{r.errorMessage}</div>
-                    )}
-                  </div>
-                ))}
-                <div className="h-96 border border-border rounded overflow-hidden">
-                  <ErrorBoundary label="Review log viewer">
-                    <LogViewer externalLogs={externalLogs} />
-                  </ErrorBoundary>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
+
+        {/* Timeline sidebar — mirrors /tasks/[id] */}
+        {showTimeline && (
+          <div className="hidden md:flex w-80 shrink-0 border-l border-border overflow-auto bg-bg-card flex-col">
+            <div className="flex items-center gap-1 p-2 border-b border-border">
+              <span className="px-2.5 py-1 rounded text-xs bg-primary/10 text-primary font-medium">
+                Pipeline
+              </span>
+            </div>
+            <div className="flex-1 overflow-auto p-3">
+              <ErrorBoundary label="Review pipeline timeline">
+                <ReviewPipelineTimeline review={review} runs={runs} />
+              </ErrorBoundary>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

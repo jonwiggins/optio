@@ -22,9 +22,9 @@ import type { LucideIcon } from "lucide-react";
 // Types
 // ---------------------------------------------------------------------------
 
-type StageStatus = "completed" | "active" | "upcoming" | "failed" | "cancelled" | "skipped";
+export type StageStatus = "completed" | "active" | "upcoming" | "failed" | "cancelled" | "skipped";
 
-interface PipelineStage {
+export interface PipelineStage {
   id: string;
   label: string;
   status: StageStatus;
@@ -395,7 +395,7 @@ const STAGE_TOOLTIPS: Record<string, string> = {
 // Stage row component
 // ---------------------------------------------------------------------------
 
-function PipelineStageRow({ stage, isLast }: { stage: PipelineStage; isLast: boolean }) {
+export function PipelineStageRow({ stage, isLast }: { stage: PipelineStage; isLast: boolean }) {
   const Icon = stage.icon;
 
   // Icon & dot styling per status
