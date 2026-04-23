@@ -72,11 +72,17 @@ export default function SetupPage() {
   const [openaiError, setOpenaiError] = useState("");
 
   // Step 3: Claude auth mode
-  const [claudeAuthMode, setClaudeAuthMode] = useState<"api-key" | "oauth-token">("oauth-token");
+  const [claudeAuthMode, setClaudeAuthMode] = useState<"api-key" | "oauth-token" | "vertex-ai">(
+    "oauth-token",
+  );
   const [oauthToken, setOauthToken] = useState("");
   const [oauthTokenDetected, setOauthTokenDetected] = useState(false);
   const [oauthChecking, setOauthChecking] = useState(false);
   const [showManualPaste, setShowManualPaste] = useState(false);
+  const [claudeVertexProject, setClaudeVertexProject] = useState("");
+  const [claudeVertexRegion, setClaudeVertexRegion] = useState("us-central1");
+  const [claudeVertexServiceAccountKey, setClaudeVertexServiceAccountKey] = useState("");
+  const [claudeVertexKeyError, setClaudeVertexKeyError] = useState("");
 
   // Step 3: Codex auth mode
   const [codexAuthMode, setCodexAuthMode] = useState<"api-key" | "app-server">("api-key");
@@ -189,7 +195,9 @@ export default function SetupPage() {
   const claudeReady =
     claudeAuthMode === "oauth-token"
       ? oauthTokenDetected || oauthToken.trim().length > 0
-      : anthropicValidated;
+      : claudeAuthMode === "vertex-ai"
+        ? claudeVertexProject.trim().length > 0
+        : anthropicValidated;
 
   const codexReady =
     codexAuthMode === "app-server" ? codexAppServerUrl.trim().length > 0 : openaiValidated;
@@ -412,6 +420,45 @@ export default function SetupPage() {
           value: oauthToken,
           scope: "user",
         });
+      }
+      if (claudeAuthMode === "vertex-ai" && claudeVertexProject.trim()) {
+        await api.createSecret({
+          name: "CLAUDE_VERTEX_PROJECT_ID",
+          value: claudeVertexProject.trim(),
+        });
+        if (claudeVertexRegion.trim()) {
+          await api.createSecret({
+            name: "CLAUDE_VERTEX_REGION",
+            value: claudeVertexRegion.trim(),
+          });
+        }
+        if (claudeVertexServiceAccountKey.trim()) {
+          // Validate JSON structure before saving
+          try {
+            const keyData = JSON.parse(claudeVertexServiceAccountKey);
+            // Validate it's actually a service account key with required fields
+            const requiredFields = ["type", "project_id", "private_key", "client_email"];
+            const missingFields = requiredFields.filter((field) => !keyData[field]);
+            if (missingFields.length > 0) {
+              throw new Error(
+                `Invalid service account key: missing required fields: ${missingFields.join(", ")}`,
+              );
+            }
+            if (keyData.type !== "service_account") {
+              throw new Error('Invalid service account key: type must be "service_account"');
+            }
+            await api.createSecret({
+              name: "CLAUDE_VERTEX_SERVICE_ACCOUNT_KEY",
+              value: claudeVertexServiceAccountKey,
+              scope: "user",
+            });
+          } catch (e) {
+            if (e instanceof Error) {
+              throw e;
+            }
+            throw new Error("Service account key must be valid JSON");
+          }
+        }
       }
       // Save Codex auth mode and credentials
       if (codexAuthMode === "app-server" && codexAppServerUrl.trim()) {
@@ -1045,6 +1092,79 @@ export default function SetupPage() {
                               <CheckCircle className="w-3 h-3" /> API key valid
                             </p>
                           )}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+
+                  <label
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-md border cursor-pointer transition-colors",
+                      claudeAuthMode === "vertex-ai"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-text-muted",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="claude-auth"
+                      checked={claudeAuthMode === "vertex-ai"}
+                      onChange={() => setClaudeAuthMode("vertex-ai")}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm font-medium">
+                        Use Vertex AI (ADC){" "}
+                        <span className="text-text-muted font-normal">— GCP workloads</span>
+                      </span>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        Route Claude API calls through Google Cloud Vertex AI. Supports workload
+                        identity or service account keys.
+                      </p>
+                      {claudeAuthMode === "vertex-ai" && (
+                        <div className="mt-2 space-y-2">
+                          <input
+                            type="text"
+                            value={claudeVertexProject}
+                            onChange={(e) => setClaudeVertexProject(e.target.value)}
+                            placeholder="GCP Project ID (required)"
+                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          />
+                          <input
+                            type="text"
+                            value={claudeVertexRegion}
+                            onChange={(e) => setClaudeVertexRegion(e.target.value)}
+                            placeholder="Region (e.g. us-east5, global)"
+                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          />
+                          <div className="space-y-1">
+                            <label className="text-xs text-text-muted">
+                              Service Account Key (optional — uses workload identity if blank)
+                            </label>
+                            <textarea
+                              value={claudeVertexServiceAccountKey}
+                              onChange={(e) => {
+                                setClaudeVertexServiceAccountKey(e.target.value);
+                                setClaudeVertexKeyError("");
+                                // Validate JSON on change
+                                if (e.target.value.trim()) {
+                                  try {
+                                    JSON.parse(e.target.value);
+                                  } catch {
+                                    setClaudeVertexKeyError("Invalid JSON format");
+                                  }
+                                }
+                              }}
+                              placeholder='{"type":"service_account",...}'
+                              rows={4}
+                              className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-xs font-mono focus:outline-none focus:border-primary resize-none"
+                            />
+                            {claudeVertexKeyError && (
+                              <p className="text-error text-xs flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3" /> {claudeVertexKeyError}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1926,7 +2046,11 @@ export default function SetupPage() {
                     <CheckCircle className="w-4 h-4 text-success" />
                     <span>
                       Claude Code:{" "}
-                      {claudeAuthMode === "oauth-token" ? "Max/Pro subscription" : "API key"}
+                      {claudeAuthMode === "oauth-token"
+                        ? "Max/Pro subscription"
+                        : claudeAuthMode === "vertex-ai"
+                          ? "Vertex AI"
+                          : "API key"}
                     </span>
                   </div>
                 )}

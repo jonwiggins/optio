@@ -119,6 +119,8 @@ export async function setupRoutes(rawApp: FastifyInstance) {
 
       const usingSubscription = isSubscriptionAvailable();
       const hasOauthToken = secretNames.includes("CLAUDE_CODE_OAUTH_TOKEN");
+      // Claude Vertex AI is detected by Claude-specific GCP project secret
+      const hasClaudeVertexAi = secretNames.includes("CLAUDE_VERTEX_PROJECT_ID");
 
       const hasCodexAppServer = secretNames.includes("CODEX_APP_SERVER_URL");
 
@@ -138,6 +140,7 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         hasOpenAIKey ||
         usingSubscription ||
         hasOauthToken ||
+        hasClaudeVertexAi ||
         hasCodexAppServer ||
         hasCopilotToken ||
         hasGeminiKey ||
@@ -160,7 +163,10 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         steps: {
           runtime: { done: runtimeHealthy, label: "Container runtime" },
           gitToken: { done: hasGitToken, label: "Git provider token" },
-          anthropicKey: { done: hasAnthropicKey, label: "Anthropic API key" },
+          anthropicKey: {
+            done: hasAnthropicKey || usingSubscription || hasOauthToken || hasClaudeVertexAi,
+            label: "Claude credentials",
+          },
           openaiKey: { done: hasOpenAIKey, label: "OpenAI API key" },
           codexAppServer: { done: hasCodexAppServer, label: "Codex app-server" },
           copilotToken: { done: hasCopilotToken, label: "GitHub Copilot token" },

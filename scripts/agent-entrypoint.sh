@@ -42,6 +42,9 @@ for f in files:
         fh.write(f['content'])
     if f.get('executable'):
         os.chmod(f['path'], 0o755)
+    elif f.get('sensitive'):
+        # For sensitive files (service account keys, credentials), set restrictive permissions
+        os.chmod(f['path'], 0o600)
     print(f'  wrote {f[\"path\"]}')
 "
 fi
@@ -59,6 +62,28 @@ case "${OPTIO_AGENT_TYPE}" in
         echo "[optio] WARNING: Token proxy not reachable at ${OPTIO_API_URL}"
       fi
       # Unset API key so Claude Code uses the apiKeyHelper
+      unset ANTHROPIC_API_KEY 2>/dev/null || true
+    elif [ "${OPTIO_AUTH_MODE:-api-key}" = "vertex-ai" ]; then
+      echo "[optio] Using Vertex AI (Google Cloud)"
+      # Validate required env vars for Vertex AI
+      if [ -z "${ANTHROPIC_VERTEX_PROJECT_ID:-}" ]; then
+        echo "[optio] ERROR: ANTHROPIC_VERTEX_PROJECT_ID is required for Vertex AI mode"
+        echo "[optio] Set this via the Vertex AI section of the setup wizard at /setup"
+        exit 1
+      fi
+      if [ -z "${CLOUD_ML_REGION:-}" ]; then
+        echo "[optio] ERROR: CLOUD_ML_REGION is required for Vertex AI mode"
+        echo "[optio] Set this via the Vertex AI section of the setup wizard at /setup"
+        exit 1
+      fi
+      echo "[optio] GCP Project: ${ANTHROPIC_VERTEX_PROJECT_ID}"
+      echo "[optio] Region: ${CLOUD_ML_REGION}"
+      if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+        echo "[optio] Using service account key at: ${GOOGLE_APPLICATION_CREDENTIALS}"
+      else
+        echo "[optio] Using workload identity (no service account key provided)"
+      fi
+      # Unset API key so Claude Code uses Vertex AI
       unset ANTHROPIC_API_KEY 2>/dev/null || true
     else
       echo "[optio] Using API key"

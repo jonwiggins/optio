@@ -58,6 +58,26 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       const apiUrl = input.optioApiUrl ?? "http://host.docker.internal:4000";
       env.OPTIO_API_URL = apiUrl;
       // CLAUDE_CODE_OAUTH_TOKEN will be injected by the task worker after fetching from auth proxy
+    } else if (authMode === "vertex-ai") {
+      // Vertex AI: authenticate via Google ADC, route through Google Cloud
+      // Claude Code reads CLAUDE_CODE_USE_VERTEX=1 + ANTHROPIC_VERTEX_PROJECT_ID + CLOUD_ML_REGION
+      env.CLAUDE_CODE_USE_VERTEX = "1";
+      if (input.googleCloudProject) {
+        env.ANTHROPIC_VERTEX_PROJECT_ID = input.googleCloudProject;
+      }
+      if (input.googleCloudLocation) {
+        env.CLOUD_ML_REGION = input.googleCloudLocation;
+      }
+      // If a service account key was provided, write it as a setup file and point ADC at it
+      if (input.claudeVertexServiceAccountKey) {
+        setupFiles.push({
+          path: "/home/agent/.config/gcloud/gsa-key.json",
+          content: input.claudeVertexServiceAccountKey,
+          sensitive: true, // Apply chmod 600 for security
+        });
+        env.GOOGLE_APPLICATION_CREDENTIALS = "/home/agent/.config/gcloud/gsa-key.json";
+      }
+      // When no key is provided, rely on workload identity (GKE) or pre-mounted ADC
     }
 
     // Claude Code settings

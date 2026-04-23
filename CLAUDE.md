@@ -118,10 +118,11 @@ When a limit is hit, task is re-queued with 10s delay.
 
 **Web UI**: Multi-provider OAuth (GitHub, Google, GitLab, generic OIDC). Enable by setting `<PROVIDER>_OAUTH_CLIENT_ID` + `<PROVIDER>_OAUTH_CLIENT_SECRET` (or `OIDC_ISSUER_URL` + `OIDC_CLIENT_ID` + `OIDC_CLIENT_SECRET` for generic OIDC). Sessions use SHA256-hashed tokens (30-day TTL). Local dev bypass: `OPTIO_AUTH_DISABLED=true`.
 
-**Claude Code** (three modes, selected in setup wizard):
+**Claude Code** (four modes, selected in setup wizard):
 
 - **API Key**: `ANTHROPIC_API_KEY` env var injected into agent pods
 - **OAuth Token** (recommended for k8s): `CLAUDE_CODE_OAUTH_TOKEN` encrypted secret injected into pods
+- **Vertex AI** (GCP workloads): Routes through Google Cloud Vertex AI. Uses `CLAUDE_VERTEX_PROJECT_ID`, `CLAUDE_VERTEX_REGION`, and optional `CLAUDE_VERTEX_SERVICE_ACCOUNT_KEY` (encrypted, user-scoped). Falls back to workload identity when no service account key provided. Service account keys written to `/home/agent/.config/gcloud/gsa-key.json` with chmod 600
 - **Max Subscription** (legacy, local dev only): reads from host macOS Keychain
 
 ### Key subsystems

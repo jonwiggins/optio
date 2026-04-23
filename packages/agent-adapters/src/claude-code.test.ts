@@ -100,6 +100,67 @@ describe("ClaudeCodeAdapter", () => {
       expect(config.env.OPTIO_API_URL).toBe("http://optio-api:4000");
     });
 
+    describe("vertex-ai mode", () => {
+      it("does not require ANTHROPIC_API_KEY", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "vertex-ai",
+          googleCloudProject: "my-gcp-project",
+          googleCloudLocation: "us-east5",
+        });
+        expect(config.requiredSecrets).toEqual([]);
+        expect(config.requiredSecrets).not.toContain("ANTHROPIC_API_KEY");
+      });
+
+      it("sets CLAUDE_CODE_USE_VERTEX=1 to enable Vertex AI routing", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "vertex-ai",
+          googleCloudProject: "my-gcp-project",
+          googleCloudLocation: "us-east5",
+        });
+        expect(config.env.CLAUDE_CODE_USE_VERTEX).toBe("1");
+        expect(config.env.ANTHROPIC_VERTEX_PROJECT_ID).toBe("my-gcp-project");
+        expect(config.env.CLOUD_ML_REGION).toBe("us-east5");
+      });
+
+      it("writes service account key file when provided (for non-GKE environments)", () => {
+        const serviceAccountKey = '{"type":"service_account","project_id":"test"}';
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "vertex-ai",
+          googleCloudProject: "my-gcp-project",
+          googleCloudLocation: "us-east5",
+          claudeVertexServiceAccountKey: serviceAccountKey,
+        });
+        const keyFile = config.setupFiles!.find(
+          (f) => f.path === "/home/agent/.config/gcloud/gsa-key.json",
+        );
+        expect(keyFile).toBeDefined();
+        expect(keyFile!.content).toBe(serviceAccountKey);
+        expect(keyFile!.sensitive).toBe(true);
+        expect(config.env.GOOGLE_APPLICATION_CREDENTIALS).toBe(
+          "/home/agent/.config/gcloud/gsa-key.json",
+        );
+      });
+
+      it("relies on workload identity when no service account key provided (GKE)", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "vertex-ai",
+          googleCloudProject: "my-gcp-project",
+          googleCloudLocation: "us-east5",
+          // No claudeVertexServiceAccountKey - will use GKE workload identity
+        });
+        // Should not create key file or set GOOGLE_APPLICATION_CREDENTIALS
+        // GKE workload identity provides ADC automatically
+        expect(config.env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+        const keyFile = config.setupFiles!.find(
+          (f) => f.path === "/home/agent/.config/gcloud/gsa-key.json",
+        );
+        expect(keyFile).toBeUndefined();
+      });
+    });
     it("generates correct branch name with TASK_BRANCH_PREFIX", () => {
       const config = adapter.buildContainerConfig({
         ...baseInput,

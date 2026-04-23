@@ -261,18 +261,27 @@ export function startTaskWorker() {
           ((await retrieveSecretWithFallback("GEMINI_AUTH_MODE", "global", taskWorkspaceId).catch(
             () => null,
           )) as any) ?? "api-key";
-        const googleCloudProject =
-          geminiAuthMode === "vertex-ai"
+
+        // GCP config for Vertex AI (both Claude and Gemini)
+        const needsGcpConfig = claudeAuthMode === "vertex-ai" || geminiAuthMode === "vertex-ai";
+        const googleCloudProject = needsGcpConfig
+          ? (((await retrieveSecretWithFallback(
+              claudeAuthMode === "vertex-ai" ? "CLAUDE_VERTEX_PROJECT_ID" : "GOOGLE_CLOUD_PROJECT",
+              "global",
+              taskWorkspaceId,
+            ).catch(() => null)) as any) ?? undefined)
+          : undefined;
+        const googleCloudLocation = needsGcpConfig
+          ? (((await retrieveSecretWithFallback(
+              claudeAuthMode === "vertex-ai" ? "CLAUDE_VERTEX_REGION" : "GOOGLE_CLOUD_LOCATION",
+              "global",
+              taskWorkspaceId,
+            ).catch(() => null)) as any) ?? undefined)
+          : undefined;
+        const claudeVertexServiceAccountKey =
+          claudeAuthMode === "vertex-ai"
             ? (((await retrieveSecretWithFallback(
-                "GOOGLE_CLOUD_PROJECT",
-                "global",
-                taskWorkspaceId,
-              ).catch(() => null)) as any) ?? undefined)
-            : undefined;
-        const googleCloudLocation =
-          geminiAuthMode === "vertex-ai"
-            ? (((await retrieveSecretWithFallback(
-                "GOOGLE_CLOUD_LOCATION",
+                "CLAUDE_VERTEX_SERVICE_ACCOUNT_KEY",
                 "global",
                 taskWorkspaceId,
               ).catch(() => null)) as any) ?? undefined)
@@ -365,6 +374,7 @@ export function startTaskWorker() {
           maxTurnsReview: repoConfig?.maxTurnsReview ?? undefined,
           googleCloudProject,
           googleCloudLocation,
+          claudeVertexServiceAccountKey,
         });
 
         // ── MCP servers & custom skills injection ────────────────────
