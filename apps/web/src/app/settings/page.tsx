@@ -200,7 +200,7 @@ function DefaultReviewEditor() {
             className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
           >
             <option value="sonnet">Sonnet 4.6</option>
-            <option value="opus">Opus 4.6</option>
+            <option value="opus">Opus 4.7</option>
             <option value="haiku">Haiku 4.5</option>
           </select>
         </div>

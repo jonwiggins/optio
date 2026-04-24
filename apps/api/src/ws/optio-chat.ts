@@ -23,7 +23,7 @@ import {
 const ANTHROPIC_API_URL = process.env.ANTHROPIC_API_BASE_URL ?? "https://api.anthropic.com";
 
 const ANTHROPIC_MODEL_MAP: Record<string, string> = {
-  opus: "claude-opus-4-6",
+  opus: "claude-opus-4-7",
   sonnet: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5-20251001",
 };

@@ -563,7 +563,7 @@ function AgentStep({
             className={selectClass}
           >
             <option value="sonnet">Sonnet 4.6</option>
-            <option value="opus">Opus 4.6</option>
+            <option value="opus">Opus 4.7</option>
             <option value="haiku">Haiku 4.5</option>
           </select>
         </div>
@@ -710,7 +710,7 @@ function ReviewStep({
                   className={selectClass}
                 >
                   <option value="sonnet">Sonnet 4.6</option>
-                  <option value="opus">Opus 4.6</option>
+                  <option value="opus">Opus 4.7</option>
                   <option value="haiku">Haiku 4.5</option>
                 </select>
               </div>
