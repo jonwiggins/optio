@@ -51,6 +51,7 @@ import { sharedDirectoryRoutes } from "./routes/shared-directories.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { optioRoutes } from "./routes/optio.js";
 import { optioSettingsRoutes } from "./routes/optio-settings.js";
+import { agentOptionsRoutes } from "./routes/agent-options.js";
 import { activityRoutes } from "./routes/activity.js";
 import githubAppRoutes from "./routes/github-app.js";
 import { githubTokenRoutes } from "./routes/github-token.js";
@@ -284,6 +285,7 @@ export async function buildServer() {
   await app.register(notificationRoutes);
   await app.register(optioRoutes);
   await app.register(optioSettingsRoutes);
+  await app.register(agentOptionsRoutes);
   await app.register(activityRoutes);
   await app.register(githubAppRoutes);
   await app.register(githubTokenRoutes);

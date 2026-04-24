@@ -1587,4 +1587,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ params }),
     }),
+
+  // Agent Options — per-provider model & runtime-option catalog
+  getAgentProviderOptions: (provider: string, opts?: { refresh?: boolean }) => {
+    const qs = opts?.refresh ? "?refresh=true" : "";
+    return request<{
+      provider: string;
+      source: "baseline" | "live";
+      cached: boolean;
+      refreshedAt: number | null;
+      error?: string;
+      catalog: unknown;
+    }>(`/api/agents/${provider}/options${qs}`);
+  },
+
+  refreshAgentProviderOptions: (provider: string) =>
+    request<{
+      provider: string;
+      source: "baseline" | "live";
+      cached: boolean;
+      refreshedAt: number | null;
+      error?: string;
+      catalog: unknown;
+    }>(`/api/agents/${provider}/options/refresh`, { method: "POST" }),
 };

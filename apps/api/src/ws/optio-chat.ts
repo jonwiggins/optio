@@ -5,6 +5,7 @@ import { logger } from "../logger.js";
 import {
   OPTIO_TOOL_SCHEMAS,
   OPTIO_TOOL_CATEGORIES,
+  resolveModelId,
   type OptioToolDefinition,
   type OptioToolSchema,
 } from "@optio/shared";
@@ -22,11 +23,11 @@ import {
 
 const ANTHROPIC_API_URL = process.env.ANTHROPIC_API_BASE_URL ?? "https://api.anthropic.com";
 
-const ANTHROPIC_MODEL_MAP: Record<string, string> = {
-  opus: "claude-opus-4-7",
-  sonnet: "claude-sonnet-4-6",
-  haiku: "claude-haiku-4-5-20251001",
-};
+/**
+ * Fallback when the stored model ID is unrecognised (not a known alias, not a
+ * cataloged dated id). Kept as a concrete dated id so an Anthropic API call
+ * never sends a stale alias.
+ */
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_MAX_TURNS = 10;
 
@@ -615,7 +616,7 @@ export async function optioChatWs(app: FastifyInstance) {
 
       // Load settings
       const settings = await getSettings(user.workspaceId);
-      const model = ANTHROPIC_MODEL_MAP[settings.model] ?? DEFAULT_MODEL;
+      const model = resolveModelId("anthropic", settings.model) ?? DEFAULT_MODEL;
       const maxTurns = settings.maxTurns || DEFAULT_MAX_TURNS;
 
       // Build system prompt (tool definitions are passed separately to the API)
@@ -666,7 +667,7 @@ export async function optioChatWs(app: FastifyInstance) {
       }
 
       const settings = await getSettings(user.workspaceId);
-      const model = ANTHROPIC_MODEL_MAP[settings.model] ?? DEFAULT_MODEL;
+      const model = resolveModelId("anthropic", settings.model) ?? DEFAULT_MODEL;
       const maxTurns = settings.maxTurns || DEFAULT_MAX_TURNS;
       const systemPrompt = buildSystemPrompt({
         systemPrompt: settings.systemPrompt,

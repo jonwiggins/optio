@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { AgentOptionsPicker, type AgentOptionsValues } from "@/components/agent-options-picker";
+import { ANTHROPIC_CATALOG, resolveModelId } from "@optio/shared";
 
 const STEPS = [
   { id: "repo", label: "Repository" },
@@ -554,54 +556,23 @@ function AgentStep({
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Model</label>
-          <select
-            value={claudeModel}
-            onChange={(e) => setClaudeModel(e.target.value)}
-            className={selectClass}
-          >
-            <option value="sonnet">Sonnet 4.6</option>
-            <option value="opus">Opus 4.7</option>
-            <option value="haiku">Haiku 4.5</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Context Window</label>
-          <select
-            value={claudeContextWindow}
-            onChange={(e) => setClaudeContextWindow(e.target.value)}
-            className={selectClass}
-          >
-            <option value="200k">200K tokens</option>
-            <option value="1m">1M tokens</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Effort Level</label>
-          <select
-            value={claudeEffort}
-            onChange={(e) => setClaudeEffort(e.target.value)}
-            className={selectClass}
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-        <div className="flex items-end pb-1">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={claudeThinking}
-              onChange={(e) => setClaudeThinking(e.target.checked)}
-              className="w-4 h-4 rounded"
-            />
-            <span className="text-sm">Extended Thinking</span>
-          </label>
-        </div>
-      </div>
+      <AgentOptionsPicker
+        provider="anthropic"
+        values={{
+          claudeModel,
+          claudeContextWindow,
+          claudeEffort,
+          claudeThinking,
+        }}
+        onChange={(v: AgentOptionsValues) => {
+          if (typeof v.claudeModel === "string") setClaudeModel(v.claudeModel);
+          if (typeof v.claudeContextWindow === "string")
+            setClaudeContextWindow(v.claudeContextWindow);
+          if (typeof v.claudeEffort === "string") setClaudeEffort(v.claudeEffort);
+          if (typeof v.claudeThinking === "boolean") setClaudeThinking(v.claudeThinking);
+        }}
+        inputClass={selectClass}
+      />
 
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -709,9 +680,15 @@ function ReviewStep({
                   onChange={(e) => setReviewModel(e.target.value)}
                   className={selectClass}
                 >
-                  <option value="sonnet">Sonnet 4.6</option>
-                  <option value="opus">Opus 4.7</option>
-                  <option value="haiku">Haiku 4.5</option>
+                  {Object.keys(ANTHROPIC_CATALOG.aliases).map((alias) => {
+                    const id = resolveModelId("anthropic", alias);
+                    const label = ANTHROPIC_CATALOG.models.find((m) => m.id === id)?.label ?? alias;
+                    return (
+                      <option key={alias} value={alias}>
+                        {label}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             </div>
