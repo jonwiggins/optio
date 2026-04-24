@@ -258,7 +258,15 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   const canCancel = ["running", "queued", "provisioning", "needs_attention"].includes(task.state);
   const canRetry = ["failed", "cancelled"].includes(task.state);
   const canResume = ["needs_attention", "failed"].includes(task.state) && !!task.sessionId;
-  const canMessage = task.state === "running" && task.agentType === "claude-code";
+  // Chat composer shows whenever the message endpoint will accept a message:
+  // - running + claude-code (mid-turn delivery via stream-json stdin), or
+  // - stopped-but-resumable (needs_attention / pr_opened / failed / cancelled)
+  //   — the message becomes the resume prompt for any agent type.
+  const canMessageRunning = task.state === "running" && task.agentType === "claude-code";
+  const canMessageStopped = ["needs_attention", "pr_opened", "failed", "cancelled"].includes(
+    task.state,
+  );
+  const canMessage = canMessageRunning || canMessageStopped;
   const canForceRestart = ["needs_attention", "failed", "pr_opened"].includes(task.state);
 
   // Detect plan review state: needs_attention with plan_review trigger
@@ -857,15 +865,22 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
           {/* Message / Resume bar */}
           <div className="shrink-0 border-t border-border bg-bg-card px-4 py-2.5">
             {canMessage ? (
-              /* Mid-task messaging bar (running claude-code tasks) */
+              /* Unified chat bar. For running claude-code tasks the message is
+                 delivered mid-turn via stream-json stdin; for stopped tasks
+                 (needs_attention / pr_opened / failed / cancelled) it resumes
+                 the agent with the message as the new prompt. */
               <ChatComposer
                 value={messageInput}
                 onChange={setMessageInput}
                 onSend={() => handleSendMessage("soft")}
-                onInterrupt={() => handleSendMessage("interrupt")}
+                onInterrupt={canMessageRunning ? () => handleSendMessage("interrupt") : undefined}
                 sending={messageSending}
-                placeholder="Send a message to the running agent..."
-                sendLabel="Send"
+                placeholder={
+                  canMessageRunning
+                    ? "Send a message to the running agent..."
+                    : "Resume the agent with a message..."
+                }
+                sendLabel={canMessageRunning ? "Send" : "Resume"}
                 interruptLabel="Stop"
               />
             ) : isPlanReview && canResume ? (

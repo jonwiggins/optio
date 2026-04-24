@@ -6,20 +6,31 @@ import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 
 const mockGetTask = vi.fn();
 const mockRecordTaskEvent = vi.fn();
+const mockTransitionTask = vi.fn();
 
 vi.mock("../services/task-service.js", () => ({
   getTask: (...args: unknown[]) => mockGetTask(...args),
   recordTaskEvent: (...args: unknown[]) => mockRecordTaskEvent(...args),
+  transitionTask: (...args: unknown[]) => mockTransitionTask(...args),
+}));
+
+const mockQueueAdd = vi.fn();
+vi.mock("../workers/task-worker.js", () => ({
+  taskQueue: {
+    add: (...args: unknown[]) => mockQueueAdd(...args),
+  },
 }));
 
 const mockSendMessage = vi.fn();
 const mockListMessages = vi.fn();
 const mockCanMessageTask = vi.fn();
+const mockMarkDelivered = vi.fn();
 
 vi.mock("../services/task-message-service.js", () => ({
   sendMessage: (...args: unknown[]) => mockSendMessage(...args),
   listMessages: (...args: unknown[]) => mockListMessages(...args),
   canMessageTask: (...args: unknown[]) => mockCanMessageTask(...args),
+  markDelivered: (...args: unknown[]) => mockMarkDelivered(...args),
 }));
 
 const mockPublishTaskMessage = vi.fn();
@@ -71,6 +82,7 @@ describe("POST /api/tasks/:id/message", () => {
       incr: vi.fn().mockResolvedValue(1),
       expire: vi.fn().mockResolvedValue(1),
     });
+    mockMarkDelivered.mockResolvedValue(undefined);
     app = await buildTestApp();
   });
 
@@ -168,7 +180,7 @@ describe("POST /api/tasks/:id/message", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("returns 409 when task is not running", async () => {
+  it("returns 409 when task is completed (terminal, not resumable)", async () => {
     mockGetTask.mockResolvedValue({ ...runningClaudeTask, state: "completed" });
     mockCanMessageTask.mockResolvedValue(true);
 
@@ -181,7 +193,20 @@ describe("POST /api/tasks/:id/message", () => {
     expect(res.statusCode).toBe(409);
   });
 
-  it("returns 501 for non-claude-code agent", async () => {
+  it("returns 409 when task is pending (hasn't started, no agent to message)", async () => {
+    mockGetTask.mockResolvedValue({ ...runningClaudeTask, state: "pending" });
+    mockCanMessageTask.mockResolvedValue(true);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks/task-1/message",
+      payload: { content: "hello" },
+    });
+
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("returns 501 for non-claude-code agent in running state", async () => {
     mockGetTask.mockResolvedValue({ ...runningClaudeTask, agentType: "codex" });
     mockCanMessageTask.mockResolvedValue(true);
 
@@ -192,6 +217,98 @@ describe("POST /api/tasks/:id/message", () => {
     });
 
     expect(res.statusCode).toBe(501);
+  });
+
+  it.each(["needs_attention", "failed", "pr_opened", "cancelled"])(
+    "resumes a stopped task when in %s state",
+    async (state) => {
+      mockGetTask.mockResolvedValue({
+        ...runningClaudeTask,
+        state,
+        sessionId: "prior-session-xyz",
+      });
+      mockCanMessageTask.mockResolvedValue(true);
+      const mockMsg = {
+        id: "msg-resume-1",
+        taskId: "task-1",
+        userId: "user-1",
+        content: "please address the review comments",
+        mode: "soft",
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        deliveredAt: null,
+        ackedAt: null,
+      };
+      mockSendMessage.mockResolvedValue(mockMsg);
+      mockTransitionTask.mockResolvedValue(undefined);
+      mockQueueAdd.mockResolvedValue({ id: "job-1" });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/tasks/task-1/message",
+        payload: { content: "please address the review comments" },
+      });
+
+      expect(res.statusCode).toBe(202);
+      // recordTaskEvent fires with the message trigger (non-transitioning),
+      // transitionTask fires with user_message_resume for the actual resume.
+      expect(mockRecordTaskEvent).toHaveBeenCalledWith(
+        "task-1",
+        state,
+        "user_message",
+        expect.stringContaining("please address"),
+        expect.anything(),
+      );
+      expect(mockTransitionTask).toHaveBeenCalledWith(
+        "task-1",
+        "queued",
+        "user_message_resume",
+        expect.stringContaining("please address"),
+      );
+      expect(mockQueueAdd).toHaveBeenCalledWith(
+        "process-task",
+        expect.objectContaining({
+          taskId: "task-1",
+          resumeSessionId: "prior-session-xyz",
+          resumePrompt: "please address the review comments",
+        }),
+        expect.any(Object),
+      );
+      // Running-stream publish path should NOT fire for stopped tasks.
+      expect(mockPublishTaskMessage).not.toHaveBeenCalled();
+      // deliveredAt is stamped immediately for the resume path.
+      expect(res.json().message.deliveredAt).not.toBeNull();
+    },
+  );
+
+  it("resumes a stopped non-claude-code task (agent type is irrelevant for resume)", async () => {
+    mockGetTask.mockResolvedValue({
+      ...runningClaudeTask,
+      state: "needs_attention",
+      agentType: "codex",
+      sessionId: "s1",
+    });
+    mockCanMessageTask.mockResolvedValue(true);
+    mockSendMessage.mockResolvedValue({
+      id: "msg-x",
+      taskId: "task-1",
+      userId: "user-1",
+      content: "retry please",
+      mode: "soft",
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      deliveredAt: null,
+      ackedAt: null,
+    });
+    mockTransitionTask.mockResolvedValue(undefined);
+    mockQueueAdd.mockResolvedValue({ id: "job-2" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks/task-1/message",
+      payload: { content: "retry please" },
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(mockQueueAdd).toHaveBeenCalled();
   });
 
   it("returns 429 when rate limit exceeded", async () => {

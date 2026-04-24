@@ -1,13 +1,24 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { TaskState } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import * as messageService from "../services/task-message-service.js";
 import { publishTaskMessage } from "../services/task-message-bus.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getRedisClient } from "../services/event-bus.js";
+import { taskQueue } from "../workers/task-worker.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TaskMessageSchema } from "../schemas/task.js";
+
+// States from which a stopped task can be resumed by sending a chat message.
+// Matches the states accepted by POST /api/tasks/:id/resume and force-restart.
+const RESUMABLE_STATES: readonly string[] = [
+  TaskState.NEEDS_ATTENTION,
+  TaskState.PR_OPENED,
+  TaskState.FAILED,
+  TaskState.CANCELLED,
+];
 
 const sendMessageSchema = z
   .object({
@@ -45,14 +56,19 @@ export async function messageRoutes(rawApp: FastifyInstance) {
     {
       schema: {
         operationId: "sendTaskMessage",
-        summary: "Send a message to a running task",
+        summary: "Send a message to a running or stopped task",
         description:
-          "Deliver a mid-run user message to a running task. The message is " +
-          "inserted in the database, published on the per-task Redis channel " +
-          "so the worker can pick it up, and broadcast via the WebSocket " +
-          "events channel. Rate limited to 10 messages per user per task " +
-          "per minute. Currently only the claude-code agent supports " +
-          "mid-task messaging — other agents return 501.",
+          "Deliver a user message to a task. Behavior depends on state:\n\n" +
+          "- **running**: mid-turn delivery via the Redis channel → task-worker " +
+          "→ stream-json stdin. Claude Code only; other agents return 501.\n" +
+          "- **needs_attention / pr_opened / failed / cancelled**: resumes the " +
+          "agent with the message as the new prompt (re-enqueues the task, " +
+          "reusing the stored session id when available). Works for any agent " +
+          "type.\n" +
+          "- **pending / queued / provisioning / completed**: 409 — no running " +
+          "agent can consume the message and the task isn't in a resumable " +
+          "state.\n\n" +
+          "Rate limited to 10 messages per user per task per minute.",
         tags: ["Tasks"],
         params: IdParamsSchema,
         body: sendMessageSchema,
@@ -85,13 +101,26 @@ export async function messageRoutes(rawApp: FastifyInstance) {
         }
       }
 
-      if (task.state !== "running") {
+      const isRunning = task.state === TaskState.RUNNING;
+      const isResumable = RESUMABLE_STATES.includes(task.state);
+      if (!isRunning && !isResumable) {
+        // pending / waiting_on_deps / queued / provisioning — task hasn't
+        // started yet and has no running agent. completed — terminal, can't
+        // be resumed. In both cases the agent can't consume a message now.
         return reply.status(409).send({
-          error: `Task is in '${task.state}' state. Messages can only be sent to running tasks.`,
+          error:
+            `Task is in '${task.state}' state. ` +
+            `Messages can be sent to running tasks or used to resume stopped tasks ` +
+            `(needs_attention / pr_opened / failed / cancelled). ` +
+            `This task is not in a state where a message can be delivered.`,
         });
       }
 
-      if (task.agentType !== "claude-code") {
+      // Mid-turn messaging (running) requires the claude-code stream-json
+      // stdin bridge. Resume-from-chat re-enqueues the task and doesn't care
+      // about the agent type — any agent can receive the message as a resume
+      // prompt.
+      if (isRunning && task.agentType !== "claude-code") {
         return reply.status(501).send({
           error:
             "Mid-task messaging is currently only supported for Claude Code. Other agents will be supported via tmux wrapping in a follow-up.",
@@ -120,11 +149,14 @@ export async function messageRoutes(rawApp: FastifyInstance) {
         workspaceId: task.workspaceId ?? undefined,
       });
 
-      const trigger = mode === "interrupt" ? "user_interrupt" : "user_message";
+      // Record the message arrival itself (non-transitioning event) so the
+      // task timeline shows user input even for the running-delivery path.
+      // The interrupt subtype is preserved when applicable.
+      const messageTrigger = mode === "interrupt" ? "user_interrupt" : "user_message";
       await taskService.recordTaskEvent(
         id,
         task.state,
-        trigger,
+        messageTrigger,
         content.slice(0, 200),
         req.user?.id,
       );
@@ -141,18 +173,55 @@ export async function messageRoutes(rawApp: FastifyInstance) {
         createdAt: message.createdAt.toISOString(),
       });
 
-      await publishTaskMessage(id, {
-        messageId: message.id,
-        content,
-        mode,
-        userDisplayName,
-      });
+      if (isRunning) {
+        // Deliver mid-turn via the Redis channel → task-worker → stream-json stdin.
+        await publishTaskMessage(id, {
+          messageId: message.id,
+          content,
+          mode,
+          userDisplayName,
+        });
+      } else {
+        // Stopped + resumable: transition to queued and enqueue a resume run
+        // with the user's message as the new prompt. The agent picks up from
+        // the stored session id (if any) so context is preserved.
+        await taskService.transitionTask(
+          id,
+          TaskState.QUEUED,
+          "user_message_resume",
+          content.slice(0, 200),
+        );
+        await taskQueue.add(
+          "process-task",
+          {
+            taskId: id,
+            resumeSessionId: task.sessionId ?? undefined,
+            resumePrompt: content,
+          },
+          {
+            jobId: `${id}-chat-${Date.now()}`,
+            attempts: 1,
+          },
+        );
+        // We'll mark delivery once the worker picks up and writes the first
+        // log; for the chat UX, acking when the resume is queued is accurate
+        // enough — the user's message has been handed off to the agent.
+        await messageService.markDelivered(message.id).catch(() => {});
+        await publishEvent({
+          type: "task:message_delivered",
+          taskId: id,
+          messageId: message.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       app.log.info(
         {
           taskId: id,
           messageId: message.id,
           userId: req.user?.id,
+          fromState: task.state,
+          delivery: isRunning ? "running-stdin" : "resume-queue",
           contentPreview: content.slice(0, 200),
         },
         "Task message sent",
@@ -166,7 +235,7 @@ export async function messageRoutes(rawApp: FastifyInstance) {
           content: message.content,
           mode: message.mode,
           createdAt: message.createdAt.toISOString(),
-          deliveredAt: null,
+          deliveredAt: isRunning ? null : new Date().toISOString(),
           ackedAt: null,
         },
       });

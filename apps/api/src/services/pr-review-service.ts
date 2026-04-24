@@ -878,8 +878,18 @@ export async function postReviewChat(input: {
     throw new Error("Prior review run has no captured session — chat not available yet");
   }
 
+  // Enqueue first so we fail before committing a user-visible chat message
+  // if the run can't be created (e.g. repo not configured, queue down).
+  // Otherwise the UI shows an orphaned "unanswered" user turn indefinitely.
+  const run = await enqueueReviewRun(review.id, "chat", {
+    prompt: input.message,
+    resumeSessionId: rootRun.sessionId,
+    createdBy: input.userId,
+  });
+
   await db.insert(prReviewChatMessages).values({
     prReviewId: review.id,
+    runId: run.id,
     role: "user",
     content: input.message,
   });
@@ -888,12 +898,6 @@ export async function postReviewChat(input: {
     .update(prReviews)
     .set({ userEngaged: true, updatedAt: new Date() })
     .where(eq(prReviews.id, review.id));
-
-  const run = await enqueueReviewRun(review.id, "chat", {
-    prompt: input.message,
-    resumeSessionId: rootRun.sessionId,
-    createdBy: input.userId,
-  });
 
   return { runId: run.id, prReviewId: review.id };
 }
