@@ -2,8 +2,9 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { getRuntime } from "../services/container-service.js";
 import { getSession, addSessionPr } from "../services/interactive-session-service.js";
+import { getAgentCredentials } from "../services/agent-credential-service.js";
 import { db } from "../db/client.js";
-import { repoPods } from "../db/schema.js";
+import { repoPods, repos } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
@@ -16,6 +17,7 @@ import {
   WS_CLOSE_CONNECTION_LIMIT,
   WS_CLOSE_MESSAGE_TOO_LARGE,
 } from "./ws-limits.js";
+import { buildSetupFilesScript } from "../utils/setup-files.js";
 
 const PR_URL_REGEX = /https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/g;
 
@@ -86,11 +88,48 @@ export async function sessionTerminalWs(app: FastifyInstance) {
     const branch = session.branch;
     const repoUrl = session.repoUrl;
 
+    // Get repo config to determine agent type
+    const [repoConfig] = await db.select().from(repos).where(eq(repos.repoUrl, session.repoUrl));
+    const agentType = (repoConfig?.defaultAgentType || "claude-code") as any;
+
+    // Get agent credentials for the user based on repo's agent type
+    let credentials: { env: Record<string, string>; setupFiles?: any[] } = { env: {} };
+    try {
+      credentials = await getAgentCredentials(agentType, session.workspaceId, session.userId);
+      log.info(
+        { agentType, envVarCount: Object.keys(credentials.env).length },
+        "Injected agent credentials",
+      );
+    } catch (err) {
+      log.warn(
+        { err, agentType },
+        "Failed to retrieve agent credentials, terminal will launch without them",
+      );
+    }
+
+    // Build env vars export statements
+    const envExports = Object.entries(credentials.env)
+      .map(([key, value]) => {
+        // Escape single quotes in the value
+        const escaped = value.replace(/'/g, "'\\''");
+        return `export ${key}='${escaped}'`;
+      })
+      .join("\n");
+
+    // Build script to write credential files if present
+    const setupFilesScript = buildSetupFilesScript(
+      credentials.setupFiles ?? [],
+      "[optio] Writing agent credential files...",
+    );
+
     const setupScript = [
       "set -e",
       // Wait for repo to be ready
       "for i in $(seq 1 60); do [ -f /workspace/.ready ] && break; sleep 1; done",
       '[ -f /workspace/.ready ] || { echo "Repo not ready"; exit 1; }',
+      // Inject agent credentials (don't fail if credentials are missing)
+      ...(envExports ? [envExports] : []),
+      ...(setupFilesScript ? [setupFilesScript] : []),
       // Acquire repo lock for worktree setup
       "exec 9>/workspace/.repo-lock",
       "flock 9",
@@ -129,6 +168,13 @@ export async function sessionTerminalWs(app: FastifyInstance) {
 
     try {
       execSession = await rt.exec(handle, ["bash", "-c", setupScript], { tty: true });
+
+      // WebSocket keepalive: send ping every 20s to prevent idle timeout
+      const pingInterval = setInterval(() => {
+        if (socket.readyState === 1) {
+          socket.ping();
+        }
+      }, 20000);
 
       // Pipe exec stdout → WebSocket + scan for PR URLs
       execSession.stdout.on("data", (chunk: Buffer) => {
@@ -170,6 +216,7 @@ export async function sessionTerminalWs(app: FastifyInstance) {
 
       // Handle exec session end
       execSession.stdout.on("end", () => {
+        clearInterval(pingInterval);
         if (socket.readyState === 1) {
           socket.close();
         }
@@ -178,6 +225,7 @@ export async function sessionTerminalWs(app: FastifyInstance) {
       // Handle WebSocket close
       socket.on("close", () => {
         log.info("Session terminal disconnected");
+        clearInterval(pingInterval);
         releaseConnection(clientIp);
         execSession?.close();
       });

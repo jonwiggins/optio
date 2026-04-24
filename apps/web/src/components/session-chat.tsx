@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
   Send,
@@ -19,6 +19,7 @@ import {
   Lightbulb,
 } from "lucide-react";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
+import { ANTHROPIC_CATALOG, GEMINI_CATALOG, resolveModelId } from "@optio/shared";
 
 interface ChatEvent {
   taskId: string;
@@ -44,13 +45,26 @@ interface SessionChatProps {
   sessionId: string;
   onCostUpdate?: (costUsd: number) => void;
   onSendToAgent?: (handler: (text: string) => void) => void;
+  onModelUpdate?: (
+    model: string,
+    agentType: string,
+    availableModels: { id: string; label: string }[],
+  ) => void;
+  onModelChange?: (handler: (model: string) => void) => void;
 }
 
-export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionChatProps) {
+export function SessionChat({
+  sessionId,
+  onCostUpdate,
+  onSendToAgent,
+  onModelUpdate,
+  onModelChange,
+}: SessionChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<ChatStatus>("connecting");
   const [model, setModel] = useState<string>("sonnet");
+  const [agentType, setAgentType] = useState<string>("claude-code");
   const [costUsd, setCostUsd] = useState(0);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
@@ -73,6 +87,62 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
     onSendToAgent?.(sendToAgent);
   }, [sendToAgent, onSendToAgent]);
 
+  // Expose a handler for external model changes (from header dropdown)
+  const handleModelChange = useCallback((newModel: string) => {
+    console.log("[SessionChat] External model change to:", newModel);
+    setModel(newModel);
+    wsRef.current?.send(JSON.stringify({ type: "set_model", model: newModel }));
+  }, []);
+
+  useEffect(() => {
+    onModelChange?.(handleModelChange);
+  }, [handleModelChange, onModelChange]);
+
+  // Debug: log agentType changes
+  useEffect(() => {
+    console.log("[SessionChat] agentType state changed to:", agentType);
+  }, [agentType]);
+
+  // Compute model options based on agent type
+  const modelOptions = useMemo(() => {
+    const catalog = agentType === "gemini" ? GEMINI_CATALOG : ANTHROPIC_CATALOG;
+    const options = catalog.models.map((m) => ({
+      id: m.id,
+      label: m.label,
+      latest: m.latest,
+      preview: m.preview,
+    }));
+    console.log(
+      "[SessionChat] Model options updated for agentType:",
+      agentType,
+      "count:",
+      options.length,
+    );
+    return options;
+  }, [agentType]);
+
+  // Validate model when agentType changes - ensure model matches agent type
+  useEffect(() => {
+    const isValidModel = modelOptions.some((m) => m.id === model);
+
+    if (!isValidModel) {
+      // Model doesn't exist for this agent type, reset to default
+      const defaultModel = agentType === "gemini" ? "gemini-2.5-flash" : "sonnet";
+      console.log(
+        `[SessionChat] Model "${model}" invalid for agent "${agentType}", resetting to "${defaultModel}"`,
+      );
+      setModel(defaultModel);
+      wsRef.current?.send(JSON.stringify({ type: "set_model", model: defaultModel }));
+    }
+  }, [agentType, model, modelOptions]);
+
+  // Notify parent when model/agentType/modelOptions change
+  useEffect(() => {
+    if (model && agentType && modelOptions.length > 0) {
+      onModelUpdate?.(model, agentType, modelOptions);
+    }
+  }, [model, agentType, modelOptions, onModelUpdate]);
+
   // WebSocket connection
   useEffect(() => {
     const ws = new WebSocket(`${getWsBaseUrl()}/ws/sessions/${sessionId}/chat`);
@@ -93,7 +163,19 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
       switch (msg.type) {
         case "status":
           setStatus(msg.status as ChatStatus);
-          if (msg.model) setModel(msg.model);
+          if (msg.model) {
+            console.log("[SessionChat] Setting model to:", msg.model);
+            setModel(msg.model);
+          }
+          if (msg.agentType) {
+            console.log(
+              "[SessionChat] Setting agentType to:",
+              msg.agentType,
+              "current:",
+              agentType,
+            );
+            setAgentType(msg.agentType);
+          }
           if (typeof msg.costUsd === "number") {
             setCostUsd(msg.costUsd);
             onCostUpdate?.(msg.costUsd);
@@ -369,7 +451,7 @@ export function SessionChat({ sessionId, onCostUpdate, onSendToAgent }: SessionC
               ? "Agent is working... Press Esc or click Stop to interrupt"
               : "Enter to send, Shift+Enter for new line"}
           </span>
-          <span className="text-[10px] text-text-muted">{model}</span>
+          <span className="text-[10px] text-text-muted/50">{agentType}</span>
         </div>
       </div>
     </div>

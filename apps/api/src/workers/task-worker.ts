@@ -36,6 +36,7 @@ import {
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
+import { getAgentCredentials } from "../services/agent-credential-service.js";
 import { subscribeToTaskMessages } from "../services/task-message-bus.js";
 import * as messageService from "../services/task-message-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
@@ -149,6 +150,7 @@ export function startTaskWorker() {
         // re-queue the task with a delay until off-peak starts.
         const { getRepoByUrl } = await import("../services/repo-service.js");
         const taskWorkspaceId = currentTask.workspaceId ?? null;
+        const taskUserId = currentTask.createdBy ?? null;
         const repoConfig = await getRepoByUrl(currentTask.repoUrl, taskWorkspaceId);
 
         if (repoConfig?.offPeakOnly && !currentTask.ignoreOffPeak) {
@@ -302,6 +304,40 @@ export function startTaskWorker() {
           ).catch(() => null)) as any) ?? undefined;
         const optioApiUrl = `http://${process.env.API_HOST ?? "host.docker.internal"}:${process.env.API_PORT ?? "4000"}`;
 
+        // Pre-flight validation for oauth-token mode
+        // Check cached validation to fail fast before pod provisioning
+        if (task.agentType === "claude-code" && claudeAuthMode === "oauth-token") {
+          try {
+            const { getCachedTokenValidation } = await import("./token-validation-worker.js");
+            const cached = await getCachedTokenValidation();
+            if (cached?.tokenExists && !cached.valid) {
+              throw new Error(
+                "Claude OAuth token is expired (detected by pre-flight validation). " +
+                  "Go to Secrets to update CLAUDE_CODE_OAUTH_TOKEN, or re-run 'claude setup-token'.",
+              );
+            }
+          } catch (preflight) {
+            // Re-throw if it's our own validation error; swallow infra errors
+            if (preflight instanceof Error && preflight.message.includes("pre-flight")) {
+              throw preflight;
+            }
+          }
+        }
+
+        // Inject agent credentials using centralized service
+        const agentCredentials = await getAgentCredentials(
+          task.agentType as any,
+          taskWorkspaceId,
+          taskUserId,
+        );
+        log.info(
+          { agentType: task.agentType, envVarCount: Object.keys(agentCredentials.env).length },
+          "Injected agent credentials",
+        );
+
+        // Store credential setupFiles to merge after adapter config
+        const credentialSetupFiles = agentCredentials.setupFiles ?? [];
+
         // Load and render prompt template
         const promptConfig = await getPromptTemplate(task.repoUrl);
 
@@ -376,8 +412,16 @@ export function startTaskWorker() {
           maxTurnsReview: repoConfig?.maxTurnsReview ?? undefined,
           googleCloudProject,
           googleCloudLocation,
-          claudeVertexServiceAccountKey,
+          // Vertex service account key is now handled by agent-credential-service
+          claudeVertexServiceAccountKey: undefined,
         });
+
+        // Merge credential setupFiles (e.g., Vertex AI service account keys)
+        if (credentialSetupFiles.length > 0) {
+          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
+          agentConfig.setupFiles.push(...credentialSetupFiles);
+          log.info({ count: credentialSetupFiles.length }, "Merged credential setup files");
+        }
 
         // ── MCP servers & custom skills injection ────────────────────
         const { getMcpServersForTask, buildMcpJsonContent } =
@@ -569,7 +613,6 @@ export function startTaskWorker() {
             ...(!isGitHubAppConfigured() ? ["GITHUB_TOKEN"] : []),
           ]),
         ];
-        const taskUserId = task.createdBy ?? null;
         const resolvedSecrets = await resolveSecretsForTask(
           secretNames,
           task.repoUrl,
@@ -614,63 +657,31 @@ export function startTaskWorker() {
           allEnv.OPTIO_RESTART_FROM_BRANCH = "true";
         }
 
+        // Inject agent credentials into task env
+        Object.assign(allEnv, agentCredentials.env);
+
+        // Strict validation: throw if required credentials are missing
+        if (task.agentType === "claude-code") {
+          if (claudeAuthMode === "max-subscription" && !allEnv.CLAUDE_CODE_OAUTH_TOKEN) {
+            throw new Error("Max subscription auth failed: Token not available");
+          }
+          if (claudeAuthMode === "oauth-token" && !allEnv.CLAUDE_CODE_OAUTH_TOKEN) {
+            throw new Error(
+              "OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found. " +
+                "Run `claude setup-token` and paste the token in the setup wizard.",
+            );
+          }
+          if (claudeAuthMode === "api-key" && !allEnv.ANTHROPIC_API_KEY) {
+            log.warn("API key mode selected but no ANTHROPIC_API_KEY found");
+          }
+        }
+
         // Inject repo-level setup config into pod env
         if (repoConfig?.extraPackages) {
           allEnv.OPTIO_EXTRA_PACKAGES = repoConfig.extraPackages;
         }
         if (repoConfig?.setupCommands) {
           allEnv.OPTIO_SETUP_COMMANDS = repoConfig.setupCommands;
-        }
-
-        // For max-subscription mode, fetch the OAuth token from the auth proxy
-        if (claudeAuthMode === "max-subscription") {
-          const { getClaudeAuthToken } = await import("../services/auth-service.js");
-          const authResult = getClaudeAuthToken();
-          if (authResult.available && authResult.token) {
-            allEnv.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
-            log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from host credentials");
-          } else {
-            throw new Error(
-              `Max subscription auth failed: ${authResult.error ?? "Token not available"}`,
-            );
-          }
-        }
-
-        // For oauth-token mode, read the token from the secrets store
-        if (claudeAuthMode === "oauth-token") {
-          // Pre-flight: check the cached validation from the background worker
-          // to fail fast before wasting ~10s on pod provisioning + worktree setup
-          try {
-            const { getCachedTokenValidation } = await import("./token-validation-worker.js");
-            const cached = await getCachedTokenValidation();
-            if (cached?.tokenExists && !cached.valid) {
-              throw new Error(
-                "Claude OAuth token is expired (detected by pre-flight validation). " +
-                  "Go to Secrets to update CLAUDE_CODE_OAUTH_TOKEN, or re-run 'claude setup-token'.",
-              );
-            }
-          } catch (preflight) {
-            // Re-throw if it's our own validation error; swallow infra errors
-            if (preflight instanceof Error && preflight.message.includes("pre-flight")) {
-              throw preflight;
-            }
-          }
-
-          const oauthToken = await retrieveSecretWithFallback(
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            "global",
-            taskWorkspaceId,
-            taskUserId,
-          ).catch(() => null);
-          if (oauthToken) {
-            allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
-            log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from secrets store");
-          } else {
-            throw new Error(
-              "OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found. " +
-                "Run `claude setup-token` and paste the token in the setup wizard.",
-            );
-          }
         }
 
         // Split env into pod-level (for repo-init.sh) and task-level (for exec).
