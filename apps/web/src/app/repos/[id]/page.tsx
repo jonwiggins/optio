@@ -32,6 +32,8 @@ import { formatRelativeTime, formatDuration } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { SharedDirectoriesSection } from "@/components/shared-directories-section";
+import { AgentOptionsPicker, type AgentOptionsValues } from "@/components/agent-options-picker";
+import { ANTHROPIC_CATALOG, resolveModelId } from "@optio/shared";
 
 const AGENT_TABS = [
   { value: "claude-code", label: "Claude Code" },
@@ -787,9 +789,16 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                     onChange={(e) => setReviewModel(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
                   >
-                    <option value="sonnet">Sonnet 4.6</option>
-                    <option value="opus">Opus 4.7</option>
-                    <option value="haiku">Haiku 4.5</option>
+                    {Object.keys(ANTHROPIC_CATALOG.aliases).map((alias) => {
+                      const id = resolveModelId("anthropic", alias);
+                      const label =
+                        ANTHROPIC_CATALOG.models.find((m) => m.id === id)?.label ?? alias;
+                      return (
+                        <option key={alias} value={alias}>
+                          {label}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div>
@@ -1121,54 +1130,22 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         {/* Claude Code tab */}
         {activeAgentTab === "claude-code" && (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Model</label>
-                <select
-                  value={claudeModel}
-                  onChange={(e) => setClaudeModel(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                >
-                  <option value="sonnet">Sonnet 4.6</option>
-                  <option value="opus">Opus 4.7</option>
-                  <option value="haiku">Haiku 4.5</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Context Window</label>
-                <select
-                  value={claudeContextWindow}
-                  onChange={(e) => setClaudeContextWindow(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                >
-                  <option value="200k">200K tokens</option>
-                  <option value="1m">1M tokens</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Effort Level</label>
-                <select
-                  value={claudeEffort}
-                  onChange={(e) => setClaudeEffort(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-              <div className="flex items-end pb-1">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={claudeThinking}
-                    onChange={(e) => setClaudeThinking(e.target.checked)}
-                    className="w-4 h-4 rounded"
-                  />
-                  <span className="text-sm">Extended Thinking</span>
-                </label>
-              </div>
-            </div>
+            <AgentOptionsPicker
+              provider="anthropic"
+              values={{
+                claudeModel,
+                claudeContextWindow,
+                claudeEffort,
+                claudeThinking,
+              }}
+              onChange={(v: AgentOptionsValues) => {
+                if (typeof v.claudeModel === "string") setClaudeModel(v.claudeModel);
+                if (typeof v.claudeContextWindow === "string")
+                  setClaudeContextWindow(v.claudeContextWindow);
+                if (typeof v.claudeEffort === "string") setClaudeEffort(v.claudeEffort);
+                if (typeof v.claudeThinking === "boolean") setClaudeThinking(v.claudeThinking);
+              }}
+            />
             <div>
               <label className="block text-xs text-text-muted mb-1">Max Turns</label>
               <NumberInput
@@ -1193,36 +1170,14 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
 
         {/* Copilot tab */}
         {activeAgentTab === "copilot" && (
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Model</label>
-              <select
-                value={copilotModel}
-                onChange={(e) => setCopilotModel(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-              >
-                <option value="">Default</option>
-                <option value="claude-sonnet-4.5">Claude Sonnet 4.5</option>
-                <option value="gpt-5">GPT-5</option>
-                <option value="gpt-5.2">GPT-5.2</option>
-                <option value="gpt-5.4">GPT-5.4</option>
-                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Reasoning Effort</label>
-              <select
-                value={copilotEffort}
-                onChange={(e) => setCopilotEffort(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-              >
-                <option value="">Default</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-          </div>
+          <AgentOptionsPicker
+            provider="copilot"
+            values={{ copilotModel, copilotEffort }}
+            onChange={(v: AgentOptionsValues) => {
+              if (typeof v.copilotModel === "string") setCopilotModel(v.copilotModel);
+              if (typeof v.copilotEffort === "string") setCopilotEffort(v.copilotEffort);
+            }}
+          />
         )}
 
         {/* OpenCode tab */}
@@ -1232,90 +1187,40 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
               Use a custom base URL to connect to local or self-hosted OpenAI-compatible inference
               servers (vLLM, lightllm, Ollama, etc.).
             </p>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Model</label>
-                <input
-                  value={opencodeModel}
-                  onChange={(e) => setOpencodeModel(e.target.value)}
-                  placeholder="Default (auto-detect)"
-                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                />
-                <p className="text-xs text-text-muted mt-1">
-                  e.g. anthropic/claude-sonnet-4, openai/gpt-4o, meta-llama/Llama-3.1-70B
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Agent</label>
-                <input
-                  value={opencodeAgent}
-                  onChange={(e) => setOpencodeAgent(e.target.value)}
-                  placeholder="Default"
-                  className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Custom Base URL</label>
-              <input
-                value={opencodeBaseUrl}
-                onChange={(e) => setOpencodeBaseUrl(e.target.value)}
-                placeholder="https://your-inference-server/v1"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-              />
-              <p className="text-xs text-text-muted mt-1">
-                OpenAI-compatible endpoint URL. When set, API keys are optional — a placeholder key
-                is used if none is configured in Secrets.
-              </p>
-            </div>
+            <AgentOptionsPicker
+              provider="opencode"
+              values={{ opencodeModel, opencodeAgent, opencodeBaseUrl }}
+              onChange={(v: AgentOptionsValues) => {
+                if (typeof v.opencodeModel === "string") setOpencodeModel(v.opencodeModel);
+                if (typeof v.opencodeAgent === "string") setOpencodeAgent(v.opencodeAgent);
+                if (typeof v.opencodeBaseUrl === "string") setOpencodeBaseUrl(v.opencodeBaseUrl);
+              }}
+            />
           </div>
         )}
 
         {/* Gemini tab */}
         {activeAgentTab === "gemini" && (
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Model</label>
-              <select
-                value={geminiModel}
-                onChange={(e) => setGeminiModel(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-              >
-                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                <option value="gemini-3-pro">Gemini 3 Pro</option>
-                <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
-                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
-                <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash Lite Preview</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Approval Mode</label>
-              <select
-                value={geminiApprovalMode}
-                onChange={(e) => setGeminiApprovalMode(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-              >
-                <option value="yolo">Yolo (skip all approvals)</option>
-                <option value="auto_edit">Auto Edit</option>
-                <option value="default">Default</option>
-              </select>
-            </div>
-          </div>
+          <AgentOptionsPicker
+            provider="gemini"
+            values={{ geminiModel, geminiApprovalMode }}
+            onChange={(v: AgentOptionsValues) => {
+              if (typeof v.geminiModel === "string") setGeminiModel(v.geminiModel);
+              if (typeof v.geminiApprovalMode === "string")
+                setGeminiApprovalMode(v.geminiApprovalMode);
+            }}
+          />
         )}
 
         {/* OpenClaw tab */}
         {activeAgentTab === "openclaw" && (
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Model</label>
-            <input
-              value={openclawModel}
-              onChange={(e) => setOpenclawModel(e.target.value)}
-              placeholder="Default (auto-detect)"
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            />
-          </div>
+          <AgentOptionsPicker
+            provider="openclaw"
+            values={{ openclawModel }}
+            onChange={(v: AgentOptionsValues) => {
+              if (typeof v.openclawModel === "string") setOpenclawModel(v.openclawModel);
+            }}
+          />
         )}
       </section>
 

@@ -25,7 +25,12 @@ import {
   Github,
   KeyRound,
 } from "lucide-react";
-import { OPTIO_TOOL_CATEGORIES, ALL_OPTIO_TOOL_NAMES } from "@optio/shared";
+import {
+  OPTIO_TOOL_CATEGORIES,
+  ALL_OPTIO_TOOL_NAMES,
+  ANTHROPIC_CATALOG,
+  resolveModelId,
+} from "@optio/shared";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 
 function PromptTemplateEditor() {
@@ -199,9 +204,15 @@ function DefaultReviewEditor() {
             onChange={(e) => setReviewModel(e.target.value)}
             className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
           >
-            <option value="sonnet">Sonnet 4.6</option>
-            <option value="opus">Opus 4.7</option>
-            <option value="haiku">Haiku 4.5</option>
+            {Object.keys(ANTHROPIC_CATALOG.aliases).map((alias) => {
+              const id = resolveModelId("anthropic", alias);
+              const label = ANTHROPIC_CATALOG.models.find((m) => m.id === id)?.label ?? alias;
+              return (
+                <option key={alias} value={alias}>
+                  {label}
+                </option>
+              );
+            })}
           </select>
         </div>
       </div>
@@ -854,9 +865,15 @@ function OptioAgentSettings() {
           onChange={(e) => setModel(e.target.value)}
           className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
         >
-          <option value="opus">Opus — most capable, highest cost</option>
-          <option value="sonnet">Sonnet — balanced capability and cost</option>
-          <option value="haiku">Haiku — fastest, lowest cost</option>
+          {Object.keys(ANTHROPIC_CATALOG.aliases).map((alias) => {
+            const id = resolveModelId("anthropic", alias);
+            const label = ANTHROPIC_CATALOG.models.find((m) => m.id === id)?.label ?? alias;
+            return (
+              <option key={alias} value={alias}>
+                {label}
+              </option>
+            );
+          })}
         </select>
       </div>
 
