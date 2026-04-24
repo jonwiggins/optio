@@ -122,7 +122,7 @@ When a limit is hit, task is re-queued with 10s delay.
 
 - **API Key**: `ANTHROPIC_API_KEY` env var injected into agent pods
 - **OAuth Token** (recommended for k8s): `CLAUDE_CODE_OAUTH_TOKEN` encrypted secret injected into pods
-- **Vertex AI** (GCP workloads): Routes through Google Cloud Vertex AI. Uses `CLAUDE_VERTEX_PROJECT_ID`, `CLAUDE_VERTEX_REGION`, and optional `CLAUDE_VERTEX_SERVICE_ACCOUNT_KEY` (encrypted, user-scoped). Falls back to workload identity when no service account key provided. Service account keys written to `/home/agent/.config/gcloud/gsa-key.json` with chmod 600
+- **Vertex AI** (GCP workloads): Routes through Google Cloud Vertex AI. Uses `CLAUDE_VERTEX_PROJECT_ID`, `CLAUDE_VERTEX_REGION`, and optional `CLAUDE_VERTEX_SERVICE_ACCOUNT_KEY` (encrypted, global scope). Falls back to workload identity when no service account key provided. Service account keys written to `/home/agent/.config/gcloud/gsa-key.json` with chmod 600
 - **Max Subscription** (legacy, local dev only): reads from host macOS Keychain
 
 ### Key subsystems

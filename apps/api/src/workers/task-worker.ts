@@ -262,30 +262,32 @@ export function startTaskWorker() {
             () => null,
           )) as any) ?? "api-key";
 
-        // GCP config for Vertex AI (both Claude and Gemini)
-        const needsGcpConfig = claudeAuthMode === "vertex-ai" || geminiAuthMode === "vertex-ai";
+        // GCP config for Vertex AI — resolve per-agent so Claude's vertex config
+        // does not bleed into Gemini tasks (and vice versa) when both are configured.
+        const isClaudeVertex = task.agentType === "claude-code" && claudeAuthMode === "vertex-ai";
+        const isGeminiVertex = task.agentType === "gemini" && geminiAuthMode === "vertex-ai";
+        const needsGcpConfig = isClaudeVertex || isGeminiVertex;
         const googleCloudProject = needsGcpConfig
           ? (((await retrieveSecretWithFallback(
-              claudeAuthMode === "vertex-ai" ? "CLAUDE_VERTEX_PROJECT_ID" : "GOOGLE_CLOUD_PROJECT",
+              isClaudeVertex ? "CLAUDE_VERTEX_PROJECT_ID" : "GOOGLE_CLOUD_PROJECT",
               "global",
               taskWorkspaceId,
             ).catch(() => null)) as any) ?? undefined)
           : undefined;
         const googleCloudLocation = needsGcpConfig
           ? (((await retrieveSecretWithFallback(
-              claudeAuthMode === "vertex-ai" ? "CLAUDE_VERTEX_REGION" : "GOOGLE_CLOUD_LOCATION",
+              isClaudeVertex ? "CLAUDE_VERTEX_REGION" : "GOOGLE_CLOUD_LOCATION",
               "global",
               taskWorkspaceId,
             ).catch(() => null)) as any) ?? undefined)
           : undefined;
-        const claudeVertexServiceAccountKey =
-          claudeAuthMode === "vertex-ai"
-            ? (((await retrieveSecretWithFallback(
-                "CLAUDE_VERTEX_SERVICE_ACCOUNT_KEY",
-                "global",
-                taskWorkspaceId,
-              ).catch(() => null)) as any) ?? undefined)
-            : undefined;
+        const claudeVertexServiceAccountKey = isClaudeVertex
+          ? (((await retrieveSecretWithFallback(
+              "CLAUDE_VERTEX_SERVICE_ACCOUNT_KEY",
+              "global",
+              taskWorkspaceId,
+            ).catch(() => null)) as any) ?? undefined)
+          : undefined;
         const opencodeDefaultBaseUrl =
           ((await retrieveSecretWithFallback(
             "OPENCODE_DEFAULT_BASE_URL",

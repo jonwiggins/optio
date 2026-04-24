@@ -450,7 +450,6 @@ export default function SetupPage() {
             await api.createSecret({
               name: "CLAUDE_VERTEX_SERVICE_ACCOUNT_KEY",
               value: claudeVertexServiceAccountKey,
-              scope: "user",
             });
           } catch (e) {
             if (e instanceof Error) {
