@@ -22,7 +22,7 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
 fi
 
 # Check Kubernetes version (v1.33+ required for post-quantum TLS)
-K8S_SERVER_VERSION=$(kubectl version --output=json 2>/dev/null | grep -o '"gitVersion":"v[0-9]*\.[0-9]*' | tail -1 | grep -o '[0-9]*\.[0-9]*')
+K8S_SERVER_VERSION=$(kubectl version --output=json 2>/dev/null | grep -oE '"gitVersion":[[:space:]]*"v[0-9]+\.[0-9]+' | tail -1 | grep -oE '[0-9]+\.[0-9]+' || true)
 if [ -n "$K8S_SERVER_VERSION" ]; then
   K8S_MAJOR=$(echo "$K8S_SERVER_VERSION" | cut -d. -f1)
   K8S_MINOR=$(echo "$K8S_SERVER_VERSION" | cut -d. -f2)

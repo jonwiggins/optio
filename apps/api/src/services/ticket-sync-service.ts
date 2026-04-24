@@ -95,7 +95,8 @@ export async function syncAllTickets(): Promise<number> {
             }
           }
         } else {
-          repoUrl = (mergedConfig as any).repoUrl;
+          const configured = (mergedConfig as { repoUrl?: string }).repoUrl;
+          if (configured) repoUrl = normalizeRepoUrl(configured);
         }
 
         if (!repoUrl) {

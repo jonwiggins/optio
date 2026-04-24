@@ -31,6 +31,7 @@ const jiraConfigSchema = z.object({
     maxPages: z.number().int().positive().optional(),
     doneStatusName: z.string().optional(),
     todoStatusName: z.string().optional(),
+    repoUrl: z.string().url().optional(),
   }),
   enabled: z.boolean().optional(),
 });
@@ -69,6 +70,7 @@ const linearConfigSchema = z.object({
     projectId: z.string().optional(),
     label: z.string().optional(),
     maxPages: z.number().int().positive().optional(),
+    repoUrl: z.string().url().optional(),
   }),
   enabled: z.boolean().optional(),
 });
@@ -83,6 +85,7 @@ const notionConfigSchema = z.object({
     doneValue: z.string().optional(),
     titleProperty: z.string().optional(),
     maxPages: z.number().int().positive().optional(),
+    repoUrl: z.string().url().optional(),
   }),
   enabled: z.boolean().optional(),
 });

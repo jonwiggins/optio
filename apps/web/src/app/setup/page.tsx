@@ -41,6 +41,15 @@ interface RepoEntry {
   validated: boolean;
 }
 
+function isGitHubUrl(url: string): boolean {
+  return /(^|[./:@])github\.com([/:]|$)/i.test(url);
+}
+
+function parseGitHubOwnerRepo(source: string): { owner: string; repo: string } | null {
+  const m = source.match(/(?:github\.com[/:])?([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
+  return m ? { owner: m[1], repo: m[2] } : null;
+}
+
 export default function SetupPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
@@ -124,14 +133,26 @@ export default function SetupPage() {
   const [autoMerge, setAutoMerge] = useState(false);
   const [promptLoading, setPromptLoading] = useState(false);
 
-  // Step 6: Tickets
-  const [enableTickets, setEnableTickets] = useState(false);
-  const [ticketProvider, setTicketProvider] = useState("github");
-  const [ticketOwner, setTicketOwner] = useState("");
-  const [ticketRepo, setTicketRepo] = useState("");
-  // Notion-specific
+  // Step 6: Tickets — per-repo GitHub Issues toggles + a list of external trackers
+  const [githubIssueRepos, setGithubIssueRepos] = useState<Record<string, boolean>>({});
+  type AddedTracker = {
+    source: "linear" | "notion" | "jira";
+    config: Record<string, unknown>;
+    repoUrl: string;
+    label: string;
+  };
+  const [addedTrackers, setAddedTrackers] = useState<AddedTracker[]>([]);
+  // Draft (form) state for adding a new external tracker
+  const [draftProvider, setDraftProvider] = useState<"linear" | "notion" | "jira">("linear");
+  const [draftRepoUrl, setDraftRepoUrl] = useState("");
   const [notionApiKey, setNotionApiKey] = useState("");
   const [notionDatabaseId, setNotionDatabaseId] = useState("");
+  const [linearApiKey, setLinearApiKey] = useState("");
+  const [linearTeamId, setLinearTeamId] = useState("");
+  const [jiraBaseUrl, setJiraBaseUrl] = useState("");
+  const [jiraEmail, setJiraEmail] = useState("");
+  const [jiraApiToken, setJiraApiToken] = useState("");
+  const [jiraProjectKey, setJiraProjectKey] = useState("");
 
   // Check runtime and GitHub App status on mount
   useEffect(() => {
@@ -184,6 +205,20 @@ export default function SetupPage() {
         .catch(() => {})
         .finally(() => setPromptLoading(false));
     }
+  }, [step]);
+
+  // When entering the tickets step, default each selected GitHub repo to ON.
+  // Preserve any explicit user choices made on prior visits to the step.
+  useEffect(() => {
+    if (currentStep?.id !== "tickets") return;
+    setGithubIssueRepos((prev) => {
+      const next = { ...prev };
+      for (const r of repos) {
+        if (isGitHubUrl(r.url) && !(r.url in next)) next[r.url] = true;
+      }
+      return next;
+    });
+    if (!draftRepoUrl && repos.length > 0) setDraftRepoUrl(repos[0].url);
   }, [step]);
 
   const claudeReady =
@@ -501,31 +536,102 @@ export default function SetupPage() {
     }
   };
 
+  // Build an AddedTracker from the draft form, or return null if incomplete.
+  const buildDraftTracker = (): AddedTracker | null => {
+    if (!draftRepoUrl) return null;
+    const repoLabel = repos.find((r) => r.url === draftRepoUrl)?.fullName ?? draftRepoUrl;
+    if (draftProvider === "linear" && linearApiKey) {
+      return {
+        source: "linear",
+        config: {
+          apiKey: linearApiKey,
+          teamId: linearTeamId || undefined,
+          label: "optio",
+          repoUrl: draftRepoUrl,
+        },
+        repoUrl: draftRepoUrl,
+        label: `Linear → ${repoLabel}`,
+      };
+    }
+    if (draftProvider === "notion" && notionApiKey && notionDatabaseId) {
+      return {
+        source: "notion",
+        config: {
+          apiKey: notionApiKey,
+          databaseId: notionDatabaseId,
+          label: "optio",
+          repoUrl: draftRepoUrl,
+        },
+        repoUrl: draftRepoUrl,
+        label: `Notion → ${repoLabel}`,
+      };
+    }
+    if (draftProvider === "jira" && jiraBaseUrl && jiraEmail && jiraApiToken) {
+      return {
+        source: "jira",
+        config: {
+          baseUrl: jiraBaseUrl,
+          email: jiraEmail,
+          apiToken: jiraApiToken,
+          projectKey: jiraProjectKey || undefined,
+          label: "optio",
+          repoUrl: draftRepoUrl,
+        },
+        repoUrl: draftRepoUrl,
+        label: `Jira (${jiraProjectKey || "all"}) → ${repoLabel}`,
+      };
+    }
+    return null;
+  };
+
+  const addDraftTracker = () => {
+    const tracker = buildDraftTracker();
+    if (!tracker) {
+      toast.error("Fill in all required fields before adding");
+      return;
+    }
+    setAddedTrackers((prev) => [...prev, tracker]);
+    // Reset draft creds (keep provider selection and target repo for quick re-use)
+    setLinearApiKey("");
+    setLinearTeamId("");
+    setNotionApiKey("");
+    setNotionDatabaseId("");
+    setJiraBaseUrl("");
+    setJiraEmail("");
+    setJiraApiToken("");
+    setJiraProjectKey("");
+  };
+
   const saveTicketsStep = async () => {
     setLoading(true);
     try {
-      if (enableTickets) {
-        if (ticketProvider === "github" && ticketOwner && ticketRepo) {
-          await api.createTicketProvider({
-            source: "github",
-            config: {
-              token: githubToken,
-              owner: ticketOwner,
-              repo: ticketRepo,
-              label: "optio",
-            },
-          });
-        } else if (ticketProvider === "notion" && notionApiKey && notionDatabaseId) {
-          await api.createTicketProvider({
-            source: "notion",
-            config: {
-              apiKey: notionApiKey,
-              databaseId: notionDatabaseId,
-              label: "optio",
-            },
-          });
-        }
+      // One GitHub Issues provider per repo the user enabled
+      for (const repo of repos) {
+        if (!isGitHubUrl(repo.url) || !githubIssueRepos[repo.url]) continue;
+        const parsed = parseGitHubOwnerRepo(repo.fullName ?? repo.url);
+        if (!parsed) continue;
+        const config: Record<string, unknown> = {
+          owner: parsed.owner,
+          repo: parsed.repo,
+          label: "optio",
+        };
+        // Only send a token if the user supplied one; otherwise sync falls back
+        // to the GitHub App installation token.
+        if (githubToken) config.token = githubToken;
+        await api.createTicketProvider({ source: "github", config });
       }
+
+      // All external trackers the user added (Linear / Notion / Jira)
+      for (const tracker of addedTrackers) {
+        await api.createTicketProvider({ source: tracker.source, config: tracker.config });
+      }
+
+      // If the user filled in the draft form but didn't click "Add", save it too
+      const pending = buildDraftTracker();
+      if (pending) {
+        await api.createTicketProvider({ source: pending.source, config: pending.config });
+      }
+
       goNext();
     } catch (err) {
       toast.error("Failed to configure ticket provider");
@@ -1761,77 +1867,124 @@ export default function SetupPage() {
                 <h2 className="text-lg font-bold">Ticket Integration</h2>
               </div>
               <p className="text-text-muted text-sm">
-                Optionally connect a ticket provider to auto-create tasks from items labeled{" "}
-                <code className="px-1 py-0.5 bg-bg rounded text-primary text-xs">optio</code>.
+                Optio auto-creates tasks from items labeled{" "}
+                <code className="px-1 py-0.5 bg-bg rounded text-primary text-xs">optio</code>. Pick
+                which repos to watch — this is optional and can be changed later in Settings.
               </p>
 
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={enableTickets}
-                  onChange={(e) => {
-                    setEnableTickets(e.target.checked);
-                    // Auto-populate from the first selected repo
-                    if (
-                      e.target.checked &&
-                      ticketProvider === "github" &&
-                      !ticketOwner &&
-                      repos.length > 0
-                    ) {
-                      const firstRepo = repos[0];
-                      const name = firstRepo.fullName ?? firstRepo.url;
-                      const match = name.match(/([^/]+)\/([^/.]+?)(?:\.git)?$/);
-                      if (match) {
-                        setTicketOwner(match[1]);
-                        setTicketRepo(match[2]);
-                      }
-                    }
-                  }}
-                  className="w-4 h-4 rounded"
-                />
-                <span className="text-sm">Enable ticket integration</span>
-              </label>
+              {/* GitHub Issues — per-repo toggles */}
+              {repos.some((r) => isGitHubUrl(r.url)) ? (
+                <div className="p-4 rounded-md bg-bg border border-border">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Github className="w-4 h-4" />
+                    <h3 className="text-sm font-semibold">GitHub Issues</h3>
+                  </div>
+                  <p className="text-xs text-text-muted mb-3">
+                    Watch these repos for issues labeled{" "}
+                    <code className="px-1 py-0.5 bg-bg-card rounded text-primary">optio</code>.
+                  </p>
+                  <div className="space-y-2">
+                    {repos
+                      .filter((r) => isGitHubUrl(r.url))
+                      .map((r) => (
+                        <label
+                          key={r.url}
+                          className="flex items-center gap-3 text-sm cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!githubIssueRepos[r.url]}
+                            onChange={(e) =>
+                              setGithubIssueRepos({
+                                ...githubIssueRepos,
+                                [r.url]: e.target.checked,
+                              })
+                            }
+                            className="w-4 h-4 rounded"
+                          />
+                          <span className="font-mono text-xs">{r.fullName ?? r.url}</span>
+                        </label>
+                      ))}
+                  </div>
+                </div>
+              ) : null}
 
-              {enableTickets && (
-                <div className="p-4 rounded-md bg-bg border border-border space-y-3">
+              {/* External trackers — add as many Linear/Notion/Jira as you want */}
+              <div className="p-4 rounded-md bg-bg border border-border space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold">Third-party trackers</h3>
+                  <p className="text-xs text-text-muted mt-1">
+                    Optional. Connect Linear, Notion, or Jira — one or more of each. Each tracker is
+                    attached to a specific repo.
+                  </p>
+                </div>
+
+                {addedTrackers.length > 0 && (
+                  <div className="space-y-2">
+                    {addedTrackers.map((t, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-bg-card border border-border text-sm"
+                      >
+                        <span className="font-mono text-xs">{t.label}</span>
+                        <button
+                          onClick={() =>
+                            setAddedTrackers((prev) => prev.filter((_, idx) => idx !== i))
+                          }
+                          className="text-text-muted hover:text-error text-xs"
+                          aria-label="Remove tracker"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="pt-3 border-t border-border space-y-3">
                   <div>
-                    <label className="block text-xs text-text-muted mb-1">Provider</label>
+                    <label className="block text-xs text-text-muted mb-1">
+                      {addedTrackers.length > 0 ? "Add another tracker" : "Add a tracker"}
+                    </label>
                     <select
-                      value={ticketProvider}
-                      onChange={(e) => setTicketProvider(e.target.value)}
+                      value={draftProvider}
+                      onChange={(e) =>
+                        setDraftProvider(e.target.value as "linear" | "notion" | "jira")
+                      }
                       className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
                     >
-                      <option value="github">GitHub Issues</option>
-                      <option value="notion">Notion</option>
                       <option value="linear">Linear</option>
+                      <option value="notion">Notion</option>
                       <option value="jira">Jira</option>
                     </select>
                   </div>
 
-                  {ticketProvider === "github" && (
-                    <div className="grid grid-cols-2 gap-3">
+                  {draftProvider === "linear" && (
+                    <div className="space-y-3">
                       <div>
-                        <label className="block text-xs text-text-muted mb-1">Owner</label>
+                        <label className="block text-xs text-text-muted mb-1">API Key</label>
                         <input
-                          value={ticketOwner}
-                          onChange={(e) => setTicketOwner(e.target.value)}
-                          placeholder="your-org"
+                          type="password"
+                          value={linearApiKey}
+                          onChange={(e) => setLinearApiKey(e.target.value)}
+                          placeholder="lin_api_..."
                           className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs text-text-muted mb-1">Repository</label>
+                        <label className="block text-xs text-text-muted mb-1">
+                          Team ID (optional)
+                        </label>
                         <input
-                          value={ticketRepo}
-                          onChange={(e) => setTicketRepo(e.target.value)}
-                          placeholder="your-repo"
+                          value={linearTeamId}
+                          onChange={(e) => setLinearTeamId(e.target.value)}
                           className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
                         />
                       </div>
                     </div>
                   )}
 
-                  {ticketProvider === "notion" && (
+                  {draftProvider === "notion" && (
                     <div className="space-y-3">
                       <div>
                         <label className="block text-xs text-text-muted mb-1">
@@ -1857,21 +2010,83 @@ export default function SetupPage() {
                           placeholder="abc123..."
                           className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
                         />
-                        <p className="text-xs text-text-muted mt-1">
-                          Found in the database URL after the workspace name and before the query
-                          string.
-                        </p>
                       </div>
                     </div>
                   )}
 
-                  <p className="text-xs text-text-muted">
-                    Items with the{" "}
-                    <code className="px-1 py-0.5 bg-bg-card rounded text-primary">optio</code> label
-                    will be synced automatically.
-                  </p>
+                  {draftProvider === "jira" && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs text-text-muted mb-1">Base URL</label>
+                        <input
+                          value={jiraBaseUrl}
+                          onChange={(e) => setJiraBaseUrl(e.target.value)}
+                          placeholder="https://your-org.atlassian.net"
+                          className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">Email</label>
+                          <input
+                            value={jiraEmail}
+                            onChange={(e) => setJiraEmail(e.target.value)}
+                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-text-muted mb-1">API Token</label>
+                          <input
+                            type="password"
+                            value={jiraApiToken}
+                            onChange={(e) => setJiraApiToken(e.target.value)}
+                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-text-muted mb-1">
+                          Project Key (optional)
+                        </label>
+                        <input
+                          value={jiraProjectKey}
+                          onChange={(e) => setJiraProjectKey(e.target.value)}
+                          placeholder="ENG"
+                          className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs text-text-muted mb-1">
+                      Attach tickets to repo
+                    </label>
+                    <select
+                      value={draftRepoUrl}
+                      onChange={(e) => setDraftRepoUrl(e.target.value)}
+                      className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                    >
+                      {repos.length === 0 && <option value="">— No repos selected —</option>}
+                      {repos.map((r) => (
+                        <option key={r.url} value={r.url}>
+                          {r.fullName ?? r.url}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={addDraftTracker}
+                      disabled={!buildDraftTracker()}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-bg-card border border-border text-sm hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add tracker
+                    </button>
+                  </div>
                 </div>
-              )}
+              </div>
 
               <div className="flex items-center justify-between">
                 <button
@@ -1956,11 +2171,21 @@ export default function SetupPage() {
                     Prompt template: {autoMerge ? "auto-merge enabled" : "review required"}
                   </span>
                 </div>
-                {enableTickets && ticketOwner && ticketRepo && (
+                {Object.values(githubIssueRepos).filter(Boolean).length > 0 && (
                   <div className="flex items-center gap-2 text-sm">
                     <CheckCircle className="w-4 h-4 text-success" />
                     <span>
-                      GitHub Issues: {ticketOwner}/{ticketRepo}
+                      GitHub Issues watching{" "}
+                      {Object.values(githubIssueRepos).filter(Boolean).length} repo(s)
+                    </span>
+                  </div>
+                )}
+                {addedTrackers.length + (buildDraftTracker() ? 1 : 0) > 0 && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <CheckCircle className="w-4 h-4 text-success" />
+                    <span>
+                      {addedTrackers.length + (buildDraftTracker() ? 1 : 0)} external tracker(s)
+                      connected
                     </span>
                   </div>
                 )}
