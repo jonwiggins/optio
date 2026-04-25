@@ -285,7 +285,9 @@ describe("workspace-service", () => {
 
       (db.insert as any) = vi.fn().mockReturnValue({
         values: vi.fn().mockReturnValue({
-          onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+          onConflictDoNothing: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([{ id: "m-1" }]),
+          }),
         }),
       });
 
@@ -301,6 +303,27 @@ describe("workspace-service", () => {
       });
 
       await expect(addMember("ws-1", "nonexistent")).rejects.toThrow("User not found");
+    });
+
+    it("throws when membership already exists", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ id: "user-1" }]),
+        }),
+      });
+
+      // onConflictDoNothing + returning yields [] when the row already exists
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoNothing: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      await expect(addMember("ws-1", "user-1", "member")).rejects.toThrow(
+        "User is already a member of this workspace",
+      );
     });
   });
 

@@ -123,7 +123,11 @@ export async function listMembers(workspaceId: string): Promise<WorkspaceMemberW
   return rows as WorkspaceMemberWithUser[];
 }
 
-/** Add a user to a workspace. */
+/**
+ * Add a user to a workspace. Throws "User not found" if the target user
+ * does not exist, and "User is already a member" if the membership already
+ * exists. Use {@link updateMemberRole} to change an existing member's role.
+ */
 export async function addMember(
   workspaceId: string,
   userId: string,
@@ -135,13 +139,19 @@ export async function addMember(
     throw new Error("User not found");
   }
 
-  await db
+  // onConflictDoNothing + returning lets us distinguish a fresh insert from
+  // an existing membership without racing against concurrent admins.
+  const inserted = await db
     .insert(workspaceMembers)
     .values({ workspaceId, userId, role })
-    .onConflictDoUpdate({
+    .onConflictDoNothing({
       target: [workspaceMembers.workspaceId, workspaceMembers.userId],
-      set: { role },
-    });
+    })
+    .returning({ id: workspaceMembers.id });
+
+  if (inserted.length === 0) {
+    throw new Error("User is already a member of this workspace");
+  }
 }
 
 /** Update a member's role. Revokes sessions to force re-authentication with updated privileges. */

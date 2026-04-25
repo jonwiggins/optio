@@ -10,7 +10,7 @@ import { getUserRole } from "../services/workspace-service.js";
 const UserLookupResponseSchema = z.object({
   user: z.object({
     id: z.string().uuid(),
-    email: z.string(),
+    email: z.string().email(),
     displayName: z.string(),
     avatarUrl: z.string().nullable(),
   }),

@@ -208,26 +208,19 @@ function MemberManagement() {
 
     setIsAdding(true);
     try {
-      // 1. Lookup user by email
+      // Look the user up by email, then add them. The duplicate-member check
+      // is enforced server-side (409 from POST /members) so a stale local
+      // `members` list can't accidentally re-add someone with a new role.
       const { user } = await api.lookupUserByEmail(addingEmail);
-
-      // 2. Check if already a member
-      if (members.some((m) => m.userId === user.id)) {
-        toast.error("User is already a member of this workspace");
-        return;
-      }
-
-      // 3. Add member
       await api.addWorkspaceMember(wsId, user.id, addingRole);
 
-      // 4. Refresh list
       const { members: updatedMembers } = await api.listWorkspaceMembers(wsId);
       setMembers(updatedMembers);
       setAddingEmail("");
       toast.success(`${user.displayName} added to workspace`);
     } catch (err) {
       toast.error("Failed to add member", {
-        description: err instanceof Error ? err.message : "User not found",
+        description: err instanceof Error ? err.message : undefined,
       });
     } finally {
       setIsAdding(false);
