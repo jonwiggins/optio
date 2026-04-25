@@ -248,7 +248,9 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         summary: "Add a member to a workspace",
         description:
           "Add an existing user to a workspace with the given role. Requires " +
-          "admin role. Returns 404 if the target user does not exist.",
+          "admin role. Returns 404 if the target user does not exist, and 409 " +
+          "if the user is already a member (use the role-update endpoint to " +
+          "change an existing member's role).",
         tags: ["Workspaces"],
         params: IdParamsSchema,
         body: addMemberSchema,
@@ -257,6 +259,7 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
           401: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
         },
       },
     },
@@ -273,6 +276,9 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg === "User not found") {
           return reply.status(404).send({ error: "User not found" });
+        }
+        if (msg === "User is already a member of this workspace") {
+          return reply.status(409).send({ error: msg });
         }
         throw err;
       }

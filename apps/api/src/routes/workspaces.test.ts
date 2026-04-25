@@ -272,4 +272,18 @@ describe("workspace members", () => {
 
     expect(res.statusCode).toBe(404);
   });
+
+  it("POST /api/workspaces/:id/members returns 409 when user is already a member", async () => {
+    mockGetUserRole.mockResolvedValue("admin");
+    mockAddMember.mockRejectedValue(new Error("User is already a member of this workspace"));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workspaces/ws-1/members",
+      payload: { userId: "00000000-0000-0000-0000-000000000002", role: "member" },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/already a member/i);
+  });
 });
