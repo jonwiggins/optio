@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { ticketProviders, repos } from "../db/schema.js";
 import { getTicketProvider } from "@optio/ticket-providers";
@@ -22,7 +22,9 @@ export async function syncAllTickets(): Promise<number> {
     .where(eq(ticketProviders.enabled, true));
 
   // Fetch configured repos once before the provider loop (avoids redundant queries)
-  const configuredRepos = await db.select({ repoUrl: repos.repoUrl }).from(repos);
+  // Sort by createdAt desc so that if multiple workspaces have the same repo, we prefer the latest setup
+  const configuredRepos = await db.select().from(repos);
+  configuredRepos.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
   let totalSynced = 0;
 
