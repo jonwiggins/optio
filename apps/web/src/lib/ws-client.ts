@@ -142,3 +142,10 @@ export function createPrReviewLogClient(
 ): WsClient {
   return new WsClient(`${getWsBaseUrl()}/ws/pr-reviews/${prReviewId}/logs`, tokenProvider);
 }
+
+export function createPersistentAgentEventsClient(
+  agentId: string,
+  tokenProvider?: TokenProvider,
+): WsClient {
+  return new WsClient(`${getWsBaseUrl()}/ws/persistent-agents/${agentId}/events`, tokenProvider);
+}

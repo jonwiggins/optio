@@ -1,8 +1,14 @@
-# Tasks: Repo Tasks and Standalone Tasks
+# Tasks: Repo Tasks, Standalone Tasks, and Persistent Agents
 
-Optio has one user-facing concept — a **Task** — with one attribute that flips the pipeline behind it: does the task have a repo? Everything else (prompts, triggers, agent config, run history, logs, costs) is shared.
+Optio's runtime tier has three flavors:
 
-This guide covers the two flavors, when to use each, and how the unified `/api/tasks` HTTP layer presents them.
+1. **Repo Task** — agent runs in a worktree, opens a PR, terminates.
+2. **Standalone Task** — agent runs once with no repo, produces side effects, terminates.
+3. **Persistent Agent** — long-lived, named, message-driven; _doesn't terminate_. See [persistent-agents.md](persistent-agents.md).
+
+The first two share most of the pipeline (prompts, triggers, agent config, run history, logs, costs) — they're separated only by whether a repo is attached. Persistent Agents are a distinct runtime model: turns are inputs to a long-lived process, rather than the unit of work itself.
+
+This guide covers the two Task flavors, when to use each, and how the unified `/api/tasks` HTTP layer presents them. For Persistent Agents see [persistent-agents.md](persistent-agents.md).
 
 ## The two flavors
 

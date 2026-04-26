@@ -15,7 +15,6 @@ import {
   DollarSign,
   Terminal,
   Bot,
-  GitBranch,
   Webhook,
   Plug,
   BarChart3,
@@ -46,6 +45,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Run",
     items: [
       { href: "/tasks", label: "Tasks", icon: ListTodo },
+      { href: "/agents", label: "Agents", icon: Bot },
       { href: "/sessions", label: "Sessions", icon: Terminal },
     ],
   },

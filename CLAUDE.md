@@ -6,7 +6,7 @@ Context and conventions for AI assistants working on the Optio codebase.
 
 Optio is an orchestration system for AI coding agents. Think of it as "CI/CD where the build step is an AI agent." One primary user-facing concept (Tasks) with one attribute (has a repo) flipping the pipeline, plus shared primitives:
 
-**Tasks** — a configured unit of agent work. A Task has a **Who** (agent type), **What** (prompt or template), **When** (trigger: manual / schedule / webhook / ticket), optional **Where** (repo + branch), and **Why** (description). Tasks come in two flavors based on whether a repo is attached:
+**Tasks** — a configured unit of agent work. A Task has a **Who** (agent type), **What** (prompt or template), **When** (trigger: manual / schedule / webhook / ticket), optional **Where** (repo + branch), and **Why** (description). Tasks come in three flavors:
 
 - **Repo Task** — `Where` is set. The agent clones the repo into a worktree and opens a PR:
   1. Spins up an isolated Kubernetes pod for the repository (pod-per-repo)
@@ -20,6 +20,8 @@ Optio is an orchestration system for AI coding agents. Think of it as "CI/CD whe
   9. Auto-completes on merge, auto-fails on close
 
 - **Standalone Task** — no `Where`. The agent runs in an isolated pod with no repo checkout, producing logs and side effects (e.g., queries Slack, posts to a database). Scheduled/webhook-driven runs of this flavor are the common case.
+
+- **Persistent Agent** — long-lived, named, message-driven agent process that does _not_ terminate after running. Halts after each turn and waits to be re-woken by a user message, an agent message, a webhook, a cron tick, or a ticket event. Addressable by other agents in the same workspace via the inter-agent HTTP API (`/api/internal/persistent-agents/*`). Three configurable pod lifecycle modes: `always-on`, `sticky` (default, with idle warm window), and `on-demand`. UI at `/agents`. Schema: `persistent_agents`, `persistent_agent_turns`, `persistent_agent_messages`, `persistent_agent_pods`. See `docs/persistent-agents.md` and the demo in `demos/the-forge/`.
 
 **Scheduled (Task Configs)** — a saved Task blueprint that spawns fresh Tasks on a trigger firing. Stored in `task_configs`. Each firing calls `instantiateTask()` which goes through the full Repo Task pipeline. Manageable at `/tasks/scheduled`. Standalone equivalents are stored in `workflows` (see backend-naming note below).
 

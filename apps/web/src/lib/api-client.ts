@@ -1624,4 +1624,71 @@ export const api = {
       error?: string;
       catalog: unknown;
     }>(`/api/agents/${provider}/options/refresh`, { method: "POST" }),
+
+  // ── Persistent Agents ──────────────────────────────────────────────────
+  listPersistentAgents: () => request<{ agents: any[] }>(`/api/persistent-agents`),
+
+  getPersistentAgent: (id: string) =>
+    request<{ agent: any; inbox: { pending: number; oldest: string | null } }>(
+      `/api/persistent-agents/${id}`,
+    ),
+
+  createPersistentAgent: (data: {
+    slug: string;
+    name: string;
+    description?: string;
+    agentRuntime?: string;
+    model?: string | null;
+    systemPrompt?: string | null;
+    agentsMd?: string | null;
+    initialPrompt: string;
+    podLifecycle?: "always-on" | "sticky" | "on-demand";
+    idlePodTimeoutMs?: number;
+    maxTurnDurationMs?: number;
+    maxTurns?: number;
+    consecutiveFailureLimit?: number;
+    enabled?: boolean;
+  }) =>
+    request<{ agent: any }>(`/api/persistent-agents`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updatePersistentAgent: (id: string, data: Record<string, unknown>) =>
+    request<{ agent: any }>(`/api/persistent-agents/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deletePersistentAgent: (id: string) =>
+    request<undefined>(`/api/persistent-agents/${id}`, { method: "DELETE" }),
+
+  sendPersistentAgentMessage: (
+    id: string,
+    body: string,
+    opts?: { broadcasted?: boolean; senderName?: string },
+  ) =>
+    request<{ ok: boolean }>(`/api/persistent-agents/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ body, ...opts }),
+    }),
+
+  listPersistentAgentMessages: (id: string, limit?: number) => {
+    const qs = limit ? `?limit=${limit}` : "";
+    return request<{ messages: any[] }>(`/api/persistent-agents/${id}/messages${qs}`);
+  },
+
+  listPersistentAgentTurns: (id: string, limit?: number) => {
+    const qs = limit ? `?limit=${limit}` : "";
+    return request<{ turns: any[] }>(`/api/persistent-agents/${id}/turns${qs}`);
+  },
+
+  getPersistentAgentTurn: (id: string, turnId: string) =>
+    request<{ turn: any; logs: any[] }>(`/api/persistent-agents/${id}/turns/${turnId}`),
+
+  controlPersistentAgent: (id: string, intent: "pause" | "resume" | "archive" | "restart") =>
+    request<{ ok: boolean; intent: string }>(`/api/persistent-agents/${id}/control`, {
+      method: "POST",
+      body: JSON.stringify({ intent }),
+    }),
 };
