@@ -194,6 +194,10 @@ describe("GET /api/auth/me", () => {
   });
 
   it("authenticates via Bearer token (BFF proxy pattern)", async () => {
+    // buildRouteTestApp by default attaches DEFAULT_TEST_USER to req.user.
+    // To test Bearer/Cookie parsing in the route handler itself, we must
+    // ensure req.user starts as null.
+    app = await buildRouteTestApp(authRoutes, { user: null });
     mockValidateSession.mockResolvedValue(mockUser);
 
     const res = await app.inject({
@@ -209,6 +213,7 @@ describe("GET /api/auth/me", () => {
   });
 
   it("authenticates via session cookie (fallback)", async () => {
+    app = await buildRouteTestApp(authRoutes, { user: null });
     mockValidateSession.mockResolvedValue(mockUser);
 
     const res = await app.inject({
@@ -224,6 +229,7 @@ describe("GET /api/auth/me", () => {
   });
 
   it("prefers Bearer token over cookie", async () => {
+    app = await buildRouteTestApp(authRoutes, { user: null });
     mockValidateSession.mockResolvedValue(mockUser);
 
     const res = await app.inject({
@@ -236,6 +242,20 @@ describe("GET /api/auth/me", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(mockValidateSession).toHaveBeenCalledWith("bearer-token");
+  });
+
+  it("returns 200 with enriched user when middleware already authenticated the request", async () => {
+    const enrichedUser = { ...mockUser, workspaceRole: "admin" as const };
+    app = await buildRouteTestApp(authRoutes, { user: enrichedUser });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user).toEqual(enrichedUser);
+    // Should NOT call validateSession because req.user was already set
+    expect(mockValidateSession).not.toHaveBeenCalled();
   });
 
   it("returns 401 when no token is provided", async () => {

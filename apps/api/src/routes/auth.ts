@@ -591,6 +591,13 @@ export async function authRoutes(rawApp: FastifyInstance) {
         });
       }
 
+      // If the auth plugin already resolved the user (with workspace role), use it.
+      if (req.user) {
+        return reply.send({ user: req.user, authDisabled: false });
+      }
+
+      // Fallback for requests that bypass the middleware or when identity is
+      // checked with a raw token (e.g. CLI boot or some tests).
       // Resolve token: Bearer header (BFF proxy) → session cookie (direct)
       const authHeader = req.headers.authorization;
       let token: string | undefined;
