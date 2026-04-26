@@ -283,6 +283,7 @@ export const repos = pgTable(
     reviewTrigger: text("review_trigger").default("on_ci_pass"), // "manual" | "on_pr" | "on_ci_pass"
     reviewPromptTemplate: text("review_prompt_template"), // null = use default
     testCommand: text("test_command"), // "npm test", "cargo test", etc.
+    reviewAgentType: text("review_agent_type"), // null = inherit (defaultAgentType / global)
     reviewModel: text("review_model").default("sonnet"), // can use cheaper model for reviews
     // External (non-optio-authored) PR auto-review
     externalReviewMode: text("external_review_mode").notNull().default("off"), // "off" | "on_request" | "on_pr_hold" | "on_pr_post"
@@ -868,6 +869,10 @@ export const optioSettings = pgTable(
     enabledTools: jsonb("enabled_tools").$type<string[]>().notNull().default([]), // empty = all enabled
     confirmWrites: boolean("confirm_writes").notNull().default(true),
     maxTurns: integer("max_turns").notNull().default(20),
+    // Review-agent defaults applied when a repo doesn't override them.
+    // NULL means "fall back to repo's defaultAgentType / catalog default".
+    defaultReviewAgentType: text("default_review_agent_type"),
+    defaultReviewModel: text("default_review_model"),
     workspaceId: uuid("workspace_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

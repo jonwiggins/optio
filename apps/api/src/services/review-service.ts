@@ -10,6 +10,8 @@ import * as taskService from "./task-service.js";
 import { getGitPlatformForRepo } from "./git-token-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { logger } from "../logger.js";
+import { resolveReviewConfig } from "./review-config.js";
+import * as optioSettingsService from "./optio-settings-service.js";
 
 /**
  * Fetch PR description, reviews, and comments to give the
@@ -91,6 +93,20 @@ export async function launchReview(parentTaskId: string): Promise<string> {
   const { getRepoByUrl } = await import("./repo-service.js");
   const repoConfig = await getRepoByUrl(parentTask.repoUrl);
 
+  // Resolve which agent + model the review should run with. The same resolver
+  // is used by pr-review-worker so config behaviour stays consistent across
+  // the two review entrypoints.
+  const globalSettings = await optioSettingsService
+    .getSettings(parentTask.workspaceId ?? null)
+    .catch(() => null);
+  const review = resolveReviewConfig({
+    repoReviewAgentType: repoConfig?.reviewAgentType ?? null,
+    repoDefaultAgentType: repoConfig?.defaultAgentType ?? null,
+    repoReviewModel: repoConfig?.reviewModel ?? null,
+    globalDefaultReviewAgentType: globalSettings?.defaultReviewAgentType ?? null,
+    globalDefaultReviewModel: globalSettings?.defaultReviewModel ?? null,
+  });
+
   // Fetch PR context using platform abstraction
   const prContextPromise = fetchPrContext(parentTask.repoUrl, prNumber, parentTask.createdBy);
 
@@ -103,7 +119,7 @@ export async function launchReview(parentTaskId: string): Promise<string> {
     prompt: `Review PR #${prNumber} for: ${parentTask.title}`,
     taskType: "review",
     blocksParent: true,
-    agentType: "claude-code",
+    agentType: review.agentType,
   });
 
   const reviewTask = subtask;
@@ -170,8 +186,11 @@ export async function launchReview(parentTaskId: string): Promise<string> {
         renderedPrompt,
         taskFileContent: reviewContext,
         taskFilePath: REVIEW_TASK_FILE_PATH,
-        // Use review model if configured
-        claudeModel: repoConfig?.reviewModel ?? "sonnet",
+        // Agent-agnostic model field — read by the worker for any review agent.
+        model: review.model,
+        // Back-compat: keep populating claudeModel for one release so
+        // in-flight workers that pre-date the resolver still find a model.
+        claudeModel: review.model,
       },
     },
     {

@@ -43,6 +43,7 @@ export interface RepoRecord {
   reviewTrigger: string | null;
   reviewPromptTemplate: string | null;
   testCommand: string | null;
+  reviewAgentType: string | null;
   reviewModel: string | null;
   maxAutoResumes: number | null;
   externalReviewMode: string;
@@ -210,6 +211,7 @@ export async function updateRepo(
     reviewTrigger?: string;
     reviewPromptTemplate?: string | null;
     testCommand?: string;
+    reviewAgentType?: string | null;
     reviewModel?: string;
     externalReviewMode?: string;
     externalReviewFilters?: {

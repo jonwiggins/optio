@@ -5,6 +5,14 @@ export interface OptioSettings {
   enabledTools: string[];
   confirmWrites: boolean;
   maxTurns: number;
+  /**
+   * Workspace-level review-agent fallback. When a repo doesn't set its own
+   * `reviewAgentType` and `defaultAgentType`, the resolver in
+   * `apps/api/src/services/review-config.ts` picks this up. Null = no
+   * preference (resolver continues falling back through its chain).
+   */
+  defaultReviewAgentType: string | null;
+  defaultReviewModel: string | null;
   workspaceId?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -16,6 +24,8 @@ export interface UpdateOptioSettingsInput {
   enabledTools?: string[];
   confirmWrites?: boolean;
   maxTurns?: number;
+  defaultReviewAgentType?: string | null;
+  defaultReviewModel?: string | null;
 }
 
 /** Tool category for UI grouping */

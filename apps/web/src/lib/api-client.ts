@@ -1035,6 +1035,8 @@ export const api = {
     enabledTools?: string[];
     confirmWrites?: boolean;
     maxTurns?: number;
+    defaultReviewAgentType?: string | null;
+    defaultReviewModel?: string | null;
   }) =>
     request<{ settings: any }>("/api/optio/settings", {
       method: "PUT",

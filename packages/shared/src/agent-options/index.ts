@@ -40,6 +40,58 @@ export const ALL_PROVIDER_IDS: readonly AgentProviderId[] = [
 ];
 
 /**
+ * The set of agent type identifiers persisted in `repos.default_agent_type`,
+ * `repos.review_agent_type`, etc. Each one maps to a provider catalog via
+ * `providerForAgentType()`.
+ */
+export type AgentType = "claude-code" | "codex" | "copilot" | "opencode" | "gemini" | "openclaw";
+
+export const AGENT_TYPES: readonly AgentType[] = [
+  "claude-code",
+  "codex",
+  "copilot",
+  "opencode",
+  "gemini",
+  "openclaw",
+];
+
+/**
+ * Map an agent type (DB value) to the provider catalog id used by
+ * `PROVIDER_CATALOGS`. Each agent type has exactly one matching catalog.
+ */
+export function providerForAgentType(agentType: AgentType | string): AgentProviderId {
+  switch (agentType) {
+    case "claude-code":
+      return "anthropic";
+    case "codex":
+      return "openai";
+    case "gemini":
+      return "gemini";
+    case "copilot":
+      return "copilot";
+    case "opencode":
+      return "opencode";
+    case "openclaw":
+      return "openclaw";
+    default:
+      // Fall back to anthropic — preserves existing behavior for legacy rows.
+      return "anthropic";
+  }
+}
+
+/**
+ * True if the given model id (or alias) belongs to the catalog for `agentType`.
+ * Used by the API layer to reject mismatched (agentType, model) pairs.
+ */
+export function modelBelongsToAgentCatalog(agentType: AgentType | string, model: string): boolean {
+  const catalog = PROVIDER_CATALOGS[providerForAgentType(agentType)];
+  if (!catalog) return false;
+  if (model in catalog.aliases) return true;
+  if (catalog.modelIsFreeText) return true;
+  return catalog.models.some((m) => m.id === model);
+}
+
+/**
  * Resolve a possibly-aliased model string (e.g. `opus`, `sonnet`, a full dated
  * id, or `undefined`) to a concrete model id for the given provider.
  *

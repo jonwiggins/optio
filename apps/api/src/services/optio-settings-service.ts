@@ -37,6 +37,8 @@ export async function getSettings(workspaceId?: string | null): Promise<OptioSet
     enabledTools: [],
     confirmWrites: true,
     maxTurns: 20,
+    defaultReviewAgentType: null,
+    defaultReviewModel: null,
     workspaceId: workspaceId ?? null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -68,6 +70,10 @@ export async function upsertSettings(
     if (input.enabledTools !== undefined) updates.enabledTools = input.enabledTools;
     if (input.confirmWrites !== undefined) updates.confirmWrites = input.confirmWrites;
     if (input.maxTurns !== undefined) updates.maxTurns = input.maxTurns;
+    if (input.defaultReviewAgentType !== undefined)
+      updates.defaultReviewAgentType = input.defaultReviewAgentType;
+    if (input.defaultReviewModel !== undefined)
+      updates.defaultReviewModel = input.defaultReviewModel;
 
     const [row] = await db
       .update(optioSettings)
@@ -85,6 +91,8 @@ export async function upsertSettings(
         enabledTools: input.enabledTools ?? [],
         confirmWrites: input.confirmWrites ?? true,
         maxTurns: input.maxTurns ?? 20,
+        defaultReviewAgentType: input.defaultReviewAgentType ?? null,
+        defaultReviewModel: input.defaultReviewModel ?? null,
         workspaceId: workspaceId ?? undefined,
       })
       .returning();
@@ -100,6 +108,8 @@ function mapRow(row: typeof optioSettings.$inferSelect): OptioSettings {
     enabledTools: row.enabledTools,
     confirmWrites: row.confirmWrites,
     maxTurns: row.maxTurns,
+    defaultReviewAgentType: row.defaultReviewAgentType ?? null,
+    defaultReviewModel: row.defaultReviewModel ?? null,
     workspaceId: row.workspaceId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

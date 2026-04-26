@@ -33,7 +33,8 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { SharedDirectoriesSection } from "@/components/shared-directories-section";
 import { AgentOptionsPicker, type AgentOptionsValues } from "@/components/agent-options-picker";
-import { ANTHROPIC_CATALOG, resolveModelId } from "@optio/shared";
+import type { AgentType } from "@optio/shared";
+import { ReviewAgentPicker } from "@/components/review-agent-picker";
 
 const AGENT_TABS = [
   { value: "claude-code", label: "Claude Code" },
@@ -95,7 +96,11 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [reviewEnabled, setReviewEnabled] = useState(false);
   const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
   const [testCommand, setTestCommand] = useState("");
-  const [reviewModel, setReviewModel] = useState("sonnet");
+  // null = inherit from repo's defaultAgentType / global setting.
+  const [reviewAgentType, setReviewAgentType] = useState<AgentType | null>(null);
+  const [reviewModel, setReviewModel] = useState("");
+  const [effectiveReviewAgentType, setEffectiveReviewAgentType] = useState<string | null>(null);
+  const [effectiveReviewModel, setEffectiveReviewModel] = useState<string | null>(null);
   const [reviewPromptTemplate, setReviewPromptTemplate] = useState("");
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
   // External (non-optio-authored) PR auto-review
@@ -178,7 +183,10 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setReviewEnabled(r.reviewEnabled ?? false);
         setReviewTrigger(r.reviewTrigger ?? "on_ci_pass");
         setTestCommand(r.testCommand ?? "");
-        setReviewModel(r.reviewModel ?? "sonnet");
+        setReviewAgentType((r.reviewAgentType as AgentType | null) ?? null);
+        setReviewModel(r.reviewModel ?? "");
+        setEffectiveReviewAgentType(r.effectiveReviewAgentType ?? null);
+        setEffectiveReviewModel(r.effectiveReviewModel ?? null);
         setReviewPromptTemplate(r.reviewPromptTemplate ?? "");
         if (r.reviewPromptTemplate) setShowReviewPrompt(true);
         setExternalReviewMode(r.externalReviewMode ?? "off");
@@ -267,7 +275,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         reviewEnabled,
         reviewTrigger,
         testCommand,
-        reviewModel,
+        reviewAgentType,
+        reviewModel: reviewModel || undefined,
         reviewPromptTemplate: showReviewPrompt ? reviewPromptTemplate : null,
         externalReviewMode,
         externalReviewWaitForCi,
@@ -781,61 +790,31 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-text-muted mb-1">Review Model</label>
-                  <select
-                    value={reviewModel}
-                    onChange={(e) => setReviewModel(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                  >
-                    {Object.keys(ANTHROPIC_CATALOG.aliases).map((alias) => {
-                      const id = resolveModelId("anthropic", alias);
-                      const label =
-                        ANTHROPIC_CATALOG.models.find((m) => m.id === id)?.label ?? alias;
-                      return (
-                        <option key={alias} value={alias}>
-                          {label}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-text-muted mb-1">Context Window</label>
-                  <select
-                    value={claudeContextWindow}
-                    className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                  >
-                    <option value="200k">200K tokens</option>
-                    <option value="1m">1M tokens</option>
-                  </select>
-                </div>
-              </div>
+              <ReviewAgentPicker
+                agentType={reviewAgentType}
+                onAgentTypeChange={setReviewAgentType}
+                model={reviewModel}
+                onModelChange={setReviewModel}
+                allowInherit
+                inheritedHint={
+                  effectiveReviewAgentType
+                    ? `Reviews will run with: ${effectiveReviewAgentType}${
+                        effectiveReviewModel ? ` · ${effectiveReviewModel}` : ""
+                      }`
+                    : undefined
+                }
+              />
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-text-muted mb-1">Effort Level</label>
-                  <select
-                    value={claudeEffort}
-                    className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-text-muted mb-1">Max Turns</label>
-                  <NumberInput
-                    min={1}
-                    max={100}
-                    value={maxTurnsReview}
-                    onChange={(v) => setMaxTurnsReview(v)}
-                    fallback={10}
-                    placeholder="10"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Max Turns</label>
+                <NumberInput
+                  min={1}
+                  max={100}
+                  value={maxTurnsReview}
+                  onChange={(v) => setMaxTurnsReview(v)}
+                  fallback={10}
+                  placeholder="10"
+                />
               </div>
 
               {/* Collapsible review prompt */}

@@ -71,6 +71,7 @@ function makeRepoConfig(overrides: Partial<RepoRecord> = {}): RepoRecord {
     reviewTrigger: "on_ci_pass",
     reviewPromptTemplate: null,
     testCommand: null,
+    reviewAgentType: null,
     reviewModel: "sonnet",
     externalReviewMode: "off",
     externalReviewFilters: null,

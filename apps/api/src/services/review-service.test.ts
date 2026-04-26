@@ -21,6 +21,7 @@ vi.mock("../db/schema.js", () => ({
   tasks: {},
   taskEvents: {},
   taskLogs: {},
+  optioSettings: { workspaceId: "workspaceId" },
 }));
 
 const mockGetTask = vi.fn();
@@ -48,6 +49,15 @@ const mockQueueSubtask = vi.fn();
 vi.mock("./subtask-service.js", () => ({
   createSubtask: (...args: any[]) => mockCreateSubtask(...args),
   queueSubtask: (...args: any[]) => mockQueueSubtask(...args),
+}));
+
+// optioSettingsService is read through the resolver to surface workspace-level
+// defaults. Stub it out so the resolver only sees per-repo data in these tests.
+vi.mock("./optio-settings-service.js", () => ({
+  getSettings: vi.fn().mockResolvedValue({
+    defaultReviewAgentType: null,
+    defaultReviewModel: null,
+  }),
 }));
 
 import { db } from "../db/client.js";
@@ -129,7 +139,8 @@ describe("launchReview", () => {
     // Verify task was transitioned to queued
     expect(mockTransitionTask).toHaveBeenCalledWith("review-1", "queued", "review_requested");
 
-    // Verify job was added to queue with review overrides
+    // Verify job was added to queue with review overrides. Both `model`
+    // (new agent-agnostic field) and `claudeModel` (back-compat) are set.
     expect(mockQueueAdd).toHaveBeenCalledWith(
       "process-task",
       expect.objectContaining({
@@ -137,6 +148,7 @@ describe("launchReview", () => {
         reviewOverride: expect.objectContaining({
           renderedPrompt: expect.any(String),
           taskFileContent: expect.stringContaining("Implement feature X"),
+          model: "haiku",
           claudeModel: "haiku",
         }),
       }),
@@ -167,16 +179,61 @@ describe("launchReview", () => {
 
     await launchReview("task-2");
 
-    // Should use default model "sonnet"
+    // With no repo config and no global override, the resolver picks
+    // claude-code's catalog default (an Anthropic model id).
     expect(mockQueueAdd).toHaveBeenCalledWith(
       "process-task",
       expect.objectContaining({
         reviewOverride: expect.objectContaining({
-          claudeModel: "sonnet",
+          model: expect.stringMatching(/claude-/),
+          claudeModel: expect.stringMatching(/claude-/),
         }),
       }),
       expect.any(Object),
     );
+  });
+
+  it("creates a Gemini review subtask for a Gemini-only repo", async () => {
+    const parentTask = {
+      id: "task-4",
+      title: "Add observability",
+      prompt: "Add metrics",
+      prUrl: "https://github.com/org/repo/pull/77",
+      repoUrl: "https://github.com/org/repo",
+    };
+
+    mockGetTask.mockResolvedValueOnce(parentTask);
+
+    // Repo lookup returns a Gemini-configured repo. Note: legacy reviewModel
+    // value of "sonnet" is intentionally still in the row to verify the
+    // resolver drops mismatched models silently.
+    vi.mocked(db.select().from(undefined as any).where as any)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          defaultAgentType: "gemini",
+          reviewAgentType: null,
+          reviewModel: "sonnet", // wrong-catalog leftover, must be ignored
+        },
+      ]);
+
+    mockCreateSubtask.mockResolvedValueOnce({ id: "review-4" });
+    mockTransitionTask.mockResolvedValueOnce({ id: "review-4", state: "queued" });
+
+    await launchReview("task-4");
+
+    // Subtask should be created with the Gemini agent type, not claude-code.
+    expect(mockCreateSubtask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTaskId: "task-4",
+        agentType: "gemini",
+      }),
+    );
+
+    // Model should be a Gemini model id, not the bogus "sonnet" leftover.
+    const queueCall = mockQueueAdd.mock.calls[0];
+    expect(queueCall[1].reviewOverride.model).toMatch(/gemini-/);
+    expect(queueCall[1].reviewOverride.model).not.toBe("sonnet");
   });
 
   it("includes review context with PR details", async () => {

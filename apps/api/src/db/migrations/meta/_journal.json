@@ -516,6 +516,13 @@
     {
       "idx": 73,
       "version": "7",
+      "when": 1777186008000,
+      "tag": "1777186008_review_agent_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
       "when": 1777200000000,
       "tag": "1777200000_custom_skills_agent_types_files",
       "breakpoints": true
