@@ -591,27 +591,11 @@ export async function authRoutes(rawApp: FastifyInstance) {
         });
       }
 
-      // Resolve token: Bearer header (BFF proxy) → session cookie (direct)
-      const authHeader = req.headers.authorization;
-      let token: string | undefined;
-      if (authHeader?.startsWith("Bearer ")) {
-        token = authHeader.slice(7);
-      } else {
-        const cookieHeader = req.headers.cookie;
-        const match = cookieHeader?.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]*)`));
-        token = match ? decodeURIComponent(match[1]) : undefined;
-      }
-
-      if (!token) {
+      if (!req.user) {
         return reply.status(401).send({ error: "Not authenticated" });
       }
 
-      const user = await validateSession(token);
-      if (!user) {
-        return reply.status(401).send({ error: "Invalid or expired session" });
-      }
-
-      reply.send({ user, authDisabled: false });
+      reply.send({ user: req.user, authDisabled: false });
     },
   );
 
