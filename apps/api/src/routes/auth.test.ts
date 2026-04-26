@@ -193,70 +193,32 @@ describe("GET /api/auth/me", () => {
     expect(body.user.id).toBe("local");
   });
 
-  it("authenticates via Bearer token (BFF proxy pattern)", async () => {
-    mockValidateSession.mockResolvedValue(mockUser);
+  it("returns the current user when authenticated", async () => {
+    // buildRouteTestApp by default attaches DEFAULT_TEST_USER to req.user
+    app = await buildRouteTestApp(authRoutes);
 
     const res = await app.inject({
       method: "GET",
       url: "/api/auth/me",
-      headers: {
-        authorization: "Bearer my-session-token",
-      },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().user).toEqual(mockUser);
-    expect(mockValidateSession).toHaveBeenCalledWith("my-session-token");
-  });
-
-  it("authenticates via session cookie (fallback)", async () => {
-    mockValidateSession.mockResolvedValue(mockUser);
-
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/auth/me",
-      headers: {
-        cookie: "optio_session=cookie-token",
-      },
+    expect(res.json().user).toEqual({
+      id: "user-1",
+      workspaceId: "ws-1",
+      workspaceRole: "admin",
     });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().user).toEqual(mockUser);
-    expect(mockValidateSession).toHaveBeenCalledWith("cookie-token");
   });
 
-  it("prefers Bearer token over cookie", async () => {
-    mockValidateSession.mockResolvedValue(mockUser);
+  it("returns 401 when not authenticated", async () => {
+    // Explicitly pass null user to simulate unauthenticated request
+    app = await buildRouteTestApp(authRoutes, { user: null });
 
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/auth/me",
-      headers: {
-        authorization: "Bearer bearer-token",
-        cookie: "optio_session=cookie-token",
-      },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(mockValidateSession).toHaveBeenCalledWith("bearer-token");
-  });
-
-  it("returns 401 when no token is provided", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/auth/me",
     });
     expect(res.statusCode).toBe(401);
-  });
-
-  it("returns 401 for an invalid token", async () => {
-    mockValidateSession.mockResolvedValue(null);
-
-    const res = await app.inject({
-      method: "GET",
-      url: "/api/auth/me",
-      headers: {
-        authorization: "Bearer expired-token",
-      },
-    });
-    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: "Not authenticated" });
   });
 });
 
