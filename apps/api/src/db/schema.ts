@@ -614,7 +614,7 @@ export const workflowTriggers = pgTable(
     // Legacy FK retained for back-compat with workflow_runs.triggerId joins.
     // For target_type='job' this mirrors target_id; for other types it is null.
     workflowId: uuid("workflow_id").references(() => workflows.id, { onDelete: "cascade" }),
-    targetType: text("target_type").notNull().default("job"), // "job" | "task_config"
+    targetType: text("target_type").notNull().default("job"), // "job" | "task_config" | "persistent_agent"
     targetId: uuid("target_id").notNull(),
     type: text("type").notNull(), // "manual" | "schedule" | "webhook"
     config: jsonb("config").$type<Record<string, unknown>>(),
@@ -1177,5 +1177,214 @@ export const workflowPods = pgTable(
     unique("workflow_pods_workflow_instance_key").on(table.workflowId, table.instanceIndex),
     index("workflow_pods_workflow_id_idx").on(table.workflowId),
     index("workflow_pods_workspace_id_idx").on(table.workspaceId),
+  ],
+);
+
+// ── Persistent Agents ───────────────────────────────────────────────────────────
+//
+// Long-lived, named, addressable agent processes. Unlike Tasks (Repo or
+// Standalone), a Persistent Agent does not terminate after running — it halts
+// after each turn and waits to be re-woken by a user message, an agent message,
+// a webhook, a cron tick, or a ticket event. State machine is cyclic
+// (idle → queued → provisioning → running → idle), with paused/failed/archived
+// as terminal-ish branches. See docs/persistent-agents.md.
+
+export const persistentAgentStateEnum = pgEnum("persistent_agent_state", [
+  "idle",
+  "queued",
+  "provisioning",
+  "running",
+  "paused",
+  "failed",
+  "archived",
+]);
+
+export const persistentAgentPodLifecycleEnum = pgEnum("persistent_agent_pod_lifecycle", [
+  "always-on", // pod runs until agent is paused/archived
+  "sticky", // pod kept warm for idle_pod_timeout_ms after each turn (default)
+  "on-demand", // cold start every turn
+]);
+
+export const persistentAgents = pgTable(
+  "persistent_agents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id"),
+    slug: text("slug").notNull(), // addressable name, unique within a workspace
+    name: text("name").notNull(),
+    description: text("description"),
+    agentRuntime: text("agent_runtime").notNull().default("claude-code"),
+    model: text("model"),
+    systemPrompt: text("system_prompt"),
+    // Operator manual: "how to use the optio agent CLI/MCP". Injected into the
+    // prompt at turn-start. Mirrors Scion's per-template agents.md.
+    agentsMd: text("agents_md"),
+    // First turn's prompt — used when the agent has never run before, or when
+    // restarted from scratch.
+    initialPrompt: text("initial_prompt").notNull(),
+    promptTemplateId: uuid("prompt_template_id").references(() => promptTemplates.id),
+    // Repo mode (optional). When set, agent gets a long-lived worktree.
+    repoId: uuid("repo_id").references(() => repos.id, { onDelete: "set null" }),
+    branch: text("branch"),
+    worktreePath: text("worktree_path"),
+    podLifecycle: persistentAgentPodLifecycleEnum("pod_lifecycle").notNull().default("sticky"),
+    idlePodTimeoutMs: integer("idle_pod_timeout_ms").notNull().default(300000),
+    // Affinity for sticky/always-on modes — the last pod assigned. The pool
+    // service prefers this pod when ready and within warm window.
+    stickyPodId: uuid("sticky_pod_id"),
+    maxTurnDurationMs: integer("max_turn_duration_ms").notNull().default(600000),
+    maxTurns: integer("max_turns").notNull().default(50),
+    consecutiveFailureLimit: integer("consecutive_failure_limit").notNull().default(3),
+    state: persistentAgentStateEnum("state").notNull().default("idle"),
+    enabled: boolean("enabled").notNull().default(true),
+    totalCostUsd: text("total_cost_usd").notNull().default("0"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    lastFailureAt: timestamp("last_failure_at", { withTimezone: true }),
+    lastFailureReason: text("last_failure_reason"),
+    lastTurnAt: timestamp("last_turn_at", { withTimezone: true }),
+    // Native runtime session id used to resume conversation context across
+    // turns (e.g. claude --resume <id>). Cleared on archive/restart.
+    sessionId: text("session_id"),
+    controlIntent: text("control_intent"), // "pause" | "resume" | "archive" | "restart" | null
+    reconcileBackoffUntil: timestamp("reconcile_backoff_until", { withTimezone: true }),
+    reconcileAttempts: integer("reconcile_attempts").notNull().default(0),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("persistent_agents_workspace_slug_key").on(table.workspaceId, table.slug),
+    index("persistent_agents_workspace_id_idx").on(table.workspaceId),
+    index("persistent_agents_state_idx").on(table.state),
+    index("persistent_agents_repo_id_idx").on(table.repoId),
+  ],
+);
+
+export const persistentAgentTurnHaltReasonEnum = pgEnum("persistent_agent_turn_halt_reason", [
+  "natural",
+  "wait_tool",
+  "max_duration",
+  "max_turns",
+  "error",
+  "cancelled",
+]);
+
+export const persistentAgentTurns = pgTable(
+  "persistent_agent_turns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => persistentAgents.id, { onDelete: "cascade" }),
+    turnNumber: integer("turn_number").notNull(),
+    // 'user' | 'agent' | 'webhook' | 'schedule' | 'ticket' | 'system' | 'initial'
+    wakeSource: text("wake_source").notNull(),
+    // Drained messages and trigger payload that produced this turn's prompt.
+    wakePayload: jsonb("wake_payload").$type<Record<string, unknown>>(),
+    promptUsed: text("prompt_used"),
+    podId: uuid("pod_id"),
+    podName: text("pod_name"),
+    haltReason: persistentAgentTurnHaltReasonEnum("halt_reason"),
+    errorMessage: text("error_message"),
+    costUsd: text("cost_usd"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    sessionId: text("session_id"),
+    summary: text("summary"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("persistent_agent_turns_agent_turn_key").on(table.agentId, table.turnNumber),
+    index("persistent_agent_turns_agent_id_idx").on(table.agentId),
+  ],
+);
+
+export const persistentAgentTurnLogs = pgTable(
+  "persistent_agent_turn_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    turnId: uuid("turn_id")
+      .notNull()
+      .references(() => persistentAgentTurns.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => persistentAgents.id, { onDelete: "cascade" }),
+    stream: text("stream").notNull().default("stdout"),
+    content: text("content").notNull(),
+    logType: text("log_type"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("persistent_agent_turn_logs_turn_idx").on(table.turnId, table.timestamp),
+    index("persistent_agent_turn_logs_agent_idx").on(table.agentId, table.timestamp),
+  ],
+);
+
+export const persistentAgentMessageSenderTypeEnum = pgEnum("persistent_agent_message_sender_type", [
+  "user",
+  "agent",
+  "system",
+  "external",
+]);
+
+export const persistentAgentMessages = pgTable(
+  "persistent_agent_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => persistentAgents.id, { onDelete: "cascade" }),
+    senderType: persistentAgentMessageSenderTypeEnum("sender_type").notNull(),
+    // For user → users.id; agent → "<workspace>/<slug>"; system/external → free-form label.
+    senderId: text("sender_id"),
+    senderName: text("sender_name"),
+    body: text("body").notNull(),
+    structuredPayload: jsonb("structured_payload").$type<Record<string, unknown>>(),
+    broadcasted: boolean("broadcasted").notNull().default(false),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    // Set when drained into a turn's wakePayload. Null = pending in inbox.
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    turnId: uuid("turn_id").references(() => persistentAgentTurns.id, {
+      onDelete: "set null",
+    }),
+  },
+  (table) => [
+    index("persistent_agent_messages_inbox_idx").on(table.agentId, table.processedAt),
+    index("persistent_agent_messages_received_idx").on(table.agentId, table.receivedAt),
+    index("persistent_agent_messages_turn_idx").on(table.turnId),
+  ],
+);
+
+// Pods owned by a single Persistent Agent. Distinct from workflow_pods because
+// these are not pooled across runs of one workflow — they're long-lived
+// per-agent (or short-lived per-turn for on-demand). The keep_warm_until
+// timestamp drives the cleanup worker: nullable means always-on, past =
+// reapable, future = warm window in progress.
+export const persistentAgentPods = pgTable(
+  "persistent_agent_pods",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => persistentAgents.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    podName: text("pod_name"),
+    podId: text("pod_id"),
+    state: workflowPodStateEnum("state").notNull().default("provisioning"),
+    lastTurnAt: timestamp("last_turn_at", { withTimezone: true }),
+    keepWarmUntil: timestamp("keep_warm_until", { withTimezone: true }),
+    errorMessage: text("error_message"),
+    jobName: text("job_name"),
+    managedBy: text("managed_by").notNull().default("bare-pod"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("persistent_agent_pods_agent_idx").on(table.agentId),
+    index("persistent_agent_pods_workspace_idx").on(table.workspaceId),
+    index("persistent_agent_pods_keep_warm_idx").on(table.keepWarmUntil),
   ],
 );

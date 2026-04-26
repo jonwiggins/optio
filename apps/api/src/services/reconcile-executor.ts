@@ -1,14 +1,21 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { tasks, workflowRuns, prReviews } from "../db/schema.js";
+import { tasks, workflowRuns, prReviews, persistentAgents } from "../db/schema.js";
 import type {
   Action,
+  PersistentAgentAction,
   PrReviewAction,
   RepoAction,
   StandaloneAction,
   WorldSnapshot,
 } from "@optio/shared";
-import { TaskState, WorkflowRunState, PrReviewState, parsePrUrl } from "@optio/shared";
+import {
+  TaskState,
+  WorkflowRunState,
+  PrReviewState,
+  PersistentAgentState,
+  parsePrUrl,
+} from "@optio/shared";
 import * as taskService from "./task-service.js";
 import { enqueueReconcile } from "./reconcile-queue.js";
 import { logger } from "../logger.js";
@@ -74,6 +81,12 @@ export async function executeAction(
             snapshot,
           );
         }
+        if (snapshot.run.kind === "persistent-agent") {
+          return await applyPersistentAgentPatchStatus(
+            action as Extract<PersistentAgentAction, { kind: "patchStatus" }>,
+            snapshot,
+          );
+        }
         return await applyPatchStatus(
           action as Extract<RepoAction, { kind: "patchStatus" }>,
           snapshot,
@@ -84,6 +97,9 @@ export async function executeAction(
 
       case "enqueueAgent":
         return await applyEnqueueAgent(action, snapshot);
+
+      case "enqueueTurn":
+        return await applyEnqueueTurn(action, snapshot);
 
       case "resumeAgent":
         return await applyResumeAgent(action, snapshot);
@@ -121,7 +137,7 @@ export async function executeAction(
 // ── Applicators ─────────────────────────────────────────────────────────────
 
 async function applyTransition(
-  action: RepoAction | StandaloneAction | PrReviewAction,
+  action: RepoAction | StandaloneAction | PrReviewAction | PersistentAgentAction,
   snapshot: WorldSnapshot,
 ): Promise<ExecuteOutcome> {
   if (action.kind !== "transition") {
@@ -133,6 +149,12 @@ async function applyTransition(
   if (snapshot.run.kind === "pr-review") {
     return applyPrReviewTransition(
       action as Extract<PrReviewAction, { kind: "transition" }>,
+      snapshot,
+    );
+  }
+  if (snapshot.run.kind === "persistent-agent") {
+    return applyPersistentAgentTransition(
+      action as Extract<PersistentAgentAction, { kind: "transition" }>,
       snapshot,
     );
   }
@@ -268,9 +290,19 @@ async function applyPatchStatus(
 }
 
 function tableForKind(
-  kind: "repo" | "standalone" | "pr-review",
-): "tasks" | "workflow_runs" | "pr_reviews" {
-  return kind === "repo" ? "tasks" : kind === "pr-review" ? "pr_reviews" : "workflow_runs";
+  kind: "repo" | "standalone" | "pr-review" | "persistent-agent",
+): "tasks" | "workflow_runs" | "pr_reviews" | "persistent_agents" {
+  switch (kind) {
+    case "repo":
+      return "tasks";
+    case "pr-review":
+      return "pr_reviews";
+    case "persistent-agent":
+      return "persistent_agents";
+    case "standalone":
+    default:
+      return "workflow_runs";
+  }
 }
 
 async function applyClearControlIntent(snapshot: WorldSnapshot): Promise<ExecuteOutcome> {
@@ -579,7 +611,7 @@ async function publishStandaloneStateChange(
 // ── CAS helpers ─────────────────────────────────────────────────────────────
 
 async function casUpdate(
-  table: "tasks" | "workflow_runs" | "pr_reviews",
+  table: "tasks" | "workflow_runs" | "pr_reviews" | "persistent_agents",
   id: string,
   version: Date,
   patch: Record<string, unknown>,
@@ -599,6 +631,14 @@ async function casUpdate(
       .set(payload)
       .where(and(eq(prReviews.id, id), eq(prReviews.updatedAt, version)))
       .returning({ id: prReviews.id });
+    return rows.length > 0 ? "applied" : "stale";
+  }
+  if (table === "persistent_agents") {
+    const rows = await db
+      .update(persistentAgents)
+      .set(payload)
+      .where(and(eq(persistentAgents.id, id), eq(persistentAgents.updatedAt, version)))
+      .returning({ id: persistentAgents.id });
     return rows.length > 0 ? "applied" : "stale";
   }
   const rows = await db
@@ -707,6 +747,82 @@ async function applyPrReviewPatchStatus(
 
 // Prevent TS unused-import warning on PrReviewState since it's only used at type level.
 void PrReviewState;
+void PersistentAgentState;
+
+// ── Persistent Agent applicators ───────────────────────────────────────────
+
+async function applyPersistentAgentTransition(
+  action: Extract<PersistentAgentAction, { kind: "transition" }>,
+  snapshot: WorldSnapshot,
+): Promise<ExecuteOutcome> {
+  if (snapshot.run.kind !== "persistent-agent") {
+    return { status: "error", reason: "wrong_kind", error: new Error("not persistent-agent") };
+  }
+  const id = snapshot.run.ref.id;
+  const version = snapshot.run.status.updatedAt;
+  const patch: Record<string, unknown> = {
+    state: action.to,
+    reconcileBackoffUntil: null,
+    reconcileAttempts: 0,
+    ...(action.statusPatch ?? {}),
+  };
+  if (action.clearControlIntent) patch.controlIntent = null;
+
+  const casResult = await casUpdate("persistent_agents", id, version, patch);
+  if (casResult === "stale") return { status: "stale", reason: "cas_failed_pa_transition" };
+
+  const fromState = snapshot.run.status.state;
+  const { publishPersistentAgentEvent } = await import("./event-bus.js");
+  await publishPersistentAgentEvent({
+    type: "persistent_agent:state_changed",
+    agentId: id,
+    agentSlug: snapshot.run.spec.slug,
+    fromState,
+    toState: action.to,
+    trigger: action.trigger,
+    timestamp: new Date().toISOString(),
+    errorMessage: (action.statusPatch?.errorMessage as string | null | undefined) ?? undefined,
+  });
+
+  await scheduleBackoffReconcile(snapshot.run.ref, patch.reconcileBackoffUntil);
+  return { status: "applied", reason: `pa_transition:${action.to}` };
+}
+
+async function applyEnqueueTurn(
+  action: Extract<PersistentAgentAction, { kind: "enqueueTurn" }>,
+  snapshot: WorldSnapshot,
+): Promise<ExecuteOutcome> {
+  if (snapshot.run.kind !== "persistent-agent") {
+    return { status: "error", reason: "wrong_kind", error: new Error("not persistent-agent") };
+  }
+  const agentId = snapshot.run.ref.id;
+  const { persistentAgentTurnQueue } = await import("../workers/persistent-agent-worker.js");
+  await persistentAgentTurnQueue.add(
+    "process-persistent-agent-turn",
+    { agentId, wakeSource: action.wakeSource },
+    { jobId: `${agentId}-turn-${Date.now()}-${Math.floor(Math.random() * 1000)}` },
+  );
+  return { status: "applied", reason: `enqueue_turn:${action.trigger}` };
+}
+
+async function applyPersistentAgentPatchStatus(
+  action: Extract<PersistentAgentAction, { kind: "patchStatus" }>,
+  snapshot: WorldSnapshot,
+): Promise<ExecuteOutcome> {
+  if (snapshot.run.kind !== "persistent-agent") {
+    return { status: "error", reason: "wrong_kind", error: new Error("not persistent-agent") };
+  }
+  const id = snapshot.run.ref.id;
+  const version = snapshot.run.status.updatedAt;
+  const casResult = await casUpdate(
+    "persistent_agents",
+    id,
+    version,
+    action.statusPatch as Record<string, unknown>,
+  );
+  if (casResult === "stale") return { status: "stale", reason: "cas_failed_pa_patch" };
+  return { status: "applied", reason: action.reason };
+}
 
 // Re-export for convenience.
 export { TaskState, WorkflowRunState };

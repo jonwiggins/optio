@@ -51,6 +51,19 @@ export async function publishWorkflowRunEvent(event: WsEvent): Promise<void> {
   }
 }
 
+export async function publishPersistentAgentEvent(event: WsEvent): Promise<void> {
+  const redis = getPublisher();
+  const channel = `optio:events`;
+  const traceId = getCurrentTraceId();
+  const enrichedEvent = traceId ? { ...event, traceId } : event;
+
+  await redis.publish(channel, JSON.stringify(enrichedEvent));
+
+  if ("agentId" in event && event.agentId) {
+    await redis.publish(`optio:persistent-agent:${event.agentId}`, JSON.stringify(enrichedEvent));
+  }
+}
+
 /** Return the shared Redis client (usable for pub/sub publishing and general commands). */
 export function getRedisClient(): Redis {
   return getPublisher();

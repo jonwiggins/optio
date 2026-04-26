@@ -31,4 +31,6 @@ export * from "./reconcile/types.js";
 export * from "./reconcile/reconcile-standalone.js";
 export * from "./reconcile/reconcile-repo.js";
 export * from "./reconcile/reconcile-pr-review.js";
+export * from "./reconcile/reconcile-persistent-agent.js";
+export * from "./types/persistent-agent.js";
 export * from "./agent-options/index.js";

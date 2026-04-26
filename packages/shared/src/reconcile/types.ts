@@ -9,10 +9,15 @@ import {
   PrReviewControlIntent,
   PrReviewFileComment,
 } from "../types/pr-review.js";
+import {
+  PersistentAgentState,
+  PersistentAgentControlIntent,
+  PersistentAgentPodLifecycle,
+} from "../types/persistent-agent.js";
 
 // ── Identity ────────────────────────────────────────────────────────────────
 
-export type RunKind = "repo" | "standalone" | "pr-review";
+export type RunKind = "repo" | "standalone" | "pr-review" | "persistent-agent";
 
 export interface RunRef {
   kind: RunKind;
@@ -104,6 +109,43 @@ export interface StandaloneRunStatus {
   updatedAt: Date;
 }
 
+// ── Persistent Agent run types ──────────────────────────────────────────────
+//
+// A PA's "run" identity is the agent itself — turns are output actions, not
+// inputs to the reconciler (analogous to PR reviews, where pr_review_runs are
+// children of the pr_reviews row).
+
+export interface PersistentAgentRunSpec {
+  agentId: string;
+  slug: string;
+  workspaceId: string | null;
+  agentRuntime: string;
+  enabled: boolean;
+  podLifecycle: PersistentAgentPodLifecycle;
+  idlePodTimeoutMs: number;
+  consecutiveFailureLimit: number;
+  maxTurnDurationMs: number;
+}
+
+export interface PersistentAgentRunStatus {
+  state: PersistentAgentState;
+  errorMessage: string | null;
+  sessionId: string | null;
+  consecutiveFailures: number;
+  lastFailureAt: Date | null;
+  lastFailureReason: string | null;
+  lastTurnAt: Date | null;
+  totalCostUsd: string;
+  controlIntent: PersistentAgentControlIntent | null;
+  reconcileBackoffUntil: Date | null;
+  reconcileAttempts: number;
+  updatedAt: Date;
+  /** Pending message count (un-drained inbox). Wakes the agent when ≥1. */
+  pendingMessages: number;
+  /** Receivedat of the oldest pending message — for ordering across agents. */
+  oldestPendingAt: Date | null;
+}
+
 // ── PR Review run types ─────────────────────────────────────────────────────
 //
 // A PR review's primary record lives in `pr_reviews`. The reconciler treats
@@ -158,6 +200,12 @@ export type Run =
       ref: RunRef;
       spec: PrReviewRunSpec;
       status: PrReviewRunStatus;
+    }
+  | {
+      kind: "persistent-agent";
+      ref: RunRef;
+      spec: PersistentAgentRunSpec;
+      status: PersistentAgentRunStatus;
     };
 
 // ── World observations ──────────────────────────────────────────────────────
@@ -287,6 +335,28 @@ export type StandaloneEnqueueAgent = {
   trigger: string;
 } & ActionBase;
 
+// ── Persistent Agent actions ────────────────────────────────────────────────
+
+export type PersistentAgentTransition = {
+  kind: "transition";
+  to: PersistentAgentState;
+  statusPatch?: Partial<PersistentAgentRunStatus>;
+  clearControlIntent?: boolean;
+  trigger: string;
+} & ActionBase;
+
+export type PersistentAgentEnqueueTurn = {
+  kind: "enqueueTurn";
+  trigger: string;
+  /** Wake source attributable to this turn — informs prompt assembly. */
+  wakeSource: "user" | "agent" | "webhook" | "schedule" | "ticket" | "system" | "initial";
+} & ActionBase;
+
+export type PersistentAgentPatchStatus = {
+  kind: "patchStatus";
+  statusPatch: Partial<PersistentAgentRunStatus>;
+} & ActionBase;
+
 // ── PR Review actions ───────────────────────────────────────────────────────
 
 export type PrReviewTransition = {
@@ -345,7 +415,16 @@ export type StandaloneAction =
   | StandaloneTransition
   | StandaloneEnqueueAgent;
 
-export type Action = RepoAction | StandaloneAction | PrReviewAction;
+export type PersistentAgentAction =
+  | CommonNoop
+  | CommonRequeue
+  | CommonDefer
+  | CommonClearIntent
+  | PersistentAgentTransition
+  | PersistentAgentEnqueueTurn
+  | PersistentAgentPatchStatus;
+
+export type Action = RepoAction | StandaloneAction | PrReviewAction | PersistentAgentAction;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

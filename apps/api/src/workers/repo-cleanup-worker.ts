@@ -10,6 +10,7 @@ import {
   killOrphanedAgentInPod,
 } from "../services/repo-pool-service.js";
 import { cleanupIdleWorkflowPods } from "../services/workflow-pool-service.js";
+import { cleanupIdlePersistentAgentPods } from "../services/persistent-agent-pool-service.js";
 import {
   cleanupZombieWorkflowRuns,
   cleanupOrphanedRepoTasks,
@@ -537,6 +538,16 @@ export function startRepoCleanupWorker() {
         }
       } catch (err) {
         logger.warn({ err }, "Failed to clean up idle workflow pods");
+      }
+
+      // Clean up persistent agent pods past their warm window.
+      try {
+        const paCleaned = await cleanupIdlePersistentAgentPods();
+        if (paCleaned > 0) {
+          logger.info({ paCleaned }, "Cleaned up idle persistent agent pods");
+        }
+      } catch (err) {
+        logger.warn({ err }, "Failed to clean up idle persistent agent pods");
       }
 
       // Detect zombie workflow_runs (running but pod terminated/gone)

@@ -2,6 +2,7 @@ import type { TaskState } from "./task.js";
 import type { InteractiveSessionState } from "./session.js";
 import type { WorkflowRunState } from "./workflow.js";
 import type { PrReviewState, PrReviewRunState } from "./pr-review.js";
+import type { PersistentAgentState, PersistentAgentTurnHaltReason } from "./persistent-agent.js";
 
 export type WsEvent =
   | TaskStateChangedEvent
@@ -23,7 +24,12 @@ export type WsEvent =
   | PrReviewRunStateChangedEvent
   | PrReviewRunLogEvent
   | PrReviewStaleEvent
-  | ActivityNewEvent;
+  | ActivityNewEvent
+  | PersistentAgentStateChangedEvent
+  | PersistentAgentTurnStartedEvent
+  | PersistentAgentTurnHaltedEvent
+  | PersistentAgentMessageEvent
+  | PersistentAgentLogEvent;
 
 export interface TaskStateChangedEvent {
   type: "task:state_changed";
@@ -199,5 +205,68 @@ export interface PrReviewRunLogEvent {
 export interface PrReviewStaleEvent {
   type: "pr_review:stale";
   prReviewId: string;
+  timestamp: string;
+}
+
+// ── Persistent Agent Events ─────────────────────────────────────────────────
+
+export interface PersistentAgentStateChangedEvent {
+  type: "persistent_agent:state_changed";
+  agentId: string;
+  agentSlug: string;
+  fromState: PersistentAgentState | null;
+  toState: PersistentAgentState;
+  trigger: string;
+  timestamp: string;
+  errorMessage?: string;
+}
+
+export interface PersistentAgentTurnStartedEvent {
+  type: "persistent_agent:turn_started";
+  agentId: string;
+  agentSlug: string;
+  turnId: string;
+  turnNumber: number;
+  wakeSource: string;
+  timestamp: string;
+}
+
+export interface PersistentAgentTurnHaltedEvent {
+  type: "persistent_agent:turn_halted";
+  agentId: string;
+  agentSlug: string;
+  turnId: string;
+  turnNumber: number;
+  haltReason: PersistentAgentTurnHaltReason;
+  costUsd?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  errorMessage?: string;
+  summary?: string;
+  timestamp: string;
+}
+
+export interface PersistentAgentMessageEvent {
+  type: "persistent_agent:message";
+  agentId: string;
+  agentSlug: string;
+  messageId: string;
+  senderType: "user" | "agent" | "system" | "external";
+  senderId: string | null;
+  senderName: string | null;
+  body: string;
+  broadcasted: boolean;
+  timestamp: string;
+}
+
+export interface PersistentAgentLogEvent {
+  type: "persistent_agent:log";
+  agentId: string;
+  agentSlug: string;
+  turnId: string;
+  stream: "stdout" | "stderr";
+  content: string;
+  logType?: string;
+  metadata?: Record<string, unknown>;
   timestamp: string;
 }

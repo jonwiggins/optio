@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   tasks,
@@ -11,12 +11,18 @@ import {
   prReviews,
   prReviewRuns,
   prReviewEvents,
+  persistentAgents,
+  persistentAgentMessages,
+  persistentAgentPods,
+  persistentAgentTurns,
 } from "../db/schema.js";
 import {
   TaskState,
   WorkflowRunState,
   PrReviewState,
   PrReviewRunState,
+  PersistentAgentState,
+  PersistentAgentPodLifecycle,
   DEFAULT_STALL_THRESHOLD_MS,
   getOffPeakInfo,
   parseIntEnv,
@@ -38,6 +44,9 @@ import type {
   PrReviewRunStatus,
   PrReviewControlIntent,
   PrReviewRunKind,
+  PersistentAgentRunSpec,
+  PersistentAgentRunStatus,
+  PersistentAgentControlIntent,
 } from "@optio/shared";
 import { getGitPlatformForRepo } from "./git-token-service.js";
 import { determineCheckStatus, determineReviewStatus } from "../workers/pr-watcher-worker.js";
@@ -54,6 +63,7 @@ import { logger } from "../logger.js";
 export async function buildWorldSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
   if (ref.kind === "repo") return buildRepoSnapshot(ref);
   if (ref.kind === "pr-review") return buildPrReviewSnapshot(ref);
+  if (ref.kind === "persistent-agent") return buildPersistentAgentSnapshot(ref);
   return buildStandaloneSnapshot(ref);
 }
 
@@ -735,4 +745,159 @@ async function countRecentAutoRereviews(prReviewId: string): Promise<number> {
         )`,
     );
   return Number(count);
+}
+
+// ── Persistent Agent snapshot ──────────────────────────────────────────────
+
+async function buildPersistentAgentSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
+  const readErrors: WorldReadError[] = [];
+  const now = new Date();
+
+  const [row] = await db.select().from(persistentAgents).where(eq(persistentAgents.id, ref.id));
+  if (!row) return null;
+
+  const [globalCap, podRow, inbox, lastTurn] = await Promise.all([
+    loadGlobalPersistentAgentCapacity().catch((err) => {
+      readErrors.push({ source: "capacity", message: String(err) });
+      return null;
+    }),
+    loadActivePodForPersistentAgent(ref.id).catch((err) => {
+      readErrors.push({ source: "pod", message: String(err) });
+      return null;
+    }),
+    loadInboxSummary(ref.id).catch((err) => {
+      readErrors.push({ source: "deps", message: String(err) });
+      return { pending: 0, oldest: null as Date | null };
+    }),
+    loadLastRunningTurn(ref.id).catch(() => null),
+  ]);
+
+  const spec: PersistentAgentRunSpec = {
+    agentId: row.id,
+    slug: row.slug,
+    workspaceId: row.workspaceId ?? null,
+    agentRuntime: row.agentRuntime,
+    enabled: row.enabled,
+    podLifecycle: row.podLifecycle as PersistentAgentPodLifecycle,
+    idlePodTimeoutMs: row.idlePodTimeoutMs,
+    consecutiveFailureLimit: row.consecutiveFailureLimit,
+    maxTurnDurationMs: row.maxTurnDurationMs,
+  };
+
+  const status: PersistentAgentRunStatus = {
+    state: row.state as PersistentAgentState,
+    errorMessage: row.lastFailureReason ?? null,
+    sessionId: row.sessionId ?? null,
+    consecutiveFailures: row.consecutiveFailures,
+    lastFailureAt: row.lastFailureAt ?? null,
+    lastFailureReason: row.lastFailureReason ?? null,
+    lastTurnAt: row.lastTurnAt ?? null,
+    totalCostUsd: row.totalCostUsd ?? "0",
+    controlIntent:
+      row.controlIntent === "pause" ||
+      row.controlIntent === "resume" ||
+      row.controlIntent === "archive" ||
+      row.controlIntent === "restart"
+        ? (row.controlIntent as PersistentAgentControlIntent)
+        : null,
+    reconcileBackoffUntil: row.reconcileBackoffUntil ?? null,
+    reconcileAttempts: row.reconcileAttempts ?? 0,
+    updatedAt: row.updatedAt,
+    pendingMessages: inbox.pending,
+    oldestPendingAt: inbox.oldest,
+  };
+
+  const stallThresholdMs = row.maxTurnDurationMs;
+  const heartbeat = computeHeartbeat(
+    lastTurn?.startedAt ?? null,
+    row.state === PersistentAgentState.RUNNING,
+    stallThresholdMs,
+    now,
+  );
+
+  const run: Run = { kind: "persistent-agent", ref, spec, status };
+
+  const snapshot: WorldSnapshot = {
+    now,
+    run,
+    pod: podRow,
+    pr: null,
+    dependencies: [],
+    blockingSubtasks: [],
+    capacity: {
+      global: globalCap ?? {
+        running: 0,
+        max: parseIntEnv("OPTIO_MAX_PERSISTENT_AGENTS_RUNNING", 10),
+      },
+    },
+    heartbeat,
+    settings: {
+      stallThresholdMs,
+      autoMerge: false,
+      cautiousMode: false,
+      autoResume: false,
+      reviewEnabled: false,
+      reviewTrigger: null,
+      offPeakOnly: false,
+      offPeakActive: false,
+      hasReviewSubtask: false,
+      maxAutoResumes: 0,
+      recentAutoResumeCount: 0,
+    },
+    readErrors,
+  };
+  return Object.freeze(snapshot);
+}
+
+async function loadGlobalPersistentAgentCapacity() {
+  const max = parseIntEnv("OPTIO_MAX_PERSISTENT_AGENTS_RUNNING", 10);
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(persistentAgents)
+    .where(eq(persistentAgents.state, PersistentAgentState.RUNNING));
+  return { running: Number(count), max };
+}
+
+async function loadActivePodForPersistentAgent(agentId: string): Promise<PodStatus | null> {
+  const [pod] = await db
+    .select()
+    .from(persistentAgentPods)
+    .where(eq(persistentAgentPods.agentId, agentId))
+    .orderBy(desc(persistentAgentPods.updatedAt))
+    .limit(1);
+  if (!pod || !pod.podName) return null;
+  return {
+    podName: pod.podName,
+    phase: mapWorkflowPodPhase(pod.state),
+    lastError: pod.errorMessage ?? null,
+  };
+}
+
+async function loadInboxSummary(agentId: string) {
+  const [row] = await db
+    .select({
+      pending: sql<number>`count(*)::int`,
+      oldest: sql<Date | null>`MIN(${persistentAgentMessages.receivedAt})`,
+    })
+    .from(persistentAgentMessages)
+    .where(
+      and(
+        eq(persistentAgentMessages.agentId, agentId),
+        isNull(persistentAgentMessages.processedAt),
+      ),
+    );
+  return {
+    pending: Number(row?.pending ?? 0),
+    oldest: (row?.oldest as Date | null) ?? null,
+  };
+}
+
+async function loadLastRunningTurn(agentId: string) {
+  const [row] = await db
+    .select()
+    .from(persistentAgentTurns)
+    .where(and(eq(persistentAgentTurns.agentId, agentId), isNull(persistentAgentTurns.finishedAt)))
+    .orderBy(desc(persistentAgentTurns.turnNumber))
+    .limit(1);
+  return row ?? null;
 }
