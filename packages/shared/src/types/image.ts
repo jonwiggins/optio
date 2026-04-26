@@ -29,6 +29,18 @@ export const PRESET_IMAGES = {
     description: "Base + rustup, cargo, cargo-nextest.",
     languages: ["rust"],
   },
+  ruby: {
+    tag: "optio-ruby:latest",
+    label: "Ruby",
+    description: "Base + rbenv, Ruby 3.3, bundler, rake, rubocop, solargraph.",
+    languages: ["ruby"],
+  },
+  dart: {
+    tag: "optio-dart:latest",
+    label: "Dart",
+    description: "Base + Dart SDK, dart_style.",
+    languages: ["dart"],
+  },
   full: {
     tag: "optio-full:latest",
     label: "Full",

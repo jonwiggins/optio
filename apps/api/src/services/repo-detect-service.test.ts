@@ -102,6 +102,24 @@ describe("repo-detect-service", () => {
     expect(result.imagePreset).toBe("python");
   });
 
+  it("detects ruby project", async () => {
+    mockPlatform.listRepoContents.mockResolvedValue([{ name: "Gemfile", type: "file" }]);
+
+    const result = await detectRepoConfig("https://github.com/owner/repo", "token");
+    expect(result.imagePreset).toBe("ruby");
+    expect(result.languages).toContain("ruby");
+    expect(result.testCommand).toBe("bundle exec rspec");
+  });
+
+  it("detects dart project", async () => {
+    mockPlatform.listRepoContents.mockResolvedValue([{ name: "pubspec.yaml", type: "file" }]);
+
+    const result = await detectRepoConfig("https://github.com/owner/repo", "token");
+    expect(result.imagePreset).toBe("dart");
+    expect(result.languages).toContain("dart");
+    expect(result.testCommand).toBe("dart test");
+  });
+
   it("uses full preset for multi-language projects", async () => {
     mockPlatform.listRepoContents.mockResolvedValue([
       { name: "package.json", type: "file" },

@@ -47,6 +47,11 @@ export async function detectRepoConfig(repoUrl: string, token: string): Promise<
     }
     if (fileNames.has("Gemfile")) {
       languages.push("ruby");
+      testCommand = testCommand ?? "bundle exec rspec";
+    }
+    if (fileNames.has("pubspec.yaml")) {
+      languages.push("dart");
+      testCommand = testCommand ?? "dart test";
     }
     if (fileNames.has("pom.xml") || fileNames.has("build.gradle")) {
       languages.push("java");
@@ -64,6 +69,10 @@ export async function detectRepoConfig(repoUrl: string, token: string): Promise<
       imagePreset = "go";
     } else if (languages.includes("python")) {
       imagePreset = "python";
+    } else if (languages.includes("ruby")) {
+      imagePreset = "ruby";
+    } else if (languages.includes("dart")) {
+      imagePreset = "dart";
     }
 
     logger.info({ repoUrl, imagePreset, languages, testCommand }, "Auto-detected repo config");

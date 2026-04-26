@@ -186,6 +186,16 @@ describe("resolveImage", () => {
     expect(resolveImage({ preset: "dind" })).toBe("optio-dind:latest");
   });
 
+  it("returns preset image for ruby (no prefix env)", () => {
+    delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
+    expect(resolveImage({ preset: "ruby" })).toBe("optio-ruby:latest");
+  });
+
+  it("returns preset image for dart (no prefix env)", () => {
+    delete process.env.OPTIO_AGENT_IMAGE_PREFIX;
+    expect(resolveImage({ preset: "dart" })).toBe("optio-dart:latest");
+  });
+
   it("falls through to default for invalid preset", () => {
     delete process.env.OPTIO_AGENT_IMAGE;
     expect(resolveImage({ preset: "nonexistent" as any })).toBe("optio-agent:latest");
@@ -208,6 +218,8 @@ describe("resolveImage", () => {
     expect(resolveImage({ preset: "python" })).toBe("ghcr.io/jonwiggins/optio-agent-python:latest");
     expect(resolveImage({ preset: "go" })).toBe("ghcr.io/jonwiggins/optio-agent-go:latest");
     expect(resolveImage({ preset: "rust" })).toBe("ghcr.io/jonwiggins/optio-agent-rust:latest");
+    expect(resolveImage({ preset: "ruby" })).toBe("ghcr.io/jonwiggins/optio-agent-ruby:latest");
+    expect(resolveImage({ preset: "dart" })).toBe("ghcr.io/jonwiggins/optio-agent-dart:latest");
     expect(resolveImage({ preset: "full" })).toBe("ghcr.io/jonwiggins/optio-agent-full:latest");
     expect(resolveImage({ preset: "dind" })).toBe("ghcr.io/jonwiggins/optio-agent-dind:latest");
   });
