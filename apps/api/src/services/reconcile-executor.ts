@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, workflowRuns, prReviews, persistentAgents } from "../db/schema.js";
 import type {
@@ -617,11 +617,24 @@ async function casUpdate(
   patch: Record<string, unknown>,
 ): Promise<"applied" | "stale"> {
   const payload = { ...patch, updatedAt: new Date() };
+  // Compare timestamps at millisecond precision. Postgres `timestamptz`
+  // columns store microseconds, but JavaScript's Date type only carries
+  // milliseconds — so a JS-side `eq(updated_at, version)` against a row
+  // whose updated_at was set by PG's `now()` (microsecond precision) will
+  // silently never match. We truncate both sides to milliseconds so the
+  // round-trip is symmetric. JS-originated writes are already ms-precision
+  // so this is exactly the comparison we want everywhere.
   if (table === "tasks") {
     const rows = await db
       .update(tasks)
       .set(payload)
-      .where(and(eq(tasks.id, id), eq(tasks.updatedAt, version)))
+      .where(
+        and(
+          eq(tasks.id, id),
+          sql`date_trunc('milliseconds', ${tasks.updatedAt})
+              = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`,
+        ),
+      )
       .returning({ id: tasks.id });
     return rows.length > 0 ? "applied" : "stale";
   }
@@ -629,7 +642,13 @@ async function casUpdate(
     const rows = await db
       .update(prReviews)
       .set(payload)
-      .where(and(eq(prReviews.id, id), eq(prReviews.updatedAt, version)))
+      .where(
+        and(
+          eq(prReviews.id, id),
+          sql`date_trunc('milliseconds', ${prReviews.updatedAt})
+              = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`,
+        ),
+      )
       .returning({ id: prReviews.id });
     return rows.length > 0 ? "applied" : "stale";
   }
@@ -637,14 +656,26 @@ async function casUpdate(
     const rows = await db
       .update(persistentAgents)
       .set(payload)
-      .where(and(eq(persistentAgents.id, id), eq(persistentAgents.updatedAt, version)))
+      .where(
+        and(
+          eq(persistentAgents.id, id),
+          sql`date_trunc('milliseconds', ${persistentAgents.updatedAt})
+              = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`,
+        ),
+      )
       .returning({ id: persistentAgents.id });
     return rows.length > 0 ? "applied" : "stale";
   }
   const rows = await db
     .update(workflowRuns)
     .set(payload)
-    .where(and(eq(workflowRuns.id, id), eq(workflowRuns.updatedAt, version)))
+    .where(
+      and(
+        eq(workflowRuns.id, id),
+        sql`date_trunc('milliseconds', ${workflowRuns.updatedAt})
+            = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`,
+      ),
+    )
     .returning({ id: workflowRuns.id });
   return rows.length > 0 ? "applied" : "stale";
 }
@@ -785,6 +816,10 @@ async function applyPersistentAgentTransition(
   });
 
   await scheduleBackoffReconcile(snapshot.run.ref, patch.reconcileBackoffUntil);
+  // Re-enqueue immediately so the reconciler observes the new state and can
+  // act again — e.g., IDLE with pending messages should advance to QUEUED on
+  // the next pass. Without this, transitions land but the loop stalls.
+  await enqueueReconcile(snapshot.run.ref, { reason: `post_transition_${action.to}` });
   return { status: "applied", reason: `pa_transition:${action.to}` };
 }
 

@@ -1,5 +1,11 @@
 import { Queue, Worker } from "bullmq";
-import { parseIntEnv, reconcileRepo, reconcileStandalone, reconcilePrReview } from "@optio/shared";
+import {
+  parseIntEnv,
+  reconcileRepo,
+  reconcileStandalone,
+  reconcilePrReview,
+  reconcilePersistentAgent,
+} from "@optio/shared";
 import type { RunRef, Action } from "@optio/shared";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { buildWorldSnapshot } from "../services/reconcile-snapshot.js";
@@ -37,7 +43,9 @@ export function startReconcileWorker() {
           ? reconcileRepo(snapshot)
           : snapshot.run.kind === "pr-review"
             ? reconcilePrReview(snapshot)
-            : reconcileStandalone(snapshot);
+            : snapshot.run.kind === "persistent-agent"
+              ? reconcilePersistentAgent(snapshot)
+              : reconcileStandalone(snapshot);
 
       const outcome: ExecuteOutcome = await executeAction(action, snapshot);
 
@@ -115,7 +123,7 @@ export function startReconcileResyncWorker() {
     "reconcile-resync",
     instrumentWorkerProcessor("reconcile-resync", async () => {
       const { db } = await import("../db/client.js");
-      const { tasks, workflowRuns, prReviews } = await import("../db/schema.js");
+      const { tasks, workflowRuns, prReviews, persistentAgents } = await import("../db/schema.js");
       const { TaskState, WorkflowRunState, PrReviewState } = await import("@optio/shared");
       const { sql } = await import("drizzle-orm");
 
@@ -134,6 +142,11 @@ export function startReconcileResyncWorker() {
         .from(prReviews)
         .where(sql`${prReviews.state} NOT IN ('cancelled')`);
 
+      const livePersistentAgents = await db
+        .select({ id: persistentAgents.id })
+        .from(persistentAgents)
+        .where(sql`${persistentAgents.state} NOT IN ('archived')`);
+
       void TaskState;
       void WorkflowRunState;
       void PrReviewState;
@@ -143,6 +156,7 @@ export function startReconcileResyncWorker() {
           tasks: nonTerminalTasks.length,
           runs: nonTerminalRuns.length,
           reviews: nonTerminalReviews.length,
+          persistentAgents: livePersistentAgents.length,
         },
         "reconcile.resync.sweep",
       );
@@ -155,6 +169,9 @@ export function startReconcileResyncWorker() {
       }
       for (const r of nonTerminalReviews) {
         await enqueueReconcile({ kind: "pr-review", id: r.id }, { reason: "resync" });
+      }
+      for (const r of livePersistentAgents) {
+        await enqueueReconcile({ kind: "persistent-agent", id: r.id }, { reason: "resync" });
       }
     }),
     {

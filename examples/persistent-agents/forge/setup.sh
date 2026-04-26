@@ -34,7 +34,7 @@ create_agent() {
 
   local resp
   resp=$(curl -sS -w "\n%{http_code}" \
-    "${AUTH_HEADER[@]}" "${WORKSPACE_HEADER[@]}" \
+    ${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"} ${WORKSPACE_HEADER[@]+"${WORKSPACE_HEADER[@]}"} \
     -H "Content-Type: application/json" \
     -X POST "$API/api/persistent-agents" \
     --data @"$file")

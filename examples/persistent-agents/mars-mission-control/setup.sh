@@ -35,7 +35,7 @@ create_agent() {
 
   local resp
   resp=$(curl -sS -w "\n%{http_code}" \
-    "${AUTH_HEADER[@]}" "${WORKSPACE_HEADER[@]}" \
+    ${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"} ${WORKSPACE_HEADER[@]+"${WORKSPACE_HEADER[@]}"} \
     -H "Content-Type: application/json" \
     -X POST "$API/api/persistent-agents" \
     --data @"$file")
@@ -66,7 +66,7 @@ done
 # Look up the Clock's id so we can attach the schedule trigger.
 echo ""
 echo -n "→ resolving clock id ... "
-CLOCK_ID=$(curl -sS "${AUTH_HEADER[@]}" "${WORKSPACE_HEADER[@]}" \
+CLOCK_ID=$(curl -sS ${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"} ${WORKSPACE_HEADER[@]+"${WORKSPACE_HEADER[@]}"} \
   "$API/api/persistent-agents" \
   | jq -r '.agents[] | select(.slug=="clock") | .id')
 if [ -z "$CLOCK_ID" ] || [ "$CLOCK_ID" = "null" ]; then
@@ -77,7 +77,7 @@ echo "$CLOCK_ID"
 
 # Check whether a schedule trigger already exists; only create if not.
 echo -n "→ checking existing triggers ... "
-EXISTING=$(curl -sS "${AUTH_HEADER[@]}" "${WORKSPACE_HEADER[@]}" \
+EXISTING=$(curl -sS ${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"} ${WORKSPACE_HEADER[@]+"${WORKSPACE_HEADER[@]}"} \
   "$API/api/persistent-agents/$CLOCK_ID/triggers" \
   | jq -r '.triggers[] | select(.type=="schedule") | .id' \
   | head -n1)
@@ -88,7 +88,7 @@ else
   CRON="*/${SOL_INTERVAL_MINUTES} * * * *"
   echo -n "→ attaching schedule trigger ($CRON) ... "
   resp=$(curl -sS -w "\n%{http_code}" \
-    "${AUTH_HEADER[@]}" "${WORKSPACE_HEADER[@]}" \
+    ${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"} ${WORKSPACE_HEADER[@]+"${WORKSPACE_HEADER[@]}"} \
     -H "Content-Type: application/json" \
     -X POST "$API/api/persistent-agents/$CLOCK_ID/triggers" \
     --data "$(jq -n --arg cron "$CRON" \

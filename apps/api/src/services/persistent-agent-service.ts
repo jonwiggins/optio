@@ -4,7 +4,7 @@
 // halts after each turn and waits for the next wake event (user message,
 // agent message, webhook, cron tick, ticket event). See docs/persistent-agents.md.
 
-import { eq, and, desc, asc, sql, isNull, lt, count } from "drizzle-orm";
+import { eq, and, desc, asc, sql, isNull, inArray, count } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/client.js";
 import {
@@ -215,7 +215,16 @@ export async function transitionPersistentAgentState(
   const result = await db
     .update(persistentAgents)
     .set(updates)
-    .where(and(eq(persistentAgents.id, agentId), eq(persistentAgents.updatedAt, expectedUpdatedAt)))
+    .where(
+      and(
+        eq(persistentAgents.id, agentId),
+        // Tolerate sub-millisecond DB precision on `updated_at` (PG stores
+        // microseconds; JS Date is millisecond-precision). Same comparison
+        // shape as reconcile-executor's casUpdate.
+        sql`date_trunc('milliseconds', ${persistentAgents.updatedAt})
+            = date_trunc('milliseconds', ${expectedUpdatedAt.toISOString()}::timestamptz)`,
+      ),
+    )
     .returning({ id: persistentAgents.id });
 
   if (result.length === 0) {
@@ -339,7 +348,7 @@ export async function drainMessagesIntoTurn(
     .where(
       and(
         eq(persistentAgentMessages.agentId, agentId),
-        sql`${persistentAgentMessages.id} = ANY(${messageIds}::uuid[])`,
+        inArray(persistentAgentMessages.id, messageIds),
       ),
     )
     .returning({ id: persistentAgentMessages.id });
