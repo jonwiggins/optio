@@ -4,7 +4,17 @@ import { useCallback, useEffect, useState } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, KeyRound, Globe, FolderGit2, Filter } from "lucide-react";
+import {
+  Loader2,
+  Plus,
+  Trash2,
+  KeyRound,
+  Globe,
+  FolderGit2,
+  Filter,
+  User,
+  Info,
+} from "lucide-react";
 import { TokenRefreshBanner } from "@/components/token-refresh-banner";
 
 export default function SecretsPage() {
@@ -92,9 +102,12 @@ export default function SecretsPage() {
   /** Display-friendly label for a scope value */
   const scopeLabel = (scope: string) => {
     if (scope === "global") return "Global";
+    if (scope === "user") return "User-only";
     const repo = repos.find((r) => r.repoUrl === scope);
     return repo?.fullName ?? scope;
   };
+
+  const hasUserScopedSecrets = secrets.some((s) => s.scope === "user");
 
   /** Unique scopes present in the current secrets list (for filter dropdown) */
   const uniqueScopes = Array.from(new Set(secrets.map((s) => s.scope)));
@@ -180,6 +193,18 @@ export default function SecretsPage() {
         </form>
       )}
 
+      {hasUserScopedSecrets && (
+        <div className="mb-4 p-3 rounded-lg border border-border/50 bg-bg-card flex gap-2 text-xs text-text-muted">
+          <Info className="w-4 h-4 shrink-0 text-text-muted mt-0.5" />
+          <div>
+            <strong className="text-text">User-only</strong> secrets are scoped to a single user and
+            are <strong>not visible to background runs</strong> (GitHub ticket sync, scheduled
+            triggers, webhooks) since those have no user context. To make a credential available
+            everywhere, store it as <strong>Global</strong>.
+          </div>
+        </div>
+      )}
+
       {/* Scope filter */}
       <div className="flex items-center gap-2 mb-4">
         <Filter className="w-4 h-4 text-text-muted" />
@@ -221,6 +246,8 @@ export default function SecretsPage() {
                 <span className="inline-flex items-center gap-1 text-xs text-text-muted px-2 py-0.5 rounded-full bg-bg-hover">
                   {secret.scope === "global" ? (
                     <Globe className="w-3 h-3" />
+                  ) : secret.scope === "user" ? (
+                    <User className="w-3 h-3" />
                   ) : (
                     <FolderGit2 className="w-3 h-3" />
                   )}

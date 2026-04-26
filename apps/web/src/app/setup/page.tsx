@@ -139,6 +139,14 @@ export default function SetupPage() {
   const [autoMerge, setAutoMerge] = useState(false);
   const [promptLoading, setPromptLoading] = useState(false);
 
+  // Scope for agent credentials (ANTHROPIC_API_KEY / OPENAI_API_KEY /
+  // GEMINI_API_KEY / CLAUDE_CODE_OAUTH_TOKEN). User-scoped secrets are only
+  // visible to tasks the same user kicks off — background runs (ticket sync,
+  // scheduled, webhooks) have no user context and will not find them, so we
+  // default to "global" for admins and "user" otherwise.
+  const [agentSecretScope, setAgentSecretScope] = useState<"global" | "user">("global");
+  const [canSetGlobalSecrets, setCanSetGlobalSecrets] = useState(true);
+
   // Step 6: Tickets — per-repo GitHub Issues toggles + a list of external trackers
   const [githubIssueRepos, setGithubIssueRepos] = useState<Record<string, boolean>>({});
   type AddedTracker = {
@@ -169,6 +177,16 @@ export default function SetupPage() {
     api
       .getGitHubAppStatus()
       .then((res) => setGithubAppConfigured(res.configured))
+      .catch(() => {});
+    // Determine if the current user can store global secrets. Only admins
+    // (or anyone, when auth is disabled) may; non-admins must use user scope.
+    api
+      .getCurrentUser()
+      .then((res) => {
+        const isAdmin = res.authDisabled || res.user.workspaceRole === "admin";
+        setCanSetGlobalSecrets(isAdmin);
+        setAgentSecretScope(isAdmin ? "global" : "user");
+      })
       .catch(() => {});
   }, []);
 
@@ -447,13 +465,17 @@ export default function SetupPage() {
       await api.createSecret({ name: "CLAUDE_AUTH_MODE", value: claudeAuthMode });
 
       if (claudeAuthMode === "api-key" && anthropicKey.trim() && anthropicValidated) {
-        await api.createSecret({ name: "ANTHROPIC_API_KEY", value: anthropicKey, scope: "user" });
+        await api.createSecret({
+          name: "ANTHROPIC_API_KEY",
+          value: anthropicKey,
+          scope: agentSecretScope,
+        });
       }
       if (claudeAuthMode === "oauth-token" && oauthToken.trim()) {
         await api.createSecret({
           name: "CLAUDE_CODE_OAUTH_TOKEN",
           value: oauthToken,
-          scope: "user",
+          scope: agentSecretScope,
         });
       }
       if (claudeAuthMode === "vertex-ai" && claudeVertexProject.trim()) {
@@ -500,7 +522,11 @@ export default function SetupPage() {
         await api.createSecret({ name: "CODEX_APP_SERVER_URL", value: codexAppServerUrl.trim() });
       } else if (openaiKey.trim() && openaiValidated) {
         await api.createSecret({ name: "CODEX_AUTH_MODE", value: "api-key" });
-        await api.createSecret({ name: "OPENAI_API_KEY", value: openaiKey, scope: "user" });
+        await api.createSecret({
+          name: "OPENAI_API_KEY",
+          value: openaiKey,
+          scope: agentSecretScope,
+        });
       }
       // Save Copilot token
       if (copilotToken.trim() && copilotValidated) {
@@ -531,7 +557,11 @@ export default function SetupPage() {
         }
       } else if (geminiKey.trim() && geminiValidated) {
         await api.createSecret({ name: "GEMINI_AUTH_MODE", value: "api-key" });
-        await api.createSecret({ name: "GEMINI_API_KEY", value: geminiKey, scope: "user" });
+        await api.createSecret({
+          name: "GEMINI_API_KEY",
+          value: geminiKey,
+          scope: agentSecretScope,
+        });
       }
       goNext();
     } catch (err) {
@@ -1006,6 +1036,82 @@ export default function SetupPage() {
               <p className="text-text-muted text-sm">
                 Configure how agents authenticate. You need at least one agent set up.
               </p>
+
+              {/* Scope: who can use these credentials */}
+              <div className="p-4 rounded-md bg-bg border border-border space-y-3">
+                <div>
+                  <span className="text-sm font-medium">Who can use these credentials?</span>
+                  <p className="text-xs text-text-muted mt-1">
+                    Background runs (ticket sync, scheduled tasks, webhooks) have no user context,
+                    so they can only see <strong>global</strong> credentials.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-md border transition-colors",
+                      !canSetGlobalSecrets
+                        ? "border-border opacity-50 cursor-not-allowed"
+                        : agentSecretScope === "global"
+                          ? "border-primary bg-primary/5 cursor-pointer"
+                          : "border-border hover:border-text-muted cursor-pointer",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="agent-scope"
+                      checked={agentSecretScope === "global"}
+                      onChange={() => setAgentSecretScope("global")}
+                      disabled={!canSetGlobalSecrets}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm font-medium">
+                        Global — recommended for shared instances
+                      </span>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        All users and all background tasks (ticket sync, scheduled, webhooks) can
+                        use these credentials.
+                        {!canSetGlobalSecrets && (
+                          <>
+                            {" "}
+                            <span className="text-warning">
+                              Requires <code>admin</code> role — ask a workspace admin to run setup
+                              or store these globally on the Secrets page.
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </label>
+                  <label
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-md border cursor-pointer transition-colors",
+                      agentSecretScope === "user"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-text-muted",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="agent-scope"
+                      checked={agentSecretScope === "user"}
+                      onChange={() => setAgentSecretScope("user")}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm font-medium">
+                        User-only — just for tasks I create
+                      </span>
+                      <p className="text-xs text-text-muted mt-0.5">
+                        Only tasks you start manually will use these credentials. Background runs
+                        like GitHub ticket sync, scheduled triggers, and webhooks will not see them
+                        and may fail.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
 
               {/* Claude Code */}
               <div className="p-4 rounded-md bg-bg border border-border space-y-4">
