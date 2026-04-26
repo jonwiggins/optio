@@ -158,6 +158,35 @@ export async function hookRoutes(rawApp: FastifyInstance) {
         return reply.status(202).send({ taskId: task.id });
       }
 
+      if (trigger.targetType === "persistent_agent") {
+        const { getPersistentAgent, wakeAgent, buildSenderId } =
+          await import("../services/persistent-agent-service.js");
+        const agent = await getPersistentAgent(trigger.targetId);
+        if (!agent || !agent.enabled) {
+          return reply.status(404).send({ error: "Target persistent agent not found or disabled" });
+        }
+        const messageBody =
+          typeof body === "string"
+            ? body
+            : `Webhook payload:\n${JSON.stringify(params ?? body, null, 2)}`;
+        await wakeAgent({
+          agentId: agent.id,
+          source: "webhook",
+          body: messageBody,
+          senderType: "external",
+          senderId: buildSenderId({ type: "external", label: `webhook:${webhookPath}` }),
+          senderName: `webhook:${webhookPath}`,
+          structuredPayload: (params as Record<string, unknown> | null) ?? undefined,
+        });
+        logger.info(
+          { agentId: agent.id, slug: agent.slug, triggerId: trigger.id },
+          "Webhook trigger woke persistent agent",
+        );
+        // Reuse the runId field for back-compat with the existing webhook
+        // response shape — the agent id serves the same caller purpose.
+        return reply.status(202).send({ runId: agent.id });
+      }
+
       return reply.status(404).send({ error: "Unknown trigger target type" });
     },
   );

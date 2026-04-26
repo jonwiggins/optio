@@ -149,6 +149,46 @@ async function dispatchTrigger(trigger: {
     return;
   }
 
+  if (trigger.targetType === "persistent_agent") {
+    const { getPersistentAgent, wakeAgent, buildSenderId } =
+      await import("../services/persistent-agent-service.js");
+    const agent = await getPersistentAgent(trigger.targetId);
+    if (!agent) {
+      logger.warn(
+        { triggerId: trigger.id, agentId: trigger.targetId },
+        "Schedule trigger references missing persistent agent, skipping",
+      );
+      return;
+    }
+    if (!agent.enabled) {
+      logger.debug(
+        { triggerId: trigger.id, agentId: agent.id },
+        "Schedule trigger target persistent agent is disabled, skipping",
+      );
+      return;
+    }
+    // Render the trigger payload as a system message into the agent's inbox.
+    // The reconciler picks it up and starts a turn.
+    const body =
+      trigger.paramMapping && Object.keys(trigger.paramMapping).length > 0
+        ? `Scheduled tick (trigger ${trigger.id}). Payload:\n${JSON.stringify(trigger.paramMapping, null, 2)}`
+        : `Scheduled tick (trigger ${trigger.id}).`;
+    await wakeAgent({
+      agentId: agent.id,
+      source: "schedule",
+      body,
+      senderType: "system",
+      senderId: buildSenderId({ type: "system", label: "scheduler" }),
+      senderName: "Scheduler",
+      structuredPayload: trigger.paramMapping ?? undefined,
+    });
+    logger.info(
+      { triggerId: trigger.id, agentId: agent.id, slug: agent.slug },
+      "Persistent agent schedule trigger fired",
+    );
+    return;
+  }
+
   if (trigger.targetType === "pr_review") {
     // Target id is a pr_reviews.id — fire a rereview.
     const { reReview } = await import("../services/pr-review-service.js");

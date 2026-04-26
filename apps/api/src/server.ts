@@ -46,6 +46,8 @@ import { mcpServerRoutes } from "./routes/mcp-servers.js";
 import { connectionRoutes } from "./routes/connections.js";
 import { skillRoutes } from "./routes/skills.js";
 import { workflowRoutes } from "./routes/workflows.js";
+import { persistentAgentRoutes } from "./routes/persistent-agents.js";
+import { persistentAgentInternalRoutes } from "./routes/persistent-agent-internal.js";
 import { taskConfigRoutes } from "./routes/task-configs.js";
 import { tasksUnifiedRoutes } from "./routes/tasks-unified.js";
 import { sharedDirectoryRoutes } from "./routes/shared-directories.js";
@@ -63,6 +65,7 @@ import { sessionTerminalWs } from "./ws/session-terminal.js";
 import { sessionChatWs } from "./ws/session-chat.js";
 import { optioChatWs } from "./ws/optio-chat.js";
 import { workflowRunLogStreamWs } from "./ws/workflow-run-log-stream.js";
+import { persistentAgentStreamWs } from "./ws/persistent-agent-stream.js";
 import { prReviewLogStreamWs } from "./ws/pr-review-log-stream.js";
 import authPlugin from "./plugins/auth.js";
 import { httpMetricsPlugin } from "./plugins/http-metrics.js";
@@ -281,6 +284,8 @@ export async function buildServer() {
   await app.register(connectionRoutes);
   await app.register(skillRoutes);
   await app.register(workflowRoutes);
+  await app.register(persistentAgentRoutes);
+  await app.register(persistentAgentInternalRoutes);
   await app.register(taskConfigRoutes);
   await app.register(tasksUnifiedRoutes);
   await app.register(sharedDirectoryRoutes);
@@ -301,6 +306,7 @@ export async function buildServer() {
   await app.register(optioChatWs);
   await app.register(workflowRunLogStreamWs);
   await app.register(prReviewLogStreamWs);
+  await app.register(persistentAgentStreamWs);
 
   // Global error handler.
   //

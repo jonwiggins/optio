@@ -15,7 +15,6 @@
 // the actual turn execution.
 
 import { Worker, Queue } from "bullmq";
-import { eq } from "drizzle-orm";
 import {
   PersistentAgentState,
   PersistentAgentPodLifecycle,
@@ -26,7 +25,6 @@ import {
   type PersistentAgentWakeSource,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
-import { db } from "../db/client.js";
 import { persistentAgents } from "../db/schema.js";
 import * as paService from "../services/persistent-agent-service.js";
 import * as paPool from "../services/persistent-agent-pool-service.js";
@@ -317,6 +315,7 @@ export function startPersistentAgentWorker() {
             claimedAgent.workspaceId ?? null,
           ).catch(() => null)) as string | null) ?? "api-key";
 
+        const apiUrl = process.env.PUBLIC_URL || process.env.OPTIO_API_URL || "";
         const env: Record<string, string> = {
           ...resolvedSecrets,
           OPTIO_PROMPT: renderedPrompt,
@@ -325,6 +324,10 @@ export function startPersistentAgentWorker() {
           OPTIO_PERSISTENT_AGENT_TURN_ID: turn.id,
           OPTIO_AGENT_TYPE: claimedAgent.agentRuntime,
           OPTIO_AUTH_MODE: claudeAuthMode,
+          // Per-agent bearer token used by the inter-agent HTTP API.
+          // Documented in the agent's `agents.md` operator manual.
+          OPTIO_AGENT_TOKEN: agentId,
+          OPTIO_API_URL: apiUrl,
         };
         if (claimedAgent.model) env.OPTIO_CLAUDE_MODEL = claimedAgent.model;
 
