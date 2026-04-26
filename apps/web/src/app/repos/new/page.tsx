@@ -21,7 +21,8 @@ import {
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { AgentOptionsPicker, type AgentOptionsValues } from "@/components/agent-options-picker";
-import { ANTHROPIC_CATALOG, resolveModelId } from "@optio/shared";
+import type { AgentType } from "@optio/shared";
+import { ReviewAgentPicker } from "@/components/review-agent-picker";
 
 const STEPS = [
   { id: "repo", label: "Repository" },
@@ -65,7 +66,9 @@ export default function NewRepoPage() {
   // Step 4: Review
   const [reviewEnabled, setReviewEnabled] = useState(false);
   const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
-  const [reviewModel, setReviewModel] = useState("sonnet");
+  // null = inherit from repo's defaultAgentType / global setting.
+  const [reviewAgentType, setReviewAgentType] = useState<AgentType | null>(null);
+  const [reviewModel, setReviewModel] = useState("");
   const [testCommand, setTestCommand] = useState("");
   const [autoResume, setAutoResume] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
@@ -133,7 +136,8 @@ export default function NewRepoPage() {
         reviewEnabled,
         reviewTrigger,
         testCommand: testCommand || undefined,
-        reviewModel,
+        reviewAgentType,
+        reviewModel: reviewModel || undefined,
         autoResume,
         autoMerge,
       });
@@ -268,6 +272,8 @@ export default function NewRepoPage() {
             setReviewEnabled={setReviewEnabled}
             reviewTrigger={reviewTrigger}
             setReviewTrigger={setReviewTrigger}
+            reviewAgentType={reviewAgentType}
+            setReviewAgentType={setReviewAgentType}
             reviewModel={reviewModel}
             setReviewModel={setReviewModel}
             testCommand={testCommand}
@@ -610,6 +616,8 @@ function ReviewStep({
   setReviewEnabled,
   reviewTrigger,
   setReviewTrigger,
+  reviewAgentType,
+  setReviewAgentType,
   reviewModel,
   setReviewModel,
   testCommand,
@@ -625,6 +633,8 @@ function ReviewStep({
   setReviewEnabled: (v: boolean) => void;
   reviewTrigger: string;
   setReviewTrigger: (v: string) => void;
+  reviewAgentType: AgentType | null;
+  setReviewAgentType: (v: AgentType | null) => void;
   reviewModel: string;
   setReviewModel: (v: string) => void;
   testCommand: string;
@@ -660,38 +670,29 @@ function ReviewStep({
 
         {reviewEnabled && (
           <div className="space-y-3 ml-6 pl-4 border-l-2 border-primary/20">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Trigger</label>
-                <select
-                  value={reviewTrigger}
-                  onChange={(e) => setReviewTrigger(e.target.value)}
-                  className={selectClass}
-                >
-                  <option value="on_ci_pass">After CI passes</option>
-                  <option value="on_pr">Immediately on PR open</option>
-                  <option value="manual">Manual only</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Review Model</label>
-                <select
-                  value={reviewModel}
-                  onChange={(e) => setReviewModel(e.target.value)}
-                  className={selectClass}
-                >
-                  {Object.keys(ANTHROPIC_CATALOG.aliases).map((alias) => {
-                    const id = resolveModelId("anthropic", alias);
-                    const label = ANTHROPIC_CATALOG.models.find((m) => m.id === id)?.label ?? alias;
-                    return (
-                      <option key={alias} value={alias}>
-                        {label}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Trigger</label>
+              <select
+                value={reviewTrigger}
+                onChange={(e) => setReviewTrigger(e.target.value)}
+                className={selectClass}
+              >
+                <option value="on_ci_pass">After CI passes</option>
+                <option value="on_pr">Immediately on PR open</option>
+                <option value="manual">Manual only</option>
+              </select>
             </div>
+
+            <ReviewAgentPicker
+              agentType={reviewAgentType}
+              onAgentTypeChange={setReviewAgentType}
+              model={reviewModel}
+              onModelChange={setReviewModel}
+              allowInherit
+              inheritedHint="Reviews will run with the repo's default agent unless overridden."
+              selectClass={selectClass}
+            />
+
             <div>
               <label className="block text-xs text-text-muted mb-1">Test command</label>
               <input

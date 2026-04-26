@@ -30,8 +30,10 @@ import {
   ALL_OPTIO_TOOL_NAMES,
   ANTHROPIC_CATALOG,
   resolveModelId,
+  type AgentType,
 } from "@optio/shared";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
+import { ReviewAgentPicker } from "@/components/review-agent-picker";
 
 function PromptTemplateEditor() {
   const [template, setTemplate] = useState("");
@@ -149,7 +151,9 @@ function PromptTemplateEditor() {
 
 function DefaultReviewEditor() {
   const [reviewPrompt, setReviewPrompt] = useState("");
-  const [reviewModel, setReviewModel] = useState("sonnet");
+  // Workspace-level review defaults — saved via PUT /api/optio/settings.
+  const [reviewAgentType, setReviewAgentType] = useState<AgentType>("claude-code");
+  const [reviewModel, setReviewModel] = useState("");
   const [reviewTrigger, setReviewTrigger] = useState("on_ci_pass");
   const [reviewContextWindow, setReviewContextWindow] = useState("200k");
   const [reviewEffort, setReviewEffort] = useState("medium");
@@ -159,13 +163,23 @@ function DefaultReviewEditor() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api
-      .getReviewDefault()
-      .then((res) => setReviewPrompt(res.template))
-      .catch(() => {
-        import("@optio/shared")
-          .then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE))
-          .catch(() => {});
+    Promise.all([
+      api.getReviewDefault().catch(() => null),
+      api.getOptioSettings().catch(() => null),
+    ])
+      .then(([promptRes, settingsRes]) => {
+        if (promptRes?.template) {
+          setReviewPrompt(promptRes.template);
+        } else {
+          import("@optio/shared")
+            .then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE))
+            .catch(() => {});
+        }
+        const s = settingsRes?.settings;
+        if (s) {
+          if (s.defaultReviewAgentType) setReviewAgentType(s.defaultReviewAgentType as AgentType);
+          if (s.defaultReviewModel) setReviewModel(s.defaultReviewModel);
+        }
       })
       .finally(() => setLoading(false));
   }, []);
@@ -184,38 +198,26 @@ function DefaultReviewEditor() {
         Default review settings applied to all repos unless overridden in repo settings.
       </p>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Default Trigger</label>
-          <select
-            value={reviewTrigger}
-            onChange={(e) => setReviewTrigger(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-          >
-            <option value="on_ci_pass">After CI passes</option>
-            <option value="on_pr">Immediately on PR open</option>
-            <option value="manual">Manual only</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Default Review Model</label>
-          <select
-            value={reviewModel}
-            onChange={(e) => setReviewModel(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-          >
-            {Object.keys(ANTHROPIC_CATALOG.aliases).map((alias) => {
-              const id = resolveModelId("anthropic", alias);
-              const label = ANTHROPIC_CATALOG.models.find((m) => m.id === id)?.label ?? alias;
-              return (
-                <option key={alias} value={alias}>
-                  {label}
-                </option>
-              );
-            })}
-          </select>
-        </div>
+      <div>
+        <label className="block text-xs text-text-muted mb-1">Default Trigger</label>
+        <select
+          value={reviewTrigger}
+          onChange={(e) => setReviewTrigger(e.target.value)}
+          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+        >
+          <option value="on_ci_pass">After CI passes</option>
+          <option value="on_pr">Immediately on PR open</option>
+          <option value="manual">Manual only</option>
+        </select>
       </div>
+
+      <ReviewAgentPicker
+        agentType={reviewAgentType}
+        onAgentTypeChange={(next) => setReviewAgentType(next ?? "claude-code")}
+        model={reviewModel}
+        onModelChange={setReviewModel}
+        allowInherit={false}
+      />
 
       <div className="grid grid-cols-3 gap-4">
         <div>
@@ -315,9 +317,13 @@ function DefaultReviewEditor() {
             setSaving(true);
             try {
               await api.saveReviewDefault(reviewPrompt);
+              await api.updateOptioSettings({
+                defaultReviewAgentType: reviewAgentType,
+                defaultReviewModel: reviewModel || null,
+              });
               toast.success("Review defaults saved");
-            } catch {
-              toast.error("Failed to save");
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Failed to save");
             } finally {
               setSaving(false);
             }

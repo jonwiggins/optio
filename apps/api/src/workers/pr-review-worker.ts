@@ -49,6 +49,8 @@ import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 import { logger } from "../logger.js";
 import * as prReviewService from "../services/pr-review-service.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
+import { resolveReviewConfig } from "../services/review-config.js";
+import * as optioSettingsService from "../services/optio-settings-service.js";
 import {
   buildAgentCommand,
   buildInitialClaudeStreamMessage,
@@ -196,19 +198,37 @@ export function startPrReviewWorker() {
           (run.metadata as {
             taskFileContent?: string;
             taskFilePath?: string;
+            // Newer field — agent-agnostic. Supersedes claudeModel.
+            model?: string;
+            // Legacy field — left in place for one release while in-flight
+            // jobs queued before the agent-aware review change drain.
             claudeModel?: string;
           } | null) ?? {};
 
         const renderedPrompt = run.prompt ?? "";
         const taskFileContent = metadata.taskFileContent ?? "";
         const taskFilePath = metadata.taskFilePath ?? ".optio/review-context.md";
-        const claudeModel = metadata.claudeModel ?? repoConfig.reviewModel ?? "sonnet";
-
-        const agentType = repoConfig.defaultAgentType ?? "claude-code";
 
         // ── Secret resolution ──────────────────────────────────────
         const workspaceId = review.workspaceId ?? null;
         const userId = review.createdBy ?? null;
+
+        // Resolve agent + model via the shared resolver so the two review
+        // entrypoints stay in sync. Metadata.model wins over repo defaults
+        // (the queueing service already ran the resolver and stamped its
+        // decision); fall through to live resolution otherwise.
+        const globalSettings = await optioSettingsService
+          .getSettings(workspaceId)
+          .catch(() => null);
+        const resolvedReview = resolveReviewConfig({
+          repoReviewAgentType: repoConfig.reviewAgentType ?? null,
+          repoDefaultAgentType: repoConfig.defaultAgentType ?? null,
+          repoReviewModel: metadata.model ?? metadata.claudeModel ?? repoConfig.reviewModel ?? null,
+          globalDefaultReviewAgentType: globalSettings?.defaultReviewAgentType ?? null,
+          globalDefaultReviewModel: globalSettings?.defaultReviewModel ?? null,
+        });
+        const agentType = resolvedReview.agentType;
+        const resolvedModel = resolvedReview.model;
         const claudeAuthMode: "api-key" | "max-subscription" | "oauth-token" =
           ((await retrieveSecretWithFallback("CLAUDE_AUTH_MODE", "global", workspaceId).catch(
             () => null,
@@ -265,6 +285,22 @@ export function startPrReviewWorker() {
         const parsedRepo = parseRepoUrl(review.repoUrl);
         const _repoName = parsedRepo ? `${parsedRepo.owner}/${parsedRepo.repo}` : review.repoUrl;
 
+        // Inject the resolved review model into the field for the resolved
+        // agent type. The adapter for `agentType` only reads its own field,
+        // but we still pass through the other agents' configured models
+        // unchanged so cross-agent settings (e.g. claudeContextWindow) remain
+        // available when an adapter happens to consume them.
+        const claudeModel =
+          agentType === "claude-code" ? resolvedModel : (repoConfig.claudeModel ?? undefined);
+        const copilotModel =
+          agentType === "copilot" ? resolvedModel : (repoConfig.copilotModel ?? undefined);
+        const opencodeModel =
+          agentType === "opencode"
+            ? resolvedModel
+            : (repoConfig.opencodeModel ?? opencodeDefaultModel);
+        const geminiModel =
+          agentType === "gemini" ? resolvedModel : (repoConfig.geminiModel ?? undefined);
+
         const agentConfig = adapter.buildContainerConfig({
           taskId: run.id,
           prompt: renderedPrompt,
@@ -281,13 +317,13 @@ export function startPrReviewWorker() {
           claudeContextWindow: repoConfig.claudeContextWindow ?? undefined,
           claudeThinking: repoConfig.claudeThinking ?? undefined,
           claudeEffort: repoConfig.claudeEffort ?? undefined,
-          copilotModel: repoConfig.copilotModel ?? undefined,
+          copilotModel,
           copilotEffort: repoConfig.copilotEffort ?? undefined,
-          opencodeModel: repoConfig.opencodeModel ?? opencodeDefaultModel,
+          opencodeModel,
           opencodeAgent: repoConfig.opencodeAgent ?? undefined,
           opencodeBaseUrl: repoConfig.opencodeBaseUrl ?? opencodeDefaultBaseUrl,
           geminiAuthMode,
-          geminiModel: repoConfig.geminiModel ?? undefined,
+          geminiModel,
           geminiApprovalMode:
             (repoConfig.geminiApprovalMode as "default" | "auto_edit" | "yolo") ?? undefined,
           maxTurnsCoding: repoConfig.maxTurnsCoding ?? undefined,
