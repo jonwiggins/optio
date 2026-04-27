@@ -72,6 +72,7 @@ export default function NewRepoPage() {
   const [testCommand, setTestCommand] = useState("");
   const [autoResume, setAutoResume] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
+  const [ticketIntegrationEnabled, setTicketIntegrationEnabled] = useState(false);
 
   // Creating
   const [creating, setCreating] = useState(false);
@@ -141,6 +142,16 @@ export default function NewRepoPage() {
         autoResume,
         autoMerge,
       });
+
+      if (ticketIntegrationEnabled) {
+        const [owner, repo] = fullName.split("/");
+        if (owner && repo) {
+          await api.createTicketProvider({
+            source: "github",
+            config: { owner, repo, label: "optio" },
+          });
+        }
+      }
 
       toast.success(`${fullName} added successfully`);
       router.push(`/repos/${repoId}`);
@@ -282,6 +293,8 @@ export default function NewRepoPage() {
             setAutoResume={setAutoResume}
             autoMerge={autoMerge}
             setAutoMerge={setAutoMerge}
+            ticketIntegrationEnabled={ticketIntegrationEnabled}
+            setTicketIntegrationEnabled={setTicketIntegrationEnabled}
             selectClass={selectClass}
             inputClass={inputClass}
           />
@@ -626,6 +639,8 @@ function ReviewStep({
   setAutoResume,
   autoMerge,
   setAutoMerge,
+  ticketIntegrationEnabled,
+  setTicketIntegrationEnabled,
   selectClass,
   inputClass,
 }: {
@@ -643,6 +658,8 @@ function ReviewStep({
   setAutoResume: (v: boolean) => void;
   autoMerge: boolean;
   setAutoMerge: (v: boolean) => void;
+  ticketIntegrationEnabled: boolean;
+  setTicketIntegrationEnabled: (v: boolean) => void;
   selectClass: string;
   inputClass: string;
 }) {
@@ -736,6 +753,25 @@ function ReviewStep({
             className="w-4 h-4 rounded"
           />
           <span className="text-sm">Auto-merge PR when checks pass and review completes</span>
+        </label>
+      </div>
+
+      {/* Ticket Integration */}
+      <div className="pt-2 border-t border-border/50">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={ticketIntegrationEnabled}
+            onChange={(e) => setTicketIntegrationEnabled(e.target.checked)}
+            className="w-4 h-4 rounded"
+          />
+          <div>
+            <span className="text-sm">Enable GitHub Issues integration</span>
+            <p className="text-[10px] text-text-muted mt-0.5">
+              Sync issues labeled with <code className="px-1 bg-bg rounded">optio</code> for this
+              repository.
+            </p>
+          </div>
         </label>
       </div>
     </section>

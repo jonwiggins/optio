@@ -179,9 +179,21 @@ describe("tickets route body validation", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/tickets/providers",
-      payload: { source: "github", config: { org: "test" }, enabled: true },
+      payload: { source: "github", config: { token: "ghp_test", org: "test" }, enabled: true },
     });
     expect(res.statusCode).toBe(201);
+  });
+
+  it("rejects POST /api/tickets/providers for GitHub when no token is available", async () => {
+    // In the test env, getGitHubToken will fail by default as no secrets/app are configured
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tickets/providers",
+      payload: { source: "github", config: { org: "test" }, enabled: true },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error).toContain("No GitHub token available");
   });
 });
 

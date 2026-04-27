@@ -63,10 +63,10 @@ export async function githubTokenRoutes(rawApp: FastifyInstance) {
         response: { 200: GitHubTokenStatusResponseSchema },
       },
     },
-    async (_req, reply) => {
+    async (req, reply) => {
       let token: string | null = null;
       try {
-        token = await retrieveSecret("GITHUB_TOKEN");
+        token = await retrieveSecret("GITHUB_TOKEN", "global", req.user?.workspaceId);
       } catch {
         /* no token stored */
       }

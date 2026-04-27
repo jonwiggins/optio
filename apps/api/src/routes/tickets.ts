@@ -15,6 +15,7 @@ import { HmacSha256Verifier } from "../services/crypto/signer.js";
 import { logger } from "../logger.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TicketProviderSchema } from "../schemas/integration.js";
+import { getGitHubToken } from "../services/github-token-service.js";
 
 // ── Zod schemas for ticket provider config ─────────────────────────────────
 
@@ -212,7 +213,10 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
           "linked to the provider record.",
         tags: ["Repos & Integrations"],
         body: ticketProviderConfigSchema,
-        response: { 201: ProviderResponseSchema },
+        response: {
+          201: ProviderResponseSchema,
+          400: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
@@ -226,6 +230,27 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         if (safeConfig[field]) {
           sensitiveValues[field] = safeConfig[field] as string;
           delete safeConfig[field];
+        }
+      }
+
+      // If this is a GitHub provider and no token was provided, attempt to resolve one.
+      // This aligns the Settings UI creation flow with the Setup Wizard flow.
+      if (body.source === "github" && !sensitiveValues.token) {
+        try {
+          const resolvedToken = await getGitHubToken({
+            server: true,
+            workspaceId: req.user?.workspaceId,
+          });
+          sensitiveValues.token = resolvedToken;
+        } catch (err) {
+          logger.warn(
+            { err, workspaceId: req.user?.workspaceId },
+            "Failed to resolve GitHub token for new provider",
+          );
+          return reply.status(400).send({
+            error:
+              "No GitHub token available. Please configure a GitHub App or add a GITHUB_TOKEN secret first.",
+          });
         }
       }
 
