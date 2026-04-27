@@ -303,6 +303,27 @@ export function LogViewer({
   const matchIndexSet = useMemo(() => new Set(searchMatches), [searchMatches]);
   const currentHighlightIdx = searchMatches.length > 0 ? searchMatches[currentMatchIndex] : -1;
 
+  // Merge groups + user messages into one chronologically-ordered timeline.
+  // Without this, all user-typed messages would render in a block at the end
+  // of the log instead of being interleaved with the agent's events.
+  type TimelineItem =
+    | { kind: "group"; group: LogGroup; ts: string; endTs: string }
+    | { kind: "user"; msg: UserMessage; ts: string; userIdx: number };
+  const timeline: TimelineItem[] = [
+    ...groups.map((g) => {
+      const ts = g.type === "tool_call" ? g.use.timestamp : g.entry.timestamp;
+      const endTs =
+        g.type === "tool_call" ? (g.result?.timestamp ?? g.use.timestamp) : g.entry.timestamp;
+      return { kind: "group" as const, group: g, ts, endTs };
+    }),
+    ...(userMessages ?? []).map((msg, userIdx) => ({
+      kind: "user" as const,
+      msg,
+      ts: msg.timestamp,
+      userIdx,
+    })),
+  ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+
   return (
     <div className="flex flex-col h-full border border-border rounded-xl overflow-hidden bg-bg">
       {/* Optional caller-supplied status strip — model picker, "Thinking…",
@@ -515,23 +536,56 @@ export function LogViewer({
         onScroll={handleScroll}
         className="flex-1 overflow-auto px-4 py-3 font-mono text-xs leading-6 relative"
       >
-        {groups.length === 0 ? (
+        {timeline.length === 0 ? (
           <div className="text-text-muted/40 text-center py-12 font-sans">
             {logTypeFilter || searchQuery
               ? "No matching logs"
               : (emptyMessage ?? "Waiting for output...")}
           </div>
         ) : (
-          groups.map((group, gi) => {
-            const ts = group.type === "tool_call" ? group.use.timestamp : group.entry.timestamp;
-            const prevGroup = gi > 0 ? groups[gi - 1] : null;
-            const prevEnd = prevGroup
-              ? prevGroup.type === "tool_call"
-                ? (prevGroup.result?.timestamp ?? prevGroup.use.timestamp)
-                : prevGroup.entry.timestamp
-              : null;
-            const gapMs = prevEnd ? new Date(ts).getTime() - new Date(prevEnd).getTime() : 0;
+          timeline.map((item, ti) => {
+            const prev = ti > 0 ? timeline[ti - 1] : null;
+            const prevEnd =
+              prev && prev.kind === "group"
+                ? prev.endTs
+                : prev && prev.kind === "user"
+                  ? prev.ts
+                  : null;
+            const gapMs = prevEnd ? new Date(item.ts).getTime() - new Date(prevEnd).getTime() : 0;
 
+            if (item.kind === "user") {
+              return (
+                <Fragment key={`user-${item.userIdx}`}>
+                  {gapMs > 10000 && <TimeGap ms={gapMs} />}
+                  <div className="flex gap-2.5 my-1 -mx-2 px-2 rounded bg-primary/5 border border-primary/10">
+                    <span
+                      className="text-[10px] leading-6 text-text-muted/25 tabular-nums shrink-0 select-none w-[54px] text-right"
+                      title={new Date(item.msg.timestamp).toLocaleString()}
+                    >
+                      {formatTime(item.msg.timestamp)}
+                    </span>
+                    <div className="flex items-center gap-2 py-1 flex-1 min-w-0">
+                      <User className="w-3 h-3 text-primary shrink-0" />
+                      <span className="text-xs font-medium text-primary font-sans">You:</span>
+                      <span className="text-xs text-text/80 truncate">{item.msg.text}</span>
+                      <span className="ml-auto shrink-0">
+                        {item.msg.status === "sending" && (
+                          <Loader2 className="w-3 h-3 text-text-muted/40 animate-spin" />
+                        )}
+                        {item.msg.status === "sent" && (
+                          <Check className="w-3 h-3 text-success/60" />
+                        )}
+                        {item.msg.status === "failed" && (
+                          <AlertCircle className="w-3 h-3 text-error/60" />
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </Fragment>
+              );
+            }
+
+            const group = item.group;
             const isMatch =
               group.type === "tool_call"
                 ? matchIndexSet.has(group.index) ||
@@ -543,7 +597,7 @@ export function LogViewer({
                 : currentHighlightIdx === group.index;
 
             return (
-              <Fragment key={group.index}>
+              <Fragment key={`group-${group.index}`}>
                 {gapMs > 10000 && <TimeGap ms={gapMs} />}
                 <div
                   className={cn(
@@ -555,9 +609,9 @@ export function LogViewer({
                 >
                   <span
                     className="text-[10px] leading-6 text-text-muted/25 tabular-nums shrink-0 select-none w-[54px] text-right"
-                    title={new Date(ts).toLocaleString()}
+                    title={new Date(item.ts).toLocaleString()}
                   >
-                    {formatTime(ts)}
+                    {formatTime(item.ts)}
                   </span>
                   <div className="flex-1 min-w-0">
                     {group.type === "tool_call" ? (
@@ -577,33 +631,6 @@ export function LogViewer({
             );
           })
         )}
-        {/* Inline user message markers */}
-        {userMessages &&
-          userMessages.map((msg, i) => (
-            <div
-              key={`user-msg-${i}`}
-              className="flex gap-2.5 my-1 -mx-2 px-2 rounded bg-primary/5 border border-primary/10"
-            >
-              <span
-                className="text-[10px] leading-6 text-text-muted/25 tabular-nums shrink-0 select-none w-[54px] text-right"
-                title={new Date(msg.timestamp).toLocaleString()}
-              >
-                {formatTime(msg.timestamp)}
-              </span>
-              <div className="flex items-center gap-2 py-1 flex-1 min-w-0">
-                <User className="w-3 h-3 text-primary shrink-0" />
-                <span className="text-xs font-medium text-primary font-sans">You:</span>
-                <span className="text-xs text-text/80 truncate">{msg.text}</span>
-                <span className="ml-auto shrink-0">
-                  {msg.status === "sending" && (
-                    <Loader2 className="w-3 h-3 text-text-muted/40 animate-spin" />
-                  )}
-                  {msg.status === "sent" && <Check className="w-3 h-3 text-success/60" />}
-                  {msg.status === "failed" && <AlertCircle className="w-3 h-3 text-error/60" />}
-                </span>
-              </div>
-            </div>
-          ))}
       </div>
 
       {/* Scroll to bottom */}
