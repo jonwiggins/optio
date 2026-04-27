@@ -17,6 +17,22 @@ export interface StandaloneStats {
   completed: number;
 }
 
+export interface PersistentAgentStats {
+  total: number;
+  idle: number;
+  queued: number;
+  running: number;
+  paused: number;
+  failed: number;
+  archived: number;
+}
+
+export interface SessionStats {
+  total: number;
+  active: number;
+  ended: number;
+}
+
 export interface UsageData {
   available: boolean;
   error?: string;

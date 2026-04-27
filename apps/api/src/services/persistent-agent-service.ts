@@ -621,4 +621,77 @@ export async function purgeAllForAgent(agentId: string) {
   await db.delete(persistentAgents).where(eq(persistentAgents.id, agentId));
 }
 
+// ── Aggregate stats ─────────────────────────────────────────────────────────
+
+/**
+ * Per-state counts across persistent agents in a workspace. Drives the
+ * Persistent Agents stats bar on the overview dashboard — shape mirrors
+ * `getTaskStats()` / `getWorkflowRunStats()` so the frontend can treat all
+ * four execution surfaces symmetrically.
+ *
+ * `total` excludes archived agents because they are terminal and are not
+ * listed by default in the agents UI; surfacing them as part of the live
+ * count would inflate the at-a-glance picture.
+ */
+export async function getPersistentAgentStats(workspaceId?: string | null) {
+  const wsFilter =
+    workspaceId === undefined
+      ? undefined
+      : workspaceId === null
+        ? isNull(persistentAgents.workspaceId)
+        : eq(persistentAgents.workspaceId, workspaceId);
+
+  const baseQuery = db
+    .select({
+      state: persistentAgents.state,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(persistentAgents);
+
+  const rows = await (wsFilter ? baseQuery.where(wsFilter) : baseQuery).groupBy(
+    persistentAgents.state,
+  );
+
+  let total = 0;
+  let idle = 0;
+  let queued = 0;
+  let running = 0;
+  let paused = 0;
+  let failed = 0;
+  let archived = 0;
+
+  for (const row of rows) {
+    const c = row.count;
+    switch (row.state) {
+      case PersistentAgentState.IDLE:
+        idle += c;
+        total += c;
+        break;
+      case PersistentAgentState.QUEUED:
+      case PersistentAgentState.PROVISIONING:
+        queued += c;
+        total += c;
+        break;
+      case PersistentAgentState.RUNNING:
+        running += c;
+        total += c;
+        break;
+      case PersistentAgentState.PAUSED:
+        paused += c;
+        total += c;
+        break;
+      case PersistentAgentState.FAILED:
+        failed += c;
+        total += c;
+        break;
+      case PersistentAgentState.ARCHIVED:
+        // Terminal — excluded from `total` so the bar reflects live agents only.
+        archived += c;
+        break;
+    }
+  }
+
+  return { total, idle, queued, running, paused, failed, archived };
+}
+
 export { PersistentAgentState, PersistentAgentPodLifecycle, buildSenderId };

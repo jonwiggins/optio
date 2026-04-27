@@ -92,6 +92,23 @@ const ActiveCountResponseSchema = z
   })
   .describe("Active session count");
 
+const SessionStatsSchema = z
+  .object({
+    total: z.number().int(),
+    active: z.number().int(),
+    ended: z.number().int(),
+  })
+  .describe(
+    "Counts of interactive sessions grouped by state. `ended` is windowed " +
+      "to the last 24 hours.",
+  );
+
+const SessionStatsResponseSchema = z
+  .object({
+    stats: SessionStatsSchema,
+  })
+  .describe("Aggregated session counts for the current workspace");
+
 export async function sessionRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
@@ -125,6 +142,30 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
       });
       const activeCount = await sessionService.getActiveSessionCount(repoUrl);
       reply.send({ sessions, activeCount });
+    },
+  );
+
+  app.get(
+    "/api/sessions/stats",
+    {
+      schema: {
+        operationId: "getSessionStats",
+        summary: "Get aggregated interactive session stats",
+        description:
+          "Returns counts of `interactive_sessions` grouped by state for the " +
+          "current workspace. Mirrors `/api/tasks/stats` so dashboards can " +
+          "render a Sessions stats bar symmetrically with tasks. The `ended` " +
+          "bucket is windowed to the last 24 hours so the bar reflects " +
+          "recent activity rather than lifetime totals.",
+        tags: ["Sessions"],
+        response: {
+          200: SessionStatsResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const stats = await sessionService.getSessionStats(req.user?.workspaceId ?? null);
+      reply.send({ stats });
     },
   );
 

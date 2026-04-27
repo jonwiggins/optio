@@ -2,7 +2,7 @@
 
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
-import { RefreshCw, GitPullRequest, Terminal } from "lucide-react";
+import { RefreshCw, GitPullRequest, Terminal, Bot, MessageSquare } from "lucide-react";
 import {
   PipelineStatsBar,
   UsagePanel,
@@ -21,6 +21,8 @@ export default function OverviewPage() {
   const {
     taskStats,
     standaloneStats,
+    agentStats,
+    sessionStats,
     recentTasks,
     repoCount,
     cluster,
@@ -130,6 +132,30 @@ export default function OverviewPage() {
             </span>
           </div>
           <PipelineStatsBar variant="standalone" standaloneStats={standaloneStats} />
+        </div>
+      )}
+
+      {(agentStats?.total ?? 0) > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 px-1">
+            <Bot className="w-3 h-3 text-text-muted/60" />
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted/60">
+              Persistent Agents
+            </span>
+          </div>
+          <PipelineStatsBar variant="agents" agentStats={agentStats} />
+        </div>
+      )}
+
+      {(sessionStats?.total ?? 0) > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 px-1">
+            <MessageSquare className="w-3 h-3 text-text-muted/60" />
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted/60">
+              Sessions
+            </span>
+          </div>
+          <PipelineStatsBar variant="sessions" sessionStats={sessionStats} />
         </div>
       )}
 

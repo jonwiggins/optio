@@ -5,6 +5,8 @@ import { api } from "@/lib/api-client";
 import type {
   TaskStats,
   StandaloneStats,
+  PersistentAgentStats,
+  SessionStats,
   UsageData,
   MetricsHistoryPoint,
 } from "@/components/dashboard/types.js";
@@ -14,6 +16,8 @@ const MAX_HISTORY = 60; // 10 minutes at 10s intervals
 export function useDashboardData() {
   const [taskStats, setTaskStats] = useState<TaskStats | null>(null);
   const [standaloneStats, setStandaloneStats] = useState<StandaloneStats | null>(null);
+  const [agentStats, setAgentStats] = useState<PersistentAgentStats | null>(null);
+  const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const [recentTasks, setRecentTasks] = useState<any[]>([]);
   const [repoCount, setRepoCount] = useState<number | null>(null);
   const [cluster, setCluster] = useState<any>(null);
@@ -34,39 +38,56 @@ export function useDashboardData() {
         .listSessions({ state: "active", limit: 5 })
         .catch(() => ({ sessions: [], activeCount: 0 })),
       api.getJobStats().catch(() => null),
+      api.getPersistentAgentStats().catch(() => null),
+      api.getSessionStats().catch(() => null),
     ])
-      .then(([statsRes, tasksRes, clusterRes, reposRes, sessionsRes, jobStatsRes]) => {
-        setActiveSessions(sessionsRes.sessions);
-        setActiveSessionCount(sessionsRes.activeCount);
-        setTaskStats(statsRes.stats);
-        setStandaloneStats(jobStatsRes?.stats ?? null);
-        setRecentTasks(tasksRes.tasks);
-        setRepoCount(reposRes.repos.length);
-        if (clusterRes) {
-          setCluster(clusterRes);
-          setMetricsAvailable(clusterRes.metricsAvailable ?? null);
-          const node = clusterRes.nodes?.[0];
-          if (node) {
-            const memPercent =
-              node.memoryUsedGi != null && node.memoryTotalGi
-                ? Math.round((parseFloat(node.memoryUsedGi) / parseFloat(node.memoryTotalGi)) * 100)
-                : null;
-            setMetricsHistory((prev) => {
-              const next = [
-                ...prev,
-                {
-                  time: Date.now(),
-                  cpuPercent: node.cpuPercent ?? null,
-                  memoryPercent: memPercent,
-                  pods: clusterRes.summary?.totalPods ?? 0,
-                  agents: clusterRes.summary?.agentPods ?? 0,
-                },
-              ];
-              return next.slice(-MAX_HISTORY);
-            });
+      .then(
+        ([
+          statsRes,
+          tasksRes,
+          clusterRes,
+          reposRes,
+          sessionsRes,
+          jobStatsRes,
+          agentStatsRes,
+          sessionStatsRes,
+        ]) => {
+          setActiveSessions(sessionsRes.sessions);
+          setActiveSessionCount(sessionsRes.activeCount);
+          setTaskStats(statsRes.stats);
+          setStandaloneStats(jobStatsRes?.stats ?? null);
+          setAgentStats(agentStatsRes?.stats ?? null);
+          setSessionStats(sessionStatsRes?.stats ?? null);
+          setRecentTasks(tasksRes.tasks);
+          setRepoCount(reposRes.repos.length);
+          if (clusterRes) {
+            setCluster(clusterRes);
+            setMetricsAvailable(clusterRes.metricsAvailable ?? null);
+            const node = clusterRes.nodes?.[0];
+            if (node) {
+              const memPercent =
+                node.memoryUsedGi != null && node.memoryTotalGi
+                  ? Math.round(
+                      (parseFloat(node.memoryUsedGi) / parseFloat(node.memoryTotalGi)) * 100,
+                    )
+                  : null;
+              setMetricsHistory((prev) => {
+                const next = [
+                  ...prev,
+                  {
+                    time: Date.now(),
+                    cpuPercent: node.cpuPercent ?? null,
+                    memoryPercent: memPercent,
+                    pods: clusterRes.summary?.totalPods ?? 0,
+                    agents: clusterRes.summary?.agentPods ?? 0,
+                  },
+                ];
+                return next.slice(-MAX_HISTORY);
+              });
+            }
           }
-        }
-      })
+        },
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -124,6 +145,8 @@ export function useDashboardData() {
   return {
     taskStats,
     standaloneStats,
+    agentStats,
+    sessionStats,
     recentTasks,
     repoCount,
     cluster,
