@@ -475,6 +475,25 @@ export const sessionPrs = pgTable(
   (table) => [index("session_prs_session_id_idx").on(table.sessionId)],
 );
 
+// Persisted chat events for an interactive session. One row per parsed
+// AgentLogEntry the session WebSocket emits. Lets reconnecting clients
+// reload the conversation rather than starting from an empty log.
+export const sessionChatEvents = pgTable(
+  "session_chat_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => interactiveSessions.id, { onDelete: "cascade" }),
+    stream: text("stream").notNull().default("stdout"),
+    content: text("content").notNull(),
+    logType: text("log_type"), // "text" | "tool_use" | "tool_result" | "thinking" | "system" | "error" | "info"
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("session_chat_events_session_idx").on(table.sessionId, table.timestamp)],
+);
+
 export const taskComments = pgTable(
   "task_comments",
   {

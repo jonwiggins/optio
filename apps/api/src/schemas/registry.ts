@@ -25,6 +25,7 @@ import {
 } from "./workflow.js";
 import {
   InteractiveSessionSchema,
+  SessionChatEventSchema,
   SessionModelConfigSchema,
   SessionPrSchema,
   ReviewDraftSchema,
@@ -87,6 +88,7 @@ export const namedSchemas = {
   WorkflowRunLogEntry: WorkflowRunLogEntrySchema,
   CronValidationResult: CronValidationResultSchema,
   InteractiveSession: InteractiveSessionSchema,
+  SessionChatEvent: SessionChatEventSchema,
   SessionModelConfig: SessionModelConfigSchema,
   SessionPr: SessionPrSchema,
   ReviewDraft: ReviewDraftSchema,

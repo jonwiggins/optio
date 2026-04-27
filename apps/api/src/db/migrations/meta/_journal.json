@@ -540,6 +540,13 @@
       "when": 1777300000000,
       "tag": "1777300000_installed_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1777400000000,
+      "tag": "1777400000_session_chat_events",
+      "breakpoints": true
     }
   ]
 }

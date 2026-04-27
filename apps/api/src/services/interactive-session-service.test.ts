@@ -21,6 +21,11 @@ vi.mock("../db/schema.js", () => ({
     sessionId: "session_prs.session_id",
     createdAt: "session_prs.created_at",
   },
+  sessionChatEvents: {
+    id: "session_chat_events.id",
+    sessionId: "session_chat_events.session_id",
+    timestamp: "session_chat_events.timestamp",
+  },
   repos: {
     repoUrl: "repos.repo_url",
   },
@@ -67,6 +72,8 @@ import {
   addSessionPr,
   updateSessionPr,
   getActiveSessionCount,
+  appendSessionChatEvent,
+  listSessionChatEvents,
 } from "./interactive-session-service.js";
 
 describe("interactive-session-service", () => {
@@ -411,6 +418,141 @@ describe("interactive-session-service", () => {
 
       const result = await getActiveSessionCount("https://github.com/o/r");
       expect(result).toBe(2);
+    });
+  });
+
+  describe("appendSessionChatEvent", () => {
+    it("inserts an event with stream/content/logType/metadata", async () => {
+      const insertReturning = vi.fn().mockResolvedValue([
+        {
+          id: "ev-1",
+          sessionId: "s-1",
+          stream: "stdout",
+          content: "hi",
+          logType: "text",
+          metadata: { foo: "bar" },
+          timestamp: new Date("2026-04-27T00:00:00Z"),
+        },
+      ]);
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({ returning: insertReturning }),
+      });
+
+      // Retention prune: empty cutoff lookup
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockReturnValue({
+              limit: vi.fn().mockReturnValue({
+                offset: vi.fn().mockResolvedValue([]),
+              }),
+            }),
+          }),
+        }),
+      });
+      (db.delete as any) = vi.fn();
+
+      const result = await appendSessionChatEvent({
+        sessionId: "s-1",
+        content: "hi",
+        logType: "text",
+        metadata: { foo: "bar" },
+      });
+
+      expect(result.id).toBe("ev-1");
+      expect(insertReturning).toHaveBeenCalled();
+    });
+
+    it("prunes old events past the retention cap", async () => {
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([
+            {
+              id: "ev-2",
+              sessionId: "s-1",
+              stream: "stdout",
+              content: "x",
+              timestamp: new Date(),
+            },
+          ]),
+        }),
+      });
+
+      // Retention prune: cutoff lookup returns a timestamp
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockReturnValue({
+              limit: vi.fn().mockReturnValue({
+                offset: vi.fn().mockResolvedValue([{ ts: new Date("2026-04-01T00:00:00Z") }]),
+              }),
+            }),
+          }),
+        }),
+      });
+      const deleteWhere = vi.fn().mockResolvedValue(undefined);
+      (db.delete as any) = vi.fn().mockReturnValue({ where: deleteWhere });
+
+      await appendSessionChatEvent({ sessionId: "s-1", content: "x" });
+      expect(deleteWhere).toHaveBeenCalled();
+    });
+
+    it("does not throw if the prune step fails", async () => {
+      (db.insert as any) = vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: "ev-3" }]),
+        }),
+      });
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockReturnValue({
+              limit: vi.fn().mockReturnValue({
+                offset: vi.fn().mockRejectedValue(new Error("prune blew up")),
+              }),
+            }),
+          }),
+        }),
+      });
+
+      const result = await appendSessionChatEvent({ sessionId: "s-1", content: "x" });
+      expect(result.id).toBe("ev-3");
+    });
+  });
+
+  describe("listSessionChatEvents", () => {
+    it("returns events ordered by timestamp ascending", async () => {
+      const events = [
+        { id: "e-1", content: "first" },
+        { id: "e-2", content: "second" },
+      ];
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue(events),
+            }),
+          }),
+        }),
+      });
+
+      const result = await listSessionChatEvents("s-1");
+      expect(result).toEqual(events);
+    });
+
+    it("respects the requested limit (capped to MAX_SESSION_CHAT_EVENTS)", async () => {
+      const limitFn = vi.fn().mockResolvedValue([]);
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            orderBy: vi.fn().mockReturnValue({ limit: limitFn }),
+          }),
+        }),
+      });
+
+      await listSessionChatEvents("s-1", { limit: 1_000_000 });
+      // The clamp should be at MAX_SESSION_CHAT_EVENTS = 5000.
+      expect(limitFn).toHaveBeenCalledWith(5000);
     });
   });
 });

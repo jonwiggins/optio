@@ -9,9 +9,22 @@ import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   InteractiveSessionSchema,
+  SessionChatEventSchema,
   SessionModelConfigSchema,
   SessionPrSchema,
 } from "../schemas/session.js";
+
+const sessionChatQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(5000).default(1000).describe("Max events to return"),
+  })
+  .describe("Query parameters for session chat history");
+
+const SessionChatResponseSchema = z
+  .object({
+    events: z.array(SessionChatEventSchema),
+  })
+  .describe("Persisted chat events for a session, oldest first");
 
 const listSessionsQuerySchema = z
   .object({
@@ -261,6 +274,43 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
       } catch (err) {
         reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
+    },
+  );
+
+  app.get(
+    "/api/sessions/:id/chat",
+    {
+      schema: {
+        operationId: "getSessionChat",
+        summary: "Get persisted chat history for a session",
+        description:
+          "Returns the persisted chat events for a session in chronological " +
+          "order. Used by the web UI to rehydrate the conversation when the " +
+          "session detail page mounts, so navigating away and back doesn't " +
+          "lose history. The session WebSocket also replays history on " +
+          "connect, but this REST endpoint is the primary loader to mirror " +
+          "how `useLogs` / `useWorkflowRunLogs` work.",
+        tags: ["Sessions"],
+        params: IdParamsSchema,
+        querystring: sessionChatQuerySchema,
+        response: {
+          200: SessionChatResponseSchema,
+          404: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params;
+      const session = await sessionService.getSession(id);
+      if (!session) return reply.status(404).send({ error: "Session not found" });
+
+      if (req.user?.id && session.userId && session.userId !== req.user.id) {
+        return reply.status(404).send({ error: "Session not found" });
+      }
+
+      const { limit } = req.query;
+      const events = await sessionService.listSessionChatEvents(id, { limit });
+      reply.send({ events });
     },
   );
 

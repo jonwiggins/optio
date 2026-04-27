@@ -768,6 +768,13 @@ export const api = {
   endSession: (id: string) =>
     request<{ session: any }>(`/api/sessions/${id}/end`, { method: "POST" }),
 
+  getSessionChat: (sessionId: string, params?: { limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return request<{ events: any[] }>(`/api/sessions/${sessionId}/chat${query ? `?${query}` : ""}`);
+  },
+
   getSessionPrs: (sessionId: string) => request<{ prs: any[] }>(`/api/sessions/${sessionId}/prs`),
 
   addSessionPr: (sessionId: string, data: { prUrl: string; prNumber: number }) =>

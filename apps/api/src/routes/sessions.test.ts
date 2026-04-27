@@ -12,6 +12,7 @@ const mockEndSession = vi.fn();
 const mockGetSessionPrs = vi.fn();
 const mockAddSessionPr = vi.fn();
 const mockGetActiveSessionCount = vi.fn();
+const mockListSessionChatEvents = vi.fn();
 
 vi.mock("../services/interactive-session-service.js", () => ({
   listSessions: (...args: unknown[]) => mockListSessions(...args),
@@ -21,6 +22,7 @@ vi.mock("../services/interactive-session-service.js", () => ({
   getSessionPrs: (...args: unknown[]) => mockGetSessionPrs(...args),
   addSessionPr: (...args: unknown[]) => mockAddSessionPr(...args),
   getActiveSessionCount: (...args: unknown[]) => mockGetActiveSessionCount(...args),
+  listSessionChatEvents: (...args: unknown[]) => mockListSessionChatEvents(...args),
 }));
 
 const mockDbSelect = vi.fn();
@@ -301,6 +303,69 @@ describe("session PRs", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBeDefined();
+  });
+});
+
+describe("GET /api/sessions/:id/chat", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns persisted chat events for a session", async () => {
+    mockGetSession.mockResolvedValue(mockSession);
+    mockListSessionChatEvents.mockResolvedValue([
+      {
+        id: "ev-1",
+        sessionId: "session-1",
+        stream: "stdout",
+        content: "hello",
+        logType: "text",
+        metadata: null,
+        timestamp: new Date("2026-04-27T00:00:00Z"),
+      },
+    ]);
+
+    const res = await app.inject({ method: "GET", url: "/api/sessions/session-1/chat" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.events).toHaveLength(1);
+    expect(body.events[0].content).toBe("hello");
+    expect(mockListSessionChatEvents).toHaveBeenCalledWith("session-1", { limit: 1000 });
+  });
+
+  it("respects the limit query param", async () => {
+    mockGetSession.mockResolvedValue(mockSession);
+    mockListSessionChatEvents.mockResolvedValue([]);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/sessions/session-1/chat?limit=42",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockListSessionChatEvents).toHaveBeenCalledWith("session-1", { limit: 42 });
+  });
+
+  it("returns 404 when session does not exist", async () => {
+    mockGetSession.mockResolvedValue(null);
+
+    const res = await app.inject({ method: "GET", url: "/api/sessions/nope/chat" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockListSessionChatEvents).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for another user's session", async () => {
+    mockGetSession.mockResolvedValue({ ...mockSession, userId: "other-user" });
+
+    const res = await app.inject({ method: "GET", url: "/api/sessions/session-1/chat" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockListSessionChatEvents).not.toHaveBeenCalled();
   });
 });
 

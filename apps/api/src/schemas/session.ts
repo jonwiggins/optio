@@ -47,6 +47,24 @@ export const SessionPrSchema = z
   .passthrough()
   .describe("Pull request opened during a session");
 
+export const SessionChatEventSchema = z
+  .object({
+    id: z.string(),
+    sessionId: z.string(),
+    stream: z.string().describe("stdout | stderr | stdin (user message)"),
+    content: z.string(),
+    logType: z
+      .string()
+      .nullable()
+      .describe(
+        "Parsed log category: text | tool_use | tool_result | thinking | system | error | info | user_message",
+      ),
+    metadata: z.record(z.unknown()).nullable(),
+    timestamp: z.union([z.date(), z.string()]),
+  })
+  .passthrough()
+  .describe("A single persisted session-chat event (one parsed agent log entry).");
+
 export const ReviewDraftSchema = z
   .object({
     id: z.string(),
