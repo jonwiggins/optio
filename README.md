@@ -1,6 +1,6 @@
 # Optio
 
-**Workflow orchestration for AI coding agents — from ticket to merged PR, and beyond.**
+**Self-hosted AI engineering platform — your cluster, your agents, your code.**
 
 [![CI](https://github.com/jonwiggins/optio/actions/workflows/ci.yml/badge.svg)](https://github.com/jonwiggins/optio/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
@@ -26,6 +26,30 @@ Under the hood, all task and pod state changes flow through a [Kubernetes-style 
   <img src="docs/screenshots/task-detail.png" alt="Task detail view showing live agent logs, pipeline progress through stages (queued, setup, running, PR, CI checks, review, merge, done), and cost tracking" width="100%"/>
 </p>
 <p align="center"><em>Task detail — live-streamed agent output with pipeline progress, PR tracking, and cost breakdown</em></p>
+
+## Why Optio?
+
+The AI coding agent space is crowded — Devin, Charlie Labs, Cursor background agents, Sweep, and others all promise ticket-to-PR automation. Optio's wedge is different: it runs **in your infrastructure**, behind **whichever agent vendor you trust**, against **whichever Kubernetes cluster you already operate**.
+
+| Optio                                                                                                                                                                                                                                                                             | Hosted alternatives                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| **Self-hosted** — runs entirely in your Kubernetes cluster (GKE, EKS, AKS, or any conformant K8s). Code, secrets, and agent logs never leave your network.                                                                                                                        | Hosted SaaS — your code goes to their cloud.           |
+| **Multi-vendor agents** — Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, and OpenCode behind one interface. Switch per repo, or A/B agents on the same task.                                                                                                           | Locked to a single model family or in-house agent.     |
+| **Open source (MIT)** — read the code, fork it, audit it. No black box, no vendor lock-in.                                                                                                                                                                                        | Closed source.                                         |
+| **Enterprise-ready primitives out of the box** — workspaces, encrypted secrets at rest (AES-256-GCM), OIDC/OAuth, Kubernetes RBAC, audit-friendly task history, and a [reconciliation control plane](./docs/reconciliation.md) that keeps runs from getting stuck on lost events. | Vary by vendor; often gated to enterprise tiers.       |
+| **Standalone Tasks** — not just ticket-to-PR. Reusable, parameterized agent work for ops, on-call triage, scheduled reports, and webhook-driven automation, with no repo checkout.                                                                                                | PR-centric; ops/automation use cases are out of scope. |
+
+If you'd ship to a hosted agent without thinking twice, the hosted options are simpler. If shipping your repo to someone else's cloud is a non-starter — or if you want to keep your model choice open — Optio is built for you.
+
+## Who is this for?
+
+- **Security-conscious organizations** — teams that can't (or won't) ship source code, secrets, or production data to a third-party AI service.
+- **Regulated industries** — finance, healthcare, government, defense, and others where data residency, auditability, and tenancy isolation are non-negotiable.
+- **Teams already running Kubernetes** — drop-in Helm install, BYO Postgres/Redis, integrates with your existing observability, ingress, and identity stack.
+- **Multi-agent shops** — engineering teams evaluating multiple agent vendors and unwilling to commit to a single platform's roadmap.
+- **Platform teams building internal AI tooling** — Optio is the orchestration layer. You bring the prompts, policies, connections, and review standards.
+
+If none of the above describes you, a hosted product like Devin or Cursor background agents will get you to value faster. We're not trying to be everything to everyone.
 
 ## How It Works
 
