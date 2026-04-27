@@ -198,8 +198,8 @@ export default function NewTaskPage() {
   const submitLabel =
     runMode === "schedule"
       ? mode === "repo"
-        ? "Save scheduled Repo Task"
-        : "Save scheduled Standalone Task"
+        ? "Save scheduled Task"
+        : "Save scheduled Job"
       : mode === "repo"
         ? "Start Task (opens a PR)"
         : "Start Task";
@@ -208,8 +208,8 @@ export default function NewTaskPage() {
     <div className="p-6 max-w-2xl mx-auto">
       <h1 className="text-2xl font-semibold tracking-tight mb-2">New Task</h1>
       <p className="text-sm text-text-muted mb-6">
-        Configure an agent to do something. Pick a mode first — repo-attached tasks open a PR,
-        standalone tasks don&apos;t.
+        Configure an agent to do something. Pick a mode first — Tasks open a PR against a repo, Jobs
+        run with no repo.
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -221,7 +221,7 @@ export default function NewTaskPage() {
               active={mode === "repo"}
               onClick={() => setMode("repo")}
               icon={<GitPullRequest className="w-5 h-5" />}
-              title="Repo Task"
+              title="Task"
               subtitle="Opens a PR against your repo"
               description="Agent clones a repo, modifies code on a branch, and opens a pull request. Full CI + review pipeline."
               disabled={repos.length === 0}
@@ -241,7 +241,7 @@ export default function NewTaskPage() {
               active={mode === "standalone"}
               onClick={() => setMode("standalone")}
               icon={<Terminal className="w-5 h-5" />}
-              title="Standalone Task"
+              title="Job"
               subtitle="Runs the agent, no PR"
               description="Agent runs in an isolated pod with no git checkout. Output is logs + side effects via Connections."
             />
@@ -417,7 +417,7 @@ export default function NewTaskPage() {
                   <a href="/repos" className="text-primary hover:underline">
                     Add a repo
                   </a>{" "}
-                  first, or switch to Standalone above.
+                  first, or switch to Job above.
                 </div>
               )}
 

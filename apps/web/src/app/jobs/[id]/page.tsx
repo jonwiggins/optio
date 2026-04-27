@@ -213,7 +213,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Standalone
+          Back to Jobs
         </Link>
         <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
           <XCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -237,7 +237,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
         subtitle={
           <Link href="/jobs" className="inline-flex items-center gap-1 hover:text-primary">
             <ArrowLeft className="w-3 h-3" />
-            Standalone
+            Jobs
           </Link>
         }
         state={workflow.enabled ? "enabled" : "disabled"}

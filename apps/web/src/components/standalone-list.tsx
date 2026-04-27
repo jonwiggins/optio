@@ -402,7 +402,7 @@ export function StandaloneList() {
                       <h3 className="font-semibold text-sm tracking-tight truncate">{wf.name}</h3>
                       <span className="shrink-0 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-text-muted/10 text-text-muted">
                         <Bot className="w-3 h-3" />
-                        Standalone
+                        Job
                       </span>
                     </div>
                     {wf.description && (

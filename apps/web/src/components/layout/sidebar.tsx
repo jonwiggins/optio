@@ -20,6 +20,9 @@ import {
   BarChart3,
   Activity,
   FileText,
+  GitPullRequest,
+  Calendar,
+  CircleDot,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
 import { WorkspaceSwitcher } from "./workspace-switcher";
@@ -45,6 +48,15 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Run",
     items: [
       { href: "/tasks", label: "Tasks", icon: ListTodo },
+      { href: "/jobs", label: "Jobs", icon: Zap },
+      { href: "/reviews", label: "Reviews", icon: GitPullRequest },
+      { href: "/issues", label: "Issues", icon: CircleDot },
+      { href: "/tasks/scheduled", label: "Scheduled", icon: Calendar },
+    ],
+  },
+  {
+    label: "Live",
+    items: [
       { href: "/agents", label: "Agents", icon: Bot },
       { href: "/sessions", label: "Sessions", icon: Terminal },
     ],
@@ -52,7 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Library",
     items: [
-      { href: "/templates", label: "Templates", icon: FileText },
+      { href: "/templates", label: "Prompts", icon: FileText },
       { href: "/repos", label: "Repos", icon: FolderGit2 },
       { href: "/connections", label: "Connections", icon: Plug },
     ],

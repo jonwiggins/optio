@@ -181,7 +181,7 @@ export default function WorkflowRunDetailPage({
             className="inline-flex items-center gap-1 hover:text-primary"
           >
             <ArrowLeft className="w-3 h-3" />
-            {workflow?.name ?? "Standalone task"}
+            {workflow?.name ?? "Job"}
           </Link>
         }
         state={run.state}
