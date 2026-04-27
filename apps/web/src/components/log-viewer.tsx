@@ -117,9 +117,33 @@ interface LogViewerProps {
     clear: () => void;
   };
   userMessages?: UserMessage[];
+  /**
+   * Sticky strip rendered ABOVE the existing toolbar. Use for connection
+   * status, cost meters, model pickers, "Thinking..." indicators —
+   * anything that belongs to the data source rather than the viewer itself.
+   */
+  status?: import("react").ReactNode;
+  /**
+   * Sticky footer rendered BELOW the log content. Used by the session and
+   * agent-chat surfaces to attach a message composer to the log stream.
+   */
+  composer?: import("react").ReactNode;
+  /**
+   * Override the default "Waiting for output..." empty message. Use to
+   * frame the empty state in the caller's voice (e.g. a session's
+   * "Ask the agent..." prompt).
+   */
+  emptyMessage?: import("react").ReactNode;
 }
 
-export function LogViewer({ taskId, externalLogs, userMessages }: LogViewerProps) {
+export function LogViewer({
+  taskId,
+  externalLogs,
+  userMessages,
+  status,
+  composer,
+  emptyMessage,
+}: LogViewerProps) {
   const internal = useLogs(taskId ?? "");
   const { logs, connected, capped, clear } = externalLogs ?? internal;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -281,6 +305,14 @@ export function LogViewer({ taskId, externalLogs, userMessages }: LogViewerProps
 
   return (
     <div className="flex flex-col h-full border border-border rounded-xl overflow-hidden bg-bg">
+      {/* Optional caller-supplied status strip — model picker, "Thinking…",
+          cost meter, etc. Lives above the toolbar so it persists across
+          search-bar open/close. */}
+      {status ? (
+        <div className="shrink-0 px-4 py-2 border-b border-border bg-bg-card/60 text-xs text-text-muted">
+          {status}
+        </div>
+      ) : null}
       {/* Search bar */}
       {searchOpen && (
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-card">
@@ -485,7 +517,9 @@ export function LogViewer({ taskId, externalLogs, userMessages }: LogViewerProps
       >
         {groups.length === 0 ? (
           <div className="text-text-muted/40 text-center py-12 font-sans">
-            {logTypeFilter || searchQuery ? "No matching logs" : "Waiting for output..."}
+            {logTypeFilter || searchQuery
+              ? "No matching logs"
+              : (emptyMessage ?? "Waiting for output...")}
           </div>
         ) : (
           groups.map((group, gi) => {
@@ -588,6 +622,12 @@ export function LogViewer({ taskId, externalLogs, userMessages }: LogViewerProps
           Scroll to bottom
         </button>
       )}
+
+      {/* Optional caller-supplied composer footer — message input for chat
+          and session surfaces. Sticks to the bottom of the viewer. */}
+      {composer ? (
+        <div className="shrink-0 border-t border-border bg-bg-card/80 px-3 py-2.5">{composer}</div>
+      ) : null}
     </div>
   );
 }
