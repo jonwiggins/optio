@@ -148,12 +148,32 @@ describe("parseClaudeEvent", () => {
     const result = parseClaudeEvent(line, TASK_ID);
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0].type).toBe("info");
-    expect(result.entries[0].content).toContain("Task completed successfully");
+    // The result event must NOT echo the assistant's final text: the same
+    // text was already streamed via an `assistant` text block, so including
+    // it here would render the agent's final line twice in the chat view
+    // (once plain, once green-tinted from the info-type highlight).
+    expect(result.entries[0].content).not.toContain("Task completed successfully");
     expect(result.entries[0].content).toContain("$0.0534");
     expect(result.entries[0].content).toContain("5 turns");
     expect(result.entries[0].metadata?.cost).toBe(0.0534);
     // The task worker closes stdin on terminal events so claude exits
     // instead of idling in stream-json input mode.
+    expect(result.isTerminal).toBe(true);
+  });
+
+  it("emits result-event metadata even when there is no result text", () => {
+    const line = JSON.stringify({
+      type: "result",
+      total_cost_usd: 0.001,
+      num_turns: 1,
+      duration_ms: 500,
+      session_id: "session-abc",
+    });
+    const result = parseClaudeEvent(line, TASK_ID);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].type).toBe("info");
+    expect(result.entries[0].content).toContain("1 turns");
+    expect(result.entries[0].content).toContain("$0.0010");
     expect(result.isTerminal).toBe(true);
   });
 
