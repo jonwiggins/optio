@@ -125,21 +125,25 @@ export function parseClaudeEvent(
   // the turn and, with --input-format stream-json, will sit idle waiting for
   // another user message. The task worker closes stdin when it sees this so
   // claude exits cleanly.
+  //
+  // We deliberately do NOT include `event.result` (the final assistant text)
+  // in the entry content: that same text was already streamed via an
+  // `assistant` text block, so echoing it here would render the agent's last
+  // line twice in chat — once plain, once green-tinted from the info-type
+  // "final answer" highlight.
   if (event.type === "result") {
-    const parts: string[] = [];
-    if (event.result) parts.push(event.result);
     const meta: string[] = [];
     if (event.num_turns) meta.push(`${event.num_turns} turns`);
     if (event.duration_ms) meta.push(`${(event.duration_ms / 1000).toFixed(1)}s`);
     if (event.total_cost_usd) meta.push(`$${event.total_cost_usd.toFixed(4)}`);
-    if (meta.length) parts.push(`(${meta.join(" · ")})`);
+    const content = meta.length ? `(${meta.join(" · ")})` : "";
 
     entries.push({
       taskId,
       timestamp,
       sessionId,
       type: "info",
-      content: parts.join(" "),
+      content,
       metadata: {
         cost: event.total_cost_usd,
         turns: event.num_turns,
