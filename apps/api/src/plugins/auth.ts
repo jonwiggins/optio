@@ -96,6 +96,9 @@ const AGENT_KEY_SECRETS = [
   "OPENAI_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "COPILOT_GITHUB_TOKEN",
+  "GEMINI_API_KEY",
+  "GOOGLE_CLOUD_PROJECT",
+  "CLAUDE_VERTEX_PROJECT_ID",
 ];
 
 let _setupCompleteCache: { value: boolean; expires: number } | null = null;

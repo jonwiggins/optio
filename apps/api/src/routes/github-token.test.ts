@@ -136,7 +136,12 @@ describe("POST /api/github-token/rotate", () => {
     const body = res.json();
     expect(body.success).toBe(true);
     expect(body.user).toEqual({ login: "newuser", name: "New User" });
-    expect(mockStoreSecret).toHaveBeenCalledWith("GITHUB_TOKEN", "ghp_newvalidtoken", "global");
+    expect(mockStoreSecret).toHaveBeenCalledWith(
+      "GITHUB_TOKEN",
+      "ghp_newvalidtoken",
+      "global",
+      undefined,
+    );
   });
 
   it("rejects an invalid token without storing it", async () => {

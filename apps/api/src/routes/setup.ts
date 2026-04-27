@@ -556,7 +556,11 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         const [, owner, repo] = match;
         const headers: Record<string, string> = { "User-Agent": "Optio" };
         let repoToken: string | null = token ?? null;
-        if (!repoToken) repoToken = await retrieveSecret("GITHUB_TOKEN").catch(() => null);
+        if (!repoToken) {
+          repoToken = await retrieveSecret("GITHUB_TOKEN", "global", req.user?.workspaceId).catch(
+            () => null,
+          );
+        }
         if (!repoToken && isGitHubAppConfigured()) {
           repoToken = await getInstallationToken().catch(() => null);
         }

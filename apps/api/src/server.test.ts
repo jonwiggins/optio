@@ -203,13 +203,16 @@ describe("error handler", () => {
 
 describe("Zod error sanitization", () => {
   const originalNodeEnv = process.env.NODE_ENV;
+  const originalAuthDisabled = process.env.OPTIO_AUTH_DISABLED;
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
+    process.env.OPTIO_AUTH_DISABLED = originalAuthDisabled;
   });
 
   it("returns field names only for Zod errors in production", async () => {
     process.env.NODE_ENV = "production";
+    process.env.OPTIO_AUTH_DISABLED = "true";
     const testApp = await buildServer();
 
     // Use /api/setup/ path to bypass auth middleware
@@ -240,6 +243,7 @@ describe("Zod error sanitization", () => {
 
   it("returns full Zod error details in development", async () => {
     process.env.NODE_ENV = "development";
+    process.env.OPTIO_AUTH_DISABLED = "true";
     const testApp = await buildServer();
 
     testApp.post("/api/setup/test-zod-dev", async () => {

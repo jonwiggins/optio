@@ -156,7 +156,7 @@ export async function githubTokenRoutes(rawApp: FastifyInstance) {
 
         const user = (await res.json()) as { login: string; name: string };
 
-        await storeSecret("GITHUB_TOKEN", token.trim(), "global");
+        await storeSecret("GITHUB_TOKEN", token.trim(), "global", req.user?.workspaceId);
 
         return reply.send({
           success: true,
