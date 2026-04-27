@@ -97,6 +97,27 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     },
   );
 
+  // Aggregated stats — must precede `/:id` so the literal segment wins
+  app.get(
+    "/api/persistent-agents/stats",
+    {
+      schema: {
+        operationId: "getPersistentAgentStats",
+        summary: "Get aggregated persistent agent stats",
+        description:
+          "Returns counts of `persistent_agents` grouped by state for the " +
+          "current workspace. Mirrors `/api/tasks/stats` so dashboards can " +
+          "render an agents stats bar symmetrically with tasks. Archived " +
+          "agents are excluded from `total` because they are terminal.",
+        tags: ["Persistent Agents"],
+      },
+    },
+    async (req, reply) => {
+      const stats = await paService.getPersistentAgentStats(req.user?.workspaceId ?? null);
+      reply.send({ stats });
+    },
+  );
+
   // Detail
   app.get(
     "/api/persistent-agents/:id",

@@ -115,3 +115,45 @@ describe("OverviewPage — section ordering", () => {
     expect(recentTasks.compareDocumentPosition(recentActivity) & FOLLOWING).toBeTruthy();
   });
 });
+
+describe("OverviewPage — Persistent Agents and Sessions stats bars", () => {
+  afterEach(() => cleanup());
+
+  it("hides the Persistent Agents and Sessions section labels when totals are zero", () => {
+    vi.mocked(useDashboardData).mockReturnValue(
+      makeDashboardData({
+        agentStats: { total: 0, idle: 0, queued: 0, running: 0, paused: 0, failed: 0, archived: 0 },
+        sessionStats: { total: 0, active: 0, ended: 0 },
+      }) as any,
+    );
+
+    render(<OverviewPage />);
+
+    expect(screen.queryByText("Persistent Agents")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sessions")).not.toBeInTheDocument();
+  });
+
+  it("renders the Persistent Agents section when total > 0", () => {
+    vi.mocked(useDashboardData).mockReturnValue(
+      makeDashboardData({
+        agentStats: { total: 3, idle: 2, queued: 0, running: 1, paused: 0, failed: 0, archived: 0 },
+      }) as any,
+    );
+
+    render(<OverviewPage />);
+
+    expect(screen.getByText("Persistent Agents")).toBeInTheDocument();
+  });
+
+  it("renders the Sessions section when total > 0", () => {
+    vi.mocked(useDashboardData).mockReturnValue(
+      makeDashboardData({
+        sessionStats: { total: 2, active: 2, ended: 0 },
+      }) as any,
+    );
+
+    render(<OverviewPage />);
+
+    expect(screen.getByText("Sessions")).toBeInTheDocument();
+  });
+});

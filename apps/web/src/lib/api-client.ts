@@ -1194,6 +1194,28 @@ export const api = {
       };
     }>("/api/jobs/stats"),
 
+  getPersistentAgentStats: () =>
+    request<{
+      stats: {
+        total: number;
+        idle: number;
+        queued: number;
+        running: number;
+        paused: number;
+        failed: number;
+        archived: number;
+      };
+    }>("/api/persistent-agents/stats"),
+
+  getSessionStats: () =>
+    request<{
+      stats: {
+        total: number;
+        active: number;
+        ended: number;
+      };
+    }>("/api/sessions/stats"),
+
   getWorkflow: (id: string) => request<{ workflow: any }>(`/api/jobs/${id}`),
 
   createWorkflow: (data: {

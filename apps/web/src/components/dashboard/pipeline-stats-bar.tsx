@@ -1,7 +1,18 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { Activity, CheckCircle, AlertTriangle, GitMerge, Eye, ListChecks } from "lucide-react";
-import type { TaskStats, StandaloneStats } from "./types.js";
+import {
+  Activity,
+  CheckCircle,
+  AlertTriangle,
+  GitMerge,
+  Eye,
+  ListChecks,
+  Pause,
+  Moon,
+  Archive,
+  XCircle,
+} from "lucide-react";
+import type { TaskStats, StandaloneStats, PersistentAgentStats, SessionStats } from "./types.js";
 
 type Stage = {
   key: string;
@@ -111,15 +122,103 @@ function standaloneStages(stats: StandaloneStats | null): Stage[] {
   ];
 }
 
+function agentStages(stats: PersistentAgentStats | null): Stage[] {
+  const href = "/agents";
+  return [
+    {
+      key: "idle",
+      label: "Idle",
+      value: stats?.idle ?? 0,
+      icon: Moon,
+      color: "var(--color-text-muted)",
+      href,
+    },
+    {
+      key: "queue",
+      label: "Queue",
+      value: stats?.queued ?? 0,
+      icon: ListChecks,
+      color: "var(--color-text-muted)",
+      href,
+    },
+    {
+      key: "running",
+      label: "Running",
+      value: stats?.running ?? 0,
+      icon: Activity,
+      color: "var(--color-primary)",
+      href,
+    },
+    {
+      key: "paused",
+      label: "Paused",
+      value: stats?.paused ?? 0,
+      icon: Pause,
+      color: "var(--color-warning)",
+      href,
+    },
+    {
+      key: "failed",
+      label: "Failed",
+      value: stats?.failed ?? 0,
+      icon: AlertTriangle,
+      color: "var(--color-error)",
+      href,
+    },
+    {
+      key: "archived",
+      label: "Archived",
+      value: stats?.archived ?? 0,
+      icon: Archive,
+      color: "var(--color-text-muted)",
+      href,
+    },
+  ];
+}
+
+function sessionStages(stats: SessionStats | null): Stage[] {
+  const href = "/sessions";
+  return [
+    {
+      key: "active",
+      label: "Active",
+      value: stats?.active ?? 0,
+      icon: Activity,
+      color: "var(--color-primary)",
+      href,
+    },
+    {
+      key: "ended",
+      label: "Ended (24h)",
+      value: stats?.ended ?? 0,
+      icon: XCircle,
+      color: "var(--color-text-muted)",
+      href,
+    },
+  ];
+}
+
 type PipelineStatsBarProps =
   | { variant?: "tasks"; taskStats: TaskStats | null }
-  | { variant: "standalone"; standaloneStats: StandaloneStats | null };
+  | { variant: "standalone"; standaloneStats: StandaloneStats | null }
+  | { variant: "agents"; agentStats: PersistentAgentStats | null }
+  | { variant: "sessions"; sessionStats: SessionStats | null };
 
 export function PipelineStatsBar(props: PipelineStatsBarProps) {
-  const stages =
-    props.variant === "standalone"
-      ? standaloneStages(props.standaloneStats)
-      : taskStages(props.taskStats);
+  let stages: Stage[];
+  switch (props.variant) {
+    case "standalone":
+      stages = standaloneStages(props.standaloneStats);
+      break;
+    case "agents":
+      stages = agentStages(props.agentStats);
+      break;
+    case "sessions":
+      stages = sessionStages(props.sessionStats);
+      break;
+    default:
+      stages = taskStages(props.taskStats);
+  }
 
   return (
     <div className="rounded-xl border border-border/50 bg-bg-card overflow-hidden">

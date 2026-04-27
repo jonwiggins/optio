@@ -13,6 +13,7 @@ const mockGetSessionPrs = vi.fn();
 const mockAddSessionPr = vi.fn();
 const mockGetActiveSessionCount = vi.fn();
 const mockListSessionChatEvents = vi.fn();
+const mockGetSessionStats = vi.fn();
 
 vi.mock("../services/interactive-session-service.js", () => ({
   listSessions: (...args: unknown[]) => mockListSessions(...args),
@@ -23,6 +24,7 @@ vi.mock("../services/interactive-session-service.js", () => ({
   addSessionPr: (...args: unknown[]) => mockAddSessionPr(...args),
   getActiveSessionCount: (...args: unknown[]) => mockGetActiveSessionCount(...args),
   listSessionChatEvents: (...args: unknown[]) => mockListSessionChatEvents(...args),
+  getSessionStats: (...args: unknown[]) => mockGetSessionStats(...args),
 }));
 
 const mockDbSelect = vi.fn();
@@ -384,5 +386,42 @@ describe("GET /api/sessions/active-count", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().count).toBe(3);
+  });
+});
+
+describe("GET /api/sessions/stats", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  it("returns aggregated session stats and forwards the workspace ID", async () => {
+    mockGetSessionStats.mockResolvedValue({
+      total: 5,
+      active: 3,
+      ended: 2,
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/sessions/stats" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.stats).toEqual({ total: 5, active: 3, ended: 2 });
+    expect(mockGetSessionStats).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("matches the literal `/stats` segment, not the `/:id` route", async () => {
+    // Regression: if Fastify routed `/api/sessions/stats` to `/api/sessions/:id`
+    // the request would either return 404 (session id "stats" not found) or
+    // hit getSession instead of getSessionStats.
+    mockGetSessionStats.mockResolvedValue({ total: 0, active: 0, ended: 0 });
+
+    const res = await app.inject({ method: "GET", url: "/api/sessions/stats" });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockGetSessionStats).toHaveBeenCalledTimes(1);
+    expect(mockGetSession).not.toHaveBeenCalled();
   });
 });
