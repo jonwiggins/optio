@@ -48,14 +48,17 @@ const ERROR_PATTERNS: Array<{
     }),
   },
   {
-    pattern: /Secret not found: (\w+)/i,
-    classify: (match) => ({
-      category: "auth",
-      title: `Missing secret: ${match[1]}`,
-      description: `The required secret "${match[1]}" is not configured. The agent needs this credential to run.`,
-      remedy: `Go to Secrets and add "${match[1]}", or re-run the setup wizard.`,
-      retryable: true,
-    }),
+    pattern: /Secret not found: (\w+)|no (\w+) secret found/i,
+    classify: (match) => {
+      const missingSecret = match[1] || match[2];
+      return {
+        category: "auth",
+        title: `Missing secret: ${missingSecret}`,
+        description: `The required secret "${missingSecret}" is not configured. The agent needs this credential to run.`,
+        remedy: `Go to Secrets and add "${missingSecret}", or re-run the setup wizard.`,
+        retryable: false, // Don't retry missing secrets - requires user action
+      };
+    },
   },
   {
     pattern:
@@ -72,7 +75,7 @@ const ERROR_PATTERNS: Array<{
         "  security find-generic-password -s \"Claude Code-credentials\" -w | python3 -c \"import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])\" | pbcopy\n\n" +
         "Or re-run 'claude setup-token' to go through the setup flow again.\n" +
         "Retry the failed tasks after updating the token.",
-      retryable: true,
+      retryable: false,
     }),
   },
   {
@@ -83,7 +86,7 @@ const ERROR_PATTERNS: Array<{
       description: "No Anthropic API key is configured and Claude Code cannot authenticate.",
       remedy:
         "Go to Secrets and add ANTHROPIC_API_KEY, or switch to Max subscription auth in Settings.",
-      retryable: true,
+      retryable: false,
     }),
   },
   {
@@ -94,7 +97,7 @@ const ERROR_PATTERNS: Array<{
       description:
         "No OpenAI API key is configured and the Codex agent cannot authenticate with the OpenAI API.",
       remedy: "Go to Secrets and add OPENAI_API_KEY with a valid OpenAI API key.",
-      retryable: true,
+      retryable: false,
     }),
   },
   {
@@ -105,7 +108,17 @@ const ERROR_PATTERNS: Array<{
       description: "No OpenClaw API key is configured and the OpenClaw agent cannot authenticate.",
       remedy:
         "Go to Secrets and add OPENCLAW_API_KEY, or provide an ANTHROPIC_API_KEY or OPENAI_API_KEY instead.",
-      retryable: true,
+      retryable: false,
+    }),
+  },
+  {
+    pattern: /GEMINI_API_KEY/i,
+    classify: () => ({
+      category: "auth",
+      title: "Gemini API key missing",
+      description: "No Gemini API key is configured and Gemini cannot authenticate.",
+      remedy: "Go to Secrets and add GEMINI_API_KEY with a valid Gemini API key.",
+      retryable: false,
     }),
   },
   {
@@ -117,7 +130,7 @@ const ERROR_PATTERNS: Array<{
         "No valid Copilot token is configured. The Copilot agent requires a GitHub token with Copilot Requests permission and an active Copilot subscription.",
       remedy:
         "Go to Secrets and add COPILOT_GITHUB_TOKEN with a fine-grained PAT that has the Copilot Requests permission. Classic PATs (ghp_) are not supported.",
-      retryable: true,
+      retryable: false,
     }),
   },
   {

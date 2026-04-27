@@ -22,7 +22,7 @@ export async function syncAllTickets(): Promise<number> {
     .where(eq(ticketProviders.enabled, true));
 
   // Fetch configured repos once before the provider loop (avoids redundant queries)
-  const configuredRepos = await db.select({ repoUrl: repos.repoUrl }).from(repos);
+  const configuredRepos = await db.select().from(repos);
 
   let totalSynced = 0;
 
@@ -37,8 +37,11 @@ export async function syncAllTickets(): Promise<number> {
         );
         const credentials = JSON.parse(secretJson);
         mergedConfig = { ...mergedConfig, ...credentials };
-      } catch {
-        // No secrets stored for this provider — use config as-is
+      } catch (secretErr) {
+        logger.warn(
+          { err: secretErr, source: providerConfig.source, id: providerConfig.id },
+          "[ticket-sync] Failed to retrieve secret for provider — using config as-is",
+        );
       }
 
       // GitHub fallback: if no token was supplied via config or provider secret,
@@ -142,6 +145,12 @@ export async function syncAllTickets(): Promise<number> {
         // Resolve agent type: ticket label > repo default > "claude-code"
         const { getRepoByUrl } = await import("./repo-service.js");
         const repoConfig = await getRepoByUrl(repoUrl);
+        if (!repoConfig) {
+          logger.warn(
+            { repoUrl, ticketId: ticket.externalId },
+            "[ticket-sync] Repository configuration not found. Task will be created without workspace context.",
+          );
+        }
         const labelAgent = ticket.labels.includes("codex")
           ? "codex"
           : ticket.labels.includes("copilot")
@@ -157,6 +166,7 @@ export async function syncAllTickets(): Promise<number> {
           ticketSource: ticket.source,
           ticketExternalId: ticket.externalId,
           metadata: { ticketUrl: ticket.url },
+          workspaceId: repoConfig?.workspaceId,
         });
 
         await taskService.transitionTask(task.id, TaskState.QUEUED, "ticket_sync");

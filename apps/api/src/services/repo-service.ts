@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { repos, workspaces } from "../db/schema.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
 import { normalizeRepoUrl, parseRepoUrl } from "@optio/shared";
+import { logger } from "../logger.js";
 
 export interface RepoRecord {
   id: string;
@@ -130,7 +131,8 @@ export async function getRepoByUrl(
     conditions.push(eq(repos.workspaceId, workspaceId));
   } else {
     // When no workspace is specified, try the default workspace first,
-    // then fall back to any repo with a NULL workspace_id
+    // then fall back to any repo with a NULL workspace_id,
+    // then fall back to any workspace (for background jobs like ticket sync)
     const defaultWsId = await getDefaultWorkspaceId();
     if (defaultWsId) {
       const [repo] = await db
@@ -139,7 +141,24 @@ export async function getRepoByUrl(
         .where(and(eq(repos.repoUrl, normalized), eq(repos.workspaceId, defaultWsId)));
       if (repo) return decryptRepoRow(repo);
     }
-    conditions.push(isNull(repos.workspaceId));
+    // Try NULL workspace_id
+    const [nullWsRepo] = await db
+      .select()
+      .from(repos)
+      .where(and(eq(repos.repoUrl, normalized), isNull(repos.workspaceId)));
+    if (nullWsRepo) return decryptRepoRow(nullWsRepo);
+    // Final fallback: any workspace (background jobs like ticket sync have no workspace context)
+    const anyRepos = await db.select().from(repos).where(eq(repos.repoUrl, normalized));
+    if (anyRepos.length > 0) {
+      if (anyRepos.length > 1) {
+        logger.warn(
+          { repoUrl: normalized, count: anyRepos.length },
+          "Multiple repos found with same URL across workspaces - returning first match",
+        );
+      }
+      return decryptRepoRow(anyRepos[0]);
+    }
+    return null;
   }
   const [repo] = await db
     .select()
