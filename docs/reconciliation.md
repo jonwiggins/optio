@@ -49,7 +49,7 @@ A snapshot is frozen — once read, the decision function only sees that point-i
 
 ## What it reconciles
 
-Two run kinds, two state machines.
+Four run kinds, four state machines. The `RunKind` discriminator is `"repo" | "standalone" | "pr-review" | "persistent-agent"` (see `packages/shared/src/reconcile/types.ts`).
 
 ### Repo runs (`tasks` table)
 
@@ -72,14 +72,36 @@ The repo decision function evaluates capacity, dependency state, pod health, PR 
 
 States: `queued`, `running`, `completed`, `failed`. Simpler — the decision function reads pod state and decides whether to enqueue the agent, transition, or back off.
 
+### PR-review runs (`pr_reviews` table)
+
+External PR reviews — code-review subtasks for PRs that aren't tied to a Repo Task. The decision function tracks pod state, review-agent completion, and re-runs on push events when configured. Lifted out of the Repo Task pipeline so external PRs can be reviewed without going through the worktree flow.
+
+### Persistent Agent runs (`persistent_agents` table)
+
+The state machine is **cyclic** rather than terminal — agents return to `idle` after each successful turn rather than transitioning to a terminal state.
+
+States: `idle`, `queued`, `provisioning`, `running`, `paused`, `failed`, `archived`.
+
+```
+idle ── pending msg / intent ──▶ queued ──▶ provisioning ──▶ running
+  ▲                                                              │
+  └────────────────── turn halted (success) ─────────────────────┘
+```
+
+The Persistent Agent decision function (`reconcile-persistent-agent.ts`) considers: pending inbox messages, control intent (`pause`, `resume`, `restart`, `archive`), pod lifecycle mode (`always-on` / `sticky` / `on-demand`), pod warm-window (`keep_warm_until`), `consecutive_failures` against `consecutive_failure_limit`, and reconcile backoff. Actions it can return include `enqueueTurn`, `provisionPod`, `markIdle`, `pausePod`, `archive`, `failPermanently`, plus the standard `patchStatus` / `deferWithBackoff` / `noop`.
+
+`paused` and `failed` require a manual `resume` control intent before the agent will act again. `archived` is terminal — the row is kept for history but no further turns are possible.
+
 ## Producers
 
-Three things enqueue a reconcile job:
+Several things enqueue a reconcile job:
 
-1. **State-change events.** `taskService.transitionTask` and `workflow-worker`'s `transitionRun` helper both fire `enqueueReconcile` after every successful transition. Anywhere the codebase changes a run's state, the reconciler is woken within milliseconds.
+1. **State-change events.** `taskService.transitionTask`, `workflow-worker`'s `transitionRun` helper, and the persistent-agent worker's per-turn finalizer all fire `enqueueReconcile` after every successful transition. Anywhere the codebase changes a run's state, the reconciler is woken within milliseconds.
 2. **PR poll updates.** The `pr-watcher-worker` polls open PRs every 30s, writes refreshed `prState` / `prChecksStatus` / `prReviewStatus` / `prReviewComments` to the row, then enqueues a reconcile so the decision function sees the new PR data.
 3. **Pod-health events.** When `repo-cleanup-worker` detects a crashed or OOM-killed pod, it marks worktrees dirty and enqueues a reconcile for each affected task — the reconciler observes `pod.phase=error` from the snapshot and fires the FAILED transition.
-4. **Periodic resync.** Every 5 minutes (configurable) the resync worker scans non-terminal runs in both tables and enqueues each one. Safety net for any signal that's lost.
+4. **Persistent Agent wakes.** `wakeAgent()` (called from the inbox API, the inter-agent HTTP API, the workflow-trigger worker on `target_type='persistent_agent'`, and the cleanup worker on warm-window expiry) enqueues a reconcile so the decision function picks up new messages or intents.
+5. **Control intents.** UI/API actions that set `control_intent` (`cancel`, `retry`, `resume`, `restart`, `pause`, `archive`) enqueue a reconcile so the decision function applies the intent.
+6. **Periodic resync.** Every 5 minutes (configurable) the resync worker scans non-terminal runs across all four tables and enqueues each one. Safety net for any signal that's lost.
 
 The queue dedups by `${kind}__${id}`, so multiple producers do not amplify load.
 
@@ -95,7 +117,7 @@ The queue dedups by `${kind}__${id}`, so multiple producers do not amplify load.
 
 ## Schema
 
-The `tasks` and `workflow_runs` tables each gained three columns (migration `1776686400_reconcile_columns.sql`):
+The `tasks`, `workflow_runs`, `pr_reviews`, and `persistent_agents` tables each carry the same three reconcile columns (`tasks` and `workflow_runs` got them via migration `1776686400_reconcile_columns.sql`; `persistent_agents` includes them in its own migration):
 
 | Column                    | Type          | Purpose                                                     |
 | ------------------------- | ------------- | ----------------------------------------------------------- |
@@ -107,16 +129,18 @@ All three are nullable / default zero, so no backfill was required.
 
 ## Code map
 
-| File                                                          | Role                                            |
-| ------------------------------------------------------------- | ----------------------------------------------- |
-| `packages/shared/src/reconcile/types.ts`                      | `RunRef`, `WorldSnapshot`, `Action` unions      |
-| `packages/shared/src/reconcile/reconcile-repo.ts`             | Pure decision logic for repo runs               |
-| `packages/shared/src/reconcile/reconcile-standalone.ts`       | Pure decision logic for standalone runs         |
-| `apps/api/src/workers/reconcile-worker.ts`                    | BullMQ consumer + resync worker                 |
-| `apps/api/src/services/reconcile-snapshot.ts`                 | Builds the frozen world view                    |
-| `apps/api/src/services/reconcile-executor.ts`                 | CAS-gated mutations; delegates to `taskService` |
-| `apps/api/src/services/reconcile-queue.ts`                    | Queue setup and dedup-aware enqueue helpers     |
-| `apps/api/src/db/migrations/1776686400_reconcile_columns.sql` | Schema columns                                  |
+| File                                                          | Role                                                  |
+| ------------------------------------------------------------- | ----------------------------------------------------- |
+| `packages/shared/src/reconcile/types.ts`                      | `RunKind`, `RunRef`, `WorldSnapshot`, `Action` unions |
+| `packages/shared/src/reconcile/reconcile-repo.ts`             | Pure decision logic for repo runs                     |
+| `packages/shared/src/reconcile/reconcile-standalone.ts`       | Pure decision logic for standalone runs               |
+| `packages/shared/src/reconcile/reconcile-pr-review.ts`        | Pure decision logic for external PR reviews           |
+| `packages/shared/src/reconcile/reconcile-persistent-agent.ts` | Pure decision logic for Persistent Agents             |
+| `apps/api/src/workers/reconcile-worker.ts`                    | BullMQ consumer + resync worker                       |
+| `apps/api/src/services/reconcile-snapshot.ts`                 | Builds the frozen world view                          |
+| `apps/api/src/services/reconcile-executor.ts`                 | CAS-gated mutations; delegates to `taskService`       |
+| `apps/api/src/services/reconcile-queue.ts`                    | Queue setup and dedup-aware enqueue helpers           |
+| `apps/api/src/db/migrations/1776686400_reconcile_columns.sql` | Schema columns for `tasks` + `workflow_runs`          |
 
 Decision logic is exhaustively tested in `packages/shared/src/reconcile/*.test.ts`. Because the decision functions are pure, every state machine edge case is covered without mocking I/O.
 

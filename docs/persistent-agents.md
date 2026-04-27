@@ -142,7 +142,12 @@ A four-agent engineering team:
 - **Sentinel** — reviewer
 - **Chronicler** — scribe (maintains team journal)
 
-See [`demos/the-forge/README.md`](../demos/the-forge/README.md).
+See [`demos/the-forge/README.md`](../demos/the-forge/README.md). A self-contained,
+runnable copy lives at [`examples/persistent-agents/forge/`](../examples/persistent-agents/forge/).
+
+For more runnable examples (including the seven-agent
+[Mars Mission Control](../examples/persistent-agents/mars-mission-control/)
+incident-response scenario), see [`examples/README.md`](../examples/README.md).
 
 ## Reconciliation
 

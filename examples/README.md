@@ -68,11 +68,13 @@ OPTIO_API_TOKEN=$(cat ~/.optio-token) \
 
 After provisioning, open the corresponding UI surface:
 
-| Tier              | UI                               |
-| ----------------- | -------------------------------- |
-| Persistent Agents | `/agents` (list) → `/agents/:id` |
-| Repo Tasks        | `/tasks?tab=repo`                |
-| Standalone Tasks  | `/tasks?tab=standalone`          |
+| Tier                       | UI                               |
+| -------------------------- | -------------------------------- |
+| Persistent Agents (Agents) | `/agents` (list) → `/agents/:id` |
+| Repo Tasks (Tasks)         | `/tasks` (list) → `/tasks/:id`   |
+| Standalone Tasks (Jobs)    | `/jobs` (list) → `/jobs/:id`     |
+
+> The v0.4 sidebar split each tier into its own top-level route under **Run** (Tasks · Jobs · Reviews · Issues · Scheduled) and **Live** (Agents · Sessions). The legacy `/tasks?tab=…` URLs redirect to the dedicated pages.
 
 ## Cleanup
 

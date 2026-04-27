@@ -9,7 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Persistent Agents** — a third Task tier alongside Repo Tasks and Standalone Tasks. Long-lived, named, message-driven agents that wake on user messages, agent messages, webhooks, cron ticks, or ticket events. Each agent has a stable slug, addressable by other agents in the same workspace via an inter-agent HTTP API. Three configurable pod lifecycle modes: `always-on`, `sticky` (default, with idle warm window), and `on-demand`. Cyclic state machine reconciled by the existing K8s-style control plane. New `/agents` UI with chat, turn history, live activity stream, and pause/resume/restart/archive controls. See [docs/persistent-agents.md](docs/persistent-agents.md) and the four-agent demo in [demos/the-forge](demos/the-forge/README.md).
+- **Persistent Agents** — a third Task tier alongside Repo Tasks and Standalone Tasks. Long-lived, named, message-driven agents that wake on user messages, agent messages, webhooks, cron ticks, or ticket events. Each agent has a stable slug, addressable by other agents in the same workspace via an inter-agent HTTP API. Three configurable pod lifecycle modes: `always-on`, `sticky` (default, with idle warm window), and `on-demand`. Cyclic state machine reconciled by the existing K8s-style control plane (now a fourth `RunKind`: `persistent-agent`). New `/agents` UI with chat, turn history, live activity stream, and pause/resume/restart/archive controls. See [docs/persistent-agents.md](docs/persistent-agents.md) and the four-agent demo in [demos/the-forge](demos/the-forge/README.md).
+- **Issues** as a top-level nav item — the GitHub Issues queue is now its own page at `/issues`, promoted out of the `/tasks` tab strip.
+- **Reviews** as a top-level nav item — code-review subtasks plus external PR reviews now live at `/reviews` (and `/reviews/:id`), with their own reconciler `RunKind` (`pr-review`).
+- **Examples directory** — runnable, self-contained agent configurations under [`examples/`](examples/README.md), starting with two Persistent Agent setups (Forge and Mars Mission Control). Each example is idempotent — re-running `setup.sh` is safe.
+
+### Changed
+
+- **Sidebar nav reorganized.** The hub-and-tabs `/tasks` page is gone. Each tier has its own dedicated route, grouped into **Run** (Tasks · Jobs · Reviews · Issues · Scheduled) and **Live** (Agents · Sessions). The Library group renamed "Templates" to **Prompts** to free that label. Legacy `/tasks?tab=…` URLs redirect to the dedicated pages.
+- **User-facing names finalised.** Repo Tasks → **Tasks**; Standalone Tasks → **Jobs** (matching the existing `/api/jobs` URL); PR Reviews → **Reviews**; Persistent Agents → **Agents**; Templates (in the Library) → **Prompts**. Backend table names (`tasks`, `task_configs`, `workflows`, `prompt_templates`) are unchanged.
+
+### Migration notes
+
+> Upgrading from 0.3.x — there are no required user actions. URL/nav changes:
+>
+> - `/tasks?tab=standalone` → `/jobs` (auto-redirected)
+> - `/tasks?tab=issues` → `/issues` (auto-redirected)
+> - `/tasks?tab=prs` → `/reviews` (auto-redirected)
+> - The "Templates" sidebar item is now labeled **Prompts** but still points to `/templates`.
+> - The new `/agents` route requires the v0.4 schema migration (`1777200001_persistent_agents.sql`) — applied automatically on API startup.
+>
+> No data migration is needed. Existing tasks, workflows, triggers, and templates continue to work unchanged.
 
 ## [0.3.2] - 2026-04-24
 
