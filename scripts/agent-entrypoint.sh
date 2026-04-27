@@ -34,12 +34,18 @@ echo "[optio] Working on branch: ${BRANCH_NAME}"
 if [ -n "${OPTIO_SETUP_FILES:-}" ]; then
   echo "[optio] Writing setup files..."
   echo "${OPTIO_SETUP_FILES}" | base64 -d | python3 -c "
-import json, sys, os
+import json, sys, os, base64
 files = json.load(sys.stdin)
 for f in files:
-    os.makedirs(os.path.dirname(f['path']), exist_ok=True)
-    with open(f['path'], 'w') as fh:
-        fh.write(f['content'])
+    parent = os.path.dirname(f['path'])
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    if 'contentBase64' in f and f['contentBase64'] is not None:
+        with open(f['path'], 'wb') as fh:
+            fh.write(base64.b64decode(f['contentBase64']))
+    else:
+        with open(f['path'], 'w') as fh:
+            fh.write(f.get('content', ''))
     if f.get('executable'):
         os.chmod(f['path'], 0o755)
     elif f.get('sensitive'):

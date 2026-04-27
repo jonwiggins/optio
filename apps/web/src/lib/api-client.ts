@@ -944,6 +944,38 @@ export const api = {
 
   deleteSkill: (id: string) => request<void>(`/api/skills/${id}`, { method: "DELETE" }),
 
+  // Installed (marketplace-sourced) Skills — Phase 2 of issue #497
+  listInstalledSkills: (scope?: string) => {
+    const qs = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    return request<{ skills: any[] }>(`/api/installed-skills${qs}`);
+  },
+  getInstalledSkill: (id: string) => request<{ skill: any }>(`/api/installed-skills/${id}`),
+  createInstalledSkill: (data: {
+    name: string;
+    description?: string;
+    sourceUrl: string;
+    ref?: string;
+    subpath?: string;
+    repoUrl?: string;
+    agentTypes?: string[];
+    enabled?: boolean;
+  }) =>
+    request<{ skill: any }>("/api/installed-skills", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateInstalledSkill: (id: string, data: Record<string, unknown>) =>
+    request<{ skill: any }>(`/api/installed-skills/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deleteInstalledSkill: (id: string) =>
+    request<void>(`/api/installed-skills/${id}`, { method: "DELETE" }),
+  syncInstalledSkill: (id: string) =>
+    request<{ skill: any }>(`/api/installed-skills/${id}/sync`, {
+      method: "POST",
+    }),
+
   // PR Reviews — canonical endpoints live under /api/pr-reviews.
   listPullRequests: (params?: { repoId?: string }) => {
     const qs = new URLSearchParams();
@@ -1035,6 +1067,8 @@ export const api = {
     enabledTools?: string[];
     confirmWrites?: boolean;
     maxTurns?: number;
+    defaultReviewAgentType?: string | null;
+    defaultReviewModel?: string | null;
   }) =>
     request<{ settings: any }>("/api/optio/settings", {
       method: "PUT",

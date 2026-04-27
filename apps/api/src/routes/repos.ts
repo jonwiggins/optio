@@ -8,6 +8,8 @@ import {
   validateRequestLimitPair,
   parseCpuMillicores,
   parseMemoryMi,
+  AGENT_TYPES,
+  modelBelongsToAgentCatalog,
 } from "@optio/shared";
 import { requireRole } from "../plugins/auth.js";
 import { getGitHubToken } from "../services/github-token-service.js";
@@ -15,6 +17,8 @@ import { isSsrfSafeUrl } from "../utils/ssrf.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { RepoSchema } from "../schemas/integration.js";
+import { resolveReviewConfig } from "../services/review-config.js";
+import * as optioSettingsService from "../services/optio-settings-service.js";
 
 const createRepoSchema = z
   .object({
@@ -59,6 +63,11 @@ const updateRepoSchema = z
     reviewTrigger: z.string().optional(),
     reviewPromptTemplate: z.string().nullable().optional(),
     testCommand: z.string().optional(),
+    reviewAgentType: z
+      .enum([...AGENT_TYPES] as [string, ...string[]])
+      .nullable()
+      .optional()
+      .describe("Override the agent used for code reviews. Null = inherit."),
     reviewModel: z.string().optional(),
     externalReviewMode: z.enum(["off", "on_request", "on_pr_hold", "on_pr_post"]).optional(),
     externalReviewFilters: z
@@ -141,7 +150,29 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       if (wsId && repo.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Repo not found" });
       }
-      reply.send({ repo });
+
+      // Compute the effective review agent + model so the UI can show
+      // "Inherit from repo default → gemini · gemini-2.5-pro" hints when
+      // the per-repo overrides are unset. Errors here are non-fatal — the
+      // UI can fall back to the raw stored values.
+      const globalSettings = await optioSettingsService
+        .getSettings(repo.workspaceId ?? null)
+        .catch(() => null);
+      const resolved = resolveReviewConfig({
+        repoReviewAgentType: repo.reviewAgentType ?? null,
+        repoDefaultAgentType: repo.defaultAgentType ?? null,
+        repoReviewModel: repo.reviewModel ?? null,
+        globalDefaultReviewAgentType: globalSettings?.defaultReviewAgentType ?? null,
+        globalDefaultReviewModel: globalSettings?.defaultReviewModel ?? null,
+      });
+
+      reply.send({
+        repo: {
+          ...repo,
+          effectiveReviewAgentType: resolved.agentType,
+          effectiveReviewModel: resolved.model,
+        },
+      });
     },
   );
 
@@ -270,6 +301,19 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       if (!memPair.valid) resourceErrors.push(memPair.error!);
       if (resourceErrors.length > 0) {
         return reply.status(400).send({ error: resourceErrors.join(" ") });
+      }
+
+      // Reject reviewAgentType + reviewModel combinations where the model
+      // belongs to a different agent's catalog (e.g. agent=gemini, model=sonnet).
+      // If only the agent changes, the resolver picks the catalog default.
+      const incomingReviewAgent = body.reviewAgentType ?? undefined;
+      const incomingReviewModel = body.reviewModel;
+      if (incomingReviewAgent && incomingReviewModel) {
+        if (!modelBelongsToAgentCatalog(incomingReviewAgent, incomingReviewModel)) {
+          return reply.status(400).send({
+            error: `Review model "${incomingReviewModel}" does not belong to the "${incomingReviewAgent}" catalog.`,
+          });
+        }
       }
 
       const repo = await repoService.updateRepo(id, body);

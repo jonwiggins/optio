@@ -1,0 +1,27 @@
+{{/*
+Persistent volume for the marketplace-skills cache. Used by the API deployment
+to park content-addressable git clones (keyed by resolved commit SHA) so
+multiple installed-skill rows pinned to the same SHA share a single copy.
+
+This PVC is opt-in: when installedSkillsCache.enabled is false, the API still
+runs but installed skills can't be synced (the directory falls back to an
+emptyDir mount that resets on restart, which means every API rollout would
+re-clone every skill).
+*/}}
+{{- if .Values.installedSkillsCache.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-installed-skills-cache
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "optio.labels" . | nindent 4 }}
+spec:
+  accessModes: {{ .Values.installedSkillsCache.accessModes | toJson }}
+  resources:
+    requests:
+      storage: {{ .Values.installedSkillsCache.size }}
+  {{- if .Values.installedSkillsCache.storageClass }}
+  storageClassName: {{ .Values.installedSkillsCache.storageClass | quote }}
+  {{- end }}
+{{- end }}

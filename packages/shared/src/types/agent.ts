@@ -48,10 +48,17 @@ export interface AgentContainerConfig {
   env: Record<string, string>;
   requiredSecrets: string[];
   image?: string;
-  /** Files to create inside the container before running the agent */
+  /**
+   * Files to create inside the container before running the agent. The
+   * entrypoint writes `content` as text by default; if `contentBase64` is
+   * set it takes precedence and is decoded to bytes (used for binary
+   * payloads from marketplace skills). When using `contentBase64`, set
+   * `content` to an empty string.
+   */
   setupFiles?: Array<{
     path: string;
     content: string;
+    contentBase64?: string;
     executable?: boolean;
     /** Mark as sensitive to apply restrictive permissions (chmod 600) */
     sensitive?: boolean;

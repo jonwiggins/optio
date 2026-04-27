@@ -68,6 +68,7 @@ async function main() {
   const { startTokenValidationWorker } = await import("./workers/token-validation-worker.js");
   const { startReconcileWorker, startReconcileResyncWorker } =
     await import("./workers/reconcile-worker.js");
+  const { startSkillSyncWorker } = await import("./workers/skill-sync-worker.js");
   const { getBullMQConnectionOptions } = await import("./services/redis-config.js");
   const { logTlsStackInfo, initTlsObservability } = await import("./services/tls-observability.js");
 
@@ -195,6 +196,7 @@ async function main() {
     cleanRepeatJobs("token-validation"),
     cleanRepeatJobs("reconcile"),
     cleanRepeatJobs("reconcile-resync"),
+    cleanRepeatJobs("skill-sync"),
   ]);
 
   // Start BullMQ workers (each re-registers its repeat job)
@@ -236,6 +238,9 @@ async function main() {
   const reconcileResyncWorker = startReconcileResyncWorker();
   logger.info("Reconcile workers started");
 
+  const skillSyncWorker = startSkillSyncWorker();
+  logger.info("Skill sync worker started");
+
   // Check if metrics-server is available
   checkMetricsServer().catch(() => {});
 
@@ -261,6 +266,7 @@ async function main() {
     await tokenValidationWorker.close();
     await reconcileWorker.close();
     await reconcileResyncWorker.close();
+    await skillSyncWorker.close();
     await app.close();
     // Flush pending OTel spans/metrics with 5s timeout
     await shutdownTelemetry();

@@ -66,6 +66,8 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: installed-skills-cache
+              mountPath: /opt/optio/skills-cache
             {{- if and .Values.postgresql.enabled .Values.postgresql.tls.enabled }}
             - name: pg-ca
               mountPath: /etc/optio
@@ -128,6 +130,13 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: installed-skills-cache
+          {{- if .Values.installedSkillsCache.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-installed-skills-cache
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
         {{- if and .Values.postgresql.enabled .Values.postgresql.tls.enabled }}
         - name: pg-ca
           secret:

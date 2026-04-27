@@ -84,3 +84,61 @@ export interface UpdateCustomSkillInput {
   agentTypes?: string[] | null;
   enabled?: boolean;
 }
+
+/**
+ * A skill installed from a remote source (e.g. an Anthropic marketplace
+ * "skill" repo). The body of the skill lives in a content-addressable cache
+ * PVC keyed by `resolvedSha`; the row records what to fetch and how to scope
+ * it. Today only `sourceType = "git"` is supported.
+ */
+export type InstalledSkillSourceType = "git";
+
+export interface InstalledSkillManifest {
+  /** SKILL.md frontmatter (best-effort YAML parse). */
+  frontmatter?: Record<string, unknown>;
+  /** Files discovered under the resolved subpath. */
+  files?: Array<{ relativePath: string; sizeBytes: number; executable: boolean }>;
+}
+
+export interface InstalledSkillConfig {
+  id: string;
+  name: string;
+  description?: string | null;
+  sourceType: InstalledSkillSourceType;
+  sourceUrl: string;
+  ref: string;
+  resolvedSha?: string | null;
+  subpath: string;
+  scope: string;
+  repoUrl?: string | null;
+  workspaceId?: string | null;
+  agentTypes?: string[] | null;
+  enabled: boolean;
+  lastSyncedAt?: Date | null;
+  lastSyncError?: string | null;
+  cachedManifest?: InstalledSkillManifest | null;
+  hasExecutableFiles: boolean;
+  totalSizeBytes?: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreateInstalledSkillInput {
+  name: string;
+  description?: string;
+  sourceUrl: string;
+  ref?: string;
+  subpath?: string;
+  repoUrl?: string;
+  agentTypes?: string[];
+  enabled?: boolean;
+}
+
+export interface UpdateInstalledSkillInput {
+  name?: string;
+  description?: string | null;
+  ref?: string;
+  subpath?: string;
+  agentTypes?: string[] | null;
+  enabled?: boolean;
+}
