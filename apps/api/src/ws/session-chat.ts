@@ -7,11 +7,13 @@ import {
   listSessionChatEvents,
 } from "../services/interactive-session-service.js";
 import { getSettings } from "../services/optio-settings-service.js";
+import { getAgentCredentials } from "../services/agent-credential-service.js";
 import { db } from "../db/client.js";
 import { repoPods, repos, interactiveSessions } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
+import { parseGeminiEvent } from "../services/gemini-event-parser.js";
 import { publishSessionEvent } from "../services/event-bus.js";
 import type { ExecSession, OptioSettings } from "@optio/shared";
 import { authenticateWs, extractSessionToken } from "./ws-auth.js";
@@ -23,6 +25,7 @@ import {
   WS_CLOSE_CONNECTION_LIMIT,
   WS_CLOSE_MESSAGE_TOO_LARGE,
 } from "./ws-limits.js";
+import { buildSetupFilesScript } from "../utils/setup-files.js";
 
 /**
  * Session chat WebSocket handler.
@@ -106,15 +109,24 @@ export async function sessionChatWs(app: FastifyInstance) {
       return;
     }
 
-    // Get repo config for model defaults
+    // Get repo config for model defaults and agent type
     const [repoConfig] = await db.select().from(repos).where(eq(repos.repoUrl, session.repoUrl));
 
     // Load Optio agent settings (model, system prompt, tool filtering, etc.)
     const workspaceId = req.user?.workspaceId ?? null;
     const optioSettings = await getSettings(workspaceId);
 
-    // Optio settings take precedence, then repo config, then default
-    let currentModel = optioSettings.model || repoConfig?.claudeModel || "sonnet";
+    // Determine agent type from repo config (defaults to claude-code)
+    const agentType = (repoConfig?.defaultAgentType || "claude-code") as any;
+
+    // Model selection depends on agent type - use repo config, not optio settings
+    // (optioSettings.model is for Optio chat interface, not interactive sessions)
+    let currentModel: string;
+    if (agentType === "gemini") {
+      currentModel = repoConfig?.geminiModel || "gemini-2.5-flash";
+    } else {
+      currentModel = repoConfig?.claudeModel || "sonnet";
+    }
 
     const rt = getRuntime();
     const handle = { id: pod.podId ?? pod.podName, name: pod.podName };
@@ -126,8 +138,20 @@ export async function sessionChatWs(app: FastifyInstance) {
     let outputBuffer = "";
     let promptCount = 0;
 
-    // Resolve auth env vars for the claude process
-    const authEnv = await buildAuthEnv(log, user.id);
+    // Resolve auth env vars and setup files for the agent
+    let authEnv: Record<string, string> = {};
+    let authSetupFiles: Array<{ path: string; content: string; sensitive?: boolean }> = [];
+    try {
+      const credentials = await getAgentCredentials(agentType, session.workspaceId, session.userId);
+      authEnv = credentials.env;
+      authSetupFiles = credentials.setupFiles ?? [];
+      log.info(
+        { agentType, envVarCount: Object.keys(authEnv).length },
+        "Loaded agent credentials for session chat",
+      );
+    } catch (err) {
+      log.warn({ err, agentType }, "Failed to retrieve agent credentials for session chat");
+    }
 
     const send = (msg: Record<string, unknown>) => {
       if (socket.readyState === 1) {
@@ -135,11 +159,12 @@ export async function sessionChatWs(app: FastifyInstance) {
       }
     };
 
-    // Send initial status with model info and settings
+    // Send initial status with model info, agent type, and settings
     send({
       type: "status",
       status: "ready",
       model: currentModel,
+      agentType,
       costUsd: cumulativeCost,
       settings: {
         maxTurns: optioSettings.maxTurns,
@@ -211,9 +236,17 @@ export async function sessionChatWs(app: FastifyInstance) {
         fullPrompt = `${prompt}\n\n[Additional instructions: ${optioSettings.systemPrompt}]`;
       }
 
-      // Build the claude command
+      // Build the agent command
       const escapedPrompt = fullPrompt.replace(/'/g, "'\\''");
-      const modelFlag = currentModel ? `--model ${currentModel}` : "";
+      let agentCommand: string;
+      if (agentType === "gemini") {
+        const modelFlag = currentModel ? `-m ${currentModel}` : "";
+        agentCommand = `gemini -p '${escapedPrompt}' ${modelFlag} --output-format stream-json --approval-mode yolo < /dev/null || true`;
+      } else {
+        // claude-code, codex, copilot, etc.
+        const modelFlag = currentModel ? `--model ${currentModel}` : "";
+        agentCommand = `claude -p '${escapedPrompt}' ${modelFlag} --output-format stream-json --verbose --dangerously-skip-permissions < /dev/null || true`;
+      }
 
       // Build auth passthrough env vars so the agent can make
       // authenticated API calls on behalf of the requesting user.
@@ -226,20 +259,28 @@ export async function sessionChatWs(app: FastifyInstance) {
         passthroughEnv.OPTIO_API_URL = apiUrl;
       }
 
+      // Build script to write auth setup files (e.g., Vertex AI service account keys)
+      const setupFilesScript = buildSetupFilesScript(
+        authSetupFiles,
+        "[optio] Writing agent credential files...",
+      );
+
       const script = [
         "set -e",
         // Wait for repo to be ready
         "for i in $(seq 1 30); do [ -f /workspace/.ready ] && break; sleep 1; done",
         '[ -f /workspace/.ready ] || { echo "Repo not ready"; exit 1; }',
+        // Write auth setup files if present
+        ...(setupFilesScript ? [setupFilesScript] : []),
         `cd "${worktreePath}"`,
-        // Set auth env vars for the Claude process
+        // Set auth env vars for the agent process
         ...Object.entries(authEnv).map(([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`),
         // Set auth passthrough env vars for Optio API calls
         ...Object.entries(passthroughEnv).map(
           ([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`,
         ),
-        // Run claude in one-shot prompt mode with streaming JSON output
-        `claude -p '${escapedPrompt}' ${modelFlag} --output-format stream-json --verbose --dangerously-skip-permissions 2>&1 || true`,
+        // Run agent in one-shot prompt mode with streaming JSON output
+        agentCommand,
       ].join("\n");
 
       try {
@@ -254,7 +295,11 @@ export async function sessionChatWs(app: FastifyInstance) {
 
           for (const line of lines) {
             if (!line.trim()) continue;
-            const { entries } = parseClaudeEvent(line, sessionId);
+            // Use agent-specific parser
+            const { entries } =
+              agentType === "gemini"
+                ? parseGeminiEvent(line, sessionId)
+                : parseClaudeEvent(line, sessionId);
             for (const entry of entries) {
               send({ type: "chat_event", event: entry });
               persistChatEvent(sessionId, entry, log);
@@ -292,7 +337,10 @@ export async function sessionChatWs(app: FastifyInstance) {
           execSession!.stdout.on("end", () => {
             // Process any remaining buffer
             if (outputBuffer.trim()) {
-              const { entries } = parseClaudeEvent(outputBuffer, sessionId);
+              const { entries } =
+                agentType === "gemini"
+                  ? parseGeminiEvent(outputBuffer, sessionId)
+                  : parseClaudeEvent(outputBuffer, sessionId);
               for (const entry of entries) {
                 send({ type: "chat_event", event: entry });
                 persistChatEvent(sessionId, entry, log);
@@ -369,6 +417,7 @@ export async function sessionChatWs(app: FastifyInstance) {
               type: "status",
               status: isProcessing ? "thinking" : "idle",
               model: currentModel,
+              agentType,
             });
           }
           break;
@@ -390,50 +439,6 @@ export async function sessionChatWs(app: FastifyInstance) {
 }
 
 /** Build auth environment variables for the claude process in the pod. */
-async function buildAuthEnv(
-  log: { warn: (obj: any, msg: string) => void },
-  userId?: string | null,
-): Promise<Record<string, string>> {
-  const env: Record<string, string> = {};
-
-  try {
-    const { retrieveSecret, retrieveSecretWithFallback } =
-      await import("../services/secret-service.js");
-    const authMode = (await retrieveSecret("CLAUDE_AUTH_MODE").catch(() => null)) as string | null;
-
-    if (authMode === "api-key") {
-      const apiKey = await retrieveSecretWithFallback(
-        "ANTHROPIC_API_KEY",
-        "global",
-        undefined,
-        userId,
-      ).catch(() => null);
-      if (apiKey) {
-        env.ANTHROPIC_API_KEY = apiKey as string;
-      }
-    } else if (authMode === "max-subscription") {
-      const { getClaudeAuthToken } = await import("../services/auth-service.js");
-      const result = getClaudeAuthToken();
-      if (result.available && result.token) {
-        env.CLAUDE_CODE_OAUTH_TOKEN = result.token;
-      }
-    } else if (authMode === "oauth-token") {
-      const token = await retrieveSecretWithFallback(
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "global",
-        undefined,
-        userId,
-      ).catch(() => null);
-      if (token) {
-        env.CLAUDE_CODE_OAUTH_TOKEN = token as string;
-      }
-    }
-  } catch (err) {
-    log.warn({ err }, "Failed to build auth env for session chat");
-  }
-
-  return env;
-}
 
 /** Update the cumulative cost on the session record. */
 async function updateSessionCost(sessionId: string, costUsd: number) {

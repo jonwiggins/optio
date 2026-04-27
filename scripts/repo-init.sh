@@ -103,8 +103,9 @@ echo "[optio] Cloning..."
 git clone --branch "${OPTIO_REPO_BRANCH}" --recurse-submodules "${OPTIO_REPO_URL}" repo 2>&1
 echo "[optio] Repo cloned"
 
-# Create tasks directory for worktrees
+# Create directories for worktrees
 mkdir -p /workspace/tasks
+mkdir -p /workspace/sessions
 
 # Run repo-level setup if present (.optio/setup.sh)
 if [ -f /workspace/repo/.optio/setup.sh ]; then

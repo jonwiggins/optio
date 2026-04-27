@@ -51,10 +51,13 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const [showEndWarning, setShowEndWarning] = useState(false);
   const [liveCost, setLiveCost] = useState<number>(0);
   const [selectedModel, setSelectedModel] = useState<string>("");
+  const [agentType, setAgentType] = useState<string>("claude-code");
+  const [availableModels, setAvailableModels] = useState<{ id: string; label: string }[]>([]);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
 
-  // Ref for "send to agent" handler
+  // Refs for agent chat handlers
   const sendToAgentRef = useRef<((text: string) => void) | null>(null);
+  const modelChangeRef = useRef<((model: string) => void) | null>(null);
 
   const fetchSession = async () => {
     try {
@@ -113,6 +116,19 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
   const handleSendToAgentRegister = useCallback((handler: (text: string) => void) => {
     sendToAgentRef.current = handler;
+  }, []);
+
+  const handleModelUpdate = useCallback(
+    (model: string, agent: string, models: { id: string; label: string }[]) => {
+      setSelectedModel(model);
+      setAgentType(agent);
+      setAvailableModels(models);
+    },
+    [],
+  );
+
+  const handleModelChangeRegister = useCallback((handler: (model: string) => void) => {
+    modelChangeRef.current = handler;
   }, []);
 
   if (loading) {
@@ -189,14 +205,14 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             )}
 
             {/* Model selector */}
-            {isActive && modelConfig && (
+            {isActive && selectedModel && availableModels.length > 0 && (
               <div className="relative">
                 <button
                   onClick={() => setShowModelDropdown(!showModelDropdown)}
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-bg-card border border-border text-text-muted hover:text-text transition-colors"
                 >
                   <Bot className="w-3 h-3" />
-                  {selectedModel}
+                  {availableModels.find((m) => m.id === selectedModel)?.label || selectedModel}
                   <ChevronDown className="w-3 h-3" />
                 </button>
                 {showModelDropdown && (
@@ -205,20 +221,20 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                       className="fixed inset-0 z-40"
                       onClick={() => setShowModelDropdown(false)}
                     />
-                    <div className="absolute right-0 top-full mt-1 z-50 bg-bg-card border border-border rounded-lg shadow-lg py-1 min-w-[120px]">
-                      {modelConfig.availableModels.map((m) => (
+                    <div className="absolute right-0 top-full mt-1 z-50 bg-bg-card border border-border rounded-lg shadow-lg py-1 min-w-[180px]">
+                      {availableModels.map((m) => (
                         <button
-                          key={m}
+                          key={m.id}
                           onClick={() => {
-                            setSelectedModel(m);
+                            modelChangeRef.current?.(m.id);
                             setShowModelDropdown(false);
                           }}
                           className={cn(
                             "w-full text-left px-3 py-1.5 text-xs hover:bg-bg transition-colors",
-                            m === selectedModel && "text-primary font-medium",
+                            m.id === selectedModel && "text-primary font-medium",
                           )}
                         >
-                          {m}
+                          {m.label}
                         </button>
                       ))}
                     </div>
@@ -294,6 +310,8 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                   sessionId={id}
                   onCostUpdate={handleCostUpdate}
                   onSendToAgent={handleSendToAgentRegister}
+                  onModelUpdate={handleModelUpdate}
+                  onModelChange={handleModelChangeRegister}
                 />
               </ErrorBoundary>
             }

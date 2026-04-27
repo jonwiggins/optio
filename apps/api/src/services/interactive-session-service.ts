@@ -43,11 +43,12 @@ export async function createSession(input: {
   try {
     const { getGitHubToken } = await import("./github-token-service.js");
     const ghToken = input.userId
-      ? await getGitHubToken({ userId: input.userId })
+      ? await getGitHubToken({ userId: input.userId, workspaceId: input.workspaceId })
       : await getGitHubToken({ server: true });
     if (ghToken) env.GITHUB_TOKEN = ghToken;
-  } catch {
-    // No token, that's fine
+  } catch (err) {
+    logger.warn({ err, repoUrl, userId: input.userId }, "No GitHub token available for session");
+    // Continue without token - public repos may still work
   }
 
   const imageConfig = repoConfig
