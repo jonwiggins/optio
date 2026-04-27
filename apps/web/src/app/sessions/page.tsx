@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { cn, formatRelativeTime, formatDuration } from "@/lib/utils";
 import { Plus, Terminal, Loader2, FolderGit2, CircleDot, StopCircle } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<any[]>([]);
@@ -61,62 +63,67 @@ export default function SessionsPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Sessions</h1>
-          <p className="text-sm text-text-muted mt-1">
-            Interactive workspaces connected to repo pods
+      <PageHeader
+        icon={Terminal}
+        title="Sessions"
+        description="Interactive workspaces connected to repo pods. Use the terminal + chat to drive an agent in real time."
+        meta={
+          <>
             {activeCount > 0 && (
-              <span className="ml-2 inline-flex items-center gap-1 text-primary">
+              <span className="inline-flex items-center gap-1.5 text-primary">
                 <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
                 {activeCount} active
               </span>
             )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {repos.length > 1 && (
-            <select
-              value={selectedRepo}
-              onChange={(e) => setSelectedRepo(e.target.value)}
-              className="px-3 py-2 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
-            >
-              <option value="">All repos</option>
-              {repos.map((r: any) => (
-                <option key={r.id} value={r.repoUrl}>
-                  {r.fullName}
-                </option>
+            <div className="flex items-center gap-1.5">
+              {(["all", "active", "ended"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setFilter(tab)}
+                  className={cn(
+                    "px-2 py-0.5 rounded text-[11px] capitalize transition-colors",
+                    filter === tab
+                      ? "bg-primary/15 text-primary"
+                      : "text-text-muted/80 hover:text-text",
+                  )}
+                >
+                  {tab}
+                </button>
               ))}
-            </select>
-          )}
-          <button
-            onClick={handleCreate}
-            disabled={creating || repos.length === 0}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
-          >
-            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            New Session
-          </button>
-        </div>
-      </div>
-
-      {/* Filter tabs */}
-      <div className="flex gap-0 border-b border-border mb-6">
-        {(["all", "active", "ended"] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setFilter(tab)}
-            className={cn(
-              "px-5 py-3 text-[13px] font-medium border-b-2 transition-colors capitalize",
-              filter === tab
-                ? "border-primary text-text"
-                : "border-transparent text-text-muted hover:text-text",
+            </div>
+          </>
+        }
+        actions={
+          <>
+            {repos.length > 1 && (
+              <select
+                value={selectedRepo}
+                onChange={(e) => setSelectedRepo(e.target.value)}
+                className="px-3 py-2 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+              >
+                <option value="">All repos</option>
+                {repos.map((r: any) => (
+                  <option key={r.id} value={r.repoUrl}>
+                    {r.fullName}
+                  </option>
+                ))}
+              </select>
             )}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+            <button
+              onClick={handleCreate}
+              disabled={creating || repos.length === 0}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
+            >
+              {creating ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
+              New Session
+            </button>
+          </>
+        }
+      />
 
       {loading ? (
         <div className="flex items-center justify-center py-16 text-text-muted">
@@ -124,15 +131,13 @@ export default function SessionsPage() {
           Loading sessions...
         </div>
       ) : sessions.length === 0 ? (
-        <div className="text-center py-16 text-text-muted border border-dashed border-border rounded-lg">
-          <Terminal className="w-10 h-10 mx-auto mb-3 opacity-50" />
-          <p className="text-sm">No sessions found</p>
-          <p className="text-xs mt-1">
-            Start a new session to get an interactive terminal connected to a repo pod.
-          </p>
-        </div>
+        <EmptyState
+          icon={Terminal}
+          title="No sessions yet"
+          description="Start a new session to get an interactive terminal connected to a repo pod."
+        />
       ) : (
-        <div className="space-y-2">
+        <div className="grid gap-2">
           {sessions.map((session: any) => (
             <SessionCard key={session.id} session={session} />
           ))}
@@ -149,7 +154,7 @@ function SessionCard({ session }: { session: any }) {
   return (
     <Link
       href={`/sessions/${session.id}`}
-      className="block p-4 rounded-lg border border-border bg-bg-card hover:border-primary/30 hover:bg-bg-hover transition-colors"
+      className="card-hover block p-4 rounded-lg border border-border bg-bg-card hover:border-primary/30"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">

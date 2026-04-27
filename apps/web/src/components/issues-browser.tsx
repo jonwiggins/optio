@@ -152,7 +152,7 @@ export function IssuesBrowser() {
           {issues.map((issue: any) => (
             <div
               key={`${issue.repo.fullName}-${issue.number}`}
-              className="p-3 rounded-lg border border-border bg-bg-card"
+              className="card-hover p-3 rounded-lg border border-border bg-bg-card hover:border-primary/30"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">

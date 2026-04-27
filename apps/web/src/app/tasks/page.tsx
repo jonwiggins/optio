@@ -4,10 +4,11 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { TaskList } from "@/components/task-list";
+import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import Link from "next/link";
-import { Plus, RotateCcw, XCircle, Loader2, Calendar } from "lucide-react";
+import { Plus, RotateCcw, XCircle, Loader2, Calendar, ListTodo } from "lucide-react";
 
 /**
  * Tasks list page — Repo Tasks only.
@@ -56,46 +57,45 @@ export default function TasksPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
-          <p className="text-sm text-text-muted mt-1">
-            Agents that work in a repo and end by opening a pull request.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleRetryFailed}
-            disabled={bulkLoading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-text hover:bg-bg-hover disabled:opacity-50 transition-colors"
-          >
-            <RotateCcw className="w-3 h-3" />
-            Retry Failed
-          </button>
-          <button
-            onClick={handleCancelActive}
-            disabled={bulkLoading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-error hover:bg-error/5 disabled:opacity-50 transition-colors"
-          >
-            <XCircle className="w-3 h-3" />
-            Cancel Active
-          </button>
-          <Link
-            href="/tasks/scheduled"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-bg-card border border-border text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
-          >
-            <Calendar className="w-4 h-4" />
-            Scheduled
-          </Link>
-          <Link
-            href="/tasks/new"
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Task
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        icon={ListTodo}
+        title="Tasks"
+        description="Agents that work in a repo and end by opening a pull request."
+        actions={
+          <>
+            <button
+              onClick={handleRetryFailed}
+              disabled={bulkLoading}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-text hover:bg-bg-hover disabled:opacity-50 transition-colors"
+            >
+              <RotateCcw className="w-3 h-3" />
+              Retry Failed
+            </button>
+            <button
+              onClick={handleCancelActive}
+              disabled={bulkLoading}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-error hover:bg-error/5 disabled:opacity-50 transition-colors"
+            >
+              <XCircle className="w-3 h-3" />
+              Cancel Active
+            </button>
+            <Link
+              href="/tasks/scheduled"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
+            >
+              <Calendar className="w-3 h-3" />
+              Scheduled
+            </Link>
+            <Link
+              href="/tasks/new"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              New Task
+            </Link>
+          </>
+        }
+      />
 
       <Suspense
         fallback={
