@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api-client";
@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { createPersistentAgentEventsClient } from "@/lib/ws-client";
 import { getWsTokenProvider } from "@/lib/ws-auth";
+import { LogViewer } from "@/components/log-viewer";
+import { useAgentLiveLogs, useAgentTurnLogs } from "@/hooks/use-agent-logs";
 import {
   Bot,
   ArrowLeft,
@@ -18,7 +20,6 @@ import {
   Archive,
   Trash2,
   Inbox,
-  Activity,
   ChevronDown,
   ChevronRight,
   Loader2,
@@ -77,15 +78,6 @@ interface Turn {
   createdAt: string;
 }
 
-interface LogLine {
-  id?: string;
-  turnId?: string;
-  content: string;
-  stream?: string;
-  logType?: string;
-  timestamp?: string;
-}
-
 export default function AgentDetailPage() {
   const params = useParams<{ id: string }>();
   const agentId = params.id;
@@ -97,9 +89,11 @@ export default function AgentDetailPage() {
   const [tab, setTab] = useState<"chat" | "turns" | "config">("chat");
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [liveEvents, setLiveEvents] = useState<LogLine[]>([]);
   const [openTurns, setOpenTurns] = useState<Set<string>>(new Set());
-  const [turnLogs, setTurnLogs] = useState<Record<string, LogLine[]>>({});
+
+  // Live log stream — fed into LogViewer in the chat tab. Same widget as
+  // task / job / review log views; the only thing that varies is the source.
+  const liveLogs = useAgentLiveLogs(agentId);
 
   const refreshAgent = async () => {
     try {
@@ -136,12 +130,11 @@ export default function AgentDetailPage() {
     // refresh* helpers are stable closures — re-running on every render is unnecessary.
   }, [agentId]);
 
+  // Subscribe to non-log events (state, message, turn lifecycle) — log
+  // events are owned by useAgentLiveLogs.
   useEffect(() => {
     const client = createPersistentAgentEventsClient(agentId, getWsTokenProvider());
     client.connect();
-    const unsubLog = client.on("persistent_agent:log", (msg: any) => {
-      setLiveEvents((prev) => [...prev.slice(-300), msg as LogLine]);
-    });
     const unsubState = client.on("persistent_agent:state_changed", () => {
       refreshAgent();
       refreshTurns();
@@ -160,7 +153,6 @@ export default function AgentDetailPage() {
       refreshTurns();
     });
     return () => {
-      unsubLog();
       unsubState();
       unsubMsg();
       unsubStart();
@@ -196,20 +188,14 @@ export default function AgentDetailPage() {
     }
   };
 
-  const toggleTurn = async (turn: Turn) => {
+  // Each open turn renders an ExpandedTurnLogs child that owns its own
+  // useAgentTurnLogs hook — no need to manage a turn-id → logs map here.
+  const toggleTurn = (turn: Turn) => {
     const next = new Set(openTurns);
     if (next.has(turn.id)) {
       next.delete(turn.id);
     } else {
       next.add(turn.id);
-      if (!turnLogs[turn.id]) {
-        try {
-          const res = await api.getPersistentAgentTurn(agentId, turn.id);
-          setTurnLogs((prev) => ({ ...prev, [turn.id]: res.logs as LogLine[] }));
-        } catch {
-          // ignore
-        }
-      }
     }
     setOpenTurns(next);
   };
@@ -340,7 +326,7 @@ export default function AgentDetailPage() {
         <ChatTab
           agent={agent}
           messages={messages}
-          liveEvents={liveEvents}
+          liveLogs={liveLogs}
           draft={draft}
           setDraft={setDraft}
           submitMessage={submitMessage}
@@ -349,7 +335,7 @@ export default function AgentDetailPage() {
       ) : null}
 
       {tab === "turns" ? (
-        <TurnsTab turns={turns} openTurns={openTurns} turnLogs={turnLogs} toggleTurn={toggleTurn} />
+        <TurnsTab agentId={agentId} turns={turns} openTurns={openTurns} toggleTurn={toggleTurn} />
       ) : null}
 
       {tab === "config" ? <ConfigTab agent={agent} /> : null}
@@ -360,7 +346,7 @@ export default function AgentDetailPage() {
 function ChatTab({
   agent,
   messages,
-  liveEvents,
+  liveLogs,
   draft,
   setDraft,
   submitMessage,
@@ -368,23 +354,18 @@ function ChatTab({
 }: {
   agent: Agent;
   messages: Message[];
-  liveEvents: LogLine[];
+  liveLogs: ReturnType<typeof useAgentLiveLogs>;
   draft: string;
   setDraft: (v: string) => void;
   submitMessage: () => void;
   sending: boolean;
 }) {
-  const liveRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    liveRef.current?.scrollTo({ top: liveRef.current.scrollHeight, behavior: "smooth" });
-  }, [liveEvents.length]);
-
   const reversedMessages = [...messages].reverse();
 
   return (
     <div className="grid lg:grid-cols-2 gap-4">
       {/* Messages column */}
-      <div className="flex flex-col h-[600px] border border-border rounded-lg bg-bg-card">
+      <div className="flex flex-col h-[640px] border border-border rounded-lg bg-bg-card overflow-hidden">
         <div className="px-3 py-2 border-b border-border text-xs font-medium text-text-muted flex items-center gap-2">
           <Inbox className="w-3.5 h-3.5" /> Inbox
         </div>
@@ -461,52 +442,23 @@ function ChatTab({
         </div>
       </div>
 
-      {/* Live activity column */}
-      <div className="flex flex-col h-[600px] border border-border rounded-lg bg-bg-card">
-        <div className="px-3 py-2 border-b border-border text-xs font-medium text-text-muted flex items-center gap-2">
-          <Activity className="w-3.5 h-3.5" /> Live activity
-        </div>
-        <div
-          ref={liveRef}
-          className="flex-1 overflow-y-auto p-3 font-mono text-[11px] leading-snug"
-        >
-          {liveEvents.length === 0 ? (
-            <div className="text-text-muted">Waiting for activity…</div>
-          ) : (
-            liveEvents.map((e, i) => (
-              <div key={i} className="mb-0.5">
-                <span className="text-text-muted/60">
-                  {e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ""}
-                </span>{" "}
-                <span
-                  className={cn(
-                    e.logType === "error" || e.stream === "stderr"
-                      ? "text-error"
-                      : e.logType === "tool_use"
-                        ? "text-primary"
-                        : "text-text",
-                  )}
-                >
-                  {e.content}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
+      {/* Live activity — same widget Tasks / Jobs / Reviews use */}
+      <div className="h-[640px] flex flex-col">
+        <LogViewer externalLogs={liveLogs} />
       </div>
     </div>
   );
 }
 
 function TurnsTab({
+  agentId,
   turns,
   openTurns,
-  turnLogs,
   toggleTurn,
 }: {
+  agentId: string;
   turns: Turn[];
   openTurns: Set<string>;
-  turnLogs: Record<string, LogLine[]>;
   toggleTurn: (turn: Turn) => void;
 }) {
   if (turns.length === 0) {
@@ -516,7 +468,6 @@ function TurnsTab({
     <div className="space-y-2">
       {turns.map((turn) => {
         const isOpen = openTurns.has(turn.id);
-        const logs = turnLogs[turn.id] ?? [];
         return (
           <div key={turn.id} className="border border-border rounded-md bg-bg-card">
             <button
@@ -556,35 +507,21 @@ function TurnsTab({
               </span>
             </button>
             {isOpen ? (
-              <div className="border-t border-border p-3">
-                {turn.summary ? (
-                  <div className="text-xs text-text-muted mb-2 italic">{turn.summary}</div>
-                ) : null}
-                {turn.errorMessage ? (
-                  <div className="text-xs text-error bg-error/5 border border-error/30 rounded px-2 py-1 mb-2">
-                    {turn.errorMessage}
+              <div className="border-t border-border">
+                {turn.summary || turn.errorMessage ? (
+                  <div className="px-3 pt-3">
+                    {turn.summary ? (
+                      <div className="text-xs text-text-muted mb-2 italic">{turn.summary}</div>
+                    ) : null}
+                    {turn.errorMessage ? (
+                      <div className="text-xs text-error bg-error/5 border border-error/30 rounded px-2 py-1 mb-2">
+                        {turn.errorMessage}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
-                <div className="font-mono text-[11px] max-h-[400px] overflow-y-auto space-y-0.5">
-                  {logs.length === 0 ? (
-                    <div className="text-text-muted">Loading logs…</div>
-                  ) : (
-                    logs.map((l, i) => (
-                      <div key={i}>
-                        <span
-                          className={cn(
-                            l.logType === "error" || l.stream === "stderr"
-                              ? "text-error"
-                              : l.logType === "tool_use"
-                                ? "text-primary"
-                                : "text-text",
-                          )}
-                        >
-                          {l.content}
-                        </span>
-                      </div>
-                    ))
-                  )}
+                <div className="h-[480px] flex flex-col">
+                  <ExpandedTurnLogs agentId={agentId} turnId={turn.id} />
                 </div>
               </div>
             ) : null}
@@ -603,6 +540,17 @@ function ConfigTab({ agent }: { agent: Agent }) {
       <Block title="Initial prompt" body={agent.initialPrompt} />
     </div>
   );
+}
+
+/**
+ * Owns its own useAgentTurnLogs hook so each open turn gets a clean fetch
+ * and unmounting (collapse) cleans up. Uses LogViewer for actual rendering
+ * so the turn-history view matches the live activity panel and the task /
+ * job / review log views one for one.
+ */
+function ExpandedTurnLogs({ agentId, turnId }: { agentId: string; turnId: string }) {
+  const logs = useAgentTurnLogs(agentId, turnId);
+  return <LogViewer externalLogs={logs} />;
 }
 
 function Block({ title, body }: { title: string; body: string | null }) {
