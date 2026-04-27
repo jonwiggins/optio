@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState, useCallback, useMemo } from "rea
 import { useLogs, type LogEntry } from "@/hooks/use-logs";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { LogMarkdown } from "./log-markdown";
 import {
   ArrowDown,
   ArrowUp,
@@ -708,7 +709,7 @@ function ToolCallGroup({
   );
 }
 
-function LogLine({
+export function LogLine({
   log,
   searchQuery,
 }: {
@@ -746,11 +747,15 @@ function LogLine({
           .filter((b: any) => b.type === "text" && b.text)
           .map((b: any) => b.text);
         if (texts.length > 0) {
-          return (
-            <div className="py-0.5 text-text/90 whitespace-pre-wrap break-words">
-              {texts.join("\n")}
-            </div>
-          );
+          const joined = texts.join("\n");
+          if (searchQuery) {
+            return (
+              <div className="py-0.5 text-text/90 whitespace-pre-wrap break-words">
+                <HighlightedText text={joined} search={searchQuery} />
+              </div>
+            );
+          }
+          return <LogMarkdown content={joined} className="py-0.5 text-text/90" />;
         }
         return null;
       }
@@ -858,10 +863,16 @@ function LogLine({
     );
   }
 
-  // Text — default agent output
-  return (
-    <div className="py-0.5 text-text/90 whitespace-pre-wrap break-words">
-      <HighlightedText text={log.content} search={searchQuery} />
-    </div>
-  );
+  // Text — default agent output. Render as markdown so tables / code
+  // fences / lists / links display with proper layout. While a search
+  // query is active, fall back to plain text so the substring-highlight
+  // pass below can wrap matches in <mark>.
+  if (searchQuery) {
+    return (
+      <div className="py-0.5 text-text/90 whitespace-pre-wrap break-words">
+        <HighlightedText text={log.content} search={searchQuery} />
+      </div>
+    );
+  }
+  return <LogMarkdown content={log.content} className="py-0.5 text-text/90" />;
 }
