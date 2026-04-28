@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { tasks } from "../db/schema.js";
+import { tasks, secrets } from "../db/schema.js";
 import {
   retrieveSecret,
   retrieveSecretWithFallback,
@@ -16,24 +16,40 @@ const TOKEN_REFRESH_BUFFER_MS = 10 * 60 * 1000;
 export type GitHubTokenContext =
   | { taskId: string }
   | { userId: string; workspaceId?: string | null }
-  | { server: true };
+  | { server: true; workspaceId?: string | null };
 
 export async function getGitHubToken(context: GitHubTokenContext): Promise<string> {
-  if ("server" in context) return getServerToken();
+  if ("server" in context) return getServerToken(context.workspaceId);
   if ("taskId" in context) return getTokenForTask(context.taskId);
   return getTokenForUser(context.userId, context.workspaceId);
 }
 
-async function getServerToken(): Promise<string> {
+async function getServerToken(workspaceId?: string | null): Promise<string> {
   if (isGitHubAppConfigured()) {
     try {
       return await getInstallationToken();
     } catch (err) {
       logger.warn({ err }, "Installation token failed, falling back to PAT");
-      return getPatFallback();
+      return getPatFallback(workspaceId);
     }
   }
-  return getPatFallback();
+  // If no GitHub App, and no workspace context provided (e.g. repo-init),
+  // try to find ANY global GITHUB_TOKEN to use as a server-level fallback.
+  // This handles the case where a token exists but is scoped to a workspace,
+  // preventing AAD decryption failures during system-level clones.
+  if (!workspaceId) {
+    const [anyGlobalToken] = await db
+      .select({ workspaceId: secrets.workspaceId })
+      .from(secrets)
+      .where(eq(secrets.name, "GITHUB_TOKEN"))
+      .limit(1);
+
+    if (anyGlobalToken) {
+      return getPatFallback(anyGlobalToken.workspaceId);
+    }
+  }
+
+  return getPatFallback(workspaceId);
 }
 
 async function getTokenForTask(taskId: string): Promise<string> {
