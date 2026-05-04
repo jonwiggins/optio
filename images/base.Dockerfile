@@ -24,6 +24,19 @@ RUN ARCH=$(dpkg --print-architecture) \
     && dpkg -i /tmp/glab.deb \
     && rm /tmp/glab.deb
 
+# AWS CLI v2 (used for AWS CodeCommit clone auth via `aws codecommit credential-helper`
+# and for `aws codecommit create-pull-request` from agents)
+RUN ARCH_RAW=$(dpkg --print-architecture) \
+    && case "$ARCH_RAW" in \
+         amd64) AWS_ARCH=x86_64 ;; \
+         arm64) AWS_ARCH=aarch64 ;; \
+         *) echo "Unsupported arch: $ARCH_RAW" && exit 1 ;; \
+       esac \
+    && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip \
+    && unzip -q /tmp/awscliv2.zip -d /tmp \
+    && /tmp/aws/install \
+    && rm -rf /tmp/awscliv2.zip /tmp/aws
+
 # Node.js 22 (needed for Claude Code)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \

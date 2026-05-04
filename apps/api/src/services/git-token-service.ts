@@ -2,6 +2,7 @@ import type { GitPlatform, GitPlatformType, RepoIdentifier } from "@optio/shared
 import { parseRepoUrl } from "@optio/shared";
 import { getGitHubToken } from "./github-token-service.js";
 import { retrieveSecretWithFallback } from "./secret-service.js";
+import { getCodeCommitCredentials } from "./codecommit-credential-service.js";
 import { createGitPlatform } from "./git-platform/index.js";
 import { logger } from "../logger.js";
 
@@ -15,6 +16,8 @@ export interface GitTokenContext {
  * Resolve a git platform token for the given platform and context.
  * GitHub: delegates to the existing github-token-service (App → user OAuth → PAT).
  * GitLab: checks GITLAB_TOKEN secret (workspace-scoped → global).
+ * CodeCommit: returns a JSON-encoded AWS credential blob (or "workload-identity"
+ * sentinel) — see codecommit-credential-service.
  */
 export async function getGitToken(
   platform: GitPlatformType,
@@ -25,6 +28,10 @@ export async function getGitToken(
     if (context.userId)
       return getGitHubToken({ userId: context.userId, workspaceId: context.workspaceId });
     return getGitHubToken({ server: true });
+  }
+
+  if (platform === "codecommit") {
+    return getCodeCommitCredentials(context.workspaceId);
   }
 
   // GitLab: try user-scoped token, then workspace/global GITLAB_TOKEN

@@ -41,7 +41,32 @@ no existing PR and no prior work. You must write the code, not review it.
 
 6. **Push and open a pull/merge request.** Write a meaningful description that
    explains what changed, why, and how to verify it:
-{{#if GIT_PLATFORM_GITLAB}}
+{{#if GIT_PLATFORM_CODECOMMIT}}
+   Push your branch first, then use the AWS CLI to create a CodeCommit pull request:
+   \`\`\`
+   git push -u origin {{BRANCH_NAME}}
+{{#if ISSUE_NUMBER}}   aws codecommit create-pull-request --title "{{TASK_TITLE}}" --description "$(cat <<'OPTIO_PR_EOF'
+Closes #{{ISSUE_NUMBER}}
+
+## What changed
+<Summarize the changes you made and why>
+
+## How to test
+<Describe how a reviewer can verify the changes>
+OPTIO_PR_EOF
+)" --targets "repositoryName={{CODECOMMIT_REPO}},sourceReference={{BRANCH_NAME}},destinationReference={{BASE_BRANCH}}"{{else}}   aws codecommit create-pull-request --title "{{TASK_TITLE}}" --description "$(cat <<'OPTIO_PR_EOF'
+Implements task {{TASK_ID}}
+
+## What changed
+<Summarize the changes you made and why>
+
+## How to test
+<Describe how a reviewer can verify the changes>
+OPTIO_PR_EOF
+)" --targets "repositoryName={{CODECOMMIT_REPO}},sourceReference={{BRANCH_NAME}},destinationReference={{BASE_BRANCH}}"{{/if}}
+   \`\`\`
+   CodeCommit has no draft-PR concept; if review is gated, the orchestrator will hold the PR until a human approves.
+{{else}}{{#if GIT_PLATFORM_GITLAB}}
    Use the \`glab\` CLI to create a merge request:
    \`\`\`
 {{#if ISSUE_NUMBER}}   glab mr create --title "{{TASK_TITLE}}" --description "$(cat <<'OPTIO_PR_EOF'
@@ -87,7 +112,7 @@ Implements task {{TASK_ID}}
 OPTIO_PR_EOF
 )"{{/if}}{{#if DRAFT_PR}} --draft{{/if}}
    \`\`\`
-{{/if}}
+{{/if}}{{/if}}
 
 7. After opening the PR, you are done. Do NOT wait for CI checks or monitor them.
     The orchestration system handles CI monitoring and code review automatically.
@@ -114,9 +139,10 @@ You are task {{TASK_ID}} working on branch {{BRANCH_NAME}}. Other tasks may be r
 concurrently on this same repository — each on its own branch. You MUST stay in scope:
 
 - Do NOT look at, review, or interact with other PRs or branches.
-{{#if GIT_PLATFORM_GITLAB}}- Do NOT run \`glab mr list\` to browse merge requests. You only need to create YOUR MR.
+{{#if GIT_PLATFORM_CODECOMMIT}}- Do NOT run \`aws codecommit list-pull-requests\` to browse other PRs. You only need to create YOUR PR.
+{{else}}{{#if GIT_PLATFORM_GITLAB}}- Do NOT run \`glab mr list\` to browse merge requests. You only need to create YOUR MR.
 {{else}}- Do NOT run \`gh pr list\` to browse PRs. You only need to create YOUR PR.
-{{/if}}- If you see references to other branches named \`optio/task-*\`, ignore them — those belong to other agents.
+{{/if}}{{/if}}- If you see references to other branches named \`optio/task-*\`, ignore them — those belong to other agents.
 - Your working directory is your worktree. Do not navigate outside it.
 
 ## Guidelines
@@ -139,9 +165,10 @@ export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have
 
 1. Read the diff for {{#if GIT_PLATFORM_GITLAB}}MR !{{PR_NUMBER}}{{else}}PR #{{PR_NUMBER}}{{/if}}:
    \`\`\`
-{{#if GIT_PLATFORM_GITLAB}}   glab mr diff {{PR_NUMBER}}
+{{#if GIT_PLATFORM_CODECOMMIT}}   git fetch origin && git diff origin/{{BASE_BRANCH}}...HEAD
+{{else}}{{#if GIT_PLATFORM_GITLAB}}   glab mr diff {{PR_NUMBER}}
 {{else}}   gh pr diff {{PR_NUMBER}}
-{{/if}}   \`\`\`
+{{/if}}{{/if}}   \`\`\`
 
 2. Read the original task description to understand what this {{#if GIT_PLATFORM_GITLAB}}MR{{else}}PR{{/if}} is supposed to accomplish:
    \`\`\`
@@ -163,11 +190,13 @@ export const DEFAULT_REVIEW_PROMPT_TEMPLATE = `You are a code reviewer. You have
    - Style: Does it follow the repo's conventions?
 
 5. Submit your review:
-{{#if GIT_PLATFORM_GITLAB}}   - If the code is good: \`glab mr approve {{PR_NUMBER}}\` then \`glab mr note {{PR_NUMBER}} --message "Your review summary"\`
+{{#if GIT_PLATFORM_CODECOMMIT}}   - If the code is good: \`aws codecommit update-pull-request-approval-state --pull-request-id {{PR_NUMBER}} --revision-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.revisionId' --output text) --approval-state APPROVE\` then \`aws codecommit post-comment-for-pull-request --pull-request-id {{PR_NUMBER}} --repository-name {{CODECOMMIT_REPO}} --before-commit-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.pullRequestTargets[0].destinationCommit' --output text) --after-commit-id $(aws codecommit get-pull-request --pull-request-id {{PR_NUMBER}} --query 'pullRequest.pullRequestTargets[0].sourceCommit' --output text) --content "Your review summary"\`
+   - If changes are needed: post a comment with \`aws codecommit post-comment-for-pull-request ...\` whose content starts with \`**[CHANGES REQUESTED]**\`
+{{else}}{{#if GIT_PLATFORM_GITLAB}}   - If the code is good: \`glab mr approve {{PR_NUMBER}}\` then \`glab mr note {{PR_NUMBER}} --message "Your review summary"\`
    - If changes are needed: \`glab mr note {{PR_NUMBER}} --message "Changes requested: What needs fixing"\`
 {{else}}   - If the code is good: \`gh pr review {{PR_NUMBER}} --approve --body "Your review summary"\`
    - If changes are needed: \`gh pr review {{PR_NUMBER}} --request-changes --body "What needs fixing"\`
-{{/if}}
+{{/if}}{{/if}}
 
 6. After submitting your review, you are done. Do not review any other {{#if GIT_PLATFORM_GITLAB}}MRs{{else}}PRs{{/if}}.
 
@@ -190,17 +219,19 @@ export const DEFAULT_PR_REVIEW_PROMPT_TEMPLATE = `You are a code review assistan
 
 ## IMPORTANT
 - You are reviewing ONLY {{#if GIT_PLATFORM_GITLAB}}MR !{{PR_NUMBER}}{{else}}PR #{{PR_NUMBER}}{{/if}}. Do not look at, review, or comment on any others.
-{{#if GIT_PLATFORM_GITLAB}}- Do NOT submit the review to GitLab. Do NOT run \`glab mr approve\` or \`glab mr note\`. Only write your findings to a file.
+{{#if GIT_PLATFORM_CODECOMMIT}}- Do NOT submit the review to CodeCommit. Do NOT call \`aws codecommit update-pull-request-approval-state\` or \`post-comment-for-pull-request\`. Only write your findings to a file.
+{{else}}{{#if GIT_PLATFORM_GITLAB}}- Do NOT submit the review to GitLab. Do NOT run \`glab mr approve\` or \`glab mr note\`. Only write your findings to a file.
 {{else}}- Do NOT submit the review to GitHub. Do NOT run \`gh pr review\`. Only write your findings to a file.
-{{/if}}- Do NOT modify any code, create commits, push changes, or check out branches.
+{{/if}}{{/if}}- Do NOT modify any code, create commits, push changes, or check out branches.
 
 ## Steps
 
 1. Read the diff for {{#if GIT_PLATFORM_GITLAB}}MR !{{PR_NUMBER}}{{else}}PR #{{PR_NUMBER}}{{/if}}:
    \`\`\`
-{{#if GIT_PLATFORM_GITLAB}}   glab mr diff {{PR_NUMBER}}
+{{#if GIT_PLATFORM_CODECOMMIT}}   git fetch origin && git diff origin/{{BASE_BRANCH}}...HEAD
+{{else}}{{#if GIT_PLATFORM_GITLAB}}   glab mr diff {{PR_NUMBER}}
 {{else}}   gh pr diff {{PR_NUMBER}}
-{{/if}}   \`\`\`
+{{/if}}{{/if}}   \`\`\`
 
 2. Read the review context for background on this PR:
    \`\`\`
@@ -253,9 +284,10 @@ export const DEFAULT_PR_REVIEW_PROMPT_TEMPLATE = `You are a code review assistan
 ## Scope
 
 - Review ONLY {{#if GIT_PLATFORM_GITLAB}}MR !{{PR_NUMBER}}{{else}}PR #{{PR_NUMBER}}{{/if}}. Nothing else.
-{{#if GIT_PLATFORM_GITLAB}}- Do NOT run \`glab mr list\` or browse other merge requests.
+{{#if GIT_PLATFORM_CODECOMMIT}}- Do NOT run \`aws codecommit list-pull-requests\` or browse other PRs.
+{{else}}{{#if GIT_PLATFORM_GITLAB}}- Do NOT run \`glab mr list\` or browse other merge requests.
 {{else}}- Do NOT run \`gh pr list\` or browse other PRs.
-{{/if}}- Your working directory is your worktree. Do not navigate outside it.
+{{/if}}{{/if}}- Your working directory is your worktree. Do not navigate outside it.
 - **You have a limited turn budget.** Focus on the diff and task context. Do not exhaustively explore the entire codebase. Write the review JSON file BEFORE you run out of turns.
 `;
 

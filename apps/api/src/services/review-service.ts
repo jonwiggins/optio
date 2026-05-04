@@ -130,6 +130,7 @@ export async function launchReview(parentTaskId: string): Promise<string> {
 
   const parsedRepo = parseRepoUrl(parentTask.repoUrl);
   const isGitLab = parsedRepo?.platform === "gitlab";
+  const isCodeCommit = parsedRepo?.platform === "codecommit";
 
   const renderedPrompt = renderPromptTemplate(reviewTemplate, {
     PR_NUMBER: String(prNumber),
@@ -138,6 +139,9 @@ export async function launchReview(parentTaskId: string): Promise<string> {
     TASK_TITLE: parentTask.title,
     TEST_COMMAND: repoConfig?.testCommand ?? "",
     GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
+    GIT_PLATFORM_CODECOMMIT: isCodeCommit ? "true" : "",
+    CODECOMMIT_REPO: isCodeCommit ? (parsedRepo?.repo ?? "") : "",
+    BASE_BRANCH: parentTask.repoBranch ?? repoConfig?.defaultBranch ?? "main",
   });
 
   // Build review context file with enriched PR data

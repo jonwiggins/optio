@@ -462,6 +462,7 @@ export async function enqueueReviewRun(
     const fullRepoName = `${review.repoOwner}/${review.repoName}`;
     const parsedRepoUrl = parseRepoUrl(review.repoUrl);
     const isGitLab = parsedRepoUrl?.platform === "gitlab";
+    const isCodeCommit = parsedRepoUrl?.platform === "codecommit";
 
     renderedPrompt = renderPromptTemplate(template, {
       PR_NUMBER: String(review.prNumber),
@@ -471,6 +472,9 @@ export async function enqueueReviewRun(
       TEST_COMMAND: repoConfig.testCommand ?? "",
       OUTPUT_PATH: PR_REVIEW_OUTPUT_PATH,
       GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
+      GIT_PLATFORM_CODECOMMIT: isCodeCommit ? "true" : "",
+      CODECOMMIT_REPO: isCodeCommit ? (parsedRepoUrl?.repo ?? "") : "",
+      BASE_BRANCH: repoConfig.defaultBranch ?? "main",
     });
     taskFileContent = reviewContextFileContent({
       prNumber: review.prNumber,

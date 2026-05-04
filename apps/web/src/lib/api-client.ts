@@ -386,6 +386,40 @@ export const api = {
       body: JSON.stringify({ token, host }),
     }),
 
+  validateAwsCredentials: (creds: {
+    accessKeyId: string;
+    secretAccessKey: string;
+    sessionToken?: string;
+    region: string;
+  }) =>
+    request<{ valid: boolean; error?: string; user?: { login: string; name: string } }>(
+      "/api/setup/validate/aws-credentials",
+      { method: "POST", body: JSON.stringify(creds) },
+    ),
+
+  listCodecommitRepos: (creds: {
+    accessKeyId: string;
+    secretAccessKey: string;
+    sessionToken?: string;
+    region: string;
+  }) =>
+    request<{
+      repos: Array<{
+        fullName: string;
+        cloneUrl: string;
+        htmlUrl: string;
+        defaultBranch: string;
+        isPrivate: boolean;
+        description: string | null;
+        language: string | null;
+        pushedAt: string;
+      }>;
+      error?: string;
+    }>("/api/setup/repos/codecommit", {
+      method: "POST",
+      body: JSON.stringify(creds),
+    }),
+
   validateAnthropicKey: (key: string) =>
     request<{ valid: boolean; error?: string }>("/api/setup/validate/anthropic-key", {
       method: "POST",

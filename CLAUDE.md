@@ -19,6 +19,8 @@ Optio is an orchestration system for AI coding agents. Think of it as "CI/CD whe
   8. Auto-resumes agent when reviewer requests changes (if enabled)
   9. Auto-completes on merge, auto-fails on close
 
+  Supported git platforms: **GitHub**, **GitLab** (incl. self-hosted via `GITLAB_HOSTS`), and **AWS CodeCommit**. CodeCommit auths via AWS access keys (or IRSA / instance profile when running on EKS) and uses the AWS CLI credential helper for clones; PR ops go through `@aws-sdk/client-codecommit`. CodeCommit has no native CI or issues — `getCIChecks` returns `[]` (auto-merge still fires on `checksStatus="none"`), `listIssues` returns `[]`, and `reviewTrigger="on_pr"` is recommended over the default `on_ci_pass` for CodeCommit repos.
+
 - **Standalone Task** — no `Where`. The agent runs in an isolated pod with no repo checkout, producing logs and side effects (e.g., queries Slack, posts to a database). Scheduled/webhook-driven runs of this flavor are the common case.
 
 - **Persistent Agent** — long-lived, named, message-driven agent process that does _not_ terminate after running. Halts after each turn and waits to be re-woken by a user message, an agent message, a webhook, a cron tick, or a ticket event. Addressable by other agents in the same workspace via the inter-agent HTTP API (`/api/internal/persistent-agents/*`). Three configurable pod lifecycle modes: `always-on`, `sticky` (default, with idle warm window), and `on-demand`. UI at `/agents`. Schema: `persistent_agents`, `persistent_agent_turns`, `persistent_agent_messages`, `persistent_agent_pods`. See `docs/persistent-agents.md` and the demo in `demos/the-forge/`.

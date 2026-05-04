@@ -197,6 +197,44 @@ describe("PLANNING_MODE in DEFAULT_PROMPT_TEMPLATE", () => {
   });
 });
 
+describe("CodeCommit branch in DEFAULT_PROMPT_TEMPLATE", () => {
+  it("uses aws codecommit create-pull-request when GIT_PLATFORM_CODECOMMIT is set", () => {
+    const result = renderPromptTemplate(DEFAULT_PROMPT_TEMPLATE, {
+      TASK_FILE: ".optio/task.md",
+      BRANCH_NAME: "optio/task-abc",
+      TASK_ID: "abc-123",
+      TASK_TITLE: "Fix login bug",
+      REPO_NAME: "MyRepo",
+      CODECOMMIT_REPO: "MyRepo",
+      BASE_BRANCH: "main",
+      AUTO_MERGE: "false",
+      ISSUE_NUMBER: "",
+      GIT_PLATFORM_CODECOMMIT: "true",
+    });
+    expect(result).toContain("aws codecommit create-pull-request");
+    expect(result).toContain("repositoryName=MyRepo");
+    expect(result).toContain("sourceReference=optio/task-abc");
+    expect(result).toContain("destinationReference=main");
+    expect(result).not.toContain("gh pr create");
+    expect(result).not.toContain("glab mr create");
+  });
+
+  it("falls back to gh when neither codecommit nor gitlab is set", () => {
+    const result = renderPromptTemplate(DEFAULT_PROMPT_TEMPLATE, {
+      TASK_FILE: ".optio/task.md",
+      BRANCH_NAME: "optio/task-abc",
+      TASK_ID: "abc-123",
+      TASK_TITLE: "Fix login bug",
+      REPO_NAME: "org/repo",
+      AUTO_MERGE: "false",
+      ISSUE_NUMBER: "",
+    });
+    expect(result).toContain("gh pr create");
+    expect(result).not.toContain("aws codecommit");
+    expect(result).not.toContain("glab mr create");
+  });
+});
+
 describe("TASK_FILE_PATH", () => {
   it("is a relative path", () => {
     expect(TASK_FILE_PATH).not.toMatch(/^\//);
