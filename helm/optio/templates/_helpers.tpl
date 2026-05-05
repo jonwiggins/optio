@@ -49,7 +49,7 @@ Called from secrets.yaml to fail early on misconfiguration.
   {{- else -}}
     {{- $hasProvider := or .Values.auth.github.clientId (or .Values.auth.google.clientId (or .Values.auth.gitlab.clientId .Values.auth.oidc.issuerUrl)) -}}
     {{- if not $hasProvider -}}
-      {{- fail "At least one OAuth provider must be configured when auth is enabled. Set auth.github.clientId, auth.google.clientId, auth.gitlab.clientId, or auth.oidc.issuerUrl (with corresponding clinetId, clientSecret as needed)." -}}
+      {{- fail "At least one OAuth provider must be configured when auth is enabled. Set auth.github.clientId, auth.google.clientId, auth.gitlab.clientId, or auth.oidc.issuerUrl (with corresponding clientId, clientSecret as needed)." -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
