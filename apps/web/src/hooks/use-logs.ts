@@ -36,6 +36,10 @@ export function useLogs(taskId: string) {
     clientRef.current = client;
 
     client.on("task:log", (event) => {
+      // The WebSocket replays recent logs with `catchUp: true` on connect.
+      // REST history is canonical, so ignore those replay frames.
+      if (event.catchUp) return;
+
       const entry: LogEntry = {
         content: event.content,
         stream: event.stream,
