@@ -29,6 +29,10 @@ export function useWorkflowRunLogs(runId: string, isActive: boolean) {
     clientRef.current = client;
 
     client.on("workflow_run:log", (event) => {
+      // The WebSocket replays recent logs with `catchUp: true` on connect.
+      // REST history is canonical, so ignore those replay frames.
+      if (event.catchUp) return;
+
       const entry: LogEntry = {
         content: event.content,
         stream: event.stream,
