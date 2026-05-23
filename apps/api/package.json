@@ -17,6 +17,8 @@
     "openapi:types": "openapi-typescript openapi.generated.json -o openapi.generated.d.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-codecommit": "^3.1041.0",
+    "@aws-sdk/client-sts": "^3.1041.0",
     "@fastify/cors": "^11.0.0",
     "@fastify/formbody": "^8.0.2",
     "@fastify/rate-limit": "^10.2.2",
@@ -61,6 +63,7 @@
     "@types/node": "^22.15.0",
     "@types/web-push": "^3.6.4",
     "@vitest/coverage-v8": "^3.2.4",
+    "aws-sdk-client-mock": "^4.1.0",
     "drizzle-kit": "^0.31.1",
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.19.4",

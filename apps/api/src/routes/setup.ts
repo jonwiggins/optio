@@ -18,6 +18,14 @@ const gitlabTokenSchema = z
       .describe("Optional self-hosted GitLab host; defaults to gitlab.com"),
   })
   .describe("GitLab token + optional host");
+const awsCredentialsSchema = z
+  .object({
+    accessKeyId: z.string().min(1),
+    secretAccessKey: z.string().min(1),
+    sessionToken: z.string().optional(),
+    region: z.string().min(1),
+  })
+  .describe("AWS credentials + region for CodeCommit access");
 const keySchema = z.object({ key: z.string().min(1) }).describe("Body with a required API key");
 const reposBodySchema = z
   .object({
@@ -246,6 +254,113 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       } catch (err) {
         app.log.error(err, "GitLab token validation failed");
         reply.send({ valid: false, error: sanitizeError(err) });
+      }
+    },
+  );
+
+  app.post(
+    "/api/setup/validate/aws-credentials",
+    {
+      config: { rateLimit: SETUP_POST_RATE_LIMIT },
+      preHandler: [requireAdminWhenAuthenticated],
+      schema: {
+        operationId: "validateAwsCredentials",
+        summary: "Validate AWS credentials for CodeCommit",
+        description:
+          "Confirms the supplied AWS credentials by calling sts:GetCallerIdentity " +
+          "and codecommit:ListRepositories in the given region.",
+        tags: ["Setup & Settings"],
+        body: awsCredentialsSchema,
+        response: { 200: ValidationResultSchema, 400: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const { accessKeyId, secretAccessKey, sessionToken, region } = req.body;
+      try {
+        const { STSClient, GetCallerIdentityCommand } = await import("@aws-sdk/client-sts");
+        const { CodeCommitClient: CC, ListRepositoriesCommand } =
+          await import("@aws-sdk/client-codecommit");
+        const credentials = {
+          accessKeyId,
+          secretAccessKey,
+          ...(sessionToken ? { sessionToken } : {}),
+        };
+        const sts = new STSClient({ region, credentials });
+        const id = await sts.send(new GetCallerIdentityCommand({}));
+        const cc = new CC({ region, credentials });
+        await cc.send(new ListRepositoriesCommand({}));
+        reply.send({
+          valid: true,
+          user: {
+            login: id.Arn ?? "aws",
+            name: id.Account ? `AWS account ${id.Account}` : "AWS",
+          },
+        });
+      } catch (err) {
+        app.log.error(err, "AWS credential validation failed");
+        reply.send({ valid: false, error: sanitizeError(err) });
+      }
+    },
+  );
+
+  app.post(
+    "/api/setup/repos/codecommit",
+    {
+      config: { rateLimit: SETUP_POST_RATE_LIMIT },
+      preHandler: [requireAdminWhenAuthenticated],
+      schema: {
+        operationId: "listSetupCodeCommitRepos",
+        summary: "List CodeCommit repositories for setup",
+        description: "List CodeCommit repos in the given region accessible to the supplied creds.",
+        tags: ["Setup & Settings"],
+        body: awsCredentialsSchema,
+        response: { 200: ReposListResponseSchema, 400: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const { accessKeyId, secretAccessKey, sessionToken, region } = req.body;
+      try {
+        const {
+          CodeCommitClient: CC,
+          ListRepositoriesCommand,
+          GetRepositoryCommand,
+        } = await import("@aws-sdk/client-codecommit");
+        const credentials = {
+          accessKeyId,
+          secretAccessKey,
+          ...(sessionToken ? { sessionToken } : {}),
+        };
+        const cc = new CC({ region, credentials });
+        const list = await cc.send(new ListRepositoriesCommand({}));
+        const names = (list.repositories ?? []).map((r) => r.repositoryName).filter(Boolean) as
+          | string[]
+          | [];
+        const details = await Promise.all(
+          names.slice(0, 50).map((name) =>
+            cc
+              .send(new GetRepositoryCommand({ repositoryName: name }))
+              .then((d) => d.repositoryMetadata)
+              .catch(() => null),
+          ),
+        );
+        const repos = details
+          .filter((d): d is NonNullable<typeof d> => Boolean(d))
+          .map((d) => ({
+            fullName: d.repositoryName ?? "",
+            cloneUrl:
+              d.cloneUrlHttp ??
+              `https://git-codecommit.${region}.amazonaws.com/v1/repos/${d.repositoryName}`,
+            htmlUrl: `https://${region}.console.aws.amazon.com/codesuite/codecommit/repositories/${d.repositoryName}/browse`,
+            defaultBranch: d.defaultBranch ?? "main",
+            isPrivate: true,
+            description: d.repositoryDescription ?? null,
+            language: null,
+            pushedAt: d.lastModifiedDate ? new Date(d.lastModifiedDate).toISOString() : "",
+          }));
+        reply.send({ repos });
+      } catch (err) {
+        app.log.error(err, "CodeCommit repo listing failed");
+        reply.send({ repos: [], error: sanitizeError(err) });
       }
     },
   );

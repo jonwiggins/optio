@@ -11,6 +11,7 @@ git config --global user.email "${GIT_BOT_EMAIL:-${GITHUB_APP_BOT_EMAIL:-optio-a
 # Detect git platform from repo URL
 OPTIO_GIT_HOST=""
 case "${OPTIO_REPO_URL}" in
+  *git-codecommit.*.amazonaws.com*) OPTIO_GIT_HOST="codecommit" ;;
   *gitlab*) OPTIO_GIT_HOST="gitlab" ;;
   *github*) OPTIO_GIT_HOST="github" ;;
   *)        OPTIO_GIT_HOST="github" ;; # default
@@ -51,6 +52,17 @@ elif [ -n "${OPTIO_GIT_CREDENTIAL_URL:-}" ] && [ -f /usr/local/bin/optio-git-cre
     glab auth login --hostname "${GITLAB_HOST}" --token "${GITLAB_TOKEN}" 2>/dev/null || true
     echo "[optio] GitLab CLI authenticated (host: ${GITLAB_HOST})"
   fi
+
+elif [ "${OPTIO_GIT_HOST}" = "codecommit" ] && command -v aws >/dev/null 2>&1; then
+  # CodeCommit uses AWS SigV4 — wire git's credential helper to the AWS CLI helper.
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN / AWS_REGION are
+  # injected by the API server when launching the pod (or come from instance profile / IRSA).
+  git config --global credential.helper '!aws codecommit credential-helper $@'
+  git config --global credential.UseHttpPath true
+  if [ -z "${AWS_DEFAULT_REGION:-}" ] && [ -n "${AWS_REGION:-}" ]; then
+    export AWS_DEFAULT_REGION="${AWS_REGION}"
+  fi
+  echo "[optio] CodeCommit credential helper configured (region: ${AWS_DEFAULT_REGION:-${AWS_REGION:-unset}})"
 
 elif [ -n "${GITHUB_TOKEN:-}" ] || [ -n "${GITLAB_TOKEN:-}" ]; then
   # Static PAT fallback — configure credentials for the detected platform

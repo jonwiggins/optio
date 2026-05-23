@@ -114,6 +114,13 @@ async function main() {
   const applied = await migrateSafe(db, migrationsPath);
   logger.info({ applied }, "Database migrations applied");
 
+  // Heal contradictory (scope='global', workspace_id IS NOT NULL) secret rows
+  // left over from issue #509. Idempotent — a no-op once the data is clean.
+  const { healContradictoryGlobalSecrets } = await import("./services/secret-service.js");
+  await healContradictoryGlobalSecrets().catch((err) =>
+    logger.error({ err }, "healContradictoryGlobalSecrets failed at boot"),
+  );
+
   // Seed built-in connection providers (idempotent upsert)
   const { seedBuiltInProviders } = await import("./services/connection-service.js");
   await seedBuiltInProviders();

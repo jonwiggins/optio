@@ -8,7 +8,12 @@ vi.mock("../db/client.js", () => ({
     insert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    execute: vi.fn().mockResolvedValue(undefined),
   },
+}));
+
+vi.mock("../logger.js", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 // Mock the schema to return simple column references
@@ -853,6 +858,285 @@ describe("secret-service", () => {
       await deleteSecret("MY_TOKEN", "user", null, "u-1");
       expect(db.delete).toHaveBeenCalled();
       expect(whereMock).toHaveBeenCalled();
+    });
+  });
+
+  describe("global ⇔ workspaceId IS NULL invariant (issue #509)", () => {
+    it("storeSecret rejects scope='global' with a non-null workspaceId", async () => {
+      await expect(storeSecret("GITHUB_TOKEN", "ghp_x", "global", "ws-1")).rejects.toThrow(
+        "workspaceId must be null when scope is 'global'",
+      );
+    });
+
+    it("storeSecret accepts scope='global' with null workspaceId", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
+      });
+      const insertValues = vi.fn().mockResolvedValue(undefined);
+      (db.insert as any) = vi.fn().mockReturnValue({ values: insertValues });
+
+      await expect(storeSecret("GITHUB_TOKEN", "ghp_x", "global", null)).resolves.toBeUndefined();
+      expect(insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "GITHUB_TOKEN", scope: "global", workspaceId: undefined }),
+      );
+    });
+
+    it("storeSecret accepts non-global scope with a workspaceId", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
+      });
+      const insertValues = vi.fn().mockResolvedValue(undefined);
+      (db.insert as any) = vi.fn().mockReturnValue({ values: insertValues });
+
+      await expect(
+        storeSecret("REPO_TOKEN", "abc", "https://github.com/o/r", "ws-1"),
+      ).resolves.toBeUndefined();
+      expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "ws-1" }));
+    });
+  });
+
+  describe("healContradictoryGlobalSecrets (issue #509)", () => {
+    let healContradictoryGlobalSecrets: typeof import("./secret-service.js").healContradictoryGlobalSecrets;
+
+    beforeEach(async () => {
+      const mod = await import("./secret-service.js");
+      healContradictoryGlobalSecrets = mod.healContradictoryGlobalSecrets;
+    });
+
+    it("returns 0 and is a no-op when there are no contradictory rows", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
+      });
+      const updateMock = vi.fn();
+      const deleteMock = vi.fn();
+      (db.update as any) = updateMock;
+      (db.delete as any) = deleteMock;
+
+      const healed = await healContradictoryGlobalSecrets();
+      expect(healed).toBe(0);
+      expect(updateMock).not.toHaveBeenCalled();
+      expect(deleteMock).not.toHaveBeenCalled();
+    });
+
+    it("re-encrypts a contradictory row with global AAD and nulls workspace_id", async () => {
+      // Row encrypted under the buggy AAD ("name|global|ws-1")
+      const oldAad = buildSecretAAD("GITHUB_TOKEN", "global", "ws-1");
+      const blob = encrypt("ghp_real_value", oldAad);
+      const badRow = {
+        id: "sec-1",
+        name: "GITHUB_TOKEN",
+        scope: "global",
+        workspaceId: "ws-1",
+        encryptedValue: blob.ciphertext,
+        iv: blob.iv,
+        authTag: blob.authTag,
+        alg: blob.alg,
+      };
+
+      let selectCall = 0;
+      (db.select as any) = vi.fn().mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            selectCall++;
+            // 1st: list bad rows. 2nd: shadow lookup (no shadow exists).
+            return Promise.resolve(selectCall === 1 ? [badRow] : []);
+          }),
+        }),
+      }));
+
+      let captured: { iv: Buffer; ciphertext: Buffer; authTag: Buffer; workspaceId: any } | null =
+        null;
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: (vals: any) => ({
+          where: vi.fn().mockImplementation(() => {
+            captured = {
+              iv: vals.iv,
+              ciphertext: vals.encryptedValue,
+              authTag: vals.authTag,
+              workspaceId: vals.workspaceId,
+            };
+            return Promise.resolve(undefined);
+          }),
+        }),
+      });
+      (db.delete as any) = vi.fn();
+
+      const healed = await healContradictoryGlobalSecrets();
+      expect(healed).toBe(1);
+      expect(captured).not.toBeNull();
+      expect(captured!.workspaceId).toBeNull();
+
+      // The re-encrypted blob must decrypt under the canonical global AAD.
+      const newAad = buildSecretAAD("GITHUB_TOKEN", "global", null);
+      const plaintext = decrypt(
+        {
+          alg: ALG_AES_256_GCM_V1,
+          iv: captured!.iv,
+          ciphertext: captured!.ciphertext,
+          authTag: captured!.authTag,
+        },
+        newAad,
+      );
+      expect(plaintext).toBe("ghp_real_value");
+    });
+
+    it("heals two contradictory rows for the same name in different workspaces in one pass", async () => {
+      // Both rows encrypted under their respective buggy AADs.
+      const rowA = {
+        id: "sec-a",
+        name: "GITHUB_TOKEN",
+        scope: "global",
+        workspaceId: "ws-1",
+        ...encrypt("ghp_value_a", buildSecretAAD("GITHUB_TOKEN", "global", "ws-1")),
+      };
+      const rowB = {
+        id: "sec-b",
+        name: "GITHUB_TOKEN",
+        scope: "global",
+        workspaceId: "ws-2",
+        ...encrypt("ghp_value_b", buildSecretAAD("GITHUB_TOKEN", "global", "ws-2")),
+      };
+      const toRow = (r: any) => ({
+        id: r.id,
+        name: r.name,
+        scope: r.scope,
+        workspaceId: r.workspaceId,
+        encryptedValue: r.ciphertext,
+        iv: r.iv,
+        authTag: r.authTag,
+        alg: r.alg,
+      });
+
+      // Track which rows have been "promoted" so the shadow lookup reflects
+      // the in-flight state — simulating real DB behavior across iterations.
+      const promotedNames = new Set<string>();
+      let selectCall = 0;
+      (db.select as any) = vi.fn().mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            selectCall++;
+            // 1st call: list all bad rows.
+            if (selectCall === 1) return Promise.resolve([toRow(rowA), toRow(rowB)]);
+            // Subsequent calls: shadow lookups, one per bad row.
+            const idx = selectCall - 2; // 0 for rowA, 1 for rowB
+            const name = idx === 0 ? rowA.name : rowB.name;
+            return Promise.resolve(promotedNames.has(name) ? [{ id: "shadow" }] : []);
+          }),
+        }),
+      }));
+
+      const updates: Array<{ workspaceId: any; name?: string }> = [];
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: (vals: any) => ({
+          where: vi.fn().mockImplementation(() => {
+            updates.push({ workspaceId: vals.workspaceId });
+            // First update promotes the name to global; subsequent rows with
+            // the same name must be deleted, not updated.
+            promotedNames.add("GITHUB_TOKEN");
+            return Promise.resolve(undefined);
+          }),
+        }),
+      });
+      const deleteWhere = vi.fn().mockResolvedValue(undefined);
+      (db.delete as any) = vi.fn().mockReturnValue({ where: deleteWhere });
+
+      const healed = await healContradictoryGlobalSecrets();
+      expect(healed).toBe(2);
+      // Exactly one row promoted to NULL workspace_id; the second was dropped
+      // to avoid creating a duplicate (NULL is distinct in PG UNIQUE).
+      expect(updates).toHaveLength(1);
+      expect(updates[0].workspaceId).toBeNull();
+      expect(deleteWhere).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs and skips a row whose decryption fails, continuing with others", async () => {
+      // Good row: decrypts fine.
+      const goodAad = buildSecretAAD("NPM_TOKEN", "global", "ws-1");
+      const good = encrypt("npm_value", goodAad);
+      // Bad row: ciphertext was tampered with — decrypt will throw.
+      const badAad = buildSecretAAD("BROKEN_KEY", "global", "ws-1");
+      const bad = encrypt("doesnt_matter", badAad);
+      const tamperedAuthTag = Buffer.from(bad.authTag);
+      tamperedAuthTag[0] = tamperedAuthTag[0] ^ 0xff;
+
+      const rows = [
+        {
+          id: "sec-bad",
+          name: "BROKEN_KEY",
+          scope: "global",
+          workspaceId: "ws-1",
+          encryptedValue: bad.ciphertext,
+          iv: bad.iv,
+          authTag: tamperedAuthTag,
+          alg: bad.alg,
+        },
+        {
+          id: "sec-good",
+          name: "NPM_TOKEN",
+          scope: "global",
+          workspaceId: "ws-1",
+          encryptedValue: good.ciphertext,
+          iv: good.iv,
+          authTag: good.authTag,
+          alg: good.alg,
+        },
+      ];
+
+      let selectCall = 0;
+      (db.select as any) = vi.fn().mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            selectCall++;
+            if (selectCall === 1) return Promise.resolve(rows);
+            return Promise.resolve([]); // no shadows
+          }),
+        }),
+      }));
+      const updateMock = vi.fn().mockReturnValue({
+        set: () => ({ where: vi.fn().mockResolvedValue(undefined) }),
+      });
+      (db.update as any) = updateMock;
+      (db.delete as any) = vi.fn();
+
+      const healed = await healContradictoryGlobalSecrets();
+      // Only the good row is healed; the bad row is logged and skipped.
+      expect(healed).toBe(1);
+      expect(updateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops the contradictory row when a true global shadow row already exists", async () => {
+      const oldAad = buildSecretAAD("GITHUB_TOKEN", "global", "ws-1");
+      const blob = encrypt("ghp_dup", oldAad);
+      const badRow = {
+        id: "sec-2",
+        name: "GITHUB_TOKEN",
+        scope: "global",
+        workspaceId: "ws-1",
+        encryptedValue: blob.ciphertext,
+        iv: blob.iv,
+        authTag: blob.authTag,
+        alg: blob.alg,
+      };
+
+      let selectCall = 0;
+      (db.select as any) = vi.fn().mockImplementation(() => ({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            selectCall++;
+            // 1st: list bad rows. 2nd: shadow lookup returns an existing row.
+            return Promise.resolve(selectCall === 1 ? [badRow] : [{ id: "sec-shadow" }]);
+          }),
+        }),
+      }));
+
+      const deleteWhere = vi.fn().mockResolvedValue(undefined);
+      (db.delete as any) = vi.fn().mockReturnValue({ where: deleteWhere });
+      (db.update as any) = vi.fn();
+
+      const healed = await healContradictoryGlobalSecrets();
+      expect(healed).toBe(1);
+      expect(deleteWhere).toHaveBeenCalled();
+      expect(db.update).not.toHaveBeenCalled();
     });
   });
 });

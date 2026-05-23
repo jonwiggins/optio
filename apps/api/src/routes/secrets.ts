@@ -158,15 +158,21 @@ export async function secretRoutes(rawApp: FastifyInstance) {
 
       // User-scoped secrets need a caller. In auth-disabled local dev there's
       // no user, so silently downgrade to global — there's no multi-user
-      // separation to preserve anyway.
-      const effectiveScope = input.scope === "user" && !userId ? "global" : input.scope;
+      // separation to preserve anyway. Treat omitted scope as "global" up
+      // front so the workspaceId-stripping rule below applies uniformly.
+      const requestedScope = input.scope ?? "global";
+      const effectiveScope = requestedScope === "user" && !userId ? "global" : requestedScope;
       const effectiveUserId = effectiveScope === "user" ? userId : null;
+      // "global" scope must not carry a workspaceId — see issue #509. The
+      // request always has the caller's current workspaceId, but for a
+      // global write we drop it so the row is genuinely workspace-agnostic.
+      const effectiveWorkspaceId = effectiveScope === "global" ? null : workspaceId;
 
       await secretService.storeSecret(
         input.name,
         input.value,
         effectiveScope,
-        workspaceId,
+        effectiveWorkspaceId,
         effectiveUserId,
       );
 
@@ -185,13 +191,13 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       logAction({
         userId: req.user?.id,
         action: "secret.upsert",
-        params: { name: input.name, scope: input.scope ?? "global" },
+        params: { name: input.name, scope: effectiveScope },
         result: { name: input.name },
         success: true,
       }).catch(() => {});
       reply.status(201).send({
         name: input.name,
-        scope: input.scope ?? "global",
+        scope: effectiveScope,
         ...(validation ? { validation } : {}),
       });
     },

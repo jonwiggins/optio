@@ -172,6 +172,39 @@ describe("parseRepoUrl", () => {
     expect(repoResult!.repo).toBe(prResult!.repo);
   });
 
+  it("parses CodeCommit HTTPS URL", () => {
+    const result = parseRepoUrl("https://git-codecommit.us-east-1.amazonaws.com/v1/repos/MyRepo");
+    expect(result).toEqual({
+      platform: "codecommit",
+      host: "git-codecommit.us-east-1.amazonaws.com",
+      owner: "us-east-1",
+      repo: "MyRepo",
+      apiBaseUrl: "us-east-1",
+    });
+  });
+
+  it("parses CodeCommit HTTPS URL with .git suffix", () => {
+    const result = parseRepoUrl(
+      "https://git-codecommit.eu-west-2.amazonaws.com/v1/repos/MyRepo.git",
+    );
+    expect(result).not.toBeNull();
+    expect(result!.platform).toBe("codecommit");
+    expect(result!.owner).toBe("eu-west-2");
+    expect(result!.repo).toBe("MyRepo");
+    expect(result!.apiBaseUrl).toBe("eu-west-2");
+  });
+
+  it("parses CodeCommit SSH URL", () => {
+    // CodeCommit SSH URLs use the SSH key ID as the username
+    const result = parseRepoUrl(
+      "ssh://APKAEIBAERJR2EXAMPLE@git-codecommit.us-west-2.amazonaws.com/v1/repos/AnotherRepo",
+    );
+    expect(result).not.toBeNull();
+    expect(result!.platform).toBe("codecommit");
+    expect(result!.owner).toBe("us-west-2");
+    expect(result!.repo).toBe("AnotherRepo");
+  });
+
   it("returns null for invalid URLs", () => {
     expect(parseRepoUrl("not-a-url")).toBeNull();
     expect(parseRepoUrl("https://github.com")).toBeNull();

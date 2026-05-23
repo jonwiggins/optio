@@ -71,6 +71,14 @@ export default function SetupPage() {
   const [gitlabUser, setGitlabUser] = useState<{ login: string; name: string } | null>(null);
   const [gitlabValidated, setGitlabValidated] = useState(false);
   const [gitlabError, setGitlabError] = useState("");
+  const [codecommitEnabled, setCodecommitEnabled] = useState(false);
+  const [awsAccessKeyId, setAwsAccessKeyId] = useState("");
+  const [awsSecretAccessKey, setAwsSecretAccessKey] = useState("");
+  const [awsSessionToken, setAwsSessionToken] = useState("");
+  const [awsRegion, setAwsRegion] = useState("us-east-1");
+  const [awsValidated, setAwsValidated] = useState(false);
+  const [awsUser, setAwsUser] = useState<{ login: string; name: string } | null>(null);
+  const [awsError, setAwsError] = useState("");
 
   // Step 3: Agent keys
   const [anthropicKey, setAnthropicKey] = useState("");
@@ -206,6 +214,15 @@ export default function SetupPage() {
         fetches.push(api.listUserRepos(githubToken || ""));
       if (gitlabEnabled && gitlabToken)
         fetches.push(api.listGitlabRepos(gitlabToken, gitlabHost || undefined));
+      if (codecommitEnabled && awsAccessKeyId && awsSecretAccessKey)
+        fetches.push(
+          api.listCodecommitRepos({
+            accessKeyId: awsAccessKeyId,
+            secretAccessKey: awsSecretAccessKey,
+            sessionToken: awsSessionToken || undefined,
+            region: awsRegion,
+          }),
+        );
       if (fetches.length > 0) {
         Promise.all(fetches)
           .then((results) => {
@@ -305,6 +322,29 @@ export default function SetupPage() {
       }
     } catch (err) {
       setGitlabError(err instanceof Error ? err.message : "Validation failed");
+    }
+    setLoading(false);
+  };
+
+  const validateAws = async () => {
+    if (!awsAccessKeyId.trim() || !awsSecretAccessKey.trim() || !awsRegion.trim()) return;
+    setLoading(true);
+    setAwsError("");
+    try {
+      const res = await api.validateAwsCredentials({
+        accessKeyId: awsAccessKeyId,
+        secretAccessKey: awsSecretAccessKey,
+        sessionToken: awsSessionToken || undefined,
+        region: awsRegion,
+      });
+      if (res.valid && res.user) {
+        setAwsUser(res.user);
+        setAwsValidated(true);
+      } else {
+        setAwsError(res.error ?? "Invalid credentials");
+      }
+    } catch (err) {
+      setAwsError(err instanceof Error ? err.message : "Validation failed");
     }
     setLoading(false);
   };
@@ -450,6 +490,14 @@ export default function SetupPage() {
         if (gitlabHost && gitlabHost !== "gitlab.com") {
           await api.createSecret({ name: "GITLAB_HOST", value: gitlabHost });
         }
+      }
+      if (codecommitEnabled && awsAccessKeyId.trim() && awsSecretAccessKey.trim() && awsValidated) {
+        await api.createSecret({ name: "AWS_ACCESS_KEY_ID", value: awsAccessKeyId });
+        await api.createSecret({ name: "AWS_SECRET_ACCESS_KEY", value: awsSecretAccessKey });
+        if (awsSessionToken.trim()) {
+          await api.createSecret({ name: "AWS_SESSION_TOKEN", value: awsSessionToken });
+        }
+        await api.createSecret({ name: "AWS_REGION", value: awsRegion });
       }
       goNext();
     } catch (err) {
@@ -835,6 +883,20 @@ export default function SetupPage() {
                   </svg>
                   GitLab
                 </button>
+                <button
+                  onClick={() => setCodecommitEnabled((v) => !v)}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-md text-sm border transition-colors",
+                    codecommitEnabled
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border text-text-muted hover:bg-bg-hover",
+                  )}
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2 2 7v10l10 5 10-5V7L12 2zm0 2.18L19.82 8 12 11.82 4.18 8 12 4.18zM4 9.74l7 3.5v7.52l-7-3.5V9.74zm9 11.02v-7.52l7-3.5v7.52l-7 3.5z" />
+                  </svg>
+                  AWS CodeCommit
+                </button>
               </div>
 
               {/* GitHub form */}
@@ -977,6 +1039,91 @@ export default function SetupPage() {
                 </>
               )}
 
+              {/* CodeCommit form */}
+              {codecommitEnabled && (
+                <>
+                  <p className="text-text-muted text-sm">
+                    Create an IAM user (or role) with the <code>AWSCodeCommitPowerUser</code>{" "}
+                    managed policy and paste its access key and secret here. STS session tokens are
+                    also supported.
+                  </p>
+                  <div>
+                    <label className="block text-sm text-text-muted mb-1.5">AWS Region</label>
+                    <input
+                      type="text"
+                      value={awsRegion}
+                      onChange={(e) => {
+                        setAwsRegion(e.target.value);
+                        setAwsValidated(false);
+                        setAwsError("");
+                      }}
+                      placeholder="us-east-1"
+                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-text-muted mb-1.5">
+                      AWS Access Key ID
+                    </label>
+                    <input
+                      type="text"
+                      value={awsAccessKeyId}
+                      onChange={(e) => {
+                        setAwsAccessKeyId(e.target.value);
+                        setAwsValidated(false);
+                        setAwsError("");
+                      }}
+                      placeholder="AKIA…"
+                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-text-muted mb-1.5">
+                      AWS Secret Access Key
+                    </label>
+                    <input
+                      type="password"
+                      value={awsSecretAccessKey}
+                      onChange={(e) => {
+                        setAwsSecretAccessKey(e.target.value);
+                        setAwsValidated(false);
+                        setAwsError("");
+                      }}
+                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-text-muted mb-1.5">
+                      Session Token{" "}
+                      <span className="text-text-muted/60">(optional, for STS credentials)</span>
+                    </label>
+                    <input
+                      type="password"
+                      value={awsSessionToken}
+                      onChange={(e) => {
+                        setAwsSessionToken(e.target.value);
+                        setAwsValidated(false);
+                        setAwsError("");
+                      }}
+                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                  {awsError && (
+                    <div className="flex items-center gap-2 text-error text-sm">
+                      <AlertCircle className="w-4 h-4" />
+                      {awsError}
+                    </div>
+                  )}
+                  {awsValidated && awsUser && (
+                    <div className="flex items-center gap-2 text-success text-sm p-2 rounded-md bg-success/10">
+                      <CheckCircle className="w-4 h-4" />
+                      Authenticated as <strong>{awsUser.login}</strong>
+                      {awsUser.name && <span className="text-text-muted">({awsUser.name})</span>}
+                    </div>
+                  )}
+                </>
+              )}
+
               <div className="flex items-center justify-between">
                 <button
                   onClick={goBack}
@@ -1003,13 +1150,28 @@ export default function SetupPage() {
                       {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Validate GitLab"}
                     </button>
                   )}
+                  {codecommitEnabled && !awsValidated && (
+                    <button
+                      onClick={() => validateAws()}
+                      disabled={
+                        loading ||
+                        !awsAccessKeyId.trim() ||
+                        !awsSecretAccessKey.trim() ||
+                        !awsRegion.trim()
+                      }
+                      className="flex items-center gap-2 px-4 py-2 rounded-md bg-bg-hover text-text text-sm hover:bg-border disabled:opacity-50"
+                    >
+                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Validate AWS"}
+                    </button>
+                  )}
                   <button
                     onClick={saveGitStep}
                     disabled={
                       loading ||
-                      (!githubEnabled && !gitlabEnabled) ||
+                      (!githubEnabled && !gitlabEnabled && !codecommitEnabled) ||
                       (githubEnabled && !githubAppConfigured && !githubValidated) ||
-                      (gitlabEnabled && !gitlabValidated)
+                      (gitlabEnabled && !gitlabValidated) ||
+                      (codecommitEnabled && !awsValidated)
                     }
                     className="flex items-center gap-2 px-5 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"
                   >

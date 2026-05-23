@@ -335,7 +335,7 @@ describe("github-token-service", () => {
   });
 
   it("resolves task creator's token", async () => {
-    mockDbWhere.mockResolvedValue([{ createdBy: "user-5", workspaceId: "ws-2" }]);
+    mockDbWhere.mockResolvedValueOnce([{ createdBy: "user-5", workspaceId: "ws-2" }]);
     const futureDate = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     mockRetrieveSecret
       .mockResolvedValueOnce("ghu_task_user_token")

@@ -83,7 +83,7 @@ describe("POST /api/secrets", () => {
     app = await buildTestApp();
   });
 
-  it("creates a secret", async () => {
+  it("creates a secret with workspaceId stripped for global scope (#509)", async () => {
     mockStoreSecret.mockResolvedValue(undefined);
 
     const res = await app.inject({
@@ -97,8 +97,8 @@ describe("POST /api/secrets", () => {
     expect(mockStoreSecret).toHaveBeenCalledWith(
       "MY_SECRET",
       "super-secret-value",
-      undefined,
-      "ws-1",
+      "global",
+      null,
       null,
     );
   });

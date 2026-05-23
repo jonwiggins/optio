@@ -19,6 +19,23 @@ if [ -n "${GITLAB_TOKEN:-}" ] && command -v glab >/dev/null 2>&1; then
   glab auth login --hostname "${GITLAB_HOST:-gitlab.com}" --token "${GITLAB_TOKEN}"
   echo "[optio] GitLab CLI authenticated"
 fi
+case "${OPTIO_REPO_URL:-}" in
+  *git-codecommit.*.amazonaws.com*)
+    if command -v aws >/dev/null 2>&1; then
+      git config --global credential.helper '!aws codecommit credential-helper $@'
+      git config --global credential.UseHttpPath true
+      if [ -z "${AWS_DEFAULT_REGION:-}" ] && [ -n "${AWS_REGION:-}" ]; then
+        export AWS_DEFAULT_REGION="${AWS_REGION}"
+      fi
+      echo "[optio] AWS CodeCommit credential helper configured (region: ${AWS_DEFAULT_REGION:-${AWS_REGION:-unset}})"
+      aws sts get-caller-identity >/dev/null 2>&1 \
+        && echo "[optio] AWS credentials valid" \
+        || echo "[optio] WARNING: AWS credentials missing or invalid — clone/PR ops may fail"
+    else
+      echo "[optio] WARNING: aws CLI not found in image; CodeCommit operations will fail"
+    fi
+    ;;
+esac
 
 # Clone repo
 cd /workspace

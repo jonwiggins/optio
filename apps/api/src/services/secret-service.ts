@@ -1,7 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { secrets } from "../db/schema.js";
+import { logger } from "../logger.js";
 import type { SecretRef } from "@optio/shared";
 
 const ALGORITHM = "aes-256-gcm";
@@ -129,6 +130,16 @@ export async function storeSecret(
   if (scope !== "user" && userId) {
     throw new Error("userId can only be set when scope is 'user'");
   }
+  // Enforce: scope = "global" implies workspaceId IS NULL. A "global"-scoped
+  // row bound to a workspace is a contradictory state — the SQL lookup in
+  // retrieveSecret omits the workspace filter for global scope, so it can match
+  // a workspace-bound row that was encrypted with a workspace-bound AAD,
+  // producing GCM auth-tag failures (see issue #509). Reject up front.
+  if (scope === "global" && workspaceId) {
+    throw new Error(
+      "workspaceId must be null when scope is 'global' — use a workspace-specific scope instead",
+    );
+  }
 
   const aad = buildSecretAAD(name, scope, workspaceId);
   const { alg, ciphertext, iv, authTag } = encrypt(value, aad);
@@ -254,6 +265,110 @@ export async function deleteSecret(
     conditions.push(eq(secrets.userId, userId));
   }
   await db.delete(secrets).where(and(...conditions));
+}
+
+/**
+ * Postgres advisory lock id for healContradictoryGlobalSecrets — distinct from
+ * the migration runner's lock so the two can't deadlock against each other.
+ * Replicas booting concurrently serialize through this lock.
+ */
+const HEAL_ADVISORY_LOCK_ID = 8_675_310;
+
+/**
+ * Heal contradictory rows where scope='global' but workspace_id IS NOT NULL
+ * (see issue #509). Re-encrypts each row with the canonical global AAD and
+ * nulls out workspace_id. Idempotent — a no-op once the invariant holds.
+ *
+ * Returns the number of rows healed. If a row is already shadowed by a true
+ * global row (same name, no workspace), it is dropped to avoid violating the
+ * (name, scope, workspace_id, user_id) unique constraint on update.
+ *
+ * IMPORTANT: a Postgres advisory lock serializes concurrent replicas. Without
+ * it, two pods booting at the same time would both select the same bad rows
+ * and both update them — and because Postgres treats NULLs as distinct in
+ * UNIQUE indexes, the second update would silently produce a duplicate
+ * (name, 'global', NULL, NULL) row instead of conflicting.
+ *
+ * NOTE: each healed row turns a workspace-bound secret into a globally-readable
+ * one. We log per-row at INFO so an operator can audit which secrets crossed
+ * a workspace boundary as a side effect of the fix.
+ */
+export async function healContradictoryGlobalSecrets(): Promise<number> {
+  await db.execute(sql`SELECT pg_advisory_lock(${sql.raw(String(HEAL_ADVISORY_LOCK_ID))})`);
+  try {
+    const bad = await db
+      .select()
+      .from(secrets)
+      .where(and(eq(secrets.scope, "global"), isNotNull(secrets.workspaceId)));
+
+    if (bad.length === 0) return 0;
+
+    let healed = 0;
+    for (const row of bad) {
+      try {
+        const oldAad = buildSecretAAD(row.name, "global", row.workspaceId);
+        const plaintext = decrypt(
+          {
+            alg: row.alg ?? ALG_AES_256_GCM_V1,
+            iv: row.iv,
+            ciphertext: row.encryptedValue,
+            authTag: row.authTag,
+          },
+          oldAad,
+        );
+
+        const [shadow] = await db
+          .select({ id: secrets.id })
+          .from(secrets)
+          .where(
+            and(
+              eq(secrets.name, row.name),
+              eq(secrets.scope, "global"),
+              isNull(secrets.workspaceId),
+            ),
+          );
+
+        if (shadow) {
+          // A true global row already exists with the same name — drop the
+          // contradictory row rather than collide on the unique constraint.
+          await db.delete(secrets).where(eq(secrets.id, row.id));
+          logger.warn(
+            { name: row.name, fromWorkspaceId: row.workspaceId },
+            "healContradictoryGlobalSecrets: dropped redundant workspace-bound global row",
+          );
+        } else {
+          const newAad = buildSecretAAD(row.name, "global", null);
+          const reEncrypted = encrypt(plaintext, newAad);
+          await db
+            .update(secrets)
+            .set({
+              encryptedValue: reEncrypted.ciphertext,
+              iv: reEncrypted.iv,
+              authTag: reEncrypted.authTag,
+              alg: reEncrypted.alg,
+              workspaceId: null,
+              updatedAt: new Date(),
+            })
+            .where(eq(secrets.id, row.id));
+          logger.info(
+            { name: row.name, fromWorkspaceId: row.workspaceId },
+            "healContradictoryGlobalSecrets: secret promoted from workspace to global scope",
+          );
+        }
+        healed++;
+      } catch (err) {
+        logger.error(
+          { err, name: row.name, workspaceId: row.workspaceId },
+          "healContradictoryGlobalSecrets: failed to heal row — leaving in place for manual review",
+        );
+      }
+    }
+
+    logger.info({ healed, total: bad.length }, "healContradictoryGlobalSecrets complete");
+    return healed;
+  } finally {
+    await db.execute(sql`SELECT pg_advisory_unlock(${sql.raw(String(HEAL_ADVISORY_LOCK_ID))})`);
+  }
 }
 
 /**

@@ -1,11 +1,11 @@
-export type GitPlatformType = "github" | "gitlab";
+export type GitPlatformType = "github" | "gitlab" | "codecommit";
 
 export interface RepoIdentifier {
   platform: GitPlatformType;
-  host: string; // "github.com", "gitlab.com", "gitlab.myco.com"
-  owner: string;
+  host: string; // "github.com", "gitlab.com", "gitlab.myco.com", "git-codecommit.us-east-1.amazonaws.com"
+  owner: string; // For CodeCommit: AWS region (e.g. "us-east-1") since CodeCommit has no owner concept
   repo: string;
-  apiBaseUrl: string; // "https://api.github.com" or "https://gitlab.com/api/v4"
+  apiBaseUrl: string; // "https://api.github.com", "https://gitlab.com/api/v4", or AWS region for CodeCommit
 }
 
 export interface PullRequest {

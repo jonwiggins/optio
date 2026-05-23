@@ -497,10 +497,12 @@ rbac:
 serviceAccount:
   create: true
   name: optio
-  # Annotations for the service account (e.g., for GKE Workload Identity).
+  # Annotations for the service account (e.g., for GKE Workload Identity or EKS IRSA).
   # Used by both API/web pods (for K8s API access) and agent pods (for cloud service auth).
   # Example for GKE Workload Identity:
   #   iam.gke.io/gcp-service-account: optio@PROJECT_ID.iam.gserviceaccount.com
+  # Example for EKS IRSA (lets CodeCommit use the pod's IAM role instead of static AWS keys):
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/optio-codecommit
   annotations: {}
 
 # ──────────────────────────────────────────────────────────────────────────────
