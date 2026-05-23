@@ -5,19 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - unreleased
+## [0.4.0] - 2026-04-27
 
 ### Added
 
-- **Persistent Agents** — a third Task tier alongside Repo Tasks and Standalone Tasks. Long-lived, named, message-driven agents that wake on user messages, agent messages, webhooks, cron ticks, or ticket events. Each agent has a stable slug, addressable by other agents in the same workspace via an inter-agent HTTP API. Three configurable pod lifecycle modes: `always-on`, `sticky` (default, with idle warm window), and `on-demand`. Cyclic state machine reconciled by the existing K8s-style control plane (now a fourth `RunKind`: `persistent-agent`). New `/agents` UI with chat, turn history, live activity stream, and pause/resume/restart/archive controls. See [docs/persistent-agents.md](docs/persistent-agents.md) and the four-agent demo in [demos/the-forge](demos/the-forge/README.md).
-- **Issues** as a top-level nav item — the GitHub Issues queue is now its own page at `/issues`, promoted out of the `/tasks` tab strip.
+- **Persistent Agents** — a third Task tier alongside Repo Tasks and Standalone Tasks. Long-lived, named, message-driven agents that wake on user messages, agent messages, webhooks, cron ticks, or ticket events. Each agent has a stable slug, addressable by other agents in the same workspace via an inter-agent HTTP API. Three configurable pod lifecycle modes: `always-on`, `sticky` (default, with idle warm window), and `on-demand`. Cyclic state machine reconciled by the existing K8s-style control plane (now a fourth `RunKind`: `persistent-agent`). New `/agents` UI with chat, turn history, live activity stream, and pause/resume/restart/archive controls (#510). See [docs/persistent-agents.md](docs/persistent-agents.md) and the four-agent demo in [demos/the-forge](demos/the-forge/README.md).
+- **Issues** as a top-level nav item — the GitHub Issues queue is now its own page at `/issues`, fanning out across multiple configured ticket providers.
 - **Reviews** as a top-level nav item — code-review subtasks plus external PR reviews now live at `/reviews` (and `/reviews/:id`), with their own reconciler `RunKind` (`pr-review`).
+- **Workspace member management UI** — invite, list, and remove workspace members by email with a server-side duplicate-member 409 guard (#496, #499).
+- **Agent-aware review configuration** — pick the review agent type per repo so reviews can run on a different vendor than the authoring agent (#504).
+- **Skills marketplace** — install skills from any git URL, with agent-typed scoping and a multi-file skill-directory layout so a single skill can target one or many agent types.
+- **Persistent Agents and Sessions stats bars** on the overview page (#521).
+- **Persisted session chat history** — re-opening a session now shows the prior conversation (#517).
+- **Rich rendering in the agent log viewer** — markdown tables and rich blocks render in agent text output (#520).
 - **Examples directory** — runnable, self-contained agent configurations under [`examples/`](examples/README.md), starting with two Persistent Agent setups (Forge and Mars Mission Control). Each example is idempotent — re-running `setup.sh` is safe.
 
 ### Changed
 
 - **Sidebar nav reorganized.** The hub-and-tabs `/tasks` page is gone. Each tier has its own dedicated route, grouped into **Run** (Tasks · Jobs · Reviews · Issues · Scheduled) and **Live** (Agents · Sessions). The Library group renamed "Templates" to **Prompts** to free that label. Legacy `/tasks?tab=…` URLs redirect to the dedicated pages.
 - **User-facing names finalised.** Repo Tasks → **Tasks**; Standalone Tasks → **Jobs** (matching the existing `/api/jobs` URL); PR Reviews → **Reviews**; Persistent Agents → **Agents**; Templates (in the Library) → **Prompts**. Backend table names (`tasks`, `task_configs`, `workflows`, `prompt_templates`) are unchanged.
+- **Setup wizard defaults agent secrets to global scope** with an explicit scope toggle, reducing per-user secret sprawl for the common case (#503).
+- **README leads with differentiation** — self-hosted, BYO-K8s, multi-vendor — to better orient first-time readers (#519).
+
+### Fixed
+
+- Sessions: stop echoing the agent's final line in the chat view (#516).
+- Auth: `/me` now returns the enriched user object with the caller's workspace role attached (#508).
 
 ### Migration notes
 
