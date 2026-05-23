@@ -144,7 +144,7 @@ export async function syncAllTickets(): Promise<number> {
 
         // Resolve agent type: ticket label > repo default > "claude-code"
         const { getRepoByUrl } = await import("./repo-service.js");
-        const repoConfig = await getRepoByUrl(repoUrl);
+        const repoConfig = await getRepoByUrl(repoUrl, null, { allowAnyWorkspace: true });
         if (!repoConfig) {
           logger.warn(
             { repoUrl, ticketId: ticket.externalId },

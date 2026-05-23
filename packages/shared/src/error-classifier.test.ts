@@ -157,4 +157,36 @@ describe("classifyError", () => {
     expect(result.category).toBe("auth");
     expect(result.title).toBe("Authentication token expired");
   });
+
+  describe("authentication error retryability", () => {
+    it("pins retryable: false for ANTHROPIC_API_KEY missing", () => {
+      const result = classifyError("Secret not found: ANTHROPIC_API_KEY");
+      expect(result.category).toBe("auth");
+      expect(result.retryable).toBe(false);
+    });
+
+    it("pins retryable: false for OPENAI_API_KEY missing", () => {
+      const result = classifyError("Secret not found: OPENAI_API_KEY");
+      expect(result.category).toBe("auth");
+      expect(result.retryable).toBe(false);
+    });
+
+    it("pins retryable: false for GEMINI_API_KEY missing", () => {
+      const result = classifyError("Secret not found: GEMINI_API_KEY");
+      expect(result.category).toBe("auth");
+      expect(result.retryable).toBe(false);
+    });
+
+    it("pins retryable: false for COPILOT_GITHUB_TOKEN missing", () => {
+      const result = classifyError("Secret not found: COPILOT_GITHUB_TOKEN");
+      expect(result.category).toBe("auth");
+      expect(result.retryable).toBe(false);
+    });
+
+    it("pins retryable: false for expired OAuth token", () => {
+      const result = classifyError("OAuth token has expired during task execution");
+      expect(result.category).toBe("auth");
+      expect(result.retryable).toBe(false);
+    });
+  });
 });
