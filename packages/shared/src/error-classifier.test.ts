@@ -157,4 +157,11 @@ describe("classifyError", () => {
     expect(result.category).toBe("auth");
     expect(result.title).toBe("Authentication token expired");
   });
+
+  it("classifies invalid API key error", () => {
+    const result = classifyError("API_KEY_INVALID error from Gemini API");
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Invalid API key");
+    expect(result.retryable).toBe(false);
+  });
 });

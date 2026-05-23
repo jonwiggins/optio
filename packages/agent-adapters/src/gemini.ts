@@ -64,8 +64,6 @@ export class GeminiAdapter implements AgentAdapter {
       OPTIO_PROMPT: prompt,
       OPTIO_AGENT_TYPE: "gemini",
       OPTIO_BRANCH_NAME: `${TASK_BRANCH_PREFIX}${input.taskId}`,
-      // Ensure the CLI doesn't prompt for trust in isolated ephemeral pods
-      GEMINI_CLI_TRUST_WORKSPACE: "true",
     };
 
     const requiredSecrets: string[] = [];
