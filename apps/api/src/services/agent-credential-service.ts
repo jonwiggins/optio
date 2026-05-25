@@ -14,6 +14,7 @@ export type AgentType =
 export interface AgentCredentials {
   env: Record<string, string>;
   setupFiles?: Array<{ path: string; content: string; sensitive?: boolean }>;
+  error?: string;
 }
 
 /**
@@ -37,6 +38,7 @@ export async function getAgentCredentials(
   const log = logger.child({ agentType, workspaceId, userId });
   const env: Record<string, string> = {};
   const setupFiles: Array<{ path: string; content: string; sensitive?: boolean }> = [];
+  let authError: string | undefined = undefined;
 
   // ── Claude Code credentials ──────────────────────────────────────
   if (agentType === "claude-code") {
@@ -54,6 +56,7 @@ export async function getAgentCredentials(
         log.info("Injected CLAUDE_CODE_OAUTH_TOKEN from host credentials");
       } else {
         log.warn({ error: authResult.error }, "Max subscription auth unavailable");
+        authError = authResult.error;
       }
     } else if (claudeAuthMode === "oauth-token") {
       // OAuth token mode: retrieve from secrets store
@@ -88,8 +91,17 @@ export async function getAgentCredentials(
         userId,
       ).catch(() => null);
 
-      if (projectId) env.ANTHROPIC_VERTEX_PROJECT_ID = projectId as string;
-      if (region) env.CLOUD_ML_REGION = region as string;
+      if (projectId) {
+        env.ANTHROPIC_VERTEX_PROJECT_ID = projectId as string;
+      } else {
+        authError = "CLAUDE_VERTEX_PROJECT_ID secret is missing or empty.";
+      }
+      if (region) {
+        env.CLOUD_ML_REGION = region as string;
+      } else {
+        authError =
+          (authError ? authError + " " : "") + "CLAUDE_VERTEX_REGION secret is missing or empty.";
+      }
       env.CLAUDE_CODE_USE_VERTEX = "1";
 
       // If service account key provided, write it as a sensitive file
@@ -271,5 +283,9 @@ export async function getAgentCredentials(
     log.info("Configured OpenCode defaults");
   }
 
-  return { env, setupFiles: setupFiles.length > 0 ? setupFiles : undefined };
+  return {
+    env,
+    setupFiles: setupFiles.length > 0 ? setupFiles : undefined,
+    ...(authError ? { error: authError } : {}),
+  };
 }

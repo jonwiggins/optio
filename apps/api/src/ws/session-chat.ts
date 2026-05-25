@@ -119,6 +119,18 @@ export async function sessionChatWs(app: FastifyInstance) {
     // Determine agent type from repo config (defaults to claude-code)
     const agentType = (repoConfig?.defaultAgentType || "claude-code") as any;
 
+    if (agentType !== "claude-code" && agentType !== "gemini") {
+      socket.send(
+        JSON.stringify({
+          type: "error",
+          message: `Interactive sessions are not supported for agent type "${agentType}". Only "claude-code" and "gemini" are supported.`,
+        }),
+      );
+      releaseConnection(clientIp);
+      socket.close();
+      return;
+    }
+
     // Model selection depends on agent type - use repo config, not optio settings
     // (optioSettings.model is for Optio chat interface, not interactive sessions)
     let currentModel: string;
@@ -242,10 +254,19 @@ export async function sessionChatWs(app: FastifyInstance) {
       if (agentType === "gemini") {
         const modelFlag = currentModel ? `-m ${currentModel}` : "";
         agentCommand = `gemini -p '${escapedPrompt}' ${modelFlag} --output-format stream-json --approval-mode yolo < /dev/null || true`;
-      } else {
-        // claude-code, codex, copilot, etc.
+      } else if (agentType === "claude-code") {
         const modelFlag = currentModel ? `--model ${currentModel}` : "";
         agentCommand = `claude -p '${escapedPrompt}' ${modelFlag} --output-format stream-json --verbose --dangerously-skip-permissions < /dev/null || true`;
+      } else {
+        log.error(
+          { agentType },
+          "Unsupported agent type encountered in session chat execution path",
+        );
+        send({
+          type: "error",
+          message: `Internal Error: Agent type "${agentType}" is not supported in session chat.`,
+        });
+        return;
       }
 
       // Build auth passthrough env vars so the agent can make

@@ -699,13 +699,22 @@ export function startTaskWorker() {
         // Strict validation: throw if required credentials are missing
         if (task.agentType === "claude-code") {
           if (claudeAuthMode === "max-subscription" && !allEnv.CLAUDE_CODE_OAUTH_TOKEN) {
-            throw new Error("Max subscription auth failed: Token not available");
+            throw new Error(
+              `Max subscription auth failed: ${agentCredentials.error ?? "Token not available"}`,
+            );
           }
           if (claudeAuthMode === "oauth-token" && !allEnv.CLAUDE_CODE_OAUTH_TOKEN) {
             throw new Error(
               "OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found. " +
                 "Run `claude setup-token` and paste the token in the setup wizard.",
             );
+          }
+          if (claudeAuthMode === "vertex-ai") {
+            if (!allEnv.ANTHROPIC_VERTEX_PROJECT_ID || !allEnv.CLOUD_ML_REGION) {
+              throw new Error(
+                `Vertex AI auth failed: ${agentCredentials.error ?? "Configuration not found"}`,
+              );
+            }
           }
           if (claudeAuthMode === "api-key" && !allEnv.ANTHROPIC_API_KEY) {
             log.warn("API key mode selected but no ANTHROPIC_API_KEY found");

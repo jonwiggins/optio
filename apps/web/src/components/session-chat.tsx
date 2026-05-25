@@ -83,7 +83,9 @@ export function SessionChat({
   // Expose a handler for external model changes (from header dropdown)
   const handleModelChange = useCallback((newModel: string) => {
     setModel(newModel);
-    wsRef.current?.send(JSON.stringify({ type: "set_model", model: newModel }));
+    if (wsRef.current && wsRef.current.readyState === 1) {
+      wsRef.current.send(JSON.stringify({ type: "set_model", model: newModel }));
+    }
   }, []);
 
   useEffect(() => {
@@ -108,7 +110,9 @@ export function SessionChat({
     if (!isValidModel) {
       const defaultModel = agentType === "gemini" ? "gemini-2.5-flash" : "sonnet";
       setModel(defaultModel);
-      wsRef.current?.send(JSON.stringify({ type: "set_model", model: defaultModel }));
+      if (wsRef.current && wsRef.current.readyState === 1) {
+        wsRef.current.send(JSON.stringify({ type: "set_model", model: defaultModel }));
+      }
     }
   }, [agentType, model, modelOptions]);
 
@@ -195,7 +199,9 @@ export function SessionChat({
   const handleSend = () => {
     const text = input.trim();
     if (!text || status === "thinking") return;
-    wsRef.current?.send(JSON.stringify({ type: "message", text }));
+    if (wsRef.current && wsRef.current.readyState === 1) {
+      wsRef.current.send(JSON.stringify({ type: "message", text }));
+    }
     setInput("");
     requestAnimationFrame(() => {
       if (textareaRef.current) {
@@ -205,7 +211,9 @@ export function SessionChat({
   };
 
   const handleInterrupt = () => {
-    wsRef.current?.send(JSON.stringify({ type: "interrupt" }));
+    if (wsRef.current && wsRef.current.readyState === 1) {
+      wsRef.current.send(JSON.stringify({ type: "interrupt" }));
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
