@@ -158,7 +158,7 @@ describe("parseGeminiEvent", () => {
   it("handles non-JSON lines as raw text", () => {
     const result = parseGeminiEvent("[optio] Running Google Gemini...", TASK_ID);
     expect(result.entries).toHaveLength(1);
-    expect(result.entries[0].type).toBe("text");
+    expect(result.entries[0].type).toBe("system");
     expect(result.entries[0].content).toBe("[optio] Running Google Gemini...");
   });
 
