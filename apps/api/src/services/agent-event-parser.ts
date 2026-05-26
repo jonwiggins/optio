@@ -26,8 +26,10 @@ export function parseClaudeEvent(
     // Filter out terminal control sequences
     const clean = line.replace(/\x1b\[[0-9;]*[a-zA-Z]|\r/g, "").trim();
     if (!clean || clean.length < 2) return { entries: [] };
+
+    const type = isOptioSystemMessage(clean) ? "system" : "text";
     return {
-      entries: [{ taskId, timestamp: new Date().toISOString(), type: "text", content: clean }],
+      entries: [{ taskId, timestamp: new Date().toISOString(), type, content: clean }],
     };
   }
 
@@ -156,6 +158,12 @@ export function parseClaudeEvent(
 
   // Skip rate_limit_event, stream_event, etc.
   return { entries: [], sessionId };
+}
+
+/** Detects specific Optio system messages that come as raw text */
+function isOptioSystemMessage(line: string): boolean {
+  const lower = line.toLowerCase();
+  return lower.includes("[optio] ") || lower.startsWith("wrote ");
 }
 
 /** Format a tool use into a concise human-readable string */

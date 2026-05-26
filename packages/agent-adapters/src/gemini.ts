@@ -104,7 +104,7 @@ export class GeminiAdapter implements AgentAdapter {
     // Yolo mode is applied via the --approval-mode CLI flag; settings.json uses "auto_edit".
     const settingsApprovalMode = approvalMode === "yolo" ? "auto_edit" : approvalMode;
     const geminiSettings = {
-      security: { auth: { selectedType: authType } },
+      security: { auth: { selectedType: authType }, folderTrust: { enabled: true } },
       model: { maxSessionTurns },
       general: { defaultApprovalMode: settingsApprovalMode },
       telemetry: { enabled: false },

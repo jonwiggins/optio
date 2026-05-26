@@ -20,13 +20,15 @@ export function parseGeminiEvent(
   let event: any;
   try {
     event = JSON.parse(line);
-  } catch {
+  } catch (err) {
     // Not JSON — raw text from shell/git
     if (!line.trim()) return { entries: [] };
     const clean = line.replace(/\x1b\[[0-9;]*[a-zA-Z]|\r/g, "").trim();
     if (!clean || clean.length < 2) return { entries: [] };
+
+    const type = isOptioSystemMessage(clean) ? "system" : "text";
     return {
-      entries: [{ taskId, timestamp: new Date().toISOString(), type: "text", content: clean }],
+      entries: [{ taskId, timestamp: new Date().toISOString(), type, content: clean }],
     };
   }
 
@@ -96,8 +98,15 @@ export function parseGeminiEvent(
 
   // Tool use
   if (event.type === "tool_use") {
+    const name =
+      event.name ??
+      event.tool_name ??
+      event.tool ??
+      event.function ??
+      event.functionName ??
+      event.function_name;
     const args = parseArgs(event.arguments);
-    const formatted = formatGeminiToolUse(event.name, args);
+    const formatted = formatGeminiToolUse(name, args);
     entries.push({
       taskId,
       timestamp,
@@ -105,7 +114,7 @@ export function parseGeminiEvent(
       type: "tool_use",
       content: formatted,
       metadata: {
-        toolName: event.name,
+        toolName: name,
         toolInput: args,
         toolUseId: event.call_id,
       },
@@ -187,6 +196,19 @@ export function parseGeminiEvent(
 
   // Unknown JSON event — skip
   return { entries: [], sessionId };
+}
+
+/** Detects specific Optio system messages that come as raw text */
+function isOptioSystemMessage(line: string): boolean {
+  const lower = line.toLowerCase();
+  return (
+    lower.includes("[optio] ") ||
+    lower.startsWith("wrote ") ||
+    lower.includes("color support") ||
+    lower.includes("yolo mode is enabled") ||
+    lower.includes("cannot measure phase") ||
+    lower.includes("approval mode overridden")
+  );
 }
 
 /** Parse tool call arguments (may be a JSON string or object) */

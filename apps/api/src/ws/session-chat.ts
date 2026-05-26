@@ -15,7 +15,7 @@ import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import { parseGeminiEvent } from "../services/gemini-event-parser.js";
 import { publishSessionEvent } from "../services/event-bus.js";
-import type { ExecSession, OptioSettings } from "@optio/shared";
+import type { ExecSession, OptioSettings, AgentLogEntry } from "@optio/shared";
 import { authenticateWs, extractSessionToken } from "./ws-auth.js";
 import {
   getClientIp,
@@ -253,7 +253,7 @@ export async function sessionChatWs(app: FastifyInstance) {
       let agentCommand: string;
       if (agentType === "gemini") {
         const modelFlag = currentModel ? `-m ${currentModel}` : "";
-        agentCommand = `gemini -p '${escapedPrompt}' ${modelFlag} --output-format stream-json --approval-mode yolo < /dev/null || true`;
+        agentCommand = `gemini -p '${escapedPrompt}' ${modelFlag} --output-format stream-json --approval-mode yolo --skip-trust < /dev/null || true`;
       } else if (agentType === "claude-code") {
         const modelFlag = currentModel ? `--model ${currentModel}` : "";
         agentCommand = `claude -p '${escapedPrompt}' ${modelFlag} --output-format stream-json --verbose --dangerously-skip-permissions < /dev/null || true`;
@@ -342,14 +342,31 @@ export async function sessionChatWs(app: FastifyInstance) {
         execSession.stderr.on("data", (chunk: Buffer) => {
           const text = chunk.toString("utf-8").trim();
           if (text) {
-            const entry = {
-              taskId: sessionId,
-              timestamp: new Date().toISOString(),
-              type: "error" as const,
-              content: text,
-            };
-            send({ type: "chat_event", event: entry });
-            persistChatEvent(sessionId, entry, log);
+            const cleanText = text.trim();
+            if (!cleanText) return;
+
+            let entries: AgentLogEntry[] = [];
+            if (agentType === "gemini") {
+              ({ entries } = parseGeminiEvent(cleanText, sessionId));
+            } else if (agentType === "claude-code") {
+              ({ entries } = parseClaudeEvent(cleanText, sessionId));
+            } else {
+              log.warn(
+                { agentType },
+                "Unsupported agent type encountered during output parsing, treating as generic text",
+              );
+              entries.push({
+                taskId: sessionId,
+                timestamp: new Date().toISOString(),
+                type: "text",
+                content: outputBuffer,
+              });
+            }
+
+            for (const entry of entries) {
+              send({ type: "chat_event", event: entry });
+              persistChatEvent(sessionId, entry, log);
+            }
           }
         });
 
@@ -358,10 +375,24 @@ export async function sessionChatWs(app: FastifyInstance) {
           execSession!.stdout.on("end", () => {
             // Process any remaining buffer
             if (outputBuffer.trim()) {
-              const { entries } =
-                agentType === "gemini"
-                  ? parseGeminiEvent(outputBuffer, sessionId)
-                  : parseClaudeEvent(outputBuffer, sessionId);
+              let entries: AgentLogEntry[] = [];
+              if (agentType === "gemini") {
+                ({ entries } = parseGeminiEvent(outputBuffer, sessionId));
+              } else if (agentType === "claude-code") {
+                ({ entries } = parseClaudeEvent(outputBuffer, sessionId));
+              } else {
+                log.warn(
+                  { agentType },
+                  "Unsupported agent type encountered during output parsing, treating as generic text",
+                );
+                entries.push({
+                  taskId: sessionId,
+                  timestamp: new Date().toISOString(),
+                  type: "text",
+                  content: outputBuffer,
+                });
+              }
+
               for (const entry of entries) {
                 send({ type: "chat_event", event: entry });
                 persistChatEvent(sessionId, entry, log);
@@ -390,7 +421,7 @@ export async function sessionChatWs(app: FastifyInstance) {
 
       const str = typeof data === "string" ? data : data.toString("utf-8");
 
-      let msg: { type: string; content?: string; model?: string };
+      let msg: { type: string; content?: string; text?: string; model?: string };
       try {
         msg = JSON.parse(str);
       } catch {
@@ -400,7 +431,8 @@ export async function sessionChatWs(app: FastifyInstance) {
 
       switch (msg.type) {
         case "message":
-          if (!msg.content?.trim()) {
+          const content = msg.content ?? msg.text;
+          if (!content?.trim()) {
             send({ type: "error", message: "Empty message" });
             return;
           }
@@ -409,11 +441,11 @@ export async function sessionChatWs(app: FastifyInstance) {
           // logType=user_message so the UI can render it distinctly.
           appendSessionChatEvent({
             sessionId,
-            content: msg.content,
+            content,
             stream: "stdin",
             logType: "user_message",
           }).catch((err) => log.warn({ err }, "Failed to persist user message"));
-          runPrompt(msg.content).catch((err) => {
+          runPrompt(content).catch((err) => {
             log.error({ err }, "Prompt execution failed");
             send({ type: "error", message: "Prompt failed" });
           });
