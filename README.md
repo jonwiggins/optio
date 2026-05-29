@@ -408,3 +408,86 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, workflow, and co
 ## License
 
 [MIT](./LICENSE)
+
+## FAQ
+
+### What is Optio?
+
+**Optio is a self-hosted AI engineering platform** that runs entirely in your Kubernetes cluster. It orchestrates AI coding agents (Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode) to automate ticket-to-PR workflows, standalone tasks, and persistent agent services — all behind your firewall, with your model vendor choice, and with enterprise-grade primitives built in.
+
+| Optio | Hosted Alternatives |
+|-------|---------------------|
+| **Self-hosted** — runs in your K8s cluster (GKE, EKS, AKS, or any conformant cluster) | Hosted SaaS — your code goes to their cloud |
+| **Multi-vendor agents** — Claude, Codex, Copilot, Gemini, OpenCode behind one interface | Locked to a single model family |
+| **Open source (MIT)** — read, fork, audit, extend | Closed source, vendor lock-in |
+| **Enterprise primitives** — workspaces, encrypted secrets, OIDC/OAuth, K8s RBAC, audit logs | Often gated to enterprise tiers |
+| **Standalone Tasks** — ops, triage, reports, webhook automation beyond PRs | PR-centric; ops use cases out of scope |
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Tasks (Ticket to PR)** | Submit from GitHub Issues, Linear, Jira, Notion → agent provisions isolated env → opens PR → monitors CI → auto-fixes failures → merges when ready |
+| **Jobs (Standalone Tasks)** | Reusable, parameterized agent runs without repo checkout: reports, triage, audits, scheduled ops |
+| **Persistent Agents** | Long-lived, message-driven agent processes with stable slugs, inboxes, and lifecycle modes (`always-on` / `sticky` / `on-demand`) |
+| **Connections** | Plug external services (Notion, Slack, Linear, GitHub, PostgreSQL, Sentry, MCP servers) into agent pods at runtime |
+| **Feedback Loop** | Auto-resumes agent on CI failures, merge conflicts, review feedback; auto-merges when all checks pass |
+| **Inter-Agent Messaging** | Persistent Agents address each other via HTTP API for multi-agent teams |
+
+### Installation
+
+**Quick Start (Local Kubernetes):**
+
+```bash
+# Prerequisites: Kubernetes v1.33+, Docker Desktop with K8s enabled, Node.js 22+, pnpm 10+, Helm
+git clone https://github.com/jonwiggins/optio.git && cd optio
+./scripts/setup-local.sh
+```
+
+**Production Deployment (Helm):**
+
+```bash
+helm repo add optio https://jonwiggins.github.io/optio
+helm install optio optio/optio -n optio --create-namespace   --set encryption.key=$(openssl rand -hex 32)   --set postgresql.enabled=false   --set externalDatabase.url="postgres://..."   --set redis.enabled=false   --set externalRedis.url="redis://..."   --set ingress.enabled=true   --set ingress.hosts[0].host=optio.example.com
+```
+
+### Requirements
+
+| Requirement | Version/Details |
+|-------------|-----------------|
+| **Kubernetes** | v1.33+ (required for post-quantum TLS) |
+| **Docker Desktop** | With Kubernetes enabled |
+| **Node.js** | 22+ |
+| **pnpm** | 10+ |
+| **Helm** | For deployment |
+| **PostgreSQL** | 16 (task state, logs, secrets) |
+| **Redis** | 7 + BullMQ (job queue, pub/sub) |
+| **Agent Credentials** | Claude API key or Max/Pro subscription, OpenAI/Codex/Gemini keys (optional) |
+
+### Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Monorepo** | Turborepo + pnpm |
+| **API** | Fastify 5, Drizzle ORM, BullMQ |
+| **Web** | Next.js 15, Tailwind CSS 4, Zustand |
+| **Database** | PostgreSQL 16 |
+| **Queue** | Redis 7 + BullMQ |
+| **Runtime** | Kubernetes (Docker Desktop for local dev) |
+| **Deploy** | Helm chart |
+| **Auth** | Multi-provider OAuth (GitHub, Google, GitLab) |
+| **Agents** | Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode |
+
+### License
+
+Optio is released under the **MIT License** — open source, free to use, modify, and distribute.
+
+### Help & Resources
+
+| Resource | Link |
+|----------|------|
+| **Documentation** | [docs/](./docs/) directory, [site/](./site/) GitHub Pages |
+| **Contributing** | [CONTRIBUTING.md](./CONTRIBUTING.md) |
+| **Examples** | [examples/](./examples/README.md) — runnable demos |
+| **Issues** | [GitHub Issues](https://github.com/jonwiggins/optio/issues) |
+| **Helm Chart** | [helm/optio/](./helm/optio/values.yaml) |
