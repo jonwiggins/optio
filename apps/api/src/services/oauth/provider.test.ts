@@ -16,6 +16,16 @@ describe("getCallbackUrl", () => {
     process.env = { ...originalEnv };
   });
 
+  it("uses PUBLIC_URL when it is set and PUBLIC_API_URL is not", () => {
+    process.env.PUBLIC_URL = "https://optio.example.com";
+
+    const githubUrl = getCallbackUrl("github");
+    const oidcUrl = getCallbackUrl("oidc");
+
+    expect(githubUrl).toBe("https://optio.example.com/api/auth/github/callback");
+    expect(oidcUrl).toBe("https://optio.example.com/api/auth/oidc/callback");
+  });
+
   it("uses PUBLIC_API_URL when it is set", () => {
     process.env.PUBLIC_API_URL = "https://api.example.com/api";
 
@@ -30,14 +40,6 @@ describe("getCallbackUrl", () => {
     const url = getCallbackUrl("github");
 
     expect(url).toBe("https://api.example.com/api/auth/github/callback");
-  });
-
-  it("uses PUBLIC_URL when it is set and PUBLIC_API_URL is not", () => {
-    process.env.PUBLIC_URL = "https://optio.example.com";
-
-    const url = getCallbackUrl("github");
-
-    expect(url).toBe("https://optio.example.com/api/auth/github/callback");
   });
 
   it("falls back to localhost with API_PORT when PUBLIC_URL is not set", () => {
