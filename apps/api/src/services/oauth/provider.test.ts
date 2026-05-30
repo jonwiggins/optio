@@ -16,43 +16,35 @@ describe("getCallbackUrl", () => {
     process.env = { ...originalEnv };
   });
 
-  it("uses PUBLIC_URL when it is set and PUBLIC_API_URL is not", () => {
-    process.env.PUBLIC_URL = "https://optio.example.com";
+  describe.each(["github", "google", "oidc"])("with provider %s", (provider) => {
+    it("uses PUBLIC_URL when it is set and PUBLIC_API_URL is not", () => {
+      process.env.PUBLIC_URL = "https://optio.example.com";
+      expect(getCallbackUrl(provider)).toBe(
+        `https://optio.example.com/api/auth/${provider}/callback`,
+      );
+    });
 
-    const githubUrl = getCallbackUrl("github");
-    const oidcUrl = getCallbackUrl("oidc");
+    it("uses PUBLIC_API_URL when it is set", () => {
+      process.env.PUBLIC_API_URL = "https://optio-api.example.com/api";
+      expect(getCallbackUrl(provider)).toBe(
+        `https://optio-api.example.com/api/auth/${provider}/callback`,
+      );
+    });
 
-    expect(githubUrl).toBe("https://optio.example.com/api/auth/github/callback");
-    expect(oidcUrl).toBe("https://optio.example.com/api/auth/oidc/callback");
-  });
+    it("uses PUBLIC_API_URL and trims trailing slash", () => {
+      process.env.PUBLIC_API_URL = "https://optio-api.example.com/api/";
+      expect(getCallbackUrl(provider)).toBe(
+        `https://optio-api.example.com/api/auth/${provider}/callback`,
+      );
+    });
 
-  it("uses PUBLIC_API_URL when it is set", () => {
-    process.env.PUBLIC_API_URL = "https://api.example.com/api";
+    it("falls back to localhost with API_PORT when PUBLIC_URL is not set", () => {
+      process.env.API_PORT = "8080";
+      expect(getCallbackUrl(provider)).toBe(`http://localhost:8080/api/auth/${provider}/callback`);
+    });
 
-    const url = getCallbackUrl("github");
-
-    expect(url).toBe("https://api.example.com/api/auth/github/callback");
-  });
-
-  it("uses PUBLIC_API_URL and trims trailing slash", () => {
-    process.env.PUBLIC_API_URL = "https://api.example.com/api/";
-
-    const url = getCallbackUrl("github");
-
-    expect(url).toBe("https://api.example.com/api/auth/github/callback");
-  });
-
-  it("falls back to localhost with API_PORT when PUBLIC_URL is not set", () => {
-    process.env.API_PORT = "8080";
-
-    const url = getCallbackUrl("google");
-
-    expect(url).toBe("http://localhost:8080/api/auth/google/callback");
-  });
-
-  it("falls back to localhost:4000 when neither PUBLIC_URL nor API_PORT are set", () => {
-    const url = getCallbackUrl("oidc");
-
-    expect(url).toBe("http://localhost:4000/api/auth/oidc/callback");
+    it("falls back to localhost:4000 when neither PUBLIC_URL nor API_PORT are set", () => {
+      expect(getCallbackUrl(provider)).toBe(`http://localhost:4000/api/auth/${provider}/callback`);
+    });
   });
 });
