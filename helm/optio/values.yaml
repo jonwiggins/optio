@@ -96,6 +96,8 @@ web:
     maxReplicas: 4
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: ""
+  # Optional override for the public API URL (defaults to PUBLIC_URL with /api path)
+  publicApiUrl: ""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Optio Operations Assistant Pod
