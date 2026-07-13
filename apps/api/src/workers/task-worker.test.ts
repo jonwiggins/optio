@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   buildAgentCommand,
   buildInitialClaudeStreamMessage,
   inferExitCode,
+  shellQuote,
   shouldEscalateNoPr,
 } from "./task-worker.js";
 
@@ -243,6 +248,171 @@ describe("buildAgentCommand", () => {
       expect(cmds.some((c) => c.includes("Unknown agent type"))).toBe(true);
       expect(cmds.some((c) => c.includes("exit 1"))).toBe(true);
     });
+  });
+});
+
+describe("shellQuote", () => {
+  it("wraps a plain value in single quotes", () => {
+    expect(shellQuote("abc")).toBe("'abc'");
+  });
+
+  it("escapes embedded single quotes with the '\\'' sequence", () => {
+    expect(shellQuote("it's")).toBe("'it'\\''s'");
+  });
+
+  it("leaves backticks, $VAR, globs, and newlines untouched inside the quotes", () => {
+    const hostile = "`echo x` $HOME optio/task-*\nnext";
+    expect(shellQuote(hostile)).toBe(`'${hostile}'`);
+  });
+});
+
+// Regression tests for shell-quoting of agent command arguments. These
+// execute the generated command lines exactly the way the repo pod does
+// (joined with "\n" and run via `bash -c`), with a fake agent binary on
+// PATH that records its argv and stdin. Hostile text — backticks, $HOME,
+// globs, single quotes, literal newlines — must reach the binary
+// byte-for-byte, never be expanded or executed by the shell. The previous
+// JSON.stringify quoting failed this: bash expands $VAR and backticks
+// inside double quotes.
+describe("hostile prompt/argument shell-quoting regression", () => {
+  const HOSTILE = [
+    "pwn `echo should-not-run`",
+    "$HOME",
+    "optio/task-*",
+    "it's quoted",
+    "line1\nline2",
+  ].join(" ");
+
+  function makeFakeBin(dir: string, name: string): { argsFile: string; stdinFile: string } {
+    const argsFile = path.join(dir, `${name}-args.bin`);
+    const stdinFile = path.join(dir, `${name}-stdin.bin`);
+    const script = [
+      "#!/usr/bin/env bash",
+      // NUL-separated argv so newlines inside a single argument survive
+      'for arg in "$@"; do printf \'%s\\0\' "$arg"; done > "$OPTIO_TEST_ARGS_FILE"',
+      'cat > "$OPTIO_TEST_STDIN_FILE"',
+    ].join("\n");
+    fs.writeFileSync(path.join(dir, name), script, { mode: 0o755 });
+    return { argsFile, stdinFile };
+  }
+
+  function runGeneratedCommand(
+    cmds: string[],
+    extraEnv: Record<string, string>,
+    stdin: string,
+  ): ReturnType<typeof spawnSync> {
+    return spawnSync("bash", ["-c", cmds.join("\n")], {
+      env: {
+        PATH: extraEnv.PATH,
+        // Distinct HOME so accidental $HOME expansion is detectable
+        HOME: "/tmp/optio-fake-home",
+        ...extraEnv,
+      },
+      input: stdin,
+      encoding: "utf8",
+    });
+  }
+
+  it("passes a hostile --resume session id to claude literally, not shell-executed", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "optio-shellquote-"));
+    try {
+      const { argsFile, stdinFile } = makeFakeBin(tmp, "claude");
+
+      const env = { OPTIO_PROMPT: HOSTILE };
+      const cmds = buildAgentCommand("claude-code", env, { resumeSessionId: HOSTILE });
+      const result = runGeneratedCommand(
+        cmds,
+        {
+          PATH: `${tmp}:${process.env.PATH}`,
+          OPTIO_TEST_ARGS_FILE: argsFile,
+          OPTIO_TEST_STDIN_FILE: stdinFile,
+          OPTIO_PROMPT: env.OPTIO_PROMPT,
+        },
+        buildInitialClaudeStreamMessage(env.OPTIO_PROMPT),
+      );
+      expect(result.status).toBe(0);
+
+      const argv = fs.readFileSync(argsFile, "utf8").split("\0").slice(0, -1);
+      const resumeIdx = argv.indexOf("--resume");
+      expect(resumeIdx).toBeGreaterThan(-1);
+      const received = argv[resumeIdx + 1];
+      // Byte-for-byte literal: backticks not executed, $HOME not expanded,
+      // glob not expanded, single quote and newlines preserved
+      expect(received).toBe(HOSTILE);
+      expect(received).toContain("`echo should-not-run`");
+      expect(received).toContain("$HOME");
+      expect(received).toContain("optio/task-*");
+      expect(received).toContain("'");
+      expect(received).toContain("\n");
+      expect(received).not.toContain("/tmp/optio-fake-home");
+
+      // The prompt (delivered via stdin in stream-json mode) is literal too
+      const stdinData = fs.readFileSync(stdinFile, "utf8");
+      expect(stdinData).toBe(buildInitialClaudeStreamMessage(HOSTILE));
+      const parsed = JSON.parse(stdinData.trim());
+      expect(parsed.message.content[0].text).toBe(HOSTILE);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("passes a hostile prompt to codex literally via $OPTIO_PROMPT", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "optio-shellquote-"));
+    try {
+      const { argsFile } = makeFakeBin(tmp, "codex");
+
+      const env = { OPTIO_PROMPT: HOSTILE };
+      const cmds = buildAgentCommand("codex", env);
+      const result = runGeneratedCommand(
+        cmds,
+        {
+          PATH: `${tmp}:${process.env.PATH}`,
+          OPTIO_TEST_ARGS_FILE: argsFile,
+          OPTIO_TEST_STDIN_FILE: path.join(tmp, "codex-stdin.bin"),
+          OPTIO_PROMPT: env.OPTIO_PROMPT,
+        },
+        "",
+      );
+      expect(result.status).toBe(0);
+
+      const argv = fs.readFileSync(argsFile, "utf8").split("\0").slice(0, -1);
+      // codex exec --full-auto "$OPTIO_PROMPT" ... — the prompt is one argv
+      // element, delivered byte-for-byte with nothing expanded or executed
+      expect(argv).toContain(HOSTILE);
+      const received = argv[argv.indexOf(HOSTILE)];
+      expect(received).toContain("`echo should-not-run`");
+      expect(received).not.toContain("/tmp/optio-fake-home");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("passes a hostile --session id to opencode literally", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "optio-shellquote-"));
+    try {
+      const { argsFile } = makeFakeBin(tmp, "opencode");
+
+      const env = { OPTIO_PROMPT: "Continue work" };
+      const cmds = buildAgentCommand("opencode", env, { resumeSessionId: HOSTILE });
+      const result = runGeneratedCommand(
+        cmds,
+        {
+          PATH: `${tmp}:${process.env.PATH}`,
+          OPTIO_TEST_ARGS_FILE: argsFile,
+          OPTIO_TEST_STDIN_FILE: path.join(tmp, "opencode-stdin.bin"),
+          OPTIO_PROMPT: env.OPTIO_PROMPT,
+        },
+        "",
+      );
+      expect(result.status).toBe(0);
+
+      const argv = fs.readFileSync(argsFile, "utf8").split("\0").slice(0, -1);
+      const sessionIdx = argv.indexOf("--session");
+      expect(sessionIdx).toBeGreaterThan(-1);
+      expect(argv[sessionIdx + 1]).toBe(HOSTILE);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 

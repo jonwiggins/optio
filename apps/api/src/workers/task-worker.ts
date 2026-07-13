@@ -1664,6 +1664,19 @@ export function buildInitialClaudeStreamMessage(prompt: string): string {
   );
 }
 
+/**
+ * Quote a value as a single shell word. Wraps in single quotes (inside which
+ * bash performs no expansion at all) and escapes embedded single quotes with
+ * the standard '\'' close/escape/reopen sequence.
+ *
+ * JSON.stringify is NOT safe for this: it produces double quotes, and bash
+ * still performs `$VAR` expansion and backtick/`$()` command substitution
+ * inside double quotes.
+ */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 export function buildAgentCommand(
   agentType: string,
   env: Record<string, string>,
@@ -1698,7 +1711,7 @@ export function buildAgentCommand(
           : [];
 
       const resumeFlag = opts?.resumeSessionId
-        ? `--resume ${JSON.stringify(opts.resumeSessionId)}`
+        ? `--resume ${shellQuote(opts.resumeSessionId)}`
         : "";
 
       // Build --model flag from env vars set by the adapter
@@ -1730,7 +1743,7 @@ export function buildAgentCommand(
     case "codex": {
       const appServerFlag =
         env.OPTIO_CODEX_AUTH_MODE === "app-server" && env.OPTIO_CODEX_APP_SERVER_URL
-          ? ` --app-server ${JSON.stringify(env.OPTIO_CODEX_APP_SERVER_URL)}`
+          ? ` --app-server ${shellQuote(env.OPTIO_CODEX_APP_SERVER_URL)}`
           : "";
       return [
         `echo "[optio] Running OpenAI Codex${appServerFlag ? " (app-server)" : ""}..."`,
@@ -1738,7 +1751,7 @@ export function buildAgentCommand(
       ];
     }
     case "copilot": {
-      const modelFlag = env.COPILOT_MODEL ? ` --model ${JSON.stringify(env.COPILOT_MODEL)}` : "";
+      const modelFlag = env.COPILOT_MODEL ? ` --model ${shellQuote(env.COPILOT_MODEL)}` : "";
       const effortFlag = env.COPILOT_EFFORT ? ` --effort ${env.COPILOT_EFFORT}` : "";
       return [
         `echo "[optio] Running GitHub Copilot..."`,
@@ -1749,13 +1762,13 @@ export function buildAgentCommand(
     }
     case "opencode": {
       const modelFlag = env.OPTIO_OPENCODE_MODEL
-        ? ` --model ${JSON.stringify(env.OPTIO_OPENCODE_MODEL)}`
+        ? ` --model ${shellQuote(env.OPTIO_OPENCODE_MODEL)}`
         : "";
       const agentFlag = env.OPTIO_OPENCODE_AGENT
-        ? ` --agent ${JSON.stringify(env.OPTIO_OPENCODE_AGENT)}`
+        ? ` --agent ${shellQuote(env.OPTIO_OPENCODE_AGENT)}`
         : "";
       const resumeFlag = opts?.resumeSessionId
-        ? ` --session ${JSON.stringify(opts.resumeSessionId)}`
+        ? ` --session ${shellQuote(opts.resumeSessionId)}`
         : "";
       return [
         `echo "[optio] Running OpenCode (experimental)..."`,
@@ -1764,7 +1777,7 @@ export function buildAgentCommand(
     }
     case "gemini": {
       const geminiModelFlag = env.OPTIO_GEMINI_MODEL
-        ? ` -m ${JSON.stringify(env.OPTIO_GEMINI_MODEL)}`
+        ? ` -m ${shellQuote(env.OPTIO_GEMINI_MODEL)}`
         : "";
       return [
         `echo "[optio] Running Gemini..."`,
@@ -1775,10 +1788,10 @@ export function buildAgentCommand(
     }
     case "openclaw": {
       const openclawModelFlag = env.OPTIO_OPENCLAW_MODEL
-        ? ` --model ${JSON.stringify(env.OPTIO_OPENCLAW_MODEL)}`
+        ? ` --model ${shellQuote(env.OPTIO_OPENCLAW_MODEL)}`
         : "";
       const openclawAgentFlag = env.OPTIO_OPENCLAW_AGENT
-        ? ` --agent ${JSON.stringify(env.OPTIO_OPENCLAW_AGENT)}`
+        ? ` --agent ${shellQuote(env.OPTIO_OPENCLAW_AGENT)}`
         : "";
       return [
         `echo "[optio] Running OpenClaw (experimental)..."`,
