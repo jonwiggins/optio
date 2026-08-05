@@ -22,6 +22,9 @@ spec:
   resources:
     requests:
       storage: {{ .Values.postgresql.storage.size }}
+  {{- if .Values.postgresql.storage.storageClass }}
+  storageClassName: {{ .Values.postgresql.storage.storageClass | quote }}
+  {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment

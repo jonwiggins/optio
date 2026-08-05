@@ -225,6 +225,7 @@ postgresql:
   # Kubernetes nodeSelector for PostgreSQL pods (opt-in).
   nodeSelector: {}
   storage:
+    storageClass: ""  # Empty = cluster default storage class
     size: 5Gi
   auth:
     database: optio
