@@ -92,6 +92,16 @@ spec:
               value: "0.0.0.0"
             - name: OPTIO_API_INTERNAL_URL
               value: "http://{{ .Release.Name }}-api:{{ .Values.api.port }}"
+            {{- if .Values.web.publicApiUrl }}
+            - name: PUBLIC_API_URL
+              value: {{ .Values.web.publicApiUrl | quote }}
+            {{- else if .Values.publicUrl }}
+            - name: PUBLIC_API_URL
+              value: "{{ trimSuffix "/" .Values.publicUrl }}/api"
+            {{- else if and (eq .Values.api.service.type "NodePort") .Values.api.service.nodePort }}
+            - name: PUBLIC_API_URL
+              value: "http://localhost:{{ .Values.api.service.nodePort }}"
+            {{- end }}
             - name: NODE_ENV
               value: "production"
             - name: LOG_LEVEL
