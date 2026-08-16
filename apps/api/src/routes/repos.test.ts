@@ -195,6 +195,65 @@ describe("PATCH /api/repos/:id", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it("accepts openclaw as the default agent type", async () => {
+    mockGetRepo.mockResolvedValue(mockRepoData);
+    mockUpdateRepo.mockResolvedValue({ ...mockRepoData, defaultAgentType: "openclaw" });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/repos/repo-1",
+      payload: { defaultAgentType: "openclaw" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockUpdateRepo).toHaveBeenCalledWith(
+      "repo-1",
+      expect.objectContaining({ defaultAgentType: "openclaw" }),
+    );
+  });
+
+  it("persists openclawModel and openclawAgent settings", async () => {
+    mockGetRepo.mockResolvedValue(mockRepoData);
+    mockUpdateRepo.mockResolvedValue({
+      ...mockRepoData,
+      openclawModel: "openclaw-model-x",
+      openclawAgent: "build",
+    });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/repos/repo-1",
+      payload: { openclawModel: "openclaw-model-x", openclawAgent: "build" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockUpdateRepo).toHaveBeenCalledWith(
+      "repo-1",
+      expect.objectContaining({ openclawModel: "openclaw-model-x", openclawAgent: "build" }),
+    );
+  });
+
+  it("accepts null openclawModel and openclawAgent (clearing the fields)", async () => {
+    mockGetRepo.mockResolvedValue(mockRepoData);
+    mockUpdateRepo.mockResolvedValue({
+      ...mockRepoData,
+      openclawModel: null,
+      openclawAgent: null,
+    });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/repos/repo-1",
+      payload: { openclawModel: null, openclawAgent: null },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockUpdateRepo).toHaveBeenCalledWith(
+      "repo-1",
+      expect.objectContaining({ openclawModel: null, openclawAgent: null }),
+    );
+  });
+
   it("rejects invalid CPU quantity", async () => {
     mockGetRepo.mockResolvedValue(mockRepoData);
 

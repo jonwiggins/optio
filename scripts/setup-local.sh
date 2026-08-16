@@ -76,7 +76,17 @@ else
 fi
 
 echo "[5/6] Deploying Optio to Kubernetes via Helm..."
-ENCRYPTION_KEY=$(openssl rand -hex 32)
+# Reuse the existing encryption key if the release already has one. Rotating the
+# key invalidates every secret stored in Postgres (AES-256-GCM decryption fails
+# with "Unsupported state or unable to authenticate data") — see issue #553.
+ENCRYPTION_KEY=$(kubectl get secret optio-config -n optio \
+  -o jsonpath='{.data.OPTIO_ENCRYPTION_KEY}' 2>/dev/null | base64 -d || true)
+if [ -n "$ENCRYPTION_KEY" ]; then
+  echo "   Reusing existing encryption key from optio-config secret."
+else
+  echo "   Generating new encryption key..."
+  ENCRYPTION_KEY=$(openssl rand -hex 32)
+fi
 
 if helm status optio -n optio &>/dev/null; then
   echo "   Existing release found, upgrading..."

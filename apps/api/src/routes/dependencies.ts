@@ -5,6 +5,7 @@ import * as dependencyService from "../services/dependency-service.js";
 import * as taskService from "../services/task-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TaskDependencySchema } from "../schemas/task.js";
+import { requireRole } from "../plugins/auth.js";
 
 const depParamsSchema = z
   .object({
@@ -102,6 +103,7 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tasks/:id/dependencies",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "addTaskDependencies",
         summary: "Add dependencies to a task",
@@ -141,6 +143,7 @@ export async function dependencyRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/tasks/:id/dependencies/:depTaskId",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "removeTaskDependency",
         summary: "Remove a dependency edge",

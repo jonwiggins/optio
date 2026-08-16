@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "../db/client.js";
 import * as optioActionService from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import { requireRole } from "../plugins/auth.js";
 
 const NAMESPACE = "optio";
 const POD_ROLE_LABEL = "optio.pod-role=optio";
@@ -325,6 +326,7 @@ export async function optioRoutes(rawApp: FastifyInstance) {
   app.get(
     "/api/optio/actions",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "listOptioActions",
         summary: "List Optio action audit log entries",

@@ -11,7 +11,9 @@ import {
   customType,
   unique,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // ── Workspace enums ─────────────────────────────────────────────────────────
 
@@ -272,6 +274,7 @@ export const repos = pgTable(
     geminiApprovalMode: text("gemini_approval_mode").default("yolo"), // "default" | "auto_edit" | "yolo"
     openclawModel: text("openclaw_model"), // model selection, null = OpenClaw default
     openclawAgent: text("openclaw_agent"), // named agent/preset, null = default
+    cursorModel: text("cursor_model"), // e.g. "composer-2.5", null = Cursor account default
     maxTurnsCoding: integer("max_turns_coding"), // null = use global default (250)
     maxTurnsReview: integer("max_turns_review"), // null = use global default (10)
     autoResume: boolean("auto_resume").notNull().default(false),
@@ -330,6 +333,10 @@ export const ticketProviders = pgTable("ticket_providers", {
   lastError: text("last_error"),
   lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
   consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  // NULL until the first successful sync completes. Tickets swept while this
+  // is NULL are backfill: their tasks are created pending, not auto-queued
+  // (issue #579).
+  initialSyncAt: timestamp("initial_sync_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -743,6 +750,12 @@ export const connectionProviders = pgTable(
   },
   (table) => [
     unique("connection_providers_slug_ws_key").on(table.slug, table.workspaceId),
+    // The composite unique above treats NULL workspace_id as distinct, so it
+    // can't stop duplicate built-in (NULL-workspace) rows; this partial index
+    // is the conflict target for seedBuiltInProviders()'s upsert.
+    uniqueIndex("connection_providers_slug_builtin_key")
+      .on(table.slug)
+      .where(sql`${table.workspaceId} IS NULL`),
     index("connection_providers_category_idx").on(table.category),
     index("connection_providers_workspace_id_idx").on(table.workspaceId),
   ],
@@ -945,9 +958,12 @@ export const optioActions = pgTable(
   "optio_actions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    // Nullable: NULL rows are operator/legacy actions with no tenant context and
+    // are only surfaced to admins by the activity feed (deny-by-default).
+    workspaceId: uuid("workspace_id"),
     userId: uuid("user_id").references(() => users.id),
     action: text("action").notNull(), // tool name e.g. "retry_task", "bulk_cancel_active"
-    params: jsonb("params").$type<Record<string, unknown>>(), // sanitized tool call parameters
+    params: jsonb("params").$type<Record<string, unknown>>(), // allowlisted, non-secret tool call parameters
     result: jsonb("result").$type<Record<string, unknown>>(), // outcome: affected IDs, error, etc.
     success: boolean("success").notNull(),
     conversationSnippet: text("conversation_snippet"), // user message that triggered this
@@ -957,6 +973,7 @@ export const optioActions = pgTable(
     index("optio_actions_user_id_idx").on(table.userId),
     index("optio_actions_action_idx").on(table.action),
     index("optio_actions_created_at_idx").on(table.createdAt.desc()),
+    index("optio_actions_workspace_id_idx").on(table.workspaceId),
   ],
 );
 

@@ -4,20 +4,73 @@ import { optioActions, users } from "../db/schema.js";
 import type { OptioAction } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
 
-// ── Sensitive key patterns to strip from params ─────────────────────────────
+// ── Params allowlist ────────────────────────────────────────────────────────
+//
+// The audit trail must never carry secrets or other tenants' data. Callers
+// historically spread whole request bodies into `params` (e.g. `...req.body`),
+// which could persist plaintext credentials, connection configs, webhook
+// signing secrets, and cross-tenant ids. Rather than blocklist by key name
+// (fragile — misses nested values and unexpected key spellings), we keep an
+// explicit allowlist of non-secret, low-cardinality fields: resource ids,
+// human-readable names/types, and a few scalar flags. Everything else is
+// dropped at write time. The same allowlist is applied at read time in
+// `routes/activity.ts` so legacy rows written before this change can't leak
+// their full `params` either.
 
-const SENSITIVE_KEYS = /token|secret|password|key|credential|auth/i;
+export const ACTION_PARAM_ALLOWLIST: ReadonlySet<string> = new Set([
+  // Identifiers (safe: opaque ids scoped by the workspace filter)
+  "id",
+  "ids",
+  "taskId",
+  "taskIds",
+  "taskConfigId",
+  "configId",
+  "parentTaskId",
+  "repoId",
+  "workflowId",
+  "workflowRunId",
+  "runId",
+  "connectionId",
+  "assignmentId",
+  "mcpServerId",
+  "webhookId",
+  "triggerId",
+  "prReviewId",
+  "sessionId",
+  "agentId",
+  "providerSlug",
+  // Human-readable descriptors (labels, not secret values)
+  "name",
+  "slug",
+  "title",
+  "type",
+  "kind",
+  "scope",
+  "agentType",
+  "fullName",
+  "repoUrl",
+  "prUrl",
+  "events",
+  // Non-secret scalar flags / counts
+  "count",
+  "enabled",
+  "priority",
+  "status",
+  "state",
+]);
 
-/** Remove sensitive fields from a params object before persisting. */
-function sanitizeParams(
+/**
+ * Keep only allowlisted, non-secret fields from a params object. Nested
+ * objects/arrays under non-allowlisted keys are dropped entirely, so secrets
+ * buried inside request bodies never reach the audit table.
+ */
+export function filterParams(
   params: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> | null {
   if (!params) return null;
   const clean: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(params)) {
-    if (SENSITIVE_KEYS.test(k)) {
-      clean[k] = "[REDACTED]";
-    } else {
+    if (ACTION_PARAM_ALLOWLIST.has(k) && v !== undefined) {
       clean[k] = v;
     }
   }
@@ -28,6 +81,8 @@ function sanitizeParams(
 
 export interface LogActionInput {
   userId?: string;
+  /** Tenant the action belongs to. Null = operator/legacy (admin-only visibility). */
+  workspaceId?: string | null;
   action: string;
   params?: Record<string, unknown> | null;
   result?: Record<string, unknown> | null;
@@ -36,16 +91,17 @@ export interface LogActionInput {
 }
 
 /**
- * Record an Optio agent action in the audit trail.
- * Params are sanitized to strip any sensitive values before storage.
+ * Record an Optio agent action in the audit trail. Params are reduced to an
+ * explicit non-secret allowlist before storage (see `filterParams`).
  */
 export async function logAction(input: LogActionInput): Promise<OptioAction> {
   const [row] = await db
     .insert(optioActions)
     .values({
+      workspaceId: input.workspaceId ?? null,
       userId: input.userId,
       action: input.action,
-      params: sanitizeParams(input.params),
+      params: filterParams(input.params),
       result: input.result ?? null,
       success: input.success,
       conversationSnippet: input.conversationSnippet ?? null,

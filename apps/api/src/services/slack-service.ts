@@ -1,9 +1,11 @@
 import { logger } from "../logger.js";
 import { assertSsrfSafe } from "../utils/ssrf.js";
+import { readLimitedResponseText } from "../utils/http-response.js";
 import type { TaskState } from "@optio/shared";
 import type { RepoRecord } from "./repo-service.js";
 
 const PUBLIC_URL = process.env.PUBLIC_URL ?? "http://localhost:3000";
+const MAX_SLACK_ERROR_BODY_BYTES = 2_000;
 
 /** Task states that can trigger Slack notifications */
 export const NOTIFIABLE_STATES = ["completed", "failed", "needs_attention", "pr_opened"] as const;
@@ -229,10 +231,11 @@ export async function sendSlackNotification(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    redirect: "error",
   });
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
+    const body = (await readLimitedResponseText(response, MAX_SLACK_ERROR_BODY_BYTES)) ?? "";
     throw new Error(`Slack webhook returned ${response.status}: ${body}`);
   }
 

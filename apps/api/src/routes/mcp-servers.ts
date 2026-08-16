@@ -5,6 +5,7 @@ import * as mcpService from "../services/mcp-server-service.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { McpServerSchema } from "../schemas/integration.js";
+import { requireRole } from "../plugins/auth.js";
 
 const scopeQuerySchema = z
   .object({
@@ -89,6 +90,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/mcp-servers",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "createMcpServer",
         summary: "Create a global MCP server",
@@ -102,6 +104,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const server = await mcpService.createMcpServer(req.body, workspaceId);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "mcp_server.create",
         params: { name: req.body.name, command: req.body.command },
@@ -115,6 +118,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/mcp-servers/:id",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "updateMcpServer",
         summary: "Update an MCP server",
@@ -135,6 +139,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
       }
       const server = await mcpService.updateMcpServer(id, req.body);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "mcp_server.update",
         params: { mcpServerId: id, ...req.body },
@@ -148,6 +153,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/mcp-servers/:id",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "deleteMcpServer",
         summary: "Delete an MCP server",
@@ -167,6 +173,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
       }
       await mcpService.deleteMcpServer(id);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "mcp_server.delete",
         params: { mcpServerId: id },
@@ -205,6 +212,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/repos/:id/mcp-servers",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "createRepoMcpServer",
         summary: "Create a repo-scoped MCP server",
@@ -226,6 +234,7 @@ export async function mcpServerRoutes(rawApp: FastifyInstance) {
         workspaceId,
       );
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "mcp_server.create",
         params: { name: req.body.name, repoId: id },

@@ -43,6 +43,7 @@ const AGENT_TABS = [
   { value: "opencode", label: "OpenCode" },
   { value: "gemini", label: "Google Gemini" },
   { value: "openclaw", label: "OpenClaw" },
+  { value: "cursor", label: "Cursor" },
 ] as const;
 
 export default function RepoDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -78,6 +79,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
   const [opencodeAgent, setOpencodeAgent] = useState("");
   const [opencodeBaseUrl, setOpencodeBaseUrl] = useState("");
   const [openclawModel, setOpenclawModel] = useState("");
+  const [cursorModel, setCursorModel] = useState("");
   const [maxTurnsCoding, setMaxTurnsCoding] = useState(250);
   const [maxTurnsReview, setMaxTurnsReview] = useState(30);
   const [autoResume, setAutoResume] = useState(false);
@@ -178,6 +180,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         setOpencodeAgent(r.opencodeAgent ?? "");
         setOpencodeBaseUrl(r.opencodeBaseUrl ?? "");
         setOpenclawModel(r.openclawModel ?? "");
+        setCursorModel(r.cursorModel ?? "");
         setMaxTurnsCoding(r.maxTurnsCoding ?? 250);
         setMaxTurnsReview(r.maxTurnsReview ?? 30);
         setReviewEnabled(r.reviewEnabled ?? false);
@@ -270,6 +273,7 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
         opencodeAgent: opencodeAgent || undefined,
         opencodeBaseUrl: opencodeBaseUrl || null,
         openclawModel: openclawModel || undefined,
+        cursorModel: cursorModel || undefined,
         maxTurnsCoding,
         maxTurnsReview,
         reviewEnabled,
@@ -1198,6 +1202,17 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
             values={{ openclawModel }}
             onChange={(v: AgentOptionsValues) => {
               if (typeof v.openclawModel === "string") setOpenclawModel(v.openclawModel);
+            }}
+          />
+        )}
+
+        {/* Cursor tab */}
+        {activeAgentTab === "cursor" && (
+          <AgentOptionsPicker
+            provider="cursor"
+            values={{ cursorModel }}
+            onChange={(v: AgentOptionsValues) => {
+              if (typeof v.cursorModel === "string") setCursorModel(v.cursorModel);
             }}
           />
         )}

@@ -5,6 +5,7 @@ dist/
 .next/
 .env
 .env.local
+.optio-run-token
 *.tsbuildinfo
 coverage/
 coverage-report.md
@@ -14,9 +15,14 @@ apps/api/.env
 .claude/
 .tool-versions
 .values.local.yaml
+helm/optio/values-prod.yaml
 .worktrees/
 /issues/
 
 # Generated OpenAPI artifacts (rebuild via `pnpm --filter @optio/api openapi:dump`)
 apps/api/openapi.generated.json
 apps/api/openapi.generated.d.ts
+
+# Playwright artifacts
+apps/web/test-results/
+apps/web/playwright-report/

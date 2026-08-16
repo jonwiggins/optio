@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { GitHubPlatform } from "./github.js";
+import { GitHubPlatform, GitHubApiError, classifyGitHubFailure } from "./github.js";
 import type { RepoIdentifier } from "@optio/shared";
 
 const ri: RepoIdentifier = {
@@ -239,5 +239,82 @@ describe("GitHubPlatform", () => {
 
       await expect(platform.getPullRequest(ri, 999)).rejects.toThrow("GitHub API error 404");
     });
+
+    it("throws a GitHubApiError carrying status, retry-after, and secondary-limit flag", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ "retry-after": "120" }),
+        json: () => Promise.resolve({}),
+        text: () => Promise.resolve("You have exceeded a secondary rate limit"),
+      });
+
+      await expect(platform.getPullRequest(ri, 1)).rejects.toMatchObject({
+        name: "GitHubApiError",
+        status: 403,
+        isSecondaryRateLimit: true,
+        retryAfterMs: 120000,
+      });
+    });
+
+    it("flags a primary rate limit from x-ratelimit headers", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1900000000" }),
+        json: () => Promise.resolve({}),
+        text: () => Promise.resolve("API rate limit exceeded"),
+      });
+
+      await expect(platform.getPullRequest(ri, 2)).rejects.toMatchObject({
+        name: "GitHubApiError",
+        status: 403,
+        isPrimaryRateLimit: true,
+        isSecondaryRateLimit: false,
+        rateLimitRemaining: 0,
+        rateLimitResetMs: 1900000000000,
+      });
+    });
+  });
+});
+
+describe("classifyGitHubFailure", () => {
+  it("classifies a secondary rate limit (body marker), carrying Retry-After", () => {
+    const f = classifyGitHubFailure(
+      new GitHubApiError(403, "You have exceeded a secondary rate limit", { retryAfterMs: 120000 }),
+    );
+    expect(f).toMatchObject({ kind: "secondary_rate_limit", retryAfterMs: 120000 });
+  });
+
+  it("classifies a primary rate limit (remaining 0) with the reset time", () => {
+    const f = classifyGitHubFailure(
+      new GitHubApiError(403, "API rate limit exceeded", {
+        rateLimitRemaining: 0,
+        rateLimitResetMs: 1_900_000_000_000,
+      }),
+    );
+    expect(f).toMatchObject({ kind: "primary_rate_limit", resetAtMs: 1_900_000_000_000 });
+  });
+
+  it("treats a bare 429 as a secondary rate limit", () => {
+    expect(classifyGitHubFailure(new GitHubApiError(429, "Too Many Requests"))?.kind).toBe(
+      "secondary_rate_limit",
+    );
+  });
+
+  it("classifies 401 as auth and a non-rate-limit 403 as permission", () => {
+    expect(classifyGitHubFailure(new GitHubApiError(401, "Bad credentials"))?.kind).toBe("auth");
+    expect(
+      classifyGitHubFailure(new GitHubApiError(403, "Resource not accessible by integration"))
+        ?.kind,
+    ).toBe("permission");
+  });
+
+  it("returns null for transient 5xx, 4xx logic errors, and non-GitHub errors", () => {
+    expect(classifyGitHubFailure(new GitHubApiError(500, "Server Error"))).toBeNull();
+    expect(classifyGitHubFailure(new GitHubApiError(404, "Not Found"))).toBeNull();
+    expect(classifyGitHubFailure(new GitHubApiError(422, "Unprocessable"))).toBeNull();
+    expect(classifyGitHubFailure(new Error("db hiccup"))).toBeNull();
+    expect(classifyGitHubFailure(undefined)).toBeNull();
   });
 });

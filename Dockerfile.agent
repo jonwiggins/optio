@@ -33,6 +33,9 @@ RUN node -e 'const [maj,min] = process.versions.openssl.split(".").map(Number); 
 
 RUN npm install -g @anthropic-ai/claude-code
 
+# OpenAI Codex CLI
+RUN npm install -g @openai/codex
+
 # Allow sudo for extra package installation at runtime
 RUN apt-get update && apt-get install -y sudo \
     && rm -rf /var/lib/apt/lists/*

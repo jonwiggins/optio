@@ -130,4 +130,39 @@ describe("useLogs", () => {
     const contents = result.current.logs.map((l) => l.content);
     expect(contents).toEqual(["historical-1", "duplicate", "live-only"]);
   });
+
+  it("ignores catchUp WebSocket frames while appending normal live frames", async () => {
+    let logHandler: ((event: any) => void) | undefined;
+    mockOn.mockImplementation((eventType: string, handler: (event: any) => void) => {
+      if (eventType === "task:log") {
+        logHandler = handler;
+      }
+      return () => {};
+    });
+    mockGetTaskLogs.mockResolvedValue({
+      logs: [{ content: "historical", stream: "stdout", timestamp: "2025-06-01T00:00:00Z" }],
+    });
+
+    const { result } = renderHook(() => useLogs("task-1"));
+
+    await waitFor(() => {
+      expect(result.current.logs).toHaveLength(1);
+    });
+
+    act(() => {
+      logHandler?.({
+        content: "catch-up frame",
+        stream: "stdout",
+        timestamp: "2025-06-01T00:00:01Z",
+        catchUp: true,
+      });
+      logHandler?.({
+        content: "live frame",
+        stream: "stdout",
+        timestamp: "2025-06-01T00:00:02Z",
+      });
+    });
+
+    expect(result.current.logs.map((l) => l.content)).toEqual(["historical", "live frame"]);
+  });
 });

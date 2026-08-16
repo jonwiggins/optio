@@ -11,6 +11,113 @@ import type {
   RepoContent,
 } from "@optio/shared";
 
+/**
+ * Error thrown by GitHubPlatform for any non-2xx GitHub REST response. Carries
+ * the verified response metadata callers need to choose the correct recovery:
+ * HTTP status, `Retry-After`, the `x-ratelimit-*` primary-quota signals, and
+ * whether the body indicates a *secondary* rate limit. The `.message` is kept
+ * identical to the previous `GitHub API error <status>: <body>` string so
+ * existing message-based logging/classification is unaffected.
+ */
+export class GitHubApiError extends Error {
+  readonly status: number;
+  readonly retryAfterMs: number | null;
+  readonly rateLimitRemaining: number | null;
+  readonly rateLimitResetMs: number | null;
+  readonly isSecondaryRateLimit: boolean;
+  readonly isPrimaryRateLimit: boolean;
+
+  constructor(
+    status: number,
+    body: string,
+    meta: {
+      retryAfterMs?: number | null;
+      rateLimitRemaining?: number | null;
+      rateLimitResetMs?: number | null;
+    } = {},
+  ) {
+    super(`GitHub API error ${status}: ${body}`);
+    this.name = "GitHubApiError";
+    this.status = status;
+    this.retryAfterMs = meta.retryAfterMs ?? null;
+    this.rateLimitRemaining = meta.rateLimitRemaining ?? null;
+    this.rateLimitResetMs = meta.rateLimitResetMs ?? null;
+    this.isSecondaryRateLimit =
+      (status === 403 || status === 429) &&
+      /secondary rate limit|exceeded a secondary rate limit|abuse detection/i.test(body);
+    // A primary-quota exhaustion is a 403/429 with the remaining counter at 0
+    // and no secondary marker — it must wait for the reset, not the 60s floor.
+    this.isPrimaryRateLimit =
+      (status === 403 || status === 429) &&
+      this.rateLimitRemaining === 0 &&
+      !this.isSecondaryRateLimit;
+    // Preserve the prototype chain so `instanceof GitHubApiError` holds even
+    // under down-level transpilation targets.
+    Object.setPrototypeOf(this, GitHubApiError.prototype);
+  }
+
+  static fromResponse(res: Response, body: string): GitHubApiError {
+    return new GitHubApiError(res.status, body, {
+      retryAfterMs: parseRetryAfterMs(res.headers),
+      rateLimitRemaining: parseIntHeader(res.headers, "x-ratelimit-remaining"),
+      rateLimitResetMs: parseEpochSecondsToMs(res.headers, "x-ratelimit-reset"),
+    });
+  }
+}
+
+function parseRetryAfterMs(headers: Headers | undefined): number | null {
+  const raw = headers?.get("retry-after");
+  if (!raw) return null;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) ? Math.max(0, seconds) * 1000 : null;
+}
+
+function parseIntHeader(headers: Headers | undefined, name: string): number | null {
+  const raw = headers?.get(name);
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseEpochSecondsToMs(headers: Headers | undefined, name: string): number | null {
+  const seconds = parseIntHeader(headers, name);
+  return seconds == null ? null : seconds * 1000;
+}
+
+/** Distinct GitHub failure classes, each of which needs a distinct retry policy. */
+export type GitHubFailureKind =
+  | "secondary_rate_limit"
+  | "primary_rate_limit"
+  | "auth"
+  | "permission";
+
+export interface GitHubFailure {
+  kind: GitHubFailureKind;
+  /** Server-directed wait (`Retry-After`), if present. */
+  retryAfterMs: number | null;
+  /** Primary-quota reset time (`x-ratelimit-reset`), if present. */
+  resetAtMs: number | null;
+}
+
+/**
+ * Classify a thrown error into the GitHub failure class that determines retry
+ * policy, or `null` when it is NOT a GitHub block (transient 5xx, 404, 422,
+ * network, or any non-GitHub error) — in which case callers keep their normal
+ * fast-retry behavior. The deadline math (how long to wait) is the caller's
+ * responsibility, since it depends on persisted attempt history.
+ */
+export function classifyGitHubFailure(err: unknown): GitHubFailure | null {
+  if (!(err instanceof GitHubApiError)) return null;
+  const { retryAfterMs, rateLimitResetMs: resetAtMs } = err;
+  if (err.isSecondaryRateLimit) return { kind: "secondary_rate_limit", retryAfterMs, resetAtMs };
+  if (err.isPrimaryRateLimit) return { kind: "primary_rate_limit", retryAfterMs, resetAtMs };
+  // A 429 with no secondary marker / remaining counter is still a rate limit.
+  if (err.status === 429) return { kind: "secondary_rate_limit", retryAfterMs, resetAtMs };
+  if (err.status === 401) return { kind: "auth", retryAfterMs: null, resetAtMs: null };
+  if (err.status === 403) return { kind: "permission", retryAfterMs: null, resetAtMs: null };
+  return null;
+}
+
 export class GitHubPlatform implements GitPlatform {
   readonly type = "github" as const;
   private readonly token: string;
@@ -37,7 +144,7 @@ export class GitHubPlatform implements GitPlatform {
     const res = await fetch(url, init);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new Error(`GitHub API error ${res.status}: ${body}`);
+      throw GitHubApiError.fromResponse(res, body);
     }
     return (await res.json()) as T;
   }
@@ -196,7 +303,7 @@ export class GitHubPlatform implements GitPlatform {
     });
     if (!res.ok && res.status !== 422) {
       const body = await res.text().catch(() => "");
-      throw new Error(`GitHub API error ${res.status}: ${body}`);
+      throw GitHubApiError.fromResponse(res, body);
     }
   }
 

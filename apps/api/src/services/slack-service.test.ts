@@ -59,6 +59,7 @@ function makeRepoConfig(overrides: Partial<RepoRecord> = {}): RepoRecord {
     opencodeAgent: null,
     opencodeProvider: null,
     opencodeBaseUrl: null,
+    cursorModel: null,
     geminiModel: "gemini-2.5-pro",
     geminiApprovalMode: "yolo",
     maxTurnsCoding: null,
@@ -338,6 +339,7 @@ describe("sendSlackNotification", () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe("https://hooks.slack.com/services/T/B/x");
     expect(opts!.method).toBe("POST");
+    expect(opts!.redirect).toBe("error");
     expect(opts!.headers).toEqual({ "Content-Type": "application/json" });
 
     const body = JSON.parse(opts!.body as string);
@@ -373,6 +375,15 @@ describe("sendSlackNotification", () => {
     await expect(
       sendSlackNotification("https://hooks.slack.com/services/T/B/x", task, "completed"),
     ).rejects.toThrow("Slack webhook returned 500: server error");
+  });
+
+  it("caps non-OK response bodies before including them in errors", async () => {
+    const mockFetch = vi.mocked(fetch);
+    mockFetch.mockResolvedValueOnce(new Response("x".repeat(2500), { status: 500 }));
+
+    await expect(
+      sendSlackNotification("https://hooks.slack.com/services/T/B/x", task, "completed"),
+    ).rejects.toThrow(`Slack webhook returned 500: ${"x".repeat(2000)}...(truncated)`);
   });
 });
 

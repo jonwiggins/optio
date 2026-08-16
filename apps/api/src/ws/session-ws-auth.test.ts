@@ -19,6 +19,11 @@ vi.mock("./ws-auth.js", () => ({
   extractSessionToken: (...args: unknown[]) => mockExtractSessionToken(...args),
 }));
 
+// Pass-through role guard — role enforcement is covered in ws-authz.test.ts
+vi.mock("./ws-authz.js", () => ({
+  requireWsRole: async () => true,
+}));
+
 const mockGetSession = vi.fn();
 const mockAddSessionPr = vi.fn();
 vi.mock("../services/interactive-session-service.js", () => ({

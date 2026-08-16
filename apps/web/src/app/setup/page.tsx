@@ -125,6 +125,9 @@ export default function SetupPage() {
   const [geminiVertexProject, setGeminiVertexProject] = useState("");
   const [geminiVertexLocation, setGeminiVertexLocation] = useState("us-central1");
 
+  // Step 3c: Cursor (no public validation endpoint — stored as-is)
+  const [cursorKey, setCursorKey] = useState("");
+
   // Step 4: Repos
   const [repos, setRepos] = useState<RepoEntry[]>([]);
   const [suggestedRepos, setSuggestedRepos] = useState<
@@ -281,6 +284,8 @@ export default function SetupPage() {
 
   const geminiReady =
     geminiAuthMode === "vertex-ai" ? geminiVertexProject.trim().length > 0 : geminiValidated;
+
+  const cursorReady = cursorKey.trim().length > 0;
 
   const currentStep = STEPS[step];
 
@@ -608,6 +613,14 @@ export default function SetupPage() {
         await api.createSecret({
           name: "GEMINI_API_KEY",
           value: geminiKey,
+          scope: agentSecretScope,
+        });
+      }
+      // Save Cursor API key (no public validation endpoint)
+      if (cursorKey.trim()) {
+        await api.createSecret({
+          name: "CURSOR_API_KEY",
+          value: cursorKey.trim(),
           scope: agentSecretScope,
         });
       }
@@ -1902,7 +1915,8 @@ export default function SetupPage() {
                                   setGeminiError("");
                                 }}
                                 onPaste={(e) => {
-                                  const pasted = e.clipboardData.getData("text");
+                                  e.preventDefault();
+                                  const pasted = e.clipboardData.getData("text").trim();
                                   if (pasted) {
                                     setGeminiKey(pasted);
                                     setGeminiValidated(false);
@@ -1980,6 +1994,41 @@ export default function SetupPage() {
                 </div>
               </div>
 
+              {/* Cursor */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-text">
+                    Cursor <span className="text-text-muted font-normal">— optional</span>
+                  </span>
+                  {cursorReady && (
+                    <span className="text-success text-xs flex items-center gap-1">
+                      <CheckCircle className="w-3 h-3" /> Ready
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-text-muted">
+                    Runs Cursor&apos;s Composer models via the Cursor CLI. Create an API key in your{" "}
+                    <a
+                      href="https://cursor.com/settings"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      Cursor dashboard settings
+                    </a>
+                    .
+                  </p>
+                  <input
+                    type="password"
+                    value={cursorKey}
+                    onChange={(e) => setCursorKey(e.target.value)}
+                    placeholder="key_..."
+                    className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <button
                   onClick={goBack}
@@ -1994,7 +2043,8 @@ export default function SetupPage() {
                       !codexReady &&
                       !copilotReady &&
                       !opencodeReady &&
-                      !geminiReady) ||
+                      !geminiReady &&
+                      !cursorReady) ||
                     loading
                   }
                   className="flex items-center gap-2 px-5 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"

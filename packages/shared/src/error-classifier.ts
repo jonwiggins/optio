@@ -4,12 +4,71 @@ export interface ClassifiedError {
   description: string;
   remedy: string;
   retryable: boolean;
+  /**
+   * Stable discriminator for which provider-specific recovery surface the UI
+   * should render. Absent for generic errors. Set explicitly by classifiers so
+   * renderers never have to infer the provider from display-title text.
+   */
+  recovery?: "claude-token" | "github-token" | "github-permission" | "rate-limit";
 }
 
 const ERROR_PATTERNS: Array<{
   pattern: RegExp;
   classify: (match: RegExpMatchArray) => ClassifiedError;
 }> = [
+  // ── GitHub write-path failures ──────────────────────────────────────────
+  // Must precede the generic rate-limit rule and the LLM auth rule. Scoped to
+  // the verified `GitHub API error <status>: <body>` wrapper that GitHubPlatform
+  // produces, so an unrelated provider/service emitting e.g. "bad credentials"
+  // is NOT misclassified as a permanent GitHub failure. `recovery` tells the UI
+  // which provider-specific recovery surface to render.
+  {
+    pattern: /github api error \d+:.*(secondary rate limit|abuse detection)/is,
+    classify: () => ({
+      category: "auth",
+      title: "GitHub secondary rate limit",
+      description:
+        "GitHub temporarily blocked writes (PRs, comments, reviews, merges) because too many " +
+        "content-creating requests were sent too quickly. This is a secondary rate limit, separate " +
+        "from the primary hourly quota.",
+      remedy:
+        "Stop retrying immediately. Wait at least 60 seconds (honor the Retry-After header if present) " +
+        "before further GitHub writes, and reduce concurrent agents/auto-resumes if it recurs.",
+      retryable: false,
+      recovery: "rate-limit",
+    }),
+  },
+  {
+    pattern: /github api error \d+:.*bad credentials/is,
+    classify: () => ({
+      category: "auth",
+      title: "GitHub credentials invalid",
+      description:
+        "GitHub rejected the token (HTTP 401 Bad credentials). The configured GitHub token is missing, " +
+        "expired, or revoked. Retrying with the same token will keep failing.",
+      remedy:
+        "Reconnect the GitHub App or refresh the GITHUB_TOKEN secret. Do not retry until the credential " +
+        "is replaced.",
+      retryable: false,
+      recovery: "github-token",
+    }),
+  },
+  {
+    pattern:
+      /github api error \d+:.*resource not accessible by (integration|personal access token|fine-grained personal access token)/is,
+    classify: () => ({
+      category: "auth",
+      title: "GitHub permission denied",
+      description:
+        "The GitHub token authenticated but lacks permission for this operation (HTTP 403 Resource not " +
+        "accessible). The App installation or token is missing a required scope/permission.",
+      remedy:
+        "Grant the missing permission to the GitHub App installation (or PAT scopes) — e.g. Pull requests: " +
+        "write, Issues: write, Contents: write — then retry.",
+      retryable: false,
+      recovery: "github-permission",
+    }),
+  },
   {
     pattern: /ErrImageNeverPull|InvalidImageName/i,
     classify: (match) => {
@@ -47,15 +106,47 @@ const ERROR_PATTERNS: Array<{
       retryable: true,
     }),
   },
+  // A missing required secret is a configuration error, not a transient one —
+  // retrying without adding the secret fails identically every time (and used
+  // to bounce tasks queued↔provisioning forever). Marked non-retryable so the
+  // provisioning path fails the task immediately with an actionable message.
+  // The pattern is scoped to the exact message secret-service.retrieveSecret()
+  // throws ("Secret not found: NAME (scope: ...)"), not arbitrary errors that
+  // merely mention secrets.
   {
     pattern: /Secret not found: (\w+)/i,
     classify: (match) => ({
       category: "auth",
       title: `Missing secret: ${match[1]}`,
-      description: `The required secret "${match[1]}" is not configured. The agent needs this credential to run.`,
-      remedy: `Go to Secrets and add "${match[1]}", or re-run the setup wizard.`,
-      retryable: true,
+      description: `The required secret "${match[1]}" is not configured. The agent needs this credential to run, and retrying without adding it will fail again.`,
+      remedy: `Go to Secrets and add "${match[1]}" (or re-run the setup wizard), then retry the task.`,
+      retryable: false,
     }),
+  },
+  // Must precede the credential-name patterns (ANTHROPIC_API_KEY, OPENAI_API_KEY, …)
+  // so a decrypt failure mentioning a secret's name isn't misclassified as a
+  // missing key. Matches both the wrapped message from secret-service.decrypt()
+  // and Node's raw AES-GCM auth failure in case it surfaces unwrapped.
+  {
+    pattern:
+      /failed to decrypt stored secret(?: "([^"]+)")?|unsupported state or unable to authenticate data/i,
+    classify: (match) => {
+      const name = match[1];
+      return {
+        category: "auth",
+        title: name ? `Cannot decrypt secret: ${name}` : "Cannot decrypt stored secret",
+        description:
+          `A stored secret${name ? ` ("${name}")` : ""} could not be decrypted. This almost always ` +
+          "means the encryption key (OPTIO_ENCRYPTION_KEY) changed after the secret was saved — " +
+          "for example, a redeploy generated a fresh key — so decryption fails for every " +
+          "previously stored credential.",
+        remedy:
+          "Re-enter the affected credentials under Secrets (or re-run the setup wizard), or " +
+          "restore the original encryption key (Helm value encryption.key) and redeploy. " +
+          "Retrying without doing one of these will keep failing.",
+        retryable: false,
+      };
+    },
   },
   {
     pattern:
@@ -105,6 +196,41 @@ const ERROR_PATTERNS: Array<{
       description: "No OpenClaw API key is configured and the OpenClaw agent cannot authenticate.",
       remedy:
         "Go to Secrets and add OPENCLAW_API_KEY, or provide an ANTHROPIC_API_KEY or OPENAI_API_KEY instead.",
+      retryable: true,
+    }),
+  },
+  {
+    pattern: /CURSOR_API_KEY/i,
+    classify: () => ({
+      category: "auth",
+      title: "Cursor API key missing or invalid",
+      description:
+        "No valid Cursor API key is configured and the Cursor agent cannot authenticate.",
+      remedy:
+        "Go to Secrets and add CURSOR_API_KEY with an API key from cursor.com dashboard settings, then retry the task.",
+      retryable: true,
+    }),
+  },
+  {
+    // Gemini API rejects bad keys with "API key not valid. Please pass a
+    // valid API key." and reason API_KEY_INVALID.
+    pattern: /API[_ ]?KEY[_ ]?INVALID|API key not valid/i,
+    classify: () => ({
+      category: "auth",
+      title: "Gemini API key invalid",
+      description: "The configured Gemini API key was rejected by the Google AI API.",
+      remedy:
+        "Go to Secrets and update GEMINI_API_KEY with a valid key from Google AI Studio, then retry the task.",
+      retryable: false,
+    }),
+  },
+  {
+    pattern: /GEMINI_API_KEY/i,
+    classify: () => ({
+      category: "auth",
+      title: "Gemini API key missing",
+      description: "No Gemini API key is configured and the Gemini agent cannot authenticate.",
+      remedy: "Go to Secrets and add GEMINI_API_KEY, or switch the repo to Vertex AI auth.",
       retryable: true,
     }),
   },

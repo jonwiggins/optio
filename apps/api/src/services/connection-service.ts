@@ -332,7 +332,7 @@ export async function createProvider(
 
 /**
  * Idempotent seeder: creates or updates built-in providers.
- * Uses upsert on the (slug, workspaceId) unique constraint.
+ * Uses upsert on the partial (slug WHERE workspace_id IS NULL) unique index.
  */
 export async function seedBuiltInProviders(): Promise<void> {
   for (const provider of BUILT_IN_PROVIDERS) {
@@ -353,7 +353,13 @@ export async function seedBuiltInProviders(): Promise<void> {
         workspaceId: undefined, // built-in providers have NULL workspaceId
       })
       .onConflictDoUpdate({
-        target: [connectionProviders.slug, connectionProviders.workspaceId],
+        // Built-in providers have NULL workspace_id, and the composite
+        // (slug, workspace_id) constraint treats NULLs as distinct — its
+        // conflict never fires, which duplicated every built-in provider on
+        // each restart. Target the partial unique index on (slug) WHERE
+        // workspace_id IS NULL instead.
+        target: connectionProviders.slug,
+        targetWhere: isNull(connectionProviders.workspaceId),
         set: {
           name: provider.name,
           description: provider.description,
@@ -540,6 +546,20 @@ export async function listAssignments(connectionId: string): Promise<ConnectionA
     .from(connectionAssignments)
     .where(eq(connectionAssignments.connectionId, connectionId));
   return rows.map(mapAssignmentRow);
+}
+
+/**
+ * Fetch a single assignment by id (read-only). Used by the routes layer to
+ * resolve the owning connection for workspace-scoping the flat
+ * `/api/connection-assignments/:id` routes, which otherwise take only the
+ * assignment id and would be an IDOR surface.
+ */
+export async function getAssignment(id: string): Promise<ConnectionAssignment | null> {
+  const [row] = await db
+    .select()
+    .from(connectionAssignments)
+    .where(eq(connectionAssignments.id, id));
+  return row ? mapAssignmentRow(row) : null;
 }
 
 export async function createAssignment(

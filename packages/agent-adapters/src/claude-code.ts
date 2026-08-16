@@ -113,14 +113,37 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const prMatch = logs.match(
       /https:\/\/(?![\w.-]+\/api\/)[^\s"]+\/(?:pull\/\d+|-\/merge_requests\/\d+)/,
     );
-    const costMatch = logs.match(/"total_cost_usd":\s*([\d.]+)/);
+    // Cost: take the LAST total_cost_usd, not the first. In stream-json mode a
+    // multi-turn run (mid-task user messages) emits a `result` event PER TURN,
+    // and each result's total_cost_usd is the CUMULATIVE cost of the process so
+    // far — so the final result event carries the full spend. Grabbing the first
+    // match would drop every turn after the first (issue #541). The authoritative
+    // value comes from the last result event (captured in the loop below); this
+    // global-regex last-match is only a fallback for logs whose result event
+    // didn't parse as JSON.
+    const costMatches = [...logs.matchAll(/"total_cost_usd":\s*([\d.]+)/g)];
+    const costFromRegex =
+      costMatches.length > 0 ? parseFloat(costMatches[costMatches.length - 1][1]) : undefined;
 
     // Extract error, token usage, model, and result text from Claude's NDJSON events
-    let error: string | undefined;
-    let resultText: string | undefined;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let model: string | undefined;
+
+    // Track the final result event — the authoritative signal for how the run
+    // ended. With --input-format stream-json each turn emits a result event and
+    // the CLI then exits 0 once stdin closes, so the process exit code alone
+    // cannot be trusted (see issue #552: an API-error run exited 0).
+    let sawResultEvent = false;
+    let lastResultIsError = false;
+    let lastResultText: string | undefined;
+    let lastResultSubtype: string | undefined;
+    // Cumulative cost reported by the most recent result event (last wins).
+    let lastResultCostUsd: number | undefined;
+    // Synthetic assistant text Claude Code emits when an API call fails
+    // ("API Error: ..."). Only used as a failure signal when the run never
+    // produced a result event (i.e. the error was terminal, not recovered).
+    let lastApiErrorText: string | undefined;
 
     for (const line of logs.split("\n")) {
       try {
@@ -144,12 +167,30 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           }
         }
 
-        // Extract result text from the final result event
-        if (event.type === "result" && event.result) {
-          if (event.is_error && exitCode !== 0) {
-            error = event.result;
-          } else if (!event.is_error) {
-            resultText = event.result;
+        // Track API-error text blocks emitted as synthetic assistant messages
+        if (event.type === "assistant" && Array.isArray(event.message?.content)) {
+          for (const block of event.message.content) {
+            if (
+              block?.type === "text" &&
+              typeof block.text === "string" &&
+              /^API Error[:\s]/.test(block.text.trim())
+            ) {
+              lastApiErrorText = block.text.trim();
+            }
+          }
+        }
+
+        // Track the final result event (last one wins across multiple turns)
+        if (event.type === "result") {
+          sawResultEvent = true;
+          lastResultIsError = event.is_error === true;
+          lastResultSubtype = typeof event.subtype === "string" ? event.subtype : undefined;
+          lastResultText =
+            typeof event.result === "string" && event.result ? event.result : undefined;
+          // Each result event's total_cost_usd is cumulative for the process,
+          // so the last one seen holds the authoritative final cost.
+          if (typeof event.total_cost_usd === "number") {
+            lastResultCostUsd = event.total_cost_usd;
           }
         }
       } catch {
@@ -157,19 +198,44 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       }
     }
 
+    let error: string | undefined;
+    let resultText: string | undefined;
+    // Did the agent itself report a terminal, unrecovered error?
+    let agentReportedError = false;
+
+    if (sawResultEvent && lastResultIsError) {
+      // Terminal error result (e.g. "API Error: Usage credits required") —
+      // authoritative failure even when the CLI process exits 0.
+      agentReportedError = true;
+      error =
+        lastResultText ??
+        lastApiErrorText ??
+        `Agent reported an error result${lastResultSubtype ? ` (${lastResultSubtype})` : ""}`;
+    } else if (sawResultEvent) {
+      // A successful final result event supersedes any transient API errors
+      // the agent recovered from mid-run.
+      resultText = lastResultText;
+    } else if (lastApiErrorText) {
+      // API error with no result event at all — the run died on the error.
+      agentReportedError = true;
+      error = lastApiErrorText;
+    }
+
     if (exitCode !== 0 && !error) {
       error = `Exit code: ${exitCode}`;
     }
+
+    const success = exitCode === 0 && !agentReportedError;
 
     // Use the agent's actual result text as the summary when available.
     // When the agent reports an explicit error, surface it in the summary
     // so users see what went wrong without digging into raw logs.
     let summary: string;
-    const hasStructuredError = exitCode !== 0 && error && error !== `Exit code: ${exitCode}`;
+    const hasStructuredError = !success && error && error !== `Exit code: ${exitCode}`;
     if (hasStructuredError) {
       const preview = error!.length > 500 ? error!.slice(0, 500) + "…" : error!;
       summary = `Agent error: ${preview}`;
-    } else if (exitCode !== 0) {
+    } else if (!success) {
       summary = `Agent exited with code ${exitCode}`;
     } else if (resultText) {
       // Truncate very long result texts for the summary field
@@ -179,9 +245,9 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     }
 
     return {
-      success: exitCode === 0,
+      success,
       prUrl: prMatch?.[0],
-      costUsd: costMatch ? parseFloat(costMatch[1]) : undefined,
+      costUsd: lastResultCostUsd ?? costFromRegex,
       inputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
       outputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
       model,

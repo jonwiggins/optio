@@ -5,7 +5,7 @@ import { use, useState, useEffect, useCallback } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useWorkflowRunLogs } from "@/hooks/use-workflow-run-logs";
 import { LogViewer } from "@/components/log-viewer";
-import { TokenRefreshBanner } from "@/components/token-refresh-banner";
+import { TokenRefreshBanner, GitHubTokenBanner } from "@/components/token-refresh-banner";
 import { DetailHeader } from "@/components/detail-header";
 import { PrStatusBar } from "@/components/pr-status-bar";
 import { WorkflowRunPipelineTimeline } from "@/components/workflow-run-pipeline-timeline";
@@ -281,8 +281,17 @@ export default function WorkflowRunDetailPage({
         </div>
       </div>
 
-      {/* Auth banner — same recovery surface as task/review pages */}
-      {classifiedError?.category === "auth" && (
+      {/* GitHub credential recovery — distinct from the Claude token banner */}
+      {classifiedError?.recovery === "github-token" && (
+        <div className="shrink-0 border-b border-border bg-bg-card">
+          <div className="max-w-5xl mx-auto px-4 py-3">
+            <GitHubTokenBanner onSaved={refresh} />
+          </div>
+        </div>
+      )}
+
+      {/* Claude auth banner — only for non-GitHub auth (Claude/OpenAI) errors */}
+      {classifiedError?.category === "auth" && !classifiedError.recovery && (
         <div className="shrink-0 border-b border-border bg-bg-card">
           <div className="max-w-5xl mx-auto px-4 py-3">
             <TokenRefreshBanner onSaved={refresh} />
@@ -290,47 +299,50 @@ export default function WorkflowRunDetailPage({
         </div>
       )}
 
-      {/* Classified error banner — matches /tasks/[id] and /reviews/[id] */}
-      {classifiedError && classifiedError.category !== "auth" && (
-        <div className="shrink-0 border-b border-error/20 bg-error/5">
-          <div className="max-w-5xl mx-auto px-4 py-3">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-error shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <div>
-                  <h3 className="text-sm font-medium text-error">{classifiedError.title}</h3>
-                  <p className="text-xs text-error/70 mt-0.5">{classifiedError.description}</p>
-                </div>
-                {classifiedError.remedy && (
-                  <div className="p-2.5 rounded-md bg-bg/50 border border-border">
-                    <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                      Suggested fix
-                    </div>
-                    <pre className="text-xs text-text/80 whitespace-pre-wrap font-mono">
-                      {classifiedError.remedy}
-                    </pre>
+      {/* Classified error panel — rate-limit, github-permission, and all
+          non-auth errors (no token form). */}
+      {classifiedError &&
+        classifiedError.recovery !== "github-token" &&
+        !(classifiedError.category === "auth" && !classifiedError.recovery) && (
+          <div className="shrink-0 border-b border-error/20 bg-error/5">
+            <div className="max-w-5xl mx-auto px-4 py-3">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-error shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div>
+                    <h3 className="text-sm font-medium text-error">{classifiedError.title}</h3>
+                    <p className="text-xs text-error/70 mt-0.5">{classifiedError.description}</p>
                   </div>
-                )}
-                <div className="flex items-center gap-2">
-                  {classifiedError.retryable && canRetry && (
-                    <button
-                      onClick={handleRetry}
-                      disabled={actionLoading}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                      Retry
-                    </button>
+                  {classifiedError.remedy && (
+                    <div className="p-2.5 rounded-md bg-bg/50 border border-border">
+                      <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
+                        Suggested fix
+                      </div>
+                      <pre className="text-xs text-text/80 whitespace-pre-wrap font-mono">
+                        {classifiedError.remedy}
+                      </pre>
+                    </div>
                   )}
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-error/10 text-error">
-                    {classifiedError.category}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {classifiedError.retryable && canRetry && (
+                      <button
+                        onClick={handleRetry}
+                        disabled={actionLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Retry
+                      </button>
+                    )}
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-error/10 text-error">
+                      {classifiedError.category}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* Main content: log column + timeline sidebar — mirrors /tasks/[id] */}
       <div className="flex-1 flex overflow-hidden">

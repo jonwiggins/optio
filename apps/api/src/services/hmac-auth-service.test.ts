@@ -83,6 +83,7 @@ describe("verifyInternalRequest", () => {
   });
 
   afterEach(() => {
+    delete process.env.OPTIO_ALLOW_LEGACY_INTERNAL_BEARER;
     vi.useRealTimers();
   });
 
@@ -147,8 +148,15 @@ describe("verifyInternalRequest", () => {
     expect(result).toEqual({ error: "Invalid signature", status: 401 });
   });
 
-  // Legacy Bearer token support
-  it("accepts valid legacy Bearer token", () => {
+  it("rejects legacy Bearer token by default", () => {
+    const headers = { authorization: `Bearer ${SECRET}` };
+
+    const result = verifyInternalRequest(headers, PATH);
+    expect(result).toEqual({ error: "Legacy bearer authentication disabled", status: 401 });
+  });
+
+  it("accepts valid legacy Bearer token only when explicitly enabled", () => {
+    process.env.OPTIO_ALLOW_LEGACY_INTERNAL_BEARER = "1";
     const headers = { authorization: `Bearer ${SECRET}` };
 
     const result = verifyInternalRequest(headers, PATH);
@@ -156,6 +164,7 @@ describe("verifyInternalRequest", () => {
   });
 
   it("rejects invalid legacy Bearer token", () => {
+    process.env.OPTIO_ALLOW_LEGACY_INTERNAL_BEARER = "1";
     const headers = { authorization: "Bearer wrong-token" };
 
     const result = verifyInternalRequest(headers, PATH);

@@ -200,6 +200,8 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
       }
 
       secCtx.capabilities = caps;
+      secCtx.allowPrivilegeEscalation = false;
+      secCtx.seccompProfile = { type: "RuntimeDefault" };
       container.securityContext = secCtx;
     }
 

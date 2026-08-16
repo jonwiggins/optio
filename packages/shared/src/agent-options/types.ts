@@ -23,7 +23,8 @@ export type AgentProviderId =
   | "gemini"
   | "copilot"
   | "opencode"
-  | "openclaw";
+  | "openclaw"
+  | "cursor";
 
 export interface ModelOption {
   /** The canonical model id passed to the provider (e.g. "claude-opus-4-7"). */
@@ -38,6 +39,15 @@ export interface ModelOption {
   preview?: boolean;
   /** Where this option came from — hardcoded baseline or live API probe. */
   source?: "baseline" | "live";
+}
+
+/**
+ * A model entry returned by a provider's list-models API. `displayName` is
+ * the provider's human-readable label (e.g. Anthropic's `display_name`).
+ */
+export interface LiveModel {
+  id: string;
+  displayName?: string;
 }
 
 export interface OptionChoice {

@@ -11,7 +11,7 @@ Optio is an orchestration system for AI coding agents. Think of it as "CI/CD whe
 - **Repo Task** — `Where` is set. The agent clones the repo into a worktree and opens a PR:
   1. Spins up an isolated Kubernetes pod for the repository (pod-per-repo)
   2. Creates a git worktree for the task (multiple run concurrently per repo)
-  3. Runs Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, or OpenCode with the prompt
+  3. Runs Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode, or Cursor with the prompt
   4. Streams structured logs back to a web UI in real time
   5. Agent stops after opening a PR (no CI blocking)
   6. PR watcher tracks CI checks, review status, and merge state
@@ -151,7 +151,7 @@ These are well-documented in code; read the relevant service files for details:
 - **Prompt templates**: `{{VARIABLE}}` + `{{#if VAR}}...{{/if}}` syntax. Priority: repo override → global default → hardcoded fallback
 - **Shared cache directories**: per-repo persistent PVCs for tool caches (npm, pip, cargo, etc.), managed via `/api/repos/:id/shared-directories`
 - **Interactive sessions**: persistent workspaces with terminal + agent chat, at `/sessions`
-- **Workspaces**: multi-tenancy via `workspaceId` column. Roles (admin/member/viewer) in schema but not fully enforced
+- **Workspaces**: multi-tenancy via `workspaceId` column. Roles (admin/member/viewer) enforced API-wide: a default-deny baseline in `plugins/auth.ts` makes viewers read-only on all mutating `/api` routes (self-scoped allowlist: logout, own PATs, workspace create/switch, notification prefs, own comments, ending own sessions); `requireRole("member"|"admin")` preHandlers gate routes explicitly (admin: repos, secrets, cluster, connections, MCP servers, ticket providers, shared directories, Optio settings, auth refresh, claude-token proxy); mutating WebSockets (session terminal/chat, Optio chat) enforce `requireWsRole` in `ws/ws-authz.ts`
 - **Standalone Tasks / Jobs** (`workflow-service.ts`, `workflow-worker.ts`): top-level **Jobs** nav item under "Run" (list at `/jobs`, detail at `/jobs/:id`, runs at `/jobs/:id/runs/:runId`). Agent runs with no repo, `{{PARAM}}` prompt templates, four trigger types (manual/schedule/webhook/ticket), pooled pod execution, real-time log streaming, auto-retry with exponential backoff. Pods are **shared across runs within a workflow**, keyed on `(workflow_id, instance_index)`: each workflow has `workflows.maxPodInstances` pod replicas (default 1, max 20) and `workflows.maxAgentsPerPod` concurrent runs per pod (default 2, max 50) — mirrors repo pod scaling. Runs track their assigned pod via `workflow_runs.pod_id` and remember it for retry affinity via `last_pod_id`. Schema: `workflows`, `workflow_triggers`, `workflow_runs`, `workflow_run_logs`, `workflow_pods`
 - **Repo Task Configs** (`task-config-service.ts`, routes in `task-configs.ts`): reusable Repo Task blueprints that spawn tasks when triggers fire. `instantiateTask(configId, { triggerId, params })` creates a task with rendered prompt + title, transitions it to QUEUED, and enqueues the BullMQ job. UI at `/tasks/scheduled`. Schema: `task_configs`
 - **Triggers** (`workflow-trigger-service.ts`, `workflow-trigger-worker.ts`): polymorphic trigger table (`workflow_triggers`) keyed by `(target_type, target_id)`. `target_type="job"` dispatches to `createWorkflowRun`; `target_type="task_config"` dispatches to `instantiateTask`. Schedule trigger worker polls every 60s (`OPTIO_WORKFLOW_TRIGGER_INTERVAL`).
@@ -196,8 +196,14 @@ kubectl rollout restart deployment/optio-api deployment/optio-web -n optio
 # Quality (these are what CI runs, and pre-commit hooks mirror them)
 pnpm format:check                     # Check formatting (Prettier)
 pnpm turbo typecheck                  # Typecheck all 6 packages
-pnpm turbo test                       # Run tests (Vitest)
+pnpm turbo test                       # Run unit tests (Vitest, all mocked, no infra)
 cd apps/web && npx next build         # Verify production build
+
+# Deeper test tiers (see "Testing" section below)
+pnpm --filter @optio/api test:integration  # Real Postgres+Redis service tests
+pnpm --filter @optio/api test:e2e          # Full pipeline e2e (real server, fake pods)
+pnpm --filter @optio/web test:e2e          # Playwright browser e2e (seeded stack)
+bash scripts/smoke-e2e.sh                  # LIVE cluster smoke incl. one real LLM run
 
 # Database
 cd apps/api && npx drizzle-kit generate  # Generate migration after schema change
@@ -214,6 +220,29 @@ helm upgrade optio helm/optio -n optio --reuse-values
 # Teardown
 helm uninstall optio -n optio
 ```
+
+## Testing
+
+Five tiers. The first four are deterministic (no cluster, no LLM calls, no cost) and run in CI; the live tier is local-only. **A change is not done until the tiers covering it pass.** Pick tiers by what you touched:
+
+| Tier         | Command                                         | Covers                                                                                                                                                                           | Run when you change                                                                 |
+| ------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Unit         | `pnpm turbo test`                               | Pure logic, routes with mocked services                                                                                                                                          | Anything (always)                                                                   |
+| Integration  | `pnpm --filter @optio/api test:integration`     | Services against **real Postgres + Redis**: state machines, reconciler CAS, triggers, secrets crypto, migrations-built schema                                                    | DB schema, services, reconciler, workers' DB logic                                  |
+| Pipeline e2e | `pnpm --filter @optio/api test:e2e`             | The **real API server** (all 14 workers) driven over HTTP with a fake container runtime: task/job/persistent-agent lifecycles, boot + migrations from empty DB, WS log streaming | Workers, routes, pipeline, boot, reconciler behavior                                |
+| Web e2e      | `pnpm --filter @optio/web test:e2e`             | Playwright against `next dev` + real API + seeded data: every top-level page, task/job/agent flows                                                                               | Web UI                                                                              |
+| Live         | `/live-e2e` skill → `bash scripts/smoke-e2e.sh` | Real K8s pods + real agent auth + one real LLM run (~$0.01)                                                                                                                      | Pod lifecycle, images, Helm, agent adapters — final check; **local only, never CI** |
+
+Mechanics (integration + e2e tiers):
+
+- Throwaway infra containers (`optio-test-postgres` :54329, `optio-test-redis` :63790) auto-start via `scripts/test-infra.sh` — needs Docker running. `stop` to clean up.
+- Each test FILE gets a private database cloned from a migrated template plus a leased Redis logical DB — concurrent runs are safe. GlobalSetup sweeps leftovers from crashed runs.
+- Integration tests: name `*.int.test.ts` under `apps/api/src/`, exemplar `apps/api/src/db/harness.int.test.ts`, row factories in `apps/api/src/test-utils/integration/fixtures.ts`. Import services normally — env already points at the private DB.
+- Pipeline e2e tests: `apps/api/e2e/*.e2e.test.ts`, exemplar `standalone-job.e2e.test.ts`; `startApiServer()` from `src/test-utils/e2e/api-server.ts` spawns the real server (`OPTIO_RUNTIME=fake`, `OPTIO_STATEFULSET_ENABLED=false`, auth disabled).
+- The fake runtime (`packages/container-runtime/src/fake.ts`) plays agents by speaking claude stream-json; script it with prompt directives: `[[mock:pr]]` (emit PR URL → pr_opened), `[[mock:fail]]`, `[[mock:silent]]` (no output), `[[mock:sleep:MS]]`, `[[mock:hang]]`, `[[mock:cost:X]]`. Default = success, cost 0.0123. Repo tasks need `ANTHROPIC_API_KEY` + `GITHUB_TOKEN` secrets seeded (dummy values fine) or provisioning retries forever.
+- Playwright: specs in `apps/web/e2e/*.spec.ts`; `e2e/launch-stack.ts` boots API + `next dev` (ports 4931/3131) and seeds a repo, tasks, a job run, a template, and an agent. First run: `cd apps/web && npx playwright install chromium`.
+
+After changing backend code, ALWAYS rebuild + redeploy the local cluster and verify live (see the `/live-e2e` skill; per standing user preference, deploy after backend changes).
 
 ## Conventions
 
@@ -270,6 +299,5 @@ Key `values.yaml` settings:
 
 ## Known Issues
 
-- Workspace RBAC roles are in schema but not fully enforced in all routes
 - API container runs via `tsx` rather than compiled JS (workspace packages export `./src/index.ts`)
 - OAuth tokens from `claude setup-token` have limited scopes vs Keychain-extracted tokens

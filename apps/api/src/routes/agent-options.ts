@@ -7,7 +7,7 @@ import { isAuthDisabled } from "../services/oauth/index.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 
 const providerParamsSchema = z.object({
-  provider: z.enum(["anthropic", "openai", "gemini", "copilot", "opencode", "openclaw"]),
+  provider: z.enum(["anthropic", "openai", "gemini", "copilot", "opencode", "openclaw", "cursor"]),
 });
 
 const refreshQuerySchema = z.object({

@@ -77,7 +77,10 @@ export function startReconcileWorker() {
         });
       }
 
-      // Errors get a longer backoff.
+      // Errors get a longer backoff. GitHub rate-limit / auth / permission
+      // blocks are handled upstream in the executor, which persists a
+      // `reconcileBackoffUntil` cooldown on the run so every reconcile producer
+      // is paused — those do not reach this branch as errors.
       if (outcome.status === "error") {
         await enqueueReconcile(ref, {
           reason: `error_retry:${outcome.reason}`,

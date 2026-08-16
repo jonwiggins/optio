@@ -168,6 +168,13 @@ agent:
   statefulSet:
     enabled: true
     terminationGracePeriodSeconds: 300
+  # Rootless mode for clusters that forbid root containers (restricted
+  # PodSecurity, OpenShift, rootless runtimes). Skips the root-running
+  # home-perm-fix initContainer on agent StatefulSets and relies on
+  # fsGroup + fsGroupChangePolicy=OnRootMismatch for PVC ownership, and
+  # stamps runAsNonRoot on agent pods. Requires a CSI driver that honors
+  # fsGroup (most cloud CSI drivers do; hostpath-style ones often don't).
+  rootless: false
   # Shared cache directory PVCs (opt-in per repo).
   # Controls storage class and size limits for cache directories.
   cache:
@@ -227,6 +234,7 @@ postgresql:
   # Kubernetes nodeSelector for PostgreSQL pods (opt-in).
   nodeSelector: {}
   storage:
+    storageClass: ""  # Empty = cluster default storage class
     size: 5Gi
   auth:
     database: optio

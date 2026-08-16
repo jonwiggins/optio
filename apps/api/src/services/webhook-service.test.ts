@@ -326,6 +326,7 @@ describe("deliverWebhook", () => {
       "https://example.com/hook",
       expect.objectContaining({
         method: "POST",
+        redirect: "error",
         headers: expect.objectContaining({
           "X-Optio-Event": "task.completed",
           "X-Optio-Signature": expect.any(String),
@@ -405,6 +406,41 @@ describe("deliverWebhook", () => {
 
     expect(capturedValues.success).toBe(false);
     expect(capturedValues.error).toContain("HTTP 500");
+  });
+
+  it("caps stored response bodies from failed deliveries", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response("x".repeat(2500), {
+        status: 500,
+      }),
+    );
+
+    let capturedValues: any;
+    (db.insert as any) = vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((vals: any) => {
+        capturedValues = vals;
+        return { returning: vi.fn().mockResolvedValue([{ id: "d-1", success: false }]) };
+      }),
+    });
+
+    await deliverWebhook(
+      {
+        id: "wh-1",
+        url: "https://example.com",
+        workspaceId: null,
+        secret: null,
+        events: [],
+        description: null,
+        active: true,
+        createdBy: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      "task.failed",
+      { taskId: "t-1" },
+    );
+
+    expect(capturedValues.responseBody).toBe(`${"x".repeat(2000)}...(truncated)`);
   });
 
   it("handles fetch exceptions", async () => {

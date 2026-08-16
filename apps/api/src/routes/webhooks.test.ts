@@ -195,3 +195,52 @@ describe("GET /api/webhooks/:id/deliveries", () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+describe("webhook mutations require member role", () => {
+  async function viewerApp(): Promise<FastifyInstance> {
+    return buildRouteTestApp(webhookRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Seed getWebhook so a viewer that somehow reached the handler would still
+    // resolve a webhook — proving the 403 comes from the role gate, not a 404.
+    mockGetWebhook.mockResolvedValue({ id: "wh-1", workspaceId: "ws-1", secret: null, events: [] });
+  });
+
+  it("403s a viewer creating a webhook", async () => {
+    const app = await viewerApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/webhooks",
+      payload: { url: "https://example.com/hook", events: ["task.completed"] },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(mockCreateWebhook).not.toHaveBeenCalled();
+  });
+
+  it("403s a viewer updating a webhook", async () => {
+    const app = await viewerApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/webhooks/wh-1",
+      payload: { events: ["task.failed"] },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("403s a viewer deleting a webhook", async () => {
+    const app = await viewerApp();
+    const res = await app.inject({ method: "DELETE", url: "/api/webhooks/wh-1" });
+    expect(res.statusCode).toBe(403);
+    expect(mockDeleteWebhook).not.toHaveBeenCalled();
+  });
+
+  it("403s a viewer firing a test delivery", async () => {
+    const app = await viewerApp();
+    const res = await app.inject({ method: "POST", url: "/api/webhooks/wh-1/test", payload: {} });
+    expect(res.statusCode).toBe(403);
+  });
+});

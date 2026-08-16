@@ -369,6 +369,7 @@ export default function NewTaskPage() {
             <option value="opencode">OpenCode (Experimental)</option>
             <option value="gemini">Google Gemini</option>
             <option value="openclaw">OpenClaw (Experimental)</option>
+            <option value="cursor">Cursor</option>
           </select>
         </div>
 

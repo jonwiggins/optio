@@ -32,8 +32,21 @@ vi.mock("../db/client.js", () => ({
 }));
 
 vi.mock("../db/schema.js", () => ({
-  tasks: { id: "id", updatedAt: "updated_at" },
+  tasks: {
+    id: "id",
+    updatedAt: "updated_at",
+    reconcileBackoffUntil: "reconcile_backoff_until",
+    reconcileAttempts: "reconcile_attempts",
+    errorMessage: "error_message",
+  },
   workflowRuns: { id: "id", updatedAt: "updated_at", state: "state" },
+  prReviews: {
+    id: "id",
+    updatedAt: "updated_at",
+    reconcileBackoffUntil: "reconcile_backoff_until",
+    reconcileAttempts: "reconcile_attempts",
+    errorMessage: "error_message",
+  },
 }));
 
 vi.mock("./task-service.js", () => ({
@@ -89,6 +102,7 @@ vi.mock("../logger.js", () => ({
 
 // Import AFTER mocks
 import { executeAction } from "./reconcile-executor.js";
+import { GitHubApiError } from "./git-platform/github.js";
 
 // ─── Fixtures ───
 
@@ -536,6 +550,68 @@ describe("reconcile-executor", () => {
       const outcome = await executeAction(action, snap);
       expect(outcome.status).toBe("error");
       expect(mockTransitionTask).not.toHaveBeenCalled();
+    });
+
+    it("persists a cooldown and does not transition on a secondary rate limit", async () => {
+      mockGetPlatform.mockResolvedValue({
+        platform: { mergePullRequest: mockMergePR },
+        ri: { owner: "acme", repo: "repo" },
+      });
+      mockMergePR.mockRejectedValue(
+        new GitHubApiError(403, "You have exceeded a secondary rate limit", {
+          retryAfterMs: 120000,
+        }),
+      );
+      const chain = chainable([{ id: "task-1" }]);
+      mockDbUpdate.mockReturnValue(chain);
+
+      const snap = repoSnapshot();
+      if (snap.run.kind !== "repo") throw new Error("fixture mismatch");
+      snap.run.status.prUrl = "https://github.com/acme/repo/pull/42";
+      snap.run.status.state = TaskState.PR_OPENED;
+
+      const outcome = await executeAction(
+        { kind: "autoMergePr", reason: "auto_merge_ready" },
+        snap,
+      );
+
+      // Applied (not error) so the worker won't fast-retry; run NOT advanced.
+      expect(outcome.status).toBe("applied");
+      expect(outcome.reason).toContain("github_cooldown");
+      expect(mockTransitionTask).not.toHaveBeenCalled();
+      expect(chain.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reconcileBackoffUntil: expect.anything(),
+          errorMessage: expect.stringContaining("secondary rate limit"),
+        }),
+      );
+      // Single delayed wake honoring Retry-After (>=120s).
+      const enqueueArgs = mockEnqueueReconcile.mock.calls.at(-1)?.[1] as { delayMs: number };
+      expect(enqueueArgs.delayMs).toBeGreaterThanOrEqual(120000);
+    });
+
+    it("persists a long cooldown for an auth (bad credentials) failure", async () => {
+      mockGetPlatform.mockResolvedValue({
+        platform: { mergePullRequest: mockMergePR },
+        ri: { owner: "acme", repo: "repo" },
+      });
+      mockMergePR.mockRejectedValue(new GitHubApiError(401, '{"message":"Bad credentials"}'));
+      mockDbUpdate.mockReturnValue(chainable([{ id: "task-1" }]));
+
+      const snap = repoSnapshot();
+      if (snap.run.kind !== "repo") throw new Error("fixture mismatch");
+      snap.run.status.prUrl = "https://github.com/acme/repo/pull/42";
+      snap.run.status.state = TaskState.PR_OPENED;
+
+      const outcome = await executeAction(
+        { kind: "autoMergePr", reason: "auto_merge_ready" },
+        snap,
+      );
+      expect(outcome.status).toBe("applied");
+      expect(outcome.reason).toContain("github_cooldown:auth");
+      expect(mockTransitionTask).not.toHaveBeenCalled();
+      const enqueueArgs = mockEnqueueReconcile.mock.calls.at(-1)?.[1] as { delayMs: number };
+      expect(enqueueArgs.delayMs).toBeGreaterThanOrEqual(60_000);
     });
   });
 

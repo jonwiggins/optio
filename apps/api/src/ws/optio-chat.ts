@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getSettings } from "../services/optio-settings-service.js";
 import { authenticateWs, extractSessionToken } from "./ws-auth.js";
+import { requireWsRole } from "./ws-authz.js";
 import { logger } from "../logger.js";
 import {
   OPTIO_TOOL_SCHEMAS,
@@ -404,6 +405,13 @@ export async function optioChatWs(app: FastifyInstance) {
 
     const userId = user.id;
     const log = logger.child({ userId, ws: "optio-chat" });
+
+    // The Optio assistant executes tools against the workspace (and `approve`
+    // authorizes pending tool calls) — viewers are read-only.
+    if (!(await requireWsRole(socket, user, "member"))) {
+      releaseConnection(clientIp);
+      return;
+    }
 
     // Enforce one active conversation per user
     if (activeConnections.has(userId)) {

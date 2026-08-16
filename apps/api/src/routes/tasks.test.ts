@@ -274,9 +274,11 @@ describe("POST /api/tasks", () => {
     app = await buildTestApp();
   });
 
-  it("creates a task and enqueues it", async () => {
-    mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task" });
-    mockTransitionTask.mockResolvedValue(undefined);
+  it("creates a task, enqueues it, and responds with the post-transition (queued) row", async () => {
+    mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "pending" });
+    // transitionTask returns the updated row — the route must respond with
+    // this, not the stale `pending` row from createTask().
+    mockTransitionTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "queued" });
 
     const res = await app.inject({
       method: "POST",
@@ -301,11 +303,16 @@ describe("POST /api/tasks", () => {
     );
     expect(mockTransitionTask).toHaveBeenCalled();
     expect(mockQueueAdd).toHaveBeenCalled();
+    expect(res.json().task.state).toBe("queued");
   });
 
   it("creates a task with dependencies", async () => {
-    mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task" });
-    mockTransitionTask.mockResolvedValue(undefined);
+    mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "pending" });
+    mockTransitionTask.mockResolvedValue({
+      ...mockTaskData,
+      id: "new-task",
+      state: "waiting_on_deps",
+    });
     mockAddDependencies.mockResolvedValue(undefined);
 
     const res = await app.inject({
@@ -334,6 +341,7 @@ describe("POST /api/tasks", () => {
     );
     // Should NOT enqueue when dependencies exist
     expect(mockQueueAdd).not.toHaveBeenCalled();
+    expect(res.json().task.state).toBe("waiting_on_deps");
   });
 
   it("rejects invalid agentType (400 from Zod body schema)", async () => {

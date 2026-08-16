@@ -17,6 +17,8 @@ import * as paService from "../services/persistent-agent-service.js";
 import { buildSenderId } from "@optio/shared";
 import { logger } from "../logger.js";
 
+const agentTokenSchema = z.string().uuid();
+
 const sendBodySchema = z.object({
   to: z.string().min(1).describe("Target agent slug (e.g. 'forge') in this workspace"),
   body: z.string().min(1),
@@ -31,7 +33,12 @@ const broadcastBodySchema = z.object({
 
 async function authAgentByToken(token: string | undefined) {
   if (!token) return null;
-  const [agent] = await db.select().from(persistentAgents).where(eq(persistentAgents.id, token));
+  const parsed = agentTokenSchema.safeParse(token);
+  if (!parsed.success) return null;
+  const [agent] = await db
+    .select()
+    .from(persistentAgents)
+    .where(eq(persistentAgents.id, parsed.data));
   return agent ?? null;
 }
 

@@ -41,7 +41,7 @@ export async function initTelemetry(): Promise<void> {
   const { OTLPTraceExporter } = await import("@opentelemetry/exporter-trace-otlp-proto");
   const { OTLPMetricExporter } = await import("@opentelemetry/exporter-metrics-otlp-proto");
   const { PeriodicExportingMetricReader } = await import("@opentelemetry/sdk-metrics");
-  const { Resource } = await import("@opentelemetry/resources");
+  const { resourceFromAttributes } = await import("@opentelemetry/resources");
   const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } =
     await import("@opentelemetry/semantic-conventions");
   const { BatchSpanProcessor } = await import("@opentelemetry/sdk-trace-node");
@@ -57,7 +57,7 @@ export async function initTelemetry(): Promise<void> {
   const samplingRatio = parseFloat(process.env.OPTIO_OTEL_SAMPLING_RATIO ?? "1.0");
   const metricsIntervalMs = parseIntEnv("OPTIO_OTEL_METRICS_INTERVAL_MS", 60000);
 
-  const resource = new Resource({
+  const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME ?? "optio-api",
     [ATTR_SERVICE_VERSION]: process.env.npm_package_version ?? "0.1.0",
     "service.namespace": "optio",
@@ -73,22 +73,16 @@ export async function initTelemetry(): Promise<void> {
   });
 
   // Configure log exporter if enabled
-  let logRecordProcessor: unknown = undefined;
+  let logRecordProcessors: unknown[] | undefined = undefined;
+  let otelLogs: typeof import("@opentelemetry/api-logs").logs | undefined;
   if (process.env.OPTIO_OTEL_LOGS_ENABLED === "true") {
     const { OTLPLogExporter } = await import("@opentelemetry/exporter-logs-otlp-proto");
-    const { BatchLogRecordProcessor, LoggerProvider } = await import("@opentelemetry/sdk-logs");
+    const { BatchLogRecordProcessor } = await import("@opentelemetry/sdk-logs");
     const { logs } = await import("@opentelemetry/api-logs");
 
     const logExporter = new OTLPLogExporter();
-    const logProvider = new LoggerProvider({ resource });
-    logProvider.addLogRecordProcessor(new BatchLogRecordProcessor(logExporter));
-    logs.setGlobalLoggerProvider(logProvider);
-
-    // Enable the logs module
-    const { enableLogs } = await import("./telemetry/logs.js");
-    enableLogs(logs.getLogger("optio-api"));
-
-    logRecordProcessor = new BatchLogRecordProcessor(logExporter);
+    logRecordProcessors = [new BatchLogRecordProcessor(logExporter)];
+    otelLogs = logs;
   }
 
   const sdk = new NodeSDK({
@@ -98,6 +92,7 @@ export async function initTelemetry(): Promise<void> {
     sampler: new ParentBasedSampler({
       root: new TraceIdRatioBasedSampler(samplingRatio),
     }),
+    ...(logRecordProcessors ? { logRecordProcessors: logRecordProcessors as any } : {}),
     instrumentations: [
       getNodeAutoInstrumentations({
         // Disable noisy/unnecessary instrumentations
@@ -110,12 +105,16 @@ export async function initTelemetry(): Promise<void> {
 
   sdk.start();
 
-  // Enable span and metrics modules
+  // Enable span, metrics, and optional logs modules
   const { enableSpans } = await import("./telemetry/spans.js");
   const { enableMetrics, initMetrics } = await import("./telemetry/metrics.js");
   enableSpans();
   enableMetrics();
   initMetrics();
+  if (otelLogs) {
+    const { enableLogs } = await import("./telemetry/logs.js");
+    enableLogs(otelLogs.getLogger("optio-api"));
+  }
 
   // Set up graceful shutdown
   shutdownFn = async () => {

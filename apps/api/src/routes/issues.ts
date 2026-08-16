@@ -14,6 +14,7 @@ import { logger } from "../logger.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { IssueSummarySchema } from "../schemas/session.js";
 import { TaskSchema } from "../schemas/task.js";
+import { requireRole } from "../plugins/auth.js";
 
 const issuesQuerySchema = z
   .object({
@@ -270,6 +271,7 @@ export async function issueRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/issues/assign",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "assignIssueToOptio",
         summary: "Assign an issue to Optio",

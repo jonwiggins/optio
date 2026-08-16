@@ -51,6 +51,7 @@ describe("GET /api/internal/git-credentials", () => {
   });
 
   afterEach(() => {
+    delete process.env.OPTIO_ALLOW_LEGACY_INTERNAL_BEARER;
     vi.unstubAllGlobals();
   });
 
@@ -127,7 +128,7 @@ describe("GET /api/internal/git-credentials", () => {
     expect(res.json().error).toBe("Invalid signature");
   });
 
-  // --- Legacy Bearer token auth (backward compatibility) ---
+  // --- Legacy Bearer token auth (opt-in compatibility) ---
 
   it("returns 401 when no auth headers", async () => {
     const res = await app.inject({
@@ -146,10 +147,11 @@ describe("GET /api/internal/git-credentials", () => {
     });
 
     expect(res.statusCode).toBe(401);
-    expect(res.json().error).toBe("Unauthorized");
+    expect(res.json().error).toBe("Legacy bearer authentication disabled");
   });
 
-  it("returns token with valid legacy bearer and taskId query param", async () => {
+  it("returns token with valid legacy bearer only when explicitly enabled", async () => {
+    process.env.OPTIO_ALLOW_LEGACY_INTERNAL_BEARER = "1";
     mockGetGitHubToken.mockResolvedValue("ghp_task_token");
 
     const res = await app.inject({
@@ -163,13 +165,14 @@ describe("GET /api/internal/git-credentials", () => {
     expect(mockGetGitHubToken).toHaveBeenCalledWith({ taskId: "task-123" });
   });
 
-  it("returns token with valid legacy bearer and no taskId", async () => {
+  it("returns token with valid HMAC and no taskId", async () => {
     mockGetGitHubToken.mockResolvedValue("ghp_server_token");
+    const path = "/api/internal/git-credentials";
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/internal/git-credentials",
-      headers: { authorization: VALID_BEARER },
+      url: path,
+      headers: makeHmacHeaders(path),
     });
 
     expect(res.statusCode).toBe(200);
@@ -181,11 +184,12 @@ describe("GET /api/internal/git-credentials", () => {
 
   it("returns 500 when token service throws", async () => {
     mockGetGitHubToken.mockRejectedValue(new Error("Token fetch failed"));
+    const path = "/api/internal/git-credentials";
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/internal/git-credentials",
-      headers: { authorization: VALID_BEARER },
+      url: path,
+      headers: makeHmacHeaders(path),
     });
 
     expect(res.statusCode).toBe(500);

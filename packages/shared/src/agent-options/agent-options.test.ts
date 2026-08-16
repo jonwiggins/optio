@@ -63,7 +63,7 @@ describe("PROVIDER_CATALOGS", () => {
 
 describe("resolveModelId", () => {
   it("resolves the opus alias to the latest dated id", () => {
-    expect(resolveModelId("anthropic", "opus")).toBe("claude-opus-4-7");
+    expect(resolveModelId("anthropic", "opus")).toBe("claude-opus-4-8");
   });
 
   it("resolves the sonnet alias", () => {
@@ -72,6 +72,10 @@ describe("resolveModelId", () => {
 
   it("resolves the haiku alias", () => {
     expect(resolveModelId("anthropic", "haiku")).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("resolves the fable alias", () => {
+    expect(resolveModelId("anthropic", "fable")).toBe("claude-fable-5");
   });
 
   it("returns an exact-match dated id unchanged", () => {
@@ -87,7 +91,7 @@ describe("resolveModelId", () => {
 
   it("returns the latest-marked model when no input is provided", () => {
     // Pick a provider with an explicit `latest` flag.
-    expect(resolveModelId("anthropic", undefined)).toBe("claude-opus-4-7");
+    expect(resolveModelId("anthropic", undefined)).toBe("claude-opus-4-8");
   });
 
   it("returns undefined for free-text providers with no baseline models", () => {
@@ -102,7 +106,7 @@ describe("resolveModelId", () => {
   });
 
   it("treats an empty string like undefined", () => {
-    expect(resolveModelId("anthropic", "")).toBe("claude-opus-4-7");
+    expect(resolveModelId("anthropic", "")).toBe("claude-opus-4-8");
   });
 
   it("resolves gemini-pro alias", () => {
@@ -123,9 +127,9 @@ describe("mergeLiveModels", () => {
   });
 
   it("preserves baseline metadata when a live id matches", () => {
-    const opus = ANTHROPIC_CATALOG.models.find((m) => m.id === "claude-opus-4-7")!;
-    const merged = mergeLiveModels(ANTHROPIC_CATALOG, ["claude-opus-4-7"]);
-    const mergedOpus = merged.models.find((m) => m.id === "claude-opus-4-7")!;
+    const opus = ANTHROPIC_CATALOG.models.find((m) => m.id === "claude-opus-4-8")!;
+    const merged = mergeLiveModels(ANTHROPIC_CATALOG, ["claude-opus-4-8"]);
+    const mergedOpus = merged.models.find((m) => m.id === "claude-opus-4-8")!;
     expect(mergedOpus.label).toBe(opus.label);
     expect(mergedOpus.latest).toBe(true);
     expect(mergedOpus.source).toBe("baseline");
@@ -154,13 +158,40 @@ describe("mergeLiveModels", () => {
     expect(merged.models.find((m) => m.id === "")).toBeUndefined();
     expect(merged.models.find((m) => m.id === "legit-id")).toBeDefined();
   });
+
+  it("uses the provider display name as the label when present", () => {
+    const merged = mergeLiveModels(ANTHROPIC_CATALOG, [
+      { id: "claude-opus-5", displayName: "Claude Opus 5" },
+      { id: "claude-mystery-1" },
+    ]);
+    expect(merged.models.find((m) => m.id === "claude-opus-5")!.label).toBe("Claude Opus 5");
+    expect(merged.models.find((m) => m.id === "claude-mystery-1")!.label).toBe("claude-mystery-1");
+  });
+
+  it("assigns live models to a baseline family when the id contains one", () => {
+    const merged = mergeLiveModels(ANTHROPIC_CATALOG, [
+      "claude-opus-5",
+      "claude-sonnet-5-20270101",
+      "claude-unrelated-model",
+    ]);
+    expect(merged.models.find((m) => m.id === "claude-opus-5")!.family).toBe("opus");
+    expect(merged.models.find((m) => m.id === "claude-sonnet-5-20270101")!.family).toBe("sonnet");
+    expect(merged.models.find((m) => m.id === "claude-unrelated-model")!.family).toBeUndefined();
+  });
+
+  it("groups family-inferred live models with their baseline family", () => {
+    const merged = mergeLiveModels(ANTHROPIC_CATALOG, ["claude-opus-5"]);
+    const groups = groupModelsByFamily(merged);
+    const opusGroup = groups.find((g) => g.family === "opus")!;
+    expect(opusGroup.models.some((m) => m.id === "claude-opus-5")).toBe(true);
+  });
 });
 
 describe("groupModelsByFamily", () => {
   it("groups anthropic models by family", () => {
     const groups = groupModelsByFamily(ANTHROPIC_CATALOG);
     const families = groups.map((g) => g.family).sort();
-    expect(families).toEqual(["haiku", "opus", "sonnet"]);
+    expect(families).toEqual(["fable", "haiku", "opus", "sonnet"]);
   });
 
   it("falls back to the model id when there is no family", () => {

@@ -61,6 +61,7 @@ const AGENT_TYPES = [
   { value: "copilot", label: "GitHub Copilot" },
   { value: "gemini", label: "Google Gemini" },
   { value: "opencode", label: "OpenCode" },
+  { value: "cursor", label: "Cursor" },
 ];
 
 const PERMISSION_LEVELS = [

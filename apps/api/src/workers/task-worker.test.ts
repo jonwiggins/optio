@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   buildAgentCommand,
   buildInitialClaudeStreamMessage,
+  classifyRunOutcome,
   inferExitCode,
+  shellQuote,
   shouldEscalateNoPr,
 } from "./task-worker.js";
+import { ClaudeCodeAdapter } from "@optio/agent-adapters";
 
 describe("buildAgentCommand", () => {
   describe("claude-code agent", () => {
@@ -106,7 +113,7 @@ describe("buildAgentCommand", () => {
     it("adds --model flag when OPTIO_CLAUDE_MODEL is set", () => {
       const env = { OPTIO_PROMPT: "Do work", OPTIO_CLAUDE_MODEL: "opus" };
       const cmds = buildAgentCommand("claude-code", env);
-      expect(cmds.some((c) => c.includes("--model opus"))).toBe(true);
+      expect(cmds.some((c) => c.includes("--model 'opus'"))).toBe(true);
     });
 
     it("adds context window suffix to --model flag", () => {
@@ -116,7 +123,8 @@ describe("buildAgentCommand", () => {
         OPTIO_CLAUDE_CONTEXT_WINDOW: "1m",
       };
       const cmds = buildAgentCommand("claude-code", env);
-      expect(cmds.some((c) => c.includes("--model opus[1m]"))).toBe(true);
+      // Quoted: [1m] would otherwise be a glob character class in bash
+      expect(cmds.some((c) => c.includes("--model 'opus[1m]'"))).toBe(true);
     });
 
     it("does not add --model flag when OPTIO_CLAUDE_MODEL is not set", () => {
@@ -243,6 +251,171 @@ describe("buildAgentCommand", () => {
       expect(cmds.some((c) => c.includes("Unknown agent type"))).toBe(true);
       expect(cmds.some((c) => c.includes("exit 1"))).toBe(true);
     });
+  });
+});
+
+describe("shellQuote", () => {
+  it("wraps a plain value in single quotes", () => {
+    expect(shellQuote("abc")).toBe("'abc'");
+  });
+
+  it("escapes embedded single quotes with the '\\'' sequence", () => {
+    expect(shellQuote("it's")).toBe("'it'\\''s'");
+  });
+
+  it("leaves backticks, $VAR, globs, and newlines untouched inside the quotes", () => {
+    const hostile = "`echo x` $HOME optio/task-*\nnext";
+    expect(shellQuote(hostile)).toBe(`'${hostile}'`);
+  });
+});
+
+// Regression tests for shell-quoting of agent command arguments. These
+// execute the generated command lines exactly the way the repo pod does
+// (joined with "\n" and run via `bash -c`), with a fake agent binary on
+// PATH that records its argv and stdin. Hostile text — backticks, $HOME,
+// globs, single quotes, literal newlines — must reach the binary
+// byte-for-byte, never be expanded or executed by the shell. The previous
+// JSON.stringify quoting failed this: bash expands $VAR and backticks
+// inside double quotes.
+describe("hostile prompt/argument shell-quoting regression", () => {
+  const HOSTILE = [
+    "pwn `echo should-not-run`",
+    "$HOME",
+    "optio/task-*",
+    "it's quoted",
+    "line1\nline2",
+  ].join(" ");
+
+  function makeFakeBin(dir: string, name: string): { argsFile: string; stdinFile: string } {
+    const argsFile = path.join(dir, `${name}-args.bin`);
+    const stdinFile = path.join(dir, `${name}-stdin.bin`);
+    const script = [
+      "#!/usr/bin/env bash",
+      // NUL-separated argv so newlines inside a single argument survive
+      'for arg in "$@"; do printf \'%s\\0\' "$arg"; done > "$OPTIO_TEST_ARGS_FILE"',
+      'cat > "$OPTIO_TEST_STDIN_FILE"',
+    ].join("\n");
+    fs.writeFileSync(path.join(dir, name), script, { mode: 0o755 });
+    return { argsFile, stdinFile };
+  }
+
+  function runGeneratedCommand(
+    cmds: string[],
+    extraEnv: Record<string, string>,
+    stdin: string,
+  ): ReturnType<typeof spawnSync> {
+    return spawnSync("bash", ["-c", cmds.join("\n")], {
+      env: {
+        PATH: extraEnv.PATH,
+        // Distinct HOME so accidental $HOME expansion is detectable
+        HOME: "/tmp/optio-fake-home",
+        ...extraEnv,
+      },
+      input: stdin,
+      encoding: "utf8",
+    });
+  }
+
+  it("passes a hostile --resume session id to claude literally, not shell-executed", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "optio-shellquote-"));
+    try {
+      const { argsFile, stdinFile } = makeFakeBin(tmp, "claude");
+
+      const env = { OPTIO_PROMPT: HOSTILE };
+      const cmds = buildAgentCommand("claude-code", env, { resumeSessionId: HOSTILE });
+      const result = runGeneratedCommand(
+        cmds,
+        {
+          PATH: `${tmp}:${process.env.PATH}`,
+          OPTIO_TEST_ARGS_FILE: argsFile,
+          OPTIO_TEST_STDIN_FILE: stdinFile,
+          OPTIO_PROMPT: env.OPTIO_PROMPT,
+        },
+        buildInitialClaudeStreamMessage(env.OPTIO_PROMPT),
+      );
+      expect(result.status).toBe(0);
+
+      const argv = fs.readFileSync(argsFile, "utf8").split("\0").slice(0, -1);
+      const resumeIdx = argv.indexOf("--resume");
+      expect(resumeIdx).toBeGreaterThan(-1);
+      const received = argv[resumeIdx + 1];
+      // Byte-for-byte literal: backticks not executed, $HOME not expanded,
+      // glob not expanded, single quote and newlines preserved
+      expect(received).toBe(HOSTILE);
+      expect(received).toContain("`echo should-not-run`");
+      expect(received).toContain("$HOME");
+      expect(received).toContain("optio/task-*");
+      expect(received).toContain("'");
+      expect(received).toContain("\n");
+      expect(received).not.toContain("/tmp/optio-fake-home");
+
+      // The prompt (delivered via stdin in stream-json mode) is literal too
+      const stdinData = fs.readFileSync(stdinFile, "utf8");
+      expect(stdinData).toBe(buildInitialClaudeStreamMessage(HOSTILE));
+      const parsed = JSON.parse(stdinData.trim());
+      expect(parsed.message.content[0].text).toBe(HOSTILE);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("passes a hostile prompt to codex literally via $OPTIO_PROMPT", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "optio-shellquote-"));
+    try {
+      const { argsFile } = makeFakeBin(tmp, "codex");
+
+      const env = { OPTIO_PROMPT: HOSTILE };
+      const cmds = buildAgentCommand("codex", env);
+      const result = runGeneratedCommand(
+        cmds,
+        {
+          PATH: `${tmp}:${process.env.PATH}`,
+          OPTIO_TEST_ARGS_FILE: argsFile,
+          OPTIO_TEST_STDIN_FILE: path.join(tmp, "codex-stdin.bin"),
+          OPTIO_PROMPT: env.OPTIO_PROMPT,
+        },
+        "",
+      );
+      expect(result.status).toBe(0);
+
+      const argv = fs.readFileSync(argsFile, "utf8").split("\0").slice(0, -1);
+      // codex exec --full-auto "$OPTIO_PROMPT" ... — the prompt is one argv
+      // element, delivered byte-for-byte with nothing expanded or executed
+      expect(argv).toContain(HOSTILE);
+      const received = argv[argv.indexOf(HOSTILE)];
+      expect(received).toContain("`echo should-not-run`");
+      expect(received).not.toContain("/tmp/optio-fake-home");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("passes a hostile --session id to opencode literally", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "optio-shellquote-"));
+    try {
+      const { argsFile } = makeFakeBin(tmp, "opencode");
+
+      const env = { OPTIO_PROMPT: "Continue work" };
+      const cmds = buildAgentCommand("opencode", env, { resumeSessionId: HOSTILE });
+      const result = runGeneratedCommand(
+        cmds,
+        {
+          PATH: `${tmp}:${process.env.PATH}`,
+          OPTIO_TEST_ARGS_FILE: argsFile,
+          OPTIO_TEST_STDIN_FILE: path.join(tmp, "opencode-stdin.bin"),
+          OPTIO_PROMPT: env.OPTIO_PROMPT,
+        },
+        "",
+      );
+      expect(result.status).toBe(0);
+
+      const argv = fs.readFileSync(argsFile, "utf8").split("\0").slice(0, -1);
+      const sessionIdx = argv.indexOf("--session");
+      expect(sessionIdx).toBeGreaterThan(-1);
+      expect(argv[sessionIdx + 1]).toBe(HOSTILE);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 
@@ -438,5 +611,90 @@ describe("shouldEscalateNoPr", () => {
         detectedPrUrl: "https://github.com/org/repo/pull/1",
       }),
     ).toBe(false);
+  });
+});
+
+describe("classifyRunOutcome", () => {
+  const defaults = {
+    success: true,
+    isReviewTask: false,
+    sessionId: "sess-1" as string | undefined,
+    detectedPrUrl: undefined as string | undefined | null,
+  };
+
+  it("returns no_output when a non-review run produced no session", () => {
+    expect(classifyRunOutcome({ ...defaults, sessionId: undefined })).toBe("no_output");
+  });
+
+  it("returns pr_opened when a PR was detected on a non-review run", () => {
+    expect(
+      classifyRunOutcome({ ...defaults, detectedPrUrl: "https://github.com/org/repo/pull/42" }),
+    ).toBe("pr_opened");
+  });
+
+  it("never returns pr_opened for review tasks", () => {
+    expect(
+      classifyRunOutcome({
+        ...defaults,
+        isReviewTask: true,
+        detectedPrUrl: "https://github.com/org/repo/pull/42",
+      }),
+    ).toBe("success");
+  });
+
+  it("returns success for a successful run", () => {
+    expect(classifyRunOutcome(defaults)).toBe("success");
+  });
+
+  it("returns failure for a failed non-review run", () => {
+    expect(classifyRunOutcome({ ...defaults, success: false })).toBe("failure");
+  });
+
+  it("returns failure for a failed review run (issue #552 regression)", () => {
+    // Previously review tasks were unconditionally routed to the success
+    // branch, marking API-error review runs as completed.
+    expect(classifyRunOutcome({ ...defaults, success: false, isReviewTask: true })).toBe("failure");
+  });
+
+  it("returns success for a successful review run", () => {
+    expect(classifyRunOutcome({ ...defaults, isReviewTask: true })).toBe("success");
+  });
+
+  it("fails the reporter's exact scenario: review run, API error result event, exit 0", () => {
+    // Issue #552: Claude Code hit "API Error: Usage credits required for 1M
+    // context", emitted an is_error result event, and exited 0. The task was
+    // wrongly marked Done (agent success) with the error in the message.
+    const apiError =
+      "API Error: Usage credits required for 1M context · turn on usage credits at claude.ai/settings/usage, or use --model to switch to standard context";
+    const logs = [
+      '{"type":"system","subtype":"init","session_id":"s-1","model":"claude-sonnet-4-6[1m]","tools":[]}',
+      JSON.stringify({
+        type: "assistant",
+        session_id: "s-1",
+        message: { content: [{ type: "text", text: apiError }] },
+      }),
+      JSON.stringify({
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        result: apiError,
+        num_turns: 1,
+        duration_ms: 500,
+        session_id: "s-1",
+      }),
+    ].join("\n");
+
+    const exitCode = inferExitCode("claude-code", logs);
+    const result = new ClaudeCodeAdapter().parseResult(exitCode, logs);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Usage credits required for 1M context");
+
+    const outcome = classifyRunOutcome({
+      success: result.success,
+      isReviewTask: true,
+      sessionId: "s-1",
+      detectedPrUrl: undefined,
+    });
+    expect(outcome).toBe("failure");
   });
 });

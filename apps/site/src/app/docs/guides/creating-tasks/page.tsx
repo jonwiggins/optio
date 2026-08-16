@@ -47,7 +47,7 @@ export default function CreatingTasksPage() {
         </li>
         <li>
           Pick an <strong className="text-text-heading">agent</strong> (Claude Code, Codex, Copilot,
-          Gemini, OpenCode).
+          Gemini, OpenCode, Cursor).
         </li>
         <li>
           For Repo Tasks, select the <strong className="text-text-heading">repository</strong> and

@@ -13,6 +13,7 @@ import {
   SessionModelConfigSchema,
   SessionPrSchema,
 } from "../schemas/session.js";
+import { requireRole } from "../plugins/auth.js";
 
 const sessionChatQuerySchema = z
   .object({
@@ -241,6 +242,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/sessions",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createSession",
         summary: "Create an interactive session",
@@ -265,6 +267,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
         workspaceId: req.user?.workspaceId ?? null,
       });
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "session.create",
         params: { repoUrl: input.repoUrl },
@@ -305,6 +308,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
       try {
         const updated = await sessionService.endSession(id);
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "session.end",
           params: { sessionId: id },

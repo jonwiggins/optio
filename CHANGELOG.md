@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-06-11
+
+### Added
+
+- **AWS CodeCommit** as a third supported git platform alongside GitHub and GitLab. Auths via AWS access keys or IRSA/instance profile on EKS; PR ops go through `@aws-sdk/client-codecommit`. CI checks return `[]` (auto-merge fires on `checksStatus="none"`); `reviewTrigger="on_pr"` is recommended over the default `on_ci_pass` (#529).
+- **Ruby and Dart agent image presets** — new language-specific base images available in the agent image picker (#470).
+- **Live model discovery** — agent model lists are now fetched directly from provider APIs at runtime rather than being hard-coded, so newly released models appear automatically (#543).
+- **Claude Fable 5 and GitHub Copilot** added as supported agent vendors (#542).
+
+### Fixed
+
+- Git token resolution in repo pods is now more resilient against transient credential lookup failures (#525).
+- `scope='global'` secrets now correctly enforce `workspace_id IS NULL` in the database, preventing a constraint mismatch that could cause secret lookups to fail (#509).
+- Missing `auth.oidc` block validation added to the Helm chart, preventing silent misconfiguration when using generic OIDC login (#528).
+
 ## [0.4.0] - 2026-04-27
 
 ### Added

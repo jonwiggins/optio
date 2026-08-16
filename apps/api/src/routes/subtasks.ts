@@ -5,6 +5,7 @@ import * as subtaskService from "../services/subtask-service.js";
 import * as taskService from "../services/task-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TaskSchema, SubtaskStatusSchema } from "../schemas/task.js";
+import { requireRole } from "../plugins/auth.js";
 
 const createSubtaskSchema = z
   .object({
@@ -75,6 +76,7 @@ export async function subtaskRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tasks/:id/subtasks",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createSubtask",
         summary: "Create a subtask",

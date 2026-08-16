@@ -1,6 +1,7 @@
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workflowTriggers } from "../db/schema.js";
+import { computeNextFire } from "../utils/cron.js";
 
 export async function listTriggers(workflowId: string) {
   return db
@@ -48,6 +49,14 @@ export async function createTrigger(input: {
     }
   }
 
+  // Schedule triggers are only picked up by the poller once next_fire_at is
+  // set — compute it here so triggers created through this service fire.
+  const enabled = input.enabled ?? true;
+  let nextFireAt: Date | null = null;
+  if (input.type === "schedule" && enabled && typeof input.config?.cronExpression === "string") {
+    nextFireAt = computeNextFire(input.config.cronExpression);
+  }
+
   const [trigger] = await db
     .insert(workflowTriggers)
     .values({
@@ -57,7 +66,8 @@ export async function createTrigger(input: {
       type: input.type,
       config: input.config ?? {},
       paramMapping: input.paramMapping,
-      enabled: input.enabled ?? true,
+      enabled,
+      nextFireAt,
     })
     .returning();
   return trigger;
@@ -71,6 +81,9 @@ export async function updateTrigger(
     enabled?: boolean;
   },
 ) {
+  const existing = await getTrigger(id);
+  if (!existing) return null;
+
   // Check webhook path uniqueness if updating config on a webhook trigger
   if (input.config && typeof input.config.path === "string") {
     const conflicts = await db
@@ -89,6 +102,19 @@ export async function updateTrigger(
   if (input.config !== undefined) updates.config = input.config;
   if (input.paramMapping !== undefined) updates.paramMapping = input.paramMapping;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
+
+  // Recompute next_fire_at for schedule triggers: a cron change reschedules,
+  // re-enabling reschedules, disabling clears it.
+  if (existing.type === "schedule") {
+    const newConfig =
+      input.config !== undefined
+        ? input.config
+        : (existing.config as Record<string, unknown> | null);
+    const newEnabled = input.enabled ?? existing.enabled;
+    const cronExpression = newConfig?.cronExpression;
+    updates.nextFireAt =
+      newEnabled && typeof cronExpression === "string" ? computeNextFire(cronExpression) : null;
+  }
 
   const [updated] = await db
     .update(workflowTriggers)

@@ -7,7 +7,7 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { Bot, ArrowLeft } from "lucide-react";
 
-const RUNTIMES = ["claude-code", "codex", "copilot", "gemini", "opencode"] as const;
+const RUNTIMES = ["claude-code", "codex", "copilot", "gemini", "opencode", "cursor"] as const;
 const LIFECYCLES = ["sticky", "always-on", "on-demand"] as const;
 
 export default function NewAgentPage() {

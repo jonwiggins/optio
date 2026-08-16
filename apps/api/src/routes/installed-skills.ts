@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as installedSkillService from "../services/installed-skill-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import { requireRole } from "../plugins/auth.js";
 
 const InstalledSkillSchema = z.unknown().describe("Installed (marketplace-sourced) skill row");
 
@@ -96,6 +97,7 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/installed-skills",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createInstalledSkill",
         summary: "Install a marketplace skill",
@@ -126,6 +128,7 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/installed-skills/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "updateInstalledSkill",
         summary: "Update an installed skill",
@@ -158,6 +161,7 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/installed-skills/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteInstalledSkill",
         summary: "Delete an installed skill",
@@ -177,6 +181,7 @@ export async function installedSkillRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/installed-skills/:id/sync",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "syncInstalledSkill",
         summary: "Force a sync for an installed skill",

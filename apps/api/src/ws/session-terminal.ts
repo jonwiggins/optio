@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
 import { authenticateWs } from "./ws-auth.js";
+import { requireWsRole } from "./ws-authz.js";
 import {
   getClientIp,
   trackConnection,
@@ -47,6 +48,14 @@ export async function sessionTerminalWs(app: FastifyInstance) {
 
     if (session.userId && session.userId !== user.id) {
       socket.close(4403, "Not authorized for this session");
+      releaseConnection(clientIp);
+      return;
+    }
+
+    // The terminal writes straight to a shell in the repo pod — viewers are
+    // read-only and must not reach it.
+    if (!(await requireWsRole(socket, user, "member", session.workspaceId))) {
+      releaseConnection(clientIp);
       return;
     }
 

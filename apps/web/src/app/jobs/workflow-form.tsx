@@ -69,6 +69,7 @@ const AGENT_RUNTIMES = [
   { value: "opencode", label: "OpenCode (Experimental)" },
   { value: "gemini", label: "Google Gemini" },
   { value: "openclaw", label: "OpenClaw (Experimental)" },
+  { value: "cursor", label: "Cursor" },
 ];
 
 const TRIGGER_TYPES = [

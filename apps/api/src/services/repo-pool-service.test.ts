@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ── Mocks ───────────────────────────────────────────────────────────
 
@@ -102,6 +105,7 @@ import {
   deleteNetworkPolicy,
   killOrphanedAgentInPod,
   parseJsonEnv,
+  execTaskInRepoPod,
 } from "./repo-pool-service.js";
 
 // ── resolveImage ────────────────────────────────────────────────────
@@ -1168,5 +1172,74 @@ describe("getOrCreateRepoPod — service account propagation", () => {
 
     const spec = mockRuntimeCreate.mock.calls[0][0];
     expect(spec.serviceAccountName).toBeUndefined();
+  });
+});
+
+// ── execTaskInRepoPod — env injection safety ────────────────────────
+
+describe("execTaskInRepoPod", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("embeds a hostile prompt inertly — nothing executes before the agent command", async () => {
+    // Regression for the Phase 4F symptoms ("n: command not found",
+    // "optio/task-*: No such file or directory"): prompts with markdown
+    // backticks, $HOME, wildcards, and literal newlines must reach the pod
+    // byte-for-byte without the shell interpreting any of it.
+    const hostilePrompt = [
+      "Fix the `pr_opened` handling.",
+      "",
+      "1. Inspect $HOME and run `git status`.",
+      "2. Ignore branches named optio/task-* entirely.",
+      "3. Don't rewrite 'quoted' text.",
+      "```bash",
+      "touch injected-from-fenced-block",
+      "```",
+      "$(touch injected-from-substitution)",
+    ].join("\n");
+
+    mockRuntimeExec.mockResolvedValueOnce({ stdin: { write: vi.fn() } });
+    const pod = {
+      id: "pod-1",
+      repoUrl: "https://github.com/org/repo",
+      podName: "optio-repo-org-repo-0",
+      podId: "k8s-pod-1",
+      state: "ready",
+    };
+
+    await execTaskInRepoPod(pod as any, "task-1", [`echo "[optio] agent"`], {
+      OPTIO_PROMPT: hostilePrompt,
+      OPTIO_REPO_BRANCH: "main",
+    });
+
+    const execCall = mockRuntimeExec.mock.calls[0];
+    expect(execCall[1][0]).toBe("bash");
+    expect(execCall[1][1]).toBe("-c");
+    const script: string = execCall[1][2];
+    expect(script).not.toContain("eval $(");
+
+    // Run the script prefix (set -e + env exports) through real bash and
+    // verify the prompt round-trips exactly with no side effects.
+    const lines = script.split("\n");
+    const readyIdx = lines.findIndex((l) => l.includes("Waiting for repo to be ready"));
+    expect(readyIdx).toBeGreaterThan(0);
+    const prefix = lines.slice(0, readyIdx).join("\n");
+
+    const { execFileSync } =
+      await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    const dir = mkdtempSync(join(tmpdir(), "repo-pool-env-"));
+    try {
+      execFileSync("bash", ["-c", `${prefix}\nprintf '%s' "$OPTIO_PROMPT" > prompt-out`], {
+        cwd: dir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      expect(readFileSync(join(dir, "prompt-out"), "utf8")).toBe(hostilePrompt);
+      // No canary files — prompt contents never executed
+      expect(readdirSync(dir)).toEqual(["prompt-out"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

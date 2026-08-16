@@ -30,6 +30,7 @@ export interface RepoRecord {
   opencodeAgent: string | null;
   opencodeProvider: string | null;
   opencodeBaseUrl: string | null;
+  cursorModel: string | null;
   geminiModel: string | null;
   geminiApprovalMode: string | null;
   maxTurnsCoding: number | null;
@@ -87,6 +88,7 @@ function decryptRepoRow(row: typeof repos.$inferSelect): RepoRecord {
         authTag: row.slackWebhookUrlAuthTag,
       },
       aad,
+      `repo ${row.id} slackWebhookUrl`,
     );
   }
   const {
@@ -201,6 +203,8 @@ export async function updateRepo(
     claudeContextWindow?: string;
     claudeThinking?: boolean;
     claudeEffort?: string;
+    openclawModel?: string | null;
+    openclawAgent?: string | null;
     maxTurnsCoding?: number;
     maxTurnsReview?: number;
     autoResume?: boolean;

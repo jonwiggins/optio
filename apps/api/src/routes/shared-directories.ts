@@ -4,6 +4,7 @@ import { z } from "zod";
 import * as sharedDirService from "../services/shared-directory-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { SharedDirectorySchema } from "../schemas/integration.js";
+import { requireRole } from "../plugins/auth.js";
 
 const dirIdParamsSchema = z
   .object({
@@ -88,6 +89,7 @@ export async function sharedDirectoryRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/repos/:id/shared-directories",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "createSharedDirectory",
         summary: "Create a shared directory",
@@ -156,6 +158,7 @@ export async function sharedDirectoryRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/repos/:id/shared-directories/:dirId",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "updateSharedDirectory",
         summary: "Update a shared directory",
@@ -190,6 +193,7 @@ export async function sharedDirectoryRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/repos/:id/shared-directories/:dirId",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "deleteSharedDirectory",
         summary: "Delete a shared directory",
@@ -223,6 +227,7 @@ export async function sharedDirectoryRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/repos/:id/shared-directories/:dirId/clear",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "clearSharedDirectory",
         summary: "Clear a shared directory's contents",
@@ -256,6 +261,7 @@ export async function sharedDirectoryRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/repos/:id/shared-directories/:dirId/usage",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "getSharedDirectoryUsage",
         summary: "Get usage of a shared directory",
@@ -291,6 +297,7 @@ export async function sharedDirectoryRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/repos/:id/pods/recycle",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "recycleRepoPods",
         summary: "Recycle all ready pods for a repo",

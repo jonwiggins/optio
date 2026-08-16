@@ -6,7 +6,7 @@ let runtime: ContainerRuntime | null = null;
 
 export function getRuntime(): ContainerRuntime {
   if (!runtime) {
-    const type = (process.env.OPTIO_RUNTIME ?? "docker") as "docker" | "kubernetes";
+    const type = (process.env.OPTIO_RUNTIME ?? "docker") as "docker" | "kubernetes" | "fake";
     runtime = createRuntime({ type });
   }
   return runtime;

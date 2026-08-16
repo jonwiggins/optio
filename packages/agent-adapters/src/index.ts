@@ -5,6 +5,7 @@ export { CopilotAdapter } from "./copilot.js";
 export { OpenCodeAdapter } from "./opencode.js";
 export { GeminiAdapter } from "./gemini.js";
 export { OpenClawAdapter } from "./openclaw.js";
+export { CursorAdapter } from "./cursor.js";
 
 import type { AgentAdapter } from "./types.js";
 import { ClaudeCodeAdapter } from "./claude-code.js";
@@ -13,6 +14,7 @@ import { CopilotAdapter } from "./copilot.js";
 import { OpenCodeAdapter } from "./opencode.js";
 import { GeminiAdapter } from "./gemini.js";
 import { OpenClawAdapter } from "./openclaw.js";
+import { CursorAdapter } from "./cursor.js";
 
 const adapters: Record<string, AgentAdapter> = {
   "claude-code": new ClaudeCodeAdapter(),
@@ -20,6 +22,7 @@ const adapters: Record<string, AgentAdapter> = {
   copilot: new CopilotAdapter(),
   gemini: new GeminiAdapter(),
   opencode: new OpenCodeAdapter(),
+  cursor: new CursorAdapter(),
 };
 
 // OpenClaw is experimental — only register when explicitly enabled

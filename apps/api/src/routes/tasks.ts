@@ -411,7 +411,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         description:
           "Submit a new task to run against a repository. The task is " +
           "created in `pending` state and immediately transitioned to " +
-          "`queued` (or `waiting_on_deps` if `dependsOn` is non-empty). " +
+          "`queued` (or `waiting_on_deps` if `dependsOn` is non-empty); " +
+          "the response carries the post-transition row. " +
           "Requires `member` role.",
         tags: ["Tasks"],
         body: createTaskSchema,
@@ -443,6 +444,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             workspaceId: req.user?.workspaceId ?? undefined,
           });
           logAction({
+            workspaceId: req.user?.workspaceId ?? null,
             userId: req.user?.id,
             action: "task.create",
             params: { type, workflowId: workflow.id, name },
@@ -482,6 +484,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             createdBy: req.user?.id ?? null,
           });
           logAction({
+            workspaceId: req.user?.workspaceId ?? null,
             userId: req.user?.id,
             action: "task.create",
             params: { type, taskConfigId: row.id, name },
@@ -528,6 +531,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         workspaceId: req.user?.workspaceId ?? null,
       });
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.create",
         params: { taskId: task.id, title: taskInput.title, repoUrl: taskInput.repoUrl },
@@ -545,8 +549,12 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         }
       }
 
+      // transitionTask returns the post-transition row — respond with that,
+      // not the stale `pending` row from createTask(), so clients never see a
+      // state the task has already left.
+      let transitioned: typeof task;
       if (hasDeps) {
-        await taskService.transitionTask(
+        transitioned = await taskService.transitionTask(
           task.id,
           TaskState.WAITING_ON_DEPS,
           "task_submitted_with_deps",
@@ -554,7 +562,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           req.user?.id,
         );
       } else {
-        await taskService.transitionTask(
+        transitioned = await taskService.transitionTask(
           task.id,
           TaskState.QUEUED,
           "task_submitted",
@@ -573,7 +581,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         );
       }
 
-      reply.status(201).send({ task: { type: "repo-task", ...task } });
+      reply.status(201).send({ task: { type: "repo-task", ...(transitioned ?? task) } });
     },
   );
 
@@ -612,6 +620,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         req.user?.id,
       );
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.cancel",
         params: { taskId: id },
@@ -666,6 +675,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         },
       );
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.retry",
         params: { taskId: id },
@@ -722,6 +732,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         },
       );
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.force_redo",
         params: { taskId: id },
@@ -973,6 +984,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         const { launchReview } = await import("../services/review-service.js");
         const reviewTaskId = await launchReview(id);
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "task.review",
           params: { taskId: id },
@@ -1041,6 +1053,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
 
       const task = await taskService.getTask(id);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.run_now",
         params: { taskId: id },
@@ -1091,6 +1104,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           .where(eq(tasks.id, body.taskIds[i]));
       }
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.reorder",
         params: { taskIds: body.taskIds },

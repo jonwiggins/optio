@@ -26,8 +26,12 @@ import { dependencyRoutes } from "./dependencies.js";
 // ─── Helpers ───
 
 async function buildTestApp(user?: { id: string; workspaceId: string }): Promise<FastifyInstance> {
+  // Default user has no workspace so workspace-scope checks stay inert, but
+  // carries a role so the requireRole("member") preHandlers pass.
   return buildRouteTestApp(dependencyRoutes, {
-    user: user ? { id: user.id, workspaceId: user.workspaceId, workspaceRole: "admin" } : null,
+    user: user
+      ? { id: user.id, workspaceId: user.workspaceId, workspaceRole: "admin" }
+      : { id: "user-1", workspaceId: null, workspaceRole: "member" },
   });
 }
 

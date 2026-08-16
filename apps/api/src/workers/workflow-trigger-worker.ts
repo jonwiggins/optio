@@ -150,9 +150,9 @@ async function dispatchTrigger(trigger: {
   }
 
   if (trigger.targetType === "persistent_agent") {
-    const { getPersistentAgent, wakeAgent, buildSenderId } =
+    const { getPersistentAgentUnscoped, wakeAgent, buildSenderId } =
       await import("../services/persistent-agent-service.js");
-    const agent = await getPersistentAgent(trigger.targetId);
+    const agent = await getPersistentAgentUnscoped(trigger.targetId);
     if (!agent) {
       logger.warn(
         { triggerId: trigger.id, agentId: trigger.targetId },

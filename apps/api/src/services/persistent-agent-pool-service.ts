@@ -19,6 +19,7 @@ import type { ContainerHandle, ContainerSpec, ExecSession } from "@optio/shared"
 import { PersistentAgentPodLifecycle, parseIntEnv, type RepoImageConfig } from "@optio/shared";
 import { logger } from "../logger.js";
 import { resolveImage } from "./repo-pool-service.js";
+import { buildEnvExports } from "../utils/pod-env.js";
 
 const POD_PROVISION_TIMEOUT_MS = parseIntEnv("OPTIO_PERSISTENT_AGENT_POD_PROVISION_MS", 120_000);
 
@@ -242,17 +243,11 @@ export async function execTurnInPod(
     name: pod.podName,
   };
 
-  const envJson = JSON.stringify({ ...env, OPTIO_PERSISTENT_AGENT_TURN_ID: turnId });
-  const envB64 = Buffer.from(envJson).toString("base64");
-
   const script = [
     "set -e",
-    `eval $(echo '${envB64}' | base64 -d | python3 -c "`,
-    `import json, sys, shlex`,
-    `env = json.load(sys.stdin)`,
-    `for k, v in env.items():`,
-    `    print(f'export {k}={shlex.quote(v)}')`,
-    `")`,
+    // Env values (including the prompt) are embedded as inert single-quoted
+    // exports — see buildEnvExports.
+    ...buildEnvExports({ ...env, OPTIO_PERSISTENT_AGENT_TURN_ID: turnId }),
     `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
     `[ -f /workspace/.ready ] || { echo "[optio] ERROR: pod not ready after 120s"; exit 1; }`,
     `mkdir -p /workspace/turns/${turnId}`,

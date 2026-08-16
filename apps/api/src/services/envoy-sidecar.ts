@@ -357,6 +357,11 @@ export function buildEnvoySidecarContainer(opts: {
       requests: { cpu: "50m", memory: "64Mi" },
       limits: { cpu: "200m", memory: "128Mi" },
     },
+    securityContext: {
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ["ALL"] },
+      seccompProfile: { type: "RuntimeDefault" },
+    },
   };
   return container;
 }
@@ -390,6 +395,11 @@ export function buildSecretInitContainer(opts: {
       { name: "envoy-secrets", mountPath: SECRET_MOUNT_PATH },
       { name: "envoy-ca", mountPath: "/etc/envoy/ca" },
     ],
+    securityContext: {
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ["ALL"] },
+      seccompProfile: { type: "RuntimeDefault" },
+    },
   };
   return container;
 }
@@ -397,7 +407,7 @@ export function buildSecretInitContainer(opts: {
 /**
  * Build the volumes needed for the Envoy sidecar setup.
  */
-export function buildEnvoyVolumes(envoyConfig: string): V1Volume[] {
+export function buildEnvoyVolumes(_envoyConfig: string): V1Volume[] {
   return [
     {
       name: "envoy-config",

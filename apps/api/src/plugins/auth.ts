@@ -44,28 +44,48 @@ export function requireRole(minimumRole: WorkspaceRole) {
 const SESSION_COOKIE_NAME = "optio_session";
 const WORKSPACE_HEADER = "x-workspace-id";
 
+/** HTTP methods that mutate state and therefore require at least "member". */
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * Mutating routes that stay available to every authenticated user regardless
+ * of workspace role (including viewers). These act only on the caller's own
+ * resources — session, PATs, notification prefs, own comments — or create a
+ * workspace the caller becomes admin of. Route/service-level ownership checks
+ * still apply.
+ */
+const SELF_SCOPED_MUTATIONS: RegExp[] = [
+  /^\/api\/auth\/logout$/,
+  /^\/api\/auth\/api-keys(\/[^/]+)?$/,
+  /^\/api\/workspaces$/,
+  /^\/api\/workspaces\/[^/]+\/switch$/,
+  /^\/api\/notifications\/(subscribe|preferences|test)$/,
+  // Commenting is a viewer right; edits/deletes are owner-gated in the service.
+  /^\/api\/tasks\/[^/]+\/comments(\/[^/]+)?$/,
+  // Ending one's own session is owner-gated in the route.
+  /^\/api\/sessions\/[^/]+\/end$/,
+];
+
+function isSelfScopedMutation(path: string): boolean {
+  return SELF_SCOPED_MUTATIONS.some((re) => re.test(path));
+}
+
 /** Exact routes that are always public. */
 const PUBLIC_ROUTES = new Set([
   "/api/health",
   "/api/setup/status",
   "/api/notifications/vapid-public-key",
+  "/api/internal/git-credentials",
+  "/api/internal/persistent-agents",
 ]);
 
 /**
  * Prefix-matched routes that are always public.
  *
- * /api/internal/* routes are called by agent pods which don't have session
- * cookies. They authenticate via HMAC-SHA256 signatures verified in the
- * route handler itself (see hmac-auth-service.ts). The Helm ingress also
- * blocks /api/internal/* from public traffic as defense in depth.
+ * Public prefix routes must be intentionally unauthenticated. Outbound
+ * webhook management lives under /api/webhooks and must remain protected.
  */
-const PUBLIC_PREFIXES = [
-  "/api/webhooks/",
-  "/api/hooks/",
-  "/ws/",
-  "/api/internal/git-credentials",
-  "/docs",
-];
+const PUBLIC_PREFIXES = ["/api/hooks/", "/api/internal/persistent-agents/", "/ws/", "/docs"];
 
 /**
  * Auth routes that are public (OAuth login/callback flows only).
@@ -96,6 +116,13 @@ const AGENT_KEY_SECRETS = [
   "OPENAI_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "COPILOT_GITHUB_TOKEN",
+  "GEMINI_API_KEY",
+  "CURSOR_API_KEY",
+  // Vertex-mode installs store project ids rather than API keys; count them
+  // so a Vertex-only setup still locks the /api/setup/* routes (mirrors the
+  // per-provider checks in routes/setup.ts).
+  "GOOGLE_CLOUD_PROJECT",
+  "CLAUDE_VERTEX_PROJECT_ID",
 ];
 
 let _setupCompleteCache: { value: boolean; expires: number } | null = null;
@@ -181,18 +208,22 @@ async function authPlugin(app: FastifyInstance) {
     }
 
     // Resolve workspace context
-    const headerWorkspaceId =
+    const requestedWorkspaceId =
       (req.headers[WORKSPACE_HEADER] as string) ??
       parseCookie(req.headers.cookie, "optio_workspace");
-    const workspaceId = headerWorkspaceId || user.workspaceId;
+    const workspaceId = requestedWorkspaceId || user.workspaceId;
 
     if (workspaceId) {
       const role = await getUserRole(workspaceId, user.id);
       if (role) {
         user.workspaceId = workspaceId;
         user.workspaceRole = role;
+      } else if (requestedWorkspaceId) {
+        return reply.status(403).send({
+          error: "Forbidden: not a member of requested workspace",
+        });
       } else {
-        // User not a member of the requested workspace — fall back to default
+        // Saved default workspace is missing/stale — fall back to a valid default.
         const defaultWsId = await ensureUserHasWorkspace(user.id);
         const defaultRole = await getUserRole(defaultWsId, user.id);
         user.workspaceId = defaultWsId;
@@ -207,6 +238,21 @@ async function authPlugin(app: FastifyInstance) {
     }
 
     req.user = user;
+
+    // Default-deny baseline: mutating API requests require at least "member".
+    // Viewers are read-only except for the self-scoped allowlist above.
+    // Route-level requireRole preHandlers can still demand "admin"; this is
+    // the safety net that keeps a newly added route from shipping writable
+    // by viewers.
+    const path = req.url.split("?")[0];
+    if (MUTATING_METHODS.has(req.method) && path.startsWith("/api/")) {
+      const level = user.workspaceRole ? (ROLE_LEVEL[user.workspaceRole] ?? 0) : 0;
+      if (level < ROLE_LEVEL.member && !isSelfScopedMutation(path)) {
+        return reply.status(403).send({
+          error: "Forbidden: viewers have read-only access",
+        });
+      }
+    }
   });
 }
 

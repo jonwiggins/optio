@@ -19,6 +19,7 @@ import { promptTemplates } from "../db/schema.js";
 import { DEFAULT_PROMPT_TEMPLATE } from "@optio/shared";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { PromptTemplateSchema } from "../schemas/integration.js";
+import { requireRole } from "../plugins/auth.js";
 
 const repoUrlQuerySchema = z
   .object({
@@ -146,6 +147,7 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/prompt-templates",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "savePromptTemplate",
         summary: "Save a prompt template",
@@ -214,6 +216,7 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/prompt-templates/named",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createNamedTemplate",
         summary: "Create a named template",
@@ -244,6 +247,7 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/prompt-templates/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "updateNamedTemplate",
         summary: "Update a named template",
@@ -273,6 +277,7 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/prompt-templates/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteNamedTemplate",
         summary: "Delete a named template",
@@ -297,6 +302,7 @@ export async function promptTemplateRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/prompt-templates/:id/preview",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "previewTemplate",
         summary: "Render a template with sample params",

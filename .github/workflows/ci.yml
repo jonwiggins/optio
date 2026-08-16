@@ -46,6 +46,56 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo test
 
+  integration:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/test-infra.sh start
+      - run: pnpm --filter @optio/api test:integration
+
+  e2e:
+    name: E2E Test (fake runtime)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/test-infra.sh start
+      - run: pnpm --filter @optio/api test:e2e
+
+  web-e2e:
+    name: Web E2E (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/test-infra.sh start
+      - name: Install Playwright chromium
+        run: cd apps/web && npx playwright install --with-deps chromium
+      - run: pnpm --filter @optio/web test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
   openapi-lint:
     name: OpenAPI Lint
     runs-on: ubuntu-latest

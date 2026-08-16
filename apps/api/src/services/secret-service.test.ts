@@ -363,6 +363,78 @@ describe("secret-service", () => {
     });
   });
 
+  describe("decrypt error wrapping (issue #553)", () => {
+    /** Encrypt with a DIFFERENT key than the service's — simulates key rotation. */
+    function encryptWithRotatedKey(plaintext: string) {
+      const rotatedKey = Buffer.from("b".repeat(64), "hex");
+      const iv = randomBytes(12);
+      const cipher = createCipheriv("aes-256-gcm", rotatedKey, iv);
+      const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+      return { alg: ALG_AES_256_GCM_V1, iv, ciphertext, authTag: cipher.getAuthTag() };
+    }
+
+    it("wraps the raw GCM auth failure in an actionable message", () => {
+      const blob = encryptWithRotatedKey("some-value");
+      expect(() => decrypt(blob)).toThrow(/Failed to decrypt stored secret/);
+      expect(() => decrypt(blob)).toThrow(/encryption key \(OPTIO_ENCRYPTION_KEY\)/);
+    });
+
+    it("preserves the original error message for debugging", () => {
+      const blob = encryptWithRotatedKey("some-value");
+      expect(() => decrypt(blob)).toThrow(/Unsupported state or unable to authenticate data/);
+    });
+
+    it("includes the secret name when provided, but never the value", () => {
+      const blob = encryptWithRotatedKey("super-sensitive-value");
+      let message = "";
+      try {
+        decrypt(blob, undefined, "MY_API_KEY");
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toContain('"MY_API_KEY"');
+      expect(message).not.toContain("super-sensitive-value");
+    });
+
+    it("omits the name label when no secret name is provided", () => {
+      const blob = encryptWithRotatedKey("v");
+      expect(() => decrypt(blob)).toThrow(/^Failed to decrypt stored secret — /);
+    });
+
+    it("wraps AAD-mismatch failures the same way", () => {
+      const blob = encrypt("secret-value", Buffer.from("API_KEY|global|ws-1"));
+      expect(() => decrypt(blob, Buffer.from("API_KEY|global|ws-2"), "API_KEY")).toThrow(
+        /Failed to decrypt stored secret "API_KEY"/,
+      );
+    });
+
+    it("does not wrap unsupported-algorithm errors", () => {
+      const blob = encrypt("test");
+      blob.alg = 0x10;
+      expect(() => decrypt(blob)).toThrow(/^Unsupported encryption algorithm: 0x10$/);
+    });
+
+    it("retrieveSecret surfaces the wrapped error with the secret name", async () => {
+      const blob = encryptWithRotatedKey("stored-under-old-key");
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            {
+              encryptedValue: blob.ciphertext,
+              iv: blob.iv,
+              authTag: blob.authTag,
+              alg: blob.alg,
+            },
+          ]),
+        }),
+      });
+
+      await expect(retrieveSecret("ROTATED_KEY_SECRET")).rejects.toThrow(
+        /Failed to decrypt stored secret "ROTATED_KEY_SECRET"/,
+      );
+    });
+  });
+
   describe("buildSecretAAD", () => {
     it("builds AAD from name, scope, and workspaceId", () => {
       const aad = buildSecretAAD("API_KEY", "global", "ws-123");

@@ -68,6 +68,14 @@ web:
 # --- Agent containers ---
 # Images and pull policies default to GHCR / IfNotPresent in values.yaml.
 
+# --- Agent pod isolation ---
+networkPolicy:
+  enabled: true
+
+# --- Persist installed skill clones across API rollouts ---
+installedSkillsCache:
+  enabled: true
+
 # --- Use external managed database and Redis ---
 postgresql:
   enabled: false

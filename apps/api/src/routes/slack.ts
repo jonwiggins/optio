@@ -6,6 +6,7 @@ import { isSsrfSafeUrl } from "../utils/ssrf.js";
 import { handleSlackAction, sendSlackNotification } from "../services/slack-service.js";
 import { logger } from "../logger.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
+import { requireRole } from "../plugins/auth.js";
 
 const slackTestBodySchema = z
   .object({
@@ -112,6 +113,7 @@ export async function slackRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/slack/test",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "testSlackWebhook",
         summary: "Send a test Slack notification",

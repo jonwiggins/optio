@@ -23,10 +23,50 @@ describe("classifyError", () => {
     expect(result.retryable).toBe(true);
   });
 
-  it("classifies missing secret", () => {
+  it("classifies missing secret as permanent (non-retryable)", () => {
     const result = classifyError("Secret not found: ANTHROPIC_API_KEY (scope: global)");
     expect(result.category).toBe("auth");
     expect(result.title).toContain("ANTHROPIC_API_KEY");
+    // Retrying without adding the secret fails identically — must be permanent
+    // so provisioning fails the task instead of re-queuing forever.
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies wrapped decrypt failure with secret name", () => {
+    const result = classifyError(
+      'Failed to decrypt stored secret "SLACK_TOKEN" — the encryption key (OPTIO_ENCRYPTION_KEY) ' +
+        "has likely changed since it was saved. Re-enter the credential, or restore the original " +
+        "encryption key. (Unsupported state or unable to authenticate data)",
+    );
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Cannot decrypt secret: SLACK_TOKEN");
+    expect(result.remedy).toContain("encryption key");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies wrapped decrypt failure without secret name", () => {
+    const result = classifyError("Failed to decrypt stored secret — the encryption key changed");
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Cannot decrypt stored secret");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies raw GCM auth failure (unwrapped)", () => {
+    const result = classifyError("Error: Unsupported state or unable to authenticate data");
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Cannot decrypt stored secret");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("prefers decrypt classification over credential-name patterns", () => {
+    // The message mentions ANTHROPIC_API_KEY, but the root cause is a decrypt
+    // failure — must not be classified as "Anthropic API key missing".
+    const result = classifyError(
+      'Failed to decrypt stored secret "ANTHROPIC_API_KEY" — the encryption key ' +
+        "(OPTIO_ENCRYPTION_KEY) has likely changed since it was saved.",
+    );
+    expect(result.title).toBe("Cannot decrypt secret: ANTHROPIC_API_KEY");
+    expect(result.retryable).toBe(false);
   });
 
   it("classifies invalid state transition", () => {
@@ -70,6 +110,29 @@ describe("classifyError", () => {
     const result = classifyError("Secret not found: OPENAI_API_KEY");
     expect(result.category).toBe("auth");
     expect(result.title).toContain("OPENAI_API_KEY");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies invalid Gemini API key as non-retryable auth error", () => {
+    const result = classifyError(
+      "Error: [400 Bad Request] API key not valid. Please pass a valid API key. [reason: API_KEY_INVALID]",
+    );
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Gemini API key invalid");
+    expect(result.retryable).toBe(false);
+  });
+
+  it("classifies missing GEMINI_API_KEY directly", () => {
+    const result = classifyError("Error: GEMINI_API_KEY environment variable is not set");
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("Gemini API key missing");
+    expect(result.retryable).toBe(true);
+  });
+
+  it("classifies missing GEMINI_API_KEY secret as permanent", () => {
+    const result = classifyError("Secret not found: GEMINI_API_KEY");
+    expect(result.category).toBe("auth");
+    expect(result.retryable).toBe(false);
   });
 
   it("classifies OpenAI API key error directly", () => {
@@ -156,5 +219,52 @@ describe("classifyError", () => {
     );
     expect(result.category).toBe("auth");
     expect(result.title).toBe("Authentication token expired");
+  });
+
+  it("classifies GitHub secondary rate limit as non-retryable with rate-limit recovery", () => {
+    const result = classifyError(
+      "GitHub API error 403: You have exceeded a secondary rate limit and have been temporarily blocked from content creation.",
+    );
+    expect(result.category).toBe("auth");
+    expect(result.title).toBe("GitHub secondary rate limit");
+    expect(result.retryable).toBe(false);
+    expect(result.recovery).toBe("rate-limit");
+  });
+
+  it("classifies GitHub bad credentials as non-retryable with github-token recovery", () => {
+    const result = classifyError('GitHub API error 401: {"message":"Bad credentials"}');
+    expect(result.title).toBe("GitHub credentials invalid");
+    expect(result.retryable).toBe(false);
+    expect(result.recovery).toBe("github-token");
+  });
+
+  it("classifies GitHub permission error as non-retryable with github-permission recovery", () => {
+    const result = classifyError(
+      'GitHub API error 403: {"message":"Resource not accessible by integration"}',
+    );
+    expect(result.title).toBe("GitHub permission denied");
+    expect(result.retryable).toBe(false);
+    expect(result.recovery).toBe("github-permission");
+  });
+
+  it("does NOT classify unrelated 'bad credentials' (no GitHub wrapper) as a GitHub error", () => {
+    const result = classifyError("Internal connector rejected the request: bad credentials");
+    expect(result.title).not.toBe("GitHub credentials invalid");
+    expect(result.recovery).toBeUndefined();
+    expect(result.category).toBe("unknown");
+    expect(result.retryable).toBe(true);
+  });
+
+  it("does NOT classify an unrelated 'resource not accessible' string as a GitHub error", () => {
+    const result = classifyError("resource not accessible by integration");
+    expect(result.title).not.toBe("GitHub permission denied");
+    expect(result.recovery).toBeUndefined();
+  });
+
+  it("still treats a non-GitHub provider rate limit as retryable (generic rule)", () => {
+    const result = classifyError("API returned 429 too many requests");
+    expect(result.title).toBe("API rate limit exceeded");
+    expect(result.retryable).toBe(true);
+    expect(result.recovery).toBeUndefined();
   });
 });

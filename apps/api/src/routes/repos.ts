@@ -37,7 +37,7 @@ const updateRepoSchema = z
     customDockerfile: z.string().nullable().optional(),
     autoMerge: z.boolean().optional(),
     cautiousMode: z.boolean().optional(),
-    defaultAgentType: z.enum(["claude-code", "codex", "copilot", "opencode", "gemini"]).optional(),
+    defaultAgentType: z.enum([...AGENT_TYPES] as [string, ...string[]]).optional(),
     promptTemplateOverride: z.string().nullable().optional(),
     defaultBranch: z.string().optional(),
     claudeModel: z.string().optional(),
@@ -52,6 +52,9 @@ const updateRepoSchema = z
     opencodeBaseUrl: z.string().url().nullable().optional(),
     geminiModel: z.string().optional(),
     geminiApprovalMode: z.string().optional(),
+    openclawModel: z.string().nullable().optional(),
+    openclawAgent: z.string().nullable().optional(),
+    cursorModel: z.string().nullable().optional(),
     maxTurnsCoding: z.number().int().min(1).max(10000).optional(),
     maxTurnsReview: z.number().int().min(1).max(10000).optional(),
     autoResume: z.boolean().optional(),
@@ -226,6 +229,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       }
 
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "repo.create",
         params: { repoUrl: body.repoUrl, fullName: body.fullName },
@@ -319,6 +323,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       const repo = await repoService.updateRepo(id, body);
       if (!repo) return reply.status(404).send({ error: "Repo not found" });
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "repo.update",
         params: { repoId: id, ...body },
@@ -354,6 +359,7 @@ export async function repoRoutes(rawApp: FastifyInstance) {
       }
       await repoService.deleteRepo(id);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "repo.delete",
         params: { repoId: id, repoUrl: existing.repoUrl },

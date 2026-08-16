@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
-import { getWorkflowRun, getWorkflowRunLogs } from "../services/workflow-service.js";
+import { assertWorkspace } from "./ws-authz.js";
+import { getWorkflow, getWorkflowRun, getWorkflowRunLogs } from "../services/workflow-service.js";
 import {
   getClientIp,
   trackConnection,
@@ -31,6 +32,13 @@ export async function workflowRunLogStreamWs(app: FastifyInstance) {
     const run = await getWorkflowRun(workflowRunId);
     if (!run) {
       socket.close(4404, "Workflow run not found");
+      releaseConnection(clientIp);
+      return;
+    }
+
+    // Enforce workspace isolation: a run's tenant is its parent workflow's.
+    const workflow = await getWorkflow(run.workflowId);
+    if (!assertWorkspace(socket, user.workspaceId, workflow?.workspaceId)) {
       releaseConnection(clientIp);
       return;
     }

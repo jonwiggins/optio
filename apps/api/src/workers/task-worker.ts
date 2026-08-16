@@ -13,15 +13,24 @@ import {
   parseRepoUrl,
   parsePrUrl,
   parseIntEnv,
+  addCostStrings,
+  addTokenCounts,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
+import { shellSingleQuote } from "../utils/pod-env.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import { parseCodexEvent } from "../services/codex-event-parser.js";
 import { parseCopilotEvent } from "../services/copilot-event-parser.js";
 import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
 import { parseGeminiEvent } from "../services/gemini-event-parser.js";
 import { parseOpenClawEvent } from "../services/openclaw-event-parser.js";
-import { checkExistingPr, type ExistingPr } from "../services/pr-detection-service.js";
+import { parseCursorEvent } from "../services/cursor-event-parser.js";
+import {
+  checkExistingPr,
+  resolveDetectedPrUrl,
+  verifyTaskPr,
+  type ExistingPr,
+} from "../services/pr-detection-service.js";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { eq, sql } from "drizzle-orm";
@@ -37,6 +46,7 @@ import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
 import { subscribeToTaskMessages } from "../services/task-message-bus.js";
+import { registerActiveExec, unregisterActiveExec } from "../services/task-cancellation-service.js";
 import * as messageService from "../services/task-message-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
 import { logger } from "../logger.js";
@@ -372,6 +382,7 @@ export function startTaskWorker() {
           opencodeModel: repoConfig?.opencodeModel ?? opencodeDefaultModel,
           opencodeAgent: repoConfig?.opencodeAgent ?? undefined,
           opencodeBaseUrl: repoConfig?.opencodeBaseUrl ?? opencodeDefaultBaseUrl,
+          cursorModel: repoConfig?.cursorModel ?? undefined,
           geminiAuthMode,
           geminiModel: repoConfig?.geminiModel ?? undefined,
           geminiApprovalMode:
@@ -820,6 +831,11 @@ export function startTaskWorker() {
           resetWorktree: shouldResetWorktree,
         });
 
+        // Register the live exec session so a user cancel can abort the
+        // stream (and kill the in-pod agent) instead of letting the agent
+        // run to completion in the background (#549).
+        registerActiveExec(taskId, execSession);
+
         // Claude runs with `--input-format stream-json`, which means the initial
         // user message must come in over stdin — the -p/--print positional arg is
         // ignored in that mode. The pipe buffer holds this line until bash finishes
@@ -929,7 +945,9 @@ export function startTaskWorker() {
                       ? parseGeminiEvent(line, taskId)
                       : task.agentType === "openclaw"
                         ? parseOpenClawEvent(line, taskId)
-                        : parseClaudeEvent(line, taskId);
+                        : task.agentType === "cursor"
+                          ? parseCursorEvent(line, taskId)
+                          : parseClaudeEvent(line, taskId);
             if (parsed.sessionId && !sessionId) {
               sessionId = parsed.sessionId;
               await taskService.updateTaskSession(taskId, sessionId);
@@ -1031,7 +1049,9 @@ export function startTaskWorker() {
                     ? parseGeminiEvent(lineBuf, taskId)
                     : task.agentType === "openclaw"
                       ? parseOpenClawEvent(lineBuf, taskId)
-                      : parseClaudeEvent(lineBuf, taskId);
+                      : task.agentType === "cursor"
+                        ? parseCursorEvent(lineBuf, taskId)
+                        : parseClaudeEvent(lineBuf, taskId);
           for (const entry of parsed.entries) {
             await taskService.appendTaskLog(
               taskId,
@@ -1086,11 +1106,54 @@ export function startTaskWorker() {
 
         await taskService.updateTaskResult(taskId, result.summary, result.error);
 
-        // Persist cost, token usage, and model data
+        // Persist cost, token usage, and model data.
+        //
+        // On a resume or force-restart, Claude runs as a FRESH process (either
+        // `claude --resume <session>` or a brand-new session on the existing
+        // branch). Its result reports only its OWN turns' total_cost_usd / token
+        // usage — it has no knowledge of what the prior run already spent. So the
+        // recorded value must ACCUMULATE (prior + this run), not overwrite.
+        // Overwriting is what caused issue #541: /api/analytics/costs sums
+        // tasks.cost_usd, so replacing the original cost with just the resumed
+        // invocation's spend undercounts total spend.
+        //
+        // A genuine first run has no prior spend to preserve, so it writes its
+        // value directly. Accumulating never double-counts: each relaunch is a
+        // distinct process reporting only its own cost, so prior + current is
+        // always the true total.
+        //
+        // Continuation signals: `resumeSessionId` (/resume, --resume), a
+        // `restartFromBranch` fresh session on the existing PR (/force-restart,
+        // auto-resume), or a `resumePrompt` (set by every relaunch path —
+        // including message-resume where the stored session id may be absent).
+        //
+        // Prior recorded usage counts as a continuation signal too (issue
+        // #580): retry-without-a-PR and BullMQ auto-retries enqueue a bare
+        // `{taskId}` job, but a failed attempt's tokens were still spent, so
+        // its cost must survive the relaunch even though the work restarts
+        // from scratch. Only a task with no recorded spend writes directly.
+        const isContinuation = !!(resumeSessionId || restartFromBranch || resumePrompt);
+        const hasPriorUsage =
+          parseFloat(taskAfterExec.costUsd ?? "0") > 0 ||
+          (taskAfterExec.inputTokens ?? 0) > 0 ||
+          (taskAfterExec.outputTokens ?? 0) > 0;
+        const accumulate = isContinuation || hasPriorUsage;
         const costFields: Record<string, unknown> = {};
-        if (result.costUsd != null) costFields.costUsd = String(result.costUsd);
-        if (result.inputTokens != null) costFields.inputTokens = result.inputTokens;
-        if (result.outputTokens != null) costFields.outputTokens = result.outputTokens;
+        if (result.costUsd != null) {
+          costFields.costUsd = accumulate
+            ? addCostStrings(taskAfterExec.costUsd, result.costUsd)
+            : String(result.costUsd);
+        }
+        if (result.inputTokens != null) {
+          costFields.inputTokens = accumulate
+            ? addTokenCounts(taskAfterExec.inputTokens, result.inputTokens)
+            : result.inputTokens;
+        }
+        if (result.outputTokens != null) {
+          costFields.outputTokens = accumulate
+            ? addTokenCounts(taskAfterExec.outputTokens, result.outputTokens)
+            : result.outputTokens;
+        }
         if (result.model) costFields.modelUsed = result.model;
         if (Object.keys(costFields).length > 0) {
           await db.update(tasks).set(costFields).where(eq(tasks.id, taskId));
@@ -1145,9 +1208,54 @@ export function startTaskWorker() {
             fallbackPrUrl = undefined;
           }
         }
-        const detectedPrUrl = capturedPrUrl || taskAfterExec?.prUrl || fallbackPrUrl;
+        const scrapedPrUrl = capturedPrUrl || taskAfterExec?.prUrl || fallbackPrUrl || undefined;
 
-        if (!sessionId && !isReviewTask) {
+        // A `/pull/N` URL in agent output is not proof that a PR was opened —
+        // it may be an example URL echoed from the prompt (issue #531). The
+        // task branch is deterministic (`optio/task-{id}`), so ask the git
+        // platform whether an open PR actually exists for it before trusting
+        // any scraped URL. If the platform can't be consulted (no token, API
+        // error), fall back to the previous trust-the-logs behavior.
+        let detectedPrUrl = scrapedPrUrl;
+        // Set when the platform authoritatively reported no open PR for the
+        // task branch — lets later API-fallback checks skip a redundant call.
+        let prKnownAbsent = false;
+        if (scrapedPrUrl && !isReviewTask) {
+          const verification = await verifyTaskPr(task.repoUrl, taskId, taskWorkspaceId);
+          const resolved = resolveDetectedPrUrl(scrapedPrUrl, verification);
+          detectedPrUrl = resolved.url;
+          if (verification.status === "no_pr") {
+            prKnownAbsent = true;
+            log.warn(
+              { rejectedPrUrl: resolved.rejectedUrl },
+              "Ignoring PR URL from agent output — platform reports no open PR for the task branch",
+            );
+            if (taskAfterExec?.prUrl) {
+              // A bogus URL was already persisted during streaming — clear it
+              // so the task doesn't advertise a PR that was never opened.
+              await taskService.clearTaskPr(taskId);
+            }
+          } else if (verification.status === "unavailable") {
+            log.info(
+              { prUrl: scrapedPrUrl, reason: verification.reason },
+              "PR verification unavailable — falling back to PR URL from agent output",
+            );
+          } else if (detectedPrUrl !== scrapedPrUrl) {
+            log.info(
+              { scrapedPrUrl, verifiedPrUrl: detectedPrUrl },
+              "Using canonical PR URL from platform instead of URL scraped from agent output",
+            );
+          }
+        }
+
+        const outcome = classifyRunOutcome({
+          success: result.success,
+          isReviewTask,
+          sessionId,
+          detectedPrUrl,
+        });
+
+        if (outcome === "no_output") {
           // Agent never started — no session ID means no agent output was produced.
           await repoPool.updateWorktreeState(taskId, "dirty");
           await taskService.transitionTask(
@@ -1157,7 +1265,7 @@ export function startTaskWorker() {
             "Agent process exited without producing any output",
           );
           log.warn("Agent exited without output — no session ID captured");
-        } else if (detectedPrUrl && !isReviewTask) {
+        } else if (outcome === "pr_opened" && detectedPrUrl) {
           // PR exists — go to pr_opened regardless of exit code.
           if (detectedPrUrl !== taskAfterExec?.prUrl) {
             await taskService.updateTaskPr(taskId, detectedPrUrl);
@@ -1171,11 +1279,15 @@ export function startTaskWorker() {
             detectedPrUrl,
           );
           log.info({ prUrl: detectedPrUrl }, "PR opened");
-        } else if (result.success || isReviewTask) {
+        } else if (outcome === "success") {
           // External PR reviews no longer run here — they execute under
           // pr_review_runs via pr-review-worker.ts. Subtask reviews
           // (`taskType === "review"`) still flow through this path and
           // their result lands in the parent coding task's comments.
+          // Failed review runs (e.g. terminal API errors, issue #552) take the
+          // failure branch below like any other run — they must not be marked
+          // completed, which would both show a false green state and count as
+          // an approval for auto-merge in subtask-service.
 
           // Planning mode: agent finished planning — wait for human approval
           if (isPlanningRun && !isReviewTask) {
@@ -1200,10 +1312,12 @@ export function startTaskWorker() {
             // check the API as a fallback — the agent may have pushed a PR
             // that wasn't captured in log output.
             let apiFallbackPr: ExistingPr | null = null;
-            try {
-              apiFallbackPr = await checkExistingPr(task.repoUrl, taskId, taskWorkspaceId);
-            } catch {
-              // Non-fatal — proceed with escalation
+            if (!prKnownAbsent) {
+              try {
+                apiFallbackPr = await checkExistingPr(task.repoUrl, taskId, taskWorkspaceId);
+              } catch {
+                // Non-fatal — proceed with escalation
+              }
             }
 
             if (apiFallbackPr) {
@@ -1245,7 +1359,7 @@ export function startTaskWorker() {
           // Log-based PR detection can miss URLs (e.g. agent created a PR but
           // the URL wasn't in stdout, or repo validation filtered it out).
           let apiFallbackPr: ExistingPr | null = null;
-          if (!isReviewTask) {
+          if (!isReviewTask && !prKnownAbsent) {
             try {
               apiFallbackPr = await checkExistingPr(task.repoUrl, taskId, taskWorkspaceId);
             } catch {
@@ -1423,6 +1537,9 @@ export function startTaskWorker() {
         }
         throw err;
       } finally {
+        // Drop the exec session from the cancellation registry (no-op if it
+        // was already aborted by a cancel or never registered).
+        unregisterActiveExec(taskId);
         // Release the task slot on the repo pod
         if (repoPodId) {
           await repoPool.releaseRepoPodTask(repoPodId).catch(() => {});
@@ -1664,6 +1781,17 @@ export function buildInitialClaudeStreamMessage(prompt: string): string {
   );
 }
 
+/**
+ * Quote a value as a single shell word. Wraps in single quotes (inside which
+ * bash performs no expansion at all) and escapes embedded single quotes with
+ * the standard '\'' close/escape/reopen sequence.
+ *
+ * JSON.stringify is NOT safe for this: it produces double quotes, and bash
+ * still performs `$VAR` expansion and backtick/`$()` command substitution
+ * inside double quotes.
+ */
+export const shellQuote = shellSingleQuote;
+
 export function buildAgentCommand(
   agentType: string,
   env: Record<string, string>,
@@ -1692,13 +1820,13 @@ export function buildAgentCommand(
       const authSetup =
         env.OPTIO_AUTH_MODE === "max-subscription"
           ? [
-              `if curl -sf "${env.OPTIO_API_URL}/api/auth/claude-token" > /dev/null 2>&1; then echo "[optio] Token proxy OK"; fi`,
+              `if curl -sf ${shellQuote(`${env.OPTIO_API_URL}/api/auth/claude-token`)} > /dev/null 2>&1; then echo "[optio] Token proxy OK"; fi`,
               `unset ANTHROPIC_API_KEY 2>/dev/null || true`,
             ]
           : [];
 
       const resumeFlag = opts?.resumeSessionId
-        ? `--resume ${JSON.stringify(opts.resumeSessionId)}`
+        ? `--resume ${shellQuote(opts.resumeSessionId)}`
         : "";
 
       // Build --model flag from env vars set by the adapter
@@ -1707,7 +1835,7 @@ export function buildAgentCommand(
       let modelFlag = "";
       if (modelName) {
         const ctx = ctxWindow === "1m" ? "[1m]" : "";
-        modelFlag = `--model ${modelName}${ctx}`;
+        modelFlag = `--model ${shellQuote(`${modelName}${ctx}`)}`;
       }
 
       return [
@@ -1730,7 +1858,7 @@ export function buildAgentCommand(
     case "codex": {
       const appServerFlag =
         env.OPTIO_CODEX_AUTH_MODE === "app-server" && env.OPTIO_CODEX_APP_SERVER_URL
-          ? ` --app-server ${JSON.stringify(env.OPTIO_CODEX_APP_SERVER_URL)}`
+          ? ` --app-server ${shellQuote(env.OPTIO_CODEX_APP_SERVER_URL)}`
           : "";
       return [
         `echo "[optio] Running OpenAI Codex${appServerFlag ? " (app-server)" : ""}..."`,
@@ -1738,8 +1866,8 @@ export function buildAgentCommand(
       ];
     }
     case "copilot": {
-      const modelFlag = env.COPILOT_MODEL ? ` --model ${JSON.stringify(env.COPILOT_MODEL)}` : "";
-      const effortFlag = env.COPILOT_EFFORT ? ` --effort ${env.COPILOT_EFFORT}` : "";
+      const modelFlag = env.COPILOT_MODEL ? ` --model ${shellQuote(env.COPILOT_MODEL)}` : "";
+      const effortFlag = env.COPILOT_EFFORT ? ` --effort ${shellQuote(env.COPILOT_EFFORT)}` : "";
       return [
         `echo "[optio] Running GitHub Copilot..."`,
         `copilot --autopilot --yolo --max-autopilot-continues ${maxTurns} \\`,
@@ -1749,13 +1877,13 @@ export function buildAgentCommand(
     }
     case "opencode": {
       const modelFlag = env.OPTIO_OPENCODE_MODEL
-        ? ` --model ${JSON.stringify(env.OPTIO_OPENCODE_MODEL)}`
+        ? ` --model ${shellQuote(env.OPTIO_OPENCODE_MODEL)}`
         : "";
       const agentFlag = env.OPTIO_OPENCODE_AGENT
-        ? ` --agent ${JSON.stringify(env.OPTIO_OPENCODE_AGENT)}`
+        ? ` --agent ${shellQuote(env.OPTIO_OPENCODE_AGENT)}`
         : "";
       const resumeFlag = opts?.resumeSessionId
-        ? ` --session ${JSON.stringify(opts.resumeSessionId)}`
+        ? ` --session ${shellQuote(opts.resumeSessionId)}`
         : "";
       return [
         `echo "[optio] Running OpenCode (experimental)..."`,
@@ -1764,7 +1892,7 @@ export function buildAgentCommand(
     }
     case "gemini": {
       const geminiModelFlag = env.OPTIO_GEMINI_MODEL
-        ? ` -m ${JSON.stringify(env.OPTIO_GEMINI_MODEL)}`
+        ? ` -m ${shellQuote(env.OPTIO_GEMINI_MODEL)}`
         : "";
       return [
         `echo "[optio] Running Gemini..."`,
@@ -1775,14 +1903,28 @@ export function buildAgentCommand(
     }
     case "openclaw": {
       const openclawModelFlag = env.OPTIO_OPENCLAW_MODEL
-        ? ` --model ${JSON.stringify(env.OPTIO_OPENCLAW_MODEL)}`
+        ? ` --model ${shellQuote(env.OPTIO_OPENCLAW_MODEL)}`
         : "";
       const openclawAgentFlag = env.OPTIO_OPENCLAW_AGENT
-        ? ` --agent ${JSON.stringify(env.OPTIO_OPENCLAW_AGENT)}`
+        ? ` --agent ${shellQuote(env.OPTIO_OPENCLAW_AGENT)}`
         : "";
       return [
         `echo "[optio] Running OpenClaw (experimental)..."`,
         `openclaw agent --output-format stream-json${openclawModelFlag}${openclawAgentFlag} "$OPTIO_PROMPT"`,
+      ];
+    }
+    case "cursor": {
+      const cursorModelFlag = env.OPTIO_CURSOR_MODEL
+        ? ` --model ${shellQuote(env.OPTIO_CURSOR_MODEL)}`
+        : "";
+      // --resume takes the chat id from the prior run's system:init event
+      const cursorResumeFlag = opts?.resumeSessionId
+        ? ` --resume ${shellQuote(opts.resumeSessionId)}`
+        : "";
+      return [
+        `echo "[optio] Running Cursor${opts?.isReview ? " (review)" : ""}..."`,
+        `cursor-agent --print --trust --force \\`,
+        `  --output-format stream-json${cursorModelFlag}${cursorResumeFlag} "$OPTIO_PROMPT"`,
       ];
     }
     default:
@@ -1798,6 +1940,29 @@ export function buildAgentCommand(
  * opening one, the work didn't ship — the user should be notified so they can
  * resume or restart the agent.
  */
+/**
+ * Classify how a finished agent run should be handled.
+ *
+ * - "no_output"  — agent produced no session/output at all (non-review only)
+ * - "pr_opened"  — a PR was detected (non-review only; reviews never own a PR)
+ * - "success"    — agent finished successfully
+ * - "failure"    — agent failed; applies to review subtasks too. A review run
+ *   that ends in a terminal agent error (e.g. "API Error: Usage credits
+ *   required", issue #552) must be failed — previously reviews unconditionally
+ *   completed, hiding the error behind a green state and counting as an
+ *   approval for auto-merge.
+ */
+export function classifyRunOutcome(opts: {
+  success: boolean;
+  isReviewTask: boolean;
+  sessionId: string | undefined;
+  detectedPrUrl: string | undefined | null;
+}): "no_output" | "pr_opened" | "success" | "failure" {
+  if (!opts.sessionId && !opts.isReviewTask) return "no_output";
+  if (opts.detectedPrUrl && !opts.isReviewTask) return "pr_opened";
+  return opts.success ? "success" : "failure";
+}
+
 export function shouldEscalateNoPr(opts: {
   success: boolean;
   isReviewTask: boolean;
@@ -1887,6 +2052,28 @@ export function inferExitCode(agentType: string, logs: string): number {
       return hasErrorEvent || hasApiErrorEnvelope || hasAuthError || hasModelError || hasFatalError
         ? 1
         : 0;
+    }
+    case "cursor": {
+      // Cursor emits a Claude-style terminal result event — use it when present.
+      for (const line of logs.split("\n")) {
+        try {
+          const ev = JSON.parse(line);
+          if (ev.type === "result") {
+            return ev.is_error ? 1 : 0;
+          }
+        } catch {
+          // Not JSON — skip
+        }
+      }
+      // No result event — headless failures print plain text to stderr.
+      const hasAuthError =
+        /CURSOR_API_KEY|invalid.*api.?key|unauthorized|authentication.*failed|not.*logged.*in/i.test(
+          logs,
+        );
+      const hasQuotaError = /usage limit|quota|subscription.*required/i.test(logs);
+      const hasModelError = /model.*not found|model_not_found|does not exist.*model/i.test(logs);
+      const hasErrorEvent = logs.includes('"type":"error"') || logs.includes('"type": "error"');
+      return hasAuthError || hasQuotaError || hasModelError || hasErrorEvent ? 1 : 0;
     }
     case "claude-code":
     default: {

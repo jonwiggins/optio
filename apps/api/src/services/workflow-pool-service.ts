@@ -12,6 +12,7 @@ import {
 import { logger } from "../logger.js";
 import { resolveImage } from "./repo-pool-service.js";
 import { getWorkloadManager, isStatefulSetEnabled } from "./k8s-workload-service.js";
+import { buildEnvExports } from "../utils/pod-env.js";
 
 const IDLE_TIMEOUT_MS = parseIntEnv("OPTIO_WORKFLOW_POD_IDLE_MS", 600000); // 10 min default
 
@@ -396,17 +397,11 @@ export async function execRunInPod(
     })
     .where(eq(workflowPods.id, pod.id));
 
-  const envJson = JSON.stringify({ ...env, OPTIO_WORKFLOW_RUN_ID: runId });
-  const envB64 = Buffer.from(envJson).toString("base64");
-
   const script = [
     "set -e",
-    `eval $(echo '${envB64}' | base64 -d | python3 -c "`,
-    `import json, sys, shlex`,
-    `env = json.load(sys.stdin)`,
-    `for k, v in env.items():`,
-    `    print(f'export {k}={shlex.quote(v)}')`,
-    `")`,
+    // Env values (including the prompt) are embedded as inert single-quoted
+    // exports — see buildEnvExports.
+    ...buildEnvExports({ ...env, OPTIO_WORKFLOW_RUN_ID: runId }),
     `echo "[optio] Waiting for workflow pod to be ready..."`,
     `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
     `[ -f /workspace/.ready ] || { echo "[optio] ERROR: workflow pod not ready after 120s"; exit 1; }`,

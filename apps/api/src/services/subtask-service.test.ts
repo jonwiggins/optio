@@ -130,6 +130,40 @@ describe("subtask-service", () => {
       expect(result.subtaskOrder).toBe(0); // -1 + 1 = 0
     });
 
+    it("inherits the parent task's workspaceId", async () => {
+      const parent = {
+        id: "parent-1",
+        repoUrl: "https://github.com/owner/repo",
+        agentType: "claude-code",
+        priority: 100,
+        workspaceId: "ws-1",
+      };
+      vi.mocked(taskService.getTask).mockResolvedValue(parent as any);
+      vi.mocked(taskService.createTask).mockResolvedValue({ id: "sub-1" } as any);
+
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([{ max: -1 }]),
+        }),
+      });
+      (db.update as any) = vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(undefined),
+        }),
+      });
+
+      await createSubtask({
+        parentTaskId: "parent-1",
+        title: "Review",
+        prompt: "Review the PR",
+        taskType: "review",
+      });
+
+      expect(taskService.createTask).toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceId: "ws-1" }),
+      );
+    });
+
     it("throws when parent task is not found", async () => {
       vi.mocked(taskService.getTask).mockResolvedValue(null as any);
 

@@ -15,6 +15,7 @@ import { HmacSha256Verifier } from "../services/crypto/signer.js";
 import { logger } from "../logger.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TicketProviderSchema } from "../schemas/integration.js";
+import { requireRole } from "../plugins/auth.js";
 
 // ── Zod schemas for ticket provider config ─────────────────────────────────
 
@@ -184,6 +185,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tickets/sync",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "syncTicketProviders",
         summary: "Force a ticket sync",
@@ -203,6 +205,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tickets/providers",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "createTicketProvider",
         summary: "Configure a ticket provider",
@@ -253,6 +256,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/tickets/providers/:id",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "deleteTicketProvider",
         summary: "Delete a ticket provider",
@@ -273,6 +277,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/tickets/providers/:id/re-enable",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "reEnableTicketProvider",
         summary: "Re-enable a ticket provider",

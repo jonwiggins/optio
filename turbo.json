@@ -18,6 +18,16 @@
     "test": {
       "dependsOn": ["^build"]
     },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": ["OPTIO_TEST_PG_URL", "OPTIO_TEST_REDIS_URL", "OPTIO_TEST_NO_DOCKER"]
+    },
+    "test:e2e": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": ["OPTIO_TEST_PG_URL", "OPTIO_TEST_REDIS_URL", "OPTIO_TEST_NO_DOCKER", "CI"]
+    },
     "test:coverage": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"]

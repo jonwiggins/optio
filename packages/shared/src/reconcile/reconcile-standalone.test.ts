@@ -133,14 +133,20 @@ describe("reconcileStandalone — world-read failures", () => {
 // ── Intent ──────────────────────────────────────────────────────────────────
 
 describe("reconcileStandalone — control intent", () => {
-  it("cancel from QUEUED transitions to FAILED", () => {
-    const s = snapshot({}, { state: WorkflowRunState.QUEUED, controlIntent: "cancel" });
+  it("cancel from QUEUED transitions to FAILED with the retry budget exhausted", () => {
+    const s = snapshot(
+      { maxRetries: 3 },
+      { state: WorkflowRunState.QUEUED, controlIntent: "cancel" },
+    );
     const action = reconcileStandalone(s);
     expect(action.kind).toBe("transition");
     if (action.kind === "transition") {
       expect(action.to).toBe(WorkflowRunState.FAILED);
       expect(action.clearControlIntent).toBe(true);
       expect(action.statusPatch?.errorMessage).toBe("Cancelled by user");
+      // Exhausted budget is what keeps decideFailed from auto-retrying the
+      // cancelled run back to QUEUED on the next pass.
+      expect(action.statusPatch?.retryCount).toBe(3);
     }
   });
 
@@ -150,7 +156,36 @@ describe("reconcileStandalone — control intent", () => {
     expect(action.kind).toBe("transition");
     if (action.kind === "transition") {
       expect(action.to).toBe(WorkflowRunState.FAILED);
+      expect(action.statusPatch?.retryCount).toBe(3);
     }
+  });
+
+  it("cancel never lowers a retryCount already above maxRetries", () => {
+    const s = snapshot(
+      { maxRetries: 1 },
+      { state: WorkflowRunState.RUNNING, controlIntent: "cancel", retryCount: 4 },
+    );
+    const action = reconcileStandalone(s);
+    expect(action.kind).toBe("transition");
+    if (action.kind === "transition") {
+      expect(action.statusPatch?.retryCount).toBe(4);
+    }
+  });
+
+  it("a cancelled run (FAILED, budget exhausted, no intent) is left alone", () => {
+    // The post-cancel shape both cancel paths write: FAILED + "Cancelled by
+    // user" + retryCount == maxRetries. decideFailed must NOT auto-retry it.
+    const s = snapshot(
+      { maxRetries: 3 },
+      {
+        state: WorkflowRunState.FAILED,
+        errorMessage: "Cancelled by user",
+        retryCount: 3,
+        finishedAt: NOW,
+      },
+    );
+    const action = reconcileStandalone(s);
+    expect(action).toEqual({ kind: "noop", reason: "failed_no_retry_intent" });
   });
 
   it("cancel on terminal COMPLETED clears intent without transitioning", () => {

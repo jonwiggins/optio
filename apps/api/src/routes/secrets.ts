@@ -99,6 +99,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
   app.get(
     "/api/secrets",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "listSecrets",
         summary: "List secrets",
@@ -189,6 +190,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       }
 
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "secret.upsert",
         params: { name: input.name, scope: effectiveScope },
@@ -230,6 +232,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
 
       await secretService.deleteSecret(name, scope, workspaceId, effectiveUserId);
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "secret.delete",
         params: { name },

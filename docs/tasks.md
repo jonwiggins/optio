@@ -18,7 +18,7 @@ A Repo Task targets a specific repository and ends by opening a pull request. Th
 
 1. Find or spin up an isolated Kubernetes pod for the repo (pod-per-repo).
 2. Create a git worktree for the task — multiple tasks can run concurrently on one pod.
-3. Run the configured agent (Claude Code, Codex, Copilot, Gemini, OpenCode) with the rendered prompt.
+3. Run the configured agent (Claude Code, Codex, Copilot, Gemini, OpenCode, Cursor) with the rendered prompt.
 4. Stream structured logs back to the web UI in real time.
 5. The agent stops after opening a PR — it does not block on CI.
 6. The PR watcher tracks CI checks, review status, and merge state.

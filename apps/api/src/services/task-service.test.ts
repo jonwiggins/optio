@@ -35,12 +35,19 @@ vi.mock("../db/schema.js", () => ({
 }));
 
 vi.mock("./event-bus.js", () => ({ publishEvent: vi.fn() }));
+vi.mock("./task-cancellation-service.js", () => ({
+  terminateTaskExecution: vi.fn().mockResolvedValue({ streamAborted: true, agentKilled: true }),
+}));
+vi.mock("../workers/webhook-worker.js", () => ({
+  enqueueWebhookEvent: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("../logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 import { db } from "../db/client.js";
 import { publishEvent } from "./event-bus.js";
+import { terminateTaskExecution } from "./task-cancellation-service.js";
 import {
   StateRaceError,
   createTask,
@@ -133,6 +140,34 @@ describe("transitionTask", () => {
     );
   });
 
+  it("clears stale errorMessage and resultSummary when a PR is detected (pr_opened)", async () => {
+    // Regression: the agent can exit non-zero after opening a valid PR.
+    // updateTaskResult persists e.g. "Exit code: 1" before PR detection runs,
+    // so the pr_opened transition must wipe those stale fields — a task with
+    // an open PR must not look like a failed task.
+    const task = {
+      id: "t1",
+      state: "running",
+      startedAt: new Date(),
+      ticketSource: null,
+      errorMessage: "Exit code: 1",
+      resultSummary: "Agent exited with code 1",
+    };
+    vi.mocked(db.select().from(undefined as any).where).mockResolvedValueOnce([task]);
+    vi.mocked(db as any).returning.mockResolvedValueOnce([
+      { ...task, state: "pr_opened", errorMessage: null, resultSummary: null },
+    ]);
+    vi.mocked(db.insert(undefined as any).values).mockResolvedValueOnce(undefined as any);
+    await transitionTask("t1", TaskState.PR_OPENED, "pr_detected", "https://github.com/o/r/pull/1");
+    expect(db.update(undefined as any).set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: TaskState.PR_OPENED,
+        errorMessage: null,
+        resultSummary: null,
+      }),
+    );
+  });
+
   it("throws StateRaceError when atomic update returns 0 rows", async () => {
     const task = { id: "t1", state: "queued", startedAt: null };
     vi.mocked(db.select().from(undefined as any).where)
@@ -165,9 +200,10 @@ describe("updateTaskPr", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("extracts PR number from URL", async () => {
-    vi.mocked(db.update(undefined as any).set(undefined as any).where as any).mockResolvedValueOnce(
-      [],
-    );
+    // getTask state check → running, then update chain
+    vi.mocked(db.select().from(undefined as any).where).mockResolvedValueOnce([
+      { id: "t1", state: "running" },
+    ]);
     await updateTaskPr("t1", "https://github.com/o/r/pull/42");
     expect(db.update(undefined as any).set).toHaveBeenCalledWith(
       expect.objectContaining({ prUrl: "https://github.com/o/r/pull/42", prNumber: 42 }),
@@ -175,13 +211,50 @@ describe("updateTaskPr", () => {
   });
 
   it("handles URL without PR number", async () => {
-    vi.mocked(db.update(undefined as any).set(undefined as any).where as any).mockResolvedValueOnce(
-      [],
-    );
+    vi.mocked(db.select().from(undefined as any).where).mockResolvedValueOnce([
+      { id: "t1", state: "running" },
+    ]);
     await updateTaskPr("t1", "https://github.com/o/r");
     expect(db.update(undefined as any).set).toHaveBeenCalledWith(
       expect.objectContaining({ prUrl: "https://github.com/o/r" }),
     );
+  });
+
+  it("refuses to attach a PR to a cancelled task", async () => {
+    vi.mocked(db.select().from(undefined as any).where).mockResolvedValueOnce([
+      { id: "t1", state: "cancelled" },
+    ]);
+    await updateTaskPr("t1", "https://github.com/o/r/pull/42");
+    expect(db.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("transitionTask → cancelled kills the running agent", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("terminates execution when a running task is cancelled", async () => {
+    const task = { id: "t1", state: "running", startedAt: new Date(), ticketSource: null };
+    vi.mocked(db.select().from(undefined as any).where).mockResolvedValueOnce([task]);
+    vi.mocked(db as any).returning.mockResolvedValueOnce([{ ...task, state: "cancelled" }]);
+    vi.mocked(db.insert(undefined as any).values).mockResolvedValueOnce(undefined as any);
+
+    await transitionTask("t1", TaskState.CANCELLED, "user_cancel");
+
+    // terminateTaskExecution fires via dynamic import (fire-and-forget)
+    await vi.waitFor(() => expect(terminateTaskExecution).toHaveBeenCalledWith("t1"));
+  });
+
+  it("does not terminate execution when a queued task is cancelled", async () => {
+    const task = { id: "t2", state: "queued", startedAt: null, ticketSource: null };
+    vi.mocked(db.select().from(undefined as any).where).mockResolvedValueOnce([task]);
+    vi.mocked(db as any).returning.mockResolvedValueOnce([{ ...task, state: "cancelled" }]);
+    vi.mocked(db.insert(undefined as any).values).mockResolvedValueOnce(undefined as any);
+
+    await transitionTask("t2", TaskState.CANCELLED, "user_cancel");
+
+    // Give any stray dynamic import a tick to land, then assert nothing fired
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(terminateTaskExecution).not.toHaveBeenCalled();
   });
 });
 

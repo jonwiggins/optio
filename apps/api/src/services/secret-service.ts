@@ -40,6 +40,7 @@ export const IDENTITY_SECRET_DENYLIST = new Set([
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "GEMINI_API_KEY",
+  "CURSOR_API_KEY",
 ]);
 
 function getEncryptionKey(): Buffer {
@@ -92,13 +93,31 @@ export function encrypt(plaintext: string, aad?: Buffer): EncryptedBlob {
   return { alg: ALG_AES_256_GCM_V1, iv, ciphertext, authTag: cipher.getAuthTag() };
 }
 
-export function decrypt(blob: EncryptedBlob, aad?: Buffer): string {
+/**
+ * Decrypt an EncryptedBlob. `secretName` (optional) is included in error
+ * messages for diagnosability — never the value.
+ *
+ * A failed GCM auth check surfaces from Node as the cryptic "Unsupported state
+ * or unable to authenticate data"; in practice this almost always means the
+ * encryption key changed after the secret was stored (see issue #553), so we
+ * wrap it with an actionable message. The original error text is preserved.
+ */
+export function decrypt(blob: EncryptedBlob, aad?: Buffer, secretName?: string): string {
   if (!Number.isInteger(blob.alg) || blob.alg < 1 || blob.alg > 255) {
     throw new Error(`Invalid algorithm id: ${blob.alg}`);
   }
   switch (blob.alg) {
     case ALG_AES_256_GCM_V1:
-      return decryptAesGcmV1(blob, aad);
+      try {
+        return decryptAesGcmV1(blob, aad);
+      } catch (err) {
+        const label = secretName ? ` "${secretName}"` : "";
+        throw new Error(
+          `Failed to decrypt stored secret${label} — the encryption key (OPTIO_ENCRYPTION_KEY) ` +
+            `has likely changed since it was saved. Re-enter the credential, or restore the ` +
+            `original encryption key. (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
     default:
       throw new Error(`Unsupported encryption algorithm: 0x${blob.alg.toString(16)}`);
   }
@@ -222,6 +241,7 @@ export async function retrieveSecret(
       authTag: secret.authTag,
     },
     aad,
+    name,
   );
 }
 
@@ -315,6 +335,7 @@ export async function healContradictoryGlobalSecrets(): Promise<number> {
             authTag: row.authTag,
           },
           oldAad,
+          row.name,
         );
 
         const [shadow] = await db

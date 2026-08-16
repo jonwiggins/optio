@@ -210,6 +210,7 @@ export async function prReviewRoutes(rawApp: FastifyInstance) {
           origin: "manual",
         });
         logAction({
+          workspaceId: req.user?.workspaceId ?? null,
           userId: req.user?.id,
           action: "pr_review.launch",
           params: { prUrl: req.body.prUrl },

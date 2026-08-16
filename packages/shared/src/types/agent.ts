@@ -31,6 +31,7 @@ export interface AgentTaskInput {
   opencodeModel?: string;
   opencodeAgent?: string;
   opencodeBaseUrl?: string;
+  cursorModel?: string;
   openclawModel?: string;
   openclawAgent?: string;
   geminiAuthMode?: GeminiAuthMode;

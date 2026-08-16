@@ -65,6 +65,7 @@ import * as taskService from "./task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { retrieveSecret } from "./secret-service.js";
 import { getGitHubToken } from "./github-token-service.js";
+import { getRepoByUrl } from "./repo-service.js";
 import { syncAllTickets } from "./ticket-sync-service.js";
 import { logger } from "../logger.js";
 
@@ -117,7 +118,13 @@ describe("ticket-sync-service", () => {
 
   it("syncs new tickets and creates tasks", async () => {
     mockDbSelect([
-      { id: "p1", source: "github", config: { repoUrl: "https://github.com/o/r" }, enabled: true },
+      {
+        id: "p1",
+        source: "github",
+        config: { repoUrl: "https://github.com/o/r" },
+        enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
+      },
     ]);
 
     const mockProvider = {
@@ -162,9 +169,101 @@ describe("ticket-sync-service", () => {
     expect(mockProvider.addComment).toHaveBeenCalled();
   });
 
+  it("stamps created tasks with the repo's workspaceId (issue #544)", async () => {
+    mockDbSelect([
+      {
+        id: "p1",
+        source: "github",
+        config: { repoUrl: "https://github.com/o/r" },
+        enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
+      },
+    ]);
+
+    // Repo is configured in a workspace — webhook/poll-created tasks must
+    // inherit it or the workspace-scoped UI filters them out.
+    vi.mocked(getRepoByUrl).mockResolvedValueOnce({
+      id: "repo-1",
+      workspaceId: "ws-1",
+      defaultAgentType: null,
+    } as any);
+
+    vi.mocked(getTicketProvider).mockReturnValue({
+      fetchActionableTickets: vi.fn().mockResolvedValue([
+        {
+          title: "Labeled issue",
+          body: "Body",
+          source: "github",
+          externalId: "321",
+          url: "https://github.com/o/r/issues/321",
+          labels: ["optio"],
+          repo: null,
+        },
+      ]),
+      fetchTicketComments: vi.fn().mockResolvedValue([]),
+      addComment: vi.fn().mockResolvedValue(undefined),
+    } as any);
+
+    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.createTask).mockResolvedValue({ id: "task-1", maxRetries: 3 } as any);
+
+    await syncAllTickets();
+
+    expect(taskService.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoUrl: "https://github.com/o/r",
+        workspaceId: "ws-1",
+      }),
+    );
+  });
+
+  it("falls back to a NULL workspaceId when the repo is not configured", async () => {
+    mockDbSelect([
+      {
+        id: "p1",
+        source: "github",
+        config: { repoUrl: "https://github.com/o/r" },
+        enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
+      },
+    ]);
+
+    // getRepoByUrl default mock resolves null (unknown repo)
+    vi.mocked(getTicketProvider).mockReturnValue({
+      fetchActionableTickets: vi.fn().mockResolvedValue([
+        {
+          title: "Unknown repo issue",
+          body: "",
+          source: "github",
+          externalId: "654",
+          url: "",
+          labels: [],
+          repo: null,
+        },
+      ]),
+      fetchTicketComments: vi.fn().mockResolvedValue([]),
+      addComment: vi.fn().mockResolvedValue(undefined),
+    } as any);
+
+    vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+    vi.mocked(taskService.createTask).mockResolvedValue({ id: "task-2", maxRetries: 3 } as any);
+
+    await syncAllTickets();
+
+    expect(taskService.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: null }),
+    );
+  });
+
   it("skips tickets that already have tasks", async () => {
     mockDbSelect([
-      { id: "p1", source: "github", config: { repoUrl: "https://github.com/o/r" }, enabled: true },
+      {
+        id: "p1",
+        source: "github",
+        config: { repoUrl: "https://github.com/o/r" },
+        enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
+      },
     ]);
 
     vi.mocked(getTicketProvider).mockReturnValue({
@@ -194,7 +293,13 @@ describe("ticket-sync-service", () => {
 
   it("uses codex agent type when ticket has codex label", async () => {
     mockDbSelect([
-      { id: "p1", source: "github", config: { repoUrl: "https://github.com/o/r" }, enabled: true },
+      {
+        id: "p1",
+        source: "github",
+        config: { repoUrl: "https://github.com/o/r" },
+        enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
+      },
     ]);
 
     vi.mocked(getTicketProvider).mockReturnValue({
@@ -231,6 +336,7 @@ describe("ticket-sync-service", () => {
           source: "github",
           config: { repoUrl: "https://github.com/fallback/repo" },
           enabled: true,
+          initialSyncAt: new Date("2026-01-01"),
         },
       ],
       [{ repoUrl: "https://github.com/owner/specific-repo" }],
@@ -265,7 +371,15 @@ describe("ticket-sync-service", () => {
   });
 
   it("skips tickets without repo URL", async () => {
-    mockDbSelect([{ id: "p1", source: "github", config: {}, enabled: true }]);
+    mockDbSelect([
+      {
+        id: "p1",
+        source: "github",
+        config: {},
+        enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
+      },
+    ]);
 
     vi.mocked(getTicketProvider).mockReturnValue({
       fetchActionableTickets: vi.fn().mockResolvedValue([
@@ -305,7 +419,13 @@ describe("ticket-sync-service", () => {
 
   it("continues syncing when comment fails", async () => {
     mockDbSelect([
-      { id: "p1", source: "github", config: { repoUrl: "https://github.com/o/r" }, enabled: true },
+      {
+        id: "p1",
+        source: "github",
+        config: { repoUrl: "https://github.com/o/r" },
+        enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
+      },
     ]);
 
     vi.mocked(getTicketProvider).mockReturnValue({
@@ -339,12 +459,14 @@ describe("ticket-sync-service", () => {
           source: "github",
           config: { repoUrl: "https://github.com/o/r" },
           enabled: true,
+          initialSyncAt: new Date("2026-01-01"),
         },
         {
           id: "p2",
           source: "jira",
           config: { baseUrl: "https://j.example.com", email: "a@b.com" },
           enabled: true,
+          initialSyncAt: new Date("2026-01-01"),
         },
       ],
       [{ repoUrl: "https://github.com/o/r" }],
@@ -370,6 +492,7 @@ describe("ticket-sync-service", () => {
           source: "gitlab",
           config: { baseUrl: "https://gitlab.corp.example.com" },
           enabled: true,
+          initialSyncAt: new Date("2026-01-01"),
         },
       ],
       [], // no configured repos — forces URL construction fallback
@@ -410,6 +533,7 @@ describe("ticket-sync-service", () => {
         source: "jira",
         config: { baseUrl: "https://j.example.com", email: "a@b.com", label: "optio" },
         enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
       },
     ]);
 
@@ -439,6 +563,7 @@ describe("ticket-sync-service", () => {
         source: "github",
         config: { repoUrl: "https://github.com/o/r" },
         enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
         consecutiveFailures: 0,
       },
     ]);
@@ -467,6 +592,7 @@ describe("ticket-sync-service", () => {
         source: "github",
         config: { repoUrl: "https://github.com/o/r" },
         enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
         consecutiveFailures: 3,
         lastError: "Bad credentials",
         lastErrorAt: new Date(),
@@ -498,6 +624,7 @@ describe("ticket-sync-service", () => {
         source: "github",
         config: { repoUrl: "https://github.com/o/r" },
         enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
         consecutiveFailures: 4, // one more will hit 5
       },
     ]);
@@ -526,6 +653,7 @@ describe("ticket-sync-service", () => {
         source: "github",
         config: { owner: "o", repo: "r" },
         enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
       },
     ]);
 
@@ -550,6 +678,7 @@ describe("ticket-sync-service", () => {
         source: "github",
         config: { owner: "o", repo: "r", token: "inline-token" },
         enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
       },
     ]);
 
@@ -564,7 +693,13 @@ describe("ticket-sync-service", () => {
 
   it("does not call getGitHubToken when a token is supplied via provider secret", async () => {
     mockDbSelect([
-      { id: "p1", source: "github", config: { owner: "o", repo: "r" }, enabled: true },
+      {
+        id: "p1",
+        source: "github",
+        config: { owner: "o", repo: "r" },
+        enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
+      },
     ]);
     vi.mocked(retrieveSecret).mockResolvedValue(JSON.stringify({ token: "secret-token" }));
 
@@ -584,6 +719,7 @@ describe("ticket-sync-service", () => {
         source: "jira",
         config: { baseUrl: "https://j.example.com", email: "a@b.com" },
         enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
       },
     ]);
 
@@ -603,6 +739,7 @@ describe("ticket-sync-service", () => {
         source: "github",
         config: { repoUrl: "https://github.com/o/r" },
         enabled: true,
+        initialSyncAt: new Date("2026-01-01"),
         consecutiveFailures: 2,
         lastError: "Bad credentials",
       },
@@ -622,5 +759,123 @@ describe("ticket-sync-service", () => {
     );
     // Should NOT have logged at error level
     expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  describe("initial sync backfill (issue #579)", () => {
+    const backfillTicket = {
+      title: "Pre-existing ticket",
+      body: "was labeled before the provider was configured",
+      source: "github",
+      externalId: "42",
+      url: "https://github.com/o/r/issues/42",
+      labels: [],
+      repo: null,
+    };
+
+    function mockProviderWithTicket() {
+      const provider = {
+        fetchActionableTickets: vi.fn().mockResolvedValue([backfillTicket]),
+        fetchTicketComments: vi.fn().mockResolvedValue([]),
+        addComment: vi.fn().mockResolvedValue(undefined),
+      };
+      vi.mocked(getTicketProvider).mockReturnValue(provider as any);
+      return provider;
+    }
+
+    it("first sync creates backfill tasks pending, without queueing or commenting", async () => {
+      // initialSyncAt is null → this is the provider's first sweep
+      mockDbSelect([
+        {
+          id: "p1",
+          source: "github",
+          config: { repoUrl: "https://github.com/o/r" },
+          enabled: true,
+          initialSyncAt: null,
+        },
+      ]);
+      const updates = mockDbUpdate();
+      const provider = mockProviderWithTicket();
+      vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+      vi.mocked(taskService.createTask).mockResolvedValue({ id: "t1", maxRetries: 2 } as any);
+
+      const count = await syncAllTickets();
+
+      // The task exists (visible for review) but was never started …
+      expect(count).toBe(1);
+      expect(taskService.createTask).toHaveBeenCalledTimes(1);
+      expect(taskService.transitionTask).not.toHaveBeenCalled();
+      expect(taskQueue.add).not.toHaveBeenCalled();
+      // … nothing was announced on the ticket …
+      expect(provider.addComment).not.toHaveBeenCalled();
+      // … and the sweep stamped initial_sync_at so the next sync auto-queues.
+      expect(updates.setCalls.some((s) => s.initialSyncAt instanceof Date)).toBe(true);
+    });
+
+    it("stamps initial_sync_at even when the first sweep matches nothing", async () => {
+      mockDbSelect([
+        {
+          id: "p1",
+          source: "github",
+          config: { repoUrl: "https://github.com/o/r" },
+          enabled: true,
+          initialSyncAt: null,
+        },
+      ]);
+      const updates = mockDbUpdate();
+      vi.mocked(getTicketProvider).mockReturnValue({
+        fetchActionableTickets: vi.fn().mockResolvedValue([]),
+      } as any);
+
+      const count = await syncAllTickets();
+
+      expect(count).toBe(0);
+      expect(updates.setCalls.some((s) => s.initialSyncAt instanceof Date)).toBe(true);
+    });
+
+    it("does not stamp initial_sync_at when the first sweep fails", async () => {
+      mockDbSelect([
+        {
+          id: "p1",
+          source: "github",
+          config: { repoUrl: "https://github.com/o/r" },
+          enabled: true,
+          initialSyncAt: null,
+          consecutiveFailures: 0,
+        },
+      ]);
+      const updates = mockDbUpdate();
+      vi.mocked(getTicketProvider).mockReturnValue({
+        fetchActionableTickets: vi.fn().mockRejectedValue(new Error("API error")),
+      } as any);
+
+      await syncAllTickets();
+
+      // The failure bookkeeping ran, but no initialSyncAt stamp — the next
+      // successful sync is still treated as the initial backfill sweep.
+      expect(updates.setCalls.every((s) => !("initialSyncAt" in s))).toBe(true);
+    });
+
+    it("syncs after the initial sweep queue tasks as before", async () => {
+      mockDbSelect([
+        {
+          id: "p1",
+          source: "github",
+          config: { repoUrl: "https://github.com/o/r" },
+          enabled: true,
+          initialSyncAt: new Date("2026-01-01"),
+        },
+      ]);
+      mockDbUpdate();
+      const provider = mockProviderWithTicket();
+      vi.mocked(taskService.listTasks).mockResolvedValue([] as any);
+      vi.mocked(taskService.createTask).mockResolvedValue({ id: "t1", maxRetries: 2 } as any);
+
+      const count = await syncAllTickets();
+
+      expect(count).toBe(1);
+      expect(taskService.transitionTask).toHaveBeenCalledWith("t1", "queued", "ticket_sync");
+      expect(taskQueue.add).toHaveBeenCalledTimes(1);
+      expect(provider.addComment).toHaveBeenCalledTimes(1);
+    });
   });
 });

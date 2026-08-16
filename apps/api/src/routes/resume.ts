@@ -6,6 +6,7 @@ import * as taskService from "../services/task-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TaskSchema } from "../schemas/task.js";
+import { requireRole } from "../plugins/auth.js";
 
 const resumeSchema = z
   .object({
@@ -42,6 +43,7 @@ export async function resumeRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tasks/:id/resume",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "resumeTask",
         summary: "Resume a task in needs_attention or failed state",
@@ -101,6 +103,7 @@ export async function resumeRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/tasks/:id/force-restart",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "forceRestartTask",
         summary: "Start a fresh agent session on the existing PR branch",

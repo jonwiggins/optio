@@ -281,6 +281,32 @@ describe("ClaudeCodeAdapter", () => {
       expect(result.costUsd).toBe(0.0534);
     });
 
+    it("uses the LAST result event's cost on a multi-turn run, not the first (issue #541)", () => {
+      // With --input-format stream-json each mid-task user message produces its
+      // own result event whose total_cost_usd is cumulative for the process.
+      // Taking the first match would drop everything after turn one.
+      const logs = [
+        '{"type":"assistant","message":{"usage":{"input_tokens":100,"output_tokens":50}}}',
+        '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0534,"result":"turn 1 done"}',
+        '{"type":"assistant","message":{"usage":{"input_tokens":200,"output_tokens":75}}}',
+        '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.1289,"result":"turn 2 done"}',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.costUsd).toBe(0.1289);
+    });
+
+    it("falls back to the LAST regex cost match when result events are not JSON", () => {
+      // Truncated/garbled result lines still expose total_cost_usd in the raw
+      // text; the fallback must also prefer the last occurrence.
+      const logs = [
+        'noise "total_cost_usd": 0.01 more noise',
+        "<partial> total_cost_usd was 0.02 ...",
+        'trailing "total_cost_usd": 0.0789 end',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.costUsd).toBe(0.0789);
+    });
+
     it("extracts model from system init event", () => {
       const logs = [
         '{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514"}',
@@ -322,14 +348,94 @@ describe("ClaudeCodeAdapter", () => {
     it("extracts error from result event with is_error=true when exitCode is non-zero", () => {
       const logs = '{"type":"result","is_error":true,"result":"API rate limit exceeded"}';
       const result = adapter.parseResult(1, logs);
+      expect(result.success).toBe(false);
       expect(result.error).toBe("API rate limit exceeded");
     });
 
-    it("does NOT extract error from is_error result when exitCode is 0", () => {
+    it("fails on an is_error result event even when exitCode is 0 (issue #552)", () => {
+      // Claude Code in stream-json mode exits 0 after stdin closes, so the
+      // process exit code cannot be trusted — the result event is authoritative.
       const logs = '{"type":"result","is_error":true,"result":"API rate limit exceeded"}';
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("API rate limit exceeded");
+      expect(result.summary).toBe("Agent error: API rate limit exceeded");
+    });
+
+    it("reproduces issue #552: usage-credit API error with exit 0 and no real result", () => {
+      const apiError =
+        "API Error: Usage credits required for 1M context · turn on usage credits at claude.ai/settings/usage, or use --model to switch to standard context";
+      const logs = [
+        '{"type":"system","subtype":"init","model":"claude-sonnet-4-6[1m]","tools":[]}',
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: apiError }] },
+        }),
+        JSON.stringify({
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          result: apiError,
+          num_turns: 1,
+          duration_ms: 500,
+        }),
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Usage credits required for 1M context");
+      expect(result.summary).toMatch(/^Agent error: API Error: Usage credits required/);
+    });
+
+    it("fails on an is_error result event with no result text, using subtype", () => {
+      const logs = '{"type":"result","subtype":"error_during_execution","is_error":true}';
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Agent reported an error result (error_during_execution)");
+    });
+
+    it("fails when an API error is emitted and no result event follows (crash)", () => {
+      const logs = [
+        '{"type":"system","subtype":"init","model":"claude-sonnet-4-6","tools":[]}',
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "API Error: 500 Internal Server Error" }] },
+        }),
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("API Error: 500 Internal Server Error");
+    });
+
+    it("still succeeds when a transient API error is recovered and a real result follows", () => {
+      const logs = [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "API Error: 529 Overloaded (retrying)" }] },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "Finished the review." }] },
+        }),
+        '{"type":"result","is_error":false,"result":"Review complete: LGTM"}',
+      ].join("\n");
       const result = adapter.parseResult(0, logs);
       expect(result.success).toBe(true);
       expect(result.error).toBeUndefined();
+      expect(result.summary).toBe("Review complete: LGTM");
+    });
+
+    it("does not treat ordinary assistant text mentioning errors as failure", () => {
+      const logs = [
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            content: [{ type: "text", text: "The API Error handling in foo.ts looks fine." }],
+          },
+        }),
+        '{"type":"result","is_error":false,"result":"All good"}',
+      ].join("\n");
+      const result = adapter.parseResult(0, logs);
+      expect(result.success).toBe(true);
     });
 
     it("falls back to Exit code: N when no structured error", () => {

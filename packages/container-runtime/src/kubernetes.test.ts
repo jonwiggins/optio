@@ -209,6 +209,8 @@ describe("KubernetesContainerRuntime", () => {
         drop: ["ALL"],
         add: ["NET_ADMIN", "NET_RAW"],
       });
+      expect(container.securityContext.allowPrivilegeEscalation).toBe(false);
+      expect(container.securityContext.seccompProfile).toEqual({ type: "RuntimeDefault" });
     });
 
     it("adds sidecar containers", async () => {
@@ -313,6 +315,8 @@ describe("KubernetesContainerRuntime", () => {
 
       const container = mockCoreApi.createNamespacedPod.mock.calls[0][0].body.spec.containers[0];
       expect(container.securityContext.capabilities).toEqual({ drop: ["ALL"] });
+      expect(container.securityContext.allowPrivilegeEscalation).toBe(false);
+      expect(container.securityContext.seccompProfile).toEqual({ type: "RuntimeDefault" });
     });
 
     it("rejects disallowed capabilities (SYS_ADMIN)", async () => {

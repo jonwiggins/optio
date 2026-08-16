@@ -289,3 +289,60 @@ describe("GET /api/tasks/:id/triggers", () => {
     expect(res.statusCode).toBe(405);
   });
 });
+
+describe("workspace scoping + role enforcement", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function viewerApp(): Promise<FastifyInstance> {
+    return buildRouteTestApp(tasksUnifiedRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+  }
+
+  it("scopes the parent lookup to the caller's workspace (404 for foreign id)", async () => {
+    // Simulate the resolver rejecting a foreign id (it enforces workspace).
+    mockResolveAnyTaskById.mockResolvedValue(null);
+    const app = await buildApp();
+
+    const res = await app.inject({ method: "POST", url: "/api/tasks/foreign/runs", payload: {} });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockResolveAnyTaskById).toHaveBeenCalledWith("foreign", "ws-1");
+  });
+
+  it("403s a viewer kicking off a run", async () => {
+    const app = await viewerApp();
+    const res = await app.inject({ method: "POST", url: "/api/tasks/wf-1/runs", payload: {} });
+    expect(res.statusCode).toBe(403);
+    expect(mockResolveAnyTaskById).not.toHaveBeenCalled();
+  });
+
+  it("403s a viewer creating a trigger", async () => {
+    const app = await viewerApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks/wf-1/triggers",
+      payload: { type: "schedule", config: { cronExpression: "0 9 * * *" } },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(mockResolveAnyTaskById).not.toHaveBeenCalled();
+  });
+
+  it("403s a viewer updating a trigger", async () => {
+    const app = await viewerApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/tasks/wf-1/triggers/trg-1",
+      payload: { enabled: false },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("403s a viewer deleting a trigger", async () => {
+    const app = await viewerApp();
+    const res = await app.inject({ method: "DELETE", url: "/api/tasks/wf-1/triggers/trg-1" });
+    expect(res.statusCode).toBe(403);
+  });
+});

@@ -35,7 +35,7 @@ export const TaskActivitySubstateSchema = z
   .describe("Activity sub-state for running tasks");
 
 export const AgentTypeSchema = z
-  .enum(["claude-code", "codex", "copilot", "opencode", "gemini", "openclaw"])
+  .enum(["claude-code", "codex", "copilot", "opencode", "gemini", "openclaw", "cursor"])
   .describe("Agent runtime that executes the task");
 
 export const WorktreeStateSchema = z

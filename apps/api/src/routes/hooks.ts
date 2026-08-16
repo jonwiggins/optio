@@ -159,9 +159,9 @@ export async function hookRoutes(rawApp: FastifyInstance) {
       }
 
       if (trigger.targetType === "persistent_agent") {
-        const { getPersistentAgent, wakeAgent, buildSenderId } =
+        const { getPersistentAgentUnscoped, wakeAgent, buildSenderId } =
           await import("../services/persistent-agent-service.js");
-        const agent = await getPersistentAgent(trigger.targetId);
+        const agent = await getPersistentAgentUnscoped(trigger.targetId);
         if (!agent || !agent.enabled) {
           return reply.status(404).send({ error: "Target persistent agent not found or disabled" });
         }

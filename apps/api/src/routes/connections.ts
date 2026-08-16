@@ -1,7 +1,8 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as connectionService from "../services/connection-service.js";
+import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
@@ -96,6 +97,30 @@ const AssignmentResponse = z.object({ assignment: ConnectionAssignmentSchema });
 
 // ── Routes ────────────────────────────────────────────────────────────────
 
+/**
+ * Resolve a connection by id, enforcing workspace ownership. On a missing or
+ * foreign connection it sends a 404 (foreign resources are indistinguishable
+ * from missing ones) and returns null; otherwise returns the connection.
+ * Callers must `return` when null is received.
+ */
+async function requireOwnedConnection(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  connectionId: string,
+): Promise<Awaited<ReturnType<typeof connectionService.getConnection>>> {
+  const conn = await connectionService.getConnection(connectionId);
+  if (!conn) {
+    reply.status(404).send({ error: "Connection not found" });
+    return null;
+  }
+  const wsId = req.user?.workspaceId;
+  if (wsId && conn.workspaceId && conn.workspaceId !== wsId) {
+    reply.status(404).send({ error: "Connection not found" });
+    return null;
+  }
+  return conn;
+}
+
 export async function connectionRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
@@ -143,6 +168,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/connection-providers",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "createConnectionProvider",
         summary: "Create a custom connection provider",
@@ -189,6 +215,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/connections",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "createConnection",
         summary: "Create a connection",
@@ -238,6 +265,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/connections/:id",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "updateConnection",
         summary: "Update a connection",
@@ -270,6 +298,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/connections/:id",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "deleteConnection",
         summary: "Delete a connection",
@@ -301,6 +330,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/connections/:id/test",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "testConnection",
         summary: "Test connection health",
@@ -338,8 +368,8 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const conn = await connectionService.getConnection(req.params.id);
-      if (!conn) return reply.status(404).send({ error: "Connection not found" });
+      const conn = await requireOwnedConnection(req, reply, req.params.id);
+      if (!conn) return;
       const assignments = await connectionService.listAssignments(req.params.id);
       reply.send({ assignments });
     },
@@ -348,10 +378,11 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/connections/:id/assignments",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createConnectionAssignment",
         summary: "Create a connection assignment",
-        description: "Assign a connection to a repo/agent combination.",
+        description: "Assign a connection to a repo/agent combination. Requires `member` role.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: createAssignmentSchema,
@@ -359,8 +390,8 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const conn = await connectionService.getConnection(req.params.id);
-      if (!conn) return reply.status(404).send({ error: "Connection not found" });
+      const conn = await requireOwnedConnection(req, reply, req.params.id);
+      if (!conn) return;
       const assignment = await connectionService.createAssignment(req.params.id, req.body);
       logAction({
         userId: req.user?.id,
@@ -376,17 +407,22 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/connection-assignments/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "updateConnectionAssignment",
         summary: "Update a connection assignment",
-        description: "Partial update to a connection assignment.",
+        description: "Partial update to a connection assignment. Requires `member` role.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: updateAssignmentSchema,
-        response: { 200: AssignmentResponse },
+        response: { 200: AssignmentResponse, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
+      const existing = await connectionService.getAssignment(req.params.id);
+      if (!existing) return reply.status(404).send({ error: "Assignment not found" });
+      const conn = await requireOwnedConnection(req, reply, existing.connectionId);
+      if (!conn) return;
       const assignment = await connectionService.updateAssignment(req.params.id, req.body);
       logAction({
         userId: req.user?.id,
@@ -402,16 +438,22 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/connection-assignments/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteConnectionAssignment",
         summary: "Delete a connection assignment",
-        description: "Delete a connection assignment. Returns 204 on success.",
+        description:
+          "Delete a connection assignment. Returns 204 on success. Requires `member` role.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 204: z.null() },
+        response: { 204: z.null(), 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
+      const existing = await connectionService.getAssignment(req.params.id);
+      if (!existing) return reply.status(404).send({ error: "Assignment not found" });
+      const conn = await requireOwnedConnection(req, reply, existing.connectionId);
+      if (!conn) return;
       await connectionService.deleteAssignment(req.params.id);
       logAction({
         userId: req.user?.id,

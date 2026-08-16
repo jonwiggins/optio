@@ -152,6 +152,14 @@ case "${OPTIO_AGENT_TYPE}" in
     fi
     gemini ${GEMINI_FLAGS} -p "${OPTIO_PROMPT}"
     ;;
+  cursor)
+    echo "[optio] Running Cursor..."
+    CURSOR_FLAGS="--print --trust --force --output-format stream-json"
+    if [ -n "${OPTIO_CURSOR_MODEL:-}" ]; then
+      CURSOR_FLAGS="${CURSOR_FLAGS} --model ${OPTIO_CURSOR_MODEL}"
+    fi
+    cursor-agent ${CURSOR_FLAGS} "${OPTIO_PROMPT}"
+    ;;
   *)
     echo "[optio] Unknown agent type: ${OPTIO_AGENT_TYPE}"
     exit 1

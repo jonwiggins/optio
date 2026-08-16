@@ -141,31 +141,96 @@ describe("createTrigger", () => {
       }),
     ).rejects.toThrow("duplicate_type");
   });
-});
 
-describe("updateTrigger", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("updates a trigger", async () => {
-    const updated = makeDbRow({ enabled: false });
-
+  it("computes nextFireAt for an enabled schedule trigger", async () => {
     (db.select as any) = vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue([]),
       }),
     });
 
-    (db.update as any) = vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([updated]),
-        }),
+    let capturedValues: Record<string, unknown> = {};
+    (db.insert as any) = vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((values: Record<string, unknown>) => {
+        capturedValues = values;
+        return { returning: vi.fn().mockResolvedValue([makeDbRow({ type: "schedule" })]) };
       }),
     });
 
+    await createTrigger({
+      workflowId: "wf-1",
+      type: "schedule",
+      config: { cronExpression: "0 0 * * *" },
+    });
+
+    expect(capturedValues.nextFireAt).toBeInstanceOf(Date);
+    expect((capturedValues.nextFireAt as Date).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("leaves nextFireAt null for a disabled schedule trigger and for non-schedule types", async () => {
+    (db.select as any) = vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([]),
+      }),
+    });
+
+    const captured: Record<string, unknown>[] = [];
+    (db.insert as any) = vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((values: Record<string, unknown>) => {
+        captured.push(values);
+        return { returning: vi.fn().mockResolvedValue([makeDbRow()]) };
+      }),
+    });
+
+    await createTrigger({
+      workflowId: "wf-1",
+      type: "schedule",
+      config: { cronExpression: "0 0 * * *" },
+      enabled: false,
+    });
+    await createTrigger({ workflowId: "wf-1", type: "manual", config: {} });
+
+    expect(captured[0].nextFireAt).toBeNull();
+    expect(captured[1].nextFireAt).toBeNull();
+  });
+});
+
+describe("updateTrigger", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  /** Mock db.update capturing the `set(...)` payload. */
+  function mockUpdateCapture(returned: Record<string, unknown>) {
+    const captured: { set: Record<string, unknown> } = { set: {} };
+    (db.update as any) = vi.fn().mockReturnValue({
+      set: vi.fn().mockImplementation((set: Record<string, unknown>) => {
+        captured.set = set;
+        return {
+          where: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([returned]),
+          }),
+        };
+      }),
+    });
+    return captured;
+  }
+
+  it("updates a trigger", async () => {
+    const existing = makeDbRow();
+    const updated = makeDbRow({ enabled: false });
+
+    // getTrigger existence check resolves the current row.
+    (db.select as any) = vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([existing]),
+      }),
+    });
+    const captured = mockUpdateCapture(updated);
+
     const result = await updateTrigger("trig-1", { enabled: false });
     expect(result).toEqual(updated);
-    expect(result.enabled).toBe(false);
+    expect(result!.enabled).toBe(false);
+    // Non-schedule triggers never get a nextFireAt stamped.
+    expect("nextFireAt" in captured.set).toBe(false);
   });
 
   it("returns null when trigger not found", async () => {
@@ -175,16 +240,69 @@ describe("updateTrigger", () => {
       }),
     });
 
-    (db.update as any) = vi.fn().mockReturnValue({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([]),
-        }),
-      }),
-    });
+    (db.update as any) = vi.fn();
 
     const result = await updateTrigger("nonexistent", { enabled: false });
     expect(result).toBeNull();
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("recomputes nextFireAt when re-enabling a schedule trigger", async () => {
+    const existing = makeDbRow({
+      type: "schedule",
+      config: { cronExpression: "0 0 * * *" },
+      enabled: false,
+      nextFireAt: null,
+    });
+    (db.select as any) = vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([existing]),
+      }),
+    });
+    const captured = mockUpdateCapture(makeDbRow({ type: "schedule", enabled: true }));
+
+    await updateTrigger("trig-1", { enabled: true });
+    expect(captured.set.nextFireAt).toBeInstanceOf(Date);
+    expect((captured.set.nextFireAt as Date).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("recomputes nextFireAt when the cron expression changes", async () => {
+    const existing = makeDbRow({
+      type: "schedule",
+      config: { cronExpression: "0 0 * * *" },
+      enabled: true,
+    });
+    (db.select as any) = vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([existing]),
+      }),
+    });
+    const captured = mockUpdateCapture(makeDbRow({ type: "schedule" }));
+
+    // Every-minute cron → recomputed nextFireAt lands within the next minute.
+    await updateTrigger("trig-1", { config: { cronExpression: "* * * * *" } });
+    expect(captured.set.nextFireAt).toBeInstanceOf(Date);
+    const nextFireAt = (captured.set.nextFireAt as Date).getTime();
+    expect(nextFireAt).toBeGreaterThan(Date.now());
+    expect(nextFireAt).toBeLessThanOrEqual(Date.now() + 60_000);
+  });
+
+  it("clears nextFireAt when disabling a schedule trigger", async () => {
+    const existing = makeDbRow({
+      type: "schedule",
+      config: { cronExpression: "0 0 * * *" },
+      enabled: true,
+      nextFireAt: new Date(),
+    });
+    (db.select as any) = vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([existing]),
+      }),
+    });
+    const captured = mockUpdateCapture(makeDbRow({ type: "schedule", enabled: false }));
+
+    await updateTrigger("trig-1", { enabled: false });
+    expect(captured.set.nextFireAt).toBeNull();
   });
 });
 

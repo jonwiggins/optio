@@ -3,6 +3,7 @@ import {
   PROVIDER_CATALOGS,
   mergeLiveModels,
   type AgentProviderId,
+  type LiveModel,
   type ProviderCatalog,
 } from "@optio/shared";
 import { getRedisClient } from "./event-bus.js";
@@ -14,57 +15,110 @@ const CACHE_TTL_SECONDS = 60 * 60;
 /** Redis key prefix for cached live model lists. */
 const CACHE_KEY_PREFIX = "optio:agent-options";
 
-type LiveProbe = (apiKey: string) => Promise<string[]>;
+/**
+ * Credential used for an upstream list-models probe. `api-key` is sent in the
+ * provider's native key header; `oauth` is sent as a Bearer token (Anthropic
+ * OAuth tokens from `claude setup-token` additionally need the oauth beta
+ * header).
+ */
+interface ProbeCredential {
+  value: string;
+  kind: "api-key" | "oauth";
+}
 
-/** Anthropic: GET /v1/models → data[].id. */
-async function probeAnthropic(apiKey: string): Promise<string[]> {
-  const res = await fetch("https://api.anthropic.com/v1/models?limit=100", {
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-  });
-  if (!res.ok) throw new Error(`Anthropic /v1/models returned ${res.status}`);
-  const body = (await res.json()) as { data?: Array<{ id?: string }> };
-  return (body.data ?? []).map((m) => m.id ?? "").filter(Boolean);
+type LiveProbe = (credential: ProbeCredential) => Promise<LiveModel[]>;
+
+/** Safety bound on list-models pagination — well above any real model count. */
+const MAX_PROBE_PAGES = 10;
+
+/** Anthropic: GET /v1/models → data[].{id,display_name}, paginated via after_id. */
+async function probeAnthropic(credential: ProbeCredential): Promise<LiveModel[]> {
+  const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
+  if (credential.kind === "oauth") {
+    headers.Authorization = `Bearer ${credential.value}`;
+    headers["anthropic-beta"] = "oauth-2025-04-20";
+  } else {
+    headers["x-api-key"] = credential.value;
+  }
+
+  const models: LiveModel[] = [];
+  let afterId: string | undefined;
+  for (let page = 0; page < MAX_PROBE_PAGES; page++) {
+    const url = new URL("https://api.anthropic.com/v1/models");
+    url.searchParams.set("limit", "100");
+    if (afterId) url.searchParams.set("after_id", afterId);
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(`Anthropic /v1/models returned ${res.status}`);
+    const body = (await res.json()) as {
+      data?: Array<{ id?: string; display_name?: string }>;
+      has_more?: boolean;
+      last_id?: string;
+    };
+    for (const m of body.data ?? []) {
+      if (m.id) models.push({ id: m.id, displayName: m.display_name });
+    }
+    if (!body.has_more || !body.last_id) break;
+    afterId = body.last_id;
+  }
+  return models;
 }
 
 /** OpenAI: GET /v1/models → data[].id. */
-async function probeOpenAI(apiKey: string): Promise<string[]> {
+async function probeOpenAI(credential: ProbeCredential): Promise<LiveModel[]> {
   const res = await fetch("https://api.openai.com/v1/models", {
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { Authorization: `Bearer ${credential.value}` },
   });
   if (!res.ok) throw new Error(`OpenAI /v1/models returned ${res.status}`);
   const body = (await res.json()) as { data?: Array<{ id?: string }> };
-  return (body.data ?? []).map((m) => m.id ?? "").filter(Boolean);
+  return (body.data ?? []).flatMap((m) => (m.id ? [{ id: m.id }] : []));
 }
 
-/** Gemini: GET /v1beta/models?key=... → models[].name (strip "models/" prefix). */
-async function probeGemini(apiKey: string): Promise<string[]> {
+/** Gemini: GET /v1beta/models?key=... → models[].{name,displayName} (strip "models/" prefix). */
+async function probeGemini(credential: ProbeCredential): Promise<LiveModel[]> {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(credential.value)}`,
   );
   if (!res.ok) throw new Error(`Gemini /v1beta/models returned ${res.status}`);
-  const body = (await res.json()) as { models?: Array<{ name?: string }> };
-  return (body.models ?? [])
-    .map((m) => m.name ?? "")
-    .map((name) => (name.startsWith("models/") ? name.slice("models/".length) : name))
-    .filter(Boolean);
+  const body = (await res.json()) as {
+    models?: Array<{ name?: string; displayName?: string }>;
+  };
+  return (body.models ?? []).flatMap((m) => {
+    const name = m.name ?? "";
+    const id = name.startsWith("models/") ? name.slice("models/".length) : name;
+    return id ? [{ id, displayName: m.displayName }] : [];
+  });
 }
 
 interface ProbeConfig {
   /** Redis cache key suffix (distinguishes providers sharing a DB column). */
   probeKey: AgentProviderId;
-  /** Secret name that holds the API key for the upstream probe. */
-  secretName: string;
-  /** Probe function that returns a list of upstream model ids. */
+  /** Ordered credential sources for the upstream probe — first one found wins. */
+  secretCandidates: Array<{ name: string; kind: ProbeCredential["kind"] }>;
+  /** Probe function that returns a list of upstream models. */
   probe: LiveProbe;
 }
 
 const PROBE_CONFIG: Partial<Record<AgentProviderId, ProbeConfig>> = {
-  anthropic: { probeKey: "anthropic", secretName: "ANTHROPIC_API_KEY", probe: probeAnthropic },
-  openai: { probeKey: "openai", secretName: "OPENAI_API_KEY", probe: probeOpenAI },
-  gemini: { probeKey: "gemini", secretName: "GEMINI_API_KEY", probe: probeGemini },
+  anthropic: {
+    probeKey: "anthropic",
+    // OAuth-token deployments (the recommended k8s mode) have no API key, so
+    // fall back to the Claude Code OAuth token for the probe.
+    secretCandidates: [
+      { name: "ANTHROPIC_API_KEY", kind: "api-key" },
+      { name: "CLAUDE_CODE_OAUTH_TOKEN", kind: "oauth" },
+    ],
+    probe: probeAnthropic,
+  },
+  openai: {
+    probeKey: "openai",
+    secretCandidates: [{ name: "OPENAI_API_KEY", kind: "api-key" }],
+    probe: probeOpenAI,
+  },
+  gemini: {
+    probeKey: "gemini",
+    secretCandidates: [{ name: "GEMINI_API_KEY", kind: "api-key" }],
+    probe: probeGemini,
+  },
 };
 
 /**
@@ -99,18 +153,27 @@ interface GetOptions {
   forceRefresh?: boolean;
 }
 
-async function readLiveIdsFromCache(
+async function readLiveModelsFromCache(
   provider: AgentProviderId,
   keyHash: string,
-): Promise<{ ids: string[]; refreshedAt: number } | null> {
+): Promise<{ models: LiveModel[]; refreshedAt: number } | null> {
   try {
     const redis = getRedisClient();
     const raw = await redis.get(buildCacheKey(provider, keyHash));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { ids?: string[]; refreshedAt?: number };
-    if (!Array.isArray(parsed.ids)) return null;
+    const parsed = JSON.parse(raw) as {
+      models?: LiveModel[];
+      ids?: string[]; // pre-displayName cache shape
+      refreshedAt?: number;
+    };
+    const models = Array.isArray(parsed.models)
+      ? parsed.models
+      : Array.isArray(parsed.ids)
+        ? parsed.ids.map((id) => ({ id }))
+        : null;
+    if (!models) return null;
     return {
-      ids: parsed.ids,
+      models,
       refreshedAt: parsed.refreshedAt ?? Math.floor(Date.now() / 1000),
     };
   } catch {
@@ -118,17 +181,17 @@ async function readLiveIdsFromCache(
   }
 }
 
-async function writeLiveIdsToCache(
+async function writeLiveModelsToCache(
   provider: AgentProviderId,
   keyHash: string,
-  ids: string[],
+  models: LiveModel[],
 ): Promise<number> {
   const refreshedAt = Math.floor(Date.now() / 1000);
   try {
     const redis = getRedisClient();
     await redis.set(
       buildCacheKey(provider, keyHash),
-      JSON.stringify({ ids, refreshedAt }),
+      JSON.stringify({ models, refreshedAt }),
       "EX",
       CACHE_TTL_SECONDS,
     );
@@ -171,15 +234,22 @@ export async function getProviderOptions(
     };
   }
 
-  // Look up the configured API key for the probe. Missing → baseline only.
-  let apiKey: string | null = null;
-  try {
-    apiKey = await retrieveSecret(probeConfig.secretName, "global", opts.workspaceId ?? undefined);
-  } catch {
-    // No configured key — nothing to probe with.
+  // Look up a configured credential for the probe (first candidate that
+  // resolves wins). None found → baseline only.
+  let credential: ProbeCredential | null = null;
+  for (const candidate of probeConfig.secretCandidates) {
+    try {
+      const value = await retrieveSecret(candidate.name, "global", opts.workspaceId ?? undefined);
+      if (value) {
+        credential = { value, kind: candidate.kind };
+        break;
+      }
+    } catch {
+      // Not configured — try the next candidate.
+    }
   }
 
-  if (!apiKey) {
+  if (!credential) {
     return {
       catalog: baseline,
       source: "baseline",
@@ -188,13 +258,13 @@ export async function getProviderOptions(
     };
   }
 
-  const keyHash = hashKey(apiKey);
+  const keyHash = hashKey(credential.value);
 
   if (!opts.forceRefresh) {
-    const cached = await readLiveIdsFromCache(provider, keyHash);
+    const cached = await readLiveModelsFromCache(provider, keyHash);
     if (cached) {
       return {
-        catalog: mergeLiveModels(baseline, cached.ids),
+        catalog: mergeLiveModels(baseline, cached.models),
         source: "live",
         cached: true,
         refreshedAt: cached.refreshedAt,
@@ -203,10 +273,10 @@ export async function getProviderOptions(
   }
 
   try {
-    const ids = await probeConfig.probe(apiKey);
-    const refreshedAt = await writeLiveIdsToCache(provider, keyHash, ids);
+    const models = await probeConfig.probe(credential);
+    const refreshedAt = await writeLiveModelsToCache(provider, keyHash, models);
     return {
-      catalog: mergeLiveModels(baseline, ids),
+      catalog: mergeLiveModels(baseline, models),
       source: "live",
       cached: false,
       refreshedAt,

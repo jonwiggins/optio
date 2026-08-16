@@ -201,13 +201,24 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
           "workspace is scoped on subsequent requests.",
         tags: ["Workspaces"],
         params: IdParamsSchema,
-        response: { 200: OkResponseSchema, 401: ErrorResponseSchema },
+        response: {
+          200: OkResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
       if (!req.user) return reply.status(401).send({ error: "Authentication required" });
       const { id } = req.params;
-      await workspaceService.switchWorkspace(req.user.id, id);
+      try {
+        await workspaceService.switchWorkspace(req.user.id, id);
+      } catch (err) {
+        if (err instanceof Error && err.message === "Not a member of this workspace") {
+          return reply.status(403).send({ error: err.message });
+        }
+        throw err;
+      }
       reply.send({ ok: true });
     },
   );

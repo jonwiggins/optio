@@ -54,8 +54,9 @@ export function computeSignature(secret: string, timestamp: number, path: string
 /**
  * Verify an internal request's HMAC signature.
  *
- * Also accepts the legacy Bearer token format for backward compatibility
- * during rollout (old agent images that haven't been rebuilt yet).
+ * Legacy Bearer token support is disabled by default. It can be re-enabled
+ * temporarily with OPTIO_ALLOW_LEGACY_INTERNAL_BEARER=1 during a controlled
+ * agent-image rollout.
  *
  * Returns null if valid, or an error string if invalid.
  */
@@ -77,6 +78,9 @@ export function verifyInternalRequest(
   // Fall back to legacy Bearer token for backward compatibility
   const authHeader = (headers.authorization ?? "") as string;
   if (authHeader.startsWith("Bearer ")) {
+    if (process.env.OPTIO_ALLOW_LEGACY_INTERNAL_BEARER !== "1") {
+      return { error: "Legacy bearer authentication disabled", status: 401 };
+    }
     return verifyBearerToken(authHeader, secret);
   }
 

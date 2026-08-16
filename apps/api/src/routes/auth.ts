@@ -7,10 +7,7 @@ import {
   getClaudeUsage,
   invalidateCredentialsCache,
 } from "../services/auth-service.js";
-import {
-  hasRecentClaudeAuthFailure,
-  getRecentAuthFailures,
-} from "../services/auth-failure-detector.js";
+import { getRecentAuthFailures } from "../services/auth-failure-detector.js";
 import { getOAuthProvider, getEnabledProviders, isAuthDisabled } from "../services/oauth/index.js";
 import {
   createSession,
@@ -20,7 +17,7 @@ import {
 } from "../services/session-service.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/api-key-service.js";
 import { storeUserGitHubTokens } from "../services/github-token-service.js";
-import { SESSION_COOKIE_NAME } from "../plugins/auth.js";
+import { SESSION_COOKIE_NAME, requireRole } from "../plugins/auth.js";
 import { getRedisClient } from "../services/event-bus.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 
@@ -207,6 +204,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
   app.get(
     "/api/auth/claude-token",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         hide: true,
         operationId: "getClaudeToken",
@@ -331,6 +329,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/auth/refresh",
     {
+      preHandler: [requireRole("admin")],
       schema: {
         operationId: "refreshAuthCache",
         summary: "Refresh the credential cache",
@@ -657,7 +656,6 @@ export async function authRoutes(rawApp: FastifyInstance) {
   const CLI_STATE_PREFIX = "cli_flow:";
   const CLI_STATE_TTL_SECS = 600; // 10 minutes
   const CLI_CODE_PREFIX = "cli_code:";
-  const CLI_CODE_TTL_SECS = 300; // 5 minutes
 
   const CLI_RATE_LIMIT = {
     config: {
@@ -667,6 +665,30 @@ export async function authRoutes(rawApp: FastifyInstance) {
       },
     },
   };
+
+  function validateCliCallback(callback: string): string | null {
+    let parsed: URL;
+    try {
+      parsed = new URL(callback);
+    } catch {
+      return "Callback must be a valid URL";
+    }
+
+    if (parsed.protocol !== "http:") {
+      return "CLI callback must use http:// loopback";
+    }
+    if (parsed.username || parsed.password) {
+      return "CLI callback must not include credentials";
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    const isLoopback = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
+    if (!isLoopback) {
+      return "CLI callback must target localhost or a loopback address";
+    }
+
+    return null;
+  }
 
   app.post(
     "/api/auth/cli/start",
@@ -705,6 +727,16 @@ export async function authRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: `Unknown provider: ${provider}` });
       }
 
+      const callbackError = validateCliCallback(callback);
+      if (callbackError) {
+        return reply.status(400).send({ error: callbackError });
+      }
+
+      const pkceMethod = code_challenge_method ?? "S256";
+      if (pkceMethod !== "S256") {
+        return reply.status(400).send({ error: "Only S256 PKCE is supported" });
+      }
+
       // Store CLI flow data in Redis
       const redis = getRedisClient();
       await redis.setex(
@@ -714,7 +746,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
           provider,
           callback,
           codeChallenge: code_challenge,
-          codeChallengeMethod: code_challenge_method ?? "S256",
+          codeChallengeMethod: pkceMethod,
         }),
       );
 

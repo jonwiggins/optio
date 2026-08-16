@@ -28,31 +28,48 @@ function isInCidr(ip: string, cidr: string): boolean {
   return (ipToLong(ip) & mask) === (ipToLong(base) & mask);
 }
 
-const BLOCKED_CIDRS = [
+const BLOCKED_IPV4_CIDRS = [
   "10.0.0.0/8", // RFC 1918
   "172.16.0.0/12", // RFC 1918
   "192.168.0.0/16", // RFC 1918
   "127.0.0.0/8", // Loopback
   "169.254.0.0/16", // Link-local (AWS/GCP metadata)
   "0.0.0.0/8", // "This" network
+  "100.64.0.0/10", // Carrier-grade NAT
+  "192.0.0.0/24", // IETF protocol assignments
+  "192.0.2.0/24", // TEST-NET-1
+  "192.88.99.0/24", // Deprecated 6to4 relay anycast
+  "198.18.0.0/15", // Benchmarking
+  "198.51.100.0/24", // TEST-NET-2
+  "203.0.113.0/24", // TEST-NET-3
+  "224.0.0.0/4", // Multicast
+  "240.0.0.0/4", // Reserved
 ];
 
 function isPrivateIPv4(ip: string): boolean {
-  return BLOCKED_CIDRS.some((cidr) => isInCidr(ip, cidr));
+  return BLOCKED_IPV4_CIDRS.some((cidr) => isInCidr(ip, cidr));
 }
 
 function isPrivateIPv6(ip: string): boolean {
   const lower = ip.toLowerCase();
   // ::1 loopback
   if (lower === "::1" || lower === "0:0:0:0:0:0:0:1") return true;
-  // fe80::/10 link-local
-  if (lower.startsWith("fe80:")) return true;
-  // fc00::/7 unique-local
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
   // :: unspecified
   if (lower === "::") return true;
-  // IPv4-mapped IPv6 (::ffff:x.x.x.x)
-  const v4Mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+
+  const firstHextet = parseInt(lower.split(":")[0] || "0", 16);
+  // fe80::/10 link-local
+  if ((firstHextet & 0xffc0) === 0xfe80) return true;
+  // fc00::/7 unique-local
+  if ((firstHextet & 0xfe00) === 0xfc00) return true;
+  // ff00::/8 multicast
+  if ((firstHextet & 0xff00) === 0xff00) return true;
+  // 2001:db8::/32 documentation
+  const secondHextet = parseInt(lower.split(":")[1] || "0", 16);
+  if (firstHextet === 0x2001 && secondHextet === 0x0db8) return true;
+
+  // IPv4-compatible and IPv4-mapped IPv6 (::x.x.x.x / ::ffff:x.x.x.x)
+  const v4Mapped = lower.match(/::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
   if (v4Mapped) return isPrivateIPv4(v4Mapped[1]);
   return false;
 }
@@ -72,14 +89,16 @@ const BLOCKED_HOST_PATTERNS = [
 const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 function isBlockedHostname(hostname: string): boolean {
+  const normalized = hostname.replace(/\.+$/, "").toLowerCase();
+
   // Check patterns
-  if (BLOCKED_HOST_PATTERNS.some((re) => re.test(hostname))) return true;
+  if (BLOCKED_HOST_PATTERNS.some((re) => re.test(normalized))) return true;
 
   // If the hostname is an IPv4 literal, check the CIDR ranges
-  if (IPV4_RE.test(hostname) && isPrivateIPv4(hostname)) return true;
+  if (IPV4_RE.test(normalized) && isPrivateIPv4(normalized)) return true;
 
   // Bracket-stripped IPv6 literal
-  const v6 = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+  const v6 = normalized.startsWith("[") ? normalized.slice(1, -1) : normalized;
   if (v6.includes(":") && isPrivateIPv6(v6)) return true;
 
   return false;
@@ -139,7 +158,7 @@ export async function assertSsrfSafe(url: string): Promise<void> {
   }
 
   const parsed = new URL(url);
-  const hostname = parsed.hostname;
+  const hostname = parsed.hostname.replace(/\.+$/, "");
 
   // Skip DNS resolution for IP literals — already checked above
   if (IPV4_RE.test(hostname)) return;
@@ -148,12 +167,14 @@ export async function assertSsrfSafe(url: string): Promise<void> {
 
   // Resolve hostname and check resulting IPs (catches DNS rebinding)
   try {
-    const { address, family } = await dns.lookup(hostname);
-    if (family === 4 && isPrivateIPv4(address)) {
-      throw new SsrfError(`DNS resolved ${hostname} to private address ${address}`);
-    }
-    if (family === 6 && isPrivateIPv6(address)) {
-      throw new SsrfError(`DNS resolved ${hostname} to private address ${address}`);
+    const records = await dns.lookup(hostname, { all: true, verbatim: true });
+    for (const { address, family } of records) {
+      if (family === 4 && isPrivateIPv4(address)) {
+        throw new SsrfError(`DNS resolved ${hostname} to private address ${address}`);
+      }
+      if (family === 6 && isPrivateIPv6(address)) {
+        throw new SsrfError(`DNS resolved ${hostname} to private address ${address}`);
+      }
     }
   } catch (err) {
     if (err instanceof SsrfError) throw err;

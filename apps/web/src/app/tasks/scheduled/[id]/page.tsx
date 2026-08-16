@@ -349,6 +349,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
                 <option value="copilot">GitHub Copilot</option>
                 <option value="opencode">OpenCode</option>
                 <option value="gemini">Google Gemini</option>
+                <option value="cursor">Cursor</option>
               </select>
             </Field>
           </div>

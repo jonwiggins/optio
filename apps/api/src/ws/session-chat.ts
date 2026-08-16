@@ -15,6 +15,7 @@ import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import { publishSessionEvent } from "../services/event-bus.js";
 import type { ExecSession, OptioSettings } from "@optio/shared";
 import { authenticateWs, extractSessionToken } from "./ws-auth.js";
+import { requireWsRole } from "./ws-authz.js";
 import {
   getClientIp,
   trackConnection,
@@ -74,6 +75,13 @@ export async function sessionChatWs(app: FastifyInstance) {
 
     if (session.userId && session.userId !== user.id) {
       socket.close(4403, "Not authorized for this session");
+      releaseConnection(clientIp);
+      return;
+    }
+
+    // Chat drives an agent that mutates the workspace — viewers are read-only.
+    if (!(await requireWsRole(socket, user, "member", session.workspaceId))) {
+      releaseConnection(clientIp);
       return;
     }
 

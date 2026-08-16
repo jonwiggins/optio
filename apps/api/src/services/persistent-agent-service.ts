@@ -29,6 +29,18 @@ import { logger } from "../logger.js";
 
 // ── CRUD ────────────────────────────────────────────────────────────────────
 
+/**
+ * Workspace predicate for `persistent_agents` queries. `null` scopes to the
+ * default (workspace-less) tenant, matching the local-dev / auth-disabled
+ * world where every agent row has a null `workspace_id`. Mirrors the pattern
+ * used by `getPersistentAgentBySlug` and `getPersistentAgentStats`.
+ */
+function wsPredicate(workspaceId: string | null) {
+  return workspaceId === null
+    ? isNull(persistentAgents.workspaceId)
+    : eq(persistentAgents.workspaceId, workspaceId);
+}
+
 export async function listPersistentAgents(workspaceId?: string | null) {
   const baseQuery = db.select().from(persistentAgents).orderBy(desc(persistentAgents.updatedAt));
   if (workspaceId !== undefined) {
@@ -41,8 +53,28 @@ export async function listPersistentAgents(workspaceId?: string | null) {
   return baseQuery;
 }
 
-export async function getPersistentAgent(id: string) {
+/**
+ * Unscoped lookup by primary key. Callers that legitimately operate outside a
+ * user's workspace context — workers, the reconciler, trigger/webhook dispatch,
+ * and internal service self-calls — use this. **User-facing HTTP routes must
+ * NOT use this**; they resolve agents through `getPersistentAgentScoped` so a
+ * caller can never reach another tenant's agent by id.
+ */
+export async function getPersistentAgentUnscoped(id: string) {
   const [row] = await db.select().from(persistentAgents).where(eq(persistentAgents.id, id));
+  return row ?? null;
+}
+
+/**
+ * Workspace-scoped lookup by primary key. Returns the agent only when it lives
+ * in `workspaceId`; a foreign or missing id resolves to `null` so routes can
+ * 404 without leaking cross-tenant existence.
+ */
+export async function getPersistentAgentScoped(id: string, workspaceId: string | null) {
+  const [row] = await db
+    .select()
+    .from(persistentAgents)
+    .where(and(eq(persistentAgents.id, id), wsPredicate(workspaceId)));
   return row ?? null;
 }
 
@@ -129,30 +161,41 @@ export interface UpdatePersistentAgentInput {
   enabled?: boolean;
 }
 
-export async function updatePersistentAgent(id: string, input: UpdatePersistentAgentInput) {
+export async function updatePersistentAgent(
+  id: string,
+  input: UpdatePersistentAgentInput,
+  workspaceId: string | null,
+) {
   const [row] = await db
     .update(persistentAgents)
     .set({ ...input, updatedAt: new Date() })
-    .where(eq(persistentAgents.id, id))
+    .where(and(eq(persistentAgents.id, id), wsPredicate(workspaceId)))
     .returning();
   return row ?? null;
 }
 
-export async function deletePersistentAgent(id: string): Promise<boolean> {
+export async function deletePersistentAgent(
+  id: string,
+  workspaceId: string | null,
+): Promise<boolean> {
   const deleted = await db
     .delete(persistentAgents)
-    .where(eq(persistentAgents.id, id))
+    .where(and(eq(persistentAgents.id, id), wsPredicate(workspaceId)))
     .returning({ id: persistentAgents.id });
   return deleted.length > 0;
 }
 
 // ── Control intent ──────────────────────────────────────────────────────────
 
-export async function setControlIntent(id: string, intent: PersistentAgentControlIntent | null) {
+export async function setControlIntent(
+  id: string,
+  intent: PersistentAgentControlIntent | null,
+  workspaceId: string | null,
+) {
   const [row] = await db
     .update(persistentAgents)
     .set({ controlIntent: intent, updatedAt: new Date() })
-    .where(eq(persistentAgents.id, id))
+    .where(and(eq(persistentAgents.id, id), wsPredicate(workspaceId)))
     .returning();
   return row ?? null;
 }
@@ -258,7 +301,7 @@ export interface ReceiveMessageInput {
 }
 
 export async function receivePersistentAgentMessage(input: ReceiveMessageInput) {
-  const agent = await getPersistentAgent(input.agentId);
+  const agent = await getPersistentAgentUnscoped(input.agentId);
   if (!agent) throw new Error(`Persistent agent ${input.agentId} not found`);
 
   const [msg] = await db
@@ -368,7 +411,7 @@ export interface CreateTurnInput {
 }
 
 export async function createPersistentAgentTurn(input: CreateTurnInput) {
-  const agent = await getPersistentAgent(input.agentId);
+  const agent = await getPersistentAgentUnscoped(input.agentId);
   if (!agent) throw new Error(`Persistent agent ${input.agentId} not found`);
 
   // Determine next turn number atomically (best-effort).
@@ -434,7 +477,7 @@ export async function haltPersistentAgentTurn(input: HaltTurnInput) {
     .returning();
 
   if (turn) {
-    const agent = await getPersistentAgent(turn.agentId);
+    const agent = await getPersistentAgentUnscoped(turn.agentId);
     if (agent) {
       await publishPersistentAgentEvent({
         type: "persistent_agent:turn_halted",
@@ -496,7 +539,7 @@ export async function appendPersistentAgentLog(input: AppendLogInput) {
     })
     .returning();
 
-  const agent = await getPersistentAgent(input.agentId);
+  const agent = await getPersistentAgentUnscoped(input.agentId);
   if (agent) {
     await publishPersistentAgentEvent({
       type: "persistent_agent:log",

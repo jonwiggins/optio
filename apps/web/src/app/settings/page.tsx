@@ -547,6 +547,7 @@ const SKILL_AGENT_TYPES = [
   { value: "copilot", label: "GitHub Copilot" },
   { value: "gemini", label: "Google Gemini" },
   { value: "opencode", label: "OpenCode" },
+  { value: "cursor", label: "Cursor" },
 ];
 
 type SkillExtraFile = { relativePath: string; content: string };

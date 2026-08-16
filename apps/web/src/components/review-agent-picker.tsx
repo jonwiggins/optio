@@ -25,6 +25,7 @@ const AGENT_LABELS: Record<AgentType, string> = {
   opencode: "OpenCode",
   gemini: "Google Gemini",
   openclaw: "OpenClaw",
+  cursor: "Cursor",
 };
 
 export interface ReviewAgentPickerProps {

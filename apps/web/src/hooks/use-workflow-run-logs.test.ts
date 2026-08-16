@@ -105,6 +105,36 @@ describe("useWorkflowRunLogs", () => {
     expect(result.current.logs[2].content).toBe("New live event");
   });
 
+  it("ignores catchUp WebSocket frames while appending normal live frames", async () => {
+    const { result } = renderHook(() => useWorkflowRunLogs("run-1", true));
+
+    await waitFor(() => {
+      expect(result.current.logs).toHaveLength(2);
+    });
+
+    act(() => {
+      wsHandler?.({
+        content: "catch-up frame",
+        stream: "stdout",
+        timestamp: "2025-06-01T00:00:02Z",
+        logType: "text",
+        catchUp: true,
+      });
+      wsHandler?.({
+        content: "live frame",
+        stream: "stdout",
+        timestamp: "2025-06-01T00:00:03Z",
+        logType: "text",
+      });
+    });
+
+    expect(result.current.logs.map((l) => l.content)).toEqual([
+      "Starting agent",
+      "Running tool",
+      "live frame",
+    ]);
+  });
+
   it("deduplicates identical events", async () => {
     const { result } = renderHook(() => useWorkflowRunLogs("run-1", true));
 

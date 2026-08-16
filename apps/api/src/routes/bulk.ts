@@ -71,6 +71,7 @@ export async function bulkRoutes(rawApp: FastifyInstance) {
         }
       }
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.bulk_retry",
         params: {},
@@ -126,6 +127,7 @@ export async function bulkRoutes(rawApp: FastifyInstance) {
         }
       }
       logAction({
+        workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
         action: "task.bulk_cancel",
         params: {},

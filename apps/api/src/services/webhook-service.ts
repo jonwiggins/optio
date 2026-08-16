@@ -5,6 +5,7 @@ import { webhooks, webhookDeliveries } from "../db/schema.js";
 import { encrypt, decrypt, ALG_AES_256_GCM_V1 } from "./secret-service.js";
 import { HmacSha256Signer } from "./crypto/signer.js";
 import { logger } from "../logger.js";
+import { readLimitedResponseText } from "../utils/http-response.js";
 
 export type WebhookEvent =
   | "task.completed"
@@ -28,6 +29,9 @@ export const VALID_EVENTS: WebhookEvent[] = [
   "workflow_run.completed",
   "workflow_run.failed",
 ];
+
+const WEBHOOK_TIMEOUT_MS = 10_000;
+const MAX_RESPONSE_BODY_BYTES = 2_000;
 
 export interface WebhookRecord {
   id: string;
@@ -57,6 +61,7 @@ function decryptWebhookRow(row: typeof webhooks.$inferSelect): WebhookRecord {
         authTag: row.secretAuthTag,
       },
       aad,
+      `webhook ${row.id} secret`,
     );
   }
   return {
@@ -363,22 +368,18 @@ export async function deliverWebhook(
     await assertSsrfSafe(webhook.url);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000); // 10s timeout
+    const timeout = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
 
     const res = await fetch(webhook.url, {
       method: "POST",
       headers,
       body: payloadStr,
       signal: controller.signal,
-    });
+      redirect: "error",
+    }).finally(() => clearTimeout(timeout));
 
-    clearTimeout(timeout);
     statusCode = res.status;
-    responseBody = await res.text().catch(() => undefined);
-    // Truncate response body to avoid storing huge payloads
-    if (responseBody && responseBody.length > 2000) {
-      responseBody = responseBody.slice(0, 2000) + "...(truncated)";
-    }
+    responseBody = await readLimitedResponseText(res, MAX_RESPONSE_BODY_BYTES);
     success = res.ok;
     if (!res.ok) {
       error = `HTTP ${res.status}: ${responseBody?.slice(0, 200) ?? ""}`;

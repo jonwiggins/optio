@@ -11,7 +11,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "^15.3.3",
+    "next": "^15.5.16",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
@@ -22,6 +22,6 @@
     "@types/react-dom": "^19.1.0",
     "tailwindcss": "^4.1.8",
     "typescript": "^5.7.0",
-    "vitest": "^3.2.1"
+    "vitest": "^3.2.6"
   }
 }

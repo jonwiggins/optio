@@ -90,6 +90,7 @@ const AGENT_TYPE_OPTIONS = [
   { value: "codex", label: "Codex" },
   { value: "copilot", label: "Copilot" },
   { value: "opencode", label: "OpenCode" },
+  { value: "cursor", label: "Cursor" },
 ];
 
 function getDateFromTimeFilter(timeFilter: string): string | undefined {

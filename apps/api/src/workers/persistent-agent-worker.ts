@@ -35,6 +35,7 @@ import { parseCodexEvent } from "../services/codex-event-parser.js";
 import { parseCopilotEvent } from "../services/copilot-event-parser.js";
 import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
 import { parseGeminiEvent } from "../services/gemini-event-parser.js";
+import { parseCursorEvent } from "../services/cursor-event-parser.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { logger } from "../logger.js";
@@ -172,6 +173,16 @@ function buildAgentCommand(
         `gemini ${geminiModelFlag} -p "$OPTIO_PROMPT"`,
       ];
     }
+    case "cursor": {
+      const cursorModelFlag = env.OPTIO_CURSOR_MODEL
+        ? ` --model ${JSON.stringify(env.OPTIO_CURSOR_MODEL)}`
+        : "";
+      return [
+        `echo "[optio] Running persistent agent turn (Cursor)..."`,
+        `cursor-agent --print --trust --force \\`,
+        `  --output-format stream-json${cursorModelFlag} "$OPTIO_PROMPT"`,
+      ];
+    }
     default:
       return [`echo "Unknown agent runtime: ${agentRuntime}"`, `exit 1`];
   }
@@ -196,6 +207,8 @@ function pickEventParser(agentRuntime: string) {
       return parseOpenCodeEvent;
     case "gemini":
       return parseGeminiEvent;
+    case "cursor":
+      return parseCursorEvent;
     default:
       return parseClaudeEvent;
   }
@@ -211,7 +224,7 @@ export function startPersistentAgentWorker() {
       const log = logger.child({ agentId, jobId: job.id, persistentAgent: true });
 
       // 1. Verify agent is in QUEUED state and claim by transitioning to PROVISIONING.
-      const agent = await paService.getPersistentAgent(agentId);
+      const agent = await paService.getPersistentAgentUnscoped(agentId);
       if (!agent) {
         log.warn("Persistent agent not found, skipping job");
         return;
@@ -238,7 +251,7 @@ export function startPersistentAgentWorker() {
       }
 
       // Re-fetch to get the new updated_at for downstream CAS.
-      const claimedAgent = await paService.getPersistentAgent(agentId);
+      const claimedAgent = await paService.getPersistentAgentUnscoped(agentId);
       if (!claimedAgent) return;
 
       let turn: { id: string; turnNumber: number } | null = null;
@@ -290,7 +303,7 @@ export function startPersistentAgentWorker() {
         }
 
         // Transition PROVISIONING → RUNNING (CAS).
-        const provAgent = await paService.getPersistentAgent(agentId);
+        const provAgent = await paService.getPersistentAgentUnscoped(agentId);
         if (!provAgent) throw new Error("Agent disappeared during provisioning");
         await paService.transitionPersistentAgentState(
           agentId,
@@ -315,7 +328,10 @@ export function startPersistentAgentWorker() {
             claimedAgent.workspaceId ?? null,
           ).catch(() => null)) as string | null) ?? "api-key";
 
-        const apiUrl = process.env.PUBLIC_URL || process.env.OPTIO_API_URL || "";
+        const apiUrl =
+          process.env.OPTIO_API_INTERNAL_URL ??
+          process.env.OPTIO_API_URL ??
+          `http://localhost:${process.env.API_PORT ?? "4000"}`;
         const env: Record<string, string> = {
           ...resolvedSecrets,
           OPTIO_PROMPT: renderedPrompt,
@@ -458,7 +474,7 @@ export function startPersistentAgentWorker() {
 
         if (success) {
           // RUNNING → IDLE on success, reset failure counter.
-          const after = await paService.getPersistentAgent(agentId);
+          const after = await paService.getPersistentAgentUnscoped(agentId);
           if (after) {
             await paService.transitionPersistentAgentState(
               agentId,
@@ -475,7 +491,7 @@ export function startPersistentAgentWorker() {
           }
         } else {
           // Failure path — escalate or recover.
-          const after = await paService.getPersistentAgent(agentId);
+          const after = await paService.getPersistentAgentUnscoped(agentId);
           if (after) {
             const nextFailures = after.consecutiveFailures + 1;
             const escalate = nextFailures >= after.consecutiveFailureLimit;
@@ -506,7 +522,7 @@ export function startPersistentAgentWorker() {
             .catch(() => {});
         }
         // Try to recover the agent state to IDLE so the reconciler can decide what to do.
-        const after = await paService.getPersistentAgent(agentId);
+        const after = await paService.getPersistentAgentUnscoped(agentId);
         if (after && after.state !== PersistentAgentState.IDLE) {
           const nextFailures = after.consecutiveFailures + 1;
           const escalate = nextFailures >= after.consecutiveFailureLimit;

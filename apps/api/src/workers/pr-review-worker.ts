@@ -34,6 +34,7 @@ import { parseCodexEvent } from "../services/codex-event-parser.js";
 import { parseCopilotEvent } from "../services/copilot-event-parser.js";
 import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
 import { parseGeminiEvent } from "../services/gemini-event-parser.js";
+import { parseCursorEvent } from "../services/cursor-event-parser.js";
 import { parseOpenClawEvent } from "../services/openclaw-event-parser.js";
 import * as repoPool from "../services/repo-pool-service.js";
 import {
@@ -300,6 +301,8 @@ export function startPrReviewWorker() {
             : (repoConfig.opencodeModel ?? opencodeDefaultModel);
         const geminiModel =
           agentType === "gemini" ? resolvedModel : (repoConfig.geminiModel ?? undefined);
+        const cursorModel =
+          agentType === "cursor" ? resolvedModel : (repoConfig.cursorModel ?? undefined);
 
         const agentConfig = adapter.buildContainerConfig({
           taskId: run.id,
@@ -322,6 +325,7 @@ export function startPrReviewWorker() {
           opencodeModel,
           opencodeAgent: repoConfig.opencodeAgent ?? undefined,
           opencodeBaseUrl: repoConfig.opencodeBaseUrl ?? opencodeDefaultBaseUrl,
+          cursorModel,
           geminiAuthMode,
           geminiModel,
           geminiApprovalMode:
@@ -588,7 +592,9 @@ export function startPrReviewWorker() {
                       ? parseGeminiEvent(line, run.id)
                       : agentType === "openclaw"
                         ? parseOpenClawEvent(line, run.id)
-                        : parseClaudeEvent(line, run.id);
+                        : agentType === "cursor"
+                          ? parseCursorEvent(line, run.id)
+                          : parseClaudeEvent(line, run.id);
 
             if (parsed.sessionId && !sessionId) {
               sessionId = parsed.sessionId;
@@ -640,7 +646,9 @@ export function startPrReviewWorker() {
                     ? parseGeminiEvent(lineBuf, run.id)
                     : agentType === "openclaw"
                       ? parseOpenClawEvent(lineBuf, run.id)
-                      : parseClaudeEvent(lineBuf, run.id);
+                      : agentType === "cursor"
+                        ? parseCursorEvent(lineBuf, run.id)
+                        : parseClaudeEvent(lineBuf, run.id);
           for (const entry of parsed.entries) {
             await appendRunLog(run, entry.content, "stdout", entry.type, entry.metadata);
           }

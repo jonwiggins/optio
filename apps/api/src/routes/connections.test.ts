@@ -15,6 +15,7 @@ const mockUpdateConnection = vi.fn();
 const mockDeleteConnection = vi.fn();
 const mockTestConnection = vi.fn();
 const mockListAssignments = vi.fn();
+const mockGetAssignment = vi.fn();
 const mockCreateAssignment = vi.fn();
 const mockUpdateAssignment = vi.fn();
 const mockDeleteAssignment = vi.fn();
@@ -32,6 +33,7 @@ vi.mock("../services/connection-service.js", () => ({
   deleteConnection: (...args: unknown[]) => mockDeleteConnection(...args),
   testConnection: (...args: unknown[]) => mockTestConnection(...args),
   listAssignments: (...args: unknown[]) => mockListAssignments(...args),
+  getAssignment: (...args: unknown[]) => mockGetAssignment(...args),
   createAssignment: (...args: unknown[]) => mockCreateAssignment(...args),
   updateAssignment: (...args: unknown[]) => mockUpdateAssignment(...args),
   deleteAssignment: (...args: unknown[]) => mockDeleteAssignment(...args),
@@ -363,6 +365,15 @@ describe("GET /api/connections/:id/assignments", () => {
 
     expect(res.statusCode).toBe(404);
   });
+
+  it("returns 404 for a connection in another workspace (no assignment read)", async () => {
+    mockGetConnection.mockResolvedValue({ id: "conn-1", workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "GET", url: "/api/connections/conn-1/assignments" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockListAssignments).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/connections/:id/assignments", () => {
@@ -405,6 +416,34 @@ describe("POST /api/connections/:id/assignments", () => {
 
     expect(res.statusCode).toBe(404);
   });
+
+  it("returns 404 for a connection in another workspace (no assignment created)", async () => {
+    mockGetConnection.mockResolvedValue({ id: "conn-1", workspaceId: "ws-other" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/connections/conn-1/assignments",
+      payload: { repoId: "repo-1", permission: "read" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockCreateAssignment).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(connectionRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({
+      method: "POST",
+      url: "/api/connections/conn-1/assignments",
+      payload: { repoId: "repo-1", permission: "read" },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockCreateAssignment).not.toHaveBeenCalled();
+  });
 });
 
 describe("PATCH /api/connection-assignments/:id", () => {
@@ -412,6 +451,8 @@ describe("PATCH /api/connection-assignments/:id", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockGetAssignment.mockResolvedValue({ id: "asgn-1", connectionId: "conn-1" });
+    mockGetConnection.mockResolvedValue({ id: "conn-1", workspaceId: "ws-1" });
     app = await buildTestApp();
   });
 
@@ -427,6 +468,47 @@ describe("PATCH /api/connection-assignments/:id", () => {
     expect(res.statusCode).toBe(200);
     expect(mockUpdateAssignment).toHaveBeenCalledWith("asgn-1", { permission: "write" });
   });
+
+  it("returns 404 when the assignment does not exist (no update)", async () => {
+    mockGetAssignment.mockResolvedValue(null);
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/connection-assignments/nope",
+      payload: { permission: "write" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockUpdateAssignment).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when the owning connection is in another workspace (no update)", async () => {
+    mockGetConnection.mockResolvedValue({ id: "conn-1", workspaceId: "ws-other" });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/connection-assignments/asgn-1",
+      payload: { permission: "write" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockUpdateAssignment).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(connectionRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({
+      method: "PATCH",
+      url: "/api/connection-assignments/asgn-1",
+      payload: { permission: "write" },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockUpdateAssignment).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE /api/connection-assignments/:id", () => {
@@ -434,6 +516,8 @@ describe("DELETE /api/connection-assignments/:id", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockGetAssignment.mockResolvedValue({ id: "asgn-1", connectionId: "conn-1" });
+    mockGetConnection.mockResolvedValue({ id: "conn-1", workspaceId: "ws-1" });
     app = await buildTestApp();
   });
 
@@ -443,6 +527,38 @@ describe("DELETE /api/connection-assignments/:id", () => {
     const res = await app.inject({ method: "DELETE", url: "/api/connection-assignments/asgn-1" });
 
     expect(res.statusCode).toBe(204);
+  });
+
+  it("returns 404 when the assignment does not exist (no delete)", async () => {
+    mockGetAssignment.mockResolvedValue(null);
+
+    const res = await app.inject({ method: "DELETE", url: "/api/connection-assignments/nope" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockDeleteAssignment).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when the owning connection is in another workspace (no delete)", async () => {
+    mockGetConnection.mockResolvedValue({ id: "conn-1", workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "DELETE", url: "/api/connection-assignments/asgn-1" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockDeleteAssignment).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(connectionRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({
+      method: "DELETE",
+      url: "/api/connection-assignments/asgn-1",
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockDeleteAssignment).not.toHaveBeenCalled();
   });
 });
 

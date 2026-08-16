@@ -462,8 +462,9 @@ describe("execRunInPod", () => {
     const execCall = mockRuntimeExec.mock.calls[0];
     expect(execCall[1][0]).toBe("bash");
     expect(execCall[1][1]).toBe("-c");
-    // The script should contain the base64-encoded env
-    expect(execCall[1][2]).toContain("base64");
+    // Env vars are embedded as inert single-quoted exports (no eval/word-splitting)
+    expect(execCall[1][2]).toContain("export MY_VAR='hello'");
+    expect(execCall[1][2]).not.toContain("eval $(");
     // And cd into per-run working directory
     expect(execCall[1][2]).toContain("/workspace/runs/run-1");
   });

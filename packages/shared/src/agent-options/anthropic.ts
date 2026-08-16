@@ -11,10 +11,16 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
   modelField: "claudeModel",
   models: [
     {
+      id: "claude-opus-4-8",
+      label: "Opus 4.8",
+      family: "opus",
+      latest: true,
+      source: "baseline",
+    },
+    {
       id: "claude-opus-4-7",
       label: "Opus 4.7",
       family: "opus",
-      latest: true,
       source: "baseline",
     },
     {
@@ -43,11 +49,18 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
       latest: true,
       source: "baseline",
     },
+    {
+      id: "claude-fable-5",
+      label: "Fable 5",
+      family: "fable",
+      source: "baseline",
+    },
   ],
   aliases: {
-    opus: "claude-opus-4-7",
+    opus: "claude-opus-4-8",
     sonnet: "claude-sonnet-4-6",
     haiku: "claude-haiku-4-5-20251001",
+    fable: "claude-fable-5",
   },
   options: [
     {

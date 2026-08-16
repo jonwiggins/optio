@@ -195,7 +195,7 @@ export default function ArchitecturePage() {
         </li>
         <li>
           <strong className="text-text-heading">@optio/agent-adapters</strong> — Claude Code, Codex,
-          Copilot, Gemini, and OpenCode adapters (auth, environment, config)
+          Copilot, Gemini, OpenCode, and Cursor adapters (auth, environment, config)
         </li>
         <li>
           <strong className="text-text-heading">@optio/ticket-providers</strong> — GitHub Issues,

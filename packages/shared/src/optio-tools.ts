@@ -477,10 +477,10 @@ const watch_task: OptioToolSchema = {
       },
       timeoutMinutes: {
         type: "number",
-        description: "Maximum minutes to watch before giving up",
+        description: "Maximum minutes to watch before giving up (hard-capped at 30)",
         default: 10,
         minimum: 1,
-        maximum: 60,
+        maximum: 30,
       },
     },
     required: ["id"],

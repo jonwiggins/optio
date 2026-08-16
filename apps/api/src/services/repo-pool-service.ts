@@ -29,6 +29,7 @@ import {
 } from "./envoy-sidecar.js";
 import { parseIntEnv } from "@optio/shared";
 import { withSpan } from "../telemetry/spans.js";
+import { buildEnvExports } from "../utils/pod-env.js";
 
 const IDLE_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_POD_IDLE_MS", 600000); // 10 min default
 const REPO_INIT_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_INIT_TIMEOUT_MS", 120000); // 2 min default
@@ -282,18 +283,22 @@ async function createRepoPod(
   const pvcSuffix = instanceIndex > 0 ? `-${instanceIndex}` : "";
   const pvcName = `optio-home-${repoUrl.replace(/[^a-zA-Z0-9]/g, "-").slice(0, 40)}${pvcSuffix}`;
   let pvcReady = false;
-  try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execFileAsync = promisify(execFile);
-
-    // Check if PVC already exists
+  // PVCs only exist for the kubernetes runtime. In docker/fake mode the
+  // kubectl shell-out would target whatever cluster the local kubeconfig
+  // points at — creating real PVCs from dev/test runs.
+  if (process.env.OPTIO_RUNTIME === "kubernetes") {
     try {
-      await execFileAsync("kubectl", ["get", "pvc", pvcName, "-n", "optio"]);
-      pvcReady = true;
-    } catch {
-      // PVC doesn't exist, create it
-      const pvcManifest = `apiVersion: v1
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execFileAsync = promisify(execFile);
+
+      // Check if PVC already exists
+      try {
+        await execFileAsync("kubectl", ["get", "pvc", pvcName, "-n", "optio"]);
+        pvcReady = true;
+      } catch {
+        // PVC doesn't exist, create it
+        const pvcManifest = `apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: ${pvcName}
@@ -306,13 +311,14 @@ spec:
   resources:
     requests:
       storage: 5Gi`;
-      // Use bash -c with heredoc since execFile doesn't support stdin input
-      await execFileAsync("bash", ["-c", `echo '${pvcManifest}' | kubectl apply -f - -n optio`]);
-      pvcReady = true;
-      logger.info({ pvcName }, "Created PVC for repo pod home directory");
+        // Use bash -c with heredoc since execFile doesn't support stdin input
+        await execFileAsync("bash", ["-c", `echo '${pvcManifest}' | kubectl apply -f - -n optio`]);
+        pvcReady = true;
+        logger.info({ pvcName }, "Created PVC for repo pod home directory");
+      }
+    } catch (err) {
+      logger.warn({ err, pvcName }, "Failed to create PVC, pod will use ephemeral storage");
     }
-  } catch (err) {
-    logger.warn({ err, pvcName }, "Failed to create PVC, pod will use ephemeral storage");
   }
 
   // Load shared directories and ensure cache PVC exists
@@ -902,13 +908,13 @@ export async function execTaskInRepoPod(
         .set({ worktreeState: "active", lastPodId: pod.id, updatedAt: new Date() })
         .where(eq(tasks.id, taskId));
 
-      // Build the exec command
-      const envJson = JSON.stringify({
+      // Build the exec command. Env values (including the task prompt) are
+      // embedded as inert single-quoted exports — see buildEnvExports.
+      const envExports = buildEnvExports({
         ...env,
         OPTIO_TASK_ID: taskId,
         REPO_INIT_TIMEOUT_SECS: String(Math.ceil(REPO_INIT_TIMEOUT_MS / 1000)),
       });
-      const envB64 = Buffer.from(envJson).toString("base64");
       const runToken = randomUUID();
 
       // Build worktree setup commands based on whether we're resetting or creating fresh
@@ -964,12 +970,7 @@ export async function execTaskInRepoPod(
 
       const script = [
         "set -e",
-        `eval $(echo '${envB64}' | base64 -d | python3 -c "`,
-        `import json, sys, shlex`,
-        `env = json.load(sys.stdin)`,
-        `for k, v in env.items():`,
-        `    print(f'export {k}={shlex.quote(v)}')`,
-        `")`,
+        ...envExports,
         `echo "[optio] Waiting for repo to be ready..."`,
         `for i in $(seq 1 \${REPO_INIT_TIMEOUT_SECS}); do [ -f /workspace/.ready ] && break; sleep 1; done`,
         `[ -f /workspace/.ready ] || { echo "[optio] ERROR: repo not ready after \${REPO_INIT_TIMEOUT_SECS}s (increase OPTIO_REPO_INIT_TIMEOUT_MS to extend)"; exit 1; }`,

@@ -106,7 +106,7 @@ k8s/            Local dev K8s manifests`}</CodeBlock>
               ["packages/container-runtime/", "Kubernetes container runtime interface"],
               [
                 "packages/agent-adapters/",
-                "Claude Code, Codex, Copilot, Gemini, and OpenCode agent adapters",
+                "Claude Code, Codex, Copilot, Gemini, OpenCode, and Cursor agent adapters",
               ],
               [
                 "packages/ticket-providers/",

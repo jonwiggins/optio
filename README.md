@@ -35,7 +35,7 @@ The AI coding agent space is crowded — Devin, Charlie Labs, Cursor background 
 | Optio                                                                                                                                                                                                                                                                             | Hosted alternatives                                    |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | **Self-hosted** — runs entirely in your Kubernetes cluster (GKE, EKS, AKS, or any conformant K8s). Code, secrets, and agent logs never leave your network.                                                                                                                        | Hosted SaaS — your code goes to their cloud.           |
-| **Multi-vendor agents** — Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, and OpenCode behind one interface. Switch per repo, or A/B agents on the same task.                                                                                                           | Locked to a single model family or in-house agent.     |
+| **Multi-vendor agents** — Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode, and Cursor behind one interface. Switch per repo, or A/B agents on the same task.                                                                                                   | Locked to a single model family or in-house agent.     |
 | **Open source (MIT)** — read the code, fork it, audit it. No black box, no vendor lock-in.                                                                                                                                                                                        | Closed source.                                         |
 | **Enterprise-ready primitives out of the box** — workspaces, encrypted secrets at rest (AES-256-GCM), OIDC/OAuth, Kubernetes RBAC, audit-friendly task history, and a [reconciliation control plane](./docs/reconciliation.md) that keeps runs from getting stuck on lost events. | Vary by vendor; often gated to enterprise tiers.       |
 | **Standalone Tasks** — not just ticket-to-PR. Reusable, parameterized agent work for ops, on-call triage, scheduled reports, and webhook-driven automation, with no repo checkout.                                                                                                | PR-centric; ops/automation use cases are out of scope. |
@@ -118,7 +118,7 @@ Connections give your agents access to external tools and data at runtime. Confi
 - **Connections** — plug external services (Notion, Slack, Linear, GitHub, PostgreSQL, Sentry, custom MCP servers) into agent pods with fine-grained access control per repo and agent type
 - **Pod-per-repo architecture** — one long-lived Kubernetes pod per repo with git worktree isolation, multi-pod scaling, and idle cleanup
 - **Code review agent** — automatically launches a review agent as a subtask, with a separate prompt and model
-- **Multi-agent support** — run Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, or OpenCode with per-repo model and prompt configuration
+- **Multi-agent support** — run Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode, or Cursor with per-repo model and prompt configuration
 - **GitHub Issues, Linear, Jira, and Notion intake** — assign issues to Optio from the UI or via ticket sync
 - **Reconciliation control plane** — K8s-style pure-decision-plus-CAS-executor loop with periodic resync over four `RunKind`s (`repo`, `standalone`, `pr-review`, `persistent-agent`); keeps state from getting stuck on lost events
 - **Real-time dashboard** — live log streaming, pipeline progress, cost analytics, and cluster health
@@ -147,7 +147,7 @@ Connections give your agents access to external tools and data at runtime. Confi
 │              │     │  ├─ Review Agent   │     │  Connections at runtime    │
 │              │     │  └─ Auth/Secrets   │     │                            │
 └──────────────┘     └─────────┬──────────┘     └────────────────────────────┘
-                               │                  ⚡ = Claude / Codex / Copilot / Gemini / OpenCode
+                               │                  ⚡ = Claude / Codex / Copilot / Gemini / OpenCode / Cursor
                         ┌──────┴──────┐
                         │  Postgres   │  Tasks, workflows, persistent agents,
                         │             │  inboxes, connections, logs, secrets
@@ -262,7 +262,7 @@ apps/
 packages/
   shared/             Types, task state machine, prompt templates, error classifier
   container-runtime/  Kubernetes pod lifecycle, exec, log streaming
-  agent-adapters/     Claude Code + Codex + Copilot + Gemini + OpenCode adapters
+  agent-adapters/     Claude Code + Codex + Copilot + Gemini + OpenCode + Cursor adapters
   ticket-providers/   GitHub Issues, Linear, Jira, Notion
 
 images/               Container Dockerfiles: base, node, python, go, rust, full
@@ -388,18 +388,18 @@ See the [Helm chart values](helm/optio/values.yaml) for full configuration optio
 
 ## Tech Stack
 
-| Layer    | Technology                                                         |
-| -------- | ------------------------------------------------------------------ |
-| Monorepo | Turborepo + pnpm                                                   |
-| API      | Fastify 5, Drizzle ORM, BullMQ                                     |
-| Web      | Next.js 15, Tailwind CSS 4, Zustand                                |
-| Database | PostgreSQL 16                                                      |
-| Queue    | Redis 7 + BullMQ                                                   |
-| Runtime  | Kubernetes (Docker Desktop for local dev)                          |
-| Deploy   | Helm chart                                                         |
-| Auth     | Multi-provider OAuth (GitHub, Google, GitLab)                      |
-| CI       | GitHub Actions (format, typecheck, test, build-web, build-image)   |
-| Agents   | Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode |
+| Layer    | Technology                                                                 |
+| -------- | -------------------------------------------------------------------------- |
+| Monorepo | Turborepo + pnpm                                                           |
+| API      | Fastify 5, Drizzle ORM, BullMQ                                             |
+| Web      | Next.js 15, Tailwind CSS 4, Zustand                                        |
+| Database | PostgreSQL 16                                                              |
+| Queue    | Redis 7 + BullMQ                                                           |
+| Runtime  | Kubernetes (Docker Desktop for local dev)                                  |
+| Deploy   | Helm chart                                                                 |
+| Auth     | Multi-provider OAuth (GitHub, Google, GitLab)                              |
+| CI       | GitHub Actions (format, typecheck, test, build-web, build-image)           |
+| Agents   | Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode, Cursor |
 
 ## Contributing
 

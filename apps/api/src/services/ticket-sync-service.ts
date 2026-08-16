@@ -58,6 +58,14 @@ export async function syncAllTickets(): Promise<number> {
       const provider = getTicketProvider(providerConfig.source as TicketSource);
       const tickets = await provider.fetchActionableTickets(mergedConfig);
 
+      // First sweep after the provider was configured: everything it matches
+      // is pre-existing backlog, not a ticket the user filed expecting an
+      // agent. Auto-queueing the whole backlog starts work (and spends
+      // tokens) nobody initiated — issue #579. Backfilled tasks are created
+      // in `pending` for review and must be started explicitly; syncs after
+      // the initial_sync_at stamp auto-queue as before.
+      const isFirstSync = providerConfig.initialSyncAt == null;
+
       // Success — clear any previous error state
       if ((providerConfig as any).consecutiveFailures > 0 || (providerConfig as any).lastError) {
         await db
@@ -157,7 +165,21 @@ export async function syncAllTickets(): Promise<number> {
           ticketSource: ticket.source,
           ticketExternalId: ticket.externalId,
           metadata: { ticketUrl: ticket.url },
+          // Inherit the repo's workspace so webhook/poll-created tasks are
+          // visible in the (workspace-scoped) UI — see issue #544.
+          workspaceId: repoConfig?.workspaceId ?? null,
         });
+
+        if (isFirstSync) {
+          // Backfill: leave the task pending for the user to start, don't
+          // announce work on the ticket, and don't mass-fire ticket triggers.
+          logger.info(
+            { taskId: task.id, ticketId: ticket.externalId, providerId: providerConfig.id },
+            "[ticket-sync] Initial sweep: created backfill task in pending (not auto-started)",
+          );
+          totalSynced++;
+          continue;
+        }
 
         await taskService.transitionTask(task.id, TaskState.QUEUED, "ticket_sync");
         await taskQueue.add(
@@ -205,6 +227,14 @@ export async function syncAllTickets(): Promise<number> {
             "Failed to fire ticket triggers for task_configs",
           );
         }
+      }
+
+      // The sweep completed: from now on, matching tickets auto-queue.
+      if (isFirstSync) {
+        await db
+          .update(ticketProviders)
+          .set({ initialSyncAt: new Date() })
+          .where(eq(ticketProviders.id, providerConfig.id));
       }
     } catch (err: any) {
       const errorMessage = err?.message ?? String(err);

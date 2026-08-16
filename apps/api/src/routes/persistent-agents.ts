@@ -3,7 +3,7 @@
 // Mirrors the workflow routes layout. The polymorphic /api/tasks layer
 // gains type='persistent_agent' resolution in tasks-unified.ts.
 
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as paService from "../services/persistent-agent-service.js";
@@ -15,6 +15,27 @@ import {
   type PersistentAgentMessageSenderType,
 } from "@optio/shared";
 import { logAction } from "../services/optio-action-service.js";
+import { requireRole } from "../plugins/auth.js";
+
+/**
+ * Resolve an agent that belongs to the caller's workspace, or send a 404 and
+ * return null. Every `/:id` handler funnels through this so a caller can never
+ * read, mutate, or wake another tenant's persistent agent by primary key.
+ *
+ * We deliberately return 404 (not 403) for foreign agents so the endpoint does
+ * not become a cross-tenant existence oracle. Mirrors the workspace guard in
+ * `routes/tasks.ts`. When auth is disabled (local dev) `req.user` is undefined,
+ * so `workspaceId` is null and the scoped lookup matches the null-workspace
+ * rows that local dev creates — behavior is preserved.
+ */
+async function requireAgent(req: FastifyRequest, reply: FastifyReply, id: string) {
+  const agent = await paService.getPersistentAgentScoped(id, req.user?.workspaceId ?? null);
+  if (!agent) {
+    reply.code(404).send({ error: "Not found" });
+    return null;
+  }
+  return agent;
+}
 
 const podLifecycleSchema = z.enum(["always-on", "sticky", "on-demand"]);
 
@@ -131,8 +152,8 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const agent = await paService.getPersistentAgent(id);
-      if (!agent) return reply.code(404).send({ error: "Not found" });
+      const agent = await requireAgent(req, reply, id);
+      if (!agent) return;
       const inbox = await paService.listInboxSummary(id);
       reply.send({ agent, inbox });
     },
@@ -142,6 +163,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/persistent-agents",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createPersistentAgent",
         summary: "Create a persistent agent",
@@ -191,6 +213,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/persistent-agents/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "updatePersistentAgent",
         summary: "Update a persistent agent",
@@ -202,10 +225,17 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params;
       const body = req.body;
-      const updated = await paService.updatePersistentAgent(id, {
-        ...body,
-        podLifecycle: body.podLifecycle as PersistentAgentPodLifecycle | undefined,
-      });
+      const workspaceId = req.user?.workspaceId ?? null;
+      const existing = await requireAgent(req, reply, id);
+      if (!existing) return;
+      const updated = await paService.updatePersistentAgent(
+        id,
+        {
+          ...body,
+          podLifecycle: body.podLifecycle as PersistentAgentPodLifecycle | undefined,
+        },
+        workspaceId,
+      );
       if (!updated) return reply.code(404).send({ error: "Not found" });
       reply.send({ agent: updated });
     },
@@ -215,6 +245,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/persistent-agents/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deletePersistentAgent",
         summary: "Delete a persistent agent",
@@ -224,7 +255,10 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const ok = await paService.deletePersistentAgent(id);
+      const workspaceId = req.user?.workspaceId ?? null;
+      const existing = await requireAgent(req, reply, id);
+      if (!existing) return;
+      const ok = await paService.deletePersistentAgent(id, workspaceId);
       if (!ok) return reply.code(404).send({ error: "Not found" });
       reply.code(204).send();
     },
@@ -234,6 +268,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/persistent-agents/:id/messages",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "sendPersistentAgentMessage",
         summary: "Send a message to a persistent agent",
@@ -248,8 +283,8 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params;
       const body = req.body;
-      const agent = await paService.getPersistentAgent(id);
-      if (!agent) return reply.code(404).send({ error: "Not found" });
+      const agent = await requireAgent(req, reply, id);
+      if (!agent) return;
 
       const senderType: PersistentAgentMessageSenderType = body.senderType ?? "user";
       const senderId =
@@ -297,6 +332,8 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params;
       const { limit } = req.query;
+      const agent = await requireAgent(req, reply, id);
+      if (!agent) return;
       const messages = await paService.listRecentMessages(id, limit ?? 100);
       reply.send({ messages });
     },
@@ -317,6 +354,8 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params;
       const { limit } = req.query;
+      const agent = await requireAgent(req, reply, id);
+      if (!agent) return;
       const turns = await paService.listPersistentAgentTurns(id, limit ?? 50);
       reply.send({ turns });
     },
@@ -334,9 +373,13 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const { turnId } = req.params;
+      const { id, turnId } = req.params;
+      const agent = await requireAgent(req, reply, id);
+      if (!agent) return;
       const turn = await paService.getPersistentAgentTurn(turnId);
-      if (!turn) return reply.code(404).send({ error: "Not found" });
+      // Also verify the turn belongs to this agent so a valid-for-caller id
+      // cannot be paired with another agent's turnId.
+      if (!turn || turn.agentId !== id) return reply.code(404).send({ error: "Not found" });
       const logs = await paService.listTurnLogs(turnId);
       reply.send({ turn, logs });
     },
@@ -356,8 +399,8 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const agent = await paService.getPersistentAgent(id);
-      if (!agent) return reply.code(404).send({ error: "Not found" });
+      const agent = await requireAgent(req, reply, id);
+      if (!agent) return;
       const { db } = await import("../db/client.js");
       const { workflowTriggers } = await import("../db/schema.js");
       const { and, eq } = await import("drizzle-orm");
@@ -377,6 +420,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/persistent-agents/:id/triggers",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createPersistentAgentTrigger",
         summary: "Attach a schedule/webhook/manual trigger to a persistent agent",
@@ -397,8 +441,8 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params;
       const body = req.body;
-      const agent = await paService.getPersistentAgent(id);
-      if (!agent) return reply.code(404).send({ error: "Not found" });
+      const agent = await requireAgent(req, reply, id);
+      if (!agent) return;
 
       // Validate config shape per trigger type — same rules as workflow triggers.
       if (body.type === "schedule") {
@@ -450,6 +494,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/persistent-agents/:id/triggers/:triggerId",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deletePersistentAgentTrigger",
         summary: "Delete a trigger from a persistent agent",
@@ -458,13 +503,23 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const { triggerId } = req.params;
+      const { id, triggerId } = req.params;
+      const agent = await requireAgent(req, reply, id);
+      if (!agent) return;
       const { db } = await import("../db/client.js");
       const { workflowTriggers } = await import("../db/schema.js");
-      const { eq } = await import("drizzle-orm");
+      const { and, eq } = await import("drizzle-orm");
+      // Scope the delete to this agent's triggers so a trigger id from another
+      // agent (or another tenant) can't be removed via a valid-for-caller :id.
       const deleted = await db
         .delete(workflowTriggers)
-        .where(eq(workflowTriggers.id, triggerId))
+        .where(
+          and(
+            eq(workflowTriggers.id, triggerId),
+            eq(workflowTriggers.targetType, "persistent_agent"),
+            eq(workflowTriggers.targetId, id),
+          ),
+        )
         .returning({ id: workflowTriggers.id });
       if (deleted.length === 0) return reply.code(404).send({ error: "Not found" });
       reply.code(204).send();
@@ -474,6 +529,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/persistent-agents/:id/control",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "controlPersistentAgent",
         summary: "Set a control intent (pause/resume/archive/restart)",
@@ -485,9 +541,10 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params;
       const { intent } = req.body;
-      const agent = await paService.getPersistentAgent(id);
-      if (!agent) return reply.code(404).send({ error: "Not found" });
-      await paService.setControlIntent(id, intent);
+      const workspaceId = req.user?.workspaceId ?? null;
+      const agent = await requireAgent(req, reply, id);
+      if (!agent) return;
+      await paService.setControlIntent(id, intent, workspaceId);
       // Wake the reconciler so it observes the intent immediately.
       const { enqueueReconcile } = await import("../services/reconcile-queue.js");
       await enqueueReconcile(

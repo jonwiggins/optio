@@ -44,7 +44,7 @@ const features = [
   {
     title: "Multi-Agent Support",
     description:
-      "Run Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, or OpenCode. Configure model, prompt template, and settings per repository. Launch review agents as subtasks with separate prompts.",
+      "Run Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode, or Cursor. Configure model, prompt template, and settings per repository. Launch review agents as subtasks with separate prompts.",
     color: "#f0a040",
   },
   {

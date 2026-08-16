@@ -68,7 +68,7 @@ export default async function githubAppRoutes(rawApp: FastifyInstance): Promise<
           "Internal endpoint called by credential helpers in agent pods. " +
           "Cluster-internal only — the Helm ingress blocks /api/internal/* " +
           "from public traffic. Authenticates via HMAC-SHA256 signature in " +
-          "the X-Optio-Signature header (legacy Bearer token also accepted). " +
+          "the X-Optio-Signature header. " +
           "Hidden from the public spec.",
         tags: ["Auth & Sessions"],
         querystring: gitCredentialsQuerySchema,

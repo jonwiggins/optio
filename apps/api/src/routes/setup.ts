@@ -143,6 +143,8 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       // key mode.
       const hasGeminiVertexAi = secretNames.includes("GOOGLE_CLOUD_PROJECT");
 
+      const hasCursorKey = secretNames.includes("CURSOR_API_KEY");
+
       const hasAnyAgentKey =
         hasAnthropicKey ||
         hasOpenAIKey ||
@@ -153,7 +155,8 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         hasCopilotToken ||
         hasGeminiKey ||
         hasGeminiVertexAi ||
-        hasOpencodeBaseUrl;
+        hasOpencodeBaseUrl ||
+        hasCursorKey;
 
       let runtimeHealthy = false;
       try {
@@ -183,6 +186,7 @@ export async function setupRoutes(rawApp: FastifyInstance) {
             label: "OpenCode configured",
           },
           geminiKey: { done: hasGeminiKey || hasGeminiVertexAi, label: "Google Gemini API key" },
+          cursorKey: { done: hasCursorKey, label: "Cursor API key" },
           anyAgentKey: { done: hasAnyAgentKey, label: "At least one agent API key" },
         },
       });

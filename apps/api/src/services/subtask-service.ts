@@ -38,6 +38,9 @@ export async function createSubtask(input: SubtaskInput) {
     agentType: input.agentType ?? parent.agentType,
     priority: input.priority ?? Math.max(1, (parent.priority ?? 100) - 1),
     createdBy: parent.createdBy ?? undefined,
+    // Inherit the parent's workspace so subtasks (incl. review subtasks)
+    // stay visible in the workspace-scoped UI.
+    workspaceId: parent.workspaceId ?? null,
   });
 
   // Set subtask fields

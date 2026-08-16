@@ -9,13 +9,16 @@
 #
 # Fallback (Linux / macOS without Keychain entry): prompt for a token pasted
 # from `claude setup-token` output.
+#
+# Usage:
+#   scripts/update-claude-auth.sh           # refresh the token
+#   scripts/update-claude-auth.sh --check   # just report whether the stored
+#                                           # token is still valid (exit 1 if
+#                                           # missing/revoked); changes nothing
 
 set -euo pipefail
 
 API_URL="${OPTIO_API_URL:-http://localhost:30400}"
-
-echo "=== Optio — refresh Claude Code OAuth token ==="
-echo ""
 
 # Sanity check: API reachable before we start extracting secrets.
 if ! curl -fsS "$API_URL/api/health" >/dev/null 2>&1; then
@@ -24,6 +27,29 @@ if ! curl -fsS "$API_URL/api/health" >/dev/null 2>&1; then
   echo "       Or override the URL with OPTIO_API_URL=... $0" >&2
   exit 1
 fi
+
+# ── --check: validate the stored token without touching it ─────────────────
+# GET /api/auth/status probes the Anthropic API, so this catches revoked
+# tokens (agents failing with 401 "OAuth access token has been revoked" /
+# repeated [api_retry] authentication_failed), not just missing ones.
+if [[ "${1:-}" == "--check" ]]; then
+  STATUS_JSON="$(curl -fsS "$API_URL/api/auth/status")"
+  echo "$STATUS_JSON"
+  OK="$(printf '%s' "$STATUS_JSON" | python3 -c "
+import json, sys
+d = json.load(sys.stdin).get('subscription', {})
+print('ok' if d.get('available') and not d.get('expired') else 'bad')
+")"
+  if [[ "$OK" == "ok" ]]; then
+    echo "=== Stored Claude token is valid. ==="
+    exit 0
+  fi
+  echo "=== Stored Claude token is missing, expired, or revoked — run $0 to refresh. ===" >&2
+  exit 1
+fi
+
+echo "=== Optio — refresh Claude Code OAuth token ==="
+echo ""
 
 # ── Obtain token ────────────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
+import { assertWorkspace } from "./ws-authz.js";
 import { getPrReview, getLatestRun } from "../services/pr-review-service.js";
 import { db } from "../db/client.js";
 import { taskLogs } from "../db/schema.js";
@@ -36,8 +37,8 @@ export async function prReviewLogStreamWs(app: FastifyInstance) {
       releaseConnection(clientIp);
       return;
     }
-    if (user.workspaceId && review.workspaceId && review.workspaceId !== user.workspaceId) {
-      socket.close(4403, "Access denied");
+    // Enforce workspace isolation before streaming the review's run output.
+    if (!assertWorkspace(socket, user.workspaceId, review.workspaceId)) {
       releaseConnection(clientIp);
       return;
     }

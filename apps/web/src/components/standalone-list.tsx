@@ -54,6 +54,7 @@ const AGENT_TYPE_OPTIONS = [
   { value: "copilot", label: "Copilot" },
   { value: "gemini", label: "Gemini" },
   { value: "opencode", label: "OpenCode" },
+  { value: "cursor", label: "Cursor" },
 ];
 
 interface FilterState {

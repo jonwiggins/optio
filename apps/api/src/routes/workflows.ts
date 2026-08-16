@@ -1,8 +1,9 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as workflowService from "../services/workflow-service.js";
 import { workflowRunQueue } from "../workers/workflow-worker.js";
+import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
@@ -141,6 +142,41 @@ const WorkflowRunStatsResponseSchema = z
   })
   .describe("Aggregated workflow-run counts for the current workspace");
 
+/**
+ * Resolve a workflow by id, enforcing workspace ownership. Returns the
+ * workflow row when it exists and belongs to the caller's workspace (or is
+ * an unscoped legacy row), otherwise null. Callers translate null into a
+ * 404 so foreign resources are indistinguishable from missing ones.
+ */
+async function requireWorkflowInWorkspace(req: FastifyRequest, id: string) {
+  const workflow = await workflowService.getWorkflow(id);
+  if (!workflow) return null;
+  const wsId = req.user?.workspaceId;
+  if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
+    return null;
+  }
+  return workflow;
+}
+
+/**
+ * Resolve a workflow run by id, enforcing workspace ownership via its parent
+ * workflow. Runs carry no workspace column of their own, so ownership is
+ * derived from the workflow they belong to. Returns null (→ 404) for a
+ * missing run or one whose workflow lives in another workspace.
+ */
+async function requireWorkflowRunInWorkspace(req: FastifyRequest, runId: string) {
+  const run = await workflowService.getWorkflowRun(runId);
+  if (!run) return null;
+  const wsId = req.user?.workspaceId;
+  if (wsId) {
+    const parent = run.workflowId ? await workflowService.getWorkflow(run.workflowId) : null;
+    if (parent && parent.workspaceId && parent.workspaceId !== wsId) {
+      return null;
+    }
+  }
+  return run;
+}
+
 export async function workflowRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
@@ -192,10 +228,11 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/jobs",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createWorkflow",
         summary: "Create a workflow",
-        description: "Create a new workflow template.",
+        description: "Create a new workflow template. Requires `member` role.",
         tags: ["Workflows"],
         body: createWorkflowSchema,
         response: {
@@ -256,10 +293,11 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/jobs/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "updateWorkflow",
         summary: "Update a workflow",
-        description: "Partial update to a workflow template.",
+        description: "Partial update to a workflow template. Requires `member` role.",
         tags: ["Workflows"],
         params: IdParamsSchema,
         body: updateWorkflowSchema,
@@ -273,6 +311,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params;
       const input = req.body;
+      const existing = await requireWorkflowInWorkspace(req, id);
+      if (!existing) return reply.status(404).send({ error: "Workflow not found" });
       try {
         const workflow = await workflowService.updateWorkflow(id, input);
         if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
@@ -298,12 +338,14 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/jobs/:id/clone",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "cloneWorkflow",
         summary: "Clone a workflow",
         description:
           "Clone an existing workflow and its non-webhook triggers. The " +
-          "clone has a new ID and is owned by the current workspace.",
+          "clone has a new ID and is owned by the current workspace. " +
+          "Requires `member` role.",
         tags: ["Workflows"],
         params: IdParamsSchema,
         response: {
@@ -314,6 +356,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
+      const source = await requireWorkflowInWorkspace(req, id);
+      if (!source) return reply.status(404).send({ error: "Workflow not found" });
       const cloned = await workflowService.cloneWorkflow(id, {
         workspaceId: req.user?.workspaceId ?? undefined,
         createdBy: req.user?.id,
@@ -333,10 +377,13 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/jobs/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteWorkflow",
         summary: "Delete a workflow",
-        description: "Delete a workflow and all of its runs. Returns 204 on success.",
+        description:
+          "Delete a workflow and all of its runs. Returns 204 on success. " +
+          "Requires `member` role.",
         tags: ["Workflows"],
         params: IdParamsSchema,
         response: {
@@ -347,6 +394,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
+      const existing = await requireWorkflowInWorkspace(req, id);
+      if (!existing) return reply.status(404).send({ error: "Workflow not found" });
       const deleted = await workflowService.deleteWorkflow(id);
       if (!deleted) return reply.status(404).send({ error: "Workflow not found" });
       logAction({
@@ -365,24 +414,29 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/jobs/:id/runs",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createWorkflowRun",
         summary: "Create a workflow run",
         description:
           "Create a new workflow run and enqueue it for the workflow worker. " +
           "The run is returned immediately in `queued` state — monitor its " +
-          "progress via `/api/workflow-runs/:id` or the WebSocket log stream.",
+          "progress via `/api/workflow-runs/:id` or the WebSocket log stream. " +
+          "Requires `member` role.",
         tags: ["Workflows"],
         params: IdParamsSchema,
         body: runWorkflowBodySchema,
         response: {
           201: WorkflowRunResponseSchema,
           400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
+      const workflow = await requireWorkflowInWorkspace(req, id);
+      if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
       try {
         // createWorkflowRun enqueues on workflowRunQueue internally
         const run = await workflowService.createWorkflowRun(id, req.body);
@@ -448,7 +502,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const run = await workflowService.getWorkflowRun(id);
+      const run = await requireWorkflowRunInWorkspace(req, id);
       if (!run) return reply.status(404).send({ error: "Workflow run not found" });
       reply.send({ run });
     },
@@ -457,20 +511,26 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/workflow-runs/:id/retry",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "retryWorkflowRun",
         summary: "Retry a workflow run",
-        description: "Re-queue a failed workflow run. Returns 400 if the run is not retryable.",
+        description:
+          "Re-queue a failed workflow run. Returns 400 if the run is not retryable. " +
+          "Requires `member` role.",
         tags: ["Workflows"],
         params: IdParamsSchema,
         response: {
           200: WorkflowRunResponseSchema,
           400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
+      const existing = await requireWorkflowRunInWorkspace(req, id);
+      if (!existing) return reply.status(404).send({ error: "Workflow run not found" });
       try {
         const run = await workflowService.retryWorkflowRun(id);
         logAction({
@@ -490,20 +550,26 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/workflow-runs/:id/cancel",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "cancelWorkflowRun",
         summary: "Cancel a workflow run",
-        description: "Cancel a running workflow run. Returns 400 if the run is not cancellable.",
+        description:
+          "Cancel a running workflow run. Returns 400 if the run is not cancellable. " +
+          "Requires `member` role.",
         tags: ["Workflows"],
         params: IdParamsSchema,
         response: {
           200: WorkflowRunResponseSchema,
           400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
         },
       },
     },
     async (req, reply) => {
       const { id } = req.params;
+      const existing = await requireWorkflowRunInWorkspace(req, id);
+      if (!existing) return reply.status(404).send({ error: "Workflow run not found" });
       try {
         const run = await workflowService.cancelWorkflowRun(id);
         logAction({
@@ -538,7 +604,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const run = await workflowService.getWorkflowRun(id);
+      const run = await requireWorkflowRunInWorkspace(req, id);
       if (!run) return reply.status(404).send({ error: "Workflow run not found" });
       const opts = req.query;
       const logs = await workflowService.getWorkflowRunLogs(id, opts);

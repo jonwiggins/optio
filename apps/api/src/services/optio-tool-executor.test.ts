@@ -2,15 +2,57 @@ import { describe, it, expect, vi } from "vitest";
 import {
   executeToolCall,
   truncateToolResult,
+  watchTask,
   MAX_TOOL_RESULT_LENGTH,
 } from "./optio-tool-executor.js";
 
+type InjectResponse = { statusCode: number; body: string };
+
 /** Create a minimal Fastify-like app with a mocked inject method. */
-function mockApp(response: { statusCode: number; body: string }) {
+function mockApp(response: InjectResponse) {
   return {
     inject: vi.fn().mockResolvedValue(response),
   } as unknown as Parameters<typeof executeToolCall>[0];
 }
+
+/**
+ * Fastify-like app whose inject returns each queued response in order, then
+ * repeats the final response for any further polls.
+ */
+function mockAppSeq(responses: InjectResponse[]) {
+  const inject = vi.fn();
+  for (const r of responses) inject.mockResolvedValueOnce(r);
+  inject.mockResolvedValue(responses[responses.length - 1]);
+  return { inject } as unknown as Parameters<typeof executeToolCall>[0];
+}
+
+/**
+ * A deterministic clock for the watch poll loop: `sleep` advances the clock
+ * instead of waiting, so timeouts are driven purely by poll intervals and the
+ * loop never touches a real timer.
+ */
+function makeFakeClock() {
+  let t = 0;
+  return {
+    now: () => t,
+    sleep: async (ms: number) => {
+      t += ms;
+    },
+  };
+}
+
+/** Build a `GET /api/tasks/:id` enriched response body for a given state. */
+function taskDetailBody(state: string, id = "task-1"): string {
+  return JSON.stringify({
+    task: { type: "repo-task", id, state },
+    pendingReason: null,
+    pipelineProgress: null,
+    stallInfo: null,
+  });
+}
+
+const injectMock = (app: Parameters<typeof executeToolCall>[0]) =>
+  (app as unknown as { inject: ReturnType<typeof vi.fn> }).inject;
 
 describe("optio-tool-executor", () => {
   // ─── executeToolCall ───
@@ -135,6 +177,158 @@ describe("optio-tool-executor", () => {
       expect(call.url).toContain("state=failed");
       expect(call.url).toContain("limit=5");
       expect(call.url).not.toContain("repoUrl");
+    });
+  });
+
+  // ─── watchTask (poll-until-terminal) ───
+
+  describe("watchTask", () => {
+    it("polls through non-terminal states and returns the terminal state", async () => {
+      const app = mockAppSeq([
+        { statusCode: 200, body: taskDetailBody("running") },
+        { statusCode: 200, body: taskDetailBody("running") },
+        { statusCode: 200, body: taskDetailBody("completed") },
+      ]);
+      const clock = makeFakeClock();
+
+      const result = await watchTask(
+        app,
+        { id: "task-1", pollIntervalSeconds: 5, timeoutMinutes: 10 },
+        "tok",
+        clock,
+      );
+
+      // It waited: three polls, not one immediate snapshot.
+      expect(injectMock(app)).toHaveBeenCalledTimes(3);
+      expect(result.success).toBe(true);
+      const parsed = JSON.parse(result.result);
+      expect(parsed.watch).toBe("terminal");
+      expect(parsed.state).toBe("completed");
+      expect(parsed.polls).toBe(3);
+    });
+
+    it("returns immediately when the task is already terminal", async () => {
+      const app = mockAppSeq([{ statusCode: 200, body: taskDetailBody("failed") }]);
+      const clock = makeFakeClock();
+
+      const result = await watchTask(app, { id: "task-1" }, "tok", clock);
+
+      expect(injectMock(app)).toHaveBeenCalledTimes(1);
+      const parsed = JSON.parse(result.result);
+      expect(parsed.watch).toBe("terminal");
+      expect(parsed.state).toBe("failed");
+    });
+
+    it("does not treat a running snapshot as a successful final watch — it times out", async () => {
+      const app = mockAppSeq([{ statusCode: 200, body: taskDetailBody("running") }]);
+      const clock = makeFakeClock();
+
+      const result = await watchTask(
+        app,
+        { id: "task-1", pollIntervalSeconds: 5, timeoutMinutes: 1 },
+        "tok",
+        clock,
+      );
+
+      const parsed = JSON.parse(result.result);
+      expect(parsed.watch).toBe("timeout");
+      expect(parsed.state).toBe("running");
+      expect(parsed.message).toContain("still running");
+      expect(parsed.timeoutMinutes).toBe(1);
+      // It polled repeatedly across the minute rather than returning once.
+      expect(injectMock(app).mock.calls.length).toBeGreaterThan(1);
+      // A timeout is a completed watch operation, reported as a normal result.
+      expect(result.success).toBe(true);
+    });
+
+    it("uses the requested poll interval between checks", async () => {
+      const app = mockAppSeq([
+        { statusCode: 200, body: taskDetailBody("running") },
+        { statusCode: 200, body: taskDetailBody("completed") },
+      ]);
+      const sleep = vi.fn(async () => {});
+
+      await watchTask(app, { id: "task-1", pollIntervalSeconds: 7, timeoutMinutes: 10 }, "tok", {
+        sleep,
+        now: () => 0,
+      });
+
+      expect(sleep).toHaveBeenCalledWith(7000);
+    });
+
+    it("clamps a sub-minimum poll interval up to the 2s floor", async () => {
+      const app = mockAppSeq([
+        { statusCode: 200, body: taskDetailBody("running") },
+        { statusCode: 200, body: taskDetailBody("completed") },
+      ]);
+      const sleep = vi.fn(async () => {});
+
+      await watchTask(
+        app,
+        { id: "task-1", pollIntervalSeconds: 0.001, timeoutMinutes: 10 },
+        "tok",
+        { sleep, now: () => 0 },
+      );
+
+      expect(sleep).toHaveBeenCalledWith(2000);
+    });
+
+    it("clamps an oversized poll interval down to the 60s ceiling", async () => {
+      const app = mockAppSeq([
+        { statusCode: 200, body: taskDetailBody("running") },
+        { statusCode: 200, body: taskDetailBody("completed") },
+      ]);
+      const sleep = vi.fn(async () => {});
+
+      await watchTask(app, { id: "task-1", pollIntervalSeconds: 9999, timeoutMinutes: 10 }, "tok", {
+        sleep,
+        now: () => 0,
+      });
+
+      expect(sleep).toHaveBeenCalledWith(60000);
+    });
+
+    it("surfaces a non-2xx lookup immediately without polling", async () => {
+      const app = mockAppSeq([{ statusCode: 404, body: '{"error":"Task not found"}' }]);
+      const clock = makeFakeClock();
+
+      const result = await watchTask(app, { id: "missing" }, "tok", clock);
+
+      expect(injectMock(app)).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(false);
+      expect(result.result).toContain("Task not found");
+    });
+
+    it("rejects a missing id without hitting the API", async () => {
+      const app = mockAppSeq([{ statusCode: 200, body: taskDetailBody("running") }]);
+
+      const result = await watchTask(app, {}, "tok", makeFakeClock());
+
+      expect(result.success).toBe(false);
+      expect(result.result).toContain("requires a string task id");
+      expect(injectMock(app)).not.toHaveBeenCalled();
+    });
+
+    it("polls the enriched task detail endpoint with the session cookie", async () => {
+      const app = mockAppSeq([{ statusCode: 200, body: taskDetailBody("completed") }]);
+
+      await watchTask(app, { id: "task-1" }, "tok", makeFakeClock());
+
+      const call = injectMock(app).mock.calls[0][0];
+      expect(call.method).toBe("GET");
+      expect(call.url).toBe("/api/tasks/task-1");
+      expect(call.headers.cookie).toBe("optio_session=tok");
+    });
+
+    it("is reachable through executeToolCall dispatch", async () => {
+      const app = mockAppSeq([{ statusCode: 200, body: taskDetailBody("completed") }]);
+
+      const result = await executeToolCall(app, "watch_task", { id: "task-1" }, "tok");
+
+      expect(result.success).toBe(true);
+      const parsed = JSON.parse(result.result);
+      expect(parsed.watch).toBe("terminal");
+      expect(parsed.state).toBe("completed");
     });
   });
 

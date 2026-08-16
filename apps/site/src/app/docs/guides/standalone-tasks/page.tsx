@@ -75,7 +75,7 @@ export default function WorkflowsPage() {
         </li>
         <li>
           <strong className="text-text-heading">Agent runtime</strong> — choose from Claude Code,
-          OpenAI Codex, GitHub Copilot, Google Gemini, or OpenCode
+          OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode, or Cursor
         </li>
         <li>
           <strong className="text-text-heading">Prompt template</strong> — the agent prompt, with{" "}

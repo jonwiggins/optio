@@ -26,14 +26,17 @@ vi.mock("../services/auth-service.js", () => ({
 }));
 
 let authDisabled = false;
+let mockOAuthProvider: any = undefined;
 vi.mock("../services/oauth/index.js", () => ({
   isAuthDisabled: () => authDisabled,
   getEnabledProviders: () => [],
-  getOAuthProvider: () => undefined,
+  getOAuthProvider: () => mockOAuthProvider,
 }));
 
 vi.mock("../plugins/auth.js", () => ({
   SESSION_COOKIE_NAME: "optio_session",
+  // Pass-through guard — role enforcement is covered in plugins/auth.test.ts
+  requireRole: () => async () => {},
 }));
 
 // Redis mock — in-memory store to simulate Redis setex/get/del
@@ -85,6 +88,7 @@ describe("POST /api/auth/exchange-code", () => {
     vi.clearAllMocks();
     redisStore.clear();
     authDisabled = false;
+    mockOAuthProvider = undefined;
     app = await buildTestApp();
   });
 
@@ -145,6 +149,7 @@ describe("Redis-backed OAuth state", () => {
     vi.clearAllMocks();
     redisStore.clear();
     authDisabled = false;
+    mockOAuthProvider = undefined;
     app = await buildTestApp();
   });
 
@@ -178,6 +183,7 @@ describe("GET /api/auth/me", () => {
     vi.clearAllMocks();
     redisStore.clear();
     authDisabled = false;
+    mockOAuthProvider = undefined;
     app = await buildTestApp();
   });
 
@@ -267,6 +273,7 @@ describe("POST /api/auth/logout", () => {
     vi.clearAllMocks();
     redisStore.clear();
     authDisabled = false;
+    mockOAuthProvider = undefined;
     app = await buildTestApp();
   });
 
@@ -352,6 +359,84 @@ describe("POST /api/auth/logout", () => {
   });
 });
 
+describe("POST /api/auth/cli/start", () => {
+  let app: FastifyInstance;
+
+  const validPayload = {
+    provider: "github",
+    callback: "http://127.0.0.1:18271/cb",
+    state: "cli-state",
+    code_challenge: "challenge",
+    code_challenge_method: "S256",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    redisStore.clear();
+    authDisabled = false;
+    mockOAuthProvider = {
+      authorizeUrl: vi.fn((state: string) => `https://github.example/auth?state=${state}`),
+    };
+    app = await buildTestApp();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("stores state and returns an authorize URL for loopback callbacks", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/cli/start",
+      payload: validPayload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().url).toMatch(/^https:\/\/github\.example\/auth\?state=/);
+    expect(mockRedisClient.setex).toHaveBeenCalledWith(
+      "cli_flow:cli-state",
+      600,
+      expect.stringContaining('"callback":"http://127.0.0.1:18271/cb"'),
+    );
+  });
+
+  it("rejects non-loopback callbacks", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/cli/start",
+      payload: { ...validPayload, callback: "https://evil.example/cb" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("loopback");
+    expect(mockRedisClient.setex).not.toHaveBeenCalled();
+  });
+
+  it("rejects loopback callbacks with credentials", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/cli/start",
+      payload: { ...validPayload, callback: "http://user:pass@127.0.0.1:18271/cb" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("credentials");
+    expect(mockRedisClient.setex).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-S256 PKCE methods", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/cli/start",
+      payload: { ...validPayload, code_challenge_method: "plain" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("Only S256 PKCE is supported");
+    expect(mockRedisClient.setex).not.toHaveBeenCalled();
+  });
+});
+
 describe("Auth rate limiting", () => {
   let app: FastifyInstance;
 
@@ -359,6 +444,7 @@ describe("Auth rate limiting", () => {
     vi.clearAllMocks();
     redisStore.clear();
     authDisabled = false;
+    mockOAuthProvider = undefined;
   });
 
   afterEach(async () => {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import * as skillService from "../services/skill-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { SkillSchema } from "../schemas/integration.js";
+import { requireRole } from "../plugins/auth.js";
 
 const scopeQuerySchema = z
   .object({
@@ -104,6 +105,7 @@ export async function skillRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/skills",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createSkill",
         summary: "Create a skill",
@@ -123,6 +125,7 @@ export async function skillRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/skills/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "updateSkill",
         summary: "Update a skill",
@@ -145,6 +148,7 @@ export async function skillRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/skills/:id",
     {
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteSkill",
         summary: "Delete a skill",

@@ -10,6 +10,7 @@ const mockCreateWorkflow = vi.fn();
 const mockGetWorkflow = vi.fn();
 const mockGetWorkflowWithStats = vi.fn();
 const mockUpdateWorkflow = vi.fn();
+const mockCloneWorkflow = vi.fn();
 const mockDeleteWorkflow = vi.fn();
 const mockCreateWorkflowRun = vi.fn();
 const mockListWorkflowRuns = vi.fn();
@@ -29,6 +30,7 @@ vi.mock("../services/workflow-service.js", () => ({
   getWorkflow: (...args: unknown[]) => mockGetWorkflow(...args),
   getWorkflowWithStats: (...args: unknown[]) => mockGetWorkflowWithStats(...args),
   updateWorkflow: (...args: unknown[]) => mockUpdateWorkflow(...args),
+  cloneWorkflow: (...args: unknown[]) => mockCloneWorkflow(...args),
   deleteWorkflow: (...args: unknown[]) => mockDeleteWorkflow(...args),
   createWorkflowRun: (...args: unknown[]) => mockCreateWorkflowRun(...args),
   listWorkflowRuns: (...args: unknown[]) => mockListWorkflowRuns(...args),
@@ -133,6 +135,21 @@ describe("POST /api/jobs", () => {
 
     expect(res.statusCode).toBe(400);
   });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(workflowRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: { name: "Deploy", promptTemplate: "Deploy the app" },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockCreateWorkflow).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/jobs/:id", () => {
@@ -172,6 +189,7 @@ describe("PATCH /api/jobs/:id", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow });
     app = await buildTestApp();
   });
 
@@ -189,6 +207,7 @@ describe("PATCH /api/jobs/:id", () => {
   });
 
   it("returns 404 when not found", async () => {
+    mockGetWorkflow.mockResolvedValue(null);
     mockUpdateWorkflow.mockResolvedValue(null);
 
     const res = await app.inject({
@@ -198,6 +217,36 @@ describe("PATCH /api/jobs/:id", () => {
     });
 
     expect(res.statusCode).toBe(404);
+    // Must not fall through to the mutation for a workflow that isn't resolved.
+    expect(mockUpdateWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a workflow in another workspace (no mutation)", async () => {
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow, workspaceId: "ws-other" });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/jobs/w-1",
+      payload: { name: "Hijacked" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockUpdateWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(workflowRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({
+      method: "PATCH",
+      url: "/api/jobs/w-1",
+      payload: { name: "Updated" },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockUpdateWorkflow).not.toHaveBeenCalled();
   });
 
   it("returns 400 on validation error", async () => {
@@ -213,11 +262,60 @@ describe("PATCH /api/jobs/:id", () => {
   });
 });
 
+describe("POST /api/jobs/:id/clone", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow });
+    app = await buildTestApp();
+  });
+
+  it("clones a workflow", async () => {
+    mockCloneWorkflow.mockResolvedValue({ ...mockWorkflow, id: "wf-2" });
+
+    const res = await app.inject({ method: "POST", url: "/api/jobs/wf-1/clone" });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json().workflow.id).toBe("wf-2");
+  });
+
+  it("returns 404 when source not found (no clone)", async () => {
+    mockGetWorkflow.mockResolvedValue(null);
+
+    const res = await app.inject({ method: "POST", url: "/api/jobs/nope/clone" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockCloneWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a workflow in another workspace (no clone)", async () => {
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow, workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "POST", url: "/api/jobs/wf-1/clone" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockCloneWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(workflowRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({ method: "POST", url: "/api/jobs/wf-1/clone" });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockCloneWorkflow).not.toHaveBeenCalled();
+  });
+});
+
 describe("DELETE /api/jobs/:id", () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow });
     app = await buildTestApp();
   });
 
@@ -230,11 +328,33 @@ describe("DELETE /api/jobs/:id", () => {
   });
 
   it("returns 404 when not found", async () => {
+    mockGetWorkflow.mockResolvedValue(null);
     mockDeleteWorkflow.mockResolvedValue(false);
 
     const res = await app.inject({ method: "DELETE", url: "/api/jobs/nonexistent" });
 
     expect(res.statusCode).toBe(404);
+    expect(mockDeleteWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a workflow in another workspace (no delete)", async () => {
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow, workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "DELETE", url: "/api/jobs/w-1" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockDeleteWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(workflowRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({ method: "DELETE", url: "/api/jobs/w-1" });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockDeleteWorkflow).not.toHaveBeenCalled();
   });
 });
 
@@ -245,6 +365,7 @@ describe("POST /api/jobs/:id/runs", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow });
     app = await buildTestApp();
   });
 
@@ -262,15 +383,43 @@ describe("POST /api/jobs/:id/runs", () => {
   });
 
   it("returns 400 when run creation fails", async () => {
-    mockCreateWorkflowRun.mockRejectedValue(new Error("Workflow not found"));
+    mockCreateWorkflowRun.mockRejectedValue(new Error("disabled"));
 
     const res = await app.inject({
       method: "POST",
-      url: "/api/jobs/nonexistent/runs",
+      url: "/api/jobs/wf-1/runs",
       payload: {},
     });
 
     expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 404 for a workflow not in the workspace (no run created)", async () => {
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow, workspaceId: "ws-other" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/jobs/wf-1/runs",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockCreateWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(workflowRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({
+      method: "POST",
+      url: "/api/jobs/wf-1/runs",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockCreateWorkflowRun).not.toHaveBeenCalled();
   });
 });
 
@@ -307,6 +456,7 @@ describe("GET /api/workflow-runs/:id", () => {
 
   it("returns a workflow run", async () => {
     mockGetWorkflowRun.mockResolvedValue({ ...mockWorkflowRun });
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow });
 
     const res = await app.inject({ method: "GET", url: "/api/workflow-runs/run-1" });
 
@@ -320,6 +470,15 @@ describe("GET /api/workflow-runs/:id", () => {
 
     expect(res.statusCode).toBe(404);
   });
+
+  it("returns 404 for a run whose workflow is in another workspace", async () => {
+    mockGetWorkflowRun.mockResolvedValue({ ...mockWorkflowRun });
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow, workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "GET", url: "/api/workflow-runs/run-1" });
+
+    expect(res.statusCode).toBe(404);
+  });
 });
 
 // ─── Workflow Run Operations ───
@@ -329,6 +488,8 @@ describe("POST /api/workflow-runs/:id/retry", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockGetWorkflowRun.mockResolvedValue({ ...mockWorkflowRun });
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow });
     app = await buildTestApp();
   });
 
@@ -350,6 +511,26 @@ describe("POST /api/workflow-runs/:id/retry", () => {
 
     expect(res.statusCode).toBe(400);
   });
+
+  it("returns 404 for a run whose workflow is in another workspace (no retry)", async () => {
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow, workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "POST", url: "/api/workflow-runs/run-1/retry" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockRetryWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(workflowRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({ method: "POST", url: "/api/workflow-runs/run-1/retry" });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockRetryWorkflowRun).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/workflow-runs/:id/cancel", () => {
@@ -357,6 +538,8 @@ describe("POST /api/workflow-runs/:id/cancel", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockGetWorkflowRun.mockResolvedValue({ ...mockWorkflowRun });
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow });
     app = await buildTestApp();
   });
 
@@ -377,6 +560,26 @@ describe("POST /api/workflow-runs/:id/cancel", () => {
     const res = await app.inject({ method: "POST", url: "/api/workflow-runs/run-1/cancel" });
 
     expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 404 for a run whose workflow is in another workspace (no cancel)", async () => {
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow, workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "POST", url: "/api/workflow-runs/run-1/cancel" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockCancelWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a viewer", async () => {
+    const viewerApp = await buildRouteTestApp(workflowRoutes, {
+      user: { id: "user-1", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+
+    const res = await viewerApp.inject({ method: "POST", url: "/api/workflow-runs/run-1/cancel" });
+
+    expect(res.statusCode).toBe(403);
+    expect(mockCancelWorkflowRun).not.toHaveBeenCalled();
   });
 });
 
@@ -439,5 +642,15 @@ describe("GET /api/workflow-runs/:id/logs", () => {
     const res = await app.inject({ method: "GET", url: "/api/workflow-runs/nonexistent/logs" });
 
     expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 404 for a run whose workflow is in another workspace", async () => {
+    mockGetWorkflowRun.mockResolvedValue({ ...mockWorkflowRun, state: "running" });
+    mockGetWorkflow.mockResolvedValue({ ...mockWorkflow, workspaceId: "ws-other" });
+
+    const res = await app.inject({ method: "GET", url: "/api/workflow-runs/run-1/logs" });
+
+    expect(res.statusCode).toBe(404);
+    expect(mockGetWorkflowRunLogs).not.toHaveBeenCalled();
   });
 });

@@ -112,6 +112,12 @@ function interpretIntent(
         statusPatch: {
           errorMessage: "Cancelled by user",
           finishedAt: new Date(status.reconcileBackoffUntil ?? Date.now()),
+          // Exhaust the retry budget so decideFailed never auto-retries a
+          // user-cancelled run back to QUEUED (it cannot otherwise tell a
+          // cancellation apart from an agent failure). An explicit user retry
+          // via workflowService.retryWorkflowRun still works — it does not
+          // consult maxRetries. Mirrors workflowService.cancelWorkflowRun.
+          retryCount: Math.max(status.retryCount, spec.maxRetries),
         },
         clearControlIntent: true,
         trigger: "user_cancel",

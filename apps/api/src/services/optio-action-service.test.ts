@@ -70,53 +70,61 @@ describe("logAction", () => {
     expect(result).toEqual(mockAction);
   });
 
-  it("sanitizes sensitive fields in params", async () => {
-    const mockAction = {
-      id: "action-2",
-      action: "create_task",
-      params: { title: "test", apiToken: "[REDACTED]" },
-      success: true,
-      createdAt: new Date(),
-    };
-    const mockReturning = vi.fn().mockResolvedValue([mockAction]);
-    const mockValues = vi.fn().mockReturnValue({ returning: mockReturning });
-    (db.insert as any).mockReturnValue({ values: mockValues });
-
-    await logAction({
-      action: "create_task",
-      params: { title: "test", apiToken: "secret-value-123" },
-      success: true,
-    });
-
-    // Verify the values call had the sanitized params
-    const insertedValues = mockValues.mock.calls[0][0];
-    expect(insertedValues.params.apiToken).toBe("[REDACTED]");
-    expect(insertedValues.params.title).toBe("test");
-  });
-
-  it("sanitizes various sensitive key patterns", async () => {
+  it("persists the caller's workspaceId", async () => {
     const mockReturning = vi.fn().mockResolvedValue([{ id: "a" }]);
     const mockValues = vi.fn().mockReturnValue({ returning: mockReturning });
     (db.insert as any).mockReturnValue({ values: mockValues });
 
     await logAction({
-      action: "test",
+      workspaceId: "ws-42",
+      action: "task.create",
+      params: { taskId: "t1" },
+      success: true,
+    });
+
+    const insertedValues = mockValues.mock.calls[0][0];
+    expect(insertedValues.workspaceId).toBe("ws-42");
+  });
+
+  it("defaults workspaceId to null when omitted (operator/legacy)", async () => {
+    const mockReturning = vi.fn().mockResolvedValue([{ id: "a" }]);
+    const mockValues = vi.fn().mockReturnValue({ returning: mockReturning });
+    (db.insert as any).mockReturnValue({ values: mockValues });
+
+    await logAction({ action: "task.create", params: { taskId: "t1" }, success: true });
+
+    const insertedValues = mockValues.mock.calls[0][0];
+    expect(insertedValues.workspaceId).toBeNull();
+  });
+
+  it("keeps only allowlisted params and drops everything else", async () => {
+    const mockReturning = vi.fn().mockResolvedValue([{ id: "a" }]);
+    const mockValues = vi.fn().mockReturnValue({ returning: mockReturning });
+    (db.insert as any).mockReturnValue({ values: mockValues });
+
+    await logAction({
+      action: "connection.update",
       params: {
+        connectionId: "c1", // allowlisted id — kept
+        name: "prod-db", // allowlisted label — kept
+        // Everything below is NOT allowlisted and must be dropped, not stored:
+        config: { url: "postgres://user:hunter2@db/app" },
+        apiToken: "secret-value-123",
         password: "pass123",
-        SECRET_KEY: "key123",
-        authHeader: "Bearer xyz",
-        normalField: "keep-this",
-        credential: "cred",
+        headers: { authorization: "Bearer xyz" },
+        arbitraryField: "from ...req.body spread",
       },
       success: true,
     });
 
     const insertedValues = mockValues.mock.calls[0][0];
-    expect(insertedValues.params.password).toBe("[REDACTED]");
-    expect(insertedValues.params.SECRET_KEY).toBe("[REDACTED]");
-    expect(insertedValues.params.authHeader).toBe("[REDACTED]");
-    expect(insertedValues.params.normalField).toBe("keep-this");
-    expect(insertedValues.params.credential).toBe("[REDACTED]");
+    expect(insertedValues.params).toEqual({ connectionId: "c1", name: "prod-db" });
+    // Explicitly assert secret-bearing keys are absent (not merely redacted).
+    expect(insertedValues.params).not.toHaveProperty("config");
+    expect(insertedValues.params).not.toHaveProperty("apiToken");
+    expect(insertedValues.params).not.toHaveProperty("password");
+    expect(insertedValues.params).not.toHaveProperty("headers");
+    expect(insertedValues.params).not.toHaveProperty("arbitraryField");
   });
 
   it("handles null params", async () => {

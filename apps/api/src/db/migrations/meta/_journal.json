@@ -547,6 +547,41 @@
       "when": 1777400000000,
       "tag": "1777400000_session_chat_events",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1784588891000,
+      "tag": "1784588891_backfill_task_workspace_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1785714869000,
+      "tag": "1785714869_optio_actions_workspace_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1786218202000,
+      "tag": "1786218202_dedup_builtin_connection_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1786259406000,
+      "tag": "1786259406_ticket_provider_initial_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1786405459000,
+      "tag": "1786405459_cursor_repo_model",
+      "breakpoints": true
     }
   ]
 }

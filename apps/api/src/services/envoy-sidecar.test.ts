@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   generateEnvoyConfig,
   generateSecretInitScript,
@@ -180,6 +180,18 @@ describe("buildEnvoySidecarContainer", () => {
 
     expect(container.imagePullPolicy).toBe("Always");
   });
+
+  it("uses a restricted security context", () => {
+    const container = buildEnvoySidecarContainer({
+      envoyImage: "envoyproxy/envoy:v1.31-latest",
+    });
+
+    expect(container.securityContext).toEqual({
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ["ALL"] },
+      seccompProfile: { type: "RuntimeDefault" },
+    });
+  });
 });
 
 // ── buildSecretInitContainer ─────────────────────────────────────────
@@ -221,6 +233,19 @@ describe("buildSecretInitContainer", () => {
     });
 
     expect(container.env).toEqual([]);
+  });
+
+  it("uses a restricted security context", () => {
+    const container = buildSecretInitContainer({
+      envoyImage: "envoyproxy/envoy:v1.31-latest",
+      secrets: { githubToken: "ghp_test123" },
+    });
+
+    expect(container.securityContext).toEqual({
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ["ALL"] },
+      seccompProfile: { type: "RuntimeDefault" },
+    });
   });
 });
 
