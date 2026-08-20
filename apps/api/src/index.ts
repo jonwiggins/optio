@@ -248,6 +248,10 @@ async function main() {
   const skillSyncWorker = startSkillSyncWorker();
   logger.info("Skill sync worker started");
 
+  const { startLocalSweepWorker } = await import("./workers/local-sweep-worker.js");
+  const localSweepWorker = startLocalSweepWorker();
+  logger.info("Local sweep worker started");
+
   // Check if metrics-server is available
   checkMetricsServer().catch(() => {});
 
@@ -274,6 +278,7 @@ async function main() {
     await reconcileWorker.close();
     await reconcileResyncWorker.close();
     await skillSyncWorker.close();
+    await localSweepWorker.close();
     await app.close();
     // Flush pending OTel spans/metrics with 5s timeout
     await shutdownTelemetry();

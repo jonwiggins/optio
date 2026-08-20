@@ -59,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/agents", label: "Agents", icon: Bot },
       { href: "/sessions", label: "Sessions", icon: Terminal },
+      { href: "/local", label: "Local", icon: Terminal },
     ],
   },
   {

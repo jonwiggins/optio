@@ -1469,3 +1469,117 @@ export const persistentAgentPods = pgTable(
     index("persistent_agent_pods_keep_warm_idx").on(table.keepWarmUntil),
   ],
 );
+
+// ── Optio Local (terminals on a user's own machine) ─────────────────────────
+// See docs/optio-local.md. Hosts are personal: bound to the registering user,
+// never shared workspace compute. Scrollback stays in the daemon; the DB holds
+// metadata plus a throttled ANSI-stripped preview for the wall view.
+
+export const localHostStateEnum = pgEnum("local_host_state", ["online", "offline"]);
+
+export const localHosts = pgTable(
+  "local_hosts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Nullable: auth-disabled dev/e2e has no user rows (mirrors interactive_sessions).
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    name: text("name").notNull(),
+    hostname: text("hostname").notNull(),
+    platform: text("platform").notNull(),
+    arch: text("arch"),
+    daemonVersion: text("daemon_version"),
+    dirs: jsonb("dirs").$type<Array<{ path: string; repoUrl?: string }>>().notNull().default([]),
+    state: localHostStateEnum("state").notNull().default("offline"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("local_hosts_user_hostname_key").on(table.userId, table.hostname),
+    index("local_hosts_user_id_idx").on(table.userId),
+  ],
+);
+
+export const localTerminalStateEnum = pgEnum("local_terminal_state", [
+  "pending",
+  "launching",
+  "running",
+  "exited",
+  "error",
+]);
+
+export const localAttentionStateEnum = pgEnum("local_attention_state", [
+  "working",
+  "needs_you",
+  "idle",
+]);
+
+export const localTerminals = pgTable(
+  "local_terminals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    hostId: uuid("host_id")
+      .notNull()
+      .references(() => localHosts.id, { onDelete: "cascade" }),
+    // Nullable: auth-disabled dev/e2e has no user rows (mirrors interactive_sessions).
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    title: text("title").notNull(),
+    dir: text("dir").notNull(),
+    // Display-only rendering of what runs; the daemon executes `spec`.
+    command: text("command"),
+    spec: jsonb("spec").$type<Record<string, unknown>>().notNull(),
+    state: localTerminalStateEnum("state").notNull().default("pending"),
+    pendingReason: text("pending_reason").$type<"hold" | "host_offline">(),
+    exitCode: integer("exit_code"),
+    errorMessage: text("error_message"),
+    attentionState: localAttentionStateEnum("attention_state").notNull().default("idle"),
+    attentionReason: text("attention_reason"),
+    spawnedBy: text("spawned_by")
+      .$type<"manual" | "ticket" | "trigger" | "blueprint" | "api">()
+      .notNull()
+      .default("manual"),
+    blueprintId: uuid("blueprint_id"),
+    triggerId: uuid("trigger_id"),
+    ticketSource: text("ticket_source"),
+    ticketExternalId: text("ticket_external_id"),
+    ticketUrl: text("ticket_url"),
+    preview: text("preview"),
+    costUsd: text("cost_usd"),
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("local_terminals_host_id_idx").on(table.hostId),
+    index("local_terminals_user_state_idx").on(table.userId, table.state),
+    index("local_terminals_created_at_idx").on(table.createdAt.desc()),
+  ],
+);
+
+export const localBlueprints = pgTable(
+  "local_blueprints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Nullable: auth-disabled dev/e2e has no user rows (mirrors interactive_sessions).
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    name: text("name").notNull(),
+    description: text("description"),
+    hostId: uuid("host_id").references(() => localHosts.id, { onDelete: "set null" }),
+    dir: text("dir"),
+    repoUrl: text("repo_url"),
+    commandTemplate: text("command_template").notNull(),
+    spawnMode: text("spawn_mode").$type<"auto" | "hold">().notNull().default("auto"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("local_blueprints_user_name_key").on(table.userId, table.name),
+    index("local_blueprints_user_id_idx").on(table.userId),
+  ],
+);

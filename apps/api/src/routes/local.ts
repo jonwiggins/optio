@@ -1,0 +1,716 @@
+/**
+ * REST surface for Optio Local (hosts, terminals, blueprints, triggers).
+ * All resources are user-scoped: hosts are personal machines, and every
+ * ownership miss is a 404. See docs/optio-local.md.
+ */
+import type { FastifyInstance } from "fastify";
+import type { ZodTypeProvider } from "fastify-type-provider-zod";
+import { z } from "zod";
+import { db } from "../db/client.js";
+import { repos } from "../db/schema.js";
+import { eq } from "drizzle-orm";
+import { parseRepoUrl, type LocalTerminalSpec } from "@optio/shared";
+import { logger } from "../logger.js";
+import { requireRole } from "../plugins/auth.js";
+import { ErrorResponseSchema, EmptyResponseSchema } from "../schemas/common.js";
+import {
+  LocalBlueprintSchema,
+  LocalHostDirSchema,
+  LocalHostSchema,
+  LocalTerminalSchema,
+  LocalTerminalSpecSchema,
+  LocalTriggerSchema,
+} from "../schemas/local.js";
+import * as hostService from "../services/local-host-service.js";
+import * as terminalService from "../services/local-terminal-service.js";
+import * as blueprintService from "../services/local-blueprint-service.js";
+import { getGitPlatformForRepo } from "../services/git-token-service.js";
+import { buildTicketPrompt } from "../services/ticket-context.js";
+
+const registerHostSchema = z
+  .object({
+    name: z.string().min(1).max(100).optional(),
+    hostname: z.string().min(1).max(255),
+    platform: z.string().min(1).max(50),
+    arch: z.string().max(50).optional(),
+    daemonVersion: z.string().max(50).optional(),
+    dirs: z.array(LocalHostDirSchema).max(200).default([]),
+  })
+  .describe("Daemon host registration (upsert by user + hostname)");
+
+const createTerminalSchema = z
+  .object({
+    hostId: z.string().uuid(),
+    dir: z.string().min(1).max(1000).optional(),
+    title: z.string().max(200).optional(),
+    spec: LocalTerminalSpecSchema.optional(),
+    ticket: z
+      .object({
+        repoId: z.string().min(1),
+        issueNumber: z.number().int().positive(),
+        title: z.string().min(1),
+        body: z.string().optional(),
+        agentType: z.string().optional(),
+      })
+      .optional()
+      .describe("Start the terminal seeded with an issue's context"),
+  })
+  .describe("Spawn a terminal on a local host");
+
+const blueprintBodySchema = z
+  .object({
+    name: z.string().min(1).max(100),
+    description: z.string().max(2000).optional(),
+    hostId: z.string().uuid().optional(),
+    dir: z.string().max(1000).optional(),
+    repoUrl: z.string().max(500).optional(),
+    commandTemplate: z.string().min(1).max(4000),
+    spawnMode: z.enum(["auto", "hold"]).optional(),
+  })
+  .describe("Local blueprint definition");
+
+const triggerBodySchema = z
+  .object({
+    type: z.enum(["manual", "schedule", "webhook", "ticket"]),
+    config: z.record(z.unknown()).optional(),
+    paramMapping: z.record(z.unknown()).optional(),
+    enabled: z.boolean().optional(),
+  })
+  .describe("Trigger definition for a local blueprint");
+
+const HostResponse = z.object({ host: LocalHostSchema });
+const HostsResponse = z.object({ hosts: z.array(LocalHostSchema) });
+const TerminalResponse = z.object({ terminal: LocalTerminalSchema });
+const TerminalsResponse = z.object({ terminals: z.array(LocalTerminalSchema) });
+const BlueprintResponse = z.object({ blueprint: LocalBlueprintSchema });
+const BlueprintsResponse = z.object({ blueprints: z.array(LocalBlueprintSchema) });
+const TriggerResponse = z.object({ trigger: LocalTriggerSchema });
+const TriggersResponse = z.object({ triggers: z.array(LocalTriggerSchema) });
+
+function validateTriggerConfig(
+  type: string,
+  config: Record<string, unknown> | undefined,
+): string | null {
+  if (type === "schedule" && typeof config?.cronExpression !== "string") {
+    return "Schedule triggers require config.cronExpression";
+  }
+  if (type === "webhook" && typeof config?.path !== "string") {
+    return "Webhook triggers require config.path";
+  }
+  return null;
+}
+
+export async function localRoutes(rawApp: FastifyInstance) {
+  const app = rawApp.withTypeProvider<ZodTypeProvider>();
+  const member = { preHandler: [requireRole("member")] };
+
+  // ── Hosts ────────────────────────────────────────────────────────────────
+
+  app.get(
+    "/api/local/hosts",
+    {
+      schema: {
+        operationId: "listLocalHosts",
+        summary: "List the caller's paired local hosts",
+        tags: ["Local"],
+        response: { 200: HostsResponse },
+      },
+    },
+    async (req, reply) => {
+      const hosts = await hostService.listHosts(req.user?.id ?? null);
+      reply.send({ hosts });
+    },
+  );
+
+  app.post(
+    "/api/local/hosts/register",
+    {
+      ...member,
+      schema: {
+        operationId: "registerLocalHost",
+        summary: "Register (or refresh) a local host",
+        description:
+          "Called by the `optio local` daemon on startup. Upserts by " +
+          "(user, hostname) and replaces the advertised directory allowlist.",
+        tags: ["Local"],
+        body: registerHostSchema,
+        response: { 200: HostResponse },
+      },
+    },
+    async (req, reply) => {
+      const host = await hostService.registerHost({
+        userId: req.user?.id ?? null,
+        workspaceId: req.user?.workspaceId ?? null,
+        ...req.body,
+      });
+      reply.send({ host });
+    },
+  );
+
+  app.delete(
+    "/api/local/hosts/:id",
+    {
+      ...member,
+      schema: {
+        operationId: "deleteLocalHost",
+        summary: "Unpair a local host (and delete its terminals)",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: EmptyResponseSchema, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const host = await hostService.getHost(req.params.id);
+      if (!host || !hostService.canAccessHost(host, req.user?.id)) {
+        return reply.status(404).send({ error: "Host not found" });
+      }
+      await hostService.deleteHost(host.id);
+      reply.send({});
+    },
+  );
+
+  // ── Terminals ────────────────────────────────────────────────────────────
+
+  app.get(
+    "/api/local/terminals",
+    {
+      schema: {
+        operationId: "listLocalTerminals",
+        summary: "List the caller's local terminals",
+        tags: ["Local"],
+        querystring: z.object({
+          hostId: z.string().uuid().optional(),
+          state: z.enum(["pending", "launching", "running", "exited", "error"]).optional(),
+        }),
+        response: { 200: TerminalsResponse },
+      },
+    },
+    async (req, reply) => {
+      const terminals = await terminalService.listTerminals(req.user?.id ?? null, req.query);
+      reply.send({ terminals });
+    },
+  );
+
+  app.post(
+    "/api/local/terminals",
+    {
+      ...member,
+      schema: {
+        operationId: "createLocalTerminal",
+        summary: "Spawn a terminal on a local host",
+        description:
+          "Spawns a shell, raw command, or agent CLI in an allowlisted " +
+          "directory. With `ticket`, the prompt is seeded from the issue " +
+          "(body + comments), the terminal is linked to it, and a " +
+          "'working on this' comment is posted.",
+        tags: ["Local"],
+        body: createTerminalSchema,
+        response: {
+          201: TerminalResponse,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          503: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const body = req.body;
+      const host = await hostService.getHost(body.hostId);
+      if (!host || !hostService.canAccessHost(host, req.user?.id)) {
+        return reply.status(404).send({ error: "Host not found" });
+      }
+
+      let spec: LocalTerminalSpec = body.spec ?? { kind: "shell" };
+      let dir = body.dir ?? null;
+      let title = body.title;
+      let ticketMeta: { source: string; externalId: string; url?: string } | undefined;
+      let announceTicket: (() => Promise<void>) | null = null;
+
+      if (body.ticket) {
+        const t = body.ticket;
+        const [repo] = await db.select().from(repos).where(eq(repos.id, t.repoId));
+        if (!repo) return reply.status(404).send({ error: "Repo not found" });
+        const wsId = req.user?.workspaceId;
+        if (wsId && repo.workspaceId !== wsId) {
+          return reply.status(404).send({ error: "Repo not found" });
+        }
+        const ri = parseRepoUrl(repo.repoUrl);
+        if (!ri) return reply.status(400).send({ error: "Cannot parse repo URL" });
+
+        dir = dir ?? hostService.findHostDirForRepo(host, repo.repoUrl);
+        if (!dir) {
+          return reply.status(400).send({
+            error: `No directory on host "${host.name}" has a git remote matching ${repo.repoUrl}. Run \`optio local add <dir>\` on that machine.`,
+          });
+        }
+
+        const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
+          userId: req.user?.id,
+          server: !req.user,
+        }).catch(() => ({ platform: null }));
+
+        let comments: Array<{ author: string; createdAt: string; body: string }> = [];
+        if (platform) {
+          comments = await platform
+            .getIssueComments(ri, t.issueNumber)
+            .catch(() => [] as typeof comments);
+        }
+        const prompt = buildTicketPrompt({ title: t.title, body: t.body, comments });
+        const agent = normalizeLocalAgent(t.agentType ?? repo.defaultAgentType);
+        spec = { kind: "agent", agent, prompt };
+
+        const ticketSource = ri.platform === "gitlab" ? "gitlab" : "github";
+        const issueUrl =
+          ri.platform === "gitlab"
+            ? `https://${ri.host}/${ri.owner}/${ri.repo}/-/issues/${t.issueNumber}`
+            : `https://${ri.host}/${ri.owner}/${ri.repo}/issues/${t.issueNumber}`;
+        ticketMeta = { source: ticketSource, externalId: String(t.issueNumber), url: issueUrl };
+        title = title ?? `#${t.issueNumber} ${t.title}`.slice(0, 200);
+
+        if (platform) {
+          const p = platform;
+          announceTicket = async () => {
+            await p.createIssueComment(
+              ri,
+              t.issueNumber,
+              `**Optio Local**: a terminal session was started for this issue on \`${host.name}\`.`,
+            );
+          };
+        }
+      }
+
+      if (!dir) return reply.status(400).send({ error: "dir is required" });
+
+      let terminal;
+      try {
+        terminal = await terminalService.createTerminal({
+          host,
+          userId: req.user?.id ?? null,
+          workspaceId: req.user?.workspaceId ?? null,
+          dir,
+          spec,
+          title,
+          spawnedBy: body.ticket ? "ticket" : "manual",
+          ticket: ticketMeta,
+        });
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+
+      if (announceTicket) {
+        announceTicket().catch((err) => logger.warn({ err }, "local: failed to comment on ticket"));
+      }
+      reply.status(201).send({ terminal });
+    },
+  );
+
+  app.get(
+    "/api/local/terminals/:id",
+    {
+      schema: {
+        operationId: "getLocalTerminal",
+        summary: "Get a local terminal",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: TerminalResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      reply.send({ terminal });
+    },
+  );
+
+  app.post(
+    "/api/local/terminals/:id/start",
+    {
+      ...member,
+      schema: {
+        operationId: "startLocalTerminal",
+        summary: "Start a pending (held or parked) terminal",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: TerminalResponse, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      try {
+        const updated = await terminalService.startTerminal(terminal);
+        reply.send({ terminal: updated });
+      } catch (err) {
+        reply.status(409).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  app.post(
+    "/api/local/terminals/:id/kill",
+    {
+      ...member,
+      schema: {
+        operationId: "killLocalTerminal",
+        summary: "Kill a running terminal",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        body: z
+          .object({ signal: z.enum(["SIGTERM", "SIGINT", "SIGKILL", "SIGHUP"]).optional() })
+          .default({}),
+        response: { 200: EmptyResponseSchema, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      try {
+        await terminalService.killTerminal(terminal, req.body.signal);
+        reply.send({});
+      } catch (err) {
+        reply.status(409).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  app.post(
+    "/api/local/terminals/:id/input",
+    {
+      ...member,
+      schema: {
+        operationId: "sendLocalTerminalInput",
+        summary: "Write to a terminal's stdin (REST fallback; prefer the stream WS)",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        body: z.object({ data: z.string().max(65536) }),
+        response: { 200: EmptyResponseSchema, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      if (terminal.state !== "running") {
+        return reply.status(409).send({ error: `Terminal is ${terminal.state}` });
+      }
+      const { sendToHost } = await import("../services/local-relay.js");
+      const sent = sendToHost(terminal.hostId, {
+        type: "input",
+        terminalId: terminal.id,
+        dataB64: Buffer.from(req.body.data, "utf-8").toString("base64"),
+      });
+      if (!sent) return reply.status(409).send({ error: "Host is offline" });
+      reply.send({});
+    },
+  );
+
+  app.delete(
+    "/api/local/terminals/:id",
+    {
+      ...member,
+      schema: {
+        operationId: "deleteLocalTerminal",
+        summary: "Delete a non-running terminal record",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: EmptyResponseSchema, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      try {
+        await terminalService.deleteTerminal(terminal);
+        reply.send({});
+      } catch (err) {
+        reply.status(409).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // ── Blueprints ───────────────────────────────────────────────────────────
+
+  app.get(
+    "/api/local/blueprints",
+    {
+      schema: {
+        operationId: "listLocalBlueprints",
+        summary: "List the caller's local blueprints",
+        tags: ["Local"],
+        response: { 200: BlueprintsResponse },
+      },
+    },
+    async (req, reply) => {
+      const blueprints = await blueprintService.listBlueprints(req.user?.id ?? null);
+      reply.send({ blueprints });
+    },
+  );
+
+  app.post(
+    "/api/local/blueprints",
+    {
+      ...member,
+      schema: {
+        operationId: "createLocalBlueprint",
+        summary: "Create a local blueprint",
+        tags: ["Local"],
+        body: blueprintBodySchema,
+        response: { 201: BlueprintResponse, 400: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const blueprint = await blueprintService.createBlueprint({
+          userId: req.user?.id ?? null,
+          workspaceId: req.user?.workspaceId ?? null,
+          ...req.body,
+        });
+        reply.status(201).send({ blueprint });
+      } catch (err) {
+        reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  app.get(
+    "/api/local/blueprints/:id",
+    {
+      schema: {
+        operationId: "getLocalBlueprint",
+        summary: "Get a local blueprint",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: BlueprintResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const blueprint = await blueprintService.getBlueprint(req.params.id);
+      if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
+        return reply.status(404).send({ error: "Blueprint not found" });
+      }
+      reply.send({ blueprint });
+    },
+  );
+
+  app.patch(
+    "/api/local/blueprints/:id",
+    {
+      ...member,
+      schema: {
+        operationId: "updateLocalBlueprint",
+        summary: "Update a local blueprint",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        body: blueprintBodySchema.partial().extend({ enabled: z.boolean().optional() }),
+        response: { 200: BlueprintResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const blueprint = await blueprintService.getBlueprint(req.params.id);
+      if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
+        return reply.status(404).send({ error: "Blueprint not found" });
+      }
+      const updated = await blueprintService.updateBlueprint(blueprint.id, req.body);
+      reply.send({ blueprint: updated! });
+    },
+  );
+
+  app.delete(
+    "/api/local/blueprints/:id",
+    {
+      ...member,
+      schema: {
+        operationId: "deleteLocalBlueprint",
+        summary: "Delete a local blueprint and its triggers",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: EmptyResponseSchema, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const blueprint = await blueprintService.getBlueprint(req.params.id);
+      if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
+        return reply.status(404).send({ error: "Blueprint not found" });
+      }
+      await blueprintService.deleteBlueprint(blueprint.id);
+      reply.send({});
+    },
+  );
+
+  app.post(
+    "/api/local/blueprints/:id/spawn",
+    {
+      ...member,
+      schema: {
+        operationId: "spawnLocalBlueprint",
+        summary: "Spawn a terminal from a blueprint",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        body: z.object({ params: z.record(z.unknown()).optional() }).default({}),
+        response: { 201: TerminalResponse, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const blueprint = await blueprintService.getBlueprint(req.params.id);
+      if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
+        return reply.status(404).send({ error: "Blueprint not found" });
+      }
+      try {
+        const terminal = await blueprintService.spawnFromBlueprint(blueprint, {
+          params: req.body.params,
+          spawnedBy: "blueprint",
+        });
+        reply.status(201).send({ terminal });
+      } catch (err) {
+        reply.status(409).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // ── Blueprint triggers ───────────────────────────────────────────────────
+
+  app.get(
+    "/api/local/blueprints/:id/triggers",
+    {
+      schema: {
+        operationId: "listLocalBlueprintTriggers",
+        summary: "List a blueprint's triggers",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: TriggersResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const blueprint = await blueprintService.getBlueprint(req.params.id);
+      if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
+        return reply.status(404).send({ error: "Blueprint not found" });
+      }
+      const triggers = await blueprintService.listBlueprintTriggers(blueprint.id);
+      reply.send({ triggers });
+    },
+  );
+
+  app.post(
+    "/api/local/blueprints/:id/triggers",
+    {
+      ...member,
+      schema: {
+        operationId: "createLocalBlueprintTrigger",
+        summary: "Attach a trigger to a blueprint",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        body: triggerBodySchema,
+        response: {
+          201: TriggerResponse,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const blueprint = await blueprintService.getBlueprint(req.params.id);
+      if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
+        return reply.status(404).send({ error: "Blueprint not found" });
+      }
+      const configError = validateTriggerConfig(
+        req.body.type,
+        req.body.config as Record<string, unknown> | undefined,
+      );
+      if (configError) return reply.status(400).send({ error: configError });
+      try {
+        const trigger = await blueprintService.createBlueprintTrigger({
+          blueprintId: blueprint.id,
+          ...req.body,
+        });
+        reply.status(201).send({ trigger });
+      } catch (err) {
+        if (err instanceof Error && err.message === "duplicate_webhook_path") {
+          return reply.status(409).send({ error: "Webhook path already in use" });
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.patch(
+    "/api/local/blueprints/:id/triggers/:triggerId",
+    {
+      ...member,
+      schema: {
+        operationId: "updateLocalBlueprintTrigger",
+        summary: "Update a blueprint trigger",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid(), triggerId: z.string().uuid() }),
+        body: triggerBodySchema.omit({ type: true }).partial(),
+        response: { 200: TriggerResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const blueprint = await blueprintService.getBlueprint(req.params.id);
+      if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
+        return reply.status(404).send({ error: "Blueprint not found" });
+      }
+      const triggers = await blueprintService.listBlueprintTriggers(blueprint.id);
+      if (!triggers.some((t) => t.id === req.params.triggerId)) {
+        return reply.status(404).send({ error: "Trigger not found" });
+      }
+      const updated = await blueprintService.updateBlueprintTrigger(req.params.triggerId, req.body);
+      if (!updated) return reply.status(404).send({ error: "Trigger not found" });
+      reply.send({ trigger: updated });
+    },
+  );
+
+  app.delete(
+    "/api/local/blueprints/:id/triggers/:triggerId",
+    {
+      ...member,
+      schema: {
+        operationId: "deleteLocalBlueprintTrigger",
+        summary: "Delete a blueprint trigger",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid(), triggerId: z.string().uuid() }),
+        response: { 200: EmptyResponseSchema, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const blueprint = await blueprintService.getBlueprint(req.params.id);
+      if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
+        return reply.status(404).send({ error: "Blueprint not found" });
+      }
+      const triggers = await blueprintService.listBlueprintTriggers(blueprint.id);
+      if (!triggers.some((t) => t.id === req.params.triggerId)) {
+        return reply.status(404).send({ error: "Trigger not found" });
+      }
+      await blueprintService.deleteBlueprintTrigger(req.params.triggerId);
+      reply.send({});
+    },
+  );
+}
+
+/** Map repo defaultAgentType values onto agents the daemon can launch. */
+function normalizeLocalAgent(
+  agentType: string | null | undefined,
+): "claude-code" | "codex" | "cursor" | "gemini" | "opencode" {
+  switch (agentType) {
+    case "codex":
+      return "codex";
+    case "cursor":
+      return "cursor";
+    case "gemini":
+      return "gemini";
+    case "opencode":
+      return "opencode";
+    default:
+      return "claude-code";
+  }
+}

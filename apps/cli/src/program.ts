@@ -13,6 +13,7 @@ import { repoCommand } from "./commands/repo/index.js";
 import { sessionCommand } from "./commands/session/index.js";
 import { secretCommand } from "./commands/secret/index.js";
 import { workspaceCommand } from "./commands/workspace/index.js";
+import { localCommand } from "./commands/local/index.js";
 
 export function createProgram(): Command {
   const program = new Command("optio")
@@ -40,6 +41,7 @@ export function createProgram(): Command {
   program.addCommand(sessionCommand);
   program.addCommand(secretCommand);
   program.addCommand(workspaceCommand);
+  program.addCommand(localCommand);
 
   return program;
 }

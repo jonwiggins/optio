@@ -22,6 +22,10 @@ const WebhookAcceptedResponseSchema = z
   .object({
     runId: z.string().optional().describe("Workflow run id when the target is a job"),
     taskId: z.string().optional().describe("Task id when the target is a task_config"),
+    terminalId: z
+      .string()
+      .optional()
+      .describe("Local terminal id when the target is a local_blueprint"),
   })
   .describe("Webhook accepted and run/task queued");
 
@@ -185,6 +189,37 @@ export async function hookRoutes(rawApp: FastifyInstance) {
         // Reuse the runId field for back-compat with the existing webhook
         // response shape — the agent id serves the same caller purpose.
         return reply.status(202).send({ runId: agent.id });
+      }
+
+      if (trigger.targetType === "local_blueprint") {
+        const { getBlueprint, spawnFromBlueprint } =
+          await import("../services/local-blueprint-service.js");
+        const blueprint = await getBlueprint(trigger.targetId);
+        if (!blueprint || !blueprint.enabled) {
+          return reply.status(404).send({ error: "Target blueprint not found or disabled" });
+        }
+        try {
+          const terminal = await spawnFromBlueprint(blueprint, {
+            triggerId: trigger.id,
+            spawnedBy: "trigger",
+            params,
+          });
+          logger.info(
+            { terminalId: terminal.id, blueprintId: blueprint.id, triggerId: trigger.id },
+            "Webhook trigger spawned local terminal",
+          );
+          return reply.status(202).send({ terminalId: terminal.id });
+        } catch (err) {
+          // Spawn failures (no host, dir unresolved) are the caller's 404-ish
+          // outcome, not a 500 — the trigger itself was valid.
+          logger.warn(
+            { err, blueprintId: blueprint.id, triggerId: trigger.id },
+            "Webhook trigger failed to spawn local terminal",
+          );
+          return reply
+            .status(404)
+            .send({ error: err instanceof Error ? err.message : "Spawn failed" });
+        }
       }
 
       return reply.status(404).send({ error: "Unknown trigger target type" });

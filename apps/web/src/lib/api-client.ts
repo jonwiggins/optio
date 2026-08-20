@@ -1788,4 +1788,104 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ intent }),
     }),
+
+  // ── Optio Local (terminals on the user's own machines) ─────────────────
+
+  listLocalHosts: () => request<{ hosts: any[] }>("/api/local/hosts"),
+
+  deleteLocalHost: (id: string) => request<{}>(`/api/local/hosts/${id}`, { method: "DELETE" }),
+
+  listLocalTerminals: (params?: { hostId?: string; state?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.hostId) qs.set("hostId", params.hostId);
+    if (params?.state) qs.set("state", params.state);
+    const query = qs.toString();
+    return request<{ terminals: any[] }>(`/api/local/terminals${query ? `?${query}` : ""}`);
+  },
+
+  getLocalTerminal: (id: string) => request<{ terminal: any }>(`/api/local/terminals/${id}`),
+
+  createLocalTerminal: (data: {
+    hostId: string;
+    dir?: string;
+    title?: string;
+    spec?:
+      | { kind: "shell" }
+      | { kind: "command"; command: string }
+      | { kind: "agent"; agent: string; prompt?: string };
+    ticket?: {
+      repoId: string;
+      issueNumber: number;
+      title: string;
+      body?: string;
+      agentType?: string;
+    };
+  }) =>
+    request<{ terminal: any }>("/api/local/terminals", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  startLocalTerminal: (id: string) =>
+    request<{ terminal: any }>(`/api/local/terminals/${id}/start`, { method: "POST" }),
+
+  killLocalTerminal: (id: string, signal?: "SIGTERM" | "SIGINT" | "SIGKILL" | "SIGHUP") =>
+    request<{}>(`/api/local/terminals/${id}/kill`, {
+      method: "POST",
+      body: JSON.stringify(signal ? { signal } : {}),
+    }),
+
+  deleteLocalTerminal: (id: string) =>
+    request<{}>(`/api/local/terminals/${id}`, { method: "DELETE" }),
+
+  listLocalBlueprints: () => request<{ blueprints: any[] }>("/api/local/blueprints"),
+
+  createLocalBlueprint: (data: {
+    name: string;
+    description?: string;
+    hostId?: string;
+    dir?: string;
+    repoUrl?: string;
+    commandTemplate: string;
+    spawnMode?: "auto" | "hold";
+  }) =>
+    request<{ blueprint: any }>("/api/local/blueprints", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateLocalBlueprint: (id: string, data: Record<string, unknown>) =>
+    request<{ blueprint: any }>(`/api/local/blueprints/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteLocalBlueprint: (id: string) =>
+    request<{}>(`/api/local/blueprints/${id}`, { method: "DELETE" }),
+
+  spawnLocalBlueprint: (id: string, params?: Record<string, unknown>) =>
+    request<{ terminal: any }>(`/api/local/blueprints/${id}/spawn`, {
+      method: "POST",
+      body: JSON.stringify({ params: params ?? {} }),
+    }),
+
+  listLocalBlueprintTriggers: (id: string) =>
+    request<{ triggers: any[] }>(`/api/local/blueprints/${id}/triggers`),
+
+  createLocalBlueprintTrigger: (
+    id: string,
+    data: {
+      type: "manual" | "schedule" | "webhook" | "ticket";
+      config?: Record<string, unknown>;
+      paramMapping?: Record<string, unknown>;
+      enabled?: boolean;
+    },
+  ) =>
+    request<{ trigger: any }>(`/api/local/blueprints/${id}/triggers`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteLocalBlueprintTrigger: (id: string, triggerId: string) =>
+    request<{}>(`/api/local/blueprints/${id}/triggers/${triggerId}`, { method: "DELETE" }),
 };

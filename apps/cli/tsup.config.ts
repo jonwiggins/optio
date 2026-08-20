@@ -10,6 +10,9 @@ export default defineConfig({
   outDir: "dist",
   clean: true,
   dts: false,
-  external: ["ws"],
+  external: ["ws", "node-pty"],
+  // Workspace packages export raw TS (./src/index.ts) — bundle them so the
+  // built binary doesn't try to import TS sources at runtime.
+  noExternal: ["@optio/shared"],
   shims: false,
 });

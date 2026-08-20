@@ -60,6 +60,7 @@ import { activityRoutes } from "./routes/activity.js";
 import githubAppRoutes from "./routes/github-app.js";
 import { githubTokenRoutes } from "./routes/github-token.js";
 import { hookRoutes } from "./routes/hooks.js";
+import { localRoutes } from "./routes/local.js";
 import { logStreamWs } from "./ws/log-stream.js";
 import { eventsWs } from "./ws/events.js";
 import { sessionTerminalWs } from "./ws/session-terminal.js";
@@ -68,6 +69,8 @@ import { optioChatWs } from "./ws/optio-chat.js";
 import { workflowRunLogStreamWs } from "./ws/workflow-run-log-stream.js";
 import { persistentAgentStreamWs } from "./ws/persistent-agent-stream.js";
 import { prReviewLogStreamWs } from "./ws/pr-review-log-stream.js";
+import { localDaemonWs } from "./ws/local-daemon.js";
+import { localTerminalStreamWs } from "./ws/local-terminal-stream.js";
 import authPlugin from "./plugins/auth.js";
 import { httpMetricsPlugin } from "./plugins/http-metrics.js";
 
@@ -299,6 +302,7 @@ export async function buildServer() {
   await app.register(githubAppRoutes);
   await app.register(githubTokenRoutes);
   await app.register(hookRoutes);
+  await app.register(localRoutes);
 
   // WebSocket routes
   await app.register(logStreamWs);
@@ -309,6 +313,8 @@ export async function buildServer() {
   await app.register(workflowRunLogStreamWs);
   await app.register(prReviewLogStreamWs);
   await app.register(persistentAgentStreamWs);
+  await app.register(localDaemonWs);
+  await app.register(localTerminalStreamWs);
 
   // Global error handler.
   //
