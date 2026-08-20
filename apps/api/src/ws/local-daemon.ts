@@ -49,6 +49,13 @@ export async function localDaemonWs(app: FastifyInstance) {
       if (!hostId) socket.close(4408, "Expected hello");
     }, HELLO_TIMEOUT_MS);
 
+    // Serialize message handling per socket. The handlers do async DB writes,
+    // so firing them concurrently (void handleMessage) would let frames the
+    // daemon sent in order — hello then a spawn ack, or `started` then `exit`
+    // — interleave and race their transitions. A promise chain preserves the
+    // daemon's frame ordering through the awaits without a global lock.
+    let queue: Promise<void> = Promise.resolve();
+
     socket.on("message", (raw: Buffer | string) => {
       if (!isMessageWithinSizeLimit(raw)) {
         socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
@@ -60,9 +67,11 @@ export async function localDaemonWs(app: FastifyInstance) {
       } catch {
         return;
       }
-      void handleMessage(msg).catch((err) => {
-        log.warn({ err, type: msg.type }, "local-daemon: message handling failed");
-      });
+      queue = queue.then(() =>
+        handleMessage(msg).catch((err) => {
+          log.warn({ err, type: msg.type }, "local-daemon: message handling failed");
+        }),
+      );
     });
 
     async function handleMessage(msg: LocalDaemonMessage): Promise<void> {
@@ -93,28 +102,38 @@ export async function localDaemonWs(app: FastifyInstance) {
           socket.send(JSON.stringify({ type: "pong" }));
           return;
         case "output":
-          relay.forwardOutput(msg.terminalId, Buffer.from(msg.dataB64, "base64"));
+          // The relay drops the frame unless this host owns the terminal's
+          // live subscription — a daemon can't inject into another host's
+          // viewer even though it knows the (broadcast) terminal id.
+          relay.forwardOutput(hostId, msg.terminalId, Buffer.from(msg.dataB64, "base64"));
           return;
         case "scrollback":
+          // attachId is a server-generated secret only the owning host was
+          // told, so no cross-host check is needed here.
           relay.deliverScrollback(msg.attachId, Buffer.from(msg.dataB64, "base64"));
           return;
         case "attach-error":
           relay.deliverAttachError(msg.attachId, msg.message);
           return;
         case "started":
-          await terminalService.handleStarted(msg.terminalId);
+          await terminalService.handleStarted(hostId, msg.terminalId);
           return;
         case "spawn-error":
-          await terminalService.handleSpawnError(msg.terminalId, msg.message);
+          await terminalService.handleSpawnError(hostId, msg.terminalId, msg.message);
           return;
         case "exit":
-          await terminalService.handleExit(msg.terminalId, msg.exitCode);
+          await terminalService.handleExit(hostId, msg.terminalId, msg.exitCode);
           return;
         case "attention":
-          await terminalService.handleAttention(msg.terminalId, msg.state, msg.reason);
+          await terminalService.handleAttention(hostId, msg.terminalId, msg.state, msg.reason);
           return;
         case "preview":
-          await terminalService.handlePreview(msg.terminalId, msg.preview, msg.lastActivityAt);
+          await terminalService.handlePreview(
+            hostId,
+            msg.terminalId,
+            msg.preview,
+            msg.lastActivityAt,
+          );
           return;
         default:
           return;

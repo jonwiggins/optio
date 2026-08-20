@@ -10,9 +10,15 @@ import type { LocalAttentionState } from "@optio/shared";
  * 3. Silence — output → working; 12 s of quiet after prior output → idle
  *    (deliberately NOT needs_you).
  *
+ * `needs_you` is sticky over the weaker heuristics: neither plain output nor
+ * the silence timer may downgrade it (a bell followed by silence means the
+ * terminal MOST needs you). It clears only on the "the human responded"
+ * signals — a UserPromptSubmit hook, or user input via onInput().
+ *
  * Emits transitions only. Pure of any WS concern: events surface both as the
- * return value of feed()/hookEvent() and via the onEvent callback (which also
- * carries timer-driven idle transitions). Timers are injectable for tests.
+ * return value of feed()/hookEvent()/onInput() and via the onEvent callback
+ * (which also carries timer-driven idle transitions). Timers are injectable
+ * for tests.
  */
 
 export interface AttentionEvent {
@@ -88,9 +94,13 @@ export class AttentionTracker {
     const events: AttentionEvent[] = [];
     t.producedOutput = true;
 
-    // Any output → working (only when not already working).
-    const working = this.transition(t, terminalId, "working", "output");
-    if (working) events.push(working);
+    // Any output → working (only when not already working), EXCEPT while
+    // needs_you: a bell-flagged terminal redrawing its prompt is still
+    // waiting on the user — only input or a hook clears it.
+    if (t.state !== "needs_you") {
+      const working = this.transition(t, terminalId, "working", "output");
+      if (working) events.push(working);
+    }
 
     for (const byte of chunk) {
       if (t.pendingEsc) {
@@ -138,6 +148,20 @@ export class AttentionTracker {
     const mapped = mapHookEvent(hookEventName);
     if (!mapped) return [];
     const event = this.transition(t, terminalId, mapped.state, mapped.reason);
+    return event ? [event] : [];
+  }
+
+  /**
+   * User input was written to the terminal's PTY — "the human responded".
+   * Clears needs_you (and idle) back to working. Hook-owned terminals are
+   * untouched: their UserPromptSubmit hook is the authoritative signal.
+   */
+  onInput(terminalId: string): AttentionEvent[] {
+    const t = this.get(terminalId);
+    if (t.hasHooks) return []; // hooks own this terminal
+    if (t.state !== "needs_you" && t.state !== "idle") return [];
+    const event = this.transition(t, terminalId, "working", "input");
+    this.resetSilenceTimer(terminalId, t);
     return event ? [event] : [];
   }
 
@@ -190,7 +214,9 @@ export class AttentionTracker {
     this.clearSilenceTimer(t);
     t.silenceTimer = this.scheduler.setTimeout(() => {
       t.silenceTimer = null;
-      if (t.hasHooks || !t.producedOutput) return;
+      // Silence is the weakest signal: it only downgrades working → idle.
+      // A needs_you terminal that goes quiet is still waiting on the user.
+      if (t.hasHooks || !t.producedOutput || t.state !== "working") return;
       this.transition(t, terminalId, "idle", "silence");
     }, this.silenceMs);
   }

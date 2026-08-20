@@ -1573,6 +1573,11 @@ export const localBlueprints = pgTable(
     dir: text("dir"),
     repoUrl: text("repo_url"),
     commandTemplate: text("command_template").notNull(),
+    // When set, the rendered template is the agent's prompt (a single quoted
+    // argv element, so params are NOT shell-quoted) and the spawn runs through
+    // the daemon's agent path — so automation-spawned agents get attention
+    // hooks. Null = plain shell command (params shell-quoted).
+    agent: text("agent").$type<"claude-code" | "codex" | "cursor" | "gemini" | "opencode">(),
     spawnMode: text("spawn_mode").$type<"auto" | "hold">().notNull().default("auto"),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

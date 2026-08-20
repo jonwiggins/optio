@@ -90,8 +90,15 @@ export interface LocalBlueprint {
   /** Working dir; null = resolve via repoUrl against the host's dir list. */
   dir: string | null;
   repoUrl: string | null;
-  /** Rendered with {{param}} substitution; params are shell-quoted first. */
+  /**
+   * Rendered with {{param}} substitution. When `agent` is null the result is a
+   * shell command and params are shell-quoted first; when `agent` is set the
+   * result is the agent's prompt (a single quoted argv element), so params are
+   * substituted raw.
+   */
   commandTemplate: string;
+  /** Non-null = run the rendered template as this agent (gets attention hooks). */
+  agent: LocalAgentKind | null;
   spawnMode: LocalBlueprintSpawnMode;
   enabled: boolean;
   createdAt: string;

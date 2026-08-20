@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
 import { getWsTokenProvider } from "@/lib/ws-auth";
 import { cn } from "@/lib/utils";
+import { closeAction, isTerminalStateDead } from "./stream-policy";
 import type { LocalAttentionState, LocalTerminalState } from "@optio/shared";
 
 const ATTENTION_LABEL: Record<LocalAttentionState, string> = {
@@ -15,6 +16,24 @@ const ATTENTION_LABEL: Record<LocalAttentionState, string> = {
   needs_you: "needs you",
   idle: "idle",
 };
+
+type ConnState = "connecting" | "connected" | "reconnecting" | "disconnected";
+
+const CONN_LABEL: Record<ConnState, string> = {
+  connecting: "connecting…",
+  connected: "connected",
+  reconnecting: "reconnecting…",
+  disconnected: "disconnected",
+};
+
+const CONN_DOT: Record<ConnState, string> = {
+  connecting: "bg-text-muted/40",
+  connected: "bg-success",
+  reconnecting: "bg-warning",
+  disconnected: "bg-error",
+};
+
+const RECONNECT_DELAY_MS = 2000;
 
 /**
  * xterm.js viewer for an Optio Local terminal (/ws/local/terminals/:id/stream).
@@ -42,7 +61,7 @@ export function LocalTerminal({
     state: LocalTerminalState;
     attentionState: LocalAttentionState;
   } | null>(null);
-  const [connected, setConnected] = useState(false);
+  const [connState, setConnState] = useState<ConnState>("connecting");
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -76,6 +95,16 @@ export function LocalTerminal({
     let ws: WebSocket | null = null;
     let disposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    // The terminal has exited/errored — nothing more will ever stream, so a
+    // reconnect could only wipe the history left on screen.
+    let terminalDead = false;
+    // Set when we close the socket ourselves to recover from a retryable
+    // error frame (e.g. "Host is offline"), so onclose knows to reconnect.
+    let retryRequested = false;
+    // Reset lazily on the first binary frame of a reconnect (the scrollback
+    // replay) — never before, so a reconnect that brings nothing back can't
+    // blank the pane.
+    let pendingReset = false;
 
     const connect = async () => {
       // Tokens go in the Sec-WebSocket-Protocol header (never the URL), same
@@ -90,9 +119,13 @@ export function LocalTerminal({
       ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
       ws.binaryType = "arraybuffer";
       const socket = ws;
+      // True once this connection's status frame reports a live terminal —
+      // an error frame is only worth retrying when the terminal itself is
+      // alive (e.g. "Host is offline"; the daemon will reconnect).
+      let liveOnThisConnection = false;
 
       socket.onopen = () => {
-        setConnected(true);
+        setConnState("connected");
         socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
       };
 
@@ -105,31 +138,51 @@ export function LocalTerminal({
             return;
           }
           if (parsed.type === "status") {
+            if (isTerminalStateDead(parsed.state)) terminalDead = true;
+            else liveOnThisConnection = true;
             setStatus({ state: parsed.state, attentionState: parsed.attentionState });
             onStatusRef.current?.(parsed.state, parsed.attentionState);
           } else if (parsed.type === "exit") {
+            terminalDead = true;
             term.writeln(
               `\r\n\x1b[2m[process exited${parsed.exitCode != null ? ` (code ${parsed.exitCode})` : ""}]\x1b[0m`,
             );
             onExitRef.current?.(parsed.exitCode ?? null);
           } else if (parsed.type === "error") {
             term.writeln(`\r\n\x1b[31m${parsed.message}\x1b[0m`);
+            // An error on a live terminal (e.g. "Host is offline") leaves the
+            // socket open but attached to nothing — it would never receive
+            // another frame. Close it so the reconnect loop retries until the
+            // daemon is back.
+            if (liveOnThisConnection && !terminalDead) {
+              retryRequested = true;
+              socket.close();
+            }
           }
         } else {
+          if (pendingReset) {
+            pendingReset = false;
+            term.reset();
+          }
           term.write(new Uint8Array(msg.data));
         }
       };
 
-      socket.onclose = () => {
-        setConnected(false);
+      socket.onclose = (event) => {
         if (disposed) return;
-        // The server replays scrollback on reattach — reset so history isn't
-        // duplicated after the reconnect.
+        const action = closeAction({ code: event.code, terminalDead, retryRequested });
+        retryRequested = false;
+        if (action.kind === "stop") {
+          setConnState("disconnected");
+          if (action.message) term.writeln(`\r\n\x1b[31m${action.message}\x1b[0m`);
+          return;
+        }
+        setConnState("reconnecting");
+        pendingReset = true;
         reconnectTimer = setTimeout(() => {
           if (disposed) return;
-          term.reset();
           connect();
-        }, 2000);
+        }, RECONNECT_DELAY_MS);
       };
 
       socket.onerror = () => {
@@ -137,6 +190,7 @@ export function LocalTerminal({
       };
     };
 
+    setConnState("connecting");
     connect();
 
     term.onData((data) => {
@@ -169,13 +223,8 @@ export function LocalTerminal({
     <div className="h-full flex flex-col bg-[#09090b]">
       <div className="shrink-0 flex items-center gap-3 px-3 py-1.5 border-b border-border/50 text-[11px] text-text-muted">
         <span className="flex items-center gap-1.5">
-          <span
-            className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              connected ? "bg-success" : "bg-text-muted/40",
-            )}
-          />
-          {connected ? "connected" : "reconnecting…"}
+          <span className={cn("w-1.5 h-1.5 rounded-full", CONN_DOT[connState])} />
+          {CONN_LABEL[connState]}
         </span>
         {status && (
           <>

@@ -21,9 +21,13 @@ import {
 } from "./local-host-service.js";
 import {
   createTerminal,
+  deleteTerminal,
   getTerminal,
+  handleAttention,
   handleExit,
+  handleSpawnError,
   handleStarted,
+  killTerminal,
   reconcileHello,
   startTerminal,
   sweepStuckLaunching,
@@ -167,12 +171,12 @@ describe("local terminals", () => {
     });
     expect(manual.state).toBe("launching");
 
-    await handleStarted(manual.id);
+    await handleStarted(host.id, manual.id);
     let row = await getTerminal(manual.id);
     expect(row?.state).toBe("running");
     expect(row?.attentionState).toBe("working");
 
-    await handleExit(manual.id, 0);
+    await handleExit(host.id, manual.id, 0);
     row = await getTerminal(manual.id);
     expect(row?.state).toBe("exited");
     expect(row?.exitCode).toBe(0);
@@ -227,13 +231,95 @@ describe("local terminals", () => {
       spec: { kind: "command", command: "sleep 999" },
       spawnedBy: "trigger",
     });
-    await handleStarted(t.id);
+    await handleStarted(host.id, t.id);
 
     await reconcileHello(host.id, []); // daemon restarted: no terminals
     const row = await getTerminal(t.id);
     expect(row?.state).toBe("exited");
     // ...but automation spawns land in the needs-you queue.
     expect(row?.attentionState).toBe("needs_you");
+  });
+
+  it("reconcileHello promotes a launching terminal the daemon reports running", async () => {
+    const host = await makeHost();
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, null, daemon);
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "command", command: "sleep 999" },
+    });
+    expect(t.state).toBe("launching");
+    // The `started` frame was lost mid-reconnect; hello reports it running.
+    await reconcileHello(host.id, [{ terminalId: t.id, running: true }]);
+    const row = await getTerminal(t.id);
+    expect(row?.state).toBe("running");
+  });
+
+  it("ignores daemon frames for a terminal owned by another host", async () => {
+    const hostA = await makeHost("it-hostA");
+    const hostB = await makeHost("it-hostB");
+    relay.registerDaemon(hostA.id, null, new FakeDaemonSocket());
+    const t = await createTerminal({
+      host: hostA,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "command", command: "sleep 999" },
+    });
+    await handleStarted(hostA.id, t.id);
+
+    // hostB tries to drive hostA's terminal — every handler must no-op.
+    await handleExit(hostB.id, t.id, 0);
+    await handleSpawnError(hostB.id, t.id, "spoofed");
+    await handleAttention(hostB.id, t.id, "idle", "spoofed");
+    const row = await getTerminal(t.id);
+    expect(row?.state).toBe("running");
+    expect(row?.errorMessage).toBeNull();
+  });
+
+  it("started/exit CAS resolves a fast-exiting command to exited, never stuck running", async () => {
+    const host = await makeHost();
+    relay.registerDaemon(host.id, null, new FakeDaemonSocket());
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "command", command: "false" },
+      spawnedBy: "trigger",
+    });
+    // Even if the exit UPDATE were to land before started, CAS keeps the row
+    // terminal: apply exit first, then a late started must not resurrect it.
+    await handleExit(host.id, t.id, 1);
+    await handleStarted(host.id, t.id);
+    const row = await getTerminal(t.id);
+    expect(row?.state).toBe("exited");
+    expect(row?.exitCode).toBe(1);
+  });
+
+  it("force-exits a running terminal when killed on an offline host", async () => {
+    const host = await makeHost();
+    relay.registerDaemon(host.id, null, new FakeDaemonSocket());
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "command", command: "sleep 999" },
+    });
+    await handleStarted(host.id, t.id);
+    relay.resetRelayForTests(); // host goes offline (daemon socket gone)
+
+    await killTerminal((await getTerminal(t.id))!);
+    const row = await getTerminal(t.id);
+    expect(row?.state).toBe("exited");
+    expect(row?.errorMessage).toMatch(/offline/);
+    // ...and now deletable.
+    await deleteTerminal(row!);
+    expect(await getTerminal(t.id)).toBeNull();
   });
 });
 
@@ -264,6 +350,34 @@ describe("local blueprints", () => {
     expect(spawn.spec.kind).toBe("command");
     // The param is one single-quoted shell word; embedded quotes escaped.
     expect(spawn.spec.command).toBe(`claude 'review PR; echo '\\''$(whoami)'\\'''`);
+  });
+
+  it("agent-mode blueprints emit an agent spec with a raw (un-shell-quoted) prompt", async () => {
+    const host = await makeHost();
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, null, daemon);
+
+    const blueprint = await createBlueprint({
+      userId: null,
+      workspaceId: null,
+      name: `bp-agent-${Math.random().toString(36).slice(2, 8)}`,
+      hostId: host.id,
+      dir: "/home/dev/optio",
+      agent: "claude-code",
+      commandTemplate: "Review PR: {{title}}",
+    });
+
+    const terminal = await spawnFromBlueprint(blueprint, {
+      params: { title: `fix "it's" broken` },
+    });
+    const spawn = daemon.messages().find((m) => m.type === "spawn") as {
+      spec: { kind: string; agent: string; prompt: string };
+    };
+    expect(spawn.spec.kind).toBe("agent");
+    expect(spawn.spec.agent).toBe("claude-code");
+    // Raw substitution — the daemon quotes the whole prompt as one argv element.
+    expect(spawn.spec.prompt).toBe(`Review PR: fix "it's" broken`);
+    expect(terminal.command).toContain("claude");
   });
 
   it("fires matching ticket triggers and honors label filters", async () => {

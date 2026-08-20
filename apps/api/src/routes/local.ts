@@ -65,6 +65,10 @@ const blueprintBodySchema = z
     dir: z.string().max(1000).optional(),
     repoUrl: z.string().max(500).optional(),
     commandTemplate: z.string().min(1).max(4000),
+    agent: z
+      .enum(["claude-code", "codex", "cursor", "gemini", "opencode"])
+      .nullish()
+      .describe("Run the rendered template as this agent (gets attention hooks); null = shell"),
     spawnMode: z.enum(["auto", "hold"]).optional(),
   })
   .describe("Local blueprint definition");
@@ -652,7 +656,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
         tags: ["Local"],
         params: z.object({ id: z.string().uuid(), triggerId: z.string().uuid() }),
         body: triggerBodySchema.omit({ type: true }).partial(),
-        response: { 200: TriggerResponse, 404: ErrorResponseSchema },
+        response: { 200: TriggerResponse, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
@@ -664,9 +668,19 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!triggers.some((t) => t.id === req.params.triggerId)) {
         return reply.status(404).send({ error: "Trigger not found" });
       }
-      const updated = await blueprintService.updateBlueprintTrigger(req.params.triggerId, req.body);
-      if (!updated) return reply.status(404).send({ error: "Trigger not found" });
-      reply.send({ trigger: updated });
+      try {
+        const updated = await blueprintService.updateBlueprintTrigger(
+          req.params.triggerId,
+          req.body,
+        );
+        if (!updated) return reply.status(404).send({ error: "Trigger not found" });
+        reply.send({ trigger: updated });
+      } catch (err) {
+        if (err instanceof Error && err.message === "duplicate_webhook_path") {
+          return reply.status(409).send({ error: "Webhook path already in use" });
+        }
+        throw err;
+      }
     },
   );
 

@@ -589,6 +589,13 @@
       "when": 1787211134000,
       "tag": "1787211134_optio_local",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1787214600000,
+      "tag": "1787214600_local_blueprint_agent",
+      "breakpoints": true
     }
   ]
 }

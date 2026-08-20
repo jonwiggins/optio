@@ -20,6 +20,19 @@ import {
 const TICKET_SOURCES = ["github", "gitlab", "linear", "jira", "notion"] as const;
 type TriggerType = "schedule" | "webhook" | "ticket";
 
+// TODO: import LocalAgentKind from @optio/shared once LocalBlueprint.agent
+// lands there (being added in parallel with the API change).
+const BLUEPRINT_AGENTS = ["claude-code", "codex", "cursor", "gemini", "opencode"] as const;
+type BlueprintAgent = (typeof BLUEPRINT_AGENTS)[number];
+
+const AGENT_LABELS: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  cursor: "Cursor",
+  gemini: "Gemini",
+  opencode: "OpenCode",
+};
+
 function triggerSummary(trigger: any): string {
   const config = (trigger.config ?? {}) as Record<string, unknown>;
   switch (trigger.type) {
@@ -195,6 +208,11 @@ function BlueprintRow({
             <span className="text-[10px] px-1.5 py-0.5 rounded border border-border bg-bg text-text-muted uppercase tracking-wide">
               {blueprint.spawnMode}
             </span>
+            {blueprint.agent && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded border border-primary/30 bg-primary/10 text-primary">
+                {AGENT_LABELS[blueprint.agent] ?? blueprint.agent}
+              </span>
+            )}
           </div>
           <div className="text-[11px] text-text-muted font-mono truncate mt-0.5">
             {blueprint.dir ?? blueprint.repoUrl ?? "any dir"} · {blueprint.commandTemplate}
@@ -455,6 +473,7 @@ function NewBlueprintForm({
   const [dir, setDir] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [commandTemplate, setCommandTemplate] = useState("");
+  const [agent, setAgent] = useState<"" | BlueprintAgent>("");
   const [spawnMode, setSpawnMode] = useState<"auto" | "hold">("hold");
   const [saving, setSaving] = useState(false);
 
@@ -478,6 +497,7 @@ function NewBlueprintForm({
         dir: locationKind === "dir" ? dir.trim() : undefined,
         repoUrl: locationKind === "repoUrl" ? repoUrl.trim() : undefined,
         commandTemplate: commandTemplate.trim(),
+        ...(agent ? { agent } : {}),
         spawnMode,
       });
       toast.success("Blueprint created");
@@ -573,19 +593,48 @@ function NewBlueprintForm({
       </div>
 
       <div>
-        <label className="block text-xs text-text-muted mb-1">Command template</label>
-        <textarea
-          value={commandTemplate}
-          onChange={(e) => setCommandTemplate(e.target.value)}
-          rows={2}
-          placeholder={"claude {{prompt}}"}
-          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary resize-y"
-        />
-        <p className="text-[11px] text-text-muted/70 mt-1">
-          Params are pre-shell-quoted: write{" "}
-          <code className="font-mono">claude {"{{prompt}}"}</code>, not{" "}
-          <code className="font-mono">claude &quot;{"{{prompt}}"}&quot;</code>.
-        </p>
+        <div className="flex gap-3">
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs text-text-muted mb-1">
+              {agent ? "Prompt template" : "Command template"}
+            </label>
+            <textarea
+              value={commandTemplate}
+              onChange={(e) => setCommandTemplate(e.target.value)}
+              rows={2}
+              placeholder={agent ? "Investigate {{ticketTitle}}" : "claude {{prompt}}"}
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary resize-y"
+            />
+          </div>
+          <div className="w-36 shrink-0">
+            <label className="block text-xs text-text-muted mb-1">Run as agent</label>
+            <select
+              value={agent}
+              onChange={(e) => setAgent(e.target.value as "" | BlueprintAgent)}
+              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+            >
+              <option value="">None</option>
+              {BLUEPRINT_AGENTS.map((a) => (
+                <option key={a} value={a}>
+                  {AGENT_LABELS[a]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {agent ? (
+          <p className="text-[11px] text-text-muted/70 mt-1">
+            The template renders as {AGENT_LABELS[agent]}&apos;s prompt. Params are substituted
+            plainly (not shell-quoted): write <code className="font-mono">{"{{ticketTitle}}"}</code>{" "}
+            as-is.
+          </p>
+        ) : (
+          <p className="text-[11px] text-text-muted/70 mt-1">
+            Runs as a raw shell command. Params are pre-shell-quoted: write{" "}
+            <code className="font-mono">claude {"{{prompt}}"}</code>, not{" "}
+            <code className="font-mono">claude &quot;{"{{prompt}}"}&quot;</code>.
+          </p>
+        )}
       </div>
 
       <div>

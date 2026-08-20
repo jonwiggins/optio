@@ -80,6 +80,7 @@ export const LocalBlueprintSchema = z
     dir: z.string().nullable(),
     repoUrl: z.string().nullable(),
     commandTemplate: z.string(),
+    agent: z.enum(["claude-code", "codex", "cursor", "gemini", "opencode"]).nullable(),
     spawnMode: z.enum(["auto", "hold"]),
     enabled: z.boolean(),
     createdAt: z.date(),

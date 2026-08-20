@@ -3,6 +3,7 @@ import { normalizeRepoUrl, LOCAL_HOST_OFFLINE_AFTER_MS, type LocalHostDir } from
 import { db } from "../db/client.js";
 import { localHosts } from "../db/schema.js";
 import { logger } from "../logger.js";
+import { isAuthDisabled } from "./oauth/index.js";
 
 export type LocalHostRow = typeof localHosts.$inferSelect;
 
@@ -11,9 +12,15 @@ function ownedBy(userId: string | null | undefined) {
   return userId ? eq(localHosts.userId, userId) : isNull(localHosts.userId);
 }
 
-/** True when `userId` may act on `host` (null host owner = dev install). */
+/**
+ * True when `userId` may act on `host`. Null-owner rows only exist in
+ * auth-disabled dev installs; they're reachable exactly when auth is disabled
+ * (one implicit user) — never by an arbitrary authenticated user in a
+ * production install that was previously run without auth.
+ */
 export function canAccessHost(host: LocalHostRow, userId: string | null | undefined): boolean {
-  return !host.userId || host.userId === (userId ?? null);
+  if (host.userId) return host.userId === (userId ?? null);
+  return isAuthDisabled();
 }
 
 export interface RegisterHostInput {

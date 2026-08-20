@@ -135,6 +135,72 @@ describe("attention output/silence heuristics", () => {
   });
 });
 
+describe("needs_you stickiness", () => {
+  it("output after a bell does NOT downgrade needs_you to working", () => {
+    const { events, tracker } = setup();
+    tracker.feed(T, Buffer.from("done\x07"));
+    tracker.feed(T, Buffer.from("prompt redraw"));
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "bell" });
+  });
+
+  it("silence after a bell does NOT downgrade needs_you to idle", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.feed(T, Buffer.from("done\x07"));
+    scheduler.fireAll();
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "bell" });
+    expect(events.filter((e) => e.state === "idle")).toEqual([]);
+  });
+
+  it("output then silence after a bell still keeps needs_you", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.feed(T, Buffer.from("done\x07"));
+    tracker.feed(T, Buffer.from("still waiting"));
+    scheduler.fireAll();
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "bell" });
+  });
+
+  it("onInput() clears needs_you back to working", () => {
+    const { tracker } = setup();
+    tracker.feed(T, Buffer.from("done\x07"));
+    expect(tracker.onInput(T)).toEqual([{ terminalId: T, state: "working", reason: "input" }]);
+  });
+
+  it("onInput() clears idle back to working", () => {
+    const { scheduler, tracker } = setup();
+    tracker.feed(T, Buffer.from("output"));
+    scheduler.fireAll(); // → idle
+    expect(tracker.onInput(T)).toEqual([{ terminalId: T, state: "working", reason: "input" }]);
+  });
+
+  it("onInput() while already working is a no-op", () => {
+    const { tracker } = setup();
+    tracker.feed(T, Buffer.from("output"));
+    expect(tracker.onInput(T)).toEqual([]);
+  });
+
+  it("silence after onInput() downgrades working → idle again", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.feed(T, Buffer.from("done\x07"));
+    tracker.onInput(T);
+    scheduler.fireAll();
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "idle", reason: "silence" });
+  });
+
+  it("onInput() is a no-op for hook-owned terminals", () => {
+    const { tracker } = setup();
+    tracker.hookEvent(T, "Stop"); // needs_you, hooks own the terminal
+    expect(tracker.onInput(T)).toEqual([]);
+  });
+
+  it("a UserPromptSubmit hook still clears needs_you", () => {
+    const { tracker } = setup();
+    tracker.hookEvent(T, "Stop");
+    expect(tracker.hookEvent(T, "UserPromptSubmit")).toEqual([
+      { terminalId: T, state: "working", reason: "prompt" },
+    ]);
+  });
+});
+
 describe("hook mapping", () => {
   it("maps Stop/Notification/UserPromptSubmit to the expected (state, reason)", () => {
     expect(mapHookEvent("Stop")).toEqual({ state: "needs_you", reason: "stop" });

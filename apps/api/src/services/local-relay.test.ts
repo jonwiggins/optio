@@ -70,13 +70,17 @@ describe("local-relay", () => {
     expect(attachA).toBeDefined();
 
     // Live output before the snapshot lands is not delivered to A.
-    forwardOutput("t1", Buffer.from("early"));
+    forwardOutput("h1", "t1", Buffer.from("early"));
     expect(viewerA.sent).toHaveLength(0);
 
     deliverScrollback(attachA.attachId, Buffer.from("history"));
     expect(viewerA.sent.map(String)).toEqual(["history"]);
 
-    forwardOutput("t1", Buffer.from("live"));
+    forwardOutput("h1", "t1", Buffer.from("live"));
+    expect(viewerA.sent.map(String)).toEqual(["history", "live"]);
+
+    // A daemon on a different host cannot inject into t1's viewer.
+    forwardOutput("attacker-host", "t1", Buffer.from("evil"));
     expect(viewerA.sent.map(String)).toEqual(["history", "live"]);
 
     // Second viewer: gets its own snapshot; A is not re-sent history.
@@ -87,7 +91,7 @@ describe("local-relay", () => {
       .filter((m) => m.type === "attach")
       .at(-1) as { attachId: string };
     deliverScrollback(attachB.attachId, Buffer.from("historylive"));
-    forwardOutput("t1", Buffer.from("more"));
+    forwardOutput("h1", "t1", Buffer.from("more"));
     expect(viewerA.sent.map(String)).toEqual(["history", "live", "more"]);
     expect(viewerB.sent.map(String)).toEqual(["historylive", "more"]);
   });
@@ -124,7 +128,7 @@ describe("local-relay", () => {
       JSON.stringify({ type: "error", message: "no such terminal" }),
     ]);
     // Not enrolled for output afterwards.
-    forwardOutput("t1", Buffer.from("x"));
+    forwardOutput("h1", "t1", Buffer.from("x"));
     expect(viewer.sent).toHaveLength(1);
   });
 

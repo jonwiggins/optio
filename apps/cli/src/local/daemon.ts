@@ -171,6 +171,10 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
 
       socket.on("open", () => {
         backoff = BACKOFF_INITIAL_MS;
+        // A fresh connection has no viewers: the server dropped all relay
+        // subscriptions when the old socket died (without sending detach).
+        // Stop streaming output until it re-issues attach for each viewer.
+        manager.clearAllSubscriptions();
         const hello: LocalDaemonMessage = {
           type: "hello",
           hostId: host.id,

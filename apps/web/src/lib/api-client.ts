@@ -1847,6 +1847,8 @@ export const api = {
     dir?: string;
     repoUrl?: string;
     commandTemplate: string;
+    /** Run the rendered template as this agent's prompt; null = raw shell command. */
+    agent?: "claude-code" | "codex" | "cursor" | "gemini" | "opencode" | null;
     spawnMode?: "auto" | "hold";
   }) =>
     request<{ blueprint: any }>("/api/local/blueprints", {
@@ -1854,7 +1856,21 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  updateLocalBlueprint: (id: string, data: Record<string, unknown>) =>
+  updateLocalBlueprint: (
+    id: string,
+    data: Partial<{
+      name: string;
+      description: string | null;
+      hostId: string | null;
+      dir: string | null;
+      repoUrl: string | null;
+      commandTemplate: string;
+      /** Run the rendered template as this agent's prompt; null = raw shell command. */
+      agent: "claude-code" | "codex" | "cursor" | "gemini" | "opencode" | null;
+      spawnMode: "auto" | "hold";
+      enabled: boolean;
+    }>,
+  ) =>
     request<{ blueprint: any }>(`/api/local/blueprints/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),

@@ -9,12 +9,13 @@
  * extra quotes around params (`claude {{prompt}}`, not `claude "{{prompt}}"`).
  */
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { shellQuote } from "@optio/shared";
+import { shellQuote, type LocalAgentKind, type LocalTerminalSpec } from "@optio/shared";
 import { db } from "../db/client.js";
 import { localBlueprints, workflowTriggers } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { computeNextFire } from "../utils/cron.js";
 import { renderTemplateString } from "./prompt-template-service.js";
+import { isAuthDisabled } from "./oauth/index.js";
 import {
   findHostDirForRepo,
   getHost,
@@ -34,7 +35,8 @@ export function canAccessBlueprint(
   blueprint: LocalBlueprintRow,
   userId: string | null | undefined,
 ): boolean {
-  return !blueprint.userId || blueprint.userId === (userId ?? null);
+  if (blueprint.userId) return blueprint.userId === (userId ?? null);
+  return isAuthDisabled();
 }
 
 export interface CreateBlueprintInput {
@@ -46,6 +48,7 @@ export interface CreateBlueprintInput {
   dir?: string;
   repoUrl?: string;
   commandTemplate: string;
+  agent?: LocalAgentKind | null;
   spawnMode?: "auto" | "hold";
 }
 
@@ -64,6 +67,7 @@ export async function createBlueprint(input: CreateBlueprintInput): Promise<Loca
       dir: input.dir,
       repoUrl: input.repoUrl,
       commandTemplate: input.commandTemplate,
+      agent: input.agent ?? null,
       spawnMode: input.spawnMode ?? "auto",
     })
     .returning();
@@ -90,7 +94,14 @@ export async function updateBlueprint(
   updates: Partial<
     Pick<
       CreateBlueprintInput,
-      "name" | "description" | "hostId" | "dir" | "repoUrl" | "commandTemplate" | "spawnMode"
+      | "name"
+      | "description"
+      | "hostId"
+      | "dir"
+      | "repoUrl"
+      | "commandTemplate"
+      | "agent"
+      | "spawnMode"
     > & { enabled: boolean }
   >,
 ): Promise<LocalBlueprintRow | null> {
@@ -124,6 +135,7 @@ export async function spawnFromBlueprint(
     params?: Record<string, unknown>;
     triggerId?: string;
     spawnedBy?: "trigger" | "blueprint" | "ticket";
+    ticket?: { source: string; externalId: string; url?: string };
   } = {},
 ): Promise<LocalTerminalRow> {
   if (!blueprint.enabled) throw new Error("Blueprint is disabled");
@@ -149,23 +161,40 @@ export async function spawnFromBlueprint(
     );
   }
 
-  const quotedParams: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(opts.params ?? {})) {
-    quotedParams[key] = shellQuote(String(value ?? ""));
+  let spec: LocalTerminalSpec;
+  if (blueprint.agent) {
+    // Agent mode: the rendered template is the prompt, passed to the agent as
+    // a single argv element (the daemon shell-quotes the whole prompt), so
+    // params are substituted raw rather than shell-quoted.
+    const rawParams: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(opts.params ?? {})) {
+      rawParams[key] = String(value ?? "");
+    }
+    const prompt = renderTemplateString(blueprint.commandTemplate, rawParams).trim();
+    spec = { kind: "agent", agent: blueprint.agent, prompt: prompt || undefined };
+  } else {
+    // Command mode: params are shell-single-quoted before substitution so a
+    // trigger payload can never inject shell syntax.
+    const quotedParams: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(opts.params ?? {})) {
+      quotedParams[key] = shellQuote(String(value ?? ""));
+    }
+    const command = renderTemplateString(blueprint.commandTemplate, quotedParams).trim();
+    if (!command) throw new Error("Blueprint command rendered empty");
+    spec = { kind: "command", command };
   }
-  const command = renderTemplateString(blueprint.commandTemplate, quotedParams).trim();
-  if (!command) throw new Error("Blueprint command rendered empty");
 
   return createTerminal({
     host,
     userId: blueprint.userId,
     workspaceId: blueprint.workspaceId,
     dir,
-    spec: { kind: "command", command },
+    spec,
     title: blueprint.name,
     spawnedBy: opts.spawnedBy ?? (opts.triggerId ? "trigger" : "blueprint"),
     blueprintId: blueprint.id,
     triggerId: opts.triggerId,
+    ticket: opts.ticket,
     hold: blueprint.spawnMode === "hold",
   });
 }
@@ -235,6 +264,21 @@ export async function updateBlueprintTrigger(
     .from(workflowTriggers)
     .where(and(eq(workflowTriggers.id, id), eq(workflowTriggers.targetType, "local_blueprint")));
   if (!existing) return null;
+
+  // Enforce webhook path uniqueness on update too (create already does).
+  if (input.config && typeof input.config.path === "string") {
+    const conflicts = await db
+      .select()
+      .from(workflowTriggers)
+      .where(eq(workflowTriggers.type, "webhook"));
+    if (
+      conflicts.some(
+        (t) => t.id !== id && (t.config as Record<string, unknown>)?.path === input.config!.path,
+      )
+    ) {
+      throw new Error("duplicate_webhook_path");
+    }
+  }
 
   const updates: Record<string, unknown> = { updatedAt: new Date() };
   if (input.config !== undefined) updates.config = input.config;
@@ -307,6 +351,9 @@ export async function fireLocalTicketTriggers(ticket: {
       const terminal = await spawnFromBlueprint(blueprint, {
         triggerId: trigger.id,
         spawnedBy: "ticket",
+        // Link the terminal back to the ticket so the UI can show the ticket
+        // chip and the terminal appears in the ticket's context.
+        ticket: { source: ticket.source, externalId: ticket.externalId, url: ticket.url },
         params: {
           ticketSource: ticket.source,
           ticketExternalId: ticket.externalId,

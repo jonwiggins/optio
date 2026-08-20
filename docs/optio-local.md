@@ -26,7 +26,11 @@ secrets to your machine.
   `target_type = "local_blueprint"`) spawn terminals from blueprints on webhook, schedule,
   or ticket events. `spawn_mode = "hold"` creates the terminal `pending` for one-click
   human start; `"auto"` spawns immediately (or queues as `pending`/`host_offline` when the
-  host is offline, flushed on reconnect).
+  host is offline, flushed on reconnect). When `agent` is set (`claude-code` / `codex` /
+  `cursor` / `gemini` / `opencode`), the rendered template is the agent's prompt and the
+  spawn runs through the daemon's agent path — so automation-spawned agents get the same
+  attention hooks as hand-started ones and enter the "needs you" queue while alive, not
+  only on exit. When `agent` is null it's a plain shell command.
 
 ## Attention detection (daemon-side)
 
@@ -75,11 +79,13 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   `{name?, hostname, platform, arch, daemonVersion, dirs: [{path, repoUrl?}]}` → `{host}`
 - `GET /api/local/hosts` / `DELETE /api/local/hosts/:id`
 - `GET /api/local/terminals?state=&hostId=` — caller's terminals (with `preview`)
-- `POST /api/local/terminals` — `{hostId, dir, title?, spec}` where `spec` is
-  `{kind:"shell"} | {kind:"command", command} | {kind:"agent", agent, prompt?}`; optional
-  `ticket: {source, externalId, url?, title, body?, repoId?, issueNumber?}` (when
-  `repoId`+`issueNumber` given, issue comments are fetched and appended to the prompt and
-  a "working on this" comment is posted). Dir must be inside the host allowlist.
+- `POST /api/local/terminals` — `{hostId, dir?, title?, spec?}` where `spec` is
+  `{kind:"shell"} | {kind:"command", command} | {kind:"agent", agent, prompt?}` (defaults to
+  `{kind:"shell"}`); optional `ticket: {repoId, issueNumber, title, body?, agentType?}` — when
+  present, the repo's matching allowlisted dir is resolved (so `dir` may be omitted), the
+  issue's comments are fetched and appended to the seeded agent prompt, the terminal is
+  linked to the issue, and a "working on this" comment is posted. Dir must be inside the
+  host allowlist.
 - `GET /api/local/terminals/:id`
 - `POST /api/local/terminals/:id/start` — spawn a `pending` terminal
 - `POST /api/local/terminals/:id/kill` — `{signal?}` (default SIGTERM)

@@ -21,6 +21,7 @@ import { db } from "../db/client.js";
 import { localTerminals } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { publishLocalChanged } from "./event-bus.js";
+import { isAuthDisabled } from "./oauth/index.js";
 import * as relay from "./local-relay.js";
 import { getHost, isDirAllowed, type LocalHostRow } from "./local-host-service.js";
 
@@ -42,7 +43,8 @@ export function canAccessTerminal(
   terminal: LocalTerminalRow,
   userId: string | null | undefined,
 ): boolean {
-  return !terminal.userId || terminal.userId === (userId ?? null);
+  if (terminal.userId) return terminal.userId === (userId ?? null);
+  return isAuthDisabled();
 }
 
 /** Human-readable rendering of a spec for list views. Never re-executed. */
@@ -82,6 +84,32 @@ async function updateTerminal(
     .update(localTerminals)
     .set({ ...set, updatedAt: new Date() })
     .where(eq(localTerminals.id, id))
+    .returning();
+  if (row) await notifyChanged(row);
+  return row ?? null;
+}
+
+/**
+ * Compare-and-swap state transition. The UPDATE only lands when the row is
+ * still in one of `from` (and, for daemon-originated calls, still owned by
+ * `hostId`) — so two concurrent writers can't clobber each other's result.
+ * Daemon frames are handled without a global lock (ws/local-daemon.ts), and
+ * the sweeper/REST paths race with them, so every daemon-driven transition
+ * goes through here. A zero-row result means the CAS lost — the caller treats
+ * it as a no-op. Returns null on a lost race.
+ */
+async function transitionTerminal(
+  id: string,
+  from: LocalTerminalRow["state"][],
+  set: Partial<typeof localTerminals.$inferInsert>,
+  opts: { hostId?: string } = {},
+): Promise<LocalTerminalRow | null> {
+  const conds = [eq(localTerminals.id, id), inArray(localTerminals.state, from)];
+  if (opts.hostId) conds.push(eq(localTerminals.hostId, opts.hostId));
+  const [row] = await db
+    .update(localTerminals)
+    .set({ ...set, updatedAt: new Date() })
+    .where(and(...conds))
     .returning();
   if (row) await notifyChanged(row);
   return row ?? null;
@@ -196,7 +224,19 @@ export async function killTerminal(row: LocalTerminalRow, signal?: string): Prom
     terminalId: row.id,
     signal,
   });
-  if (!sent) throw new Error("Host is offline");
+  if (!sent) {
+    // The host is unreachable (the daemon can't be asked to kill the PTY).
+    // Rather than stranding the row as a live-looking terminal that can be
+    // neither viewed nor deleted, force it to a terminal state — the PTY dies
+    // with the daemon anyway, and a later reconcileHello agrees.
+    await updateTerminal(row.id, {
+      state: "exited",
+      errorMessage: "Killed while the host was offline",
+      endedAt: new Date(),
+      attentionState: "idle",
+      attentionReason: null,
+    });
+  }
 }
 
 export async function getTerminal(id: string): Promise<LocalTerminalRow | null> {
@@ -233,58 +273,95 @@ export async function deleteTerminal(row: LocalTerminalRow): Promise<void> {
 }
 
 // ── Daemon event handlers (called from ws/local-daemon.ts) ─────────────────
+//
+// Every handler takes the authenticated `hostId` of the daemon that sent the
+// frame and scopes its write to it, so a daemon can only ever mutate its own
+// host's terminals (terminal ids are not secret — they ride the shared events
+// channel). All transitions are CAS-guarded so concurrent daemon frames, the
+// sweeper, and REST control can't clobber each other.
 
-export async function handleStarted(terminalId: string): Promise<void> {
+export async function handleStarted(hostId: string, terminalId: string): Promise<void> {
   const row = await getTerminal(terminalId);
-  if (!row || row.state !== "launching") return;
+  if (!row || row.hostId !== hostId) return;
   const spec = row.spec as unknown as LocalTerminalSpec;
-  await updateTerminal(terminalId, {
-    state: "running",
-    startedAt: new Date(),
-    attentionState: spec.kind === "shell" ? "idle" : "working",
-    attentionReason: null,
-    errorMessage: null,
-  });
+  await transitionTerminal(
+    terminalId,
+    ["launching"],
+    {
+      state: "running",
+      startedAt: new Date(),
+      attentionState: spec.kind === "shell" ? "idle" : "working",
+      attentionReason: null,
+      errorMessage: null,
+    },
+    { hostId },
+  );
 }
 
-export async function handleSpawnError(terminalId: string, message: string): Promise<void> {
-  await updateTerminal(terminalId, {
-    state: "error",
-    errorMessage: message.slice(0, 2000),
-    endedAt: new Date(),
-  });
+export async function handleSpawnError(
+  hostId: string,
+  terminalId: string,
+  message: string,
+): Promise<void> {
+  await transitionTerminal(
+    terminalId,
+    ["pending", "launching", "running"],
+    {
+      state: "error",
+      errorMessage: message.slice(0, 2000),
+      endedAt: new Date(),
+    },
+    { hostId },
+  );
 }
 
-export async function handleExit(terminalId: string, exitCode: number | null): Promise<void> {
+export async function handleExit(
+  hostId: string,
+  terminalId: string,
+  exitCode: number | null,
+): Promise<void> {
   const row = await getTerminal(terminalId);
-  if (!row || (row.state !== "running" && row.state !== "launching")) return;
-  const updated = await updateTerminal(terminalId, {
-    state: "exited",
-    exitCode,
-    endedAt: new Date(),
-    // Automation results land in the "needs you" queue for review; a shell
-    // you typed `exit` into does not demand attention.
-    attentionState: row.spawnedBy === "manual" ? "idle" : "needs_you",
-    attentionReason: row.spawnedBy === "manual" ? null : "exit",
-  });
+  if (!row || row.hostId !== hostId) return;
+  const updated = await transitionTerminal(
+    terminalId,
+    ["running", "launching"],
+    {
+      state: "exited",
+      exitCode,
+      endedAt: new Date(),
+      // Automation results land in the "needs you" queue for review; a shell
+      // you typed `exit` into does not demand attention.
+      attentionState: row.spawnedBy === "manual" ? "idle" : "needs_you",
+      attentionReason: row.spawnedBy === "manual" ? null : "exit",
+    },
+    { hostId },
+  );
   if (updated) relay.notifyBrowsers(terminalId, { type: "exit", exitCode });
 }
 
 export async function handleAttention(
+  hostId: string,
   terminalId: string,
   state: LocalAttentionState,
   reason: string,
 ): Promise<void> {
   const row = await getTerminal(terminalId);
-  if (!row || row.state !== "running") return;
+  if (!row || row.hostId !== hostId || row.state !== "running") return;
   if (row.attentionState === state && row.attentionReason === reason) return;
-  await updateTerminal(terminalId, {
-    attentionState: state,
-    attentionReason: reason.slice(0, 100),
-  });
+  // CAS on state="running" so an exit landing first wins the row.
+  await transitionTerminal(
+    terminalId,
+    ["running"],
+    {
+      attentionState: state,
+      attentionReason: reason.slice(0, 100),
+    },
+    { hostId },
+  );
 }
 
 export async function handlePreview(
+  hostId: string,
   terminalId: string,
   preview: string,
   lastActivityAt: string,
@@ -297,7 +374,7 @@ export async function handlePreview(
       lastActivityAt: isNaN(at.getTime()) ? new Date() : at,
       updatedAt: new Date(),
     })
-    .where(eq(localTerminals.id, terminalId));
+    .where(and(eq(localTerminals.id, terminalId), eq(localTerminals.hostId, hostId)));
   // Previews are wall-view sugar — no nudge per preview (they're throttled
   // daemon-side but would still swamp the events channel across terminals).
 }
@@ -323,14 +400,39 @@ export async function reconcileHello(
       ),
     );
   for (const row of believedLive) {
-    if (!alive.has(row.id)) {
-      await updateTerminal(row.id, {
-        state: "exited",
-        errorMessage: "Daemon restarted while the terminal was running",
-        endedAt: new Date(),
-        attentionState: row.spawnedBy === "manual" ? "idle" : "needs_you",
-        attentionReason: row.spawnedBy === "manual" ? null : "exit",
-      });
+    if (alive.has(row.id)) {
+      // The daemon's hello is the authority on liveness. A row still in
+      // `launching` (its `started` frame was lost mid-connect) that the
+      // daemon reports running must be promoted — otherwise the sweeper
+      // would later error a genuinely live PTY.
+      if (row.state === "launching") {
+        const spec = row.spec as unknown as LocalTerminalSpec;
+        await transitionTerminal(
+          row.id,
+          ["launching"],
+          {
+            state: "running",
+            startedAt: row.startedAt ?? new Date(),
+            attentionState: spec.kind === "shell" ? "idle" : "working",
+            attentionReason: null,
+            errorMessage: null,
+          },
+          { hostId },
+        );
+      }
+    } else {
+      await transitionTerminal(
+        row.id,
+        ["launching", "running"],
+        {
+          state: "exited",
+          errorMessage: "Daemon restarted while the terminal was running",
+          endedAt: new Date(),
+          attentionState: row.spawnedBy === "manual" ? "idle" : "needs_you",
+          attentionReason: row.spawnedBy === "manual" ? null : "exit",
+        },
+        { hostId },
+      );
     }
   }
 
@@ -368,7 +470,9 @@ export async function sweepStuckLaunching(): Promise<void> {
     .where(and(eq(localTerminals.state, "launching"), lt(localTerminals.updatedAt, cutoff)));
   for (const row of stuck) {
     logger.warn({ terminalId: row.id, hostId: row.hostId }, "local: spawn timed out");
-    await updateTerminal(row.id, {
+    // CAS: a `started` frame racing the sweep wins the row instead of being
+    // clobbered back to error.
+    await transitionTerminal(row.id, ["launching"], {
       state: "error",
       errorMessage: "Spawn timed out — host did not acknowledge",
       endedAt: new Date(),

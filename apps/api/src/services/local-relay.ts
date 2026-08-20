@@ -174,8 +174,15 @@ export function deliverAttachError(attachId: string, message: string): void {
   safeSend(pending.socket, JSON.stringify(msg));
 }
 
-/** Relay live terminal output to every attached browser. */
-export function forwardOutput(terminalId: string, data: Buffer): void {
+/**
+ * Relay live terminal output to every attached browser. `hostId` is the
+ * authenticated daemon's host; the frame is dropped unless that host owns the
+ * terminal's live subscription (recorded at attach time from the DB row). This
+ * stops a daemon from streaming bytes into another host's viewer using a
+ * terminal id harvested from the shared events channel.
+ */
+export function forwardOutput(hostId: string, terminalId: string, data: Buffer): void {
+  if (hostByTerminal.get(terminalId) !== hostId) return;
   const set = browsersByTerminal.get(terminalId);
   if (!set) return;
   for (const socket of set) safeSend(socket, data);

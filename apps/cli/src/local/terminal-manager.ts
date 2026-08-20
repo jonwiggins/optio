@@ -128,6 +128,8 @@ export class TerminalManager {
     const term = this.terminals.get(terminalId);
     if (!term) return;
     term.pty.write(Buffer.from(dataB64, "base64").toString("utf-8"));
+    // The human responded — clears a sticky needs_you back to working.
+    this.opts.attention.onInput(terminalId);
   }
 
   resize(terminalId: string, cols: number, rows: number): void {
@@ -195,11 +197,29 @@ export class TerminalManager {
     if (term) term.subscribed = false;
   }
 
-  /** Kill every PTY (daemon shutdown). */
+  /**
+   * Drop every output subscription. Called on (re)connect: a fresh server
+   * connection holds no viewer state, so output must not resume until the
+   * server sends a new `attach`.
+   */
+  clearAllSubscriptions(): void {
+    for (const term of this.terminals.values()) {
+      term.subscribed = false;
+    }
+  }
+
+  /**
+   * Kill every PTY (daemon shutdown). Best-effort reports each terminal as
+   * exited first — on a clean shutdown the WS is still open, so the server
+   * marks the rows exited instead of leaving them "running" on an offline
+   * host (the injected `send` drops frames once the socket is down).
+   */
   killAll(): void {
     for (const term of this.terminals.values()) {
       if (term.previewTimer) clearTimeout(term.previewTimer);
       if (term.killTimer) clearTimeout(term.killTimer);
+      this.opts.send({ type: "exit", terminalId: term.terminalId, exitCode: null });
+      this.opts.attention.remove(term.terminalId);
       try {
         term.pty.kill("SIGTERM");
       } catch {
