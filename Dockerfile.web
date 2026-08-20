@@ -18,8 +18,12 @@ COPY packages/agent-adapters/package.json packages/agent-adapters/
 COPY packages/container-runtime/package.json packages/container-runtime/
 COPY packages/ticket-providers/package.json packages/ticket-providers/
 
-# Install all dependencies (dev deps needed for build)
-RUN pnpm install --frozen-lockfile --prod=false
+# Install all dependencies (dev deps needed for build).
+# --ignore-scripts (matching Dockerfile.api) skips the husky prepare hook and
+# dependency build scripts — notably node-pty's node-gyp compile, which the
+# root onlyBuiltDependencies allowlist would otherwise trigger; node-pty is
+# only used by the CLI daemon and never runs in this image.
+RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts
 
 # ---- Builder stage ----
 FROM deps AS builder
