@@ -14,6 +14,8 @@ metadata:
   labels:
     {{- include "optio.labels" . | nindent 4 }}
 data:
-  storageClass: {{ .Values.agent.pvc.storageClass | quote }}
-  size: {{ .Values.agent.pvc.size | quote }}
+  # New unified key takes precedence; falls back to deprecated agent.pvc.storageClass
+  storageClass: {{ .Values.storageClass.home | default .Values.agent.pvc.storageClass | quote }}
+  # New unified key takes precedence; falls back to deprecated agent.pvc.size
+  size: {{ .Values.storageClass.homeSize | default .Values.agent.pvc.size | quote }}
   accessModes: {{ .Values.agent.pvc.accessModes | toJson | quote }}

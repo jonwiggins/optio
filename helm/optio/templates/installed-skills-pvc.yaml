@@ -21,7 +21,8 @@ spec:
   resources:
     requests:
       storage: {{ .Values.installedSkillsCache.size }}
-  {{- if .Values.installedSkillsCache.storageClass }}
-  storageClassName: {{ .Values.installedSkillsCache.storageClass | quote }}
+  {{- $sc := .Values.storageClass.home | default .Values.installedSkillsCache.storageClass }}
+  {{- if $sc }}
+  storageClassName: {{ $sc | quote }}
   {{- end }}
 {{- end }}

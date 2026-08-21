@@ -144,6 +144,7 @@ agent:
   # PVC template for repo pod home directories.
   # These PVCs are created dynamically by the API server (one per repo pod
   # instance), but this template controls the storage class and default size.
+  # DEPRECATED: Use storageClass.home instead. Kept for backward compatibility.
   pvc:
     storageClass: ""  # Empty = cluster default storage class
     size: 10Gi
@@ -175,6 +176,7 @@ agent:
   rootless: false
   # Shared cache directory PVCs (opt-in per repo).
   # Controls storage class and size limits for cache directories.
+  # DEPRECATED: Use storageClass.cache instead. Kept for backward compatibility.
   cache:
     enabled: true                     # Set false to hard-disable the feature
     storageClass: ""                  # Empty = cluster default storage class
@@ -183,6 +185,20 @@ agent:
     defaultSizePerDirectoryGi: 10     # Default size when creating a cache directory
   # Repo init timeout (how long to wait for clone to complete)
   repoInitTimeoutMs: 120000           # 2 min default; increase for large repos
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Storage Class (unified)
+# ──────────────────────────────────────────────────────────────────────────────
+# Unified storage class and volume size settings for agent workloads.
+# - home: Used for repo pod home PVCs and installed-skills cache PVC
+# - homeSize: Default size for home PVCs (e.g. 10Gi)
+# - cache: Used for shared directory cache PVCs
+# Empty string = cluster default storage class.
+# Deprecated: agent.pvc.storageClass, agent.pvc.size, agent.cache.storageClass, installedSkillsCache.storageClass
+storageClass:
+  home: ""
+  homeSize: ""
+  cache: ""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Network Policy
@@ -208,6 +224,7 @@ networkPolicy:
 # ──────────────────────────────────────────────────────────────────────────────
 installedSkillsCache:
   enabled: false
+  # DEPRECATED: Use storageClass.home instead. Kept for backward compatibility.
   storageClass: ""  # Empty = cluster default storage class
   size: 5Gi
   accessModes:
