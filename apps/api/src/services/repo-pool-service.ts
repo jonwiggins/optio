@@ -1057,7 +1057,7 @@ export async function execTaskInRepoPod(
         // This ensures orphaned agent processes are killed when the exec stream is severed
         // (e.g. API pod restart closes the SPDY connection but kubelet doesn't send SIGHUP).
         `_optio_main_pid=$$`,
-        `trap 'kill $(jobs -p) 2>/dev/null; wait 2>/dev/null; cd /workspace/repo 2>/dev/null; git worktree remove --force /workspace/tasks/${taskId}-wt 2>/dev/null || true; git worktree prune 2>/dev/null || true' EXIT`,
+        `trap 'kill $(jobs -p) 2>/dev/null; wait 2>/dev/null; if [ -n "\$CODEX_HOME" ]; then rm -rf "\$CODEX_HOME" 2>/dev/null || true; fi; cd /workspace/repo 2>/dev/null; git worktree remove --force /workspace/tasks/${taskId}-wt 2>/dev/null || true; git worktree prune 2>/dev/null || true' EXIT`,
         // Background heartbeat: detect broken stdout pipe (EPIPE) from severed exec stream.
         // Writes an empty line every 30s (skipped by the NDJSON parser). If stdout is broken
         // (API pod died), sends SIGTERM to the main script which triggers the EXIT trap.

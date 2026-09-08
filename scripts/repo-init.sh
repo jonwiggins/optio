@@ -4,6 +4,18 @@ set -euo pipefail
 echo "[optio] Initializing repo pod"
 echo "[optio] Repo: ${OPTIO_REPO_URL} (branch: ${OPTIO_REPO_BRANCH})"
 
+# Hydrate shared Codex auth into the persistent pod home when configured.
+# This lets newly created repo pods start with a reusable app-server login.
+if [ -n "${OPTIO_CODEX_AUTH_JSON_B64:-}" ]; then
+  mkdir -p /home/agent/.codex
+  chmod 700 /home/agent/.codex
+  printf 'cli_auth_credentials_store = "file"\n' > /home/agent/.codex/config.toml
+  chmod 600 /home/agent/.codex/config.toml
+  printf '%s' "${OPTIO_CODEX_AUTH_JSON_B64}" | base64 -d > /home/agent/.codex/auth.json
+  chmod 600 /home/agent/.codex/auth.json
+  echo "[optio] Hydrated shared Codex auth into /home/agent/.codex"
+fi
+
 # Configure git author for initial clone (overridden per-worktree at task exec time)
 git config --global user.name "${GIT_BOT_NAME:-${GITHUB_APP_BOT_NAME:-Optio Agent}}"
 git config --global user.email "${GIT_BOT_EMAIL:-${GITHUB_APP_BOT_EMAIL:-optio-agent@noreply.github.com}}"

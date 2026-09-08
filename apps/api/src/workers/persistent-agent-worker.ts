@@ -144,7 +144,7 @@ function buildAgentCommand(
     case "codex":
       return [
         `echo "[optio] Running persistent agent turn (Codex)..."`,
-        `codex exec --full-auto "$OPTIO_PROMPT" --json`,
+        `codex exec --json --dangerously-bypass-approvals-and-sandbox "$OPTIO_PROMPT"`,
       ];
     case "copilot": {
       const modelFlag = env.COPILOT_MODEL ? ` --model ${JSON.stringify(env.COPILOT_MODEL)}` : "";

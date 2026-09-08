@@ -7,7 +7,13 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
 
-export function SessionTerminal({ sessionId }: { sessionId: string }) {
+export function SessionTerminal({
+  sessionId,
+  initialCommand,
+}: {
+  sessionId: string;
+  initialCommand?: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
 
@@ -50,6 +56,14 @@ export function SessionTerminal({ sessionId }: { sessionId: string }) {
       // Send initial resize
       const { cols, rows } = term;
       ws.send(JSON.stringify({ type: "resize", cols, rows }));
+
+      if (initialCommand) {
+        const key = `optio:session-terminal:init:${sessionId}:${initialCommand}`;
+        if (typeof window !== "undefined" && !window.sessionStorage.getItem(key)) {
+          ws.send(initialCommand);
+          window.sessionStorage.setItem(key, "1");
+        }
+      }
     };
 
     ws.onmessage = (msg) => {
@@ -96,7 +110,7 @@ export function SessionTerminal({ sessionId }: { sessionId: string }) {
       ws.close();
       term.dispose();
     };
-  }, [sessionId]);
+  }, [sessionId, initialCommand]);
 
   return (
     <div className="h-full bg-[#09090b]">

@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -40,6 +41,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 
 export default function SessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const searchParams = useSearchParams();
   const [session, setSession] = useState<any>(null);
   const [modelConfig, setModelConfig] = useState<{
     claudeModel: string;
@@ -135,6 +137,10 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const isActive = session.state === "active";
   const repoName = session.repoUrl?.replace("https://github.com/", "") ?? "Unknown";
   const displayCost = liveCost > 0 ? liveCost : session.costUsd ? parseFloat(session.costUsd) : 0;
+  const codexLoginMode = searchParams.get("setup") === "codex-login";
+  const codexLoginCommand = codexLoginMode
+    ? 'export CODEX_HOME="/home/agent/.codex"\nmkdir -p "$CODEX_HOME"\nprintf \'cli_auth_credentials_store = "file"\\n\' > "$CODEX_HOME/config.toml"\nchmod 700 "$CODEX_HOME"\nchmod 600 "$CODEX_HOME/config.toml"\ncodex login\n'
+    : undefined;
 
   return (
     <div className="h-full flex flex-col">
@@ -248,6 +254,14 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
+      {codexLoginMode && (
+        <div className="shrink-0 px-6 py-3 border-b border-primary/20 bg-primary/5 text-sm">
+          This session is set up for Codex login. The terminal auto-starts <code>codex login</code>
+          using the shared pod home. Finish the browser/device flow there, then return to Setup and
+          click import.
+        </div>
+      )}
+
       {/* End session warning dialog */}
       {showEndWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -300,7 +314,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             right={
               <div className="h-full flex flex-col">
                 <ErrorBoundary label="Terminal">
-                  <SessionTerminal sessionId={id} />
+                  <SessionTerminal sessionId={id} initialCommand={codexLoginCommand} />
                 </ErrorBoundary>
                 {/* PR cards inline below terminal when present */}
                 {prs.length > 0 && (

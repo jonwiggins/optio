@@ -119,8 +119,21 @@ case "${OPTIO_AGENT_TYPE}" in
       --verbose
     ;;
   codex)
-    echo "[optio] Running OpenAI Codex..."
-    codex exec --full-auto "${OPTIO_PROMPT}" --json
+    if [ "${OPTIO_CODEX_AUTH_MODE:-api-key}" = "app-server" ]; then
+      echo "[optio] Running OpenAI Codex (app-server)..."
+      node .optio/codex-app-server-client.mjs
+    else
+      export CODEX_HOME="/home/agent/.optio-codex/${OPTIO_TASK_ID}"
+      rm -rf "${CODEX_HOME}"
+      mkdir -p "${CODEX_HOME}"
+      printf 'cli_auth_credentials_store = "file"\n' > "${CODEX_HOME}/config.toml"
+      chmod 700 "${CODEX_HOME}"
+      echo "[optio] Logging in Codex with API key..."
+      printf '%s' "${OPENAI_API_KEY}" | codex login --with-api-key >/dev/null
+      echo "[optio] Running OpenAI Codex..."
+      codex exec --json --dangerously-bypass-approvals-and-sandbox "${OPTIO_PROMPT}"
+      rm -rf "${CODEX_HOME}"
+    fi
     ;;
   copilot)
     echo "[optio] Running GitHub Copilot..."

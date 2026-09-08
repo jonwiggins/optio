@@ -8,6 +8,7 @@ import {
   buildInitialClaudeStreamMessage,
   classifyRunOutcome,
   inferExitCode,
+  sanitizeTaskResultSummary,
   shellQuote,
   shouldEscalateNoPr,
 } from "./task-worker.js";
@@ -155,28 +156,60 @@ describe("buildAgentCommand", () => {
 
   describe("codex agent", () => {
     it("produces a codex exec command", () => {
-      const env = { OPTIO_PROMPT: "Build feature" };
+      const env = { OPTIO_PROMPT: "Build feature", OPTIO_TASK_ID: "task-123" };
       const cmds = buildAgentCommand("codex", env);
       expect(cmds.some((c) => c.includes("codex exec"))).toBe(true);
-      expect(cmds.some((c) => c.includes("--full-auto"))).toBe(true);
+      expect(cmds.some((c) => c.includes("--dangerously-bypass-approvals-and-sandbox"))).toBe(true);
       expect(cmds.some((c) => c.includes("--json"))).toBe(true);
     });
 
     it("does not include --app-server flag in api-key mode", () => {
-      const env = { OPTIO_PROMPT: "Build feature", OPTIO_CODEX_AUTH_MODE: "api-key" };
+      const env = {
+        OPTIO_PROMPT: "Build feature",
+        OPTIO_CODEX_AUTH_MODE: "api-key",
+        OPTIO_TASK_ID: "task-123",
+      };
       const cmds = buildAgentCommand("codex", env);
       expect(cmds.some((c) => c.includes("--app-server"))).toBe(false);
     });
 
-    it("includes --app-server flag with URL in app-server mode", () => {
+    it("bootstraps a task-scoped codex login in api-key mode", () => {
+      const env = {
+        OPTIO_PROMPT: "Build feature",
+        OPTIO_CODEX_AUTH_MODE: "api-key",
+        OPTIO_TASK_ID: "task-123",
+      };
+      const cmds = buildAgentCommand("codex", env);
+      expect(
+        cmds.some((c) => c.includes('export CODEX_HOME="/home/agent/.optio-codex/task-123"')),
+      ).toBe(true);
+      expect(cmds.some((c) => c.includes('cli_auth_credentials_store = "file"'))).toBe(true);
+      expect(cmds.some((c) => c.includes("codex login --with-api-key >/dev/null || exit $?"))).toBe(
+        true,
+      );
+    });
+
+    it("uses the app-server helper in app-server mode", () => {
       const env = {
         OPTIO_PROMPT: "Build feature",
         OPTIO_CODEX_AUTH_MODE: "app-server",
         OPTIO_CODEX_APP_SERVER_URL: "ws://localhost:3900/v1/connect",
       };
       const cmds = buildAgentCommand("codex", env);
-      expect(cmds.some((c) => c.includes("--app-server"))).toBe(true);
-      expect(cmds.some((c) => c.includes("ws://localhost:3900/v1/connect"))).toBe(true);
+      expect(cmds.some((c) => c.includes("node .optio/codex-app-server-client.mjs"))).toBe(true);
+      expect(cmds.some((c) => c.includes("--remote"))).toBe(false);
+      expect(cmds.some((c) => c.includes("codex login --with-api-key"))).toBe(false);
+    });
+
+    it("uses shared pod auth instead of re-running codex login in app-server mode", () => {
+      const env = {
+        OPTIO_PROMPT: "Build feature",
+        OPTIO_CODEX_AUTH_MODE: "app-server",
+        OPTIO_CODEX_APP_SERVER_URL: "ws://localhost:3900/v1/connect",
+      };
+      const cmds = buildAgentCommand("codex", env);
+      expect(cmds.some((c) => c.includes("codex login --with-access-token"))).toBe(false);
+      expect(cmds.some((c) => c.includes("node .optio/codex-app-server-client.mjs"))).toBe(true);
     });
 
     it("includes app-server label in echo when in app-server mode", () => {
@@ -189,10 +222,11 @@ describe("buildAgentCommand", () => {
       expect(cmds.some((c) => c.includes("(app-server)"))).toBe(true);
     });
 
-    it("does not include --app-server flag when auth mode is app-server but URL is missing", () => {
+    it("still uses the app-server helper when auth mode is app-server but URL is missing", () => {
       const env = { OPTIO_PROMPT: "Build feature", OPTIO_CODEX_AUTH_MODE: "app-server" };
       const cmds = buildAgentCommand("codex", env);
-      expect(cmds.some((c) => c.includes("--app-server"))).toBe(false);
+      expect(cmds.some((c) => c.includes("--remote"))).toBe(false);
+      expect(cmds.some((c) => c.includes("codex-app-server-client.mjs"))).toBe(true);
     });
   });
 
@@ -379,8 +413,9 @@ describe("hostile prompt/argument shell-quoting regression", () => {
       expect(result.status).toBe(0);
 
       const argv = fs.readFileSync(argsFile, "utf8").split("\0").slice(0, -1);
-      // codex exec --full-auto "$OPTIO_PROMPT" ... — the prompt is one argv
-      // element, delivered byte-for-byte with nothing expanded or executed
+      // codex exec --json --dangerously-bypass-approvals-and-sandbox
+      // "$OPTIO_PROMPT" ... — the prompt is one argv element, delivered
+      // byte-for-byte with nothing expanded or executed.
       expect(argv).toContain(HOSTILE);
       const received = argv[argv.indexOf(HOSTILE)];
       expect(received).toContain("`echo should-not-run`");
@@ -561,6 +596,18 @@ describe("inferExitCode", () => {
   });
 });
 
+describe("sanitizeTaskResultSummary", () => {
+  it("drops the generic success summary", () => {
+    expect(sanitizeTaskResultSummary("Agent completed successfully")).toBeUndefined();
+  });
+
+  it("preserves a custom summary", () => {
+    expect(sanitizeTaskResultSummary("Implemented fix and opened PR draft")).toBe(
+      "Implemented fix and opened PR draft",
+    );
+  });
+});
+
 describe("shouldEscalateNoPr", () => {
   const defaults = {
     success: true,
@@ -618,12 +665,21 @@ describe("classifyRunOutcome", () => {
   const defaults = {
     success: true,
     isReviewTask: false,
+    hasOutput: true,
     sessionId: "sess-1" as string | undefined,
     detectedPrUrl: undefined as string | undefined | null,
   };
 
-  it("returns no_output when a non-review run produced no session", () => {
-    expect(classifyRunOutcome({ ...defaults, sessionId: undefined })).toBe("no_output");
+  it("returns no_output when a non-review run produced no output", () => {
+    expect(classifyRunOutcome({ ...defaults, hasOutput: false, sessionId: undefined })).toBe(
+      "no_output",
+    );
+  });
+
+  it("treats emitted app-server auth errors as real failures even without a session id", () => {
+    expect(classifyRunOutcome({ ...defaults, success: false, sessionId: undefined })).toBe(
+      "failure",
+    );
   });
 
   it("returns pr_opened when a PR was detected on a non-review run", () => {
@@ -692,6 +748,7 @@ describe("classifyRunOutcome", () => {
     const outcome = classifyRunOutcome({
       success: result.success,
       isReviewTask: true,
+      hasOutput: true,
       sessionId: "s-1",
       detectedPrUrl: undefined,
     });

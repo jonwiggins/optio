@@ -775,6 +775,8 @@ describe("secret-service", () => {
       setupSecretStoreMock([
         { name: "NPM_TOKEN", scope: "global", value: "npm-value" },
         { name: "CLAUDE_CODE_OAUTH_TOKEN", scope: "global", value: "should-be-blocked" },
+        { name: "CODEX_ACCESS_TOKEN", scope: "global", value: "should-be-blocked" },
+        { name: "CODEX_AUTH_JSON", scope: "global", value: '{"auth":"blocked"}' },
         { name: "ANTHROPIC_API_KEY", scope: "global", value: "should-be-blocked" },
         { name: "OPENAI_API_KEY", scope: "global", value: "should-be-blocked" },
         { name: "GEMINI_API_KEY", scope: "global", value: "should-be-blocked" },
@@ -783,6 +785,8 @@ describe("secret-service", () => {
       const result = await resolveSecretsForSetup(repoUrl);
       expect(result.NPM_TOKEN).toBe("npm-value");
       expect(result.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+      expect(result.CODEX_ACCESS_TOKEN).toBeUndefined();
+      expect(result.CODEX_AUTH_JSON).toBeUndefined();
       expect(result.ANTHROPIC_API_KEY).toBeUndefined();
       expect(result.OPENAI_API_KEY).toBeUndefined();
       expect(result.GEMINI_API_KEY).toBeUndefined();
@@ -792,6 +796,8 @@ describe("secret-service", () => {
   describe("IDENTITY_SECRET_DENYLIST", () => {
     it("contains the known identity secret names", () => {
       expect(IDENTITY_SECRET_DENYLIST).toContain("CLAUDE_CODE_OAUTH_TOKEN");
+      expect(IDENTITY_SECRET_DENYLIST).toContain("CODEX_ACCESS_TOKEN");
+      expect(IDENTITY_SECRET_DENYLIST).toContain("CODEX_AUTH_JSON");
       expect(IDENTITY_SECRET_DENYLIST).toContain("ANTHROPIC_API_KEY");
       expect(IDENTITY_SECRET_DENYLIST).toContain("OPENAI_API_KEY");
       expect(IDENTITY_SECRET_DENYLIST).toContain("GEMINI_API_KEY");

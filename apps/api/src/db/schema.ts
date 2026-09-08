@@ -227,6 +227,37 @@ export const secrets = pgTable(
   ],
 );
 
+export const codexAuthAccountStatusEnum = pgEnum("codex_auth_account_status", [
+  "pending",
+  "connected",
+  "error",
+]);
+
+export const codexAuthAccounts = pgTable(
+  "codex_auth_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id"),
+    name: text("name").notNull().default("default"),
+    appServerUrl: text("app_server_url").notNull(),
+    status: codexAuthAccountStatusEnum("status").notNull().default("pending"),
+    loginSessionId: uuid("login_session_id").references(() => interactiveSessions.id, {
+      onDelete: "set null",
+    }),
+    loginSessionRepoUrl: text("login_session_repo_url"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    lastImportedAt: timestamp("last_imported_at", { withTimezone: true }),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("codex_auth_accounts_workspace_name_key").on(table.workspaceId, table.name),
+    index("codex_auth_accounts_workspace_idx").on(table.workspaceId),
+  ],
+);
+
 // ── Auth Events ─────────────────────────────────────────────────────────────
 // Lightweight table for recording auth failures from non-task contexts
 // (e.g. ticket-sync, pr-watcher) so the failure detector can surface them.

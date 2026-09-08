@@ -6,10 +6,20 @@ import type { FastifyInstance } from "fastify";
 
 const mockListSecrets = vi.fn();
 const mockRetrieveSecret = vi.fn();
+const mockGetCodexAuthAccount = vi.fn();
+const mockUpsertCodexAuthAccount = vi.fn();
+const mockImportCodexAuthFromSession = vi.fn();
+const mockStartCodexAuthSession = vi.fn();
 
 vi.mock("../services/secret-service.js", () => ({
   listSecrets: (...args: unknown[]) => mockListSecrets(...args),
   retrieveSecret: (...args: unknown[]) => mockRetrieveSecret(...args),
+}));
+vi.mock("../services/codex-auth-service.js", () => ({
+  getCodexAuthAccount: (...args: unknown[]) => mockGetCodexAuthAccount(...args),
+  upsertCodexAuthAccount: (...args: unknown[]) => mockUpsertCodexAuthAccount(...args),
+  importCodexAuthFromSession: (...args: unknown[]) => mockImportCodexAuthFromSession(...args),
+  startCodexAuthSession: (...args: unknown[]) => mockStartCodexAuthSession(...args),
 }));
 
 const mockCheckRuntimeHealth = vi.fn();
@@ -50,6 +60,7 @@ describe("GET /api/setup/status", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mockGetCodexAuthAccount.mockResolvedValue(null);
     app = await buildTestApp();
   });
 
@@ -147,6 +158,7 @@ describe("GET /api/setup/status", () => {
       { name: "GITHUB_TOKEN" },
       { name: "CODEX_AUTH_MODE" },
       { name: "CODEX_APP_SERVER_URL" },
+      { name: "CODEX_AUTH_JSON" },
     ]);
     mockRetrieveSecret.mockRejectedValue(new Error("decrypt failed: AAD mismatch"));
     mockCheckRuntimeHealth.mockResolvedValue(true);
@@ -237,6 +249,160 @@ describe("POST /api/setup/validate/github-token", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().valid).toBe(false);
+  });
+});
+
+describe("POST /api/setup/codex-auth/import", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp({ workspaceRole: "admin" });
+  });
+
+  it("imports auth from a session for admins", async () => {
+    mockImportCodexAuthFromSession.mockResolvedValue(undefined);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/setup/codex-auth/import",
+      payload: { sessionId: "sess-123" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ imported: true });
+    expect(mockImportCodexAuthFromSession).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      sessionId: "sess-123",
+      userId: "u1",
+    });
+  });
+
+  it("rejects the import when the auth capture fails", async () => {
+    mockImportCodexAuthFromSession.mockRejectedValue(
+      new Error("Codex login has not completed in this session yet."),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/setup/codex-auth/import",
+      payload: { sessionId: "sess-123" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("Codex login has not completed");
+  });
+});
+
+describe("GET /api/setup/codex-auth", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp({ workspaceRole: "admin" });
+  });
+
+  it("returns null when no account exists", async () => {
+    mockGetCodexAuthAccount.mockResolvedValue(null);
+    const res = await app.inject({ method: "GET", url: "/api/setup/codex-auth" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ account: null });
+  });
+
+  it("returns the managed account summary", async () => {
+    mockGetCodexAuthAccount.mockResolvedValue({
+      id: "acct-1",
+      status: "connected",
+      appServerUrl: "ws://localhost:3900/v1/connect",
+      loginSessionId: "sess-1",
+      loginSessionRepoUrl: "https://github.com/owner/repo",
+      lastImportedAt: new Date("2026-08-30T14:00:00.000Z"),
+      lastValidatedAt: null,
+      lastError: null,
+    });
+    const res = await app.inject({ method: "GET", url: "/api/setup/codex-auth" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().account.appServerUrl).toBe("ws://localhost:3900/v1/connect");
+    expect(res.json().account.status).toBe("connected");
+  });
+});
+
+describe("POST /api/setup/codex-auth", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp({ workspaceRole: "admin" });
+  });
+
+  it("saves the managed Codex account", async () => {
+    mockUpsertCodexAuthAccount.mockResolvedValue({
+      id: "acct-1",
+      status: "connected",
+      appServerUrl: "ws://localhost:3900/v1/connect",
+      loginSessionId: "sess-1",
+      loginSessionRepoUrl: "https://github.com/owner/repo",
+      lastImportedAt: new Date("2026-08-30T14:00:00.000Z"),
+      lastValidatedAt: new Date("2026-08-30T14:00:00.000Z"),
+      lastError: null,
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/setup/codex-auth",
+      payload: {
+        appServerUrl: "ws://localhost:3900/v1/connect",
+        authJson: '{"token":"abc"}',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockUpsertCodexAuthAccount).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      userId: "u1",
+      appServerUrl: "ws://localhost:3900/v1/connect",
+      authJson: '{"token":"abc"}',
+    });
+    expect(res.json().account.status).toBe("connected");
+  });
+});
+
+describe("POST /api/setup/codex-auth/session", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp({ workspaceRole: "admin" });
+  });
+
+  it("starts a managed Codex login session", async () => {
+    mockStartCodexAuthSession.mockResolvedValue({
+      account: {
+        id: "acct-1",
+        status: "pending",
+        appServerUrl: "ws://localhost:3900/v1/connect",
+        loginSessionId: "sess-1",
+      },
+      session: { id: "sess-1" },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/setup/codex-auth/session",
+      payload: {
+        repoUrl: "https://github.com/owner/repo",
+        appServerUrl: "ws://localhost:3900/v1/connect",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockStartCodexAuthSession).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      userId: "u1",
+      repoUrl: "https://github.com/owner/repo",
+      appServerUrl: "ws://localhost:3900/v1/connect",
+    });
+    expect(res.json().session.id).toBe("sess-1");
   });
 });
 

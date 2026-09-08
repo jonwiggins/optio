@@ -2,6 +2,12 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { checkRuntimeHealth } from "../services/container-service.js";
+import {
+  getCodexAuthAccount,
+  upsertCodexAuthAccount,
+  importCodexAuthFromSession,
+  startCodexAuthSession,
+} from "../services/codex-auth-service.js";
 import { listSecrets, retrieveSecret } from "../services/secret-service.js";
 import { isSubscriptionAvailable } from "../services/auth-service.js";
 import { isGitHubAppConfigured, getInstallationToken } from "../services/github-app-service.js";
@@ -41,6 +47,23 @@ const validateRepoSchema = z
     token: z.string().optional(),
   })
   .describe("Body for validating access to a specific repo URL");
+const codexAuthImportSchema = z
+  .object({
+    sessionId: z.string().min(1).optional().describe("Interactive session ID used for codex login"),
+  })
+  .describe("Body for importing Codex auth from an interactive session");
+const codexAuthSessionSchema = z
+  .object({
+    repoUrl: z.string().min(1).describe("Repository URL for the login session"),
+    appServerUrl: z.string().min(1).describe("Codex app-server websocket endpoint"),
+  })
+  .describe("Body for starting a managed Codex login session");
+const codexAuthAccountUpsertSchema = z
+  .object({
+    appServerUrl: z.string().min(1).describe("Codex app-server websocket endpoint"),
+    authJson: z.string().optional().describe("Optional Codex auth.json payload for manual import"),
+  })
+  .describe("Body for saving the managed Codex auth account");
 
 const ValidationResultSchema = z
   .object({
@@ -64,6 +87,54 @@ const ReposListResponseSchema = z
     error: z.string().optional(),
   })
   .describe("List of the authenticated user's repos, from the git provider");
+const CodexAuthImportResponseSchema = z
+  .object({
+    imported: z.literal(true),
+  })
+  .describe("Successful Codex auth import result");
+const CodexAuthAccountResponseSchema = z
+  .object({
+    account: z
+      .object({
+        id: z.string(),
+        status: z.string(),
+        appServerUrl: z.string(),
+        loginSessionId: z.string().nullable(),
+        loginSessionRepoUrl: z.string().nullable(),
+        lastImportedAt: z.string().nullable(),
+        lastValidatedAt: z.string().nullable(),
+        lastError: z.string().nullable(),
+      })
+      .nullable(),
+  })
+  .describe("Current managed Codex auth account state");
+const CodexAuthSessionResponseSchema = z
+  .object({
+    account: z.object({
+      id: z.string(),
+      status: z.string(),
+      appServerUrl: z.string(),
+      loginSessionId: z.string().nullable(),
+    }),
+    session: z.object({
+      id: z.string(),
+    }),
+  })
+  .describe("Managed Codex login session details");
+const CodexAuthAccountUpsertResponseSchema = z
+  .object({
+    account: z.object({
+      id: z.string(),
+      status: z.string(),
+      appServerUrl: z.string(),
+      loginSessionId: z.string().nullable(),
+      loginSessionRepoUrl: z.string().nullable(),
+      lastImportedAt: z.string().nullable(),
+      lastValidatedAt: z.string().nullable(),
+      lastError: z.string().nullable(),
+    }),
+  })
+  .describe("Saved managed Codex auth account");
 
 const SETUP_POST_RATE_LIMIT = {
   max: 5,
@@ -130,7 +201,10 @@ export async function setupRoutes(rawApp: FastifyInstance) {
       // Claude Vertex AI is detected by Claude-specific GCP project secret
       const hasClaudeVertexAi = secretNames.includes("CLAUDE_VERTEX_PROJECT_ID");
 
-      const hasCodexAppServer = secretNames.includes("CODEX_APP_SERVER_URL");
+      const codexAccount = await getCodexAuthAccount();
+      const hasCodexAppServer =
+        (!!codexAccount?.appServerUrl && codexAccount.status === "connected") ||
+        (secretNames.includes("CODEX_APP_SERVER_URL") && secretNames.includes("CODEX_AUTH_JSON"));
 
       const hasCopilotToken = secretNames.includes("COPILOT_GITHUB_TOKEN");
 
@@ -190,6 +264,149 @@ export async function setupRoutes(rawApp: FastifyInstance) {
           anyAgentKey: { done: hasAnyAgentKey, label: "At least one agent API key" },
         },
       });
+    },
+  );
+
+  app.post(
+    "/api/setup/codex-auth",
+    {
+      config: { rateLimit: SETUP_POST_RATE_LIMIT },
+      preHandler: [requireAdminWhenAuthenticated],
+      schema: {
+        operationId: "saveCodexAuthAccount",
+        summary: "Save managed Codex auth account",
+        description:
+          "Persist the Codex app-server endpoint in the app-managed account record, " +
+          "and optionally import a pasted auth.json payload.",
+        tags: ["Setup & Settings"],
+        body: codexAuthAccountUpsertSchema,
+        response: { 200: CodexAuthAccountUpsertResponseSchema, 400: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const account = await upsertCodexAuthAccount({
+          workspaceId: req.user?.workspaceId ?? null,
+          userId: req.user?.id ?? null,
+          appServerUrl: req.body.appServerUrl,
+          authJson: req.body.authJson,
+        });
+        reply.send({
+          account: {
+            id: account.id,
+            status: account.status,
+            appServerUrl: account.appServerUrl,
+            loginSessionId: account.loginSessionId,
+            loginSessionRepoUrl: account.loginSessionRepoUrl,
+            lastImportedAt: account.lastImportedAt?.toISOString() ?? null,
+            lastValidatedAt: account.lastValidatedAt?.toISOString() ?? null,
+            lastError: account.lastError ?? null,
+          },
+        });
+      } catch (err) {
+        reply.status(400).send({ error: sanitizeError(err) });
+      }
+    },
+  );
+
+  app.post(
+    "/api/setup/codex-auth/session",
+    {
+      config: { rateLimit: SETUP_POST_RATE_LIMIT },
+      preHandler: [requireAdminWhenAuthenticated],
+      schema: {
+        operationId: "startCodexAuthSession",
+        summary: "Start a managed Codex login session",
+        description:
+          "Provision an Optio interactive session dedicated to `codex login`, " +
+          "and persist the pending Codex account record in the app.",
+        tags: ["Setup & Settings"],
+        body: codexAuthSessionSchema,
+        response: { 200: CodexAuthSessionResponseSchema, 400: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      try {
+        const result = await startCodexAuthSession({
+          workspaceId: req.user?.workspaceId ?? null,
+          userId: req.user?.id,
+          repoUrl: req.body.repoUrl,
+          appServerUrl: req.body.appServerUrl,
+        });
+        reply.send({
+          account: {
+            id: result.account.id,
+            status: result.account.status,
+            appServerUrl: result.account.appServerUrl,
+            loginSessionId: result.account.loginSessionId,
+          },
+          session: { id: result.session.id },
+        });
+      } catch (err) {
+        reply.status(400).send({ error: sanitizeError(err) });
+      }
+    },
+  );
+
+  app.get(
+    "/api/setup/codex-auth",
+    {
+      schema: {
+        operationId: "getCodexAuthAccount",
+        summary: "Get managed Codex auth account state",
+        description:
+          "Return the current app-managed Codex account record for the active workspace, if any.",
+        tags: ["Setup & Settings"],
+        response: { 200: CodexAuthAccountResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const account = await getCodexAuthAccount(req.user?.workspaceId ?? null);
+      reply.send({
+        account: account
+          ? {
+              id: account.id,
+              status: account.status,
+              appServerUrl: account.appServerUrl,
+              loginSessionId: account.loginSessionId,
+              loginSessionRepoUrl: account.loginSessionRepoUrl,
+              lastImportedAt: account.lastImportedAt?.toISOString() ?? null,
+              lastValidatedAt: account.lastValidatedAt?.toISOString() ?? null,
+              lastError: account.lastError ?? null,
+            }
+          : null,
+      });
+    },
+  );
+
+  app.post(
+    "/api/setup/codex-auth/import",
+    {
+      config: { rateLimit: SETUP_POST_RATE_LIMIT },
+      preHandler: [requireAdminWhenAuthenticated],
+      schema: {
+        operationId: "importCodexAuthFromSession",
+        summary: "Import Codex auth from an interactive session",
+        description:
+          "Read ~/.codex/auth.json from an Optio-managed interactive session " +
+          "after the user completes `codex login`, then store it as managed " +
+          "workspace auth for future repo pods.",
+        tags: ["Setup & Settings"],
+        body: codexAuthImportSchema,
+        response: { 200: CodexAuthImportResponseSchema, 400: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      try {
+        await importCodexAuthFromSession({
+          workspaceId: req.user?.workspaceId ?? null,
+          userId: req.user?.id,
+          sessionId: req.body.sessionId,
+        });
+        reply.send({ imported: true as const });
+      } catch (err) {
+        reply.status(400).send({ error: sanitizeError(err) });
+      }
     },
   );
 

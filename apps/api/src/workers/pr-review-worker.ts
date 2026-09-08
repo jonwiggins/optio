@@ -44,6 +44,7 @@ import {
 } from "../services/secret-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
+import { getCodexAppServerConfig } from "../services/codex-auth-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -238,14 +239,15 @@ export function startPrReviewWorker() {
           ((await retrieveSecretWithFallback("CODEX_AUTH_MODE", "global", workspaceId).catch(
             () => null,
           )) as "api-key" | "app-server" | null) ?? "api-key";
-        const codexAppServerUrl =
+        const codexAppServerConfig =
           codexAuthMode === "app-server"
-            ? (((await retrieveSecretWithFallback(
-                "CODEX_APP_SERVER_URL",
-                "global",
+            ? await getCodexAppServerConfig({
                 workspaceId,
-              ).catch(() => null)) as string | undefined) ?? undefined)
-            : undefined;
+                userId,
+              })
+            : null;
+        const codexAppServerUrl = codexAppServerConfig?.appServerUrl;
+        const codexAuthJson = codexAppServerConfig?.codexAuthJson;
         const geminiAuthMode =
           ((await retrieveSecretWithFallback("GEMINI_AUTH_MODE", "global", workspaceId).catch(
             () => null,
@@ -312,6 +314,7 @@ export function startPrReviewWorker() {
           claudeAuthMode: claudeAuthMode as "api-key" | "max-subscription",
           codexAuthMode,
           codexAppServerUrl,
+          codexAuthJson,
           optioApiUrl,
           renderedPrompt,
           taskFileContent,
@@ -335,6 +338,19 @@ export function startPrReviewWorker() {
           googleCloudProject,
           googleCloudLocation,
         });
+
+        if (agentType === "codex" && codexAuthMode === "app-server") {
+          if (!codexAppServerUrl) {
+            throw new Error(
+              "Codex app-server mode requires a managed Codex account app-server URL. Update the setup wizard.",
+            );
+          }
+          if (!codexAuthJson) {
+            throw new Error(
+              "Codex app-server mode requires shared Codex login data. Complete Codex login in setup and import it.",
+            );
+          }
+        }
 
         // ── MCP + connections + skills (shared with task-worker) ──
         const { getMcpServersForTask, buildMcpJsonContent } =
@@ -496,6 +512,12 @@ export function startPrReviewWorker() {
             : {}),
           ...(allEnv.OPTIO_SETUP_COMMANDS
             ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
+            : {}),
+          ...(agentType === "codex" &&
+          codexAuthMode === "app-server" &&
+          typeof codexAuthJson === "string" &&
+          codexAuthJson.length > 0
+            ? { OPTIO_CODEX_AUTH_JSON_B64: Buffer.from(codexAuthJson, "utf8").toString("base64") }
             : {}),
         };
         const setupSecrets = await resolveSecretsForSetup(review.repoUrl, workspaceId);

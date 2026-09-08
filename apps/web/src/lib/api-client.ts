@@ -203,6 +203,23 @@ export const api = {
       },
     ),
 
+  saveCodexAuthAccount: (data: { appServerUrl: string; authJson?: string }) =>
+    request<{
+      account: {
+        id: string;
+        status: string;
+        appServerUrl: string;
+        loginSessionId: string | null;
+        loginSessionRepoUrl: string | null;
+        lastImportedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+      };
+    }>("/api/setup/codex-auth", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   deleteSecret: (name: string, scope?: string) => {
     const qs = scope ? `?scope=${scope}` : "";
     return request<void>(`/api/secrets/${name}${qs}`, { method: "DELETE" });
@@ -797,6 +814,35 @@ export const api = {
     request<{ session: any }>("/api/sessions", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  getCodexAuthAccount: () =>
+    request<{
+      account: {
+        id: string;
+        status: string;
+        appServerUrl: string;
+        loginSessionId: string | null;
+        loginSessionRepoUrl: string | null;
+        lastImportedAt: string | null;
+        lastValidatedAt: string | null;
+        lastError: string | null;
+      } | null;
+    }>("/api/setup/codex-auth"),
+
+  startCodexAuthSession: (data: { repoUrl: string; appServerUrl: string }) =>
+    request<{
+      account: { id: string; status: string; appServerUrl: string; loginSessionId: string | null };
+      session: { id: string };
+    }>("/api/setup/codex-auth/session", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  importCodexAuthFromSession: (sessionId: string) =>
+    request<{ imported: true }>("/api/setup/codex-auth/import", {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
     }),
 
   endSession: (id: string) =>

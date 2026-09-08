@@ -14,6 +14,8 @@ export interface AgentTaskInput {
   codexAuthMode?: CodexAuthMode;
   /** The app-server WebSocket URL for Codex CLI (used when codexAuthMode is "app-server") */
   codexAppServerUrl?: string;
+  /** Shared Codex auth.json content to hydrate into the persistent pod home */
+  codexAuthJson?: string;
   copilotAuthMode?: CopilotAuthMode;
   optioApiUrl?: string; // for apiKeyHelper callback
   /** The rendered system prompt (from the prompt template) */

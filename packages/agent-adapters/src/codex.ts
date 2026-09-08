@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type {
   AgentTaskInput,
   AgentContainerConfig,
@@ -7,8 +8,14 @@ import type {
 import { TASK_BRANCH_PREFIX } from "@optio/shared";
 import type { AgentAdapter } from "./types.js";
 
+const CODEX_APP_SERVER_CLIENT = readFileSync(
+  new URL("./codex-app-server-client.mjs", import.meta.url),
+  "utf8",
+);
+
 /**
- * Codex CLI (codex exec --full-auto --json) outputs NDJSON events.
+ * Codex CLI (codex exec --json --dangerously-bypass-approvals-and-sandbox)
+ * outputs NDJSON events.
  * Each line is a JSON object. Known event shapes:
  *
  * - { type: "message", role: "assistant"|"system", content: "..." }
@@ -66,24 +73,36 @@ export class CodexAdapter implements AgentAdapter {
     };
 
     const requiredSecrets: string[] = [];
+    const setupFiles: AgentContainerConfig["setupFiles"] = [];
 
     if (input.codexAuthMode === "app-server") {
       env.OPTIO_CODEX_AUTH_MODE = "app-server";
       if (input.codexAppServerUrl) {
         env.OPTIO_CODEX_APP_SERVER_URL = input.codexAppServerUrl;
       }
+      setupFiles.push({
+        path: ".optio/codex-app-server-client.mjs",
+        content: CODEX_APP_SERVER_CLIENT,
+        executable: true,
+      });
     } else {
       env.OPTIO_CODEX_AUTH_MODE = "api-key";
       requiredSecrets.push("OPENAI_API_KEY");
     }
-
-    const setupFiles: AgentContainerConfig["setupFiles"] = [];
 
     // Write the task file into the worktree
     if (input.taskFileContent && input.taskFilePath) {
       setupFiles.push({
         path: input.taskFilePath,
         content: input.taskFileContent,
+      });
+    }
+
+    if (input.codexAuthMode === "app-server" && input.codexAuthJson) {
+      setupFiles.push({
+        path: "/home/agent/.codex/auth.json",
+        content: input.codexAuthJson,
+        sensitive: true,
       });
     }
 
