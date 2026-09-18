@@ -4,3 +4,4 @@ DerivedData/
 build/
 .swiftpm/
 xcuserdata/
+Optio/Resources/Info.plist

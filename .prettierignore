@@ -7,3 +7,8 @@
 pnpm-lock.yaml
 **/test-results
 **/playwright-report
+
+# iOS build products and generated Xcode project
+apps/ios/build
+apps/ios/*.xcodeproj
+apps/ios/Optio/Resources/Info.plist

@@ -72,6 +72,10 @@ targets:
     sources: [OptioTests]
     dependencies:
       - target: Optio
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: dev.optio.ios.tests
 schemes:
   Optio:
     build:
