@@ -318,13 +318,39 @@ function clampDimension(value: number | undefined, fallback: number): number {
   return Math.min(Math.floor(value), MAX_DIMENSION);
 }
 
-/** process.env without undefined values (node-pty wants string values). */
-function cleanEnv(): Record<string, string> {
+/**
+ * Claude Code's per-session markers. If the daemon itself was launched from
+ * inside a Claude Code session (a `!` shell, a hook, an agent), these leak
+ * into every PTY and make nested `claude` runs believe they are child
+ * sessions ("Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION
+ * marker"). Terminals spawned here are always fresh top-level sessions.
+ * Deliberately an explicit list: CLAUDE_CODE_OAUTH_TOKEN, *_USE_VERTEX, etc.
+ * are real user configuration and must pass through.
+ */
+const CLAUDE_SESSION_MARKERS = new Set([
+  "CLAUDECODE",
+  "CLAUDE_PID",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_ENTRYPOINT",
+  "CLAUDE_CODE_EXECPATH",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
+  "CLAUDE_CODE_SESSION_ATTENDED",
+  "CLAUDE_CODE_SESSION_ID",
+]);
+
+/** Drop undefined values (node-pty wants strings) and inherited Claude Code session markers. */
+export function scrubSpawnEnv(source: NodeJS.ProcessEnv): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined || CLAUDE_SESSION_MARKERS.has(key)) continue;
+    env[key] = value;
   }
   return env;
+}
+
+function cleanEnv(): Record<string, string> {
+  return scrubSpawnEnv(process.env);
 }
 
 /**

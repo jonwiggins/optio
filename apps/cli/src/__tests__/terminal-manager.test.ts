@@ -2,7 +2,7 @@ import os from "node:os";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LocalDaemonMessage } from "@optio/shared";
 import { AttentionTracker } from "../local/attention.js";
-import { TerminalManager } from "../local/terminal-manager.js";
+import { TerminalManager, scrubSpawnEnv } from "../local/terminal-manager.js";
 
 const h = vi.hoisted(() => {
   class FakePty {
@@ -191,6 +191,25 @@ describe("input", () => {
       terminalId: "t-1",
       state: "working",
       reason: "input",
+    });
+  });
+});
+
+describe("scrubSpawnEnv", () => {
+  it("drops inherited Claude Code session markers but keeps user config", () => {
+    const env = scrubSpawnEnv({
+      PATH: "/bin",
+      CLAUDECODE: "1",
+      CLAUDE_CODE_CHILD_SESSION: "1",
+      CLAUDE_CODE_SESSION_ID: "abc",
+      CLAUDE_CODE_OAUTH_TOKEN: "keep-me",
+      CLAUDE_CODE_USE_VERTEX: "1",
+      UNDEFINED_ONE: undefined,
+    });
+    expect(env).toEqual({
+      PATH: "/bin",
+      CLAUDE_CODE_OAUTH_TOKEN: "keep-me",
+      CLAUDE_CODE_USE_VERTEX: "1",
     });
   });
 });
