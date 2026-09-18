@@ -71,7 +71,8 @@ export async function publishPersistentAgentEvent(event: WsEvent): Promise<void>
  * ever ride on it. Clients refetch over REST on receipt.
  */
 export async function publishLocalChanged(event: {
-  terminalId: string;
+  /** Null for host-level changes (online/offline) with no specific terminal. */
+  terminalId: string | null;
   hostId: string;
   userId: string | null;
 }): Promise<void> {

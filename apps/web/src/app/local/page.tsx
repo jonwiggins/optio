@@ -48,6 +48,12 @@ export default function LocalPage() {
     refetch().finally(() => setLoading(false));
   }, [refetch]);
 
+  // A host filter pointing at an unpaired host would hide every terminal
+  // with no visible control to clear it (the select only renders for 2+ hosts).
+  useEffect(() => {
+    if (hostFilter && !hosts.some((h) => h.id === hostFilter)) setHostFilter("");
+  }, [hosts, hostFilter]);
+
   // Live updates: content-free local:changed nudges on the shared events WS,
   // debounced 500ms, plus a 5s visible-tab poll and a visibilitychange refetch.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -111,7 +117,7 @@ export default function LocalPage() {
   const handleStart = async (t: any) => {
     try {
       await api.startLocalTerminal(t.id);
-      toast.success("Terminal started");
+      toast.success("Starting terminal…");
       refetch();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to start terminal");

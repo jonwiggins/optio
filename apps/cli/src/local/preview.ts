@@ -16,8 +16,18 @@ const ANSI_RE =
 
 const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 
+// CSI cursor-forward (ESC [ n C): TUIs (Claude Code, Ink apps) position words
+// with these instead of literal spaces — dropping them would glue words
+// together in the preview, so render them as spaces (capped per sequence).
+const CURSOR_FORWARD_RE = /\x1b\[(\d*)C/g;
+
 export function stripAnsi(text: string): string {
-  return text.replace(ANSI_RE, "").replace(CONTROL_RE, "");
+  return text
+    .replace(CURSOR_FORWARD_RE, (_m, n: string) =>
+      " ".repeat(Math.min(Math.max(parseInt(n || "1", 10) || 1, 1), 200)),
+    )
+    .replace(ANSI_RE, "")
+    .replace(CONTROL_RE, "");
 }
 
 /**

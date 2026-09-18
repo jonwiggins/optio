@@ -7,8 +7,12 @@ import type { LocalAttentionState } from "@optio/shared";
  * 1. Claude Code hooks — once any hook fires for a terminal, heuristics are
  *    disabled for it.
  * 2. Terminal bell — a BEL that is not an OSC/DCS/APC/PM string terminator.
- * 3. Silence — output → working; 12 s of quiet after prior output → idle
- *    (deliberately NOT needs_you).
+ * 3. Silence — output → working; 12 s of quiet after prior output → idle for
+ *    shells/commands (deliberately NOT needs_you: a quiet test watcher isn't
+ *    asking for you). For AGENT terminals quiet means the opposite: an
+ *    interactive agent CLI is either streaming or waiting on the human (a
+ *    trust/login/theme prompt before Claude Code's hooks even start firing,
+ *    or a non-hooked agent at its input line) → needs_you (reason `quiet`).
  *
  * `needs_you` is sticky over the weaker heuristics: neither plain output nor
  * the silence timer may downgrade it (a bell followed by silence means the
@@ -56,6 +60,8 @@ const BEL = 0x07;
 interface TermAttention {
   state: LocalAttentionState | null;
   reason: string | null;
+  /** Agent CLI spawn: silence is read as "waiting on you", not idle. */
+  agent: boolean;
   hasHooks: boolean;
   producedOutput: boolean;
   /** Inside an OSC/DCS/APC/PM string sequence (survives chunk splits). */
@@ -84,6 +90,14 @@ export class AttentionTracker {
     this.onEvent = opts.onEvent ?? (() => {});
     this.scheduler = opts.scheduler ?? defaultScheduler;
     this.silenceMs = opts.silenceMs ?? SILENCE_MS;
+  }
+
+  /**
+   * Declare a terminal as an agent CLI spawn (call before its first output).
+   * Flips the silence heuristic from idle to needs_you for it.
+   */
+  markAgent(terminalId: string): void {
+    this.get(terminalId).agent = true;
   }
 
   /** Feed a chunk of PTY output. Returns any synchronous transitions. */
@@ -184,6 +198,7 @@ export class AttentionTracker {
       t = {
         state: null,
         reason: null,
+        agent: false,
         hasHooks: false,
         producedOutput: false,
         inString: false,
@@ -214,10 +229,11 @@ export class AttentionTracker {
     this.clearSilenceTimer(t);
     t.silenceTimer = this.scheduler.setTimeout(() => {
       t.silenceTimer = null;
-      // Silence is the weakest signal: it only downgrades working → idle.
+      // Silence is the weakest signal: it only moves a `working` terminal.
       // A needs_you terminal that goes quiet is still waiting on the user.
       if (t.hasHooks || !t.producedOutput || t.state !== "working") return;
-      this.transition(t, terminalId, "idle", "silence");
+      if (t.agent) this.transition(t, terminalId, "needs_you", "quiet");
+      else this.transition(t, terminalId, "idle", "silence");
     }, this.silenceMs);
   }
 

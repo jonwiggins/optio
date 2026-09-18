@@ -72,6 +72,7 @@ for (const { path, marker } of [
   { path: "/reviews", marker: /No open pull requests found|pull request/i },
   { path: "/issues", marker: /No open issues found|issues/i },
   { path: "/sessions", marker: /No sessions yet|Sessions/i },
+  { path: "/local", marker: /No machines paired yet|Local/i },
   { path: "/costs", marker: /cost/i },
   { path: "/repos", marker: /e2e-org\/e2e-repo/ },
   { path: "/connections", marker: /connection/i },

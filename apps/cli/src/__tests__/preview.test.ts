@@ -10,6 +10,12 @@ describe("stripAnsi", () => {
     expect(stripAnsi("\x1b]0;title\x07before \x1b]8;;http://x\x1b\\after")).toBe("before after");
   });
 
+  it("renders CSI cursor-forward as spaces so TUI-positioned words stay separated", () => {
+    expect(stripAnsi("Accessing\x1b[1Cworkspace:\x1b[3Cok\x1b[Cend")).toBe(
+      "Accessing workspace:   ok end",
+    );
+  });
+
   it("removes stray control characters but keeps newlines and tabs", () => {
     expect(stripAnsi("a\x07b\x00c\nd\te")).toBe("abc\nd\te");
   });

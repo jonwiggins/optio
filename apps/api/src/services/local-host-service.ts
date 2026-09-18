@@ -3,9 +3,17 @@ import { normalizeRepoUrl, LOCAL_HOST_OFFLINE_AFTER_MS, type LocalHostDir } from
 import { db } from "../db/client.js";
 import { localHosts } from "../db/schema.js";
 import { logger } from "../logger.js";
+import { publishLocalChanged } from "./event-bus.js";
 import { isAuthDisabled } from "./oauth/index.js";
 
 export type LocalHostRow = typeof localHosts.$inferSelect;
+
+/** Content-free nudge so the cockpit / issues page refresh host online state. */
+async function notifyHostChanged(host: { id: string; userId: string | null }): Promise<void> {
+  await publishLocalChanged({ terminalId: null, hostId: host.id, userId: host.userId }).catch(
+    (err) => logger.warn({ err, hostId: host.id }, "local: failed to publish host change"),
+  );
+}
 
 /** Ownership scope: rows with null userId belong to the auth-disabled dev user. */
 function ownedBy(userId: string | null | undefined) {
@@ -93,7 +101,7 @@ export async function markHostOnline(
   id: string,
   updates: { dirs?: LocalHostDir[]; daemonVersion?: string },
 ): Promise<void> {
-  await db
+  const [row] = await db
     .update(localHosts)
     .set({
       state: "online",
@@ -102,14 +110,18 @@ export async function markHostOnline(
       ...(updates.dirs ? { dirs: sanitizeDirs(updates.dirs) } : {}),
       ...(updates.daemonVersion ? { daemonVersion: updates.daemonVersion } : {}),
     })
-    .where(eq(localHosts.id, id));
+    .where(eq(localHosts.id, id))
+    .returning({ id: localHosts.id, userId: localHosts.userId });
+  if (row) await notifyHostChanged(row);
 }
 
 export async function markHostOffline(id: string): Promise<void> {
-  await db
+  const [row] = await db
     .update(localHosts)
     .set({ state: "offline", updatedAt: new Date() })
-    .where(eq(localHosts.id, id));
+    .where(eq(localHosts.id, id))
+    .returning({ id: localHosts.id, userId: localHosts.userId });
+  if (row) await notifyHostChanged(row);
 }
 
 /** Heartbeat from the daemon ping loop. */
@@ -127,9 +139,10 @@ export async function sweepStaleHosts(): Promise<string[]> {
     .update(localHosts)
     .set({ state: "offline", updatedAt: new Date() })
     .where(and(eq(localHosts.state, "online"), lt(localHosts.lastSeenAt, cutoff)))
-    .returning({ id: localHosts.id });
+    .returning({ id: localHosts.id, userId: localHosts.userId });
   if (stale.length > 0) {
     logger.info({ hostIds: stale.map((h) => h.id) }, "local: marked stale hosts offline");
+    for (const row of stale) await notifyHostChanged(row);
   }
   return stale.map((h) => h.id);
 }

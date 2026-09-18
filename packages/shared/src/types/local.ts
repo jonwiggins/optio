@@ -162,7 +162,8 @@ export type LocalStreamClientMessage =
 /** Content-free nudge published on the shared /ws/events stream. */
 export interface LocalChangedEvent {
   type: "local:changed";
-  terminalId: string;
+  /** Null for host-level changes (online/offline) with no specific terminal. */
+  terminalId: string | null;
   hostId: string;
   userId: string | null;
 }

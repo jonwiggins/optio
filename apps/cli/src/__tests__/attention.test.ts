@@ -109,6 +109,28 @@ describe("attention output/silence heuristics", () => {
     expect(events.at(-1)).toEqual({ terminalId: T, state: "idle", reason: "silence" });
   });
 
+  it("silence on an AGENT terminal (no hooks yet) means needs_you/quiet", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.markAgent(T);
+    tracker.feed(T, Buffer.from("Do you trust this folder?"));
+    scheduler.fireAll();
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "quiet" });
+    // Typing the answer clears it; the next quiet spell flags again.
+    tracker.onInput(T);
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "working", reason: "input" });
+    scheduler.fireAll();
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "quiet" });
+  });
+
+  it("agent silence heuristic is disabled once hooks own the terminal", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.markAgent(T);
+    tracker.hookEvent(T, "UserPromptSubmit");
+    tracker.feed(T, Buffer.from("thinking..."));
+    scheduler.fireAll();
+    expect(events.filter((e) => e.reason === "quiet")).toEqual([]);
+  });
+
   it("output resets the silence timer", () => {
     const { events, scheduler, tracker } = setup();
     tracker.feed(T, Buffer.from("one"));

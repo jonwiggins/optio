@@ -8,6 +8,13 @@ export class WsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private url: string;
   private tokenProvider: TokenProvider | null;
+  /**
+   * Set by disconnect(). The browser fires `onclose` asynchronously after
+   * `ws.close()`, and a token fetch may still be in flight — without this
+   * flag either path would open a fresh socket after the caller let go of the
+   * client, leaking an auto-reconnecting connection per page visit.
+   */
+  private closed = false;
 
   constructor(url: string, tokenProvider?: TokenProvider) {
     this.url = url;
@@ -15,6 +22,7 @@ export class WsClient {
   }
 
   connect(): void {
+    this.closed = false;
     if (this.ws?.readyState === WebSocket.OPEN) return;
 
     // If a token provider is set, fetch a token before connecting.
@@ -23,10 +31,12 @@ export class WsClient {
     if (this.tokenProvider) {
       this.tokenProvider()
         .then((token) => {
+          if (this.closed) return;
           const protocols = token ? ["optio-ws-v1", `optio-auth-${token}`] : undefined;
           this.openSocket(this.url, protocols);
         })
         .catch(() => {
+          if (this.closed) return;
           // Token fetch failed — retry after delay
           this.reconnectTimer = setTimeout(() => this.connect(), 3000);
         });
@@ -50,6 +60,7 @@ export class WsClient {
     };
 
     this.ws.onclose = (ev) => {
+      if (this.closed) return; // caller disconnected — never reconnect
       if (ev.code === 4429) return; // connection limit exceeded — retry can't help
       this.reconnectTimer = setTimeout(() => this.connect(), 3000);
     };
@@ -60,6 +71,7 @@ export class WsClient {
   }
 
   disconnect(): void {
+    this.closed = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

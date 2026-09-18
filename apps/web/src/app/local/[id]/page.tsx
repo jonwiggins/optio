@@ -82,7 +82,7 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
     try {
       const res = await api.startLocalTerminal(id);
       setTerminal(res.terminal);
-      toast.success("Terminal started");
+      toast.success("Starting terminal…");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to start terminal");
     }
@@ -153,10 +153,13 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const canStart = terminal.state === "pending";
+  // Parked-on-offline-host terminals spawn themselves on reconnect; Start
+  // would only 409.
+  const canStart = terminal.state === "pending" && terminal.pendingReason !== "host_offline";
   const canKill = terminal.state === "running" || terminal.state === "launching";
   const canDelete =
     terminal.state === "exited" || terminal.state === "error" || terminal.state === "pending";
+  const isDead = terminal.state === "exited" || terminal.state === "error";
 
   return (
     <div className="h-full flex flex-col">
@@ -199,8 +202,10 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
                     exit {terminal.exitCode}
                   </span>
                 )}
-                {terminal.state === "error" && terminal.errorMessage && (
-                  <span className="text-error">{terminal.errorMessage}</span>
+                {isDead && terminal.errorMessage && (
+                  <span className={cn(terminal.state === "error" ? "text-error" : "")}>
+                    {terminal.errorMessage}
+                  </span>
                 )}
               </div>
             </div>
@@ -258,17 +263,32 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
-      <div className="flex-1 min-h-0">
-        <ErrorBoundary label="Local terminal">
-          {/* Remount on leaving `pending` — the stream WS only attaches to a
-              terminal that is already launching/running when it connects. */}
-          <LocalTerminal
-            key={terminal.state === "pending" ? "held" : "live"}
-            terminalId={id}
-            onStatus={handleStatus}
-            onExit={handleExit}
-          />
-        </ErrorBoundary>
+      <div className="flex-1 min-h-0 flex flex-col">
+        {/* Scrollback lives in the daemon and dies with the PTY, so a finished
+            terminal has nothing to stream — show the persisted preview (the
+            last lines of output) so "review the result" has a result. */}
+        {isDead && terminal.preview && (
+          <div className="shrink-0 border-b border-border/50 bg-[#09090b] px-4 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-text-muted mb-1.5">
+              Last output
+            </div>
+            <pre className="font-mono text-xs leading-5 whitespace-pre-wrap break-all text-[#d4d4d8] max-h-72 overflow-auto">
+              {terminal.preview}
+            </pre>
+          </div>
+        )}
+        <div className="flex-1 min-h-0">
+          <ErrorBoundary label="Local terminal">
+            {/* Remount on leaving `pending` — the stream WS only attaches to a
+                terminal that is already launching/running when it connects. */}
+            <LocalTerminal
+              key={terminal.state === "pending" ? "held" : "live"}
+              terminalId={id}
+              onStatus={handleStatus}
+              onExit={handleExit}
+            />
+          </ErrorBoundary>
+        </div>
       </div>
     </div>
   );

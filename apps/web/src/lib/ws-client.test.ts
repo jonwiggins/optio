@@ -128,9 +128,23 @@ describe("WsClient", () => {
 
     expect(ws.close).toHaveBeenCalled();
 
-    // Should not reconnect after disconnect
+    // Browsers fire onclose asynchronously after close() — it must not
+    // schedule a reconnect once the caller has disconnected.
+    ws.onclose?.({ code: 1000 });
     vi.advanceTimersByTime(5000);
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it("disconnect before the token fetch resolves opens no socket", async () => {
+    let resolveToken: (t: string | null) => void = () => {};
+    const provider = () => new Promise<string | null>((r) => (resolveToken = r));
+    const client = new WsClient("ws://localhost:4000/ws/events", provider);
+    client.connect();
+    client.disconnect();
+    resolveToken("tok");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(MockWebSocket.instances).toHaveLength(0);
   });
 
   it("send() transmits JSON data when socket is open", () => {

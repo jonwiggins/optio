@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
@@ -25,6 +25,14 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
 
   const effectiveDir = dir || host?.dirs?.[0]?.path || "";
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const handleCreate = async () => {
     if (!hostId || !effectiveDir) {
       toast.error("Pick a host and directory");
@@ -48,7 +56,8 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
         title: title.trim() || undefined,
         spec,
       });
-      toast.success("Terminal spawned");
+      if (host?.state === "online") toast.success("Terminal spawned");
+      else toast.success(`Queued — starts when ${host?.name ?? "the host"} reconnects`);
       router.push(`/local/${res.terminal.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to spawn terminal");
@@ -57,14 +66,28 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-bg-card border border-border rounded-xl p-5 w-full max-w-lg shadow-xl">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-terminal-title"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void handleCreate();
+        }}
+        className="bg-bg-card border border-border rounded-xl p-5 w-full max-w-lg shadow-xl"
+      >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <h2 id="new-terminal-title" className="flex items-center gap-2 text-sm font-semibold">
             <Terminal className="w-4 h-4 text-primary" />
             New Terminal
           </h2>
           <button
+            type="button"
             onClick={onClose}
             className="text-text-muted hover:text-text transition-colors"
             aria-label="Close"
@@ -78,6 +101,7 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
             <div>
               <label className="block text-xs text-text-muted mb-1">Host</label>
               <select
+                autoFocus
                 value={hostId}
                 onChange={(e) => {
                   setHostId(e.target.value);
@@ -193,13 +217,14 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
 
         <div className="flex items-center justify-end gap-2 mt-5">
           <button
+            type="button"
             onClick={onClose}
             className="px-4 py-2 rounded-lg text-xs font-medium bg-bg border border-border text-text-muted hover:text-text transition-colors"
           >
             Cancel
           </button>
           <button
-            onClick={handleCreate}
+            type="submit"
             disabled={creating || !hostId || !effectiveDir}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
           >
@@ -211,7 +236,7 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
             Spawn
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

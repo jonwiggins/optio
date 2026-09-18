@@ -111,6 +111,7 @@ export class TerminalManager {
         killTimer: null,
       };
       this.terminals.set(msg.terminalId, term);
+      if (msg.spec.kind === "agent") this.opts.attention.markAgent(msg.terminalId);
 
       pty.onData((data) => this.handleData(term, data));
       pty.onExit(({ exitCode }) => this.handleExit(term, exitCode));

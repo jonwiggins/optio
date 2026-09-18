@@ -46,7 +46,11 @@ Layered, best signal wins per terminal:
    string terminator → `needs_you` (reason `bell`). The scanner is a small cross-chunk
    state machine (ESC `]`/`P`/`_`/`^` opens a string; BEL or ESC `\` closes it).
 3. **Silence** (fallback). Output → `working`; ≥12 s of quiet after prior output → `idle`
-   (deliberately _not_ `needs_you` — a quiet test watcher isn't asking for you).
+   for shells and commands (deliberately _not_ `needs_you` — a quiet test watcher isn't
+   asking for you). For **agent** spawns quiet means the opposite — an interactive agent
+   CLI is either streaming or waiting on the human (Claude Code's trust/login prompts fire
+   before any hook does; non-hooked agents sit at their input line) → `needs_you`
+   (reason `quiet`). Layer 1 disables this once a hook has fired.
 
 Exit: `spawnedBy != "manual"` → `needs_you` (reason `exit`) so automation results land in
 the queue for review; manual shells exit to `idle`.

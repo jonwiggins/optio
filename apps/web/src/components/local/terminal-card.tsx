@@ -74,6 +74,7 @@ const ATTENTION_LABELS: Record<string, string> = {
   stop: "waiting for you",
   notification: "wants your attention",
   bell: "rang the bell",
+  quiet: "gone quiet — probably waiting on you",
   exit: "finished — review the result",
 };
 
@@ -121,7 +122,9 @@ export function TerminalCard({
     }
   };
 
-  const canStart = terminal.state === "pending";
+  // A terminal parked on an offline host spawns itself when the daemon
+  // reconnects — Start would only 409 with "Host is offline".
+  const canStart = terminal.state === "pending" && terminal.pendingReason !== "host_offline";
   const canKill = terminal.state === "running" || terminal.state === "launching";
   const canDelete =
     terminal.state === "exited" || terminal.state === "error" || terminal.state === "pending";
@@ -132,7 +135,13 @@ export function TerminalCard({
       tabIndex={0}
       onClick={() => router.push(`/local/${terminal.id}`)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") router.push(`/local/${terminal.id}`);
+        // Only when the card itself is focused — keydown bubbles from the
+        // inner Kill/Delete buttons, which must not also navigate away.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          router.push(`/local/${terminal.id}`);
+        }
       }}
       className={cn(
         "card-hover cursor-pointer p-3 rounded-lg border border-border border-l-2 bg-bg-card hover:border-primary/30 text-left flex flex-col gap-2",
@@ -177,8 +186,14 @@ export function TerminalCard({
             exit {terminal.exitCode}
           </span>
         )}
-        {terminal.state === "error" && terminal.errorMessage && (
-          <span className="text-[10px] text-error truncate" title={terminal.errorMessage}>
+        {(terminal.state === "error" || terminal.state === "exited") && terminal.errorMessage && (
+          <span
+            className={cn(
+              "text-[10px] truncate",
+              terminal.state === "error" ? "text-error" : "text-text-muted",
+            )}
+            title={terminal.errorMessage}
+          >
             {terminal.errorMessage}
           </span>
         )}
@@ -191,8 +206,12 @@ export function TerminalCard({
       )}
 
       {(canStart || canKill || canDelete) && (
-        <div className="flex items-center gap-1.5 mt-auto" onClick={(e) => e.stopPropagation()}>
-          {canStart && terminal.pendingReason === "hold" ? (
+        <div
+          className="flex items-center gap-1.5 mt-auto"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {canStart && (
             <button
               onClick={() => run(onStart)}
               disabled={busy}
@@ -201,16 +220,7 @@ export function TerminalCard({
               {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
               Start
             </button>
-          ) : canStart ? (
-            <button
-              onClick={() => run(onStart)}
-              disabled={busy}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-bg text-xs text-text-muted hover:text-text disabled:opacity-50 transition-colors"
-            >
-              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-              Start
-            </button>
-          ) : null}
+          )}
           {canKill && (
             <button
               onClick={() => run(onKill)}

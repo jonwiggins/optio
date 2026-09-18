@@ -31,10 +31,18 @@ export function IssuesBrowser() {
       .listRepos()
       .then((res) => setRepos(res.repos))
       .catch(() => {});
-    api
-      .listLocalHosts()
-      .then((res) => setLocalHosts(res.hosts))
-      .catch(() => {});
+    // Hosts flip online/offline as daemons connect — keep "Work on locally"
+    // in step without a reload.
+    const loadHosts = () =>
+      api
+        .listLocalHosts()
+        .then((res) => setLocalHosts(res.hosts))
+        .catch(() => {});
+    loadHosts();
+    const hostsTimer = setInterval(() => {
+      if (document.visibilityState === "visible") loadHosts();
+    }, 15_000);
+    return () => clearInterval(hostsTimer);
   }, []);
 
   useEffect(() => {

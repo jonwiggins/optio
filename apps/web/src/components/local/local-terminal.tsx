@@ -105,6 +105,9 @@ export function LocalTerminal({
     // replay) — never before, so a reconnect that brings nothing back can't
     // blank the pane.
     let pendingReset = false;
+    // Retryable errors ("Host is offline") repeat on every 2 s reconnect
+    // while the daemon is down — print each distinct message once.
+    let lastErrorShown: string | null = null;
 
     const connect = async () => {
       // Tokens go in the Sec-WebSocket-Protocol header (never the URL), same
@@ -149,7 +152,10 @@ export function LocalTerminal({
             );
             onExitRef.current?.(parsed.exitCode ?? null);
           } else if (parsed.type === "error") {
-            term.writeln(`\r\n\x1b[31m${parsed.message}\x1b[0m`);
+            if (parsed.message !== lastErrorShown) {
+              lastErrorShown = parsed.message;
+              term.writeln(`\r\n\x1b[31m${parsed.message}\x1b[0m`);
+            }
             // An error on a live terminal (e.g. "Host is offline") leaves the
             // socket open but attached to nothing — it would never receive
             // another frame. Close it so the reconnect loop retries until the
@@ -164,6 +170,7 @@ export function LocalTerminal({
             pendingReset = false;
             term.reset();
           }
+          lastErrorShown = null;
           term.write(new Uint8Array(msg.data));
         }
       };
