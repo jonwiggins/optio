@@ -5,19 +5,28 @@ import { usePathname, useRouter } from "next/navigation";
 import { useLocalFeed } from "./local-feed";
 import { useBellStore } from "./bell-store";
 import { useTitleStore } from "@/hooks/use-page-title";
-import { faviconDataUrl, ringingBells, summarizeAttention } from "./attention";
+import { faviconDataUrl, ringingBells, summarizeAttention, terminalTone } from "./attention";
 import { attentionLabel } from "./terminal-card";
 
 const DEFAULT_FAVICON = "/favicon.svg";
 
+let currentFavicon: string | null = null;
+
+/**
+ * Swap the tab icon. Chrome only reliably repaints when the <link> node is
+ * replaced (an href change on the existing node is sometimes ignored), so
+ * remove and re-add. Safari ignores dynamic favicons entirely — there the
+ * "(N)" title badge is the signal.
+ */
 function setFavicon(href: string) {
-  let link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
-  if (!link) {
-    link = document.createElement("link");
-    link.rel = "icon";
-    document.head.appendChild(link);
-  }
-  if (link.href !== href) link.href = href;
+  if (currentFavicon === href) return;
+  currentFavicon = href;
+  for (const old of document.querySelectorAll('link[rel~="icon"]')) old.remove();
+  const link = document.createElement("link");
+  link.rel = "icon";
+  link.type = href.startsWith("data:") ? "image/svg+xml" : "";
+  link.href = href;
+  document.head.appendChild(link);
 }
 
 /**
@@ -49,7 +58,11 @@ export function LocalAttentionWatcher() {
 
   useEffect(() => {
     const summary = summarizeAttention(terminals);
-    setFavicon(faviconDataUrl(summary.tone));
+    // Inside a session the icon is THAT session's status; on the cockpit
+    // it's the fleet's. The (N) badge is always the fleet's needs-you count.
+    const m = /^\/local\/([^/?]+)/.exec(pathname);
+    const focused = m ? terminals.find((t) => t.id === m[1]) : undefined;
+    setFavicon(faviconDataUrl(focused ? terminalTone(focused) : summary.tone));
     useTitleStore.getState().setBadge(summary.needsYou);
 
     const bells = useBellStore.getState();
@@ -63,7 +76,7 @@ export function LocalAttentionWatcher() {
     }
 
     prev.current = new Map(terminals.map((t) => [t.id, t.attentionState]));
-  }, [terminals, router]);
+  }, [terminals, router, pathname]);
 
   return null;
 }

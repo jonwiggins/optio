@@ -54,6 +54,8 @@ export interface TerminalManagerOptions {
   /** Git remote for the allowlisted dir containing `dir`, when detected. */
   getRepoUrlForDir?: (dir: string) => string | undefined;
   hookSettingsPath: string;
+  /** Directory holding the `claude` shim; prepended to every spawn's PATH. */
+  shimDir?: string;
   getHookServerPort: () => number;
   onStatus?: (line: string) => void;
 }
@@ -98,13 +100,22 @@ export class TerminalManager {
           break;
       }
 
+      const env = cleanEnv();
+      // The shim makes a hand-launched `claude` report hooks too (see
+      // writeClaudeShim). Login rc files that *prepend* to PATH keep it;
+      // ones that reset PATH lose it, and the terminal degrades to the
+      // silence heuristic as before.
+      if (this.opts.shimDir) {
+        env.PATH = env.PATH ? `${this.opts.shimDir}:${env.PATH}` : this.opts.shimDir;
+        env.OPTIO_LOCAL_HOOK_SETTINGS = this.opts.hookSettingsPath;
+      }
       const pty = ptySpawn(shell, args, {
         name: "xterm-256color",
         cols: clampDimension(msg.cols, LOCAL_DEFAULT_COLS),
         rows: clampDimension(msg.rows, LOCAL_DEFAULT_ROWS),
         cwd: dir,
         env: {
-          ...cleanEnv(),
+          ...env,
           TERM: "xterm-256color",
           OPTIO_LOCAL_TERMINAL_ID: msg.terminalId,
           OPTIO_LOCAL_DAEMON_PORT: String(this.opts.getHookServerPort()),
