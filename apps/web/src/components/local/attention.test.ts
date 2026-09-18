@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  sessionTone,
+  SESSION_DOT,
+  TONE_COLOR,
   faviconDataUrl,
   ringingBells,
   summarizeAttention,
   terminalTone,
-  TONE_COLOR,
 } from "./attention";
 
 const t = (id: string, attentionState: string, state = "running") => ({
@@ -70,5 +72,31 @@ describe("ringingBells", () => {
 
   it("does not ring on first load for something already waiting", () => {
     expect(ringingBells(new Map(), [t("c", "needs_you")], ["c"])).toEqual([]);
+  });
+});
+
+describe("sessionTone", () => {
+  it("maps every state to the purple/yellow/green/grey scale", () => {
+    expect(sessionTone({ state: "running", attentionState: "working" })).toBe("working");
+    expect(sessionTone({ state: "running", attentionState: "needs_you" })).toBe("needs_you");
+    expect(sessionTone({ state: "exited", exitCode: 0 })).toBe("completed");
+    expect(sessionTone({ state: "exited", exitCode: null })).toBe("dead");
+    expect(sessionTone({ state: "exited", exitCode: 130 })).toBe("dead");
+    expect(sessionTone({ state: "error" })).toBe("dead");
+    expect(sessionTone({ state: "running", attentionState: "idle" })).toBe("idle");
+    expect(sessionTone({ state: "pending" })).toBe("pending");
+    expect(sessionTone({ state: "launching" })).toBe("launching");
+    // needs_you wins even after exit
+    expect(sessionTone({ state: "exited", exitCode: 0, attentionState: "needs_you" })).toBe(
+      "needs_you",
+    );
+  });
+
+  it("favicon colors agree with the dot scale", () => {
+    expect(SESSION_DOT.working).toBe("bg-primary");
+    expect(TONE_COLOR.working).toBe("#7c3aed");
+    expect(SESSION_DOT.completed).toBe("bg-success");
+    expect(TONE_COLOR.completed).toBe("#34d399");
+    expect(TONE_COLOR.error).toBe(TONE_COLOR.idle);
   });
 });

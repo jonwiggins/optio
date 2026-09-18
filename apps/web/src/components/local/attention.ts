@@ -3,15 +3,62 @@
  * badge, bell notifications). Kept free of DOM so they can be unit tested.
  */
 
-export type AttentionTone = "needs_you" | "working" | "idle" | "error";
+export type AttentionTone = "needs_you" | "working" | "idle" | "error" | "completed";
+
+/**
+ * The one status scale for a Local session, used by every surface (card,
+ * list row, rail, pane header, favicon):
+ *   purple  working        — an agent is busy
+ *   yellow  needs_you      — waiting on a human (live or just finished)
+ *   green   completed      — exited cleanly (code 0)
+ *   grey    dead           — killed, crashed or failed to start
+ *   grey    idle/pending   — alive but nothing happening / not started yet
+ *   purple  launching      — about to work (dimmer, pulsing)
+ */
+export type SessionTone =
+  | "working"
+  | "needs_you"
+  | "completed"
+  | "dead"
+  | "idle"
+  | "pending"
+  | "launching";
+
+export function sessionTone(t: any): SessionTone {
+  if (t.attentionState === "needs_you") return "needs_you";
+  switch (t.state) {
+    case "error":
+      return "dead";
+    case "exited":
+      return t.exitCode === 0 ? "completed" : "dead";
+    case "pending":
+      return "pending";
+    case "launching":
+      return "launching";
+    default:
+      return t.attentionState === "working" ? "working" : "idle";
+  }
+}
+
+/** Tailwind classes for the status dot per tone. */
+export const SESSION_DOT: Record<SessionTone, string> = {
+  working: "bg-primary",
+  needs_you: "bg-warning animate-pulse",
+  completed: "bg-success",
+  dead: "bg-text-muted/30",
+  idle: "bg-text-muted/40",
+  pending: "bg-text-muted/50",
+  launching: "bg-primary/60 animate-pulse",
+};
 
 /**
  * The tone for ONE terminal — what the favicon shows while you're inside
  * a session, so the tab reflects the thing you're actually looking at.
  */
 export function terminalTone(t: any): AttentionTone {
-  if (t.state === "error") return "error";
   if (t.attentionState === "needs_you") return "needs_you";
+  if (t.state === "error") return "error";
+  if (t.state === "exited") return t.exitCode === 0 ? "completed" : "idle";
   if (isLive(t) && t.attentionState === "working") return "working";
   return "idle";
 }
@@ -37,11 +84,13 @@ export function summarizeAttention(terminals: any[]): AttentionSummary {
   };
 }
 
+// Mirrors SESSION_DOT for the favicon (which can't use Tailwind classes).
 export const TONE_COLOR: Record<AttentionTone, string> = {
   needs_you: "#f0a040",
-  working: "#34d399",
+  working: "#7c3aed",
+  completed: "#34d399",
   idle: "#807c88",
-  error: "#f06060",
+  error: "#807c88",
 };
 
 /** The Optio bolt favicon with a status dot in the corner. */

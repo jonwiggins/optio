@@ -6,15 +6,11 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { Loader2, Play, Server, Trash2, XCircle } from "lucide-react";
 import { LocalStateBadge, SpawnSourceBadge, attentionLabel, dirTail } from "./terminal-card";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
+import { SESSION_DOT, sessionTone } from "./attention";
 
-/** Accent dot for the row: attention while live, muted once finished. */
+/** Accent dot for the row — the shared session scale (see attention.ts). */
 function rowDot(t: any): string {
-  if (t.attentionState === "needs_you") return "bg-warning animate-pulse";
-  if (t.state === "error") return "bg-error";
-  if (t.state === "exited") return "bg-text-muted/30";
-  if (t.state === "pending" || t.state === "launching") return "bg-warning/60";
-  if (t.attentionState === "working") return "bg-success";
-  return "bg-text-muted/40";
+  return SESSION_DOT[sessionTone(t)];
 }
 
 /**

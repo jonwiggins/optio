@@ -15,6 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import { attentionLabel, dirTail } from "./terminal-card";
+import { SESSION_DOT, sessionTone } from "./attention";
 import { useRailStore } from "./rail-store";
 import { useLocalFeed } from "./local-feed";
 import { useBellStore } from "./bell-store";
@@ -37,21 +38,10 @@ import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
 
 type Group = { key: string; label: string; tone: string; items: any[] };
 
-// Same scheme as the favicon dot: yellow needs you, green working, grey quiet.
-const DOT: Record<string, string> = {
-  needs_you: "bg-warning",
-  working: "bg-success",
-  idle: "bg-text-muted/40",
-  dead: "bg-text-muted/25",
-  pending: "bg-warning/60",
-};
-
 function dotFor(t: any): string {
-  if (t.state === "exited" || t.state === "error") {
-    return t.attentionState === "needs_you" ? DOT.needs_you : DOT.dead;
-  }
-  if (t.state === "pending" || t.state === "launching") return DOT.pending;
-  return DOT[t.attentionState] ?? DOT.idle;
+  // The shared session scale (see attention.ts): purple working, yellow
+  // needs you, green completed, grey dead/idle.
+  return SESSION_DOT[sessionTone(t)];
 }
 
 function groupTerminals(terminals: any[]): Group[] {
@@ -80,7 +70,7 @@ function groupTerminals(terminals: any[]): Group[] {
     .sort(byTime);
   return [
     { key: "needs_you", label: "Needs you", tone: "text-warning", items: needsYou },
-    { key: "working", label: "Working", tone: "text-success", items: working },
+    { key: "working", label: "Working", tone: "text-primary", items: working },
     { key: "idle", label: "Idle", tone: "text-text-muted", items: idle },
     { key: "finished", label: "Finished", tone: "text-text-muted/70", items: finished },
   ].filter((g) => g.items.length > 0);

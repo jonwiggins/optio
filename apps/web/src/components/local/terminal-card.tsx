@@ -6,6 +6,7 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import { HoverCard } from "./hover-card";
 import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
+import { SESSION_DOT, sessionTone } from "./attention";
 import {
   Bot,
   Layers,
@@ -26,11 +27,11 @@ export function dirTail(dir: string): string {
 }
 
 const STATE_STYLES: Record<string, { label: string; className: string; pulse?: boolean }> = {
-  pending: { label: "Pending", className: "text-warning bg-warning/10" },
-  launching: { label: "Launching", className: "text-info bg-info/10", pulse: true },
+  pending: { label: "Pending", className: "text-text-muted bg-bg" },
+  launching: { label: "Launching", className: "text-primary bg-primary/10", pulse: true },
   running: { label: "Running", className: "text-primary bg-primary/10", pulse: true },
   exited: { label: "Exited", className: "text-text-muted bg-bg" },
-  error: { label: "Error", className: "text-error bg-error/10" },
+  error: { label: "Error", className: "text-text-muted bg-bg" },
 };
 
 export function localStateLabel(terminal: any): string {
@@ -80,29 +81,25 @@ function baseStatusDescriptor(terminal: any): {
   label: string;
   detail: string | null;
 } {
-  const a = terminal.attentionState;
+  const tone = sessionTone(terminal);
+  const dot = SESSION_DOT[tone];
   switch (terminal.state) {
     case "error":
-      return {
-        dot: "bg-error",
-        label: "Error",
-        detail: terminal.errorMessage ?? null,
-      };
+      return { dot, label: "Error", detail: terminal.errorMessage ?? null };
     case "exited":
-      return a === "needs_you"
-        ? {
-            dot: "bg-warning animate-pulse",
-            label: "Finished",
-            detail: attentionLabel(terminal.attentionReason),
-          }
-        : {
-            dot: "bg-text-muted/40",
-            label: "Exited",
-            detail: terminal.exitCode != null ? `exit code ${terminal.exitCode}` : null,
-          };
+      if (tone === "needs_you")
+        return { dot, label: "Finished", detail: attentionLabel(terminal.attentionReason) };
+      if (tone === "completed") return { dot, label: "Completed", detail: "exit code 0" };
+      return {
+        dot,
+        label: terminal.exitCode == null ? "Killed" : "Exited",
+        detail:
+          terminal.errorMessage ??
+          (terminal.exitCode != null ? `exit code ${terminal.exitCode}` : null),
+      };
     case "pending":
       return {
-        dot: "bg-warning/50",
+        dot,
         label:
           terminal.pendingReason === "host_offline"
             ? "Waiting for host"
@@ -112,16 +109,12 @@ function baseStatusDescriptor(terminal: any): {
         detail: null,
       };
     case "launching":
-      return { dot: "bg-warning/70 animate-pulse", label: "Launching", detail: null };
+      return { dot, label: "Launching", detail: null };
     default:
-      if (a === "needs_you")
-        return {
-          dot: "bg-warning animate-pulse",
-          label: "Needs you",
-          detail: attentionLabel(terminal.attentionReason),
-        };
-      if (a === "working") return { dot: "bg-success", label: "Working", detail: null };
-      return { dot: "bg-text-muted/40", label: "Idle", detail: "running, nothing happening" };
+      if (tone === "needs_you")
+        return { dot, label: "Needs you", detail: attentionLabel(terminal.attentionReason) };
+      if (tone === "working") return { dot, label: "Working", detail: null };
+      return { dot, label: "Idle", detail: "running, nothing happening" };
   }
 }
 
@@ -217,14 +210,15 @@ export function attentionLabel(reason: string | null): string {
 
 /** Attention-driven accent for the wall grid: left border color + optional ring. */
 function cardAccent(terminal: any): string {
-  if (terminal.state === "error") return "border-l-error";
-  if (terminal.state === "exited" && terminal.attentionState !== "needs_you")
-    return "border-l-border-strong opacity-70";
-  switch (terminal.attentionState) {
+  switch (sessionTone(terminal)) {
     case "needs_you":
       return "border-l-warning ring-1 ring-warning/25";
     case "working":
-      return "border-l-success";
+      return "border-l-primary";
+    case "completed":
+      return "border-l-success opacity-80";
+    case "dead":
+      return "border-l-border-strong opacity-70";
     default:
       return "border-l-border-strong";
   }

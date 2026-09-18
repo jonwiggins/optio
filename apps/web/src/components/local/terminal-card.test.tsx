@@ -53,10 +53,10 @@ describe("attentionLabel", () => {
 const running = { state: "running", attentionState: "working" };
 
 describe("statusDescriptor", () => {
-  it("is a single green dot for a working terminal with a healthy stream", () => {
+  it("is a single purple dot for a working terminal with a healthy stream", () => {
     const s = statusDescriptor(running, "connected");
     expect(s.label).toBe("Working");
-    expect(s.dot).toBe("bg-success");
+    expect(s.dot).toBe("bg-primary");
     expect(s.detail).toBeNull();
   });
 
@@ -83,8 +83,28 @@ describe("statusDescriptor", () => {
 
   it("ignores stream health once the process is gone", () => {
     const s = statusDescriptor({ state: "exited", exitCode: 0 }, "disconnected");
-    expect(s.label).toBe("Exited");
-    expect(s.dot).toBe("bg-text-muted/40");
+    expect(s.label).toBe("Completed");
+    expect(s.dot).toBe("bg-success");
+  });
+
+  it("uses the session scale: green completed, grey killed/error, yellow needs you", () => {
+    expect(statusDescriptor({ state: "exited", exitCode: null })).toMatchObject({
+      label: "Killed",
+      dot: "bg-text-muted/30",
+    });
+    expect(statusDescriptor({ state: "exited", exitCode: 1 })).toMatchObject({
+      label: "Exited",
+      dot: "bg-text-muted/30",
+      detail: "exit code 1",
+    });
+    expect(statusDescriptor({ state: "error", errorMessage: "boom" })).toMatchObject({
+      label: "Error",
+      dot: "bg-text-muted/30",
+      detail: "boom",
+    });
+    expect(
+      statusDescriptor({ state: "exited", exitCode: 0, attentionState: "needs_you" }),
+    ).toMatchObject({ label: "Finished", dot: "bg-warning animate-pulse" });
   });
 });
 
