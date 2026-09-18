@@ -6,6 +6,7 @@ import SwiftUI
 /// and recent tasks. Polls every 10 seconds while visible.
 struct OverviewView: View {
     @Environment(APIClient.self) private var api
+    @Environment(AppRouter.self) private var router
     @State private var model = OverviewModel()
 
     var body: some View {
@@ -13,9 +14,14 @@ struct OverviewView: View {
             Group {
                 if model.loading, model.taskStats == nil {
                     if let error = model.error {
-                        ErrorBanner(error: error) { Task { await model.refresh(api: api) } }
+                        List { ErrorRow(error: error, what: "the overview") { Task { await model.refresh(api: api) } } }.listStyle(.plain)
                     } else {
-                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                        List {
+                            Section { SkeletonStrip(labels: ["Queue", "Running", "In review", "Needs you", "Failed"]) }
+                                .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                            Section { SkeletonRows() }
+                        }
+                        .listStyle(.insetGrouped)
                     }
                 } else if model.isFirstRun {
                     welcome
@@ -24,15 +30,10 @@ struct OverviewView: View {
                 }
             }
             .navigationTitle("Overview")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await model.refresh(api: api) }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            }
+            .navigationSubtitleIfAvailable(subtitleText)
+            .hubChrome()
+            .navigationDestination(for: DashRecentTask.self) { TaskDetailView(taskId: $0.id) }
+            .navigationDestination(for: DashSessionRow.self) { SessionDetailView(sessionId: $0.id) }
             .task {
                 while !Task.isCancelled {
                     await model.refresh(api: api)
@@ -45,71 +46,131 @@ struct OverviewView: View {
     // MARK: Sections
 
     private var content: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                subtitle
+        List {
+            Section {
+                if #unavailable(iOS 26) {
+                    subtitle
+                        .listRowInsets(EdgeInsets(top: 0, leading: Spacing.l, bottom: Spacing.s, trailing: Spacing.l))
+                        .listRowBackground(Color.clear)
+                }
                 if let error = model.error {
-                    ErrorBanner(error: error) { Task { await model.refresh(api: api) } }
+                    ErrorRow(error: error, what: "the overview") { Task { await model.refresh(api: api) } }
+                        .listRowBackground(Color.clear)
                 }
+            }
 
-                StatsSection(title: "Tasks", systemImage: "arrow.triangle.pull", destination: .tasks) {
-                    OverviewStatsStrip(stages: taskStages(model.taskStats))
+            stripSection("Tasks", destination: .tasks, items: taskItems(model.taskStats))
+
+            if let s = model.standaloneStats, s.total > 0 {
+                stripSection("Jobs", destination: .jobs, items: [
+                    StatItem("Queue", s.queued), StatItem("Running", s.running),
+                    StatItem("Failed", s.failed, tone: .danger), StatItem("Done", s.completed),
+                ])
+            }
+
+            if let s = model.agentStats, s.total > 0 {
+                stripSection("Agents", destination: .agents, items: [
+                    StatItem("Idle", s.idle), StatItem("Running", s.running + s.queued),
+                    StatItem("Needs you", s.paused, tone: .accent), StatItem("Failed", s.failed, tone: .danger),
+                ])
+            }
+
+            if let s = model.sessionStats, s.total > 0 {
+                stripSection("Sessions", destination: .sessions, items: [
+                    StatItem("Active", s.active), StatItem("Ended today", s.ended),
+                ])
+            }
+
+            if let usage = model.usage, usage.claudeAuthFailed || usage.githubAuthFailed || usage.available {
+                Section {
+                    UsagePanelView(usage: usage) { await model.refreshUsage(api: api) }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                } header: {
+                    if usage.available, !usage.claudeAuthFailed { SectionHeader(title: "Claude usage").textCase(nil) }
                 }
+            }
 
-                if let s = model.standaloneStats, s.total > 0 {
-                    StatsSection(title: "Jobs", systemImage: "terminal", destination: .jobs) {
-                        OverviewStatsStrip(stages: standaloneStages(s))
-                    }
-                }
-
-                if let s = model.agentStats, s.total > 0 {
-                    StatsSection(title: "Agents", systemImage: "cpu", destination: .agents) {
-                        OverviewStatsStrip(stages: agentStages(s))
-                    }
-                }
-
-                if let s = model.sessionStats, s.total > 0 {
-                    StatsSection(title: "Sessions", systemImage: "bubble.left.and.bubble.right", destination: .sessions) {
-                        OverviewStatsStrip(stages: sessionStages(s))
-                    }
-                }
-
-                UsagePanelView(usage: model.usage) {
-                    await model.refreshUsage(api: api)
-                }
-
+            Section {
                 ClusterSummaryCard(
                     cluster: model.cluster,
                     forbidden: model.clusterForbidden,
                     totalCost: model.totalRecentCost,
                     history: model.metricsHistory
                 )
-
-                if !model.activeSessions.isEmpty {
-                    ActiveSessionsSection(sessions: model.activeSessions, activeCount: model.activeSessionCount)
-                }
-
-                RecentTasksSection(tasks: model.recentTasks)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            } header: {
+                SectionHeader(title: "Cluster", action: model.clusterForbidden ? nil : { router.open(.cluster) }).textCase(nil)
             }
-            .padding()
+
+            if !model.activeSessions.isEmpty {
+                Section {
+                    ForEach(model.activeSessions) { s in
+                        NavigationLink(value: s) {
+                            OptioRow(
+                                title: s.branch ?? "Session \(s.id.prefix(8))",
+                                tone: .working,
+                                meta: Text.meta([InsightsFormat.repoShortName(s.repoUrl ?? ""), s.createdAt.map { "started \($0.relativeDescription)" }]),
+                                titleLineLimit: 1
+                            )
+                        }
+                    }
+                } header: {
+                    SectionHeader(title: "Active sessions", detail: "\(model.activeSessionCount)") { router.open(.sessions) }.textCase(nil)
+                }
+            }
+
+            Section {
+                if model.recentTasks.isEmpty {
+                    EmptyState(title: "No tasks yet", systemImage: "checklist", message: "Put an agent to work in a repo from the Run tab.", actionTitle: "Go to Tasks") { router.open(.tasks) }
+                        .listRowBackground(Color.clear)
+                } else {
+                    ForEach(model.recentTasks) { task in
+                        NavigationLink(value: task) { RecentTaskRow(task: task) }
+                    }
+                }
+            } header: {
+                SectionHeader(title: "Recent tasks") { router.open(.tasks) }.textCase(nil)
+            }
         }
+        .listStyle(.insetGrouped)
         .refreshable { await model.refresh(api: api) }
     }
 
+    private func stripSection(_ title: String, destination: AppRouter.Section, items: [StatItem]) -> some View {
+        Section {
+            StatStrip(items: items)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+        } header: {
+            SectionHeader(title: title) { router.open(destination) }.textCase(nil)
+        }
+    }
+
+    private var subtitleText: String {
+        let running = model.taskStats?.running ?? 0
+        let attention = model.taskStats?.needsAttention ?? 0
+        var s = "\(running) active"
+        if attention > 0 { s += " · \(attention) need\(attention == 1 ? "s" : "") you" }
+        return s
+    }
+
+    /// "0 active · 2 need you" — only the second half in accent.
     private var subtitle: some View {
         let running = model.taskStats?.running ?? 0
         let attention = model.taskStats?.needsAttention ?? 0
         return HStack(spacing: 6) {
-            Text("\(running) active \(running == 1 ? "task" : "tasks")")
+            Text("\(running) active").contentTransition(.numericText())
             if model.activeSessionCount > 0 {
                 Text("·").foregroundStyle(.tertiary)
                 Text("\(model.activeSessionCount) \(model.activeSessionCount == 1 ? "session" : "sessions")")
-                    .foregroundStyle(AppTheme.accent)
             }
             if attention > 0 {
                 Text("·").foregroundStyle(.tertiary)
-                Text("\(attention) need\(attention == 1 ? "s" : "") attention")
-                    .foregroundStyle(.yellow)
+                Text("\(attention) need\(attention == 1 ? "s" : "") you")
+                    .foregroundStyle(AppTheme.accent)
+                    .contentTransition(.numericText())
             }
         }
         .font(.subheadline)
@@ -118,16 +179,20 @@ struct OverviewView: View {
 
     private var welcome: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: Spacing.l) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 40))
-                    .foregroundStyle(AppTheme.accent)
+                    .font(.largeTitle.weight(.thin))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
                 Text("Welcome to Optio").font(.title2.weight(.semibold))
                 Text(model.repoCount == 0
                      ? "Add a repository from the web UI, then create your first task to get an AI agent working on your code."
                      : "\(model.repoCount ?? 0) \(model.repoCount == 1 ? "repo" : "repos") connected. Create your first task from the Run tab.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
+                if model.repoCount != 0 {
+                    Button("Go to Tasks") { router.open(.tasks) }.buttonStyle(.borderedProminent).tint(.primary)
+                }
                 UsagePanelView(usage: model.usage) { await model.refreshUsage(api: api) }
             }
             .padding()
@@ -138,122 +203,25 @@ struct OverviewView: View {
 
     // MARK: Stages (pipeline-stats-bar.tsx)
 
-    private func taskStages(_ s: DashTaskStats?) -> [OverviewStage] {
+    private func taskItems(_ s: DashTaskStats?) -> [StatItem] {
         [
-            OverviewStage(key: "queue", label: "Queue", value: s?.queued ?? 0, icon: "list.bullet", color: .secondary),
-            OverviewStage(key: "running", label: "Running", value: s?.running ?? 0, icon: "waveform.path.ecg", color: AppTheme.accent),
-            OverviewStage(key: "ci", label: "CI", value: s?.ci ?? 0, icon: "arrow.triangle.merge", color: .blue),
-            OverviewStage(key: "review", label: "Review", value: s?.review ?? 0, icon: "eye", color: .blue),
-            OverviewStage(key: "attention", label: "Attention", value: s?.needsAttention ?? 0, icon: "exclamationmark.triangle", color: .yellow),
-            OverviewStage(key: "failed", label: "Failed", value: s?.failed ?? 0, icon: "xmark.octagon", color: .red),
-            OverviewStage(key: "done", label: "Done", value: s?.completed ?? 0, icon: "checkmark.circle", color: .green),
-        ]
-    }
-
-    private func standaloneStages(_ s: DashJobStats) -> [OverviewStage] {
-        [
-            OverviewStage(key: "queue", label: "Queue", value: s.queued, icon: "list.bullet", color: .secondary),
-            OverviewStage(key: "running", label: "Running", value: s.running, icon: "waveform.path.ecg", color: AppTheme.accent),
-            OverviewStage(key: "failed", label: "Failed", value: s.failed, icon: "xmark.octagon", color: .red),
-            OverviewStage(key: "done", label: "Done", value: s.completed, icon: "checkmark.circle", color: .green),
-        ]
-    }
-
-    private func agentStages(_ s: DashAgentStats) -> [OverviewStage] {
-        [
-            OverviewStage(key: "idle", label: "Idle", value: s.idle, icon: "moon", color: .secondary),
-            OverviewStage(key: "queue", label: "Queue", value: s.queued, icon: "list.bullet", color: .secondary),
-            OverviewStage(key: "running", label: "Running", value: s.running, icon: "waveform.path.ecg", color: AppTheme.accent),
-            OverviewStage(key: "paused", label: "Paused", value: s.paused, icon: "pause", color: .yellow),
-            OverviewStage(key: "failed", label: "Failed", value: s.failed, icon: "xmark.octagon", color: .red),
-            OverviewStage(key: "archived", label: "Archived", value: s.archived, icon: "archivebox", color: .secondary),
-        ]
-    }
-
-    private func sessionStages(_ s: DashSessionStats) -> [OverviewStage] {
-        [
-            OverviewStage(key: "active", label: "Active", value: s.active, icon: "waveform.path.ecg", color: AppTheme.accent),
-            OverviewStage(key: "ended", label: "Ended (24h)", value: s.ended, icon: "xmark.circle", color: .secondary),
+            StatItem("Queue", s?.queued ?? 0),
+            StatItem("Running", s?.running ?? 0),
+            StatItem("In review", (s?.ci ?? 0) + (s?.review ?? 0)),
+            StatItem("Needs you", s?.needsAttention ?? 0, tone: .accent),
+            StatItem("Failed", s?.failed ?? 0, tone: .danger),
         ]
     }
 }
 
-// MARK: - Stats strip
-
-struct OverviewStage: Identifiable {
-    let key: String
-    let label: String
-    let value: Int
-    let icon: String
-    let color: Color
-    var id: String { key }
-}
-
-private struct StatsSection<Content: View>: View {
-    let title: String
-    let systemImage: String
-    var destination: AppRouter.Section? = nil
-    @ViewBuilder let content: Content
-    @Environment(AppRouter.self) private var router
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                if let destination { router.open(destination) }
-            } label: {
-                HStack(spacing: 4) {
-                    Label(title, systemImage: systemImage)
-                    if destination != nil {
-                        Image(systemName: "chevron.right").font(.caption2)
-                    }
-                    Spacer()
-                }
-                .font(.caption.weight(.semibold))
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(destination == nil)
-            content
+private extension View {
+    @ViewBuilder
+    func navigationSubtitleIfAvailable(_ text: String) -> some View {
+        if #available(iOS 26, *) {
+            self.navigationSubtitle(text)
+        } else {
+            self
         }
-    }
-}
-
-/// Big mono numbers with an icon + uppercase label, one cell per pipeline stage.
-struct OverviewStatsStrip: View {
-    let stages: [OverviewStage]
-
-    var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 86), spacing: 0)], spacing: 0) {
-            ForEach(stages) { stage in
-                let active = stage.value > 0
-                VStack(spacing: 6) {
-                        Text("\(stage.value)")
-                            .font(.system(.title2, design: .monospaced).weight(.bold))
-                            .contentTransition(.numericText())
-                            .foregroundStyle(active ? stage.color : Color.secondary.opacity(0.3))
-                        HStack(spacing: 4) {
-                            Image(systemName: stage.icon)
-                            Text(stage.label)
-                        }
-                        .font(.caption2.weight(.semibold))
-                        .textCase(.uppercase)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .foregroundStyle(active ? stage.color : .secondary)
-                    }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .padding(.horizontal, 4)
-                .overlay(alignment: .top) {
-                    if active {
-                        Rectangle().fill(stage.color).frame(height: 2)
-                    }
-                }
-            }
-        }
-        .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -266,7 +234,7 @@ struct UsagePanelView: View {
     var body: some View {
         if let usage {
             if usage.claudeAuthFailed || usage.githubAuthFailed {
-                VStack(spacing: 8) {
+                VStack(spacing: Spacing.s) {
                     if usage.claudeAuthFailed {
                         tokenBanner(
                             title: "Claude token expired",
@@ -281,19 +249,13 @@ struct UsagePanelView: View {
                     }
                 }
             } else if usage.available {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label("Claude Max Usage", systemImage: "gauge.with.needle")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    let meters = self.meters(usage)
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                        ForEach(meters, id: \.label) { m in
-                            ClaudeUsageMeter(label: m.label, utilization: m.utilization, resetsAt: m.resetsAt, sublabel: m.sublabel)
-                        }
+                let meters = self.meters(usage)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                    ForEach(meters, id: \.label) { m in
+                        ClaudeUsageMeter(label: m.label, utilization: m.utilization, resetsAt: m.resetsAt, sublabel: m.sublabel)
                     }
                 }
-                .padding(12)
-                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12))
+                .cardSurface()
             }
         }
     }
@@ -307,29 +269,21 @@ struct UsagePanelView: View {
         if let w = u.sevenDaySonnet, let v = w.utilization { out.append(Meter(label: "7d Sonnet", utilization: v, resetsAt: w.resetsAt, sublabel: nil)) }
         if let w = u.sevenDayOpus, let v = w.utilization { out.append(Meter(label: "7d Opus", utilization: v, resetsAt: w.resetsAt, sublabel: nil)) }
         if let x = u.extraUsage, x.isEnabled == true, let used = x.usedCredits {
-            let spent = String(format: "$%.2f", used / 100)
-            let sub = x.monthlyLimit.map { "\(spent) / \(String(format: "$%.2f", $0 / 100)) spent" } ?? "\(spent) spent"
-            out.append(Meter(label: "Extra Credits", utilization: x.utilization ?? 0, resetsAt: nil, sublabel: sub))
+            let spent = Cost.format(used / 100)
+            let sub = x.monthlyLimit.map { "\(spent) / \(Cost.format($0 / 100)) spent" } ?? "\(spent) spent"
+            out.append(Meter(label: "Extra credits", utilization: x.utilization ?? 0, resetsAt: nil, sublabel: sub))
         }
         return out
     }
 
     private func tokenBanner(title: String, message: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "key.slash").foregroundStyle(.red)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(message).font(.caption).foregroundStyle(.secondary)
-                Button("Re-check") { Task { await onRefresh() } }
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
+        NoticeBanner(tone: .danger, systemImage: "key.slash", title: title) {
+            Text(message)
+            Button("Re-check") { Task { await onRefresh() } }
+                .font(.footnote.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.accent)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.red.opacity(0.25)))
     }
 }
 
@@ -340,7 +294,7 @@ struct ClaudeUsageMeter: View {
     var sublabel: String? = nil
 
     private var pct: Double { min(max(utilization, 0), 100) }
-    private var color: Color { pct >= 80 ? .red : pct >= 50 ? .yellow : AppTheme.accent }
+    private var tone: Tone { pct >= 90 ? .danger : .working }
 
     private var resetLabel: String? {
         guard let resetsAt, let date = resetsAt.isoDate else { return nil }
@@ -352,25 +306,27 @@ struct ClaudeUsageMeter: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack {
-                Text(label).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Text(label).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(Int(pct.rounded()))%").font(.caption.weight(.semibold).monospacedDigit()).foregroundStyle(color)
+                Text("\(Int(pct.rounded()))%")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(tone == .danger ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
+                    .contentTransition(.numericText())
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(.fill.secondary)
-                    Capsule().fill(color).frame(width: geo.size.width * pct / 100)
+                    Capsule().fill(tone == .danger ? AnyShapeStyle(.red) : AnyShapeStyle(.primary)).frame(width: geo.size.width * pct / 100)
                 }
             }
-            .frame(height: 6)
+            .frame(height: 5)
             if let sublabel {
                 Text(sublabel).font(.caption2).foregroundStyle(.tertiary)
             }
             if let resetLabel {
-                Label("resets in \(resetLabel)", systemImage: "clock")
-                    .font(.caption2).foregroundStyle(.tertiary)
+                Text("resets in \(resetLabel)").font(.caption2).foregroundStyle(.tertiary)
             }
         }
     }
@@ -387,53 +343,51 @@ struct ClusterSummaryCard: View {
 
     var body: some View {
         if forbidden {
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.s) {
                 Image(systemName: "lock").foregroundStyle(.secondary)
                 Text("Cluster summary is available to workspace admins.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12))
+            .cardSurface()
         } else if let cluster {
             let s = cluster.summary
             let node = cluster.nodes.first
-            VStack(alignment: .leading, spacing: 10) {
-                if let node {
-                    HStack(spacing: 4) {
-                        Text(node.name).font(.caption.monospaced())
-                        Text("/ optio").font(.caption).foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: Spacing.m) {
+                HStack(alignment: .firstTextBaseline) {
+                    if let node {
+                        Text(node.name).font(.monoFootnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                    Spacer()
+                    if totalCost > 0 {
+                        Text(Cost.format(totalCost)).font(.statValue).contentTransition(.numericText())
+                        Text("recent").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 14) {
-                        metric(icon: "circle.fill", iconColor: s.readyNodes > 0 ? .green : .red, label: "Nodes", value: "\(s.readyNodes)/\(s.totalNodes)")
-                        metric(icon: "shippingbox", label: "Pods", value: "\(s.runningPods)/\(s.totalPods)")
-                        metric(icon: "waveform.path.ecg", label: "Agents", value: "\(s.agentPods)")
-                        metric(icon: "cylinder", label: "Infra", value: "\(s.infraPods)")
-                        if let node {
-                            if let cpu = node.cpuPercent?.value {
-                                metric(icon: "cpu", label: "CPU", value: "\(Int(cpu))% of \(formatLoose(node.cpu)) cores")
-                            } else {
-                                metric(icon: "cpu", label: "CPU", value: "N/A · \(formatLoose(node.cpu)) cores")
-                            }
-                            if let used = node.memoryUsedGi?.value {
-                                metric(icon: "memorychip", label: "Mem", value: "\(fmt1(used)) / \(fmt1(node.memoryTotalGi?.value ?? 0)) Gi")
-                            } else {
-                                metric(icon: "memorychip", label: "Mem", value: "N/A · \(InsightsFormat.k8sResource(node.memory))")
-                            }
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: Spacing.s) {
+                    metric("Nodes", "\(s.readyNodes)/\(s.totalNodes)", tone: s.readyNodes < s.totalNodes ? .danger : nil)
+                    metric("Pods", "\(s.runningPods)/\(s.totalPods)")
+                    metric("Agents", "\(s.agentPods)")
+                    if let node {
+                        if let cpu = node.cpuPercent?.value {
+                            metric("CPU", "\(Int(cpu))% · \(formatLoose(node.cpu)) cores")
+                        } else {
+                            metric("CPU", "\(formatLoose(node.cpu)) cores")
                         }
-                        if totalCost > 0 {
-                            metric(icon: "dollarsign", label: "Recent", value: String(format: "$%.2f", totalCost))
+                        if let used = node.memoryUsedGi?.value {
+                            metric("Memory", "\(fmt1(used)) / \(fmt1(node.memoryTotalGi?.value ?? 0)) Gi")
+                        } else {
+                            metric("Memory", InsightsFormat.k8sResource(node.memory))
                         }
                     }
+                    metric("Infra", "\(s.infraPods)")
                 }
                 if node != nil {
                     Button {
-                        withAnimation { showMetrics.toggle() }
+                        withAnimation(.snappy) { showMetrics.toggle() }
                     } label: {
                         Label(showMetrics ? "Hide metrics" : "Show metrics", systemImage: showMetrics ? "chevron.up" : "chart.xyaxis.line")
-                            .font(.caption)
+                            .font(.footnote)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
@@ -442,33 +396,29 @@ struct ClusterSummaryCard: View {
                     Divider()
                     if cluster.metricsAvailable == false {
                         Text("metrics-server not detected — CPU and memory charts unavailable.")
-                            .font(.caption).foregroundStyle(.tertiary)
+                            .font(.footnote).foregroundStyle(.tertiary)
                     } else if history.count > 1 {
-                        MiniLine(label: "CPU", values: history.map { ($0.time, $0.cpuPercent ?? 0) }, suffix: "%", max: 100, color: AppTheme.accent)
-                        MiniLine(label: "Memory", values: history.map { ($0.time, $0.memoryPercent ?? 0) }, suffix: "%", max: 100, color: .blue)
-                        MiniLine(label: "Pods", values: history.map { ($0.time, Double($0.pods)) }, suffix: "", max: nil, color: .green)
+                        MiniLine(label: "CPU", values: history.map { ($0.time, $0.cpuPercent ?? 0) }, suffix: "%", max: 100, color: ChartPalette.color(0))
+                        MiniLine(label: "Memory", values: history.map { ($0.time, $0.memoryPercent ?? 0) }, suffix: "%", max: 100, color: ChartPalette.color(1))
+                        MiniLine(label: "Pods", values: history.map { ($0.time, Double($0.pods)) }, suffix: "", max: nil, color: ChartPalette.color(2))
                         Text("\(history.count) samples · refreshing every 10s")
                             .font(.caption2).foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     } else {
-                        Text("Collecting metrics data… graphs will appear in a few seconds.")
-                            .font(.caption).foregroundStyle(.tertiary)
+                        Text("Collecting metrics — graphs appear in a few seconds.")
+                            .font(.footnote).foregroundStyle(.tertiary)
                     }
                 }
             }
-            .padding(12)
-            .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12))
+            .cardSurface()
         }
     }
 
-    private func metric(icon: String, iconColor: Color = .secondary, label: String, value: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.caption2).foregroundStyle(iconColor)
-            Text(label).foregroundStyle(.secondary)
-            Text(value).fontWeight(.medium).monospacedDigit()
+    private func metric(_ label: String, _ value: String, tone: Tone? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(.subheadline.weight(.medium).monospacedDigit()).foregroundStyle(tone?.textStyle ?? AnyShapeStyle(.primary)).lineLimit(1).minimumScaleFactor(0.8)
+            Text(label).font(.caption).foregroundStyle(.secondary)
         }
-        .font(.caption)
-        .lineLimit(1)
     }
 
     private func formatLoose(_ v: LooseDouble?) -> String {
@@ -490,18 +440,18 @@ private struct MiniLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Text(label).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                Text(label).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(Int(values.last?.1 ?? 0))\(suffix)").font(.caption2.weight(.medium).monospacedDigit())
+                Text("\(Int(values.last?.1 ?? 0))\(suffix)").font(.caption.weight(.medium).monospacedDigit()).contentTransition(.numericText())
             }
             Chart {
                 ForEach(Array(values.enumerated()), id: \.offset) { _, v in
                     AreaMark(x: .value("Time", v.0), y: .value(label, v.1))
-                        .foregroundStyle(color.opacity(0.15))
+                        .foregroundStyle(color.opacity(ChartPalette.areaOpacity))
                         .interpolationMethod(.monotone)
                     LineMark(x: .value("Time", v.0), y: .value(label, v.1))
                         .foregroundStyle(color)
-                        .lineStyle(StrokeStyle(lineWidth: 2))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5))
                         .interpolationMethod(.monotone)
                 }
             }
@@ -513,133 +463,32 @@ private struct MiniLine: View {
     }
 }
 
-
-// MARK: - Active sessions (active-sessions.tsx)
-
-private struct ActiveSessionsSection: View {
-    let sessions: [DashSessionRow]
-    let activeCount: Int
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "terminal").foregroundStyle(AppTheme.accent)
-                Text("Active Sessions").font(.subheadline.weight(.medium))
-                Text("\(activeCount)")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(AppTheme.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
-                    .foregroundStyle(AppTheme.accent)
-            }
-            ForEach(sessions) { s in
-                HStack(spacing: 10) {
-                    Image(systemName: "terminal")
-                        .frame(width: 32, height: 32)
-                        .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                        .foregroundStyle(AppTheme.accent)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(s.branch ?? "Session \(s.id.prefix(8))").font(.caption.weight(.medium)).lineLimit(1)
-                        HStack(spacing: 6) {
-                            Label(InsightsFormat.repoShortName(s.repoUrl ?? ""), systemImage: "folder")
-                            if let c = s.createdAt { Text(c.relativeDescription) }
-                        }
-                        .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Circle().fill(AppTheme.accent).frame(width: 8, height: 8)
-                }
-                .padding(10)
-                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 10))
-            }
-            Text("Open the Live tab for the full session view.")
-                .font(.caption2).foregroundStyle(.tertiary)
-        }
-    }
-}
-
 // MARK: - Recent tasks (recent-tasks.tsx)
-
-private struct RecentTasksSection: View {
-    let tasks: [DashRecentTask]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Recent Tasks").font(.subheadline.weight(.medium))
-            if tasks.isEmpty {
-                EmptyState(title: "No tasks yet", systemImage: "list.bullet.rectangle", message: "Create a task from the Run tab to get an agent working on your code.")
-            } else {
-                ForEach(tasks) { task in
-                    NavigationLink(value: task) {
-                        RecentTaskRow(task: task)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .navigationDestination(for: DashRecentTask.self) { RecentTaskSummaryView(task: $0) }
-    }
-}
 
 private struct RecentTaskRow: View {
     let task: DashRecentTask
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(task.title ?? "Untitled").font(.subheadline.weight(.medium)).lineLimit(2)
-                HStack(spacing: 6) {
-                    if let repo = task.repoUrl { Text(InsightsFormat.repoShortName(repo)) }
-                    if let agent = task.agentType { Text("·"); Text(agent.replacingOccurrences(of: "-", with: " ")) }
-                    if let c = task.createdAt { Text("·"); Text(c.relativeDescription) }
-                }
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
-                StatusBadge(text: task.state ?? "unknown", color: StateColor.color(for: task.state ?? ""))
-                if task.cost > 0 {
-                    Text(String(format: "$%.2f", task.cost)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                }
-            }
+    private var trailing: (String, Tone?)? {
+        switch task.state {
+        case "completed": return ("Done", nil)
+        case "failed": return ("Failed", .danger)
+        case "needs_attention": return ("Needs you", .accent)
+        case "cancelled": return ("Cancelled", nil)
+        default: return (task.createdAt?.relativeDescription ?? "", nil)
         }
-        .padding(10)
-        .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 10))
     }
-}
-
-/// Detail-less summary for a recent task. Full task detail lives on the Run tab;
-/// a cross-tab router in Core would let this push into it directly.
-struct RecentTaskSummaryView: View {
-    let task: DashRecentTask
 
     var body: some View {
-        List {
-            Section {
-                LabeledContent("State") { StatusBadge(text: task.state ?? "unknown", color: StateColor.color(for: task.state ?? "")) }
-                if let repo = task.repoUrl { LabeledContent("Repo", value: InsightsFormat.repoShortName(repo)) }
-                if let b = task.repoBranch { LabeledContent("Branch", value: b) }
-                if let a = task.agentType { LabeledContent("Agent", value: a) }
-                if task.cost > 0 { LabeledContent("Cost", value: String(format: "$%.4f", task.cost)) }
-                if let c = task.createdAt { LabeledContent("Created", value: c.relativeDescription) }
-            }
-            if let pr = task.prUrl, let url = URL(string: pr) {
-                Section("Pull request") {
-                    Link(destination: url) { Label(pr, systemImage: "arrow.up.right.square").lineLimit(1) }
-                }
-            }
-            if let err = task.errorMessage, !err.isEmpty {
-                Section("Error") { Text(err).font(.caption.monospaced()).foregroundStyle(.red) }
-            }
-            if let summary = task.resultSummary, !summary.isEmpty {
-                Section("Result") { Text(summary).font(.callout) }
-            }
-            Section {
-                Text("Open the Run tab → Tasks for logs, comments, and actions.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .navigationTitle(task.title ?? "Task")
-        .navigationBarTitleDisplayMode(.inline)
+        OptioRow(
+            title: task.title ?? "Untitled",
+            tone: Tone.forState(task.state),
+            meta: Text.meta([
+                task.repoUrl.map { InsightsFormat.repoShortName($0) },
+                task.agentType.map { RunFormatting.agentLabel($0) },
+                Cost.formatIfNonZero(task.cost),
+            ]),
+            trailing: trailing?.0,
+            trailingTone: trailing?.1
+        )
     }
 }
-

@@ -26,10 +26,9 @@ struct SessionDetailView: View {
             if let session {
                 header(session)
                 if isActive {
-                    ChipPicker(options: [(Section.chat, "Chat"), (Section.terminal, "Terminal"), (Section.prs, "PRs (\(prs.count))")], selection: $section)
+                    DetailTabs(options: [(Section.chat, "Chat"), (Section.terminal, "Terminal"), (Section.prs, prs.isEmpty ? "PRs" : "PRs (\(prs.count))")], selection: $section)
                 }
-                if let actionError { ErrorBanner(error: actionError) }
-                Divider()
+                if let actionError { ErrorRow(error: actionError) }
                 if isActive, let chat, let terminal {
                     switch section {
                     case .chat: SessionChatView(chat: chat, modelConfig: modelConfig)
@@ -42,9 +41,9 @@ struct SessionDetailView: View {
                     ProgressView()
                 }
             } else if let error {
-                ErrorBanner(error: error) { Task { await load() } }
+                List { ErrorRow(error: error, what: "session") { Task { await load() } } }.listStyle(.plain)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                List { SkeletonRows() }.listStyle(.plain)
             }
         }
         .navigationTitle(title)
@@ -52,7 +51,11 @@ struct SessionDetailView: View {
         .toolbar {
             if isActive {
                 ToolbarItem(placement: .primaryAction) {
-                    Button(role: .destructive) { confirmEnd = true } label: { Label("End", systemImage: "stop.circle") }
+                    Menu {
+                        if let s = session, let url = URL(string: s.repoUrl) { Link(destination: url) { Label("Open repo", systemImage: "safari") } }
+                        Divider()
+                        Button(role: .destructive) { confirmEnd = true } label: { Label("End session", systemImage: "stop.circle") }
+                    } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
         }
@@ -90,29 +93,28 @@ struct SessionDetailView: View {
     }
 
     private func header(_ s: InteractiveSession) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                StatusBadge(text: s.state.rawValue, color: StateColor.color(for: s.state.rawValue))
-                Label(s.repoUrl.replacingOccurrences(of: "https://github.com/", with: ""), systemImage: "folder")
-                Label("Started \(s.createdAt.relativeDescription)", systemImage: "clock")
-                if displayCost > 0 { Label(String(format: "$%.4f", displayCost), systemImage: "dollarsign.circle") }
-                if !prs.isEmpty { Label("\(prs.count) PR\(prs.count == 1 ? "" : "s")", systemImage: "arrow.triangle.pull") }
-                if let chat, isActive {
-                    Label(chat.status.rawValue, systemImage: chat.isThinking ? "brain" : "circle.fill")
-                        .foregroundStyle(chat.isThinking ? AppTheme.accent : (chat.canSend ? .green : .secondary))
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-        }
+        let chatState: String? = {
+            guard let chat, isActive else { return nil }
+            if chat.isThinking { return "thinking" }
+            return chat.canSend ? nil : chat.status.rawValue
+        }()
+        return DetailHeader(
+            state: s.state.rawValue,
+            line: Text.meta([
+                Text(s.repoUrl.replacingOccurrences(of: "https://github.com/", with: "")),
+                Text("started \(s.createdAt.relativeDescription)"),
+                Cost.formatIfNonZero(displayCost).map { Text($0) },
+                prs.isEmpty ? nil : Text("\(prs.count) PR\(prs.count == 1 ? "" : "s")"),
+                chatState.map { Text($0) },
+            ]),
+            secondary: s.branch.isEmpty ? nil : Text.mono(s.branch)
+        )
     }
 
     private func endedBody(_ s: InteractiveSession) -> some View {
         VStack(spacing: 8) {
             EmptyState(title: "Session ended", systemImage: "terminal", message: s.endedAt.map { "Ended \($0.relativeDescription)" })
-            if displayCost > 0 { Text(String(format: "Cost: $%.4f", displayCost)).font(.caption).foregroundStyle(.secondary) }
+            if displayCost > 0 { Text("Cost \(Cost.format(displayCost))").font(.footnote).foregroundStyle(.secondary) }
             if !prs.isEmpty { prList.frame(maxHeight: 240) }
         }
     }
@@ -125,15 +127,13 @@ struct SessionDetailView: View {
             }
             ForEach(prs, id: \.id) { pr in
                 Link(destination: URL(string: pr.prUrl) ?? URL(string: "https://github.com")!) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.triangle.pull")
-                        Text("#\(Int(pr.prNumber))").font(.subheadline.weight(.semibold))
-                        StatusBadge(text: pr.prState ?? "open", color: StateColor.color(for: pr.prState ?? "open"))
-                        if let c = pr.prChecksStatus { Text("checks \(c)").font(.caption2).foregroundStyle(.secondary) }
-                        if let r = pr.prReviewStatus { Text("review \(r)").font(.caption2).foregroundStyle(.secondary) }
-                        Spacer()
-                        Image(systemName: "arrow.up.right.square").foregroundStyle(.secondary)
-                    }
+                    OptioRow(
+                        title: "PR #\(Int(pr.prNumber))",
+                        tone: Tone.forState(pr.prState ?? "open") == .working ? nil : Tone.forState(pr.prState ?? "open"),
+                        meta: Text.meta([pr.prState, pr.prChecksStatus.map { "CI \($0)" }, pr.prReviewStatus.map { "review \($0)" }]),
+                        trailing: "Open ↗",
+                        titleLineLimit: 1
+                    )
                 }
             }
         }
@@ -186,12 +186,7 @@ struct SessionChatView: View {
                         ForEach(chat.rows, id: \.id) { row in
                             switch row {
                             case .user(_, let text):
-                                Text(text)
-                                    .font(.callout)
-                                    .textSelection(.enabled)
-                                    .padding(10)
-                                    .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                                MessageBubble(role: .user, text: text)
                             case .entry(_, let entry):
                                 AgentLogRow(entry: entry)
                             }
@@ -207,11 +202,13 @@ struct SessionChatView: View {
                 .onChange(of: chat.rows.count) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             }
             if let err = chat.error {
-                Text(err).font(.footnote).foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal).padding(.vertical, 4)
+                HStack(spacing: Spacing.s) {
+                    Image(systemName: "exclamationmark.circle").foregroundStyle(.red)
+                    Text(err).font(.footnote).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal).padding(.vertical, 4)
             }
-            Divider()
             HStack(spacing: 4) {
                 if let models = modelConfig?.availableModels, !models.isEmpty {
                     Menu {
@@ -231,13 +228,12 @@ struct SessionChatView: View {
                 }
                 if chat.isThinking {
                     Button { Task { await chat.interrupt() } } label: {
-                        Image(systemName: "stop.circle.fill").font(.title2).foregroundStyle(.red)
+                        Image(systemName: "stop.circle.fill").font(.title2).foregroundStyle(.primary)
                     }
                     .padding(.trailing, 12)
                     .accessibilityLabel("Interrupt")
                 }
             }
-            .background(.bar)
         }
     }
 }

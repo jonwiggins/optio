@@ -55,7 +55,7 @@ struct ConnectionDetailView: View {
             if let conn = model.connection {
                 content(conn)
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error) { Task { await model.load(api: api) } }
             } else {
                 ProgressView()
             }
@@ -64,9 +64,7 @@ struct ConnectionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load(api: api) }
         .refreshable { await model.load(api: api) }
-        .alert("Connection test", isPresented: Binding(get: { testResult != nil }, set: { if !$0 { testResult = nil } })) {
-            Button("OK") { testResult = nil }
-        } message: { Text(testResult ?? "") }
+        .toast(testResult, tone: .success) { testResult = nil }
         .moreErrorAlert($errorMessage)
     }
 
@@ -109,8 +107,8 @@ struct ConnectionDetailView: View {
                         HStack {
                             Text(repoLabel(a.repoId)).font(.subheadline)
                             Spacer()
-                            StatusBadge(text: a.permission ?? "read", color: AppTheme.accent)
-                            if a.enabled == false { StatusBadge(text: "off", color: .orange) }
+                            StatusBadge(text: a.permission ?? "read", tone: .accent)
+                            if a.enabled == false { StatusBadge(text: "off", tone: .idle) }
                         }
                         let agents = a.agentTypes ?? []
                         Text(agents.isEmpty ? "All agents" : agents.map(MoreAgentTypes.label).joined(separator: ", "))

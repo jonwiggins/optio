@@ -41,7 +41,7 @@ struct LocalBlueprintsView: View {
                     .refreshable { await load() }
                 }
             } else if let error {
-                ErrorBanner(error: error) { Task { await load() } }
+                ErrorRow(error: error) { Task { await load() } }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -69,9 +69,7 @@ struct LocalBlueprintsView: View {
         } message: {
             Text(spawned.map { LocalPresentation.stateLabel($0) } ?? "")
         }
-        .alert("Action failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
-            Button("OK") { actionError = nil }
-        } message: { Text(actionError ?? "") }
+        .errorToast(Binding(get: { actionError }, set: { actionError = $0 }))
     }
 
     private func load() async {
@@ -94,9 +92,9 @@ struct BlueprintRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text(blueprint.name).font(.subheadline.weight(.medium)).lineLimit(1)
-                StatusBadge(text: blueprint.spawnMode.rawValue, color: .secondary)
+                StatusBadge(text: blueprint.spawnMode.rawValue, tone: .working)
                 if let agent = blueprint.agent {
-                    StatusBadge(text: LocalPresentation.agentLabel(agent), color: AppTheme.accent)
+                    StatusBadge(text: LocalPresentation.agentLabel(agent), tone: .accent)
                 }
                 Spacer()
                 if !blueprint.enabled {
@@ -156,7 +154,7 @@ struct LocalBlueprintDetailView: View {
                                     Image(systemName: t.systemImage).foregroundStyle(.secondary).frame(width: 18)
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 6) {
-                                            Text(t.type).font(.caption.weight(.semibold)).textCase(.uppercase)
+                                            Text(t.type.capitalized).font(.caption.weight(.semibold))
                                             if !t.enabled { Text("disabled").font(.caption2).foregroundStyle(.tertiary) }
                                         }
                                         Text(t.summary).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2)
@@ -182,7 +180,7 @@ struct LocalBlueprintDetailView: View {
                 }
                 .refreshable { await load() }
             } else if let error {
-                ErrorBanner(error: error) { Task { await load() } }
+                ErrorRow(error: error) { Task { await load() } }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -211,9 +209,7 @@ struct LocalBlueprintDetailView: View {
         } message: {
             Text(spawned.map { LocalPresentation.stateLabel($0) } ?? "")
         }
-        .alert("Action failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
-            Button("OK") { actionError = nil }
-        } message: { Text(actionError ?? "") }
+        .errorToast(Binding(get: { actionError }, set: { actionError = $0 }))
     }
 
     private func load() async {

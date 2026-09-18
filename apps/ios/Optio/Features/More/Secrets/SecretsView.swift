@@ -58,7 +58,7 @@ struct SecretsView: View {
             if model.loading {
                 ProgressView().frame(maxWidth: .infinity)
             } else if let error = model.error, model.secrets.isEmpty {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error) { Task { await model.load(api: api) } }
             } else if model.secrets.isEmpty {
                 EmptyState(title: "No secrets", systemImage: "key",
                            message: "Add API keys for Claude Code, Codex, or GitHub to get started.")
@@ -126,9 +126,7 @@ struct SecretsView: View {
                 }
             }
         }
-        .alert("Secret saved", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
-            Button("OK") { notice = nil }
-        } message: { Text(notice ?? "") }
+        .toast(notice, tone: .success) { notice = nil }
         .moreErrorAlert($errorMessage)
     }
 

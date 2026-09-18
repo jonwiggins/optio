@@ -8,9 +8,9 @@ enum LocalRoute: Hashable {
     case blueprint(id: String)
 }
 
-/// The `/local` screen: headline stats, hosts strip, the "needs you" queue,
-/// and the terminal list. Expects to live inside a `NavigationStack`
-/// (the Live tab's), pushing `LocalRoute`s for terminals and blueprints.
+/// The `/local` screen: stat strip (tappable filters), host chips, the
+/// "Needs you" queue, and the terminal list. Lives inside the Live tab's
+/// `NavigationStack` — it sets no title of its own.
 struct LocalHubView: View {
     @Environment(APIClient.self) private var api
     @State private var model: LocalHubModel?
@@ -24,11 +24,9 @@ struct LocalHubView: View {
             if let model {
                 content(model)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                List { SkeletonStrip(labels: ["Needs you", "Working", "Idle", "Finished"]).listRowSeparator(.hidden).listRowBackground(Color.clear); SkeletonRows() }.listStyle(.plain)
             }
         }
-        .navigationTitle("Local")
-        .navigationBarTitleDisplayMode(.large)
         .navigationDestination(for: LocalRoute.self) { route in
             switch route {
             case .terminal(let id):
@@ -41,14 +39,13 @@ struct LocalHubView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button { showNew = true } label: { Label("New Terminal", systemImage: "plus") }
-                        .disabled(model?.hosts.isEmpty ?? true)
-                    NavigationLink(value: LocalRoute.blueprints) {
-                        Label("Blueprints", systemImage: "square.stack.3d.up")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                Button { showNew = true } label: { Image(systemName: "plus") }
+                    .disabled(model?.hosts.isEmpty ?? true)
+                    .accessibilityLabel("New terminal")
+            }
+            ToolbarItem(placement: .secondaryAction) {
+                NavigationLink(value: LocalRoute.blueprints) {
+                    Label("Blueprints", systemImage: "square.stack.3d.up")
                 }
             }
         }
@@ -79,7 +76,7 @@ struct LocalHubView: View {
                 pendingKill = nil
             }
         }
-        .confirmationDialog("Delete terminal \"\(pendingDelete?.title ?? "")\"?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible) {
+        .confirmationDialog("Delete terminal “\(pendingDelete?.title ?? "")”?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 if let t = pendingDelete, let model { Task { await model.delete(t) } }
                 pendingDelete = nil
@@ -87,20 +84,18 @@ struct LocalHubView: View {
         } message: {
             Text("Removes the record. The scrollback is not kept.")
         }
-        .alert("Action failed", isPresented: Binding(get: { model?.actionError != nil }, set: { if !$0 { model?.actionError = nil } })) {
-            Button("OK") { model?.actionError = nil }
-        } message: {
-            Text(model?.actionError ?? "")
-        }
+        .errorToast(Binding(get: { model?.actionError }, set: { model?.actionError = $0 }))
     }
 
     @ViewBuilder
     private func content(_ model: LocalHubModel) -> some View {
         @Bindable var model = model
         if !model.loaded {
-            ProgressView("Loading local terminals…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            List { SkeletonStrip(labels: ["Needs you", "Working", "Idle", "Finished"]).listRowSeparator(.hidden).listRowBackground(Color.clear); SkeletonRows() }.listStyle(.plain)
         } else if let error = model.error, model.hosts.isEmpty {
-            ErrorBanner(error: error) { Task { await model.refresh() } }
+            List { ErrorRow(error: error, what: "local terminals") { Task { await model.refresh() } } }
+                .listStyle(.plain)
+                .refreshable { await model.refresh() }
         } else if model.hosts.isEmpty {
             noHosts
                 .refreshable { await model.refresh() }
@@ -108,33 +103,31 @@ struct LocalHubView: View {
             List {
                 Section {
                     statsBar(model)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.l, bottom: Spacing.xs, trailing: Spacing.l))
                         .listRowBackground(Color.clear)
                     hostsStrip(model)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Spacing.xs, trailing: 0))
                         .listRowBackground(Color.clear)
                 }
                 .listRowSeparator(.hidden)
 
-                if !model.needsYou.isEmpty, model.filter == .all {
+                if let error = model.error {
+                    ErrorRow(error: error, what: "local terminals") { Task { await model.refresh() } }
+                }
+
+                if !model.needsYou.isEmpty, model.filter == .all, model.search.isEmpty {
                     Section {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(model.needsYou, id: \.id) { t in
-                                    NavigationLink(value: LocalRoute.terminal(id: t.id)) {
-                                        NeedsYouCard(terminal: t)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
+                        ForEach(model.needsYou.prefix(3), id: \.id) { t in
+                            NavigationLink(value: LocalRoute.terminal(id: t.id)) {
+                                TerminalRowView(terminal: t, hostName: model.hosts.count > 1 ? model.hostById[t.hostId]?.name : nil)
                             }
-                            .padding(.horizontal)
                         }
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
                     } header: {
-                        Text("Needs you").foregroundStyle(.yellow)
+                        SectionHeader(title: "Needs you", detail: model.needsYou.count > 3 ? "\(model.needsYou.count)" : nil, tone: .accent) {
+                            withAnimation(.snappy) { model.filter = .needsYou }
+                        }
+                        .textCase(nil)
                     }
-                    .listRowSeparator(.hidden)
                 }
 
                 Section {
@@ -142,7 +135,7 @@ struct LocalHubView: View {
                         (LocalHubModel.Filter.all, "All"),
                         (.active, "Active"),
                         (.needsYou, "Needs you"),
-                        (.exited, "Exited"),
+                        (.exited, "Finished"),
                     ], selection: $model.filter)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
@@ -150,11 +143,13 @@ struct LocalHubView: View {
 
                     if model.filtered.isEmpty {
                         EmptyState(
-                            title: model.terminals.isEmpty ? "No terminals yet" : "Nothing matches",
+                            title: model.terminals.isEmpty ? "No terminals yet" : emptyTitle(model.filter),
                             systemImage: "terminal",
                             message: model.terminals.isEmpty
-                                ? "Spawn a terminal on one of your paired machines to get started."
-                                : "Try widening the filter or clearing the search."
+                                ? "Spawn a terminal on one of your paired machines."
+                                : "Nothing matches this filter.",
+                            actionTitle: model.terminals.isEmpty ? "New terminal" : nil,
+                            action: { showNew = true }
                         )
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -192,67 +187,75 @@ struct LocalHubView: View {
                 }
             }
             .listStyle(.plain)
-            .searchable(text: $model.search, prompt: "Title, dir, PR, ticket")
+            .animation(.snappy, value: model.filter)
+            .searchable(text: $model.search, prompt: "Search")
             .refreshable { await model.refresh() }
         }
     }
 
-    private var noHosts: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                EmptyState(title: "No machines paired yet", systemImage: "laptopcomputer.and.iphone",
-                           message: "On your machine, run `optio login`, then `optio local add <dir>` for each directory you want to expose, and `optio local up` to connect. Your host will appear here.")
-            }
-            .frame(maxWidth: .infinity, minHeight: 400)
+    private func emptyTitle(_ f: LocalHubModel.Filter) -> String {
+        switch f {
+        case .all: return "Nothing matches"
+        case .active: return "Nothing running"
+        case .needsYou: return "Nothing needs you"
+        case .exited: return "Nothing finished"
         }
+    }
+
+    private var noHosts: some View {
+        List {
+            EmptyState(title: "No machines paired", systemImage: "laptopcomputer.and.iphone",
+                       message: "On your machine, run `optio login`, then `optio local add <dir>` for each directory to expose, and `optio local up` to connect. Your host will appear here.")
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+        .listStyle(.plain)
     }
 
     private func statsBar(_ model: LocalHubModel) -> some View {
         @Bindable var model = model
         let s = model.stats
-        return StatGrid(minimum: 100) {
-                statTile("Needs you", s.needsYou, .yellow, "exclamationmark.triangle", selected: model.filter == .needsYou) {
-                    model.filter = model.filter == .needsYou ? .all : .needsYou
-                }
-                statTile("Working", s.working, AppTheme.accent, "waveform.path.ecg", selected: model.filter == .active) {
-                    model.filter = model.filter == .active ? .all : .active
-                }
-                statTile("Idle", s.idle, .secondary, "pause", selected: false, action: nil)
-                statTile("Finished", s.finished, .green, "checkmark.circle", selected: model.filter == .exited) {
-                    model.filter = model.filter == .exited ? .all : .exited
-                }
-                statTile(model.hosts.count == 1 ? "Host online" : "of \(model.hosts.count) hosts online",
-                         s.hostsOnline, s.hostsOnline > 0 ? .green : .red, "server.rack", selected: false, action: nil)
+        let selectedKey: String? = switch model.filter {
+        case .needsYou: "needsYou"
+        case .active: "active"
+        case .exited: "exited"
+        case .all: nil
         }
-    }
-
-    private func statTile(_ title: String, _ value: Int, _ color: Color, _ icon: String, selected: Bool, action: (() -> Void)?) -> some View {
-        Button { action?() } label: {
-            StatTile(title: title, value: "\(value)", color: color, systemImage: icon)
-                .frame(maxWidth: .infinity)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? color : .clear, lineWidth: 1.5))
+        return StatStrip(items: [
+            StatItem("Needs you", s.needsYou, tone: .accent, key: "needsYou"),
+            StatItem("Working", s.working, key: "active"),
+            StatItem("Idle", s.idle, key: "idle"),
+            StatItem("Finished", s.finished, key: "exited"),
+        ], selected: selectedKey) { item in
+            let target: LocalHubModel.Filter? = switch item.key {
+            case "needsYou": .needsYou
+            case "active": .active
+            case "exited": .exited
+            default: nil
+            }
+            guard let target else { return }
+            withAnimation(.snappy) { model.filter = model.filter == target ? .all : target }
         }
-        .buttonStyle(.plain)
-        .disabled(action == nil)
     }
 
     private func hostsStrip(_ model: LocalHubModel) -> some View {
         @Bindable var model = model
         return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: Spacing.s) {
                 ForEach(model.hosts, id: \.id) { h in
                     let selected = model.hostFilter == h.id
                     Button {
-                        if model.hosts.count > 1 { model.hostFilter = selected ? nil : h.id }
+                        if model.hosts.count > 1 { withAnimation(.snappy) { model.hostFilter = selected ? nil : h.id } }
                     } label: {
                         HStack(spacing: 6) {
-                            Circle().fill(h.state == .online ? Color.green : Color.secondary.opacity(0.4)).frame(width: 6, height: 6)
+                            Circle().fill(h.state == .online ? Tone.success.color : Tone.idle.color).frame(width: 6, height: 6)
                             Text(h.name).font(.caption.weight(.medium))
-                            Text("\(h.dirs.count) dir\(h.dirs.count == 1 ? "" : "s")").font(.caption2).foregroundStyle(.tertiary)
+                            Text(h.state == .online ? "\(h.dirs.count) dir\(h.dirs.count == 1 ? "" : "s")" : "offline").font(.caption2).opacity(0.6)
                         }
+                        .foregroundStyle(selected ? Color(.systemBackground) : Color.primary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(selected ? AnyShapeStyle(AppTheme.accent.opacity(0.18)) : AnyShapeStyle(.fill.tertiary), in: Capsule())
+                        .background(selected ? AnyShapeStyle(Color.primary) : AnyShapeStyle(.fill.tertiary), in: Capsule())
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -263,77 +266,54 @@ struct LocalHubView: View {
                     }
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, Spacing.l)
         }
     }
 }
 
-/// Compact card in the "Needs you" strip.
-private struct NeedsYouCard: View {
-    let terminal: LocalTerminal
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(terminal.title).font(.subheadline.weight(.medium)).lineLimit(1)
-            HStack {
-                Text(LocalPresentation.attentionLabel(terminal.attentionReason))
-                    .font(.caption2).foregroundStyle(.yellow).lineLimit(1)
-                Spacer(minLength: 4)
-                if let at = terminal.lastActivityAt {
-                    Text("waiting \(at.relativeDescription)").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-        }
-        .padding(10)
-        .frame(width: 220, alignment: .leading)
-        .background(Color.yellow.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.yellow.opacity(0.3)))
-    }
-}
-
-/// One terminal row: attention dot, title, state, where it runs, what it's
-/// working on, and when it last did something (`terminal-row.tsx`).
+/// One terminal row: state dot, title, `host · dir · command`, trailing
+/// activity time or attention reason (`terminal-row.tsx`).
 struct TerminalRowView: View {
     let terminal: LocalTerminal
     var hostName: String?
 
+    private var needsYou: Bool { terminal.attentionState == .needsYou && !LocalPresentation.isDead(terminal) }
+
+    private var trailing: (String, Tone?) {
+        if needsYou { return (LocalPresentation.attentionLabel(terminal.attentionReason), .accent) }
+        if terminal.state == .error { return ("Error", .danger) }
+        if terminal.state == .exited, let code = terminal.exitCode, code != 0 { return ("exit \(Int(code))", .danger) }
+        if terminal.state == .exited { return ("Finished", nil) }
+        if terminal.state == .pending { return (terminal.pendingReason == .hostOffline ? "Host offline" : "Held", nil) }
+        return (LocalPresentation.activityDescription(terminal), nil)
+    }
+
+    private var meta: Text? {
+        var parts: [Text?] = []
+        if let hostName { parts.append(Text(hostName)) }
+        parts.append(Text.mono(LocalPresentation.dirTail(terminal.dir)))
+        if let command = terminal.command, !command.isEmpty { parts.append(Text.mono(command)) }
+        else if !specLabel.isEmpty { parts.append(Text(specLabel)) }
+        return Text.meta(parts)
+    }
+
+    private var footer: Text? {
+        if LocalPresentation.isDead(terminal), let msg = terminal.errorMessage, !msg.isEmpty { return Text(msg) }
+        let links = LocalPresentation.workLinks(terminal)
+        if !links.isEmpty { return Text(links.prefix(3).map(WorkLinkBadges.shortLabel).joined(separator: " · ")).font(.monoFootnote) }
+        return nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 8) {
-                Circle().fill(LocalPresentation.rowDot(terminal)).frame(width: 7, height: 7)
-                Text(terminal.title).font(.subheadline.weight(.medium)).lineLimit(1)
-                Spacer(minLength: 4)
-                StatusBadge(text: LocalPresentation.stateLabel(terminal), color: LocalPresentation.stateColor(terminal))
-            }
-            if terminal.attentionState == .needsYou {
-                Text(LocalPresentation.attentionLabel(terminal.attentionReason))
-                    .font(.caption).foregroundStyle(.yellow).lineLimit(1)
-            }
-            HStack(spacing: 8) {
-                if let hostName {
-                    Label(hostName, systemImage: "server.rack").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Text(LocalPresentation.dirTail(terminal.dir)).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
-                if let command = terminal.command, !command.isEmpty {
-                    Text(command).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
-                } else {
-                    Text(specLabel).font(.caption2).foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 4)
-                Text(LocalPresentation.activityDescription(terminal)).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
-            }
-            HStack(spacing: 6) {
-                Image(systemName: LocalPresentation.spawnSourceIcon(terminal.spawnedBy)).font(.caption2).foregroundStyle(.tertiary)
-                if terminal.state == .exited, let code = terminal.exitCode, code != 0 {
-                    Text("exit \(Int(code))").font(.caption2).foregroundStyle(.red)
-                }
-                if LocalPresentation.isDead(terminal), let msg = terminal.errorMessage {
-                    Text(msg).font(.caption2).foregroundStyle(terminal.state == .error ? .red : .secondary).lineLimit(1)
-                }
-                WorkLinkBadges(links: LocalPresentation.workLinks(terminal), max: 3)
-            }
-        }
-        .padding(.vertical, 2)
+        OptioRow(
+            title: terminal.title,
+            tone: LocalPresentation.rowTone(terminal),
+            meta: meta,
+            trailing: trailing.0,
+            trailingTone: trailing.1,
+            footer: footer,
+            titleLineLimit: 1
+        )
     }
 
     private var specLabel: String {

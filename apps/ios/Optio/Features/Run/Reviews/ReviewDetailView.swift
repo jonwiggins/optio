@@ -29,19 +29,18 @@ struct ReviewDetailView: View {
         VStack(spacing: 0) {
             if let review = model.review {
                 header(review)
-                ChipPicker(options: [
+                DetailTabs(options: [
                     (Section.draft, "Draft"),
                     (Section.activity, "Activity"),
-                    (Section.runs, "Runs (\(model.runs.count))"),
+                    (Section.runs, "Runs"),
                 ], selection: $section)
-                Divider()
                 switch section {
                 case .draft: draftSection(review)
                 case .activity: activitySection(review)
                 case .runs: runsSection
                 }
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(reviewId, api: api) } }
+                ErrorRow(error: error) { Task { await model.load(reviewId, api: api) } }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -75,11 +74,7 @@ struct ReviewDetailView: View {
                 Button(label) { Task { await model.merge(method: value, api: api) } }
             }
         }
-        .alert("Error", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.actionError?.localizedDescription ?? "")
-        }
+        .errorToast(Binding(get: { model.actionError }, set: { model.actionError = $0 }))
         .transientMessage(model.toast) { model.toast = nil }
     }
 
@@ -115,53 +110,44 @@ struct ReviewDetailView: View {
     // MARK: Header
 
     private func header(_ review: PrReview) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                StatusBadge(text: ReviewFormat.stateLabel(review.state), color: ReviewFormat.stateColor(review.state))
-                if review.origin == "auto" { StatusBadge(text: "Auto", color: AppTheme.accent) }
-                if let v = review.verdict { StatusBadge(text: ReviewFormat.verdictLabel(v), color: ReviewFormat.verdictColor(v)) }
-                Spacer()
-                if logs.connected { Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.green).font(.caption) }
+        let s = model.prStatus
+        let needsYou: String? = {
+            if review.state == "ready" { return "Draft ready — read it and submit" }
+            if review.state == "stale" { return "New commits since this review — consider re-reviewing" }
+            return nil
+        }()
+        let secondary: Text? = {
+            if review.state == "failed", let err = review.errorMessage, !err.isEmpty { return Text(err) }
+            if review.isWorking { return Text(workingHint(review.state)) }
+            return nil
+        }()
+        return VStack(spacing: 0) {
+            DetailHeader(
+                state: ReviewFormat.stateLabel(review.state),
+                tone: ReviewFormat.stateTone(review.state) == .accent ? .working : ReviewFormat.stateTone(review.state),
+                line: Text.meta([
+                    Text(review.repoFullName),
+                    Text.mono("#\(review.prNumber ?? 0)"),
+                    review.verdict.map { Text(ReviewFormat.verdictLabel($0)) },
+                    review.origin == "auto" ? Text("auto") : nil,
+                    s?.checksStatus.map { Text("CI \($0)") },
+                    s?.reviewStatus.map { Text("review \($0.replacingOccurrences(of: "_", with: " "))") },
+                    (s?.prState).flatMap { $0 == "open" ? nil : Text("PR \($0)") },
+                ]),
+                secondary: secondary,
+                needsYou: needsYou
+            ) {
+                if logs.connected { StateDot(tone: .working, size: 6).accessibilityLabel("Live") }
+                Button {
+                    if let url = URL(string: review.prUrl) { openURL(url) }
+                } label: { Image(systemName: "arrow.up.right.square") }
+                .buttonStyle(.plain).font(.subheadline).foregroundStyle(.secondary)
+                .accessibilityLabel("Open pull request")
             }
-            Button {
-                if let url = URL(string: review.prUrl) { openURL(url) }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.triangle.pull")
-                    Text("\(review.repoFullName) · #\(review.prNumber ?? 0)")
-                    Image(systemName: "arrow.up.right.square").font(.caption2)
-                }
-                .font(.subheadline)
-                .foregroundStyle(AppTheme.accent)
-            }
-            .buttonStyle(.plain)
             pipelineStrip(review.state)
-            if let s = model.prStatus {
-                HStack(spacing: 10) {
-                    if let c = s.checksStatus { Label("CI \(c)", systemImage: c == "passing" ? "checkmark.circle" : c == "failing" ? "xmark.circle" : "clock") }
-                    if let r = s.reviewStatus { Label("Review \(r.replacingOccurrences(of: "_", with: " "))", systemImage: "person.crop.circle") }
-                    if let p = s.prState { Label("PR \(p)", systemImage: p == "merged" ? "arrow.triangle.merge" : "circle") }
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-            if review.state == "stale" {
-                Label("The PR has new commits since this review. Consider re-reviewing.", systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            if review.state == "failed", let err = review.errorMessage, !err.isEmpty {
-                Label(err, systemImage: "xmark.octagon").font(.caption).foregroundStyle(.red).lineLimit(3)
-            }
-            if review.isWorking {
-                Label(workingHint(review.state), systemImage: review.state == "waiting_ci" ? "clock" : "hourglass")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+                .padding(.horizontal, Spacing.l)
+                .padding(.vertical, Spacing.s)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.bar)
     }
 
     private func workingHint(_ state: String) -> String {
@@ -178,23 +164,7 @@ struct ReviewDetailView: View {
             if state == "failed" || state == "cancelled" { return -1 }
             return Self.pipeline.firstIndex { $0.0 == state } ?? -1
         }()
-        return HStack(spacing: 4) {
-            ForEach(Array(Self.pipeline.enumerated()), id: \.offset) { idx, step in
-                let done = idx < current
-                let active = idx == current
-                let color: Color = active ? (state == "stale" ? .red : AppTheme.accent) : done ? .green : .secondary.opacity(0.4)
-                HStack(spacing: 3) {
-                    Circle().fill(color).frame(width: 6, height: 6)
-                    Text(step.1).font(.caption2).foregroundStyle(active || done ? .primary : .secondary)
-                }
-                if idx < Self.pipeline.count - 1 {
-                    Rectangle().fill(done ? Color.green : Color.secondary.opacity(0.3)).frame(height: 1).frame(maxWidth: .infinity)
-                }
-            }
-            if state == "failed" || state == "cancelled" {
-                StatusBadge(text: state, color: state == "failed" ? .red : .gray)
-            }
-        }
+        return PipelineStrip(steps: Self.pipeline.map(\.1), current: current, failed: state == "failed" || state == "stale")
     }
 
     // MARK: Draft
@@ -222,7 +192,7 @@ struct ReviewDetailView: View {
                                     .minimumScaleFactor(0.8)
                             }
                             .buttonStyle(.bordered)
-                            .tint(model.verdict == v ? ReviewFormat.verdictColor(v) : .secondary)
+                            .tint(model.verdict == v ? ReviewFormat.verdictTone(v).color : Tone.idle.color)
                             .disabled(!review.isEditable)
                         }
                     }
@@ -289,7 +259,7 @@ struct ReviewDetailView: View {
                             Label(model.prStatus.map { $0.isOpen && !$0.checksOk ? "Merge anyway" : "Merge PR" } ?? "Merge PR", systemImage: "arrow.triangle.merge")
                         }
                     }
-                    .tint(model.prStatus.map { $0.isOpen && !$0.checksOk ? .orange : .green } ?? .green)
+                    .tint(.primary)
                     .disabled(model.merging || !(model.prStatus?.isOpen ?? false))
                     if let s = model.prStatus, !s.isOpen {
                         Text("PR is \(s.prState ?? "closed")").font(.caption).foregroundStyle(.secondary)
@@ -331,7 +301,7 @@ struct ReviewDetailView: View {
             ForEach(model.runs) { run in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        StatusBadge(text: run.state, color: StateColor.color(for: run.state))
+                        StatusBadge(text: run.state, tone: Tone.forState(run.state))
                         Text((run.kind ?? "run").capitalized).font(.subheadline.weight(.medium))
                         Spacer()
                         Text((run.startedAt ?? run.createdAt)?.relativeDescription ?? "").font(.caption).foregroundStyle(.secondary)

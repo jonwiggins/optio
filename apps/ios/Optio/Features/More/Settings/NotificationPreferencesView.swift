@@ -46,7 +46,7 @@ struct NotificationPreferencesView: View {
                     }
                 }
             } else if let loadError {
-                ErrorBanner(error: loadError) { Task { await load() } }
+                ErrorRow(error: loadError) { Task { await load() } }
             } else {
                 ProgressView().frame(maxWidth: .infinity)
             }

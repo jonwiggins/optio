@@ -11,38 +11,56 @@ struct SessionsListView: View {
     @State private var repoFilter: String? = nil
     @State private var error: Error?
     @State private var loaded = false
+    @State private var loading = false
     @State private var showNew = false
 
     var body: some View {
         List {
             Section {
-                VStack(spacing: 6) {
-                    if let stats {
-                        HStack(spacing: 8) {
-                            StatTile(title: "Total", value: "\(stats.total)")
-                            StatTile(title: "Active", value: "\(stats.active)", color: .blue)
-                            StatTile(title: "Ended (24h)", value: "\(stats.ended)")
-                        }
-                        .padding(.horizontal)
+                if let stats {
+                    StatStrip(items: [
+                        StatItem("Active", stats.active, key: "active"),
+                        StatItem("Ended today", stats.ended, key: "ended"),
+                        StatItem("Total", stats.total, key: "total"),
+                    ], selected: filter) { item in
+                        guard item.key != "total" else { withAnimation(.snappy) { filter = nil }; return }
+                        withAnimation(.snappy) { filter = filter == item.key ? nil : item.key }
                     }
-                    ChipPicker(options: [(nil, "All"), ("active", "Active"), ("ended", "Ended")], selection: $filter)
+                } else if !loaded {
+                    SkeletonStrip(labels: ["Active", "Ended today", "Total"])
                 }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
+            }
+            .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.l, bottom: Spacing.xs, trailing: Spacing.l))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            Section {
+                ChipPicker(options: [(nil, "All"), ("active", "Active"), ("ended", "Ended")], selection: $filter)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
             if let error {
-                ErrorBanner(error: error) { Task { await refresh() } }.listRowBackground(Color.clear)
+                ErrorRow(error: error, what: "sessions") { Task { await refresh() } }
             }
-            if loaded && sessions.isEmpty {
-                EmptyState(title: "No sessions yet", systemImage: "terminal", message: "Start a new session to get an interactive terminal connected to a repo pod.")
-                    .listRowBackground(Color.clear)
+            if !loaded && error == nil {
+                SkeletonRows()
+            } else if loaded && sessions.isEmpty {
+                EmptyState(
+                    title: filter == nil ? "No sessions yet" : "No \(filter!) sessions",
+                    systemImage: "terminal",
+                    message: filter == nil ? "An interactive terminal connected to a repo pod." : "Nothing matches this filter.",
+                    actionTitle: filter == nil ? "New session" : nil,
+                    action: { showNew = true }
+                )
+                .listRowSeparator(.hidden)
             }
             ForEach(sessions, id: \.id) { s in
                 NavigationLink(value: s.id) { SessionRow(session: s) }
             }
         }
         .listStyle(.plain)
-        .overlay { if !loaded && error == nil { ProgressView() } }
+        .dimmedWhileLoading(loading && loaded)
         .navigationDestination(for: String.self) { id in SessionDetailView(sessionId: id) }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -75,6 +93,7 @@ struct SessionsListView: View {
     }
 
     private func refresh() async {
+        loading = true
         do {
             async let list = api.listSessions(state: filter, repoUrl: repoFilter)
             async let st = api.liveSessionStats()
@@ -86,38 +105,28 @@ struct SessionsListView: View {
         } catch {
             self.error = error
         }
+        loading = false
         loaded = true
     }
 }
 
+/// `dot · branch · owner/repo · started 2h · $0.78`, trailing Ended when done.
 struct SessionRow: View {
     let session: InteractiveSession
 
-    private var isActive: Bool { session.state == .active }
     private var repoName: String { session.repoUrl.replacingOccurrences(of: "https://github.com/", with: "") }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "terminal")
-                .foregroundStyle(isActive ? AppTheme.accent : .secondary)
-                .frame(width: 32, height: 32)
-                .background((isActive ? AppTheme.accent : Color.secondary).opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(session.branch.isEmpty ? "Session \(session.id.prefix(8))" : session.branch)
-                        .font(.subheadline.weight(.semibold)).lineLimit(1)
-                    StatusBadge(text: session.state.rawValue, color: StateColor.color(for: session.state.rawValue))
-                }
-                HStack(spacing: 10) {
-                    Label(repoName, systemImage: "folder").lineLimit(1)
-                    Text("Started \(session.createdAt.relativeDescription)")
-                    if let c = session.costUsd, let d = Double(c), d > 0 { Text(String(format: "$%.4f", d)).monospacedDigit() }
-                }
-                .font(.caption2).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.vertical, 2)
+        OptioRow(
+            title: session.branch.isEmpty ? "Session \(session.id.prefix(8))" : session.branch,
+            tone: Tone.forState(session.state.rawValue),
+            meta: Text.meta([
+                Text(repoName),
+                Text("started \(session.createdAt.relativeDescription)"),
+                Cost.formatIfNonZero(session.costUsd).map { Text($0) },
+            ]),
+            trailing: session.state == .active ? nil : session.state.rawValue.capitalized
+        )
     }
 }
 
@@ -134,14 +143,14 @@ struct NewSessionSheet: View {
         NavigationStack {
             Form {
                 if repos.isEmpty {
-                    Text("Add a repo first (Admin → Repos in the web UI).").foregroundStyle(.secondary)
+                    Text("Add a repo first under More › Repos.").foregroundStyle(.secondary)
                 } else {
                     Picker("Repository", selection: $repoUrl) {
                         ForEach(repos) { r in Text(r.displayName).tag(r.repoUrl) }
                     }
                     .pickerStyle(.inline)
                 }
-                if let error { ErrorBanner(error: error) }
+                if let error { ErrorRow(error: error) }
             }
             .navigationTitle("New session")
             .navigationBarTitleDisplayMode(.inline)

@@ -54,7 +54,7 @@ struct WebhookDetailView: View {
             if let wh = model.webhook {
                 content(wh)
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error) { Task { await model.load(api: api) } }
             } else {
                 ProgressView()
             }
@@ -63,9 +63,7 @@ struct WebhookDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load(api: api) }
         .refreshable { await model.load(api: api) }
-        .alert("Test delivery", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
-            Button("OK") { notice = nil }
-        } message: { Text(notice ?? "") }
+        .toast(notice, tone: .success) { notice = nil }
         .moreErrorAlert($errorMessage)
     }
 
@@ -73,7 +71,7 @@ struct WebhookDetailView: View {
         List {
             Section {
                 HStack(alignment: .top) {
-                    Circle().fill(wh.active == false ? Color.gray : Color.green).frame(width: 8, height: 8).padding(.top, 6)
+                    Circle().fill(wh.active == false ? Tone.idle.color : Tone.success.color).frame(width: 8, height: 8).padding(.top, 6)
                     Text(wh.url ?? "").font(.footnote.monospaced()).textSelection(.enabled)
                 }
                 if let c = wh.createdAt { MoreInfoRow(label: "Created", value: c.relativeDescription) }
@@ -160,7 +158,7 @@ struct WebhookDetailView: View {
             .padding(.vertical, 4)
         } label: {
             HStack(spacing: 8) {
-                StatusBadge(text: d.success == true ? "ok" : "fail", color: d.success == true ? .green : .red)
+                StatusBadge(text: d.success == true ? "ok" : "fail", tone: d.success == true ? .success : .danger)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(d.event ?? "").font(.caption.monospaced())
                     HStack(spacing: 8) {

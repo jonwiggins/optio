@@ -15,7 +15,7 @@ final class TasksListModel {
 
     static let stages: [(String, String)] = [
         ("", "All"), ("queue", "Queue"), ("running", "Running"), ("ci", "CI"),
-        ("review", "Review"), ("attention", "Attention"), ("done", "Done"), ("failed", "Failed"),
+        ("review", "Review"), ("attention", "Needs you"), ("done", "Done"), ("failed", "Failed"),
     ]
 
     var visible: [TaskRow] {
@@ -61,56 +61,78 @@ struct TasksListView: View {
     @State private var pushTaskId: String?
     @State private var confirmBulk: String?
     @State private var actionError: Error?
+    @State private var toast: String?
 
     var body: some View {
         @Bindable var m = model
         List {
-            if let stats = model.stats {
-                Section {
-                    StatGrid {
-                            StatTile(title: "Running", value: "\(stats.running)", color: .blue)
-                            StatTile(title: "Queued", value: "\(stats.queued)", color: .orange)
-                            StatTile(title: "CI", value: "\(stats.ci)", color: AppTheme.accent)
-                            StatTile(title: "Review", value: "\(stats.review)", color: AppTheme.accent)
-                            StatTile(title: "Attention", value: "\(stats.needsAttention)", color: .yellow)
-                            StatTile(title: "Failed", value: "\(stats.failed)", color: .red)
-                            StatTile(title: "Done", value: "\(stats.completed)", color: .green)
+            Section {
+                if let stats = model.stats {
+                    StatStrip(items: [
+                        StatItem("Running", stats.running, key: "running"),
+                        StatItem("Queued", stats.queued, key: "queue"),
+                        StatItem("In review", stats.ci + stats.review, key: "review"),
+                        StatItem("Needs you", stats.needsAttention, tone: .accent, key: "attention"),
+                        StatItem("Failed", stats.failed, tone: .danger, key: "failed"),
+                    ], selected: model.stage.isEmpty ? nil : model.stage) { item in
+                        withAnimation(.snappy) { model.stage = model.stage == item.key ? "" : item.key }
                     }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
+                } else {
+                    SkeletonStrip(labels: ["Running", "Queued", "In review", "Needs you", "Failed"])
                 }
             }
+            .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.l, bottom: Spacing.xs, trailing: Spacing.l))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
             Section {
                 ChipPicker(options: TasksListModel.stages, selection: $m.stage)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
+
             if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error, what: "tasks") { Task { await model.load(api: api) } }
             }
             if model.loading {
-                ProgressView().frame(maxWidth: .infinity)
+                SkeletonRows()
             } else if model.visible.isEmpty {
-                EmptyState(title: "No tasks", systemImage: "checklist", message: model.query.isEmpty && model.stage.isEmpty ? "Create a task to put an agent to work in a repo." : "Nothing matches these filters.")
+                EmptyState(
+                    title: emptyTitle,
+                    systemImage: "checklist",
+                    message: model.query.isEmpty && model.stage.isEmpty ? "Put an agent to work in a repo." : "Nothing matches this filter.",
+                    actionTitle: model.query.isEmpty && model.stage.isEmpty ? "New task" : nil,
+                    action: { showNew = true }
+                )
+                .listRowSeparator(.hidden)
             } else {
                 ForEach(model.visible) { task in
                     NavigationLink(value: task.id) {
                         TaskRowView(task: task, subtasks: model.subtasks(of: task))
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if ["queued", "pending", "running", "provisioning", "needs_attention", "pr_opened"].contains(task.state) {
+                            Button("Cancel", systemImage: "xmark", role: .destructive) { Task { await act("cancel", task) } }
+                        }
+                        if task.state == "failed" || task.state == "cancelled" {
+                            Button("Retry", systemImage: "arrow.clockwise") { Task { await act("retry", task) } }.tint(.primary)
+                        }
                     }
                 }
                 if model.nextCursor != nil {
                     Button {
                         Task { await model.loadMore(api: api) }
                     } label: {
-                        HStack { Spacer(); if model.loadingMore { ProgressView() } else { Text("Load more") }; Spacer() }
+                        HStack { Spacer(); if model.loadingMore { ProgressView() } else { Text("Load more").font(.subheadline) }; Spacer() }
                     }
                 }
             }
         }
         .listStyle(.plain)
-        .searchable(text: $m.query, prompt: "Search titles and prompts")
+        .animation(.snappy, value: model.stage)
+        .searchable(text: $m.query, prompt: "Search")
         .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
-        .navigationTitle("Tasks")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
@@ -121,8 +143,9 @@ struct TasksListView: View {
                     Divider()
                     Button("Retry all failed") { confirmBulk = "retry" }
                     Button("Cancel all active", role: .destructive) { confirmBulk = "cancel" }
-                } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
+                } label: { Image(systemName: "line.3.horizontal.decrease") }
                 Button { showNew = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("New task")
             }
         }
         .sheet(isPresented: $showNew) {
@@ -136,14 +159,14 @@ struct TasksListView: View {
                     do {
                         if which == "retry" { try await api.post("/api/tasks/bulk/retry-failed") }
                         else { try await api.post("/api/tasks/bulk/cancel-active") }
+                        toast = which == "retry" ? "Retrying failed tasks" : "Cancelling active tasks"
                         await model.load(api: api, quiet: true)
                     } catch { actionError = error }
                 }
             }
         }
-        .alert("Action failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
-            Button("OK") {}
-        } message: { Text(actionError?.localizedDescription ?? "") }
+        .errorToast($actionError)
+        .toast(toast, tone: .success) { toast = nil }
         .task { await model.load(api: api) }
         .task(id: model.query + "|" + model.agentType) {
             try? await Task.sleep(for: .milliseconds(300))
@@ -157,45 +180,86 @@ struct TasksListView: View {
         }
         .refreshable { await model.load(api: api, quiet: true) }
     }
+
+    private var emptyTitle: String {
+        switch model.stage {
+        case "": return model.query.isEmpty ? "No tasks yet" : "No matching tasks"
+        case "attention": return "Nothing needs you"
+        case "failed": return "No failed tasks"
+        case "done": return "Nothing finished yet"
+        default: return "No \(model.stage) tasks"
+        }
+    }
+
+    private func act(_ verb: String, _ task: TaskRow) async {
+        do {
+            if verb == "retry" { try await api.retryTask(task.id) } else { try await api.cancelTask(task.id) }
+            toast = verb == "retry" ? "Retrying “\(task.title)”" : "Cancelled “\(task.title)”"
+            await model.load(api: api, quiet: true)
+        } catch { actionError = error }
+    }
 }
 
+/// Tasks row: dot + title + `repo · agent · #519 · $0.78` + trailing time / terminal state.
 struct TaskRowView: View {
     let task: TaskRow
     var subtasks: [TaskRow] = []
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top) {
-                Text(task.title).font(.body.weight(.medium)).lineLimit(2)
-                Spacer(minLength: 8)
-                StatusBadge(text: task.isStalled == true && task.state == "running" ? "stalled" : task.state, color: task.isStalled == true && task.state == "running" ? .yellow : StateColor.color(for: task.state))
+    private var stalled: Bool { task.isStalled == true && task.state == "running" }
+
+    private var tone: Tone {
+        if stalled { return .accent }
+        return Tone.forState(task.state)
+    }
+
+    private var meta: Text? {
+        var parts: [Text?] = [Text(task.repoShortName)]
+        if let n = task.prNumber { parts.append(Text.mono("#\(n)")) }
+        else if task.prUrl != nil, let last = task.prUrl?.split(separator: "/").last { parts.append(Text.mono("#\(last)")) }
+        parts.append(Text(RunFormatting.agentLabel(task.agentType)))
+        if let cost = Cost.formatIfNonZero(task.costUsd) { parts.append(Text(cost)) }
+        if task.taskType == "review" { parts.append(Text("review")) }
+        return Text.meta(parts)
+    }
+
+    private var trailing: (String, Tone?)? {
+        switch task.state {
+        case "completed":
+            if task.prState == "merged" { return ("Merged", .success) }
+            return ("Done", nil)
+        case "failed": return ("Failed" + (task.completedAt.map { " \($0.relativeDescription)" } ?? ""), .danger)
+        case "cancelled": return ("Cancelled", nil)
+        case "pr_opened":
+            if let checks = task.prChecksStatus, checks != "none" {
+                return ("CI \(checks)", checks == "passing" ? .success : checks == "failing" ? .danger : nil)
             }
-            HStack(spacing: 10) {
-                Label(task.repoShortName, systemImage: "shippingbox").lineLimit(1)
-                Label(RunFormatting.agentLabel(task.agentType), systemImage: "cpu")
-                if task.taskType == "review" { Text("review").foregroundStyle(AppTheme.accent) }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            HStack(spacing: 10) {
-                if let created = task.createdAt { Text(created.relativeDescription) }
-                if let pr = task.prLabel { Label(pr, systemImage: "arrow.triangle.pull").foregroundStyle(AppTheme.accent) }
-                if let cost = task.costText { Text(cost) }
-                if let checks = task.prChecksStatus, checks != "none" { Text("CI \(checks)").foregroundStyle(checks == "passing" ? .green : checks == "failing" ? .red : .secondary) }
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            if task.state == "failed" || task.state == "needs_attention", let err = task.errorMessage {
-                Text(err).font(.caption2).foregroundStyle(task.state == "failed" ? .red : .yellow).lineLimit(2)
-            }
-            if task.pendingReason == "waiting_for_off_peak" {
-                Label("Held for off-peak window", systemImage: "moon").font(.caption2).foregroundStyle(.secondary)
-            }
-            if !subtasks.isEmpty {
-                Text("\(subtasks.count) subtask\(subtasks.count == 1 ? "" : "s") · \(subtasks.filter { $0.state == "completed" }.count) done")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
+            return ("PR open", nil)
+        case "needs_attention": return ("Needs you", .accent)
+        default:
+            if stalled { return ("Stalled", .accent) }
+            return (task.createdAt?.relativeDescription ?? "", nil)
         }
-        .padding(.vertical, 2)
+    }
+
+    private var footer: Text? {
+        if (task.state == "failed" || task.state == "needs_attention"), let err = task.errorMessage, !err.isEmpty {
+            return Text(err)
+        }
+        if task.pendingReason == "waiting_for_off_peak" { return Text("Held for off-peak window") }
+        if !subtasks.isEmpty {
+            return Text("\(subtasks.count) subtask\(subtasks.count == 1 ? "" : "s") · \(subtasks.filter { $0.state == "completed" }.count) done")
+        }
+        return nil
+    }
+
+    var body: some View {
+        OptioRow(
+            title: task.title,
+            tone: tone,
+            meta: meta,
+            trailing: trailing?.0,
+            trailingTone: trailing?.1,
+            footer: footer
+        )
     }
 }

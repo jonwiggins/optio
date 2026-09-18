@@ -47,8 +47,8 @@ struct AgentLogRow: View {
             toolBlock
         case .error:
             Label(entry.content, systemImage: "xmark.octagon")
-                .font(.footnote.monospaced())
-                .foregroundStyle(.red)
+                .font(.monoFootnote)
+                .foregroundStyle(Tone.danger.textStyle)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .system, .info, .unknown:
             Text(entry.content)
@@ -69,7 +69,7 @@ struct AgentLogRow: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
-                .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: entry.type == .toolUse ? "wrench.and.screwdriver" : "arrow.turn.down.left")
@@ -100,23 +100,45 @@ struct ChatComposer: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom, spacing: Spacing.s) {
             TextField(placeholder, text: $text, axis: .vertical)
                 .lineLimit(1...6)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .focused($focused)
                 .disabled(disabled)
             Button {
                 Task { await send() }
             } label: {
-                if sending { ProgressView() } else { Image(systemName: "arrow.up.circle.fill").font(.title2) }
+                Group {
+                    if sending { ProgressView().tint(.white) } else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
+                }
+                .frame(width: 36, height: 36)
+                .foregroundStyle(.white)
+                .background(canSend ? AppTheme.accent : Color(.tertiaryLabel), in: Circle())
             }
-            .disabled(disabled || sending || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .accessibilityLabel("Send")
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.bar)
+        .padding(.horizontal, Spacing.l)
+        .padding(.vertical, Spacing.s)
+        .background(composerBackground)
         .onAppear { if autofocus { focused = true } }
+        .sensoryFeedback(.impact(flexibility: .soft), trigger: sending) { _, new in new }
+    }
+
+    private var canSend: Bool { !disabled && !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    @ViewBuilder
+    private var composerBackground: some View {
+        if #available(iOS 26, *) {
+            Rectangle().fill(.clear).glassEffect(.regular, in: Rectangle())
+        } else {
+            Rectangle().fill(.bar)
+        }
     }
 
     private func send() async {

@@ -76,13 +76,13 @@ struct SettingsView: View {
             Section {
                 if authDisabled {
                     Label("Authentication is disabled on this server (OPTIO_AUTH_DISABLED).", systemImage: "shield.slash")
-                        .font(.footnote).foregroundStyle(.orange)
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 ForEach(["github", "google", "gitlab", "oidc"], id: \.self) { name in
                     let enabled = providers.contains { $0.name == name }
                     HStack {
                         Image(systemName: enabled ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(enabled ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
+                            .foregroundStyle(enabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                         Text(providerLabel(name))
                         Spacer()
                         Text(enabled ? "Configured" : "Not configured").font(.caption).foregroundStyle(.secondary)
@@ -97,11 +97,12 @@ struct SettingsView: View {
             Section("App") {
                 Picker(selection: $appearance) {
                     ForEach(AppAppearance.allCases) { a in
-                        Label(a.label, systemImage: a.systemImage).tag(a)
+                        Text(a.label).tag(a)
                     }
                 } label: {
                     Label("Appearance", systemImage: "circle.lefthalf.filled")
                 }
+                .pickerStyle(.segmented)
                 NavigationLink { AppIconPickerView() } label: {
                     HStack {
                         Label("App icon", systemImage: "app.badge")

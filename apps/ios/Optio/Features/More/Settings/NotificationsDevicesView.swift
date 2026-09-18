@@ -248,7 +248,7 @@ struct NotificationsDevicesView: View {
     private var registrationColor: Color {
         switch registrar.registration {
         case .registered: return .green
-        case .tokenOnly: return .orange
+        case .tokenOnly: return .secondary
         default: return .secondary
         }
     }

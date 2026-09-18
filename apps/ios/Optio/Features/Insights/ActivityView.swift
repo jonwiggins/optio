@@ -114,46 +114,43 @@ struct ActivityView: View {
     var body: some View {
         List {
             Section {
-                HStack(spacing: 8) {
-                    filterMenu(Self.typeOptions, selection: model.typeFilter, icon: "tag") { model.typeFilter = $0; model.offset = 0 }
-                    filterMenu(Self.resourceOptions, selection: model.resourceFilter, icon: "shippingbox") { model.resourceFilter = $0; model.offset = 0 }
-                    Menu {
-                        ForEach(Self.dayOptions, id: \.0) { d in Button(d.1) { model.days = d.0; model.offset = 0 } }
-                    } label: {
-                        Label(Self.dayOptions.first { $0.0 == model.days }?.1 ?? "\(model.days) days", systemImage: "calendar").font(.caption)
-                    }
-                }
+                StatStrip(items: [
+                    StatItem("Actions", model.stats.actions),
+                    StatItem("Task events", model.stats.taskEvents),
+                    StatItem("Auth", model.stats.authEvents),
+                    StatItem("Infra", model.stats.infraEvents),
+                ])
+                .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.l, bottom: Spacing.xs, trailing: Spacing.l))
+                .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
                 HStack {
                     Text("\(model.total) event\(model.total == 1 ? "" : "s") in the last \(model.days) day\(model.days == 1 ? "" : "s")")
+                        .contentTransition(.numericText())
                     Spacer()
                     if model.liveConnected {
-                        Label("live", systemImage: "dot.radiowaves.left.and.right").foregroundStyle(.green)
+                        HStack(spacing: 4) { StateDot(tone: .working, size: 5); Text("live") }
                     }
                 }
                 .font(.caption).foregroundStyle(.secondary)
                 .listRowSeparator(.hidden)
-
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    StatTile(title: "User actions", value: "\(model.stats.actions)", color: AppTheme.accent)
-                    StatTile(title: "Task events", value: "\(model.stats.taskEvents)", color: .blue)
-                    StatTile(title: "Auth events", value: "\(model.stats.authEvents)", color: .yellow)
-                    StatTile(title: "Infra events", value: "\(model.stats.infraEvents)", color: .red)
-                }
-                .listRowSeparator(.hidden)
             }
 
             if let error = model.error, model.items.isEmpty {
-                if error.isForbidden { AdminOnlyState(what: "The activity feed") } else {
-                    ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                if error.isForbidden { AdminOnlyState(what: "The activity feed").listRowSeparator(.hidden) } else {
+                    ErrorRow(error: error, what: "activity") { Task { await model.load(api: api) } }
                 }
-            } else if model.items.isEmpty, !model.loading {
-                EmptyState(title: "No activity", systemImage: "waveform.path.ecg", message: "Nothing matched the selected filters.")
+            } else if model.items.isEmpty, model.loading {
+                SkeletonRows()
+            } else if model.items.isEmpty {
+                EmptyState(title: "No activity", systemImage: "clock.arrow.circlepath", message: "Nothing matched these filters.")
+                    .listRowSeparator(.hidden)
             } else {
                 ForEach(groupedByDay, id: \.day) { group in
-                    Section(group.day) {
+                    Section {
                         ForEach(group.items) { ActivityRow(item: $0) }
+                    } header: {
+                        SectionHeader(title: group.day).textCase(nil)
                     }
                 }
                 if model.offset > 0 || model.offset + ActivityModel.limit < model.total {
@@ -174,8 +171,21 @@ struct ActivityView: View {
             }
         }
         .listStyle(.plain)
-        .overlay {
-            if model.loading, model.items.isEmpty { ProgressView() }
+        .dimmedWhileLoading(model.loading && !model.items.isEmpty)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                PeriodPicker(days: Binding(get: { model.days }, set: { model.days = $0; model.offset = 0 }), options: [1, 7, 14, 30]).fixedSize()
+                Menu {
+                    Picker("Type", selection: Binding(get: { model.typeFilter }, set: { model.typeFilter = $0; model.offset = 0 })) {
+                        ForEach(Self.typeOptions, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    Picker("Resource", selection: Binding(get: { model.resourceFilter }, set: { model.resourceFilter = $0; model.offset = 0 })) {
+                        ForEach(Self.resourceOptions, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                } label: {
+                    Image(systemName: model.typeFilter == nil && model.resourceFilter == nil ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill")
+                }
+            }
         }
         .refreshable { await model.load(api: api) }
         .task(id: model.filterKey) { await model.load(api: api) }
@@ -192,13 +202,10 @@ struct ActivityView: View {
     }
 
     private var groupedByDay: [(day: String, items: [ActivityItem])] {
-        let f = DateFormatter()
-        f.dateStyle = .full
-        f.timeStyle = .none
         var order: [String] = []
         var map: [String: [ActivityItem]] = [:]
         for item in model.items {
-            let key = item.timestamp.isoDate.map { f.string(from: $0) } ?? "Unknown date"
+            let key = item.timestamp.isoDate.map { $0.dayHeader } ?? "Unknown date"
             if map[key] == nil { order.append(key) }
             map[key, default: []].append(item)
         }
@@ -206,80 +213,69 @@ struct ActivityView: View {
     }
 }
 
+/// Dot row: `actor summary` · `2h · task 1a2b3c4d`, details behind a disclosure.
 private struct ActivityRow: View {
     let item: ActivityItem
     @State private var expanded = false
 
-    private var typeColor: Color {
+    private var tone: Tone? {
         switch item.type {
-        case "action": return AppTheme.accent
-        case "task_event": return .blue
-        case "auth_event": return .yellow
-        case "infra_event": return .red
-        default: return .secondary
+        case "action": return .working
+        case "infra_event": return .danger
+        default: return nil
         }
     }
 
-    private var icon: String {
-        switch item.resourceType {
-        case "task": return "list.bullet.rectangle"
-        case "repo": return "folder"
-        case "workflow", "workflow_run", "workflow_trigger": return "arrow.triangle.branch"
-        case "connection", "connection_provider", "connection_assignment": return "powerplug"
-        case "secret": return "key"
-        case "webhook": return "link"
-        case "session": return "terminal"
-        case "settings", "mcp_server": return "gearshape"
-        case "auth": return "shield"
-        case "pod": return "server.rack"
-        case "review": return "bolt"
-        default: return "waveform.path.ecg"
+    private var typeLabel: String {
+        switch item.type {
+        case "action": return "action"
+        case "task_event": return "task"
+        case "auth_event": return "auth"
+        case "infra_event": return "infra"
+        default: return item.type
         }
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon)
-                .font(.caption)
-                .frame(width: 30, height: 30)
-                .background(typeColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                .foregroundStyle(typeColor)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    if let name = item.actor?.displayName { Text(name).fontWeight(.medium) }
-                    Text(item.summary).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(alignment: .top, spacing: Spacing.s) {
+                if let tone { StateDot(tone: tone == .working && item.isLive ? .accent : tone).padding(.top, 7) }
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        if let name = item.actor?.displayName { Text(name).foregroundStyle(.primary) }
+                        Text(item.summary).foregroundStyle(item.actor?.displayName == nil ? .primary : .secondary)
+                    }
+                    .font(.body)
+                    .lineLimit(3)
+                    Text.meta([
+                        Text(item.timestamp.relativeDescription),
+                        Text(typeLabel),
+                        item.isLive ? Text("new") : nil,
+                        (item.resourceId != nil && ["task", "workflow", "session"].contains(item.resourceType)) ? Text.mono("\(item.resourceType) \(item.resourceId!.prefix(8))") : nil,
+                    ])?
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
-                .font(.subheadline)
-                HStack(spacing: 6) {
-                    Text(item.timestamp.relativeDescription)
-                    Text("·").opacity(0.4)
-                    StatusBadge(text: item.type, color: typeColor)
-                    if item.isLive { StatusBadge(text: "new", color: .green) }
-                    if let rid = item.resourceId, ["task", "workflow", "session"].contains(item.resourceType) {
-                        Text("·").opacity(0.4)
-                        Text("\(item.resourceType) \(rid.prefix(8))").font(.caption2.monospaced())
-                    }
+                Spacer(minLength: 0)
+            }
+            if let details = item.details, !details.isEmpty {
+                Button {
+                    withAnimation(.snappy) { expanded.toggle() }
+                } label: {
+                    Label("Details", systemImage: expanded ? "chevron.down" : "chevron.right").font(.footnote)
                 }
-                .font(.caption).foregroundStyle(.secondary)
-                if let details = item.details, !details.isEmpty {
-                    Button {
-                        withAnimation { expanded.toggle() }
-                    } label: {
-                        Label("Details", systemImage: expanded ? "chevron.down" : "chevron.right").font(.caption)
-                    }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    if expanded {
-                        Text(Self.pretty(details))
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 6))
-                    }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .padding(.leading, tone == nil ? 0 : 15)
+                if expanded {
+                    Text(Self.pretty(details))
+                        .font(.monoCaption)
+                        .foregroundStyle(.secondary)
+                        .padding(Spacing.s)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Spacing.row)
     }
 
     private static func pretty(_ details: [String: AnyCodable]) -> String {

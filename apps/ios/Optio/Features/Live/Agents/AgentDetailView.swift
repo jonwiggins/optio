@@ -37,18 +37,18 @@ struct AgentDetailView: View {
             if let agent = model.agent {
                 header(agent, model: model)
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.refreshAgent() } }
+                ErrorRow(error: error) { Task { await model.refreshAgent() } }
             } else {
                 ProgressView().padding()
             }
-            ChipPicker(options: [
+            DetailTabs(options: [
                 (Section.chat, "Chat"),
-                (Section.turns, "Turns (\(model.turns.count))"),
+                (Section.turns, "Turns"),
                 (Section.triggers, "Triggers"),
                 (Section.config, "Config"),
             ], selection: $section)
             if let actionError = model.actionError {
-                ErrorBanner(error: actionError)
+                ErrorRow(error: actionError)
             }
             Divider()
             switch section {
@@ -104,45 +104,31 @@ struct AgentDetailView: View {
     }
 
     private func header(_ agent: PersistentAgent, model: AgentDetailModel) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text("@\(agent.slug)").font(.caption.monospaced()).foregroundStyle(.secondary)
-                StatusBadge(text: agent.state.rawValue, color: StateColor.color(for: agent.state.rawValue))
-                if model.connected {
-                    Image(systemName: "dot.radiowaves.left.and.right").font(.caption2).foregroundStyle(.green)
-                }
-                Spacer()
-            }
-            if let d = agent.description, !d.isEmpty {
-                Text(d).font(.subheadline).foregroundStyle(.secondary).lineLimit(3)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    Label(agent.agentRuntime, systemImage: "cpu")
-                    Label(agent.podLifecycle.rawValue, systemImage: "shippingbox")
-                    Label(String(format: "$%.4f lifetime", Double(agent.totalCostUsd) ?? 0), systemImage: "dollarsign.circle")
-                    if let t = agent.lastTurnAt {
-                        Label("Last turn \(t.relativeDescription)", systemImage: "clock")
-                    }
-                    if model.inbox.pending > 0 {
-                        Label("\(model.inbox.pending) pending", systemImage: "tray.full").foregroundStyle(.orange)
-                    }
-                    if agent.consecutiveFailures > 0 {
-                        Label("\(Int(agent.consecutiveFailures)) consecutive failures", systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            if let reason = agent.lastFailureReason, !reason.isEmpty {
-                Text("Last failure: \(reason)")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(3)
-            }
+        let needsYou: String? = {
+            if agent.state == .paused { return "Paused — resume to keep going" }
+            if model.inbox.pending > 0 { return "\(model.inbox.pending) message\(model.inbox.pending == 1 ? "" : "s") waiting" }
+            return nil
+        }()
+        let failure: Text? = {
+            if let reason = agent.lastFailureReason, !reason.isEmpty, agent.consecutiveFailures > 0 { return Text("\(Int(agent.consecutiveFailures)) failures · \(reason)") }
+            if let d = agent.description, !d.isEmpty { return Text(d) }
+            return nil
+        }()
+        return DetailHeader(
+            state: agent.state.rawValue,
+            tone: agent.state == .paused ? .working : nil,
+            line: Text.meta([
+                Text.mono("@\(agent.slug)"),
+                Text(agent.agentRuntime),
+                Text(agent.podLifecycle.rawValue),
+                agent.lastTurnAt.map { Text("last turn \($0.relativeDescription)") },
+                Cost.formatIfNonZero(agent.totalCostUsd).map { Text($0) },
+            ]),
+            secondary: failure,
+            needsYou: needsYou
+        ) {
+            if model.connected { StateDot(tone: .working, size: 6).accessibilityLabel("Live") }
         }
-        .padding(.horizontal)
-        .padding(.top, 8)
     }
 }
 
@@ -211,41 +197,26 @@ struct AgentChatSection: View {
 struct AgentMessageBubble: View {
     let message: PersistentAgentMessage
 
-    private var isUser: Bool { message.senderType == .user }
-    private var tint: Color {
+    private var role: MessageBubble.Role {
         switch message.senderType {
-        case .user: return AppTheme.accent
-        case .agent: return .blue
-        default: return .secondary
+        case .user: return .user
+        case .agent: return .agent
+        default: return .system
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text("\(message.senderType.rawValue):\(message.senderName ?? "unknown")")
-                    .font(.caption2.monospaced())
-                if message.broadcasted {
-                    Text("broadcast").font(.caption2).padding(.horizontal, 4)
-                        .background(Color.orange.opacity(0.2), in: Capsule())
-                }
-                Spacer()
-                Text(message.receivedAt.relativeDescription).font(.caption2)
-            }
-            .foregroundStyle(.secondary)
-            Text(message.body)
-                .font(.callout)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let p = message.processedAt {
-                Text("Processed \(p.relativeDescription)").font(.caption2).foregroundStyle(.tertiary)
-            } else {
-                Text("Pending").font(.caption2).foregroundStyle(.orange)
-            }
-        }
-        .padding(10)
-        .background(tint.opacity(isUser ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(tint.opacity(0.2)))
+        MessageBubble(
+            role: role,
+            text: message.body,
+            meta: [
+                message.senderType == .user ? nil : "\(message.senderType.rawValue):\(message.senderName ?? "unknown")",
+                message.broadcasted ? "broadcast" : nil,
+                message.receivedAt.relativeDescription,
+                message.processedAt == nil ? "pending" : nil,
+            ].compactMap { $0 }.joined(separator: " · "),
+            pending: message.processedAt == nil
+        )
     }
 }
 
@@ -275,34 +246,26 @@ struct AgentTurnsSection: View {
 struct AgentTurnRow: View {
     let turn: PersistentAgentTurn
 
+    private var trailing: (String, Tone?) {
+        guard let halt = turn.haltReason else { return ("Running", .working) }
+        return (halt.rawValue.replacingOccurrences(of: "_", with: " ").capitalized, halt == .error ? .danger : nil)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text("Turn #\(Int(turn.turnNumber))").font(.subheadline.weight(.semibold))
-                Text(turn.wakeSource.rawValue).font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                if let halt = turn.haltReason {
-                    StatusBadge(text: halt.rawValue, color: halt == .error ? .red : .secondary)
-                } else {
-                    StatusBadge(text: "running", color: .blue)
-                }
-            }
-            HStack(spacing: 12) {
-                Text((turn.startedAt ?? turn.createdAt).relativeDescription)
-                if let c = turn.costUsd, let d = Double(c) { Text(String(format: "$%.5f", d)).monospacedDigit() }
-                if let i = turn.inputTokens, let o = turn.outputTokens {
-                    Text("\(Int(i))↑ \(Int(o))↓").monospacedDigit()
-                }
-            }
-            .font(.caption2).foregroundStyle(.secondary)
-            if let s = turn.summary, !s.isEmpty {
-                Text(s).font(.caption).italic().foregroundStyle(.secondary).lineLimit(2)
-            }
-            if let e = turn.errorMessage, !e.isEmpty {
-                Text(e).font(.caption).foregroundStyle(.red).lineLimit(2)
-            }
-        }
-        .padding(.vertical, 2)
+        OptioRow(
+            title: turn.summary.flatMap { $0.isEmpty ? nil : $0 } ?? "Turn #\(Int(turn.turnNumber))",
+            tone: turn.haltReason == nil ? .working : (turn.haltReason == .error ? .danger : nil),
+            meta: Text.meta([
+                Text("#\(Int(turn.turnNumber))"),
+                Text(turn.wakeSource.rawValue.replacingOccurrences(of: "_", with: " ")),
+                Text((turn.startedAt ?? turn.createdAt).relativeDescription),
+                Cost.formatIfNonZero(turn.costUsd).map { Text($0) },
+                (turn.inputTokens != nil && turn.outputTokens != nil) ? Text("\(Int(turn.inputTokens!))↑ \(Int(turn.outputTokens!))↓") : nil,
+            ]),
+            trailing: trailing.0,
+            trailingTone: trailing.1,
+            footer: turn.errorMessage.flatMap { $0.isEmpty ? nil : Text($0) }
+        )
     }
 }
 
@@ -358,7 +321,7 @@ struct AgentTriggersSection: View {
                     HStack {
                         Label(t.type.capitalized, systemImage: icon(for: t.type)).font(.subheadline.weight(.semibold))
                         Spacer()
-                        if t.enabled == false { StatusBadge(text: "disabled", color: .gray) }
+                        if t.enabled == false { StatusBadge(text: "disabled", tone: .idle) }
                     }
                     Text(t.summary).font(.caption.monospaced()).foregroundStyle(.secondary)
                     HStack(spacing: 12) {
@@ -415,7 +378,7 @@ struct AgentTriggerSheet: View {
                         TextField("my-agent-hook", text: $path).autocorrectionDisabled().textInputAutocapitalization(.never)
                     }
                 }
-                if let error { ErrorBanner(error: error) }
+                if let error { ErrorRow(error: error) }
             }
             .navigationTitle("New trigger")
             .navigationBarTitleDisplayMode(.inline)

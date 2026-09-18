@@ -120,7 +120,7 @@ struct JobFormView: View {
                     } else if !detectedParams.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Detected parameters").font(.caption).foregroundStyle(.secondary)
-                            HStack { ForEach(detectedParams, id: \.self) { StatusBadge(text: $0, color: AppTheme.accent) } }
+                            HStack { ForEach(detectedParams, id: \.self) { StatusBadge(text: $0, tone: .accent) } }
                         }
                     }
                 }
@@ -145,7 +145,7 @@ struct JobFormView: View {
                 }
 
                 if let error {
-                    Section { ErrorBanner(error: error) }
+                    Section { ErrorRow(error: error) }
                 }
             }
             .navigationTitle(isEdit ? "Edit Job" : "New Job")

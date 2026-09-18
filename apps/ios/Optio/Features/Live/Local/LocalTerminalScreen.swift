@@ -29,9 +29,9 @@ struct LocalTerminalScreen: View {
             if let terminal {
                 content(terminal)
             } else if let loadError {
-                ErrorBanner(error: loadError) { Task { await load() } }
+                List { ErrorRow(error: loadError, what: "terminal") { Task { await load() } } }.listStyle(.plain)
             } else {
-                ProgressView("Loading terminal…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                TerminalTheme.background(colorScheme).ignoresSafeArea()
             }
         }
         .navigationTitle(terminal?.title ?? "Terminal")
@@ -64,9 +64,7 @@ struct LocalTerminalScreen: View {
         } message: {
             Text("REST fallback (POST /input) — useful when the stream is disconnected.")
         }
-        .alert("Action failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
-            Button("OK") { actionError = nil }
-        } message: { Text(actionError ?? "") }
+        .errorToast($actionError)
     }
 
     @ToolbarContentBuilder
@@ -75,13 +73,13 @@ struct LocalTerminalScreen: View {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
                     Text(terminal.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    HStack(spacing: 6) {
-                        Circle().fill(LocalPresentation.attentionColor(terminal.attentionState)).frame(width: 6, height: 6)
-                        Text(terminal.attentionState == .needsYou
+                    HStack(spacing: 5) {
+                        if let tone = LocalPresentation.rowTone(terminal) { StateDot(tone: tone, size: 6) }
+                        Text(terminal.attentionState == .needsYou && !LocalPresentation.isDead(terminal)
                              ? LocalPresentation.attentionLabel(terminal.attentionReason)
                              : LocalPresentation.stateLabel(terminal))
                             .font(.caption2)
-                            .foregroundStyle(terminal.attentionState == .needsYou ? SwiftUI.Color.yellow : SwiftUI.Color.secondary)
+                            .foregroundStyle(terminal.attentionState == .needsYou && !LocalPresentation.isDead(terminal) ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(.secondary))
                             .lineLimit(1)
                     }
                 }
@@ -125,9 +123,9 @@ struct LocalTerminalScreen: View {
             header(terminal)
             if LocalPresentation.isDead(terminal), let preview = terminal.preview, !preview.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("LAST OUTPUT").font(.caption2).foregroundStyle(.secondary)
+                    Text("Last output").font(.sectionHeader).foregroundStyle(.secondary)
                     ScrollView {
-                        Text(preview).font(.caption.monospaced()).foregroundStyle(SwiftUI.Color(white: 0.85))
+                        Text(preview).font(.monoCaption).foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
                     }
@@ -153,31 +151,28 @@ struct LocalTerminalScreen: View {
     }
 
     private func header(_ t: LocalTerminal) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                StatusBadge(text: LocalPresentation.stateLabel(t), color: LocalPresentation.stateColor(t))
-                if t.attentionState == .needsYou {
-                    StatusBadge(text: LocalPresentation.attentionLabel(t.attentionReason), color: .yellow)
-                }
-                if hosts.count > 1, let host = hosts.first(where: { $0.id == t.hostId }) {
-                    Label(host.name, systemImage: "server.rack").font(.caption2).foregroundStyle(.secondary)
-                }
-                Text(LocalPresentation.dirTail(t.dir)).font(.caption2.monospaced()).foregroundStyle(.secondary)
-                if t.state == .exited, let code = t.exitCode {
-                    Text("exit \(Int(code))").font(.caption2).foregroundStyle(code == 0 ? SwiftUI.Color.secondary : SwiftUI.Color.red)
-                }
-                if LocalPresentation.isDead(t), let msg = t.errorMessage {
-                    Text(msg).font(.caption2).foregroundStyle(t.state == .error ? SwiftUI.Color.red : SwiftUI.Color.secondary).lineLimit(1)
-                }
-                if t.state == .pending, t.pendingReason == .hostOffline {
-                    Text("starts when the host reconnects").font(.caption2).foregroundStyle(.secondary)
-                }
-                WorkLinkBadges(links: LocalPresentation.workLinks(t), max: 4)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+        let needsYou = t.attentionState == .needsYou && !LocalPresentation.isDead(t)
+        var facts: [Text?] = []
+        if hosts.count > 1, let host = hosts.first(where: { $0.id == t.hostId }) { facts.append(Text(host.name)) }
+        if t.state == .exited, let code = t.exitCode { facts.append(Text("exit \(Int(code))")) }
+        if t.state == .pending, t.pendingReason == .hostOffline { facts.append(Text("starts when the host reconnects")) }
+        if let cost = Cost.formatIfNonZero(t.costUsd) { facts.append(Text(cost)) }
+        let links = LocalPresentation.workLinks(t)
+        if !links.isEmpty { facts.append(Text(links.prefix(3).map(WorkLinkBadges.shortLabel).joined(separator: " · "))) }
+        let detailLine = Text.meta(facts)
+        let secondary: Text? = {
+            if LocalPresentation.isDead(t), let msg = t.errorMessage, !msg.isEmpty { return Text(msg) }
+            return Text.mono(t.dir)
+        }()
+        return DetailHeader(
+            state: LocalPresentation.stateLabel(t),
+            tone: LocalPresentation.stateTone(t) == .accent ? .working : LocalPresentation.stateTone(t),
+            line: detailLine,
+            secondary: secondary,
+            needsYou: needsYou ? LocalPresentation.attentionLabel(t.attentionReason).capitalizedFirst : nil
+        ) {
+            WorkLinkBadges(links: links, max: 2)
         }
-        .background(.bar)
     }
 
     // MARK: Data
@@ -263,7 +258,18 @@ struct LocalTerminalStreamView: View {
                             errorBanner(message, stream: stream)
                         }
                     }
-                    ExtraKeysBar(stream: stream, keyboardShown: $keyboardShown)
+                    TerminalKeyBar(
+                        enabled: stream.connState == .connected,
+                        applicationCursor: stream.bridge.applicationCursor,
+                        send: { stream.sendInput(bytes: $0) },
+                        keyboardShown: keyboardShown,
+                        toggleKeyboard: {
+                            if stream.bridge.isFocused { stream.bridge.blur() } else { stream.bridge.focus() }
+                            keyboardShown = stream.bridge.isFocused
+                        }
+                    )
+                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in keyboardShown = true }
+                    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in keyboardShown = false }
                 }
             } else {
                 TerminalTheme.background(colorScheme)
@@ -298,12 +304,11 @@ struct LocalTerminalStreamView: View {
                 Text(connLabel(stream.connState))
             }
             if let state = stream.state {
-                Text(state.rawValue.replacingOccurrences(of: "_", with: " ")).textCase(.uppercase)
+                Text(state.rawValue.replacingOccurrences(of: "_", with: " "))
             }
             if let attention = stream.attentionState {
                 Text(attention == .needsYou ? "needs you" : attention.rawValue)
-                    .textCase(.uppercase)
-                    .foregroundStyle(attention == .needsYou ? SwiftUI.Color.yellow : attention == .working ? AppTheme.accent : SwiftUI.Color.secondary)
+                    .foregroundStyle(attention == .needsYou ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(.secondary))
             }
             Spacer()
             if let size = stream.lastSentSize {
@@ -333,17 +338,17 @@ struct LocalTerminalStreamView: View {
             }
         }
         .padding(10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .foregroundStyle(stream.retrying ? SwiftUI.Color.orange : SwiftUI.Color.red)
+        .floatingGlass(in: RoundedRectangle(cornerRadius: Radius.card))
+        .foregroundStyle(stream.retrying ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
         .padding(10)
     }
 
     private func connColor(_ s: LocalTerminalStream.ConnState) -> SwiftUI.Color {
         switch s {
-        case .connecting: return .secondary.opacity(0.5)
-        case .connected: return .green
-        case .reconnecting: return .orange
-        case .disconnected: return .red
+        case .connecting: return Tone.idle.color
+        case .connected: return Tone.success.color
+        case .reconnecting: return Tone.idle.color
+        case .disconnected: return Tone.danger.color
         }
     }
 
@@ -354,54 +359,6 @@ struct LocalTerminalStreamView: View {
         case .reconnecting: return "reconnecting…"
         case .disconnected: return "disconnected"
         }
-    }
-}
-
-/// Keys a phone keyboard lacks, plus a keyboard toggle. Sits below the
-/// terminal so it stays visible whether or not the keyboard is up.
-struct ExtraKeysBar: View {
-    @Environment(\.colorScheme) private var colorScheme
-    let stream: LocalTerminalStream
-    @Binding var keyboardShown: Bool
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(LocalTerminalStream.ExtraKey.allCases) { key in
-                        Button { stream.send(key) } label: {
-                            Text(key.label)
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                                .frame(minWidth: 34)
-                                .padding(.vertical, 7)
-                                .padding(.horizontal, 6)
-                                .background(SwiftUI.Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.leading, 10)
-            }
-            Button {
-                if stream.bridge.isFocused { stream.bridge.blur() } else { stream.bridge.focus() }
-                keyboardShown = stream.bridge.isFocused
-            } label: {
-                Image(systemName: keyboardShown ? "keyboard.chevron.compact.down" : "keyboard")
-                    .font(.system(size: 15))
-                    .padding(.vertical, 7)
-                    .padding(.horizontal, 10)
-                    .background(SwiftUI.Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
-            }
-            .buttonStyle(.plain)
-            .padding(.trailing, 10)
-        }
-        .foregroundStyle(SwiftUI.Color(white: 0.9))
-        .padding(.vertical, 6)
-        .background(SwiftUI.Color(red: 14 / 255, green: 14 / 255, blue: 17 / 255))
-        .disabled(stream.connState != .connected)
-        .opacity(stream.connState == .connected ? 1 : 0.5)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in keyboardShown = true }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in keyboardShown = false }
     }
 }
 

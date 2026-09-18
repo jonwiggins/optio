@@ -101,17 +101,18 @@ struct SessionTerminalView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let error = controller.error {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
-                    .padding(.vertical, 6)
-                    .background(.red.opacity(0.08))
+                HStack(spacing: Spacing.s) {
+                    Image(systemName: "exclamationmark.circle").foregroundStyle(.red)
+                    Text(error).font(.footnote).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Spacing.l)
+                .padding(.vertical, 6)
+                .background(TerminalTheme.background(colorScheme))
             }
             TerminalHostView(controller: controller)
                 .background(TerminalTheme.background(colorScheme))
-            TerminalExtraKeysBar { controller.sendInput($0) }
+            TerminalKeyBar(enabled: controller.connected, send: { controller.sendInput($0[...]) })
         }
         .onAppear { controller.start() }
     }
@@ -170,7 +171,9 @@ struct TerminalHostView: UIViewRepresentable {
                 Task { @MainActor in UIApplication.shared.open(url) }
             }
         }
-        func bell(source: TerminalView) {}
+        func bell(source: TerminalView) {
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        }
         func clipboardCopy(source: TerminalView, content: Data) {
             if let s = String(data: content, encoding: .utf8) {
                 Task { @MainActor in UIPasteboard.general.string = s }
@@ -181,64 +184,3 @@ struct TerminalHostView: UIViewRepresentable {
     }
 }
 
-/// Keys a phone keyboard lacks: Esc, Tab, Ctrl combos, arrows, and a few symbols.
-struct TerminalExtraKeysBar: View {
-    var send: (String) -> Void
-
-    private struct Key: Identifiable {
-        let id: String
-        let label: String
-        let systemImage: String?
-        let sequence: String
-    }
-
-    private let keys: [Key] = [
-        Key(id: "esc", label: "esc", systemImage: nil, sequence: "\u{1b}"),
-        Key(id: "tab", label: "tab", systemImage: "arrow.right.to.line", sequence: "\t"),
-        Key(id: "up", label: "up", systemImage: "arrow.up", sequence: "\u{1b}[A"),
-        Key(id: "down", label: "down", systemImage: "arrow.down", sequence: "\u{1b}[B"),
-        Key(id: "left", label: "left", systemImage: "arrow.left", sequence: "\u{1b}[D"),
-        Key(id: "right", label: "right", systemImage: "arrow.right", sequence: "\u{1b}[C"),
-        Key(id: "pipe", label: "|", systemImage: nil, sequence: "|"),
-        Key(id: "tilde", label: "~", systemImage: nil, sequence: "~"),
-        Key(id: "dash", label: "-", systemImage: nil, sequence: "-"),
-        Key(id: "slash", label: "/", systemImage: nil, sequence: "/"),
-    ]
-
-    private let ctrlKeys: [(String, UInt8)] = [
-        ("C", 0x03), ("D", 0x04), ("Z", 0x1a), ("L", 0x0c), ("R", 0x12),
-        ("A", 0x01), ("E", 0x05), ("U", 0x15), ("K", 0x0b), ("W", 0x17),
-    ]
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Menu {
-                    ForEach(ctrlKeys, id: \.0) { label, code in
-                        Button("Ctrl+\(label)") { send(String(UnicodeScalar(code))) }
-                    }
-                } label: {
-                    keyLabel("ctrl", systemImage: nil)
-                }
-                ForEach(keys) { key in
-                    Button { send(key.sequence) } label: { keyLabel(key.label, systemImage: key.systemImage) }
-                }
-                Button { send("\u{03}") } label: { keyLabel("^C", systemImage: nil) }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-        }
-        .background(.bar)
-    }
-
-    private func keyLabel(_ text: String, systemImage: String?) -> some View {
-        Group {
-            if let systemImage { Image(systemName: systemImage) } else { Text(text) }
-        }
-        .font(.caption.monospaced().weight(.medium))
-        .frame(minWidth: 36, minHeight: 30)
-        .padding(.horizontal, 6)
-        .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 6))
-        .foregroundStyle(.primary)
-    }
-}

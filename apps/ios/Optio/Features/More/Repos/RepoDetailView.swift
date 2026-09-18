@@ -55,7 +55,7 @@ struct RepoDetailView: View {
             if let repo = model.repo {
                 content(repo)
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error) { Task { await model.load(api: api) } }
             } else {
                 ProgressView()
             }
@@ -65,11 +65,7 @@ struct RepoDetailView: View {
         .task { await model.load(api: api) }
         .refreshable { await model.load(api: api) }
         .moreErrorAlert($errorMessage)
-        .alert("Done", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
-            Button("OK") { notice = nil }
-        } message: {
-            Text(notice ?? "")
-        }
+        .toast(notice, tone: .success) { notice = nil }
     }
 
     private func content(_ repo: RepoRow) -> some View {
@@ -142,19 +138,13 @@ struct RepoDetailView: View {
                     Text("No connections assigned to this repo.").font(.footnote).foregroundStyle(.secondary)
                 } else {
                     ForEach(model.connections) { conn in
-                        HStack(spacing: 10) {
-                            Circle().fill(StateColor.color(for: conn.status == "healthy" ? "success" : (conn.status == "error" ? "error" : "unknown")))
-                                .frame(width: 8, height: 8)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(conn.name ?? conn.id).font(.subheadline)
-                                if let p = conn.provider?.name {
-                                    Text(p).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            StatusBadge(text: conn.enabled == false ? "disabled" : "active",
-                                        color: conn.enabled == false ? .secondary : .green)
-                        }
+                        OptioRow(
+                            title: conn.name ?? conn.id,
+                            tone: conn.status == "error" ? .danger : nil,
+                            meta: conn.provider?.name.map { Text($0) },
+                            trailing: conn.enabled == false ? "Paused" : nil,
+                            titleLineLimit: 1
+                        )
                     }
                 }
             }
@@ -168,8 +158,8 @@ struct RepoDetailView: View {
                             HStack {
                                 Text(s.name ?? s.id).font(.subheadline)
                                 Spacer()
-                                StatusBadge(text: s.scope == "global" ? "global" : "repo", color: .secondary)
-                                if s.enabled == false { StatusBadge(text: "disabled", color: .orange) }
+                                StatusBadge(text: s.scope == "global" ? "global" : "repo", tone: .working)
+                                if s.enabled == false { StatusBadge(text: "disabled", tone: .idle) }
                             }
                             Text(([s.command ?? ""] + (s.args ?? [])).joined(separator: " "))
                                 .font(.caption.monospaced())

@@ -31,7 +31,7 @@ struct ReposListView: View {
             if model.loading {
                 ProgressView().frame(maxWidth: .infinity)
             } else if let error = model.error, model.repos.isEmpty {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error) { Task { await model.load(api: api) } }
             } else if model.repos.isEmpty {
                 EmptyState(title: "No repositories", systemImage: "folder",
                            message: context.isAdmin ? "Add a repository to get started." : "Ask a workspace admin to add one.")
@@ -61,23 +61,15 @@ struct ReposListView: View {
     }
 
     private func row(_ repo: RepoRow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text(repo.displayName).font(.headline).lineLimit(1)
-                Image(systemName: repo.isPrivate == true ? "lock.fill" : "globe")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            HStack(spacing: 10) {
-                Label(repo.defaultBranch ?? "main", systemImage: "arrow.triangle.branch")
-                Label(repo.imagePreset ?? "base", systemImage: "shippingbox")
-                if repo.autoMerge == true {
-                    Text("auto-merge").foregroundStyle(.orange)
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 2)
+        OptioRow(
+            title: repo.displayName,
+            meta: Text.meta([
+                Text.mono(repo.defaultBranch ?? "main"),
+                Text(repo.imagePreset ?? "base"),
+                repo.autoMerge == true ? Text("auto-merge") : nil,
+                repo.isPrivate == true ? Text("private") : nil,
+            ]),
+            titleLineLimit: 1
+        )
     }
 }

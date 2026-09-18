@@ -92,8 +92,7 @@ struct TaskDetailView: View {
             if let task = model.task {
                 header(task)
                 banners(task)
-                ChipPicker(options: [("logs", "Logs"), ("activity", "Activity"), ("subtasks", "Subtasks (\(model.subtasks.count))"), ("deps", "Dependencies")], selection: $section)
-                Divider()
+                DetailTabs(options: [("logs", "Logs"), ("activity", "Activity"), ("subtasks", "Subtasks"), ("deps", "Deps")], selection: $section)
                 switch section {
                 case "logs": logsSection
                 case "activity": activitySection
@@ -101,10 +100,9 @@ struct TaskDetailView: View {
                 default: dependenciesSection
                 }
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
-                Spacer()
+                List { ErrorRow(error: error, what: "task") { Task { await model.load(api: api) } } }.listStyle(.plain)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                List { SkeletonRows() }.listStyle(.plain)
             }
         }
         .navigationTitle(model.task?.title ?? "Task")
@@ -141,12 +139,8 @@ struct TaskDetailView: View {
                 }
             }
         }
-        .alert("Action failed", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
-            Button("OK") {}
-        } message: { Text(model.actionError?.localizedDescription ?? "") }
-        .alert(model.notice ?? "", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) {
-            Button("OK") {}
-        }
+        .errorToast(Binding(get: { model.actionError }, set: { model.actionError = $0 }))
+        .toast(model.notice, tone: .success) { model.notice = nil }
     }
 
     private var confirmTitle: String {
@@ -196,79 +190,66 @@ struct TaskDetailView: View {
     // MARK: Header
 
     private func header(_ task: TaskRow) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                StatusBadge(text: task.state, color: StateColor.color(for: task.state))
-                if model.stallInfo?.isStalled == true { StatusBadge(text: "stalled", color: .yellow) }
-                if let t = task.taskType, t != "coding" { StatusBadge(text: t, color: AppTheme.accent) }
-                Spacer()
-                if let cost = task.costUsd, let v = Double(cost) { Text(String(format: "$%.4f", v)).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-            }
-            HStack(spacing: 12) {
-                Label("\(task.repoShortName)\(task.repoBranch.map { " · \($0)" } ?? "")", systemImage: "shippingbox").lineLimit(1)
-                Label(RunFormatting.agentLabel(task.agentType), systemImage: "cpu")
-            }
-            .font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 12) {
-                if let c = task.createdAt { Text("created \(c.relativeDescription)") }
-                if let s = task.startedAt, let e = task.completedAt { Text("ran \(RunFormatting.duration(e.timeIntervalSince(s) * 1000))") }
-                else if let s = task.startedAt { Text("started \(s.relativeDescription)") }
-                if let m = task.modelUsed { Text(m) }
-                if let i = task.inputTokens, let o = task.outputTokens { Text("\(i)/\(o) tok") }
-            }
-            .font(.caption2).foregroundStyle(.tertiary)
+        let stalled = model.stallInfo?.isStalled == true && task.state == "running"
+        var facts: [Text?] = []
+        if let st = task.startedAt, let e = task.completedAt { facts.append(Text(RunFormatting.duration(e.timeIntervalSince(st) * 1000))) }
+        else if let st = task.startedAt { facts.append(Text("started \(st.relativeDescription)")) }
+        else if let c = task.createdAt { facts.append(Text("created \(c.relativeDescription)")) }
+        if let m = task.modelUsed { facts.append(Text(InsightsFormat.modelShortName(m))) }
+        facts.append(Text(RunFormatting.agentLabel(task.agentType)))
+        if let cost = Cost.formatIfNonZero(task.costUsd) { facts.append(Text(cost)) }
+        if let t = task.taskType, t != "coding" { facts.append(Text(t)) }
+        var line2: [Text?] = [Text(task.repoShortName)]
+        if let b = task.repoBranch { line2.append(Text.mono(b)) }
+        if task.prUrl != nil {
+            line2.append(Text.mono(task.prLabel ?? "PR"))
+            if let checks = task.prChecksStatus, checks != "none" { line2.append(Text("CI \(checks)")) }
+            if let review = task.prReviewStatus, review != "none" { line2.append(Text("review \(review.replacingOccurrences(of: "_", with: " "))")) }
+            if let prState = task.prState, prState != "open" { line2.append(Text(prState)) }
+        }
+        let needsYou: String? = {
+            if task.state == "needs_attention" { return task.errorMessage ?? "Needs your attention" }
+            if stalled { return "Agent looks stuck — check the logs" }
+            if task.prReviewStatus == "changes_requested" { return "Reviewer requested changes" }
+            return nil
+        }()
+        return DetailHeader(
+            state: stalled ? "stalled" : task.state,
+            tone: stalled ? .working : (task.state == "needs_attention" ? .working : nil),
+            line: Text.meta(facts),
+            secondary: Text.meta(line2),
+            needsYou: needsYou
+        ) {
             if let prUrl = task.prUrl, let url = URL(string: prUrl) {
-                HStack(spacing: 8) {
-                    Link(destination: url) {
-                        Label(task.prLabel ?? "PR", systemImage: "arrow.triangle.pull")
-                    }
-                    .font(.caption.weight(.medium))
-                    if let checks = task.prChecksStatus, checks != "none" {
-                        Text("CI \(checks)").font(.caption2).foregroundStyle(checks == "passing" ? .green : checks == "failing" ? .red : .secondary)
-                    }
-                    if let review = task.prReviewStatus, review != "none" {
-                        Text("review \(review.replacingOccurrences(of: "_", with: " "))").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    if let prState = task.prState, prState != "open" {
-                        StatusBadge(text: prState, color: StateColor.color(for: prState))
-                    }
-                }
+                Link(destination: url) { Image(systemName: "arrow.up.right.square") }
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityLabel("Open pull request")
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.bar)
     }
 
     @ViewBuilder private func banners(_ task: TaskRow) -> some View {
         if let reason = model.pendingReason {
-            banner(reason, icon: reason.contains("off-peak") ? "moon" : "clock", color: .orange)
+            banner(reason, icon: reason.contains("off-peak") ? "moon" : "clock", tone: .idle)
         }
         if let stall = model.stallInfo, stall.isStalled, task.state == "running" {
-            banner("Agent looks stuck. No activity for \(RunFormatting.duration(stall.silentForMs)).\(stall.lastLogSummary.map { " Last: \($0)" } ?? "")", icon: "exclamationmark.triangle", color: .yellow)
+            banner("No activity for \(RunFormatting.duration(stall.silentForMs)).\(stall.lastLogSummary.map { " Last: \($0)" } ?? "")", icon: "exclamationmark.triangle", tone: .working)
         }
         if task.state == "failed", let err = task.errorMessage {
-            banner(err, icon: "xmark.octagon", color: .red)
-        } else if task.state == "needs_attention", let err = task.errorMessage {
-            banner(err, icon: "hand.raised", color: .yellow)
+            banner(err, icon: "xmark.octagon", tone: .danger)
         }
         if task.state == "completed", let summary = task.resultSummary, !summary.isEmpty {
-            banner(summary, icon: "checkmark.circle", color: .green)
+            banner(summary, icon: "checkmark.circle", tone: .success)
         }
         if model.isPlanReview {
-            banner("Plan ready for review — check the agent output, then send feedback or approve.", icon: "list.clipboard", color: AppTheme.accent)
+            banner("Plan ready for review — check the agent output, then send feedback or approve.", icon: "list.clipboard", tone: .accent)
         }
     }
 
-    private func banner(_ text: String, icon: String, color: Color) -> some View {
-        Label(text, systemImage: icon)
-            .font(.footnote)
-            .foregroundStyle(color)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal)
-            .padding(.vertical, 6)
-            .background(color.opacity(0.08))
+    private func banner(_ text: String, icon: String, tone: Tone) -> some View {
+        NoticeBanner(tone: tone, systemImage: icon) { Text(text) }
+            .padding(.horizontal, Spacing.l)
+            .padding(.vertical, Spacing.xs)
     }
 
     // MARK: Logs
@@ -402,15 +383,15 @@ struct TaskActivityRow: View {
             switch item.type {
             case "event":
                 HStack(spacing: 6) {
-                    if let from = item.fromState { StatusBadge(text: from, color: StateColor.color(for: from)); Image(systemName: "arrow.right").font(.caption2) }
-                    StatusBadge(text: item.toState ?? "", color: StateColor.color(for: item.toState ?? ""))
+                    if let from = item.fromState { StatusBadge(text: from, tone: Tone.forState(from)); Image(systemName: "arrow.right").font(.caption2) }
+                    StatusBadge(text: item.toState ?? "", tone: Tone.forState(item.toState ?? ""))
                     if let name = item.user?.displayName { Text("by \(name)").font(.caption2).foregroundStyle(.secondary) }
                 }
                 if let trigger = item.trigger { Text(trigger.replacingOccurrences(of: "_", with: " ")).font(.caption).foregroundStyle(.secondary) }
                 if let msg = item.message { Text(msg).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
             case "message":
                 HStack(spacing: 6) {
-                    Image(systemName: item.mode == "interrupt" ? "hand.raised.fill" : "paperplane.fill").font(.caption).foregroundStyle(item.mode == "interrupt" ? .yellow : AppTheme.accent)
+                    Image(systemName: item.mode == "interrupt" ? "hand.raised.fill" : "paperplane.fill").font(.caption).foregroundStyle(item.mode == "interrupt" ? AnyShapeStyle(.secondary) : AnyShapeStyle(AppTheme.accent))
                     Text(item.user?.displayName ?? "You").font(.caption.weight(.semibold))
                     Text(item.ackedAt != nil ? "acked" : item.deliveredAt != nil ? "delivered" : "sending").font(.caption2).foregroundStyle(.tertiary)
                 }
@@ -453,7 +434,7 @@ struct CreateSubtaskSheet: View {
                 Section("Prompt") {
                     TextEditor(text: $prompt).frame(minHeight: 140)
                 }
-                if let error { ErrorBanner(error: error) }
+                if let error { ErrorRow(error: error) }
             }
             .navigationTitle("New subtask")
             .navigationBarTitleDisplayMode(.inline)
@@ -507,7 +488,7 @@ struct AddDependencySheet: View {
             .navigationTitle("Add dependency")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .alert("Failed", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") {} } message: { Text(error?.localizedDescription ?? "") }
+            .errorToast(Binding(get: { error }, set: { error = $0 }))
         }
     }
 }

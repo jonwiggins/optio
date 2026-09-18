@@ -48,7 +48,7 @@ struct SharedDirectoriesView: View {
             if model.loading {
                 ProgressView().frame(maxWidth: .infinity)
             } else if let error = model.error, model.directories.isEmpty {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error) { Task { await model.load(api: api) } }
             } else if model.directories.isEmpty {
                 EmptyState(title: "No shared directories", systemImage: "externaldrive",
                            message: "Add a persistent cache (npm, pip, cargo…) to speed up agent pods.")
@@ -111,9 +111,7 @@ struct SharedDirectoriesView: View {
                 } }
             }
         }
-        .alert("Done", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
-            Button("OK") { notice = nil }
-        } message: { Text(notice ?? "") }
+        .toast(notice, tone: .success) { notice = nil }
         .moreErrorAlert($errorMessage)
     }
 

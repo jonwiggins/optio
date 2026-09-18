@@ -231,33 +231,34 @@ enum LocalPresentation {
         }
     }
 
-    static func stateColor(_ t: LocalTerminal) -> Color {
+    /// Terminal state → tone. Needs-you wins over everything while the process is alive.
+    static func stateTone(_ t: LocalTerminal) -> Tone {
+        if t.attentionState == .needsYou, !isDead(t) { return .accent }
         switch t.state {
-        case .pending: return .orange
-        case .launching: return .blue
-        case .running: return AppTheme.accent
-        case .exited: return .secondary
-        case .error: return .red
-        case .unknown: return .secondary
+        case .pending: return .idle
+        case .launching, .running: return .working
+        case .exited: return t.exitCode.map { $0 == 0 } ?? true ? .idle : .danger
+        case .error: return .danger
+        case .unknown: return .idle
         }
     }
 
-    static func attentionColor(_ a: LocalAttentionState) -> Color {
+    static func attentionTone(_ a: LocalAttentionState) -> Tone {
         switch a {
-        case .needsYou: return .yellow
-        case .working: return AppTheme.accent
-        case .idle, .unknown: return .secondary
+        case .needsYou: return .accent
+        case .working: return .working
+        case .idle, .unknown: return .idle
         }
     }
 
-    /// Accent dot for a row: attention while live, muted once finished (`rowDot` in terminal-row.tsx).
-    static func rowDot(_ t: LocalTerminal) -> Color {
-        if t.attentionState == .needsYou { return .yellow }
-        if t.state == .error { return .red }
-        if t.state == .exited { return Color.secondary.opacity(0.3) }
-        if t.state == .pending || t.state == .launching { return .orange.opacity(0.6) }
-        if t.attentionState == .working { return AppTheme.accent }
-        return Color.secondary.opacity(0.4)
+    /// Row dot: accent while it needs you, red on error, secondary while working, none once finished.
+    static func rowTone(_ t: LocalTerminal) -> Tone? {
+        if t.attentionState == .needsYou, !isDead(t) { return .accent }
+        if t.state == .error { return .danger }
+        if t.state == .exited { return (t.exitCode ?? 0) == 0 ? nil : .danger }
+        if t.state == .pending || t.state == .launching { return .idle }
+        if t.attentionState == .working { return .working }
+        return .idle
     }
 
     /// Ticket link merged in ahead of scanned links (`collectWorkLinks`).
@@ -335,8 +336,8 @@ struct WorkLinkBadges: View {
                                 .fixedSize()
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background((link.kind == .pr ? AppTheme.accent : Color.secondary).opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
-                                .foregroundStyle(link.kind == .pr ? AppTheme.accent : .secondary)
+                                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
+                                .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
                     }

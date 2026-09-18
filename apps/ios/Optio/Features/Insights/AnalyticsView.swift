@@ -37,14 +37,13 @@ struct AnalyticsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                PeriodPicker(days: $model.days)
+            VStack(alignment: .leading, spacing: Spacing.l) {
                 if let error = model.error, model.performance == nil {
                     if error.isForbidden { AdminOnlyState(what: "Analytics") } else {
-                        ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                        ErrorRow(error: error, what: "analytics") { Task { await model.load(api: api) } }
                     }
                 } else if model.loading, model.performance == nil {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                    SkeletonStrip(labels: ["Success", "Avg duration", "Queue wait", "PR merge"])
                 } else {
                     summaryTiles
                     tasksOverTime
@@ -56,6 +55,9 @@ struct AnalyticsView: View {
             }
             .padding()
         }
+        .background(Surface.page)
+        .dimmedWhileLoading(model.loading && model.performance != nil)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { PeriodPicker(days: $model.days).fixedSize() } }
         .refreshable { await model.load(api: api) }
         .task(id: model.days) { await model.load(api: api) }
     }
@@ -65,18 +67,20 @@ struct AnalyticsView: View {
     private var summaryTiles: some View {
         let p = model.performance
         let trend = p?.successRateTrend ?? 0
-        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            tile("Success rate", InsightsFormat.percent(p?.successRate ?? 0), sub: trend != 0 ? "\(trend > 0 ? "+" : "")\(Int(trend))pp vs prev" : nil, color: .green, icon: "checkmark.circle")
-            tile("Avg duration", InsightsFormat.duration(p?.durations?.avgExecution), sub: "p95: \(InsightsFormat.duration(p?.durations?.p95Execution))", color: .blue, icon: "clock")
-            tile("Queue wait", InsightsFormat.duration(p?.durations?.avgQueueWait), sub: "\(p?.durations?.taskCount ?? 0) completed tasks", color: .primary, icon: "hourglass")
-            tile("PR merge rate", InsightsFormat.percent(model.prs?.autoMergeRate ?? 0), sub: "\(model.prs?.merged ?? 0) of \(model.prs?.totalPrs ?? 0) PRs merged", color: AppTheme.accent, icon: "arrow.triangle.merge")
-        }
-    }
-
-    private func tile(_ title: String, _ value: String, sub: String?, color: Color, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            StatTile(title: title, value: value, color: color, systemImage: icon)
-            if let sub { Text(sub).font(.caption2).foregroundStyle(.secondary).padding(.leading, 4) }
+        return VStack(alignment: .leading, spacing: Spacing.s) {
+            StatStrip(items: [
+                StatItem("Success", text: InsightsFormat.percent(p?.successRate ?? 0)),
+                StatItem("Avg duration", text: InsightsFormat.duration(p?.durations?.avgExecution)),
+                StatItem("Queue wait", text: InsightsFormat.duration(p?.durations?.avgQueueWait)),
+                StatItem("PR merge", text: InsightsFormat.percent(model.prs?.autoMergeRate ?? 0)),
+            ])
+            Text.meta([
+                trend != 0 ? "\(trend > 0 ? "+" : "")\(Int(trend))pp vs previous" : nil,
+                "p95 \(InsightsFormat.duration(p?.durations?.p95Execution))",
+                "\(p?.durations?.taskCount ?? 0) completed",
+                "\(model.prs?.merged ?? 0) of \(model.prs?.totalPrs ?? 0) PRs merged",
+            ])
+            .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -98,11 +102,11 @@ struct AnalyticsView: View {
                             .foregroundStyle(by: .value("Outcome", "Failed"))
                     }
                 }
-                .chartForegroundStyleScale(["Succeeded": AppTheme.accent, "Failed": Color.red.opacity(0.8)])
+                .chartForegroundStyleScale(["Succeeded": ChartPalette.color(1), "Failed": Color.red.opacity(0.8)])
                 .chartLegend(position: .top, alignment: .leading)
                 .chartXAxis { AxisMarks(values: .automatic(desiredCount: 5)) { _ in AxisGridLine(); AxisValueLabel(format: .dateTime.month(.abbreviated).day()) } }
                 .chartYAxis { AxisMarks(position: .leading) { _ in AxisGridLine(); AxisValueLabel() } }
-                .frame(height: 220)
+                .frame(height: ChartPalette.primaryHeight)
             }
         }
     }
@@ -123,7 +127,7 @@ struct AnalyticsView: View {
                                 let rate = a.successRate ?? 0
                                 Text(InsightsFormat.percent(rate))
                                     .font(.caption.weight(.semibold).monospacedDigit())
-                                    .foregroundStyle(rate >= 80 ? .green : rate >= 50 ? .yellow : .red)
+                                    .foregroundStyle(rate < 50 ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
                             }
                             HStack(spacing: 10) {
                                 Label(InsightsFormat.duration(a.avgDuration), systemImage: "clock")
@@ -153,7 +157,7 @@ struct AnalyticsView: View {
             InsightCard(title: "Failure breakdown", systemImage: "exclamationmark.triangle") {
                 Chart(Array(top.enumerated()), id: \.offset) { _, m in
                     BarMark(x: .value("Count", m.count), y: .value("Error", Self.shortMessage(m.message)))
-                        .foregroundStyle(Color.red.opacity(0.75))
+                        .foregroundStyle(ChartPalette.color(1))
                         .cornerRadius(3)
                         .annotation(position: .trailing, spacing: 4) {
                             Text("\(m.count)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
@@ -161,7 +165,7 @@ struct AnalyticsView: View {
                 }
                 .chartXAxis(.hidden)
                 .chartYAxis { AxisMarks { _ in AxisValueLabel().font(.caption2) } }
-                .frame(height: CGFloat(max(120, top.count * 32)))
+                .frame(height: CGFloat(max(Int(ChartPalette.secondaryHeight), top.count * 28)))
 
                 Divider()
                 HStack(spacing: 14) {
@@ -207,7 +211,7 @@ struct AnalyticsView: View {
     }
 
     private func rateColor(_ rate: Double) -> Color {
-        rate >= 30 ? .red : rate >= 15 ? .yellow : Color.secondary.opacity(0.5)
+        rate >= 30 ? .red : ChartPalette.color(1)
     }
 
     // MARK: PR funnel
@@ -220,7 +224,7 @@ struct AnalyticsView: View {
             InsightCard(title: "PR lifecycle funnel", systemImage: "arrow.triangle.pull") {
                 ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
                     let pct = opened > 0 ? Double(step.1) / Double(opened) : 0
-                    RateBar(label: step.0, valueText: i == 0 ? "\(step.1)" : "\(step.1) · \(Int((pct * 100).rounded()))%", fraction: pct, color: AppTheme.accent.opacity(1 - Double(i) * 0.18))
+                    RateBar(label: step.0, valueText: i == 0 ? "\(step.1)" : "\(step.1) · \(Int((pct * 100).rounded()))%", fraction: pct, color: ChartPalette.color(i))
                 }
                 Divider()
                 HStack(spacing: 12) {

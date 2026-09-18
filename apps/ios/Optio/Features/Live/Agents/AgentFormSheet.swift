@@ -83,7 +83,7 @@ struct AgentFormSheet: View {
                 Section {
                     TextEditor(text: $initialPrompt).font(.caption.monospaced()).frame(minHeight: 90)
                 } header: { Text("Initial prompt") } footer: { Text("The agent's first mission — sent only on the first turn.") }
-                if let error { ErrorBanner(error: error) }
+                if let error { ErrorRow(error: error) }
             }
             .navigationTitle(isEdit ? "Edit agent" : "New agent")
             .navigationBarTitleDisplayMode(.inline)

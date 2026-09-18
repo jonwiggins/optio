@@ -21,7 +21,7 @@ struct JobDetailView: View {
             if let job = model.job {
                 content(job)
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(jobId, api: api) } }
+                ErrorRow(error: error) { Task { await model.load(jobId, api: api) } }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -53,11 +53,7 @@ struct JobDetailView: View {
                 Task { if await model.delete(jobId, api: api) { dismiss() } }
             }
         }
-        .alert("Error", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.actionError?.localizedDescription ?? "")
-        }
+        .errorToast(Binding(get: { model.actionError }, set: { model.actionError = $0 }))
         .transientMessage(model.toast) { model.toast = nil }
     }
 
@@ -98,36 +94,34 @@ struct JobDetailView: View {
     private func content(_ job: JobSummary) -> some View {
         List {
             SwiftUI.Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        StatusBadge(text: job.isEnabled ? "enabled" : "disabled", color: job.isEnabled ? .green : .gray)
-                        Text(JobFormat.runtimeLabel(job.runtime)).font(.caption).foregroundStyle(.secondary)
-                        if let m = job.model, !m.isEmpty { Text("· \(m)").font(.caption).foregroundStyle(.secondary) }
-                    }
-                    if let d = job.description, !d.isEmpty {
-                        Text(d).font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        StatTile(title: "Total Runs", value: "\(job.runCount ?? model.runs.count)", systemImage: "number")
-                        StatTile(title: "Success Rate", value: model.successRateText, systemImage: "waveform.path.ecg")
-                        StatTile(title: "Total Cost", value: JobFormat.cost(job.totalCostUsd) ?? "$0.00", systemImage: "dollarsign.circle")
-                        StatTile(title: "Last Run", value: job.lastRunAt?.relativeDescription ?? "—", systemImage: "clock")
-                    }
-                    if model.activeRunCount > 0 {
-                        Label("\(model.activeRunCount) run\(model.activeRunCount == 1 ? "" : "s") active — auto-refreshing", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.accent)
-                    }
+                VStack(alignment: .leading, spacing: Spacing.s) {
+                    DetailHeader(
+                        state: job.isEnabled ? (model.activeRunCount > 0 ? "running" : "active") : "paused",
+                        tone: job.isEnabled ? (model.activeRunCount > 0 ? .working : .idle) : .idle,
+                        line: Text.meta([
+                            JobFormat.runtimeLabel(job.runtime),
+                            job.model.flatMap { $0.isEmpty ? nil : $0 },
+                            job.lastRunAt.map { "last run \($0.relativeDescription)" } ?? "no runs yet",
+                            model.activeRunCount > 0 ? "\(model.activeRunCount) active" : nil,
+                        ]),
+                        secondary: job.description.flatMap { $0.isEmpty ? nil : Text($0) }
+                    )
+                    .padding(.horizontal, -Spacing.l)
+                    StatStrip(items: [
+                        StatItem("Runs", job.runCount ?? model.runs.count),
+                        StatItem("Success", text: model.successRateText),
+                        StatItem("Cost", text: Cost.format(job.totalCostUsd)),
+                    ])
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 .listRowBackground(Color.clear)
             }
 
             SwiftUI.Section {
-                ChipPicker(options: [
-                    (Section.runs, "Runs (\(model.runs.count))"),
-                    (Section.triggers, "Triggers (\(model.triggers.count))"),
-                    (Section.config, "Configuration"),
+                DetailTabs(options: [
+                    (Section.runs, "Runs"),
+                    (Section.triggers, "Triggers"),
+                    (Section.config, "Config"),
                 ], selection: $section)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -251,7 +245,7 @@ struct JobRunRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                StatusBadge(text: run.state, color: StateColor.color(for: run.state))
+                StatusBadge(text: run.state, tone: Tone.forState(run.state))
                 Spacer()
                 Text((run.startedAt ?? run.createdAt)?.relativeDescription ?? "")
                     .font(.caption).foregroundStyle(.secondary)
@@ -286,12 +280,12 @@ struct JobTriggerRow: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: JobFormat.triggerIcon(trigger.type))
                 .frame(width: 32, height: 32)
-                .background(((trigger.enabled ?? true) ? AppTheme.accent : Color.gray).opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
-                .foregroundStyle((trigger.enabled ?? true) ? AppTheme.accent : .gray)
+                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
+                .foregroundStyle((trigger.enabled ?? true) ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     Text(trigger.type.capitalized).font(.subheadline.weight(.medium))
-                    StatusBadge(text: (trigger.enabled ?? true) ? "Active" : "Disabled", color: (trigger.enabled ?? true) ? .green : .gray)
+                    if !(trigger.enabled ?? true) { StatusBadge(text: "Paused", tone: .idle) }
                 }
                 if let cron = trigger.cronExpression {
                     Text(cron).font(.caption.monospaced())

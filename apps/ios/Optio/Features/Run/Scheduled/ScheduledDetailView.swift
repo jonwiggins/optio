@@ -57,8 +57,18 @@ struct ScheduledDetailView: View {
         Group {
             if let config = model.config {
                 VStack(spacing: 0) {
-                    ChipPicker(options: [("config", "Config"), ("triggers", "Triggers (\(model.triggers.count))"), ("runs", "Runs (\(model.runs.count))")], selection: $section)
-                    Divider()
+                    DetailHeader(
+                        state: config.enabled ? "active" : "paused",
+                        tone: config.enabled ? .working : .idle,
+                        line: Text.meta([
+                            Text(RunFormatting.repoShortName(config.repoUrl)),
+                            Text.mono(config.repoBranch ?? "main"),
+                            Text(RunFormatting.agentLabel(config.agentType)),
+                            Text(model.triggers.isEmpty ? "manual only" : "\(model.triggers.count) trigger\(model.triggers.count == 1 ? "" : "s")"),
+                        ]),
+                        secondary: model.triggers.first.map { Text(ScheduleFormat.humanize($0)) }
+                    )
+                    DetailTabs(options: [("config", "Config"), ("triggers", "Triggers"), ("runs", "Runs")], selection: $section)
                     switch section {
                     case "triggers": triggersList
                     case "runs": runsList
@@ -67,9 +77,9 @@ struct ScheduledDetailView: View {
                 }
                 .navigationTitle(config.name)
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                List { ErrorRow(error: error, what: "schedule") { Task { await model.load(api: api) } } }.listStyle(.plain)
             } else {
-                ProgressView()
+                List { SkeletonRows() }.listStyle(.plain)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -107,8 +117,8 @@ struct ScheduledDetailView: View {
                 Task { await model.run(api: api) { try await api.deleteTaskConfigTrigger(configId, triggerId: t.id); return nil } }
             }
         }
-        .alert("Action failed", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) { Button("OK") {} } message: { Text(model.actionError?.localizedDescription ?? "") }
-        .alert(model.notice ?? "", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) { Button("OK") {} }
+        .errorToast(Binding(get: { model.actionError }, set: { model.actionError = $0 }))
+        .toast(model.notice, tone: .success) { model.notice = nil }
         .task { await model.load(api: api) }
         .refreshable { await model.load(api: api) }
     }
@@ -116,7 +126,6 @@ struct ScheduledDetailView: View {
     private func configList(_ c: TaskConfigRow) -> some View {
         List {
             Section {
-                LabeledContent("Status") { StatusBadge(text: c.enabled ? "enabled" : "paused", color: c.enabled ? .green : .gray) }
                 LabeledContent("Repository", value: RunFormatting.repoShortName(c.repoUrl))
                 LabeledContent("Branch", value: c.repoBranch ?? "main")
                 LabeledContent("Agent", value: RunFormatting.agentLabel(c.agentType))
@@ -239,7 +248,7 @@ struct TaskConfigFormSheet: View {
                     Stepper("Priority: \(priority)", value: $priority, in: 0...1000, step: 10)
                     Stepper("Max retries: \(maxRetries)", value: $maxRetries, in: 0...10)
                 }
-                if let error { ErrorBanner(error: error) }
+                if let error { ErrorRow(error: error) }
             }
             .navigationTitle(existing == nil ? "New scheduled task" : "Edit")
             .navigationBarTitleDisplayMode(.inline)
@@ -351,7 +360,7 @@ struct TriggerFormSheet: View {
                 default:
                     Text("Manual triggers only run when you tap Run now.").foregroundStyle(.secondary)
                 }
-                if let error { ErrorBanner(error: error) }
+                if let error { ErrorRow(error: error) }
             }
             .navigationTitle("Add trigger")
             .navigationBarTitleDisplayMode(.inline)

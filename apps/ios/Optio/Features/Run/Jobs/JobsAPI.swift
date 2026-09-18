@@ -270,10 +270,7 @@ extension APIClient {
 // MARK: - Small helpers shared by the Jobs + Reviews screens
 
 enum JobFormat {
-    static func cost(_ raw: String?, digits: Int = 2) -> String? {
-        guard let raw, let v = Double(raw), v != 0 else { return nil }
-        return String(format: "$%.\(digits)f", v)
-    }
+    static func cost(_ raw: String?, digits: Int = 2) -> String? { Cost.formatIfNonZero(raw) }
 
     static let agentRuntimes: [(String, String)] = [
         ("claude-code", "Claude Code"),

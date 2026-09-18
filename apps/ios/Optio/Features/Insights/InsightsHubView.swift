@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Insights tab: Analytics · Costs · Activity · Cluster, switched with a chip row.
+/// Insights tab: Analytics · Costs · Activity · Cluster, switched from the toolbar.
 struct InsightsHubView: View {
     enum Section: String, CaseIterable, Hashable {
         case analytics, costs, activity, cluster
@@ -13,8 +13,7 @@ struct InsightsHubView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ChipPicker(options: Section.allCases.map { ($0, $0.label) }, selection: $section)
-                Divider()
+                HubSwitcher(options: Section.allCases.map { ($0, $0.label) }, selection: $section)
                 Group {
                     switch section {
                     case .analytics: AnalyticsView()
@@ -23,10 +22,11 @@ struct InsightsHubView: View {
                     case .cluster: ClusterView()
                     }
                 }
+                .id(section)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .navigationTitle("Insights")
-            .navigationBarTitleDisplayMode(.inline)
+            .hubChrome()
             .onAppear(perform: consumeRoute)
             .onChange(of: router.pendingSection) { _, _ in consumeRoute() }
         }

@@ -68,7 +68,7 @@ struct WorkspaceSettingsView: View {
             if model.loading {
                 ProgressView().frame(maxWidth: .infinity)
             } else if let error = model.error, model.workspace == nil {
-                ErrorBanner(error: error) { Task { await load() } }
+                ErrorRow(error: error) { Task { await load() } }
             } else if let ws = model.workspace {
                 Section {
                     if model.isAdmin {
@@ -158,9 +158,7 @@ struct WorkspaceSettingsView: View {
         .confirmationDialog("Delete this workspace?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
             Button("Delete workspace", role: .destructive) { Task { await deleteWorkspace() } }
         } message: { Text("All repos, tasks, secrets and settings in it will be deleted.") }
-        .alert("Workspace", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
-            Button("OK") { notice = nil }
-        } message: { Text(notice ?? "") }
+        .toast(notice, tone: .success) { notice = nil }
         .moreErrorAlert($errorMessage)
     }
 

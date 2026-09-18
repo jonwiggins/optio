@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// "Live" tab: Agents (persistent agents) · Sessions (interactive workspaces) ·
-/// Local (Optio Local terminals on the user's own machine).
+/// "Live" tab: Local (Optio Local terminals on the user's own machine, first and
+/// default) · Agents (persistent agents) · Sessions (interactive workspaces).
 struct LiveHubView: View {
     enum Section: Hashable { case local, agents, sessions }
     @State private var section: Section = .local
@@ -11,19 +11,18 @@ struct LiveHubView: View {
     var body: some View {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
-                ChipPicker(options: [
-                    (Section.local, "Local"),
-                    (Section.agents, "Agents"),
-                    (Section.sessions, "Sessions"),
-                ], selection: $section)
-                Divider()
-                switch section {
-                case .agents: AgentsListView()
-                case .sessions: SessionsListView()
-                case .local: LocalHubView()
+                HubSwitcher(options: [(Section.local, "Local"), (.agents, "Agents"), (.sessions, "Sessions")], selection: $section)
+                Group {
+                    switch section {
+                    case .local: LocalHubView()
+                    case .agents: AgentsListView()
+                    case .sessions: SessionsListView()
+                    }
                 }
+                .id(section)
             }
             .navigationTitle("Live")
+            .hubChrome()
             .navigationDestination(for: AppRouter.PendingDetail.self) { detail in
                 switch detail.kind {
                 case .local: LocalTerminalScreen(terminalId: detail.id, focusComposer: detail.compose)

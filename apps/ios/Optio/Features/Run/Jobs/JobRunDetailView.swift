@@ -18,8 +18,7 @@ struct JobRunDetailView: View {
         VStack(spacing: 0) {
             if let run = model.run {
                 header(run)
-                ChipPicker(options: [(Section.logs, "Logs"), (Section.details, "Details")], selection: $section)
-                Divider()
+                DetailTabs(options: [(Section.logs, "Logs"), (Section.details, "Details")], selection: $section)
                 switch section {
                 case .logs:
                     if logs.entries.isEmpty {
@@ -36,12 +35,12 @@ struct JobRunDetailView: View {
                     details(run)
                 }
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(runId, jobId: jobId, api: api) } }
+                List { ErrorRow(error: error, what: "run") { Task { await model.load(runId, jobId: jobId, api: api) } } }.listStyle(.plain)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                List { SkeletonRows() }.listStyle(.plain)
             }
         }
-        .navigationTitle("Run \(runId.prefix(8))")
+        .navigationTitle(model.jobName ?? "Run \(runId.prefix(8))")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -72,43 +71,24 @@ struct JobRunDetailView: View {
             }
         }
         .onDisappear { logs.stop() }
-        .alert("Error", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.actionError?.localizedDescription ?? "")
-        }
+        .errorToast(Binding(get: { model.actionError }, set: { model.actionError = $0 }))
     }
 
     private func header(_ run: JobRun) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                StatusBadge(text: run.state, color: StateColor.color(for: run.state))
-                if let name = model.jobName { Text(name).font(.subheadline.weight(.medium)).lineLimit(1) }
-                Spacer()
-                if logs.connected { Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.green).font(.caption) }
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    if let m = run.modelUsed { Label(m, systemImage: "cpu") }
-                    if let d = run.durationText { Label(d, systemImage: "clock") } else if let c = run.createdAt { Label(c.relativeDescription, systemImage: "clock") }
-                    if let c = JobFormat.cost(run.costUsd, digits: 4) { Label(c, systemImage: "dollarsign.circle") }
-                    if let t = run.tokensText { Label(t, systemImage: "text.word.spacing") }
-                    if let r = run.retryCount, r > 0 { Label("retry \(r)", systemImage: "arrow.counterclockwise") }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            if let err = run.errorMessage, !err.isEmpty {
-                Label(err, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(section == .details ? nil : 3)
-            }
+        DetailHeader(
+            state: run.state,
+            line: Text.meta([
+                run.durationText.map { Text($0) } ?? run.createdAt.map { Text($0.relativeDescription) },
+                run.modelUsed.map { Text(InsightsFormat.modelShortName($0)) },
+                Cost.formatIfNonZero(run.costUsd).map { Text($0) },
+                run.tokensText.map { Text($0) },
+                (run.retryCount ?? 0) > 0 ? Text("retry \(run.retryCount!)") : nil,
+                Text.mono(String(runId.prefix(8))),
+            ]),
+            secondary: run.errorMessage.flatMap { $0.isEmpty ? nil : Text($0) }
+        ) {
+            if logs.connected { StateDot(tone: .working, size: 6).accessibilityLabel("Live") }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.bar)
     }
 
     private func details(_ run: JobRun) -> some View {

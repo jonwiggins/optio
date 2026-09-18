@@ -72,9 +72,9 @@ enum ConnectionIcons {
 
     static func statusColor(_ status: String?) -> Color {
         switch status {
-        case "healthy", "connected": return .green
-        case "error", "failed": return .red
-        default: return .gray
+        case "healthy", "connected": return Tone.success.color
+        case "error", "failed": return Tone.danger.color
+        default: return Tone.idle.color
         }
     }
 }
@@ -97,7 +97,7 @@ struct ConnectionsView: View {
             if model.loading {
                 ProgressView().frame(maxWidth: .infinity)
             } else if let error = model.error, model.connections.isEmpty, model.providers.isEmpty {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error) { Task { await model.load(api: api) } }
             } else {
                 Section {
                     if model.connections.isEmpty {
@@ -162,7 +162,7 @@ struct ConnectionsView: View {
                                     ))
                                     .labelsHidden()
                                 } else if s.enabled == false {
-                                    StatusBadge(text: "disabled", color: .orange)
+                                    StatusBadge(text: "Paused", tone: .idle)
                                 }
                             }
                             Text(([s.command ?? ""] + (s.args ?? [])).joined(separator: " "))
@@ -220,20 +220,18 @@ struct ConnectionsView: View {
 
     private func connectionRow(_ conn: ConnectionRow) -> some View {
         let provider = model.provider(for: conn)
-        return HStack(spacing: 10) {
-            Circle().fill(ConnectionIcons.statusColor(conn.status)).frame(width: 8, height: 8)
-            Image(systemName: ConnectionIcons.symbol(for: provider)).foregroundStyle(.secondary).frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(conn.name ?? conn.id).font(.subheadline).lineLimit(1)
-                    if let p = provider?.name { StatusBadge(text: p, color: .secondary) }
-                    if conn.enabled == false { StatusBadge(text: "disabled", color: .orange) }
-                }
-                if let at = conn.lastCheckedAt {
-                    Text("Checked \(at.relativeDescription)").font(.caption2).foregroundStyle(.tertiary)
-                }
-            }
-        }
+        let tone: Tone? = conn.status == "error" || conn.status == "failed" ? .danger : nil
+        return OptioRow(
+            title: conn.name ?? conn.id,
+            tone: tone,
+            meta: Text.meta([
+                provider?.name,
+                conn.status.flatMap { $0 == "healthy" || $0 == "connected" ? nil : $0 },
+                conn.lastCheckedAt.map { "checked \($0.relativeDescription)" },
+            ]),
+            trailing: conn.enabled == false ? "Paused" : nil,
+            titleLineLimit: 1
+        )
     }
 
     private func setMcpEnabled(_ s: McpServerRow, _ on: Bool) async {

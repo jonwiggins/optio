@@ -74,7 +74,7 @@ struct NewTaskSheet: View {
                     Stepper("Priority: \(priority)", value: $priority, in: 0...1000, step: 10)
                     Stepper("Max retries: \(maxRetries)", value: $maxRetries, in: 0...10)
                 } footer: { Text("Lower priority number runs first. Default 100.") }
-                if let error { ErrorBanner(error: error) }
+                if let error { ErrorRow(error: error) }
             }
             .navigationTitle("New Task")
             .navigationBarTitleDisplayMode(.inline)

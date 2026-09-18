@@ -50,14 +50,14 @@ struct ClusterView: View {
                 }
             } else if model.loading, model.overview == nil {
                 if let error = model.error {
-                    ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                    List { ErrorRow(error: error, what: "the cluster") { Task { await model.load(api: api) } } }.listStyle(.plain)
                 } else {
-                    ProgressView()
+                    List { SkeletonStrip(labels: ["Nodes", "Pods", "Agents", "Infra"]).listRowSeparator(.hidden).listRowBackground(Color.clear); SkeletonRows() }.listStyle(.plain)
                 }
             } else if let ov = model.overview {
                 content(ov)
             } else if let error = model.error {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                List { ErrorRow(error: error, what: "the cluster") { Task { await model.load(api: api) } } }.listStyle(.plain)
             }
         }
         .task {
@@ -72,65 +72,63 @@ struct ClusterView: View {
     private func content(_ ov: ClusterOverview) -> some View {
         List {
             Section {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    StatTile(title: "Nodes ready", value: "\(ov.summary.readyNodes)/\(ov.summary.totalNodes)", color: .green, systemImage: "server.rack")
-                    StatTile(title: "Pods running", value: "\(ov.summary.runningPods)/\(ov.summary.totalPods)", color: AppTheme.accent, systemImage: "shippingbox")
-                    StatTile(title: "Agent pods", value: "\(ov.summary.agentPods)", color: .yellow, systemImage: "waveform.path.ecg")
-                    StatTile(title: "Infrastructure", value: "\(ov.summary.infraPods)", color: .blue, systemImage: "cylinder")
-                }
+                StatStrip(items: [
+                    StatItem("Nodes", text: "\(ov.summary.readyNodes)/\(ov.summary.totalNodes)", tone: ov.summary.readyNodes < ov.summary.totalNodes ? .danger : nil),
+                    StatItem("Pods", text: "\(ov.summary.runningPods)/\(ov.summary.totalPods)"),
+                    StatItem("Agents", ov.summary.agentPods),
+                    StatItem("Infra", ov.summary.infraPods),
+                ])
+                .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.l, bottom: Spacing.xs, trailing: Spacing.l))
+                .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
                 versionRow.listRowSeparator(.hidden)
             }
 
             if !ov.nodes.isEmpty {
-                Section("Nodes") {
+                Section {
                     ForEach(ov.nodes) { node in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
-                                Circle().fill(node.isReady ? Color.green : Color.red).frame(width: 8, height: 8)
-                                Text(node.name).font(.caption.monospaced().weight(.medium))
+                                if !node.isReady { StateDot(tone: .danger) }
+                                Text(node.name).font(.monoSubheadline)
                                 Spacer()
-                                Text(node.kubeletVersion ?? "").font(.caption2).foregroundStyle(.secondary)
+                                Text(node.kubeletVersion ?? "").font(.caption).foregroundStyle(.tertiary)
                             }
-                            HStack(spacing: 12) {
-                                if let cpu = node.cpuPercent?.value {
-                                    Label("\(Int(cpu))% of \(Self.num(node.cpu)) cores", systemImage: "cpu")
-                                } else {
-                                    Label("\(Self.num(node.cpu)) cores", systemImage: "cpu")
-                                }
-                                if let used = node.memoryUsedGi?.value {
-                                    Label(String(format: "%.1f / %.1f Gi", used, node.memoryTotalGi?.value ?? 0), systemImage: "memorychip")
-                                } else {
-                                    Label(InsightsFormat.k8sResource(node.memory), systemImage: "memorychip")
-                                }
-                            }
-                            .font(.caption2).foregroundStyle(.secondary)
+                            Text.meta([
+                                "\(Self.num(node.cpu)) cores",
+                                node.memoryUsedGi?.value.map { String(format: "%.1f / %.1f Gi", $0, node.memoryTotalGi?.value ?? 0) } ?? InsightsFormat.k8sResource(node.memory),
+                                node.containerRuntime,
+                            ])?
+                            .font(.footnote).foregroundStyle(.secondary)
                             if ov.metricsAvailable == true, let cpu = node.cpuPercent?.value {
                                 RateBar(label: "CPU", valueText: "\(Int(cpu))%", fraction: cpu / 100)
                             }
                             if ov.metricsAvailable == true, let mem = node.memoryPercent {
-                                RateBar(label: "Memory", valueText: "\(mem)%", fraction: Double(mem) / 100, color: .blue)
+                                RateBar(label: "Memory", valueText: "\(mem)%", fraction: Double(mem) / 100)
                             }
-                            if let rt = node.containerRuntime { Text(rt).font(.caption2).foregroundStyle(.tertiary) }
                         }
                         .padding(.vertical, 2)
                     }
                     if ov.metricsAvailable == false {
                         Text("metrics-server not detected — CPU and memory usage unavailable.")
-                            .font(.caption2).foregroundStyle(.tertiary)
+                            .font(.footnote).foregroundStyle(.tertiary)
                     }
+                } header: {
+                    SectionHeader(title: "Nodes").textCase(nil)
                 }
             }
 
             Section {
-                ChipPicker(options: [
-                    (ClusterModel.Tab.pods, "Pods (\(ov.pods.count))"),
-                    (.repoPods, "Repo pods (\(model.repoPods.count))"),
-                    (.events, "Events (\(ov.events.count))"),
-                    (.health, "Health (\(model.healthEvents.count))"),
-                    (.services, "Services (\(ov.services.count))"),
-                ], selection: $model.tab)
-                .listRowInsets(EdgeInsets())
+                Picker("Show", selection: $model.tab) {
+                    Text("Pods").tag(ClusterModel.Tab.pods)
+                    Text("Repo pods").tag(ClusterModel.Tab.repoPods)
+                    Text("Events").tag(ClusterModel.Tab.events)
+                    Text("Health").tag(ClusterModel.Tab.health)
+                    Text("Services").tag(ClusterModel.Tab.services)
+                }
+                .pickerStyle(.segmented)
+                .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.l, bottom: Spacing.xs, trailing: Spacing.l))
+                .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
 
                 switch model.tab {
@@ -143,6 +141,7 @@ struct ClusterView: View {
             }
         }
         .listStyle(.plain)
+        .animation(.snappy, value: model.tab)
         .refreshable { await model.load(api: api) }
     }
 
@@ -152,12 +151,11 @@ struct ClusterView: View {
     private var versionRow: some View {
         if let v = model.version {
             HStack(spacing: 6) {
-                Image(systemName: "tag").foregroundStyle(.secondary)
-                Text("Optio \(v.current ?? "unknown")").font(.caption.weight(.medium))
+                Text("Optio \(v.current ?? "unknown")").font(.footnote).foregroundStyle(.secondary)
                 if v.updateAvailable == true, let latest = v.latest {
-                    StatusBadge(text: "v\(latest) available", color: AppTheme.accent)
+                    Text("· \(latest) available").font(.footnote).foregroundStyle(AppTheme.accent)
                 } else if let latest = v.latest {
-                    Text("latest \(latest)").font(.caption2).foregroundStyle(.tertiary)
+                    Text("· latest \(latest)").font(.footnote).foregroundStyle(.tertiary)
                 }
             }
         }
@@ -172,23 +170,23 @@ struct ClusterView: View {
         }
         ForEach(ov.pods) { pod in
             let repoPod = ov.repoPods.first { $0.podName == pod.name }
-            let row = VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Circle().fill(Self.statusColor(pod.status)).frame(width: 8, height: 8)
-                    Text(pod.name).font(.caption.monospaced().weight(.medium)).lineLimit(1)
-                    if pod.isOptioManaged == true { StatusBadge(text: "workspace", color: AppTheme.accent) }
-                    if pod.isInfra == true { StatusBadge(text: "infra", color: .blue) }
-                }
-                HStack(spacing: 8) {
-                    Text(pod.status ?? "Unknown").foregroundStyle(Self.statusColor(pod.status))
-                    if let c = pod.cpuMillicores { Text("\(c)m CPU") }
-                    if let m = pod.memoryMi { Text("\(m) Mi") }
-                    if let r = pod.restarts, r > 0 { Text("\(r) restarts").foregroundStyle(.yellow) }
-                    if let s = pod.startedAt { Text(s.relativeDescription) }
-                }
-                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                if let img = pod.shortImage { Text(img).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1) }
-            }
+            let tone = Self.statusTone(pod.status)
+            let row = OptioRow(
+                title: pod.name,
+                tone: tone == .success ? nil : tone,
+                meta: Text.meta([
+                    Text(pod.status ?? "Unknown"),
+                    pod.isOptioManaged == true ? Text("workspace") : nil,
+                    pod.isInfra == true ? Text("infra") : nil,
+                    pod.cpuMillicores.map { Text("\($0)m CPU") },
+                    pod.memoryMi.map { Text("\($0) Mi") },
+                    (pod.restarts ?? 0) > 0 ? Text("\(pod.restarts!) restarts") : nil,
+                ]),
+                trailing: tone == .danger ? (pod.status ?? "Failed") : pod.startedAt?.relativeDescription,
+                trailingTone: tone == .danger ? .danger : nil,
+                footer: pod.shortImage.map { Text($0).font(.monoFootnote) },
+                titleLineLimit: 1
+            )
             if let repoPod {
                 NavigationLink(value: repoPod) { row }
             } else {
@@ -204,21 +202,18 @@ struct ClusterView: View {
         }
         ForEach(model.repoPods) { rp in
             NavigationLink(value: rp) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        StatusBadge(text: rp.state ?? "unknown", color: StateColor.color(for: rp.state ?? ""))
-                        Text(InsightsFormat.repoShortName(rp.repoUrl ?? "")).font(.subheadline.weight(.medium)).lineLimit(1)
-                        Spacer()
-                        Text("#\(rp.instanceIndex ?? 0)").font(.caption2.monospaced()).foregroundStyle(.tertiary)
-                    }
-                    HStack(spacing: 8) {
-                        if let n = rp.podName { Text(n).font(.caption2.monospaced()) }
-                        Text("\(rp.activeTaskCount ?? 0) active")
-                        if let q = rp.queuedTaskCount, q > 0 { Text("\(q) queued") }
-                        if let l = rp.lastTaskAt { Text("last \(l.relativeDescription)") }
-                    }
-                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
+                OptioRow(
+                    title: "\(InsightsFormat.repoShortName(rp.repoUrl ?? "")) #\(rp.instanceIndex ?? 0)",
+                    tone: Tone.forState(rp.state),
+                    meta: Text.meta([
+                        Text((rp.state ?? "unknown").replacingOccurrences(of: "_", with: " ")),
+                        Text("\(rp.activeTaskCount ?? 0) active"),
+                        (rp.queuedTaskCount ?? 0) > 0 ? Text("\(rp.queuedTaskCount!) queued") : nil,
+                        rp.podName.map { Text.mono($0) },
+                    ]),
+                    trailing: rp.lastTaskAt.map { "last \($0.relativeDescription)" },
+                    titleLineLimit: 1
+                )
             }
         }
     }
@@ -229,20 +224,14 @@ struct ClusterView: View {
             Text("No recent events").font(.caption).foregroundStyle(.secondary)
         }
         ForEach(Array(ov.events.enumerated()), id: \.offset) { _, e in
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(e.type == "Warning" ? Color.yellow : Color.blue)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(e.reason ?? "").font(.caption.weight(.medium))
-                        Text(e.involvedObject ?? "").font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1)
-                        if let c = e.count, c > 1 { Text("x\(c)").font(.caption2).foregroundStyle(.secondary) }
-                    }
-                    if let m = e.message { Text(m).font(.caption2).foregroundStyle(.secondary) }
-                    if let t = e.lastTimestamp { Text(t.relativeDescription).font(.caption2).foregroundStyle(.tertiary) }
-                }
-            }
+            OptioRow(
+                title: e.reason ?? "Event",
+                tone: e.type == "Warning" ? .danger : nil,
+                meta: Text.meta([e.involvedObject.map { Text.mono($0) }, (e.count ?? 0) > 1 ? Text("×\(e.count!)") : nil]),
+                trailing: e.lastTimestamp?.relativeDescription,
+                footer: e.message.map { Text($0) },
+                titleLineLimit: 1
+            )
         }
     }
 
@@ -257,31 +246,22 @@ struct ClusterView: View {
     @ViewBuilder
     private func servicesTab(_ ov: ClusterOverview) -> some View {
         ForEach(ov.services) { svc in
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Image(systemName: "network").font(.caption).foregroundStyle(.secondary)
-                    Text(svc.name ?? "").font(.caption.monospaced().weight(.medium))
-                    Text(svc.type ?? "").font(.caption2).foregroundStyle(.secondary)
-                }
-                HStack(spacing: 8) {
-                    if let ip = svc.clusterIP { Text(ip) }
-                    ForEach(Array((svc.ports ?? []).enumerated()), id: \.offset) { _, p in
-                        Text("\(p.port ?? 0)→\(Int(p.targetPort?.value ?? 0))/\(p.proto ?? "")")
-                    }
-                }
-                .font(.caption2).foregroundStyle(.secondary)
-            }
+            OptioRow(
+                title: svc.name ?? "",
+                meta: Text.meta([svc.type.map { Text($0) }, svc.clusterIP.map { Text.mono($0) }] + (svc.ports ?? []).map { p in Text.mono("\(p.port ?? 0)→\(Int(p.targetPort?.value ?? 0))/\(p.proto ?? "")") }),
+                titleLineLimit: 1
+            )
         }
     }
 
     // MARK: Helpers
 
-    static func statusColor(_ status: String?) -> Color {
+    static func statusTone(_ status: String?) -> Tone {
         switch status ?? "" {
-        case "Running", "Ready", "ready": return .green
-        case "Pending", "provisioning": return .yellow
-        case "ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff", "Error", "error", "Failed", "failed", "NotReady": return .red
-        default: return .secondary
+        case "Running", "Ready", "ready", "Succeeded": return .success
+        case "Pending", "provisioning", "ContainerCreating": return .working
+        case "ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff", "Error", "error", "Failed", "failed", "NotReady", "OOMKilled": return .danger
+        default: return .idle
         }
     }
 
@@ -294,24 +274,22 @@ struct ClusterView: View {
 struct HealthEventRow: View {
     let event: PodHealthEvent
 
-    private var color: Color {
+    private var tone: Tone? {
         switch event.eventType ?? "" {
-        case "healthy", "orphan_cleaned": return .green
-        case "restarted": return .yellow
-        default: return .red
+        case "healthy", "orphan_cleaned": return nil
+        case "restarted": return .working
+        default: return .danger
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Circle().fill(color).frame(width: 8, height: 8)
-                Text((event.eventType ?? "event").replacingOccurrences(of: "_", with: " ").capitalized).font(.caption.weight(.medium))
-                if let n = event.podName { Text(n).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1) }
-                Spacer()
-                if let c = event.createdAt { Text(c.relativeDescription).font(.caption2).foregroundStyle(.secondary) }
-            }
-            if let m = event.message { Text(m).font(.caption2).foregroundStyle(.secondary).padding(.leading, 14) }
-        }
+        OptioRow(
+            title: (event.eventType ?? "event").replacingOccurrences(of: "_", with: " ").capitalized,
+            tone: tone,
+            meta: event.podName.map { Text.mono($0) },
+            trailing: event.createdAt?.relativeDescription,
+            footer: event.message.map { Text($0) },
+            titleLineLimit: 1
+        )
     }
 }

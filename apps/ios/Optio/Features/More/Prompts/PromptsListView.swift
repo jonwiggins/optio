@@ -72,9 +72,9 @@ struct PromptsListView: View {
                     .listRowBackground(Color.clear)
             }
             if model.loading {
-                ProgressView().frame(maxWidth: .infinity)
+                SkeletonRows()
             } else if let error = model.error, model.templates.isEmpty {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error, what: "prompts") { Task { await model.load(api: api) } }
             } else if model.visible.isEmpty {
                 EmptyState(title: "No templates", systemImage: "text.quote",
                            message: model.filter == "all" ? "Create a reusable prompt template." : "No templates of this kind yet.")
@@ -130,25 +130,15 @@ struct PromptsListView: View {
     }
 
     private func row(_ t: PromptTemplateRow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(t.name).font(.headline).lineLimit(1)
-                Spacer()
-                StatusBadge(text: PromptKind(rawValue: t.kind ?? "")?.shortLabel ?? (t.kind ?? "prompt"), color: AppTheme.accent)
-            }
-            if let d = t.description, !d.isEmpty {
-                Text(d).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
-            }
-            if let body = t.template {
-                Text(body)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
-            if let agent = t.defaultAgentType, !agent.isEmpty {
-                Text(MoreAgentTypes.label(agent)).font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 2)
+        OptioRow(
+            title: t.name,
+            meta: Text.meta([
+                PromptKind(rawValue: t.kind ?? "")?.shortLabel ?? (t.kind ?? "prompt"),
+                t.defaultAgentType.flatMap { $0.isEmpty ? nil : MoreAgentTypes.label($0) },
+                t.description.flatMap { $0.isEmpty ? nil : $0 },
+            ]),
+            footer: t.template.map { Text($0.replacingOccurrences(of: "\n", with: " ")).font(.monoFootnote) },
+            titleLineLimit: 1
+        )
     }
 }

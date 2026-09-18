@@ -13,7 +13,7 @@ struct MoreHubView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Library") {
+                Section {
                     NavigationLink { PromptsListView() } label: {
                         Label("Prompts", systemImage: "text.quote")
                     }
@@ -23,9 +23,11 @@ struct MoreHubView: View {
                     NavigationLink { ConnectionsView() } label: {
                         Label("Connections", systemImage: "powerplug")
                     }
+                } header: {
+                    SectionHeader(title: "Library").textCase(nil)
                 }
 
-                Section("Admin") {
+                Section {
                     NavigationLink { SecretsView() } label: {
                         Label("Secrets", systemImage: "key")
                     }
@@ -38,9 +40,11 @@ struct MoreHubView: View {
                     NavigationLink { SettingsView() } label: {
                         Label("Settings", systemImage: "gearshape")
                     }
+                } header: {
+                    SectionHeader(title: "Admin").textCase(nil)
                 }
 
-                Section("Account") {
+                Section {
                     accountCard
                     Button {
                         showWorkspaceSwitcher = true
@@ -59,9 +63,13 @@ struct MoreHubView: View {
                     } label: {
                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
+                } header: {
+                    SectionHeader(title: "Account").textCase(nil)
                 }
             }
+            .symbolRenderingMode(.hierarchical)
             .navigationTitle("More")
+            .hubChrome()
             .environment(context)
             .task { await refresh() }
             .refreshable { await refresh() }
@@ -75,6 +83,9 @@ struct MoreHubView: View {
                 Text("Your access token will be removed from this device.")
             }
         }
+        // On the stack itself, not the List: pushed destinations (Settings, Repos, …)
+        // inherit the stack's environment, not the List's. Missing it crashes on push.
+        .environment(context)
     }
 
     private var accountCard: some View {
@@ -82,13 +93,13 @@ struct MoreHubView: View {
             avatar
             VStack(alignment: .leading, spacing: 2) {
                 Text(context.displayName ?? session.user?.displayName ?? "Signed in")
-                    .font(.headline)
+                    .font(.body)
                 if let email = context.email ?? session.user?.email {
                     Text(email).font(.footnote).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 6) {
                     if let role = context.role {
-                        StatusBadge(text: role, color: role == "admin" ? AppTheme.accent : .secondary)
+                        StatusBadge(text: role, tone: .working)
                     }
                     if let host = session.serverURL?.host() {
                         Text(host).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
@@ -113,7 +124,7 @@ struct MoreHubView: View {
             Image(systemName: "person.crop.circle.fill")
                 .resizable()
                 .frame(width: 44, height: 44)
-                .foregroundStyle(AppTheme.accent.opacity(0.7))
+                .foregroundStyle(.secondary)
         }
     }
 

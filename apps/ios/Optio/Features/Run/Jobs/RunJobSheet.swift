@@ -39,7 +39,7 @@ struct RunJobSheet: View {
                         }
                     }
                 }
-                if let error { Section { ErrorBanner(error: error) } }
+                if let error { Section { ErrorRow(error: error) } }
             }
             .navigationTitle("Run Job")
             .navigationBarTitleDisplayMode(.inline)

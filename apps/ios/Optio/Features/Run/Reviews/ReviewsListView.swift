@@ -2,11 +2,12 @@ import SwiftUI
 
 /// Reviews list — mirrors `/reviews` (PrBrowser): open PRs across connected
 /// repos with their review state/verdict, a "paste a PR URL" launcher, repo
-/// filter, and per-PR "Review with Optio" / "Approve & Merge". A review-state
-/// chip row narrows the list client-side. Embedded by the Run hub inside its
-/// NavigationStack; declares its own navigation destinations.
+/// filter, and per-PR "Review with Optio" / "Approve & Merge" as swipe actions.
+/// Rows push: a review detail when one exists, otherwise a PR summary with the
+/// review launcher. Embedded by the Run hub inside its NavigationStack.
 struct ReviewsListView: View {
     @Environment(APIClient.self) private var api
+    @Environment(\.openURL) private var openURL
     @State private var model = ReviewsListModel()
     @State private var prUrl = ""
     @State private var stateFilter = ""
@@ -39,7 +40,8 @@ struct ReviewsListView: View {
     var body: some View {
         List {
             Section {
-                HStack(spacing: 8) {
+                HStack(spacing: Spacing.s) {
+                    Image(systemName: "link").foregroundStyle(.tertiary)
                     TextField("Paste a PR URL to review", text: $prUrl)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -48,55 +50,83 @@ struct ReviewsListView: View {
                     Button {
                         launchFromURL()
                     } label: {
-                        if model.launchingURL { ProgressView() } else { Label("Review", systemImage: "eye") }
+                        Group {
+                            if model.launchingURL { ProgressView().tint(.white) } else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
+                        }
+                        .frame(width: 30, height: 30)
+                        .foregroundStyle(.white)
+                        .background(prUrl.trimmingCharacters(in: .whitespaces).isEmpty ? Color(.tertiaryLabel) : AppTheme.accent, in: Circle())
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(AppTheme.accent)
-                    .controlSize(.small)
+                    .buttonStyle(.plain)
                     .disabled(model.launchingURL || prUrl.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .accessibilityLabel("Review")
                 }
+                .padding(.horizontal, Spacing.m)
+                .padding(.vertical, 6)
+                .background(.fill.tertiary, in: Capsule())
+                .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.l, bottom: Spacing.xs, trailing: Spacing.l))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
 
             Section {
                 ChipPicker(options: Self.stateOptions, selection: $stateFilter)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
-                if model.repos.count > 1 {
-                    Picker("Repo", selection: $repoFilter) {
-                        Text("All repos").tag("")
-                        ForEach(model.repos) { Text($0.fullName ?? $0.id).tag($0.id) }
-                    }
-                    .onChange(of: repoFilter) { _, _ in Task { await model.load(api, repoId: repoFilter) } }
-                }
+                    .listRowSeparator(.hidden)
             }
 
             if let error = model.error, model.prs.isEmpty {
-                ErrorBanner(error: error) { Task { await model.load(api, repoId: repoFilter) } }
-            } else if model.loaded && filtered.isEmpty {
+                ErrorRow(error: error, what: "pull requests") { Task { await model.load(api, repoId: repoFilter) } }
+            } else if !model.loaded {
+                SkeletonRows()
+            } else if filtered.isEmpty {
                 EmptyState(
-                    title: model.prs.isEmpty ? "No open pull requests" : "No matching PRs",
+                    title: model.prs.isEmpty ? "No open pull requests" : "No \(Self.stateOptions.first { $0.0 == stateFilter }?.1.lowercased() ?? "matching") PRs",
                     systemImage: "arrow.triangle.pull",
-                    message: model.repos.isEmpty ? "Add a repo first in Repos settings." : (model.prs.isEmpty ? "Pull requests from your configured repos appear here." : nil)
+                    message: model.repos.isEmpty ? "Add a repo first under More › Repos." : (model.prs.isEmpty ? "Pull requests from your repos appear here." : "Nothing matches this filter.")
                 )
+                .listRowSeparator(.hidden)
             } else {
                 ForEach(filtered) { pr in
-                    PullRequestRow(
-                        pr: pr,
-                        reviewing: model.reviewingURL == pr.url,
-                        merging: model.mergingURL == pr.url,
-                        onReview: { Task { if let id = await model.launchReview(prUrl: pr.url, api: api) { pushed = .detail(id) } } },
-                        onMerge: { mergeTarget = pr }
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if let id = pr.review?.id { pushed = .detail(id) }
+                    NavigationLink(value: pr.review.map { ReviewRoute.detail($0.id) } ?? ReviewRoute.pullRequest(pr)) {
+                        PullRequestRow(pr: pr, busy: model.reviewingURL == pr.url || model.mergingURL == pr.url)
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        if pr.review == nil {
+                            Button("Review", systemImage: "eye") {
+                                Task { if let id = await model.launchReview(prUrl: pr.url, api: api) { pushed = .detail(id) } }
+                            }.tint(AppTheme.accent)
+                        } else if pr.review?.canReReview == true {
+                            Button("Re-review", systemImage: "arrow.clockwise") {
+                                Task { if let id = await model.launchReview(prUrl: pr.url, api: api) { pushed = .detail(id) } }
+                            }.tint(.primary)
+                        }
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button("Merge", systemImage: "arrow.triangle.merge") { mergeTarget = pr }.tint(.primary)
+                        if let url = URL(string: pr.url) {
+                            Button("Open", systemImage: "safari") { openURL(url) }.tint(Color(.systemGray))
+                        }
                     }
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Reviews")
-        .overlay { if !model.loaded && model.error == nil { ProgressView() } }
+        .listStyle(.plain)
+        .animation(.snappy, value: stateFilter)
+        .toolbar {
+            if model.repos.count > 1 {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Repo", selection: $repoFilter) {
+                            Text("All repos").tag("")
+                            ForEach(model.repos) { Text($0.fullName ?? $0.id).tag($0.id) }
+                        }
+                    } label: { Image(systemName: "line.3.horizontal.decrease") }
+                }
+            }
+        }
+        .onChange(of: repoFilter) { _, _ in Task { await model.load(api, repoId: repoFilter) } }
         .refreshable { await model.load(api, repoId: repoFilter) }
         .task { await model.load(api, repoId: repoFilter) }
         .confirmationDialog(
@@ -104,19 +134,22 @@ struct ReviewsListView: View {
             isPresented: Binding(get: { mergeTarget != nil }, set: { if !$0 { mergeTarget = nil } }),
             titleVisibility: .visible
         ) {
-            Button("Approve & Squash-merge", role: .destructive) {
+            Button("Approve & squash-merge", role: .destructive) {
                 if let pr = mergeTarget { Task { await model.approveAndMerge(pr, api: api, repoId: repoFilter) } }
             }
         }
-        .alert("Error", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.actionError?.localizedDescription ?? "")
-        }
-        .transientMessage(model.toast) { model.toast = nil }
+        .errorToast(Binding(get: { model.actionError }, set: { model.actionError = $0 }))
+        .toast(model.toast, tone: .success) { model.toast = nil }
         .navigationDestination(item: $pushed) { route in
             switch route {
             case .detail(let id): ReviewDetailView(reviewId: id)
+            case .pullRequest(let pr): PullRequestSummaryView(pr: pr)
+            }
+        }
+        .navigationDestination(for: ReviewRoute.self) { route in
+            switch route {
+            case .detail(let id): ReviewDetailView(reviewId: id)
+            case .pullRequest(let pr): PullRequestSummaryView(pr: pr)
             }
         }
     }
@@ -133,74 +166,95 @@ struct ReviewsListView: View {
     }
 }
 
+extension PullRequestSummary.EmbeddedReview {
+    var canReReview: Bool { ["ready", "stale", "submitted", "failed"].contains(state ?? "") }
+}
+
 enum ReviewRoute: Hashable, Identifiable {
     case detail(String)
+    case pullRequest(PullRequestSummary)
     var id: String {
         switch self {
         case .detail(let id): return id
+        case .pullRequest(let pr): return pr.id
         }
     }
 }
 
+/// `dot · title · #n · repo · author · 2h` with one trailing verdict or state.
 struct PullRequestRow: View {
     let pr: PullRequestSummary
-    let reviewing: Bool
-    let merging: Bool
-    let onReview: () -> Void
-    let onMerge: () -> Void
+    var busy = false
+
+    private var tone: Tone? {
+        guard let s = pr.review?.state else { return pr.draft == true ? .idle : nil }
+        return ReviewFormat.stateTone(s)
+    }
+
+    private var trailing: (String, Tone?) {
+        if busy { return ("Working…", .working) }
+        if let v = pr.review?.verdict { return (ReviewFormat.verdictLabel(v), ReviewFormat.verdictTone(v)) }
+        if let s = pr.review?.state { return (ReviewFormat.stateLabel(s), ReviewFormat.stateTone(s) == .accent ? .accent : nil) }
+        if pr.draft == true { return ("Draft", nil) }
+        return (pr.updatedAt?.relativeDescription ?? "", nil)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 6) {
-                Text(pr.title).font(.headline).lineLimit(2)
-                Spacer(minLength: 0)
-                Text("#\(pr.number)").font(.caption).foregroundStyle(.secondary)
+        OptioRow(
+            title: pr.title,
+            tone: tone,
+            meta: Text.meta([Text.mono("#\(pr.number)"), pr.repo?.fullName.map { Text($0) }, pr.author.map { Text($0) }, pr.updatedAt.map { Text($0.relativeDescription) }]),
+            trailing: trailing.0,
+            trailingTone: trailing.1,
+            footer: (pr.labels?.isEmpty == false) ? Text(pr.labels!.joined(separator: " · ")) : nil
+        )
+    }
+}
+
+/// Pushed for a PR that has no Optio review yet: the facts, "Review with Optio", and the host link.
+struct PullRequestSummaryView: View {
+    let pr: PullRequestSummary
+    @Environment(APIClient.self) private var api
+    @State private var launching = false
+    @State private var error: Error?
+    @State private var reviewId: String?
+
+    var body: some View {
+        List {
+            Section {
+                Text(pr.title).font(.body)
+                if let repo = pr.repo?.fullName { LabeledContent("Repo", value: repo) }
+                if let a = pr.author { LabeledContent("Author", value: a) }
+                if let u = pr.updatedAt { LabeledContent("Updated", value: u.relativeDescription) }
+                if pr.draft == true { LabeledContent("State") { StatusBadge(text: "Draft", tone: .idle) } }
+                if let url = URL(string: pr.url) { Link("Open on \(pr.url.contains("gitlab") ? "GitLab" : "GitHub")", destination: url) }
             }
-            HStack(spacing: 6) {
-                if pr.draft == true { StatusBadge(text: "Draft", color: .gray) }
-                if let r = pr.review, let s = r.state { StatusBadge(text: ReviewFormat.stateLabel(s), color: ReviewFormat.stateColor(s)) }
-                if let v = pr.review?.verdict { StatusBadge(text: ReviewFormat.verdictLabel(v), color: ReviewFormat.verdictColor(v)) }
-                if pr.review?.origin == "auto" { StatusBadge(text: "Auto", color: AppTheme.accent) }
-            }
-            HStack(spacing: 10) {
-                if let repo = pr.repo?.fullName { Label(repo, systemImage: "arrow.triangle.branch") }
-                if let a = pr.author { Label(a, systemImage: "person") }
-                if let u = pr.updatedAt { Text(u.relativeDescription) }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
             if let labels = pr.labels, !labels.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) { ForEach(labels, id: \.self) { StatusBadge(text: $0, color: .secondary) } }
-                }
+                Section("Labels") { Text(labels.joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary) }
             }
-            HStack(spacing: 8) {
-                if pr.review != nil {
-                    Label("View Review", systemImage: "chevron.right")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(AppTheme.accent)
-                } else {
-                    Button(action: onReview) {
-                        if reviewing { ProgressView().controlSize(.mini) } else { Label("Review with Optio", systemImage: "eye") }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(AppTheme.accent)
-                    .controlSize(.mini)
-                    .disabled(reviewing)
+            Section {
+                Button {
+                    Task { await launch() }
+                } label: {
+                    HStack { Spacer(); if launching { ProgressView() } else { Label("Review with Optio", systemImage: "eye") }; Spacer() }
                 }
-                Spacer()
-                Button(action: onMerge) {
-                    if merging { ProgressView().controlSize(.mini) } else { Label("Approve & Merge", systemImage: "arrow.triangle.merge") }
-                }
-                .buttonStyle(.bordered)
-                .tint(.green)
-                .controlSize(.mini)
-                .disabled(merging)
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.accent)
+                .disabled(launching)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                if let error { ErrorRow(error: error) }
             }
-            .buttonStyle(.borderless)
         }
-        .padding(.vertical, 2)
+        .navigationTitle("PR #\(pr.number)")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $reviewId) { ReviewDetailView(reviewId: $0) }
+    }
+
+    private func launch() async {
+        launching = true
+        defer { launching = false }
+        do { reviewId = try await api.createPrReview(prUrl: pr.url).id } catch { self.error = error }
     }
 }
 

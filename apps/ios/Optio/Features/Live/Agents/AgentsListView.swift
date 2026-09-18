@@ -10,31 +10,54 @@ struct AgentsListView: View {
     @State private var loaded = false
     @State private var showNew = false
     @State private var showArchived = false
+    @State private var filter: String? = nil
 
     private var visible: [PersistentAgent] {
-        showArchived ? agents : agents.filter { $0.state != .archived }
+        let base = showArchived ? agents : agents.filter { $0.state != .archived }
+        guard let filter else { return base }
+        switch filter {
+        case "running": return base.filter { [.running, .queued, .provisioning].contains($0.state) }
+        case "idle": return base.filter { $0.state == .idle }
+        case "paused": return base.filter { $0.state == .paused }
+        case "failed": return base.filter { $0.state == .failed }
+        default: return base
+        }
     }
 
     var body: some View {
         List {
-            if let stats {
-                Section {
-                    statsRow(stats)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+            Section {
+                if let stats {
+                    StatStrip(items: [
+                        StatItem("Running", stats.running + stats.queued, key: "running"),
+                        StatItem("Idle", stats.idle, key: "idle"),
+                        StatItem("Needs you", stats.paused, tone: .accent, key: "paused"),
+                        StatItem("Failed", stats.failed, tone: .danger, key: "failed"),
+                    ], selected: filter) { item in
+                        withAnimation(.snappy) { filter = filter == item.key ? nil : item.key }
+                    }
+                } else if !loaded {
+                    SkeletonStrip(labels: ["Running", "Idle", "Needs you", "Failed"])
                 }
             }
+            .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.l, bottom: Spacing.xs, trailing: Spacing.l))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
             if let error {
-                ErrorBanner(error: error) { Task { await refresh() } }
-                    .listRowBackground(Color.clear)
+                ErrorRow(error: error, what: "agents") { Task { await refresh() } }
             }
-            if loaded && visible.isEmpty {
+            if !loaded && error == nil {
+                SkeletonRows()
+            } else if loaded && visible.isEmpty {
                 EmptyState(
-                    title: "No agents yet",
+                    title: filter == nil ? "No agents yet" : "No \(filter == "paused" ? "paused" : filter!) agents",
                     systemImage: "cpu",
-                    message: "Create an agent that lives in your workspace, listens for messages and events, and wakes to do work."
+                    message: filter == nil ? "A long-lived agent that listens for messages and events and wakes to do work." : "Nothing matches this filter.",
+                    actionTitle: filter == nil ? "New agent" : nil,
+                    action: { showNew = true }
                 )
-                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             ForEach(visible, id: \.id) { agent in
                 NavigationLink(value: agent.id) {
@@ -43,9 +66,7 @@ struct AgentsListView: View {
             }
         }
         .listStyle(.plain)
-        .overlay {
-            if !loaded && error == nil { ProgressView() }
-        }
+        .animation(.snappy, value: filter)
         .navigationDestination(for: String.self) { id in
             AgentDetailView(agentId: id)
         }
@@ -71,19 +92,6 @@ struct AgentsListView: View {
         }
     }
 
-    private func statsRow(_ s: PersistentAgentStats) -> some View {
-        StatGrid {
-                StatTile(title: "Total", value: "\(s.total)")
-                StatTile(title: "Running", value: "\(s.running)", color: .blue)
-                StatTile(title: "Queued", value: "\(s.queued)", color: .orange)
-                StatTile(title: "Idle", value: "\(s.idle)")
-                StatTile(title: "Paused", value: "\(s.paused)", color: .yellow)
-                StatTile(title: "Failed", value: "\(s.failed)", color: .red)
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 4)
-    }
-
     private func refresh() async {
         do {
             async let a = api.listPersistentAgents()
@@ -98,44 +106,39 @@ struct AgentsListView: View {
     }
 }
 
+/// `dot · name · @slug · runtime · last turn 2h · $0.78`, trailing terminal state.
 struct AgentRow: View {
     let agent: PersistentAgent
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(agent.name).font(.headline).lineLimit(1)
-                Text("@\(agent.slug)").font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
-                StatusBadge(text: agent.state.rawValue, color: StateColor.color(for: agent.state.rawValue))
-            }
-            if let d = agent.description, !d.isEmpty {
-                Text(d).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-            }
-            HStack(spacing: 12) {
-                Label(agent.agentRuntime, systemImage: "cpu")
-                Label(agent.podLifecycle.rawValue, systemImage: "shippingbox")
-                if let t = agent.lastTurnAt {
-                    Label("Last turn \(t.relativeDescription)", systemImage: "clock")
-                } else {
-                    Label("Never run", systemImage: "clock")
-                }
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            HStack(spacing: 12) {
-                Text(String(format: "$%.4f", Double(agent.totalCostUsd) ?? 0)).font(.caption2.monospacedDigit())
-                if agent.consecutiveFailures > 0 {
-                    Label("\(Int(agent.consecutiveFailures)) failures", systemImage: "exclamationmark.triangle")
-                        .font(.caption2).foregroundStyle(.red)
-                }
-                if !agent.enabled {
-                    Text("disabled").font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            .foregroundStyle(.secondary)
+    private var trailing: (String, Tone?)? {
+        switch agent.state {
+        case .paused: return ("Paused", .accent)
+        case .failed: return ("Failed", .danger)
+        case .archived: return ("Archived", nil)
+        case .idle: return agent.enabled ? nil : ("Disabled", nil)
+        default: return (agent.state.rawValue.capitalized, nil)
         }
-        .padding(.vertical, 4)
+    }
+
+    private var footer: Text? {
+        if agent.consecutiveFailures > 0 { return Text("\(Int(agent.consecutiveFailures)) consecutive failures") }
+        if let d = agent.description, !d.isEmpty { return Text(d) }
+        return nil
+    }
+
+    var body: some View {
+        OptioRow(
+            title: agent.name,
+            tone: Tone.forState(agent.state.rawValue),
+            meta: Text.meta([
+                Text.mono("@\(agent.slug)"),
+                Text(agent.agentRuntime),
+                Text(agent.lastTurnAt.map { "last turn \($0.relativeDescription)" } ?? "never run"),
+                Cost.formatIfNonZero(agent.totalCostUsd).map { Text($0) },
+            ]),
+            trailing: trailing?.0,
+            trailingTone: trailing?.1,
+            footer: footer
+        )
     }
 }

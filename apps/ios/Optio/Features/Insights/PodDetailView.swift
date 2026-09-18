@@ -20,7 +20,7 @@ struct PodDetailView: View {
                 content(pod)
             } else if let error {
                 if error.isForbidden { AdminOnlyState(what: "Pod detail") } else {
-                    ErrorBanner(error: error) { Task { await load() } }
+                    ErrorRow(error: error) { Task { await load() } }
                 }
             } else {
                 ProgressView()
@@ -40,11 +40,7 @@ struct PodDetailView: View {
             Button("Restart pod", role: .destructive) { Task { await restart() } }
             Button("Cancel", role: .cancel) {}
         }
-        .alert("Restart failed", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
-            Button("OK") { actionError = nil }
-        } message: {
-            Text(actionError?.localizedDescription ?? "")
-        }
+        .errorToast($actionError)
         .task { await load() }
     }
 
@@ -52,7 +48,7 @@ struct PodDetailView: View {
         let runtimeState = pod.k8sPod?.status?.lowercased() ?? pod.state ?? "unknown"
         return List {
             Section {
-                LabeledContent("State") { StatusBadge(text: runtimeState, color: ClusterView.statusColor(pod.k8sPod?.status) == .secondary ? StateColor.color(for: pod.state ?? "") : ClusterView.statusColor(pod.k8sPod?.status)) }
+                LabeledContent("State") { StatusBadge(text: runtimeState, tone: ClusterView.statusTone(pod.k8sPod?.status) == .idle ? Tone.forState(pod.state ?? "") : ClusterView.statusTone(pod.k8sPod?.status)) }
                 LabeledContent("Repo", value: InsightsFormat.repoShortName(pod.repoUrl ?? ""))
                 if let b = pod.repoBranch { LabeledContent("Branch", value: b) }
                 LabeledContent("Active tasks", value: "\(pod.activeTaskCount ?? 0)")
@@ -78,7 +74,7 @@ struct PodDetailView: View {
                 if let tasks = pod.tasks, !tasks.isEmpty {
                     ForEach(tasks) { t in
                         HStack(spacing: 8) {
-                            StatusBadge(text: t.state ?? "unknown", color: StateColor.color(for: t.state ?? ""))
+                            StatusBadge(text: t.state ?? "unknown", tone: Tone.forState(t.state ?? ""))
                             Text(t.title ?? t.id).font(.subheadline).lineLimit(1)
                             Spacer()
                             VStack(alignment: .trailing) {

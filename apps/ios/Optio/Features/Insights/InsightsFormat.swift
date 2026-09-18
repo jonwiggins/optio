@@ -13,11 +13,7 @@ enum InsightsFormat {
         return "\(parts[parts.count - 2])/\(parts[parts.count - 1])"
     }
 
-    static func cost(_ value: Double?) -> String {
-        guard let n = value, n.isFinite, n != 0 else { return "$0.00" }
-        if n < 0.01 { return String(format: "$%.4f", n) }
-        return String(format: "$%.2f", n)
-    }
+    static func cost(_ value: Double?) -> String { Cost.format(value) }
 
     static func cost(_ value: String?) -> String { cost(Double(value ?? "")) }
 
@@ -111,17 +107,12 @@ struct InsightCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(title).font(.caption.weight(.semibold)).textCase(.uppercase).foregroundStyle(.secondary)
-                Spacer()
-                if let systemImage { Image(systemName: systemImage).font(.caption).foregroundStyle(.tertiary) }
-            }
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            Text(title).font(.sectionHeader).foregroundStyle(.secondary)
             content
         }
-        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12))
+        .cardSurface()
     }
 }
 
@@ -130,14 +121,14 @@ struct RateBar: View {
     let label: String
     let valueText: String
     let fraction: Double
-    var color: Color = AppTheme.accent
+    var color: Color = ChartPalette.color(1)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text(label).font(.caption).lineLimit(1)
+                Text(label).font(.footnote).lineLimit(1)
                 Spacer()
-                Text(valueText).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text(valueText).font(.footnote.monospacedDigit()).foregroundStyle(.secondary).contentTransition(.numericText())
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -145,7 +136,7 @@ struct RateBar: View {
                     Capsule().fill(color).frame(width: geo.size.width * min(max(fraction, 0), 1))
                 }
             }
-            .frame(height: 6)
+            .frame(height: 5)
         }
     }
 }

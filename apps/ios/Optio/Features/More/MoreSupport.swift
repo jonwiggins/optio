@@ -51,25 +51,10 @@ final class MoreContext {
 
 // MARK: - Error presentation
 
-struct MoreErrorAlert: ViewModifier {
-    @Binding var message: String?
-
-    func body(content: Content) -> some View {
-        content.alert("Something went wrong", isPresented: Binding(
-            get: { message != nil },
-            set: { if !$0 { message = nil } }
-        )) {
-            Button("OK", role: .cancel) { message = nil }
-        } message: {
-            Text(message ?? "")
-        }
-    }
-}
-
 extension View {
-    /// Presents `message` in an alert whenever it becomes non-nil.
+    /// Presents `message` as a danger toast whenever it becomes non-nil.
     func moreErrorAlert(_ message: Binding<String?>) -> some View {
-        modifier(MoreErrorAlert(message: message))
+        errorToast(message)
     }
 }
 

@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Jobs list — standalone agent runs with no repo checkout. Mirrors
-/// `/jobs` (StandaloneList): search, agent-type filter, stats bar, "Run now",
-/// and a "New Job" sheet. Designed to be embedded by the Run hub inside its
-/// NavigationStack; it declares its own navigation destinations.
+/// `/jobs` (StandaloneList): search, agent-type filter, stats strip, "Run now"
+/// as a swipe action, and a "New Job" sheet. Embedded by the Run hub inside its
+/// NavigationStack; declares its own navigation destinations.
 struct JobsListView: View {
     @Environment(APIClient.self) private var api
     @State private var model = JobsListModel()
@@ -22,49 +22,62 @@ struct JobsListView: View {
 
     var body: some View {
         List {
-            if let stats = model.stats {
-                Section {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        StatTile(title: "Runs", value: "\(stats.total)", systemImage: "number")
-                        StatTile(title: "Running", value: "\(stats.running)", color: .blue, systemImage: "play.circle")
-                        StatTile(title: "Completed", value: "\(stats.completed)", color: .green, systemImage: "checkmark.circle")
-                        StatTile(title: "Failed", value: "\(stats.failed)", color: .red, systemImage: "xmark.circle")
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
+            Section {
+                if let stats = model.stats {
+                    StatStrip(items: [
+                        StatItem("Runs", stats.total),
+                        StatItem("Running", stats.running),
+                        StatItem("Completed", stats.completed),
+                        StatItem("Failed", stats.failed, tone: .danger),
+                    ])
+                } else if !model.loaded {
+                    SkeletonStrip(labels: ["Runs", "Running", "Completed", "Failed"])
                 }
             }
+            .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.l, bottom: Spacing.xs, trailing: Spacing.l))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
             Section {
                 ChipPicker(options: [("", "All agents")] + JobFormat.agentRuntimes, selection: $agentFilter)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
 
             if let error = model.error, model.jobs.isEmpty {
-                ErrorBanner(error: error) { Task { await model.load(api) } }
-            } else if model.loaded && filtered.isEmpty {
+                ErrorRow(error: error, what: "jobs") { Task { await model.load(api) } }
+            } else if !model.loaded {
+                SkeletonRows()
+            } else if filtered.isEmpty {
                 EmptyState(
                     title: model.jobs.isEmpty ? "No jobs yet" : "No matching jobs",
                     systemImage: "bolt",
-                    message: model.jobs.isEmpty ? "Create a job to run an agent with no repo checkout." : nil
+                    message: model.jobs.isEmpty ? "Run an agent with no repo checkout." : "Nothing matches this filter.",
+                    actionTitle: model.jobs.isEmpty ? "New job" : nil,
+                    action: { showNew = true }
                 )
+                .listRowSeparator(.hidden)
             } else {
                 ForEach(filtered) { job in
                     NavigationLink(value: JobRoute.detail(job.id)) {
-                        JobRow(job: job, running: model.runningId == job.id) {
-                            Task { await model.runNow(job, api: api) }
+                        JobRow(job: job, running: model.runningId == job.id)
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        if job.isEnabled {
+                            Button("Run now", systemImage: "play.fill") { Task { await model.runNow(job, api: api) } }.tint(AppTheme.accent)
                         }
                     }
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .searchable(text: $query, prompt: "Search jobs")
-        .navigationTitle("Jobs")
+        .listStyle(.plain)
+        .animation(.snappy, value: agentFilter)
+        .searchable(text: $query, prompt: "Search")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showNew = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("New job")
             }
         }
         .sheet(isPresented: $showNew) {
@@ -76,17 +89,10 @@ struct JobsListView: View {
             case .run(let jobId, let runId): JobRunDetailView(jobId: jobId, runId: runId)
             }
         }
-        .overlay {
-            if !model.loaded && model.error == nil { ProgressView() }
-        }
         .refreshable { await model.load(api) }
         .task { await model.load(api) }
-        .alert("Error", isPresented: Binding(get: { model.actionError != nil }, set: { if !$0 { model.actionError = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.actionError?.localizedDescription ?? "")
-        }
-        .transientMessage(model.toast) { model.toast = nil }
+        .errorToast(Binding(get: { model.actionError }, set: { model.actionError = $0 }))
+        .toast(model.toast, tone: .success) { model.toast = nil }
     }
 }
 
@@ -119,7 +125,7 @@ final class JobsListModel {
     }
 
     func runNow(_ job: JobSummary, api: APIClient) async {
-        guard job.isEnabled else { actionError = APIError(status: 0, message: "Job is disabled", body: nil); return }
+        guard job.isEnabled else { actionError = APIError(status: 0, message: "Job is paused", body: nil); return }
         runningId = job.id
         defer { runningId = nil }
         do {
@@ -132,83 +138,28 @@ final class JobsListModel {
     }
 }
 
+/// Job row: `runtime · model · last run 2h · 12 runs · $0.78`; "Paused" only when off.
 struct JobRow: View {
     let job: JobSummary
     let running: Bool
-    let onRun: () -> Void
+
+    private var meta: Text? {
+        Text.meta([
+            JobFormat.runtimeLabel(job.runtime),
+            job.model.flatMap { $0.isEmpty ? nil : $0 },
+            job.lastRunAt.map { "last run \($0.relativeDescription)" } ?? "no runs yet",
+            job.runCount.map { "\($0) run\($0 == 1 ? "" : "s")" },
+            JobFormat.cost(job.totalCostUsd),
+        ])
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(job.name).font(.headline).lineLimit(1)
-                    if let d = job.description, !d.isEmpty {
-                        Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                }
-                Spacer()
-                StatusBadge(text: job.isEnabled ? "Active" : "Off", color: job.isEnabled ? .green : .gray)
-            }
-            HStack(spacing: 6) {
-                Text(JobFormat.runtimeLabel(job.runtime))
-                if let m = job.model, !m.isEmpty { Text("·"); Text(m) }
-                ForEach(job.triggerTypes ?? [], id: \.self) { t in
-                    Image(systemName: JobFormat.triggerIcon(t))
-                }
-                if let cost = JobFormat.cost(job.totalCostUsd) { Text("·"); Text(cost) }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            HStack {
-                Text(job.lastRunAt.map { "Last run \($0.relativeDescription)" } ?? "No runs yet")
-                Text("·")
-                Text("\(job.runCount ?? 0) run\(job.runCount == 1 ? "" : "s")")
-                Spacer()
-                Button {
-                    onRun()
-                } label: {
-                    if running { ProgressView().controlSize(.mini) } else { Label("Run now", systemImage: "play.circle") }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .tint(AppTheme.accent)
-                .disabled(!job.isEnabled || running)
-            }
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-// MARK: - Toast helper (sonner-style transient confirmation)
-
-struct TransientMessageModifier: ViewModifier {
-    let message: String?
-    let dismiss: () -> Void
-
-    func body(content: Content) -> some View {
-        content.overlay(alignment: .bottom) {
-            if let message {
-                Text(message)
-                    .font(.footnote.weight(.medium))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule())
-                    .padding(.bottom, 12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .task {
-                        try? await Task.sleep(for: .seconds(2.5))
-                        dismiss()
-                    }
-            }
-        }
-        .animation(.easeInOut, value: message)
-    }
-}
-
-extension View {
-    func transientMessage(_ message: String?, dismiss: @escaping () -> Void) -> some View {
-        modifier(TransientMessageModifier(message: message, dismiss: dismiss))
+        OptioRow(
+            title: job.name,
+            tone: running ? .working : nil,
+            meta: meta,
+            trailing: running ? "Starting…" : (job.isEnabled ? nil : "Paused"),
+            footer: job.description.flatMap { $0.isEmpty ? nil : Text($0) }
+        )
     }
 }

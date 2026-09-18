@@ -16,7 +16,7 @@ struct ApiKeysView: View {
             if loading {
                 ProgressView().frame(maxWidth: .infinity)
             } else if let loadError, keys.isEmpty {
-                ErrorBanner(error: loadError) { Task { await load() } }
+                ErrorRow(error: loadError) { Task { await load() } }
             } else if keys.isEmpty {
                 EmptyState(title: "No tokens", systemImage: "key.horizontal",
                            message: "Create a token to sign in from the CLI or another device.")

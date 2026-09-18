@@ -34,7 +34,7 @@ struct WebhooksListView: View {
             if model.loading {
                 ProgressView().frame(maxWidth: .infinity)
             } else if let error = model.error, model.webhooks.isEmpty {
-                ErrorBanner(error: error) { Task { await model.load(api: api) } }
+                ErrorRow(error: error) { Task { await model.load(api: api) } }
             } else if model.webhooks.isEmpty {
                 EmptyState(title: "No webhooks", systemImage: "arrow.up.right.square",
                            message: "Subscribe to Optio events and get an HTTP POST when they fire.")
@@ -89,30 +89,19 @@ struct WebhooksListView: View {
                 }
             }
         } message: { Text("Delivery history will be lost.") }
-        .alert("Test delivery", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
-            Button("OK") { notice = nil }
-        } message: { Text(notice ?? "") }
+        .toast(notice, tone: .success) { notice = nil }
         .moreErrorAlert($errorMessage)
     }
 
     private func row(_ wh: WebhookRow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Circle().fill(wh.active == false ? Color.gray : Color.green).frame(width: 8, height: 8)
-                Text(wh.url ?? wh.id).font(.subheadline.monospaced()).lineLimit(1)
-            }
-            if let d = wh.description, !d.isEmpty {
-                Text(d).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-            }
-            HStack {
-                let events = wh.events ?? []
-                Text(events.prefix(3).joined(separator: ", ") + (events.count > 3 ? " +\(events.count - 3)" : ""))
-                    .font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
-                Spacer()
-                if let c = wh.createdAt { Text(c.relativeDescription).font(.caption2).foregroundStyle(.tertiary) }
-            }
-        }
-        .padding(.vertical, 2)
+        let events = wh.events ?? []
+        return OptioRow(
+            title: wh.description.flatMap { $0.isEmpty ? nil : $0 } ?? (wh.url ?? wh.id),
+            meta: Text.mono(wh.url ?? wh.id),
+            trailing: wh.active == false ? "Paused" : wh.createdAt?.relativeDescription,
+            footer: events.isEmpty ? nil : Text(events.prefix(3).joined(separator: " · ") + (events.count > 3 ? " +\(events.count - 3)" : "")).font(.monoFootnote),
+            titleLineLimit: 1
+        )
     }
 
     private func test(_ wh: WebhookRow) async {

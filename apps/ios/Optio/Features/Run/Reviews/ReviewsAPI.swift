@@ -120,15 +120,17 @@ enum ReviewFormat {
         }
     }
 
-    static func stateColor(_ state: String) -> Color {
+    /// Review state → tone. `ready` (a draft waiting for you) is the only accent.
+    static func stateTone(_ state: String) -> Tone {
         switch state {
-        case "queued", "reviewing": return .orange
-        case "waiting_ci": return .secondary
-        case "ready": return .green
-        case "stale", "failed": return .red
-        case "submitted": return .blue
-        case "cancelled": return .gray
-        default: return StateColor.color(for: state)
+        case "queued", "waiting_ci": return .idle
+        case "reviewing": return .working
+        case "ready": return .accent
+        case "stale": return .idle
+        case "failed": return .danger
+        case "submitted": return .success
+        case "cancelled": return .idle
+        default: return Tone.forState(state)
         }
     }
 
@@ -141,11 +143,11 @@ enum ReviewFormat {
         }
     }
 
-    static func verdictColor(_ verdict: String) -> Color {
+    static func verdictTone(_ verdict: String) -> Tone {
         switch verdict {
-        case "approve": return .green
-        case "request_changes": return .red
-        default: return .secondary
+        case "approve": return .success
+        case "request_changes": return .danger
+        default: return .working
         }
     }
 

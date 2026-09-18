@@ -52,7 +52,7 @@ struct TaskRow: Decodable, Identifiable, Hashable {
     }
     var costText: String? {
         guard let costUsd, let v = Double(costUsd) else { return nil }
-        return String(format: "$%.2f", v)
+        return Cost.format(v)
     }
 }
 

@@ -26,7 +26,7 @@ struct OptioAgentSettingsView: View {
             if loaded {
                 form
             } else if let loadError {
-                ErrorBanner(error: loadError) { Task { await load() } }
+                ErrorRow(error: loadError) { Task { await load() } }
             } else {
                 ProgressView()
             }
