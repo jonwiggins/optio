@@ -22,7 +22,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { LocalStateBadge, SpawnSourceBadge, attentionLabel, dirTail } from "./terminal-card";
+import { SpawnSourceBadge, StatusDot, attentionLabel, dirTail } from "./terminal-card";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import type { SplitLayout } from "./split-state";
@@ -337,11 +337,18 @@ export function TerminalPane({
       >
         {terminal.title}
       </span>
-      <LocalStateBadge terminal={terminal} />
       {terminal.attentionState === "needs_you" && (
-        <span className="text-[11px] px-2">{attentionLabel(terminal.attentionReason)}</span>
+        <span className="text-[11px]">{attentionLabel(terminal.attentionReason)}</span>
       )}
     </div>
+  );
+
+  // The attention reason as plain text beside the title — only while the
+  // title has room to spare (the dot alone carries it otherwise).
+  const attentionText = terminal.attentionState === "needs_you" && !fit.compact && (
+    <span className="text-[11px] text-warning truncate shrink-[4] min-w-0">
+      {attentionLabel(terminal.attentionReason)}
+    </span>
   );
 
   const connDot = (
@@ -421,7 +428,7 @@ export function TerminalPane({
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>
-        <Terminal className="w-4 h-4 text-text-muted shrink-0 hidden sm:block" />
+        <StatusDot terminal={terminal} />
         <div
           ref={fit.rowRef}
           className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
@@ -438,21 +445,7 @@ export function TerminalPane({
               inputClassName="text-sm font-semibold tracking-tight"
             />
           </h1>
-          <LocalStateBadge terminal={terminal} compact={fit.compact} />
-          {terminal.attentionState === "needs_you" && (
-            <span
-              title={attentionLabel(terminal.attentionReason)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium text-warning bg-warning/10 border border-warning/20 shrink-0 min-w-0",
-                fit.compact ? "px-1.5 py-1" : "px-2 py-0.5",
-              )}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse shrink-0" />
-              {!fit.compact && (
-                <span className="truncate">{attentionLabel(terminal.attentionReason)}</span>
-              )}
-            </span>
-          )}
+          {attentionText}
           {!fit.compact && (
             <>
               <span className="hidden @lg:inline-block w-px h-4 bg-border shrink-0" aria-hidden />
@@ -477,17 +470,8 @@ export function TerminalPane({
         </div>
       </div>
     ) : (
-      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-bg">
-        <span
-          className={cn(
-            "w-1.5 h-1.5 rounded-full shrink-0",
-            terminal.attentionState === "needs_you"
-              ? "bg-warning animate-pulse"
-              : terminal.attentionState === "working"
-                ? "bg-success"
-                : "bg-text-muted/40",
-          )}
-        />
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-border bg-bg">
+        <StatusDot terminal={terminal} />
         <div
           ref={fit.rowRef}
           className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
@@ -500,12 +484,7 @@ export function TerminalPane({
             className="shrink max-w-[28rem]"
             inputClassName="text-sm font-medium"
           />
-          <LocalStateBadge terminal={terminal} compact={fit.compact} />
-          {terminal.attentionState === "needs_you" && !fit.compact && (
-            <span className="text-[11px] text-warning truncate">
-              {attentionLabel(terminal.attentionReason)}
-            </span>
-          )}
+          {attentionText}
           {!fit.compact && (
             <span className="hidden @3xl:inline-flex min-w-0">
               <WorkLinkBadges links={links} size="xs" max={2} />
