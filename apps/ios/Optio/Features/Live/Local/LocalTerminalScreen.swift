@@ -6,6 +6,7 @@ import SwiftTerm
 /// attention, the SwiftTerm viewer fed by the stream WS, and an extra-keys bar
 /// for the keys a phone keyboard lacks.
 struct LocalTerminalScreen: View {
+    @Environment(\.colorScheme) private var colorScheme
     let terminalId: String
     var hosts: [LocalHost] = []
     /// Deep link `?compose=1` (Live Activity "Reply…"): raise the keyboard once the stream connects.
@@ -133,7 +134,7 @@ struct LocalTerminalScreen: View {
                     .frame(maxHeight: 180)
                 }
                 .padding(10)
-                .background(SwiftUI.Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255))
+                .background(TerminalTheme.background(colorScheme))
             }
             // Remount on leaving `pending` — the stream only attaches to a terminal
             // that is already launching/running when it connects.
@@ -148,7 +149,7 @@ struct LocalTerminalScreen: View {
             }
             .id(terminal.state == .pending ? "held" : "live")
         }
-        .background(SwiftUI.Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255))
+        .background(TerminalTheme.background(colorScheme))
     }
 
     private func header(_ t: LocalTerminal) -> some View {
@@ -241,6 +242,7 @@ extension LocalTerminal {
 // MARK: - Stream view (status strip + SwiftTerm + extra keys)
 
 struct LocalTerminalStreamView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let terminalId: String
     var focusComposer = false
     var onStatus: (LocalTerminalState, LocalAttentionState) -> Void
@@ -264,7 +266,7 @@ struct LocalTerminalStreamView: View {
                     ExtraKeysBar(stream: stream, keyboardShown: $keyboardShown)
                 }
             } else {
-                SwiftUI.Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255)
+                TerminalTheme.background(colorScheme)
             }
         }
         .onAppear {
@@ -312,7 +314,7 @@ struct LocalTerminalStreamView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
-        .background(SwiftUI.Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255))
+        .background(TerminalTheme.background(colorScheme))
         .overlay(alignment: .bottom) { Divider().opacity(0.5) }
     }
 
@@ -358,6 +360,7 @@ struct LocalTerminalStreamView: View {
 /// Keys a phone keyboard lacks, plus a keyboard toggle. Sits below the
 /// terminal so it stays visible whether or not the keyboard is up.
 struct ExtraKeysBar: View {
+    @Environment(\.colorScheme) private var colorScheme
     let stream: LocalTerminalStream
     @Binding var keyboardShown: Bool
 
@@ -372,7 +375,7 @@ struct ExtraKeysBar: View {
                                 .frame(minWidth: 34)
                                 .padding(.vertical, 7)
                                 .padding(.horizontal, 6)
-                                .background(SwiftUI.Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                                .background(SwiftUI.Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
                         }
                         .buttonStyle(.plain)
                     }
@@ -387,7 +390,7 @@ struct ExtraKeysBar: View {
                     .font(.system(size: 15))
                     .padding(.vertical, 7)
                     .padding(.horizontal, 10)
-                    .background(SwiftUI.Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                    .background(SwiftUI.Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
             .padding(.trailing, 10)

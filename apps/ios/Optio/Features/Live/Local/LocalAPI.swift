@@ -307,15 +307,28 @@ struct WorkLinkBadges: View {
     let links: [WorkLink]
     var max: Int = 3
 
+    /// `owner/repo#519` → `PR #519`; `group/proj!45` → `MR !45`; ticket refs (`ENG-12`) as-is.
+    /// The repo is implied by the terminal's directory, so the pill only carries the number.
+    static func shortLabel(_ link: WorkLink) -> String {
+        let label = link.label
+        guard let i = label.lastIndex(where: { $0 == "#" || $0 == "!" }) else { return label }
+        let number = String(label[i...])
+        switch link.kind {
+        case .pr: return (number.hasPrefix("!") ? "MR " : "PR ") + number
+        default: return number
+        }
+    }
+
     var body: some View {
         if !links.isEmpty {
             HStack(spacing: 4) {
                 ForEach(links.prefix(max), id: \.url) { link in
                     if let url = URL(string: link.url) {
                         Link(destination: url) {
-                            Label(link.label, systemImage: link.kind == .pr ? "arrow.triangle.pull" : link.kind == .ref ? "number" : "circle.circle")
+                            Label(Self.shortLabel(link), systemImage: link.kind == .pr ? "arrow.triangle.pull" : link.kind == .ref ? "number" : "circle.circle")
                                 .font(.caption2.monospaced())
                                 .lineLimit(1)
+                                .fixedSize()
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background((link.kind == .pr ? AppTheme.accent : Color.secondary).opacity(0.12), in: RoundedRectangle(cornerRadius: 5))

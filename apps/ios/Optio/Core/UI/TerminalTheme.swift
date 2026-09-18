@@ -6,6 +6,12 @@ import UIKit
 /// wrappers (Sessions and Optio Local) call `apply` from make/update so switching
 /// appearance re-themes a live terminal without reconnecting.
 enum TerminalTheme {
+    /// SwiftUI color matching the terminal canvas, for chrome around it (status strip, key bar).
+    static func background(_ scheme: ColorScheme) -> SwiftUI.Color {
+        scheme == .dark ? SwiftUI.Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255)
+                        : SwiftUI.Color(red: 250 / 255, green: 250 / 255, blue: 250 / 255)
+    }
+
     static func apply(to view: TerminalView, scheme: ColorScheme) {
         let dark = scheme == .dark
         view.nativeBackgroundColor = dark ? UIColor(red: 9 / 255, green: 9 / 255, blue: 11 / 255, alpha: 1)

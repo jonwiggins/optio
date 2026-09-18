@@ -95,6 +95,7 @@ final class SessionTerminalController {
 }
 
 struct SessionTerminalView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var controller: SessionTerminalController
 
     var body: some View {
@@ -109,7 +110,7 @@ struct SessionTerminalView: View {
                     .background(.red.opacity(0.08))
             }
             TerminalHostView(controller: controller)
-                .background(SwiftUI.Color.black)
+                .background(TerminalTheme.background(colorScheme))
             TerminalExtraKeysBar { controller.sendInput($0) }
         }
         .onAppear { controller.start() }

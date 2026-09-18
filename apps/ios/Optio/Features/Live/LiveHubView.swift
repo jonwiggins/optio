@@ -3,8 +3,8 @@ import SwiftUI
 /// "Live" tab: Agents (persistent agents) · Sessions (interactive workspaces) ·
 /// Local (Optio Local terminals on the user's own machine).
 struct LiveHubView: View {
-    enum Section: Hashable { case agents, sessions, local }
-    @State private var section: Section = .agents
+    enum Section: Hashable { case local, agents, sessions }
+    @State private var section: Section = .local
     @State private var path = NavigationPath()
     @Environment(AppRouter.self) private var router
 
@@ -12,9 +12,9 @@ struct LiveHubView: View {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 ChipPicker(options: [
+                    (Section.local, "Local"),
                     (Section.agents, "Agents"),
                     (Section.sessions, "Sessions"),
-                    (Section.local, "Local"),
                 ], selection: $section)
                 Divider()
                 switch section {
