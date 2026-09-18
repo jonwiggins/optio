@@ -10,29 +10,30 @@ struct ServersView: View {
     @State private var status: [String: ServerProbe] = [:]
     @State private var showAdd = false
     @State private var confirmRemove: ServerProfile?
+    @State private var editing: ServerProfile?
 
     var body: some View {
         List {
             Section {
                 ForEach(session.servers) { server in
-                    ServerRow(server: server, isActive: server.id == session.activeServer?.id, probe: status[server.id]) {
-                        Task { await session.switchTo(server.id) }
+                    ServerRow(server: server, isActive: server.id == session.activeServer?.id, probe: status[server.id],
+                              onSelect: { Task { await session.switchTo(server.id) } },
+                              onEdit: { editing = server })
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        Button { editing = server } label: { Label("Edit", systemImage: "pencil") }.tint(AppTheme.accent)
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) { confirmRemove = server } label: { Label("Forget", systemImage: "trash") }
                     }
                     .contextMenu {
-                        NavigationLink { ServerEditView(server: server) } label: { Label("Edit", systemImage: "pencil") }
+                        Button { editing = server } label: { Label("Edit name, colour, URL", systemImage: "pencil") }
                         Button(role: .destructive) { confirmRemove = server } label: { Label("Forget", systemImage: "trash") }
-                    }
-                    .background {
-                        NavigationLink("") { ServerEditView(server: server) }.opacity(0)
                     }
                 }
             } header: {
                 SectionHeader(title: "Paired servers").textCase(nil)
             } footer: {
-                Text("Tap a server to switch the whole app to it. Widgets can show one server or all of them.")
+                Text("Tap a server to switch the whole app to it; the pencil edits its name, colour and address. Widgets can show one server or all of them.")
             }
 
             Section {
@@ -46,6 +47,7 @@ struct ServersView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             }
         }
+        .navigationDestination(item: $editing) { server in ServerEditView(server: server) }
         .task(id: session.servers.map(\.id)) { await probeAll() }
         .refreshable { await probeAll() }
         .sheet(isPresented: $showAdd) { SignInView(mode: .add) }
@@ -110,6 +112,7 @@ struct ServerRow: View {
     let isActive: Bool
     let probe: ServerProbe?
     let onSelect: () -> Void
+    let onEdit: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -133,6 +136,16 @@ struct ServerRow: View {
                 if isActive {
                     Image(systemName: "checkmark").foregroundStyle(AppTheme.accent).fontWeight(.semibold)
                 }
+                Button(action: onEdit) {
+                    Image(systemName: "pencil.circle")
+                        .font(.title3)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit \(server.name)")
             }
             .contentShape(Rectangle())
         }
@@ -146,15 +159,45 @@ struct ServerEditView: View {
     @Environment(SessionStore.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var draft: ServerProfile
+    @State private var urlText: String
     @State private var confirmRemove = false
 
-    init(server: ServerProfile) { _draft = State(initialValue: server) }
+    init(server: ServerProfile) {
+        _draft = State(initialValue: server)
+        _urlText = State(initialValue: server.url.absoluteString)
+    }
+
+    /// The address field, normalised like sign-in (scheme defaults to https).
+    private var editedURL: URL? {
+        var raw = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        if !raw.contains("://") { raw = "https://" + raw }
+        guard let url = URL(string: raw), url.host != nil else { return nil }
+        return url
+    }
 
     var body: some View {
         Form {
-            Section("Name") {
+            Section {
                 TextField("MacBook Pro", text: $draft.name)
                     .textInputAutocapitalization(.words)
+            } header: {
+                Text("Name")
+            } footer: {
+                Text("Shown in the switcher, on the Overview and in widget sections.")
+            }
+            Section {
+                TextField("http://laptop.tailnet.ts.net:30400", text: $urlText)
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.body.monospaced())
+            } header: {
+                Text("Address")
+            } footer: {
+                Text(editedURL == nil ? "Enter the server address, including the port if it isn't 443." : "The stored token is kept; change it by adding the server again.")
+                    .foregroundStyle(editedURL == nil ? .red : .secondary)
             }
             Section {
                 ServerColorPicker(selection: $draft.color)
@@ -163,9 +206,10 @@ struct ServerEditView: View {
             } footer: {
                 Text("Marks this server's items in widgets, the Live Activity and the switcher.")
             }
-            Section("Server") {
-                MoreInfoRow(label: "URL", value: draft.url.absoluteString, mono: true)
-                if let ws = draft.workspaceId { MoreInfoRow(label: "Workspace", value: ws, mono: true) }
+            if let ws = draft.workspaceId {
+                Section("Server") {
+                    MoreInfoRow(label: "Workspace", value: ws, mono: true)
+                }
             }
             Section {
                 Button("Forget this server", role: .destructive) { confirmRemove = true }
@@ -177,11 +221,13 @@ struct ServerEditView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
                     var p = draft
+                    if let url = editedURL { p.url = url }
                     p.name = p.name.trimmingCharacters(in: .whitespaces)
                     if p.name.isEmpty { p.name = ServerProfile.defaultName(for: p.url) }
                     session.updateServer(p)
                     dismiss()
                 }
+                .disabled(editedURL == nil)
             }
         }
         .confirmationDialog("Forget \(draft.name)?", isPresented: $confirmRemove, titleVisibility: .visible) {

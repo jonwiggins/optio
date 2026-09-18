@@ -205,10 +205,19 @@ final class SessionStore {
         }
     }
 
-    /// Renames / recolours a server (or edits its workspace override).
+    /// Renames / recolours a server, edits its address or workspace override. A new
+    /// address on the active server re-points the client and rebuilds the shell.
     func updateServer(_ profile: ServerProfile) {
+        let addressChanged = profile.id == activeServer?.id && profile.url != activeServer?.url
         persist(profile)
-        if profile.id == activeServer?.id {
+        guard profile.id == activeServer?.id else { return }
+        if addressChanged, let token = ServerRegistry.token(for: profile.id) {
+            events.stop()
+            activate(profile, token: token)
+            generation += 1
+            events.start()
+            Task { await refreshUser() }
+        } else {
             activeServer = profile
             if workspaceId != profile.workspaceId { workspaceId = profile.workspaceId }
         }
