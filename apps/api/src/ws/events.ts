@@ -48,6 +48,18 @@ export async function eventsWs(app: FastifyInstance) {
     subscriber.subscribe(channel);
 
     subscriber.on("message", (_ch: string, message: string) => {
+      // `local:changed` nudges carry a terminal/host/user id that is private to
+      // the owner — this channel fans out to every authenticated user, so gate
+      // those frames to their owner (dev/auth-disabled has a null owner and one
+      // user, so it passes). Other event types keep their existing behavior.
+      if (message.includes('"local:changed"')) {
+        try {
+          const evt = JSON.parse(message) as { type?: string; userId?: string | null };
+          if (evt.type === "local:changed" && evt.userId && evt.userId !== user.id) return;
+        } catch {
+          // Unparseable — fall through and forward (matches prior behavior).
+        }
+      }
       socket.send(message);
     });
 

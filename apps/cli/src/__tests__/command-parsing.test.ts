@@ -16,6 +16,7 @@ describe("CLI command parsing", () => {
     expect(commandNames).toContain("session");
     expect(commandNames).toContain("secret");
     expect(commandNames).toContain("workspace");
+    expect(commandNames).toContain("local");
   });
 
   it("task command has expected subcommands", () => {
@@ -72,6 +73,18 @@ describe("CLI command parsing", () => {
 
     expect(subNames).toContain("list");
     expect(subNames).toContain("switch");
+  });
+
+  it("local command has expected subcommands", () => {
+    const program = createProgram();
+    const localCmd = program.commands.find((c) => c.name() === "local");
+    const subNames = localCmd?.commands.map((c) => c.name()) ?? [];
+
+    expect(subNames).toContain("up");
+    expect(subNames).toContain("add");
+    expect(subNames).toContain("remove");
+    expect(subNames).toContain("dirs");
+    expect(subNames).toContain("status");
   });
 
   it("supports global options", () => {

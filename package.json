@@ -42,6 +42,9 @@
     ]
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "node-pty"
+    ],
     "overrides": {
       "@grpc/grpc-js": "1.14.4",
       "@protobufjs/utf8": "1.1.1",

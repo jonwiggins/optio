@@ -211,6 +211,36 @@ async function dispatchTrigger(trigger: {
     return;
   }
 
+  if (trigger.targetType === "local_blueprint") {
+    const { getBlueprint, spawnFromBlueprint } =
+      await import("../services/local-blueprint-service.js");
+    const blueprint = await getBlueprint(trigger.targetId);
+    if (!blueprint) {
+      logger.warn(
+        { triggerId: trigger.id, blueprintId: trigger.targetId },
+        "Schedule trigger references missing local blueprint, skipping",
+      );
+      return;
+    }
+    if (!blueprint.enabled) {
+      logger.debug(
+        { triggerId: trigger.id, blueprintId: blueprint.id },
+        "Schedule trigger target blueprint is disabled, skipping",
+      );
+      return;
+    }
+    const terminal = await spawnFromBlueprint(blueprint, {
+      triggerId: trigger.id,
+      spawnedBy: "trigger",
+      params: trigger.paramMapping ?? undefined,
+    });
+    logger.info(
+      { triggerId: trigger.id, blueprintId: blueprint.id, terminalId: terminal.id },
+      "Local blueprint schedule trigger fired",
+    );
+    return;
+  }
+
   logger.warn(
     { triggerId: trigger.id, targetType: trigger.targetType },
     "Unknown trigger target_type, skipping",

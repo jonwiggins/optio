@@ -64,6 +64,22 @@ export async function publishPersistentAgentEvent(event: WsEvent): Promise<void>
   }
 }
 
+/**
+ * Content-free nudge for Optio Local terminal changes. Published only on the
+ * shared `optio:events` channel — that stream is visible to every
+ * authenticated user, so no terminal content (previews, output, dirs) may
+ * ever ride on it. Clients refetch over REST on receipt.
+ */
+export async function publishLocalChanged(event: {
+  /** Null for host-level changes (online/offline) with no specific terminal. */
+  terminalId: string | null;
+  hostId: string;
+  userId: string | null;
+}): Promise<void> {
+  const redis = getPublisher();
+  await redis.publish(`optio:events`, JSON.stringify({ type: "local:changed", ...event }));
+}
+
 /** Return the shared Redis client (usable for pub/sub publishing and general commands). */
 export function getRedisClient(): Redis {
   return getPublisher();

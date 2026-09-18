@@ -10,6 +10,7 @@ import { taskQueue } from "../workers/task-worker.js";
 import { retrieveSecret } from "./secret-service.js";
 import { getGitHubToken } from "./github-token-service.js";
 import { logger } from "../logger.js";
+import { buildCommentsSection } from "./ticket-context.js";
 import { recordAuthEvent } from "./auth-failure-detector.js";
 
 /** Auto-disable a provider after this many consecutive failures. */
@@ -128,11 +129,7 @@ export async function syncAllTickets(): Promise<number> {
         let commentsSection = "";
         try {
           const comments = await provider.fetchTicketComments(ticket.externalId, mergedConfig);
-          if (comments.length > 0) {
-            commentsSection =
-              "\n\n## Comments\n\n" +
-              comments.map((c) => `**${c.author}** (${c.createdAt}):\n${c.body}`).join("\n\n");
-          }
+          commentsSection = buildCommentsSection(comments);
         } catch (err) {
           logger.warn({ err, ticketId: ticket.externalId }, "Failed to fetch ticket comments");
         }
@@ -225,6 +222,24 @@ export async function syncAllTickets(): Promise<number> {
           logger.warn(
             { err: triggerErr, ticketId: ticket.externalId },
             "Failed to fire ticket triggers for task_configs",
+          );
+        }
+
+        // Fire any local blueprint ticket triggers (Optio Local terminals).
+        try {
+          const { fireLocalTicketTriggers } = await import("./local-blueprint-service.js");
+          await fireLocalTicketTriggers({
+            source: ticket.source,
+            externalId: ticket.externalId,
+            title: ticket.title,
+            body: ticket.body,
+            labels: ticket.labels,
+            url: ticket.url,
+          });
+        } catch (triggerErr) {
+          logger.warn(
+            { err: triggerErr, ticketId: ticket.externalId },
+            "Failed to fire ticket triggers for local blueprints",
           );
         }
       }

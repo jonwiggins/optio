@@ -11,6 +11,7 @@ import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import { retrieveSecret } from "../services/secret-service.js";
 import { getGitHubToken } from "../services/github-token-service.js";
 import { logger } from "../logger.js";
+import { buildCommentsSection } from "../services/ticket-context.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { IssueSummarySchema } from "../schemas/session.js";
 import { TaskSchema } from "../schemas/task.js";
@@ -324,11 +325,7 @@ export async function issueRoutes(rawApp: FastifyInstance) {
       let commentsSection = "";
       try {
         const issueComments = await platform.getIssueComments(ri, body.issueNumber);
-        if (issueComments.length > 0) {
-          commentsSection =
-            "\n\n## Comments\n\n" +
-            issueComments.map((c) => `**${c.author}** (${c.createdAt}):\n${c.body}`).join("\n\n");
-        }
+        commentsSection = buildCommentsSection(issueComments);
       } catch (err) {
         logger.warn({ err, issueNumber: body.issueNumber }, "Failed to fetch issue comments");
       }

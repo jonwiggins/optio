@@ -2,21 +2,28 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { Loader2, Zap, GitBranch, CircleDot, Check } from "lucide-react";
+import { normalizeRepoUrl } from "@optio/shared";
+import { Loader2, Zap, GitBranch, CircleDot, Check, Terminal } from "lucide-react";
 
 /**
  * Browser of GitHub Issues across the workspace's connected repos.
- * Lets the user assign individual or bulk issues to Optio (creates a Repo Task).
+ * Lets the user assign individual or bulk issues to Optio (creates a Repo Task),
+ * or — when an online local host advertises a matching checkout — start an
+ * attended Optio Local terminal for the issue.
  */
 export function IssuesBrowser() {
+  const router = useRouter();
   const [issues, setIssues] = useState<any[]>([]);
   const [repos, setRepos] = useState<any[]>([]);
+  const [localHosts, setLocalHosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRepo, setSelectedRepo] = useState("");
   const [assigning, setAssigning] = useState<number | null>(null);
+  const [workingLocally, setWorkingLocally] = useState<string | null>(null);
   const [bulkAssigning, setBulkAssigning] = useState(false);
 
   useEffect(() => {
@@ -24,6 +31,18 @@ export function IssuesBrowser() {
       .listRepos()
       .then((res) => setRepos(res.repos))
       .catch(() => {});
+    // Hosts flip online/offline as daemons connect — keep "Work on locally"
+    // in step without a reload.
+    const loadHosts = () =>
+      api
+        .listLocalHosts()
+        .then((res) => setLocalHosts(res.hosts))
+        .catch(() => {});
+    loadHosts();
+    const hostsTimer = setInterval(() => {
+      if (document.visibilityState === "visible") loadHosts();
+    }, 15_000);
+    return () => clearInterval(hostsTimer);
   }, []);
 
   useEffect(() => {
@@ -40,6 +59,42 @@ export function IssuesBrowser() {
   const isAssignable = (i: any) =>
     (i.source === "github" || i.source === "gitlab" || !i.source) && i.repo?.id;
   const unassignedIssues = issues.filter((i: any) => !i.optioTask && isAssignable(i));
+
+  /** Online local host advertising a dir whose git remote matches the issue's repo. */
+  const findLocalHost = (issue: any): any | null => {
+    const repoUrl = issue.repo?.repoUrl;
+    if (!repoUrl) return null;
+    const target = normalizeRepoUrl(repoUrl);
+    return (
+      localHosts.find(
+        (h) =>
+          h.state === "online" &&
+          (h.dirs ?? []).some((d: any) => d.repoUrl && normalizeRepoUrl(d.repoUrl) === target),
+      ) ?? null
+    );
+  };
+
+  const handleWorkLocally = async (issue: any, host: any) => {
+    const key = `${issue.repo.id}:${issue.number}`;
+    setWorkingLocally(key);
+    try {
+      const res = await api.createLocalTerminal({
+        hostId: host.id,
+        ticket: {
+          repoId: issue.repo.id,
+          issueNumber: issue.number,
+          title: issue.title,
+          body: issue.body ?? undefined,
+        },
+      });
+      toast.success(`Terminal started on ${host.name}`);
+      router.push(`/local/${res.terminal.id}`);
+      return;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to start local terminal");
+    }
+    setWorkingLocally(null);
+  };
 
   const handleAssignAll = async () => {
     if (!confirm(`Assign ${unassignedIssues.length} issues to Optio?`)) return;
@@ -206,7 +261,7 @@ export function IssuesBrowser() {
                   )}
                 </div>
 
-                <div className="shrink-0">
+                <div className="shrink-0 flex items-center gap-1.5">
                   {issue.optioTask ? (
                     <Link
                       href={`/tasks/${issue.optioTask.taskId}`}
@@ -220,18 +275,40 @@ export function IssuesBrowser() {
                           : "Running"}
                     </Link>
                   ) : isAssignable(issue) ? (
-                    <button
-                      onClick={() => handleAssign(issue)}
-                      disabled={assigning === issue.number}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
-                    >
-                      {assigning === issue.number ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Zap className="w-3 h-3" />
-                      )}
-                      Assign to Optio
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleAssign(issue)}
+                        disabled={assigning === issue.number}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
+                      >
+                        {assigning === issue.number ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Zap className="w-3 h-3" />
+                        )}
+                        Assign to Optio
+                      </button>
+                      {(() => {
+                        const localHost = findLocalHost(issue);
+                        if (!localHost) return null;
+                        const key = `${issue.repo.id}:${issue.number}`;
+                        return (
+                          <button
+                            onClick={() => handleWorkLocally(issue, localHost)}
+                            disabled={workingLocally === key}
+                            title={`Start an attended terminal in the matching checkout on ${localHost.name}`}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-primary/40 bg-primary/10 text-primary text-xs hover:bg-primary/20 disabled:opacity-50 transition-colors"
+                          >
+                            {workingLocally === key ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Terminal className="w-3 h-3" />
+                            )}
+                            Work on locally
+                          </button>
+                        );
+                      })()}
+                    </>
                   ) : (
                     <span
                       className="text-[10px] px-2 py-1 rounded-md border border-border bg-bg text-text-muted"
