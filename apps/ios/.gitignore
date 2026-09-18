@@ -5,3 +5,6 @@ build/
 .swiftpm/
 xcuserdata/
 Optio/Resources/Info.plist
+Optio/Optio.entitlements
+OptioWidgets/Info.plist
+OptioWidgets/OptioWidgets.entitlements

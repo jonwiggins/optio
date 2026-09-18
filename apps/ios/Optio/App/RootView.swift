@@ -14,6 +14,7 @@ struct RootView: View {
             case .signedIn:
                 MainTabView()
                     .environment(session.api)
+                    .environment(session.events)
             }
         }
         .animation(.default, value: session.phase)

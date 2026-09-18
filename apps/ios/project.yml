@@ -28,8 +28,19 @@ targets:
       - path: Optio
         excludes:
           - "**/*.md"
+      - path: Shared
     dependencies:
       - package: SwiftTerm
+      - target: OptioWidgets
+        embed: true
+        codeSign: true
+    entitlements:
+      path: Optio/Optio.entitlements
+      properties:
+        com.apple.security.application-groups: [group.dev.optio.ios]
+        keychain-access-groups: ["$(AppIdentifierPrefix)dev.optio.ios.shared"]
+        # aps-environment is added automatically by Xcode once the Push
+        # Notifications capability is enabled on a paid team.
     info:
       path: Optio/Resources/Info.plist
       properties:
@@ -56,6 +67,10 @@ targets:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
         NSFaceIDUsageDescription: Unlock the stored Optio access token.
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+        UIBackgroundModes: [fetch, remote-notification]
+        BGTaskSchedulerPermittedIdentifiers: [dev.optio.ios.refresh]
         CFBundleURLTypes:
           - CFBundleURLName: dev.optio.auth
             CFBundleURLSchemes: [optio]
@@ -66,6 +81,34 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+  OptioWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: OptioWidgets
+      - path: Shared
+    info:
+      path: OptioWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Optio
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: OptioWidgets/OptioWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [group.dev.optio.ios]
+        keychain-access-groups: ["$(AppIdentifierPrefix)dev.optio.ios.shared"]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.optio.ios.widgets
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME: WidgetBackground
+
   OptioTests:
     type: bundle.unit-test
     platform: iOS
@@ -81,6 +124,7 @@ schemes:
     build:
       targets:
         Optio: all
+        OptioWidgets: all
         OptioTests: [test]
     run:
       config: Debug

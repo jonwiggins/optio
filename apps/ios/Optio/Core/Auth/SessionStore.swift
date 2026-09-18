@@ -34,11 +34,13 @@ final class SessionStore {
     /// Workspace override sent as `x-workspace-id`; nil = user's default workspace.
     var workspaceId: String? {
         didSet {
-            UserDefaults.standard.set(workspaceId, forKey: Keys.workspace)
+            SharedCredentials.workspaceId = workspaceId
             api.workspaceId = workspaceId
         }
     }
     let api = APIClient()
+    /// App-wide `/ws/events` fan-out; started on sign-in, stopped on sign-out.
+    let events: EventHub
 
     private enum Keys {
         static let serverURL = "optio.serverURL"
@@ -49,6 +51,7 @@ final class SessionStore {
     private var verifyingToken = false
 
     init() {
+        events = EventHub(api: api)
         // A single 401 from a user-scoped route is not proof the token is dead
         // (auth-disabled dev servers 401 on a few of them). Re-check identity and
         // only sign out when `/api/auth/me` itself rejects the token.
@@ -78,17 +81,20 @@ final class SessionStore {
         //     xcrun simctl launch booted dev.optio.ios
         let env = ProcessInfo.processInfo.environment
         if let devToken = env["OPTIO_DEV_TOKEN"], let devURL = env["OPTIO_DEV_SERVER_URL"] {
-            try? Keychain.set(devToken, account: Keys.token)
-            UserDefaults.standard.set(devURL, forKey: Keys.serverURL)
+            SharedCredentials.setToken(devToken)
+            SharedCredentials.serverURL = URL(string: devURL)
         }
         #endif
-        guard let raw = UserDefaults.standard.string(forKey: Keys.serverURL),
-              let url = URL(string: raw),
-              let token = Keychain.get(account: Keys.token) else {
+        // Migrate pre-App-Group installs.
+        if SharedCredentials.serverURL == nil, let raw = UserDefaults.standard.string(forKey: Keys.serverURL), let url = URL(string: raw) {
+            SharedCredentials.serverURL = url
+            if let t = Keychain.get(account: Keys.token) { SharedCredentials.setToken(t) }
+        }
+        guard let url = SharedCredentials.serverURL, let token = SharedCredentials.token else {
             phase = .signedOut
             return
         }
-        workspaceId = UserDefaults.standard.string(forKey: Keys.workspace)
+        workspaceId = SharedCredentials.workspaceId
         api.configure(baseURL: url, token: token, workspaceId: workspaceId)
         serverURL = url
         do {
@@ -101,20 +107,24 @@ final class SessionStore {
             // user can retry from inside the app once the tailnet is up.
             phase = .signedIn
         }
+        if phase == .signedIn { events.start() }
     }
 
     /// Verifies the credentials, then persists them.
     func signIn(serverURL url: URL, token: String) async throws {
         api.configure(baseURL: url, token: token, workspaceId: nil)
         let me = try await api.currentUser()
-        try Keychain.set(token, account: Keys.token)
-        UserDefaults.standard.set(url.absoluteString, forKey: Keys.serverURL)
+        guard SharedCredentials.setToken(token) else { throw Keychain.KeychainError.status(errSecIO) }
+        SharedCredentials.serverURL = url
         serverURL = url
         user = me
         phase = .signedIn
+        events.start()
     }
 
     func signOut() {
+        events.stop()
+        SharedCredentials.clearAll()
         Keychain.delete(account: Keys.token)
         UserDefaults.standard.removeObject(forKey: Keys.serverURL)
         UserDefaults.standard.removeObject(forKey: Keys.workspace)

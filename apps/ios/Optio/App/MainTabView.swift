@@ -25,6 +25,7 @@ struct MainTabView: View {
                 .tag(AppRouter.Tab.more)
         }
         .environment(router)
+        .onOpenURL { url in router.handle(url: url) }
         .onAppear(perform: applyDevSection)
     }
 

@@ -9,7 +9,10 @@ struct OptioApp: App {
             RootView()
                 .environment(session)
                 .tint(AppTheme.accent)
-                .task { await session.restore() }
+                .task {
+                    AppRefresh.register()
+                    await session.restore()
+                }
         }
     }
 }
