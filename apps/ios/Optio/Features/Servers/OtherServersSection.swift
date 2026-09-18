@@ -141,7 +141,7 @@ struct OtherServerRow: View {
         case .online:
             HStack(spacing: 6) {
                 if glance.needsYou > 0 {
-                    Text("\(glance.needsYou) need\(glance.needsYou == 1 ? "s" : "") you").foregroundStyle(AppTheme.accent).fontWeight(.medium)
+                    Text("\(glance.needsYou) need\(glance.needsYou == 1 ? "s" : "") you").foregroundStyle(Tone.accent.textStyle).fontWeight(.medium)
                     Text("·").foregroundStyle(.tertiary)
                 }
                 Text("\(glance.running) running")

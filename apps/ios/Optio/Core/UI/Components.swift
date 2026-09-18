@@ -235,8 +235,7 @@ struct StatStrip: View {
     private func valueStyle(_ item: StatItem) -> AnyShapeStyle {
         if item.isZero { return AnyShapeStyle(.tertiary) }
         switch item.tone {
-        case .accent: return AnyShapeStyle(AppTheme.accent)
-        case .danger: return AnyShapeStyle(.red)
+        case .accent, .danger: return (item.tone ?? .idle).textStyle
         default: return AnyShapeStyle(.primary)
         }
     }

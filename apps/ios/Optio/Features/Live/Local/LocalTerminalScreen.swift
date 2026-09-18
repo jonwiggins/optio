@@ -308,7 +308,7 @@ struct LocalTerminalStreamView: View {
             }
             if let attention = stream.attentionState {
                 Text(attention == .needsYou ? "needs you" : attention.rawValue)
-                    .foregroundStyle(attention == .needsYou ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(attention == .needsYou ? Tone.accent.textStyle : AnyShapeStyle(.secondary))
             }
             Spacer()
             if let size = stream.lastSentSize {

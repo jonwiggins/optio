@@ -43,7 +43,7 @@ struct DetailHeader<Accessory: View>: View {
             if let needsYou {
                 HStack(spacing: 6) {
                     StateDot(tone: .accent)
-                    Text(needsYou).font(.footnote.weight(.medium)).foregroundStyle(AppTheme.accent)
+                    Text(needsYou).font(.footnote.weight(.medium)).foregroundStyle(Tone.accent.textStyle)
                 }
             }
         }
