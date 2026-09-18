@@ -196,7 +196,7 @@ struct SignInView: View {
             content()
                 .padding(.horizontal, 14)
                 .padding(.vertical, 13)
-                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(.fill.tertiary, in: Radius.innerShape)
         }
     }
 
@@ -259,23 +259,3 @@ struct SignInView: View {
 }
 
 /// The lucide "bot" outline used for the app icon, as a Shape (24-unit grid).
-struct BotGlyph: Shape {
-    func path(in rect: CGRect) -> Path {
-        let s = min(rect.width, rect.height) / 24
-        let ox = rect.midX - 12 * s
-        let oy = rect.midY - 12 * s
-        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: ox + x * s, y: oy + y * s) }
-        var path = Path()
-        // antenna
-        path.move(to: p(12, 8)); path.addLine(to: p(12, 4)); path.addLine(to: p(8, 4))
-        // head
-        path.addRoundedRect(in: CGRect(x: ox + 4 * s, y: oy + 8 * s, width: 16 * s, height: 12 * s), cornerSize: CGSize(width: 2.4 * s, height: 2.4 * s))
-        // ears
-        path.move(to: p(2, 14)); path.addLine(to: p(4, 14))
-        path.move(to: p(20, 14)); path.addLine(to: p(22, 14))
-        // eyes
-        path.move(to: p(15, 13)); path.addLine(to: p(15, 15))
-        path.move(to: p(9, 13)); path.addLine(to: p(9, 15))
-        return path
-    }
-}

@@ -271,7 +271,7 @@ private struct ActivityRow: View {
                         .foregroundStyle(.secondary)
                         .padding(Spacing.s)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
+                        .background(.fill.tertiary, in: Radius.smallShape)
                 }
             }
         }

@@ -171,9 +171,6 @@ struct ActiveServerCard: View {
     var body: some View {
         if let server = session.activeServer {
             HStack(spacing: Spacing.m) {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(server.color.swiftUI)
-                    .frame(width: 5)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(server.name).font(.headline)
@@ -199,9 +196,18 @@ struct ActiveServerCard: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, Spacing.s)
-            .padding(.horizontal, Spacing.m)
-            .background(Surface.card, in: RoundedRectangle(cornerRadius: Radius.card))
+            .padding(.vertical, Spacing.m)
+            .padding(.leading, Spacing.l + 4)
+            .padding(.trailing, Spacing.m)
+            .background {
+                // The server colour runs down the leading edge *inside* the card
+                // shape, so it follows the corner curve instead of floating beside it.
+                ZStack(alignment: .leading) {
+                    Surface.card
+                    server.color.swiftUI.frame(width: 5)
+                }
+                .clipShape(Radius.cardShape)
+            }
             .accessibilityElement(children: .combine)
         }
     }

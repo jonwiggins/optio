@@ -128,10 +128,10 @@ private struct IconCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            Radius.cardShape
                 .fill(Color(.secondarySystemGroupedBackground))
         )
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentShape(Radius.cardShape)
     }
 }
 

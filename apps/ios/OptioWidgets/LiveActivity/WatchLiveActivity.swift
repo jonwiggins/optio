@@ -5,8 +5,9 @@ import WidgetKit
 /// The one Optio Live Activity: "the thing waiting on you, plus how many more".
 /// Region table and copy: docs/design/ios-glanceable-surfaces.md §2a.
 ///
-/// Purple appears only when something needs you. Working is `.secondary`, offline is
-/// plain words, done is a summary line. The only live elements are the system timers.
+/// Colour follows the status palette (Shared/StatusColor.swift): yellow while
+/// something needs you, purple while agents are working, grey when offline / quiet.
+/// The only live elements are the system timers.
 struct WatchLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: WatchAttributes.self) { context in
@@ -28,14 +29,14 @@ struct WatchLiveActivity: Widget {
                     WatchButtons(state: state)
                 }
             } compactLeading: {
-                WatchGlyph(phase: state.phase)
+                WatchGlyph(phase: state.phase, size: 18)
             } compactTrailing: {
                 WatchCompactTrailing(state: state)
             } minimal: {
                 WatchMinimal(state: state)
             }
             .widgetURL(WatchCopy.url(for: state))
-            .keylineTint(state.phase == .waiting ? WatchCopy.purple : .secondary)
+            .keylineTint(WatchCopy.tint(state.phase))
         }
     }
 }
@@ -43,10 +44,25 @@ struct WatchLiveActivity: Widget {
 // MARK: - Copy & styling
 
 enum WatchCopy {
-    /// #6d28d9 — "you". Only ever shown while something needs you.
-    static let purple = Color(red: 0x6D / 255, green: 0x28 / 255, blue: 0xD9 / 255)
-    /// One symbol, hierarchical rendering, no wordmark.
-    static let glyph = "terminal.fill"
+    /// #6d28d9 — the action colour for the prominent button.
+    static let purple = StatusColor.purple
+
+    /// Phase → status colour: yellow needs input, purple working, grey otherwise.
+    static func tint(_ phase: WatchState.Phase) -> Color {
+        switch phase {
+        case .waiting: return StatusColor.yellow
+        case .working: return StatusColor.purple
+        case .offline, .done: return StatusColor.grey
+        }
+    }
+
+    /// Headline / timer style for a phase.
+    static func style(_ phase: WatchState.Phase) -> AnyShapeStyle {
+        switch phase {
+        case .waiting, .working: return AnyShapeStyle(tint(phase))
+        case .offline, .done: return AnyShapeStyle(.secondary)
+        }
+    }
 
     static func headline(_ state: WatchState) -> String {
         switch state.phase {
@@ -119,16 +135,27 @@ struct MonoText: View {
     }
 }
 
+/// The Optio bot in the phase colour. Doubles as the island's compact-leading mark.
 struct WatchGlyph: View {
     let phase: WatchState.Phase
-    var size: Font = .title3
+    var size: CGFloat = 20
 
     var body: some View {
-        Image(systemName: WatchCopy.glyph)
-            .symbolRenderingMode(.hierarchical)
-            .font(size)
-            .foregroundStyle(phase == .waiting ? AnyShapeStyle(WatchCopy.purple) : AnyShapeStyle(.secondary))
+        OptioGlyph(size: size, style: WatchCopy.tint(phase))
             .widgetAccentable(phase == .waiting)
+    }
+}
+
+/// A status dot for one item: yellow needs input, purple working, red failed, green done.
+struct WatchStateDot: View {
+    let item: WatchItem
+    var size: CGFloat = 7
+
+    var body: some View {
+        Circle()
+            .fill(StatusKind.forState(item.state).color)
+            .frame(width: size, height: size)
+            .accessibilityLabel(StatusKind.forState(item.state).label)
     }
 }
 
@@ -142,20 +169,20 @@ struct WatchCompactTrailing: View {
         case .waiting:
             HStack(spacing: 4) {
                 MonoText(text: state.head?.mono ?? "", size: .caption, weight: .semibold)
-                    .foregroundStyle(WatchCopy.purple)
+                    .foregroundStyle(StatusColor.yellow)
                     .frame(maxWidth: 64, alignment: .trailing)
                 if state.needsYouCount > 1 {
                     Text("+\(state.needsYouCount - 1)")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(WatchCopy.purple)
+                        .foregroundStyle(StatusColor.yellow)
                         .contentTransition(.numericText())
                 }
             }
             .widgetAccentable()
         case .working:
             Text(WatchCopy.workingLine(state))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(state.runningCount > 0 ? AnyShapeStyle(StatusColor.purple) : AnyShapeStyle(.secondary))
                 .contentTransition(.numericText())
         case .offline:
             Text("offline").font(.caption).foregroundStyle(.secondary)
@@ -171,16 +198,16 @@ struct WatchMinimal: View {
     var body: some View {
         if state.phase == .waiting {
             ZStack {
-                Circle().fill(WatchCopy.purple)
+                Circle().fill(StatusColor.yellow)
                 Text("\(state.needsYouCount)")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.black)
                     .contentTransition(.numericText())
             }
             .frame(width: 20, height: 20)
             .widgetAccentable()
         } else {
-            WatchGlyph(phase: state.phase, size: .body)
+            WatchGlyph(phase: state.phase, size: 16)
         }
     }
 }
@@ -193,7 +220,7 @@ struct WatchExpandedLeading: View {
             WatchGlyph(phase: state.phase)
             Text(WatchCopy.headline(state))
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(state.phase == .waiting ? AnyShapeStyle(WatchCopy.purple) : AnyShapeStyle(.secondary))
+                .foregroundStyle(WatchCopy.style(state.phase))
         }
         .padding(.leading, 4)
     }
@@ -208,6 +235,7 @@ struct WatchExpandedCenter: View {
             case .waiting:
                 if let head = state.head {
                     HStack(spacing: 6) {
+                        WatchStateDot(item: head)
                         MonoText(text: head.mono)
                         WatchServerTag(item: head)
                     }
@@ -219,7 +247,10 @@ struct WatchExpandedCenter: View {
                 }
             case .working:
                 if let head = state.head {
-                    Text(head.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                    HStack(spacing: 6) {
+                        WatchStateDot(item: head)
+                        Text(head.title).font(.subheadline.weight(.medium)).lineLimit(1)
+                    }
                     Text(timerInterval: head.since...head.since.addingTimeInterval(8 * 3600), countsDown: false)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -245,7 +276,7 @@ struct WatchExpandedTrailing: View {
             if let head = state.head {
                 Text(head.since, style: .timer)
                     .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(WatchCopy.purple)
+                    .foregroundStyle(StatusColor.yellow)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 52, alignment: .trailing)
                     .widgetAccentable()
@@ -253,7 +284,7 @@ struct WatchExpandedTrailing: View {
         case .working:
             Text("\(state.runningCount)")
                 .font(.title3.monospacedDigit().weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(state.runningCount > 0 ? AnyShapeStyle(StatusColor.purple) : AnyShapeStyle(.secondary))
                 .contentTransition(.numericText())
         case .offline, .done:
             EmptyView()
@@ -314,10 +345,10 @@ struct WatchLockScreenView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: fullscreen ? 10 : 6) {
             HStack(spacing: 6) {
-                WatchGlyph(phase: state.phase, size: fullscreen ? .title : .title3)
+                WatchGlyph(phase: state.phase, size: fullscreen ? 28 : 20)
                 Text(WatchCopy.headline(state))
                     .font((fullscreen ? Font.title3 : .subheadline).weight(.semibold))
-                    .foregroundStyle(state.phase == .waiting ? AnyShapeStyle(WatchCopy.purple) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(WatchCopy.style(state.phase))
                 Spacer(minLength: 8)
                 trailing
             }
@@ -336,17 +367,20 @@ struct WatchLockScreenView: View {
             if let head = state.head {
                 HStack(spacing: 6) {
                     if state.needsYouCount > 1 {
-                        Text("+\(state.needsYouCount - 1)").font(.caption.weight(.semibold)).foregroundStyle(WatchCopy.purple)
+                        Text("+\(state.needsYouCount - 1)").font(.caption.weight(.semibold)).foregroundStyle(StatusColor.yellow)
                     }
                     Text(head.since, style: .timer)
                         .font((fullscreen ? Font.title3 : .subheadline).monospacedDigit().weight(.semibold))
-                        .foregroundStyle(WatchCopy.purple)
+                        .foregroundStyle(StatusColor.yellow)
                         .frame(minWidth: 44, alignment: .trailing)
                 }
                 .widgetAccentable()
             }
         case .working:
-            Text(WatchCopy.workingLine(state)).font(.caption).foregroundStyle(.secondary).contentTransition(.numericText())
+            Text(WatchCopy.workingLine(state))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(state.runningCount > 0 ? AnyShapeStyle(StatusColor.purple) : AnyShapeStyle(.secondary))
+                .contentTransition(.numericText())
         case .offline, .done:
             EmptyView()
         }
@@ -357,6 +391,7 @@ struct WatchLockScreenView: View {
         case .waiting:
             if let head = state.head {
                 HStack(spacing: 6) {
+                    WatchStateDot(item: head, size: fullscreen ? 9 : 7)
                     MonoText(text: head.mono, size: fullscreen ? .title2 : .body)
                     WatchServerTag(item: head, size: fullscreen ? .footnote : .caption2)
                 }
@@ -373,6 +408,7 @@ struct WatchLockScreenView: View {
         case .working:
             if let head = state.head {
                 HStack(spacing: 8) {
+                    WatchStateDot(item: head, size: fullscreen ? 9 : 7)
                     Text(head.title).font(fullscreen ? .title3 : .subheadline).lineLimit(1)
                     Spacer(minLength: 4)
                     Text(timerInterval: head.since...head.since.addingTimeInterval(8 * 3600), countsDown: false)

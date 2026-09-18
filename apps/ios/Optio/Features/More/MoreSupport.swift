@@ -101,7 +101,7 @@ struct MoreCodeBlock: View {
             .lineLimit(lineLimit)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            .background(.fill.quaternary, in: Radius.smallShape)
     }
 }
 

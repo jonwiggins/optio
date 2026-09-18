@@ -363,7 +363,7 @@ struct ReviewActivityView: View {
                                 VStack(alignment: .trailing, spacing: 2) {
                                     Text(m.text)
                                         .padding(10)
-                                        .background(AppTheme.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                                        .background(AppTheme.accent.opacity(0.15), in: Radius.bubbleShape)
                                     if m.status != "sent" {
                                         Text(m.status == "failed" ? "Failed to send" : "Sending…")
                                             .font(.caption2).foregroundStyle(m.status == "failed" ? .red : .secondary)

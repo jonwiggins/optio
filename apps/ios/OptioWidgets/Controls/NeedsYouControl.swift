@@ -25,7 +25,7 @@ struct NeedsYouControl: ControlWidget {
                     Image(systemName: value.count > 0 ? GlanceStyle.glyph : "moon")
                 }
             }
-            .tint(value.count > 0 ? GlanceStyle.purple : .secondary)
+            .tint(value.count > 0 ? GlanceStyle.needsYou : .secondary)
         }
         .displayName("Jump to what needs me")
         .description("Open Optio at the oldest item waiting on you.")

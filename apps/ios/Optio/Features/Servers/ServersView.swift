@@ -33,7 +33,7 @@ struct ServersView: View {
             } header: {
                 SectionHeader(title: "Paired servers").textCase(nil)
             } footer: {
-                Text("Tap a server to switch the whole app to it; the pencil edits its name, colour and address. Widgets can show one server or all of them.")
+                Text("Tap a server to switch the whole app to it; Edit changes its name, colour and address. Widgets can show one server or all of them.")
             }
 
             Section {
@@ -136,16 +136,13 @@ struct ServerRow: View {
                 if isActive {
                     Image(systemName: "checkmark").foregroundStyle(AppTheme.accent).fontWeight(.semibold)
                 }
-                Button(action: onEdit) {
-                    Image(systemName: "pencil.circle")
-                        .font(.title3)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Edit \(server.name)")
+                Button("Edit", action: onEdit)
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .tint(.secondary)
+                    .accessibilityLabel("Edit \(server.name)")
             }
             .contentShape(Rectangle())
         }

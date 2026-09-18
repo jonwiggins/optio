@@ -336,7 +336,7 @@ struct WorkLinkBadges: View {
                                 .fixedSize()
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
+                                .background(.fill.tertiary, in: Radius.smallShape)
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)

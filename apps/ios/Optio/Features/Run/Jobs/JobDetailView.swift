@@ -280,7 +280,7 @@ struct JobTriggerRow: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: JobFormat.triggerIcon(trigger.type))
                 .frame(width: 32, height: 32)
-                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
+                .background(.fill.tertiary, in: Radius.smallShape)
                 .foregroundStyle((trigger.enabled ?? true) ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
             VStack(alignment: .leading, spacing: 3) {
                 HStack {

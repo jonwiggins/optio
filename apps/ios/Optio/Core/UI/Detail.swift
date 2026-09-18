@@ -73,7 +73,7 @@ struct MessageBubble: View {
                 .padding(.vertical, role == .user ? Spacing.s : 0)
                 .background {
                     if role == .user {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.fill.secondary)
+                        Radius.bubbleShape.fill(.fill.secondary)
                     }
                 }
                 .frame(maxWidth: 320, alignment: role == .user ? .trailing : .leading)

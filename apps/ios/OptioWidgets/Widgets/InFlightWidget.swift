@@ -2,8 +2,8 @@ import SwiftUI
 import WidgetKit
 
 /// "In Flight": what's running, read-only. Medium lists running items; large adds up
-/// to three Repo Tasks in `running` / `pr_opened`. No buttons, no purple: nothing here
-/// needs you (that's the other widget).
+/// to three Repo Tasks in `running` / `pr_opened`. No buttons; rows carry a status
+/// dot and pill (purple working, yellow needs input, green done, red failed).
 ///
 /// Configurable per server; with every server shown, rows are grouped under a
 /// coloured server header so two laptops never blur into one list.
@@ -33,15 +33,15 @@ struct InFlightView: View {
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: GlanceStyle.glyph).symbolRenderingMode(.hierarchical).foregroundStyle(.secondary)
+                    OptioGlyph(size: 16, style: entry.running.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlanceStyle.working))
                     if entry.running.isEmpty {
                         Text("Nothing running").foregroundStyle(.secondary)
                     } else {
-                        Text("\(entry.running.count)").contentTransition(.numericText()).foregroundStyle(.primary)
+                        Text("\(entry.running.count)").contentTransition(.numericText()).foregroundStyle(GlanceStyle.working)
                         Text("running").foregroundStyle(.secondary)
                     }
                     if entry.count > 0 {
-                        Text("· \(entry.count) need\(entry.count == 1 ? "s" : "") you").foregroundStyle(.secondary)
+                        Text("· \(entry.count) need\(entry.count == 1 ? "s" : "") you").foregroundStyle(GlanceStyle.needsYou)
                     }
                     if entry.showsServerName, let s = entry.server {
                         Text("·").foregroundStyle(.tertiary)
@@ -116,6 +116,7 @@ struct RunningRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            StateDotView(state: item.state)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title).font(.footnote.weight(.medium)).lineLimit(1)
                 MonoPath(text: item.mono, weight: .regular, size: .caption).foregroundStyle(.secondary)
@@ -134,6 +135,7 @@ struct TaskRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            StateDotView(state: task.state)
             VStack(alignment: .leading, spacing: 1) {
                 Text(task.title).font(.footnote.weight(.medium)).lineLimit(1)
                 HStack(spacing: 6) {

@@ -69,7 +69,7 @@ struct AgentLogRow: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
-                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
+                .background(.fill.tertiary, in: Radius.smallShape)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: entry.type == .toolUse ? "wrench.and.screwdriver" : "arrow.turn.down.left")
@@ -106,7 +106,7 @@ struct ChatComposer: View {
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .background(.fill.tertiary, in: Radius.bubbleShape)
                 .focused($focused)
                 .disabled(disabled)
             Button {

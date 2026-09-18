@@ -2,7 +2,7 @@ import SwiftUI
 import WidgetKit
 
 /// "Needs You": the Watch, persisted. Home screen small/medium plus every lock-screen
-/// accessory family. Purple only when something needs you; grey "Quiet" otherwise.
+/// accessory family. Yellow when something needs you; grey "Quiet" otherwise.
 ///
 /// Configurable per server: left empty it shows every paired server, sectioned by
 /// name and colour, so two laptops can share one widget or each get their own.
@@ -69,10 +69,7 @@ struct NeedsYouSmall: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Image(systemName: GlanceStyle.glyph)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(entry.count > 0 ? GlanceStyle.purple : .secondary)
-                        .widgetAccentable(entry.count > 0)
+                    GlanceStyle.headerGlyph(needsYou: entry.count, size: 18)
                     if entry.showsServerName, let s = entry.server {
                         ServerTag(s)
                     } else if entry.isMulti {
@@ -98,7 +95,7 @@ struct NeedsYouSmall: View {
                 } else {
                     Text("Quiet").font(.title.weight(.semibold)).foregroundStyle(.secondary)
                     Text(entry.running.isEmpty ? "nothing running" : "\(entry.running.count) running")
-                        .font(.footnote).foregroundStyle(.tertiary)
+                        .font(.footnote).foregroundStyle(entry.running.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(GlanceStyle.working))
                 }
                 HonestyFooter(entry: entry)
             }
@@ -121,20 +118,17 @@ struct NeedsYouMedium: View {
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: GlanceStyle.glyph)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(entry.count > 0 ? GlanceStyle.purple : .secondary)
-                        .widgetAccentable(entry.count > 0)
+                    GlanceStyle.headerGlyph(needsYou: entry.count)
                     if entry.count > 0 {
                         Text("\(entry.count)")
                             .contentTransition(.numericText())
-                            .foregroundStyle(GlanceStyle.purple)
+                            .foregroundStyle(GlanceStyle.needsYou)
                             .widgetAccentable()
                         Text(entry.count == 1 ? "needs you" : "need you").foregroundStyle(.secondary)
                     } else {
                         Text("Quiet").foregroundStyle(.secondary)
                         if !entry.running.isEmpty {
-                            Text("· \(entry.running.count) running").foregroundStyle(.tertiary)
+                            Text("· \(entry.running.count) running").foregroundStyle(GlanceStyle.working)
                         }
                     }
                     if entry.showsServerName, let s = entry.server {
@@ -182,6 +176,7 @@ struct NeedsYouRow: View {
         HStack(spacing: 8) {
             Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
                 HStack(spacing: 6) {
+                    StateDotView(state: item.state)
                     MonoPath(text: item.mono, size: .footnote)
                         .frame(maxWidth: 120, alignment: .leading)
                     Text(item.reason ?? "Needs you")
@@ -213,7 +208,7 @@ struct NeedsYouCircular: View {
             AccessoryWidgetBackground()
             Circle().strokeBorder(.primary.opacity(entry.count > 0 ? 1 : 0.35), lineWidth: 3)
             if entry.reachability == .signedOut {
-                Image(systemName: GlanceStyle.glyph).font(.caption)
+                OptioGlyph(size: 16, style: .primary)
             } else if entry.count > 0 {
                 Text("\(entry.count)")
                     .font(.system(.title3, design: .rounded).weight(.bold))

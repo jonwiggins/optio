@@ -338,7 +338,7 @@ struct LocalTerminalStreamView: View {
             }
         }
         .padding(10)
-        .floatingGlass(in: RoundedRectangle(cornerRadius: Radius.card))
+        .floatingGlass(in: Radius.cardShape)
         .foregroundStyle(stream.retrying ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
         .padding(10)
     }

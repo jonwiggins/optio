@@ -2,11 +2,21 @@ import SwiftUI
 import WidgetKit
 
 /// Visual language from docs/design/ios-glanceable-surfaces.md §3, shared by every widget.
+/// Colour is the status palette (Shared/StatusColor.swift): yellow needs input,
+/// purple working, green done, grey idle, red failed.
 enum GlanceStyle {
-    /// Purple (#6d28d9) means "you". It appears only when something needs you.
-    static let purple = Color(red: 0x6D / 255, green: 0x28 / 255, blue: 0xD9 / 255)
-    /// The Optio glyph: a terminal caret in a rounded square (hierarchical rendering).
+    /// Yellow: something needs you.
+    static let needsYou = StatusColor.yellow
+    /// Purple: agents are working.
+    static let working = StatusColor.purple
+    /// SF Symbol stand-in for surfaces that only accept symbols (Control Center).
     static let glyph = "apple.terminal"
+
+    /// Header glyph: the bot, yellow when `count` items need you, else grey.
+    static func headerGlyph(needsYou count: Int, size: CGFloat = 16) -> some View {
+        OptioGlyph(size: size, style: count > 0 ? AnyShapeStyle(needsYou) : AnyShapeStyle(.secondary))
+            .widgetAccentable(count > 0)
+    }
 
     static let clock: DateFormatter = {
         let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
@@ -29,7 +39,7 @@ struct MonoPath: View {
     }
 }
 
-/// The needs-you count: purple only when > 0, accentable under iOS 18 tinting.
+/// The needs-you count: yellow only when > 0, accentable under iOS 18 tinting.
 struct CountText: View {
     let count: Int
     var style: Font = .system(size: 44, weight: .semibold, design: .rounded)
@@ -37,16 +47,19 @@ struct CountText: View {
     var body: some View {
         Text("\(count)")
             .font(style)
-            .foregroundStyle(count > 0 ? GlanceStyle.purple : .secondary)
+            .foregroundStyle(count > 0 ? GlanceStyle.needsYou : .secondary)
             .contentTransition(.numericText())
             .widgetAccentable(count > 0)
             .monospacedDigit()
     }
 }
 
-/// Small grey state pill (no colour coding: hierarchy comes from weight).
+/// State pill tinted through the status palette: purple working, yellow needs
+/// input, green done, red failed, grey stopped.
 struct StatePill: View {
     let state: String
+
+    private var kind: StatusKind { StatusKind.forState(state) }
 
     var body: some View {
         Text(state.replacingOccurrences(of: "_", with: " "))
@@ -54,8 +67,19 @@ struct StatePill: View {
             .textCase(.uppercase)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(.quaternary, in: Capsule())
-            .foregroundStyle(.secondary)
+            .background(kind == .dead ? AnyShapeStyle(.quaternary) : AnyShapeStyle(kind.color.opacity(0.18)), in: Capsule())
+            .foregroundStyle(kind == .dead ? AnyShapeStyle(.secondary) : AnyShapeStyle(kind.color))
+    }
+}
+
+/// Status dot for one row: the same colour the pill would carry.
+struct StateDotView: View {
+    let state: String
+    var size: CGFloat = 7
+
+    var body: some View {
+        let kind = StatusKind.forState(state)
+        Circle().fill(kind.color).frame(width: size, height: size).accessibilityLabel(kind.label)
     }
 }
 
@@ -143,7 +167,7 @@ struct SignedOutView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: GlanceStyle.glyph).symbolRenderingMode(.hierarchical).foregroundStyle(.secondary)
+            OptioGlyph(size: 18, style: .secondary)
             Text("Sign in to Optio").font(compact ? .footnote : .subheadline).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
