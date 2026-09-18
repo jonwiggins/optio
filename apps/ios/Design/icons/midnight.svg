@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Midnight: the bot idles in the dark; one eye stays lit, watching your PRs. -->
+  <defs>
+    <radialGradient id="eyeGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.9"/>
+      <stop offset="0.35" stop-color="#7c3aed" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ambient" cx="0.5" cy="0.45" r="0.6">
+      <stop offset="0" stop-color="#1b1030"/>
+      <stop offset="1" stop-color="#07050c"/>
+    </radialGradient>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#ambient)"/>
+  <!-- eye glow spilling onto the head -->
+  <circle cx="592" cy="573" r="260" fill="url(#eyeGlow)"/>
+  <!-- dim bot outline -->
+  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#5b4a80" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 8V4H8"/>
+    <rect width="16" height="12" x="4" y="8" rx="2.4"/>
+    <path d="M2 14h2"/>
+    <path d="M20 14h2"/>
+    <path d="M9 13v2"/>
+  </g>
+  <!-- the lit eye -->
+  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke-linecap="round">
+    <path d="M15 13v2" stroke="#c4b5fd" stroke-width="3.2" filter="url(#blur)" opacity="0.9"/>
+    <path d="M15 13v2" stroke="#f5f3ff" stroke-width="1.9"/>
+  </g>
+</svg>

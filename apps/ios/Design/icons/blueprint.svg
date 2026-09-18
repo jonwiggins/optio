@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Blueprint: the schematic. Every robot starts as a drawing on blue paper. -->
+  <defs>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2"/>
+    </pattern>
+    <pattern id="grid2" width="256" height="256" patternUnits="userSpaceOnUse">
+      <path d="M256 0H0V256" fill="none" stroke="#ffffff" stroke-opacity="0.32" stroke-width="3"/>
+    </pattern>
+    <radialGradient id="paper" cx="0.5" cy="0.5" r="0.75">
+      <stop offset="0" stop-color="#1e5fd6"/>
+      <stop offset="1" stop-color="#123c94"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#paper)"/>
+  <rect width="1024" height="1024" fill="url(#grid)"/>
+  <rect width="1024" height="1024" fill="url(#grid2)"/>
+  <!-- dimension lines -->
+  <g stroke="#ffffff" stroke-opacity="0.55" stroke-width="4" stroke-linecap="round" fill="none">
+    <!-- width of head -->
+    <path d="M298 880h428"/>
+    <path d="M298 860v40"/><path d="M726 860v40"/>
+    <!-- height of head -->
+    <path d="M910 413v320"/>
+    <path d="M890 413h40"/><path d="M890 733h40"/>
+    <!-- antenna callout -->
+    <path d="M512 306H160" stroke-dasharray="12 16"/>
+    <circle cx="512" cy="306" r="14"/>
+  </g>
+  <!-- centerline crosshair -->
+  <g stroke="#ffffff" stroke-opacity="0.28" stroke-width="3" stroke-dasharray="20 14">
+    <path d="M512 130V930"/>
+    <path d="M110 573H930"/>
+  </g>
+  <!-- bot line-art -->
+  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 8V4H8"/>
+    <rect width="16" height="12" x="4" y="8" rx="2.4"/>
+    <path d="M2 14h2"/>
+    <path d="M20 14h2"/>
+    <path d="M15 13v2"/>
+    <path d="M9 13v2"/>
+  </g>
+  <!-- corner ticks (drafting registration) -->
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.7" stroke-width="5" stroke-linecap="round">
+    <path d="M60 110V60h50"/><path d="M964 110V60h-50"/>
+    <path d="M60 914v50h50"/><path d="M964 914v50h-50"/>
+  </g>
+</svg>

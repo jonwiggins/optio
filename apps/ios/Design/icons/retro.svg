@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Retro: a 1983 monitor in a basement lab. Phosphor green, scanlines, the hum. -->
+  <defs>
+    <radialGradient id="tube" cx="0.5" cy="0.5" r="0.72">
+      <stop offset="0" stop-color="#0f3318"/>
+      <stop offset="0.75" stop-color="#07180b"/>
+      <stop offset="1" stop-color="#020604"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="0.5" cy="0.5" r="0.72">
+      <stop offset="0.6" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.85"/>
+    </radialGradient>
+    <pattern id="scan" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="4" fill="#000000" fill-opacity="0.34"/>
+    </pattern>
+    <filter id="bloom" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#tube)"/>
+  <!-- bloom pass -->
+  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#39ff6a" stroke-opacity="0.55" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#bloom)">
+    <path d="M12 8V4H8"/>
+    <rect width="16" height="12" x="4" y="8" rx="2.4"/>
+    <path d="M2 14h2"/>
+    <path d="M20 14h2"/>
+    <path d="M15 13v2"/>
+    <path d="M9 13v2"/>
+  </g>
+  <!-- crisp phosphor pass -->
+  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#b6ffc8" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 8V4H8"/>
+    <rect width="16" height="12" x="4" y="8" rx="2.4"/>
+    <path d="M2 14h2"/>
+    <path d="M20 14h2"/>
+    <path d="M15 13v2"/>
+    <path d="M9 13v2"/>
+  </g>
+  <!-- blinking cursor under the bot -->
+  <rect x="470" y="806" width="84" height="26" fill="#b6ffc8"/>
+  <!-- scanlines + vignette -->
+  <rect width="1024" height="1024" fill="url(#scan)"/>
+  <rect width="1024" height="1024" fill="url(#vignette)"/>
+</svg>

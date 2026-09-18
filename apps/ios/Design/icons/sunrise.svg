@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Sunrise: the bot worked through the night. Morning, and the PR is up. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b0f7a"/>
+      <stop offset="0.38" stop-color="#8b2fb5"/>
+      <stop offset="0.68" stop-color="#e8467c"/>
+      <stop offset="0.86" stop-color="#fb923c"/>
+    </linearGradient>
+    <linearGradient id="sunFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff3b0"/>
+      <stop offset="1" stop-color="#fbbf24"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.55" stop-color="#fde68a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#fde68a" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="above">
+      <rect width="1024" height="860"/>
+    </clipPath>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#sky)"/>
+  <!-- halo + sun cresting the horizon -->
+  <circle cx="512" cy="860" r="520" fill="url(#halo)" clip-path="url(#above)"/>
+  <circle cx="512" cy="860" r="340" fill="url(#sunFill)" clip-path="url(#above)"/>
+  <!-- retro sun slats -->
+  <g fill="#e8467c" fill-opacity="0.55" clip-path="url(#above)">
+    <rect y="690" width="1024" height="8"/><rect y="734" width="1024" height="14"/><rect y="786" width="1024" height="22"/>
+  </g>
+  <!-- horizon ground -->
+  <rect y="860" width="1024" height="164" fill="#2e1065"/>
+  <!-- bot silhouette, backlit -->
+  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#2e1065" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 8V4H8"/>
+    <rect width="16" height="12" x="4" y="8" rx="2.4" fill="#2e1065"/>
+    <path d="M2 14h2"/>
+    <path d="M20 14h2"/>
+  </g>
+  <!-- warm eyes catching the light -->
+  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#fde68a" stroke-width="1.9" stroke-linecap="round">
+    <path d="M15 13v2"/>
+    <path d="M9 13v2"/>
+  </g>
+</svg>

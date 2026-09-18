@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Terminal: the shell you left open. The bot is the prompt; the caret is you, about to type. -->
+  <defs>
+    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2a30"/>
+      <stop offset="1" stop-color="#1d1d22"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="#0b0b0f"/>
+  <!-- title bar with traffic lights -->
+  <rect width="1024" height="150" fill="url(#bar)"/>
+  <rect y="149" width="1024" height="2" fill="#3a3a42"/>
+  <circle cx="92" cy="75" r="26" fill="#ff5f57"/>
+  <circle cx="168" cy="75" r="26" fill="#febc2e"/>
+  <circle cx="244" cy="75" r="26" fill="#28c840"/>
+  <!-- bot as prompt glyph -->
+  <g transform="translate(118 280) scale(18.5)" fill="none" stroke="#a78bfa" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 8V4H8"/>
+    <rect width="16" height="12" x="4" y="8" rx="2.4"/>
+    <path d="M2 14h2"/>
+    <path d="M20 14h2"/>
+    <path d="M15 13v2"/>
+    <path d="M9 13v2"/>
+  </g>
+  <!-- prompt line -->
+  <text x="118" y="820" font-family="Menlo, 'SF Mono', Monaco, monospace" font-size="156" font-weight="bold" fill="#f4f4f5">optio</text>
+  <text x="600" y="820" font-family="Menlo, 'SF Mono', Monaco, monospace" font-size="156" font-weight="bold" fill="#7c3aed">›</text>
+  <!-- block caret -->
+  <rect x="716" y="694" width="94" height="150" fill="#a78bfa"/>
+</svg>

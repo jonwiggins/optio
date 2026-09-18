@@ -102,6 +102,13 @@ struct SettingsView: View {
                 } label: {
                     Label("Appearance", systemImage: "circle.lefthalf.filled")
                 }
+                NavigationLink { AppIconPickerView() } label: {
+                    HStack {
+                        Label("App icon", systemImage: "app.badge")
+                        Spacer()
+                        AppIconThumbnail(option: .current, size: 28)
+                    }
+                }
                 MoreInfoRow(label: "Server", value: session.serverURL?.absoluteString ?? "—", mono: true)
                 MoreInfoRow(label: "Version", value: appVersion)
                 if let ws = context.workspaceId { MoreInfoRow(label: "Workspace", value: ws, mono: true) }
