@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./sidebar";
@@ -65,7 +65,9 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                   sidebarOpen ? "translate-x-0" : "-translate-x-full",
                 )}
               >
-                <TerminalRail onNavigate={() => setSidebarOpen(false)} />
+                <Suspense fallback={null}>
+                  <TerminalRail onNavigate={() => setSidebarOpen(false)} />
+                </Suspense>
               </aside>
             ) : (
               <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
