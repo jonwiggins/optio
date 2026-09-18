@@ -216,7 +216,11 @@ export default function OverviewPage() {
 
       <NeedsYou items={needsYou} />
 
-      <LimitsPanel providers={providerLimits} onRefresh={refreshUsage} />
+      <LimitsPanel
+        providers={providerLimits}
+        onRefresh={() => refreshUsage({ fresh: true })}
+        onRefreshHosts={refresh}
+      />
 
       <LivePanel items={live} />
 

@@ -111,9 +111,14 @@ export function useDashboardData() {
       .finally(() => setLoading(false));
   }, []);
 
-  const refreshUsage = useCallback(async () => {
+  /**
+   * `fresh` bypasses the server's 5-minute cache and re-reads from Anthropic
+   * (the manual refresh button); background polls leave it off. Throws on a
+   * hard failure when `fresh` so the caller can show it.
+   */
+  const refreshUsage = useCallback(async (opts?: { fresh?: boolean }) => {
     try {
-      const res = await api.getUsage();
+      const res = await api.getUsage(opts?.fresh ? { fresh: true } : undefined);
       if (!res.usage.available && !res.usage.error) {
         // Usage unavailable without error — check if token is expired
         const authRes = await api.getAuthStatus().catch(() => null);
@@ -123,7 +128,10 @@ export function useDashboardData() {
         }
       }
       setUsage(res.usage);
-    } catch {
+      if (opts?.fresh && !res.usage.available) {
+        throw new Error(res.usage.error ?? "Usage unavailable");
+      }
+    } catch (err) {
       // If usage endpoint itself fails, check auth status
       try {
         const authRes = await api.getAuthStatus();
@@ -131,6 +139,7 @@ export function useDashboardData() {
           setUsage({ available: false, error: "OAuth token has expired" });
         }
       } catch {}
+      if (opts?.fresh) throw err;
     }
   }, []);
 
