@@ -46,14 +46,42 @@ final class SessionStore {
         static let token = "accessToken"
     }
 
+    private var verifyingToken = false
+
     init() {
+        // A single 401 from a user-scoped route is not proof the token is dead
+        // (auth-disabled dev servers 401 on a few of them). Re-check identity and
+        // only sign out when `/api/auth/me` itself rejects the token.
         api.onUnauthorized = { [weak self] in
-            Task { @MainActor in self?.signOut() }
+            Task { @MainActor in await self?.verifyTokenStillValid() }
+        }
+    }
+
+    private func verifyTokenStillValid() async {
+        guard !verifyingToken, phase == .signedIn else { return }
+        verifyingToken = true
+        defer { verifyingToken = false }
+        do {
+            user = try await api.currentUser()
+        } catch let error as APIError where error.isUnauthorized {
+            signOut()
+        } catch {
+            // Network or other failure: keep the session.
         }
     }
 
     /// Restores a previous sign-in from disk and verifies it against the server.
     func restore() async {
+        #if DEBUG
+        // Dev affordance so the simulator can be driven from the command line:
+        //   SIMCTL_CHILD_OPTIO_DEV_SERVER_URL=http://localhost:30400 SIMCTL_CHILD_OPTIO_DEV_TOKEN=dev \
+        //     xcrun simctl launch booted dev.optio.ios
+        let env = ProcessInfo.processInfo.environment
+        if let devToken = env["OPTIO_DEV_TOKEN"], let devURL = env["OPTIO_DEV_SERVER_URL"] {
+            try? Keychain.set(devToken, account: Keys.token)
+            UserDefaults.standard.set(devURL, forKey: Keys.serverURL)
+        }
+        #endif
         guard let raw = UserDefaults.standard.string(forKey: Keys.serverURL),
               let url = URL(string: raw),
               let token = Keychain.get(account: Keys.token) else {

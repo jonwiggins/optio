@@ -16,7 +16,7 @@ test: generate
 
 run: build
 	xcrun simctl boot "$(SIM)" 2>/dev/null || true
-	open -a Simulator
+	open -a "$$(xcode-select -p)/Applications/Simulator.app" 2>/dev/null || true
 	xcrun simctl install booted $(DD)/Build/Products/Debug-iphonesimulator/Optio.app
 	xcrun simctl launch booted dev.optio.ios
 

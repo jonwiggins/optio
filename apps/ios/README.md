@@ -52,6 +52,26 @@ Plain-HTTP tailnet addresses are allowed by the app's ATS configuration
 (`NSAllowsArbitraryLoads` in `project.yml`). Tighten that to an exception domain
 once the API is behind TLS.
 
+## Driving the simulator from the CLI (DEBUG builds only)
+
+`make run` installs and launches the app. Debug builds accept environment
+variables (forwarded by simctl with the `SIMCTL_CHILD_` prefix) so you can skip
+the sign-in form and open a specific section, e.g. for screenshots:
+
+```bash
+SIMCTL_CHILD_OPTIO_DEV_SERVER_URL=http://localhost:30400 \
+SIMCTL_CHILD_OPTIO_DEV_TOKEN=dev \
+SIMCTL_CHILD_OPTIO_DEV_SECTION=local \
+  xcrun simctl launch booted dev.optio.ios
+xcrun simctl io booted screenshot local.png
+```
+
+Sections: tasks, jobs, reviews, issues, scheduled, agents, sessions, local,
+analytics, costs, activity, cluster, more. With `OPTIO_AUTH_DISABLED=true` on
+the server any token string works; a few user-scoped routes (workspaces, API
+keys, notification preferences) return 401 in that mode because the synthetic
+dev user has no session, which is expected.
+
 ## Layout
 
 ```
