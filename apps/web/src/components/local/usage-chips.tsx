@@ -5,6 +5,7 @@ import { Coins, Gauge } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { formatTokens, formatUsd, type LocalTerminalUsage } from "@optio/shared";
+import { HoverCard, HoverRow } from "./hover-card";
 
 /**
  * Two header chips:
@@ -105,39 +106,56 @@ export function AccountUsagePill({
   if (usage.sevenDay?.utilization != null) buckets.push(["7d", usage.sevenDay]);
   if (buckets.length === 0) return null;
   const worst = Math.max(...buckets.map(([, b]) => b.utilization ?? 0));
-  const tip = buckets
-    .map(([l, b]) => {
-      const r = resetsIn(b.resetsAt);
-      return `${l === "5h" ? "5-hour" : "7-day"} window: ${Math.round(b.utilization ?? 0)}% used${r ? `, resets in ${r}` : ""}`;
-    })
-    .join("\n");
-  return (
-    <span
-      title={`Claude usage limits (account-wide)\n${tip}`}
-      className={cn(
-        "inline-flex items-center gap-1.5 @2xl:gap-2 h-6 px-1.5 @2xl:px-2 rounded-md border text-[11px] font-mono shrink-0",
-        worst >= 95
-          ? "border-error/40 bg-error/10"
-          : worst >= 80
-            ? "border-warning/40 bg-warning/10"
-            : "border-border/70 bg-bg-card/60",
-        className,
-      )}
-    >
-      <Gauge className={cn("w-3 h-3 shrink-0", pctTone(worst))} />
-      {collapsible && (
-        <span className={cn("@2xl:hidden tabular-nums font-medium", pctTone(worst))}>
-          {Math.round(worst)}%
-        </span>
-      )}
-      <span
-        className={cn("inline-flex items-center gap-2", collapsible && "hidden @2xl:inline-flex")}
-      >
-        {buckets.map(([l, b]) => (
-          <Meter key={l} label={l} bucket={b} />
-        ))}
+  const card = (
+    <>
+      <span className="block font-medium text-text mb-1">Claude usage limits</span>
+      {buckets.map(([l, b]) => {
+        const pct = Math.round(b.utilization ?? 0);
+        const r = resetsIn(b.resetsAt);
+        return (
+          <span key={l} className="block">
+            <HoverRow
+              label={l === "5h" ? "5-hour window" : "7-day window"}
+              value={<span className={pctTone(pct)}>{pct}%</span>}
+            />
+            {r && (
+              <span className="block text-[10px] text-text-muted/70 -mt-0.5">resets in {r}</span>
+            )}
+          </span>
+        );
+      })}
+      <span className="block mt-1 text-[10px] text-text-muted/70">
+        Account-wide, refreshed every few minutes
       </span>
-    </span>
+    </>
+  );
+  return (
+    <HoverCard content={card} className={className}>
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 @2xl:gap-2 h-6 px-1.5 @2xl:px-2 rounded-md border text-[11px] font-mono shrink-0",
+          worst >= 95
+            ? "border-error/40 bg-error/10"
+            : worst >= 80
+              ? "border-warning/40 bg-warning/10"
+              : "border-border/70 bg-bg-card/60",
+        )}
+      >
+        <Gauge className={cn("w-3 h-3 shrink-0", pctTone(worst))} />
+        {collapsible && (
+          <span className={cn("@2xl:hidden tabular-nums font-medium", pctTone(worst))}>
+            {Math.round(worst)}%
+          </span>
+        )}
+        <span
+          className={cn("inline-flex items-center gap-2", collapsible && "hidden @2xl:inline-flex")}
+        >
+          {buckets.map(([l, b]) => (
+            <Meter key={l} label={l} bucket={b} />
+          ))}
+        </span>
+      </span>
+    </HoverCard>
   );
 }
 
@@ -154,31 +172,45 @@ export function SessionUsageChip({
   if (!usage || usage.turns === 0) return null;
   const tokens =
     usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
-  const tip = [
-    `This session (${usage.turns} turn${usage.turns === 1 ? "" : "s"}${usage.model ? `, ${usage.model}` : ""})`,
-    `input ${formatTokens(usage.inputTokens)} · output ${formatTokens(usage.outputTokens)}`,
-    `cache read ${formatTokens(usage.cacheReadTokens)} · cache write ${formatTokens(usage.cacheWriteTokens)}`,
-    usage.costUsd != null
-      ? `≈ ${formatUsd(usage.costUsd)} at list price`
-      : "cost unknown for this model",
-  ].join("\n");
-  return (
-    <span
-      title={tip}
-      className={cn(
-        "inline-flex items-center gap-1.5 h-6 px-1.5 @xl:px-2 rounded-md border border-border/70 bg-bg-card/60 text-[11px] font-mono text-text-muted shrink-0",
-        className,
-      )}
-    >
-      <Coins className="w-3 h-3 shrink-0 text-text-muted/70" />
-      <span className={cn("tabular-nums", collapsible && "hidden @xl:inline")}>
-        {formatTokens(tokens)}
+  const card = (
+    <>
+      <span className="block font-medium text-text mb-1">
+        This session · {usage.turns} turn{usage.turns === 1 ? "" : "s"}
       </span>
-      {usage.costUsd != null && (
-        <span className={cn("tabular-nums text-text", collapsible && "hidden @xl:inline")}>
-          {formatUsd(usage.costUsd)}
+      <HoverRow label="Input" value={formatTokens(usage.inputTokens)} />
+      <HoverRow label="Output" value={formatTokens(usage.outputTokens)} />
+      <HoverRow label="Cache read" value={formatTokens(usage.cacheReadTokens)} />
+      <HoverRow label="Cache write" value={formatTokens(usage.cacheWriteTokens)} />
+      <span className="block border-t border-border/60 mt-1.5 pt-1.5">
+        <HoverRow
+          label="Est. cost"
+          value={usage.costUsd != null ? formatUsd(usage.costUsd) : "unknown model"}
+        />
+      </span>
+      {usage.model && (
+        <span className="block mt-1 text-[10px] text-text-muted/70">
+          {usage.model} · list price
         </span>
       )}
-    </span>
+    </>
+  );
+  return (
+    <HoverCard content={card} className={className}>
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 h-6 px-1.5 @xl:px-2 rounded-md border border-border/70 bg-bg-card/60 text-[11px] font-mono text-text-muted shrink-0",
+        )}
+      >
+        <Coins className="w-3 h-3 shrink-0 text-text-muted/70" />
+        <span className={cn("tabular-nums", collapsible && "hidden @xl:inline")}>
+          {formatTokens(tokens)}
+        </span>
+        {usage.costUsd != null && (
+          <span className={cn("tabular-nums text-text", collapsible && "hidden @xl:inline")}>
+            {formatUsd(usage.costUsd)}
+          </span>
+        )}
+      </span>
+    </HoverCard>
   );
 }
