@@ -7,7 +7,7 @@ import Foundation
 /// placed in the URL. Frames are delivered on an `AsyncStream`; text frames that parse
 /// as JSON are delivered as `.json`, other text as `.text`, binary as `.binary`.
 final class WebSocketClient: @unchecked Sendable {
-    enum Frame: Sendable {
+    enum Frame: @unchecked Sendable {
         case json([String: Any])
         case text(String)
         case binary(Data)

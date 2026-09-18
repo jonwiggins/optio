@@ -35,6 +35,34 @@ const ANY = "AnyCodable";
 const UNKNOWN_RAW = "__unknown__";
 
 /** Identifiers that must be backtick-escaped when used as Swift member names. */
+/**
+ * Type names that shadow Swift stdlib / Foundation types callers use constantly
+ * (`Task.sleep`, `Error`, ...). These are emitted with an `Optio` prefix.
+ */
+const SWIFT_RESERVED_TYPE_NAMES = new Set([
+  "Task",
+  "Error",
+  "Result",
+  "Data",
+  "Date",
+  "URL",
+  "Notification",
+  "Operation",
+  "Timer",
+  "Thread",
+  "Bundle",
+  "Process",
+  "Optional",
+  "Array",
+  "Dictionary",
+  "Set",
+  "String",
+  "Character",
+  "Never",
+  "Decoder",
+  "Encoder",
+]);
+
 const SWIFT_KEYWORDS = new Set([
   "default",
   "in",
@@ -312,7 +340,7 @@ export function generateSwift(sourceFiles: string[]): GenerateResult {
       const kind = classify(stmt, sf);
       if (kind === null) continue;
       const name = stmt.name.text;
-      let swiftName = name;
+      let swiftName = SWIFT_RESERVED_TYPE_NAMES.has(name) ? `Optio${name}` : name;
       if (takenSwiftNames.has(swiftName)) {
         const prefix = pascalCase(path.basename(file).replace(/\.[^.]+$/, ""));
         swiftName = `${prefix}${name}`;
@@ -419,7 +447,7 @@ export function generateSwift(sourceFiles: string[]): GenerateResult {
       if (!p.isStringLiteral()) return null;
       out.push(p.value);
     }
-    return out;
+    return out.sort();
   }
 
   function mapType(node: ts.TypeNode, ctx: Ctx, hint: string, docs: string[] = []): Mapped {
@@ -502,6 +530,7 @@ export function generateSwift(sourceFiles: string[]): GenerateResult {
             name,
             docs,
             lits.map((l) => ({ raw: l, name: camelCase(l), docs: [] })),
+            `${rel(ctx.sf.fileName)}: ${hint}`,
           ),
         );
         return { swift: name, optional: false };
@@ -611,6 +640,7 @@ export function generateSwift(sourceFiles: string[]): GenerateResult {
           name,
           docs,
           (literals as string[]).map((l) => ({ raw: l, name: camelCase(l), docs: [] })),
+          `${rel(ctx.sf.fileName)}: ${hint}`,
         ),
       );
       return { swift: name, optional };
@@ -954,7 +984,7 @@ export function generateSwift(sourceFiles: string[]): GenerateResult {
     docs: string[];
   }
 
-  function emitStringEnum(name: string, docs: string[], cases: EnumCase[]): string {
+  function emitStringEnum(name: string, docs: string[], cases: EnumCase[], at = name): string {
     const used = new Set<string>(["unknown"]);
     const lines: string[] = [];
     const known: string[] = [];
@@ -963,7 +993,7 @@ export function generateSwift(sourceFiles: string[]): GenerateResult {
       if (caseName === "unknown") {
         caseName = "unknownValue";
         warn(
-          `${name}: raw value "${c.raw}" collides with the \`.unknown\` fallback; emitted as \`.unknownValue\``,
+          `${at}: raw value "${c.raw}" collides with the \`.unknown\` fallback; emitted as \`.unknownValue\``,
         );
       }
       let n = 2;
@@ -1112,6 +1142,7 @@ export function generateSwift(sourceFiles: string[]): GenerateResult {
           name: camelCase(memberName(m)),
           docs: docsOf(m, entry.sf),
         })),
+        where(entry),
       );
     }
     const cases: { value: number; name: string; docs: string[] }[] = [];
@@ -1168,6 +1199,16 @@ export function generateSwift(sourceFiles: string[]): GenerateResult {
       }
       case "alias": {
         const node = entry.node as ts.TypeAliasDeclaration;
+        const single = stringLiteralOf(node.type);
+        if (single !== null) {
+          // A one-member "union" — still an enum so the server can grow it.
+          return emitStringEnum(
+            entry.swiftName,
+            docs,
+            [{ raw: single, name: camelCase(single), docs: [] }],
+            where(entry),
+          );
+        }
         const mapped = mapType(node.type, ctx, entry.swiftName, docs);
         // A union / keyof alias emits a top-level enum named after the alias.
         const own = ctx.nested.filter(
