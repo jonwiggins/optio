@@ -88,11 +88,31 @@ export function LocalTerminal({
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
-    term.open(containerRef.current);
-    fitAddon.fit();
+    // fit() reads the renderer's dimensions; WebKit can hit this before the
+    // renderer exists (first paint) and any engine after dispose(), so guard
+    // it and retry on the next frame.
+    const safeFit = () => {
+      if (disposed) return;
+      try {
+        fitAddon.fit();
+      } catch {
+        // renderer not ready yet
+      }
+    };
+    let disposed = false;
+    const container = containerRef.current;
+    const resizeObserver = new ResizeObserver(() => safeFit());
+    // Open on the next frame, after React's commit has been laid out: WebKit
+    // otherwise syncs xterm's viewport against a renderer that doesn't exist
+    // yet ("this._renderer.value.dimensions" TypeError) on a 0-height box.
+    const openFrame = requestAnimationFrame(() => {
+      if (disposed) return;
+      term.open(container);
+      safeFit();
+      resizeObserver.observe(container);
+    });
 
     let ws: WebSocket | null = null;
-    let disposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     // The terminal has exited/errored — nothing more will ever stream, so a
     // reconnect could only wipe the history left on screen.
@@ -211,13 +231,9 @@ export function LocalTerminal({
       }
     });
 
-    const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
-    });
-    resizeObserver.observe(containerRef.current);
-
     return () => {
       disposed = true;
+      cancelAnimationFrame(openFrame);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       resizeObserver.disconnect();
       ws?.close();
@@ -248,6 +264,7 @@ export function LocalTerminal({
         )}
       </div>
       <div ref={containerRef} className="flex-1 min-h-0" />
+      <div className="shrink-0 h-[env(safe-area-inset-bottom)]" aria-hidden />
     </div>
   );
 }

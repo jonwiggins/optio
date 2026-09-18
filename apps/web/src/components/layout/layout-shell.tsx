@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./sidebar";
@@ -22,6 +22,23 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const inLocalTerminal = /^\/local\/[^/]+$/.test(pathname);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // iOS Safari: the on-screen keyboard shrinks the *visual* viewport but not
+  // 100dvh, so a focused terminal's input line ends up under the keyboard.
+  // Track the visual viewport into a CSS var the shell's height uses.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const apply = () => {
+      document.documentElement.style.setProperty("--app-height", `${Math.round(vv.height)}px`);
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    return () => {
+      vv.removeEventListener("resize", apply);
+      document.documentElement.style.removeProperty("--app-height");
+    };
+  }, []);
+
   return (
     <ThemeProvider>
       {!isLogin && <SetupCheck />}
@@ -30,7 +47,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       {isSetup || isLogin ? (
         <main className="min-h-screen">{children}</main>
       ) : (
-        <div className="flex flex-col h-screen">
+        <div className="flex flex-col h-dvh" style={{ height: "var(--app-height, 100dvh)" }}>
           <GlobalAuthBanner />
           <div className="flex flex-1 min-h-0">
             {/* Mobile overlay */}
@@ -55,7 +72,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
             )}
             <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
               {/* Mobile header */}
-              <div className="md:hidden shrink-0 flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card">
+              <div className="md:hidden shrink-0 flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card pt-[max(0.75rem,env(safe-area-inset-top))]">
                 <button
                   onClick={() => setSidebarOpen(true)}
                   className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted transition-colors"

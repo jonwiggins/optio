@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Sora, IBM_Plex_Mono } from "next/font/google";
 import { LayoutShell } from "@/components/layout/layout-shell";
 import "./globals.css";
@@ -13,6 +13,16 @@ const ibmPlexMono = IBM_Plex_Mono({
   weight: ["400", "500", "600"],
   variable: "--font-ibm-mono",
 });
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // iOS zooms the page when focusing an input smaller than 16px (xterm's
+  // hidden textarea included); maximumScale: 1 stops that while pinch-zoom
+  // keeps working. viewportFit lets us pad for the notch / home indicator.
+  maximumScale: 1,
+  viewportFit: "cover",
+};
 
 export const metadata: Metadata = {
   title: "Optio",

@@ -11,15 +11,26 @@ import { getWsTokenProvider } from "@/lib/ws-auth";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
-import { Loader2, MonitorSmartphone, Plus, Search, Terminal } from "lucide-react";
+import { LayoutGrid, List, Loader2, MonitorSmartphone, Plus, Search, Terminal } from "lucide-react";
 import { TerminalCard, attentionLabel } from "@/components/local/terminal-card";
+import { TerminalRow } from "@/components/local/terminal-row";
 import { NewTerminalDialog } from "@/components/local/new-terminal-dialog";
 import { BlueprintsSection } from "@/components/local/blueprints-section";
 import { collectWorkLinks, workLinksSearchText } from "@/components/local/work-links";
 
 type StateFilter = "all" | "active" | "needs_you" | "exited";
+type ViewMode = "list" | "cards";
 
 const ACTIVE_STATES = ["pending", "launching", "running"];
+const VIEW_KEY = "optio_local_view";
+
+function loadView(): ViewMode {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "cards" ? "cards" : "list";
+  } catch {
+    return "list";
+  }
+}
 
 export default function LocalPage() {
   usePageTitle("Local");
@@ -42,6 +53,16 @@ export default function LocalPage() {
   const [hostFilter, setHostFilter] = useState("");
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
   const [search, setSearch] = useState("");
+  const [view, setViewState] = useState<ViewMode>("list");
+  useEffect(() => setViewState(loadView()), []);
+  const setView = (v: ViewMode) => {
+    setViewState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      // storage unavailable — view still switches for this page
+    }
+  };
 
   const refetch = useCallback(async () => {
     try {
@@ -114,6 +135,19 @@ export default function LocalPage() {
     [terminals],
   );
 
+  // Headline numbers: what's asking for you, what's busy, what's done.
+  const stats = useMemo(() => {
+    const live = terminals.filter((t) => ACTIVE_STATES.includes(t.state));
+    return {
+      needsYou: terminals.filter((t) => t.attentionState === "needs_you").length,
+      working: live.filter((t) => t.attentionState === "working").length,
+      idle: live.filter((t) => t.attentionState !== "working" && t.attentionState !== "needs_you")
+        .length,
+      finished: terminals.filter((t) => t.state === "exited" || t.state === "error").length,
+      hostsOnline: hosts.filter((h) => h.state === "online").length,
+    };
+  }, [terminals, hosts]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return terminals.filter((t) => {
@@ -168,7 +202,41 @@ export default function LocalPage() {
       <PageHeader
         icon={Terminal}
         title="Local"
-        description="Terminal sessions on your own machines, spawned and watched from here. Attended agents in your own checkouts — no pods, your local auth."
+        description={
+          hasHosts ? (
+            <span className="flex items-center gap-x-4 gap-y-1 flex-wrap text-sm">
+              <StatButton
+                value={stats.needsYou}
+                label="need you"
+                tone={stats.needsYou > 0 ? "text-warning" : undefined}
+                active={stateFilter === "needs_you"}
+                onClick={() => setStateFilter(stateFilter === "needs_you" ? "all" : "needs_you")}
+              />
+              <StatButton
+                value={stats.working}
+                label="working"
+                tone={stats.working > 0 ? "text-primary" : undefined}
+                active={stateFilter === "active"}
+                onClick={() => setStateFilter(stateFilter === "active" ? "all" : "active")}
+              />
+              <StatButton value={stats.idle} label="idle" />
+              <StatButton
+                value={stats.finished}
+                label="finished"
+                active={stateFilter === "exited"}
+                onClick={() => setStateFilter(stateFilter === "exited" ? "all" : "exited")}
+              />
+              <span className="text-text-muted/50 hidden sm:inline">·</span>
+              <StatButton
+                value={stats.hostsOnline}
+                label={`of ${hosts.length} host${hosts.length === 1 ? "" : "s"} online`}
+                tone={stats.hostsOnline === 0 ? "text-error" : "text-success"}
+              />
+            </span>
+          ) : (
+            "Terminals on your own machines, spawned and watched from here."
+          )
+        }
         meta={
           hasHosts ? (
             <div className="flex items-center gap-2 flex-wrap">
@@ -294,15 +362,44 @@ export default function LocalPage() {
                 </button>
               ))}
             </div>
-            <div className="relative">
+            <div className="relative flex-1 min-w-[10rem] sm:flex-none">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search title, dir, PR, ticket…"
-                className="pl-8 pr-3 py-1.5 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary w-56"
+                className="pl-8 pr-3 py-1.5 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary w-full sm:w-56"
               />
+            </div>
+            <div
+              className="ml-auto flex items-center p-1 rounded-lg bg-bg-card border border-border"
+              role="radiogroup"
+              aria-label="View"
+            >
+              {(
+                [
+                  ["list", List, "List"],
+                  ["cards", LayoutGrid, "Cards"],
+                ] as Array<[ViewMode, typeof List, string]>
+              ).map(([value, Icon, label]) => (
+                <button
+                  key={value}
+                  role="radio"
+                  aria-checked={view === value}
+                  aria-label={label}
+                  title={label}
+                  onClick={() => setView(value)}
+                  className={cn(
+                    "p-1.5 rounded-md transition-colors",
+                    view === value
+                      ? "bg-primary/15 text-primary"
+                      : "text-text-muted hover:text-text",
+                  )}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                </button>
+              ))}
             </div>
           </div>
 
@@ -327,6 +424,20 @@ export default function LocalPage() {
                 ) : undefined
               }
             />
+          ) : view === "list" ? (
+            <div className="rounded-lg border border-border bg-bg-card overflow-hidden">
+              {filtered.map((t) => (
+                <TerminalRow
+                  key={t.id}
+                  terminal={t}
+                  hostName={hostById.get(t.hostId)?.name}
+                  showHost={hosts.length > 1}
+                  onStart={handleStart}
+                  onKill={handleKill}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </div>
           ) : (
             <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filtered.map((t) => (
@@ -348,5 +459,43 @@ export default function LocalPage() {
 
       {showNewDialog && <NewTerminalDialog hosts={hosts} onClose={() => setShowNewDialog(false)} />}
     </div>
+  );
+}
+
+/** One headline number. Clickable stats double as filter toggles. */
+function StatButton({
+  value,
+  label,
+  tone,
+  active,
+  onClick,
+}: {
+  value: number;
+  label: string;
+  tone?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const body = (
+    <>
+      <span className={cn("text-lg font-semibold tabular-nums leading-none", tone ?? "text-text")}>
+        {value}
+      </span>
+      <span className="text-text-muted">{label}</span>
+    </>
+  );
+  if (!onClick) return <span className="inline-flex items-baseline gap-1.5">{body}</span>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex items-baseline gap-1.5 rounded-md px-1 -mx-1 transition-colors hover:bg-bg-hover/60",
+        active && "bg-primary/10 ring-1 ring-primary/30",
+      )}
+    >
+      {body}
+    </button>
   );
 }

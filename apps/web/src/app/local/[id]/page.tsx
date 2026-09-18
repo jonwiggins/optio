@@ -154,16 +154,22 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="h-full flex flex-col">
-      <div className="shrink-0 px-6 py-3.5 border-b border-border bg-bg">
+      <div className="shrink-0 px-3 sm:px-6 py-2.5 sm:py-3.5 border-b border-border bg-bg">
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <Link href="/local" className="text-text-muted hover:text-text transition-colors">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <Link
+              href="/local"
+              className="text-text-muted hover:text-text transition-colors p-1 -m-1"
+              aria-label="Back to Local"
+            >
               <ArrowLeft className="w-4 h-4" />
             </Link>
-            <Terminal className="w-5 h-5 text-primary shrink-0" />
+            <Terminal className="w-5 h-5 text-primary shrink-0 hidden sm:block" />
             <div className="min-w-0">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-lg font-semibold tracking-tight truncate">{terminal.title}</h1>
+              <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+                <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate max-w-[60vw] sm:max-w-none">
+                  {terminal.title}
+                </h1>
                 <LocalStateBadge terminal={terminal} />
                 {terminal.attentionState === "needs_you" && (
                   <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium tracking-wide uppercase text-warning bg-warning/10 border border-warning/20">
@@ -171,10 +177,12 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
                     {attentionLabel(terminal.attentionReason)}
                   </span>
                 )}
-                <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
+                <span className="hidden sm:inline-flex">
+                  <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
+                </span>
               </div>
               <div className="flex items-center gap-3 mt-0.5 text-xs text-text-muted flex-wrap">
-                {host && (
+                {host && hosts.length > 1 && (
                   <span className="flex items-center gap-1">
                     <Server className="w-3 h-3" />
                     {host.name}
@@ -184,7 +192,10 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
                   {dirTail(terminal.dir)}
                 </span>
                 {terminal.command && (
-                  <span className="font-mono truncate max-w-md" title={terminal.command}>
+                  <span
+                    className="font-mono truncate max-w-md hidden sm:inline"
+                    title={terminal.command}
+                  >
                     {terminal.command}
                   </span>
                 )}
@@ -203,7 +214,9 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <WorkLinkBadges links={collectWorkLinks(terminal)} max={4} />
+            <span className="hidden md:inline-flex">
+              <WorkLinkBadges links={collectWorkLinks(terminal)} max={4} />
+            </span>
             {canStart && (
               <button
                 onClick={handleStart}
@@ -215,7 +228,7 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
                 ) : (
                   <Play className="w-3.5 h-3.5" />
                 )}
-                Start
+                <span className="hidden sm:inline">Start</span>
               </button>
             )}
             {canKill && (
@@ -225,7 +238,7 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-error hover:border-error/30 disabled:opacity-50 transition-colors"
               >
                 <XCircle className="w-3.5 h-3.5" />
-                Kill
+                <span className="hidden sm:inline">Kill</span>
               </button>
             )}
             {canDelete && (
@@ -235,13 +248,18 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-error hover:border-error/30 disabled:opacity-50 transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                Delete
+                <span className="hidden sm:inline">Delete</span>
               </button>
             )}
           </div>
         </div>
       </div>
 
+      {collectWorkLinks(terminal).length > 0 && (
+        <div className="md:hidden shrink-0 px-3 py-1.5 border-b border-border/60 bg-bg">
+          <WorkLinkBadges links={collectWorkLinks(terminal)} size="xs" max={4} />
+        </div>
+      )}
       <div className="flex-1 min-h-0 flex flex-col">
         {/* Scrollback lives in the daemon and dies with the PTY, so a finished
             terminal has nothing to stream — show the persisted preview (the

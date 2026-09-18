@@ -67,7 +67,7 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
       onClick={onClose}
     >
       <form
@@ -79,7 +79,7 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
           e.preventDefault();
           void handleCreate();
         }}
-        className="bg-bg-card border border-border rounded-xl p-5 w-full max-w-lg shadow-xl"
+        className="bg-bg-card border border-border rounded-t-xl sm:rounded-xl p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] w-full max-w-lg shadow-xl max-h-[90dvh] overflow-y-auto"
       >
         <div className="flex items-center justify-between mb-4">
           <h2 id="new-terminal-title" className="flex items-center gap-2 text-sm font-semibold">
@@ -97,7 +97,7 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
         </div>
 
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-text-muted mb-1">Host</label>
               <select
