@@ -19,7 +19,8 @@ enum TerminalTheme {
         view.nativeForegroundColor = dark ? UIColor(red: 244 / 255, green: 244 / 255, blue: 245 / 255, alpha: 1)
                                           : UIColor(red: 24 / 255, green: 24 / 255, blue: 27 / 255, alpha: 1)
         view.backgroundColor = view.nativeBackgroundColor
-        view.caretColor = UIColor(red: 0x6D / 255, green: 0x28 / 255, blue: 0xD9 / 255, alpha: 1)
+        // Cursor matches the text (no accent): the terminal is a tool, not a brand surface.
+        view.caretColor = view.nativeForegroundColor
         view.keyboardAppearance = dark ? .dark : .light
         view.installColors(dark ? darkAnsi : lightAnsi)
     }
