@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(APIClient.self) private var api
     @Environment(SessionStore.self) private var session
     @Environment(MoreContext.self) private var context
+    @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .system
 
     @State private var claude: ClaudeAuthStatus.Subscription?
     @State private var claudeError: String?
@@ -33,6 +34,9 @@ struct SettingsView: View {
                 }
                 NavigationLink { NotificationPreferencesView() } label: {
                     Label("Notifications", systemImage: "bell")
+                }
+                NavigationLink { NotificationsDevicesView() } label: {
+                    Label("Notifications on this iPhone", systemImage: "iphone.radiowaves.left.and.right")
                 }
             }
 
@@ -91,6 +95,13 @@ struct SettingsView: View {
             }
 
             Section("App") {
+                Picker(selection: $appearance) {
+                    ForEach(AppAppearance.allCases) { a in
+                        Label(a.label, systemImage: a.systemImage).tag(a)
+                    }
+                } label: {
+                    Label("Appearance", systemImage: "circle.lefthalf.filled")
+                }
                 MoreInfoRow(label: "Server", value: session.serverURL?.absoluteString ?? "—", mono: true)
                 MoreInfoRow(label: "Version", value: appVersion)
                 if let ws = context.workspaceId { MoreInfoRow(label: "Workspace", value: ws, mono: true) }

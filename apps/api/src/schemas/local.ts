@@ -72,6 +72,10 @@ export const LocalTerminalSchema = z
       .describe("PR / ticket links seen in the output"),
     costUsd: z.string().nullable(),
     lastActivityAt: z.date().nullable(),
+    snoozedUntil: z
+      .date()
+      .nullable()
+      .describe('"Later": out of the needs-you queue until this time'),
     createdAt: z.date(),
     updatedAt: z.date(),
     startedAt: z.date().nullable(),

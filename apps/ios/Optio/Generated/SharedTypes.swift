@@ -3139,6 +3139,9 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
     public let links: [WorkLink]
     public let costUsd: String?
     public let lastActivityAt: String?
+    /// "Later": while set and in the future the terminal is not in the needs-you
+    /// queue (Watch, widgets, push). Cleared by DELETE /snooze or by expiry.
+    public let snoozedUntil: String?
     public let createdAt: String
     public let updatedAt: String
     public let startedAt: String?
@@ -3169,6 +3172,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         case links = "links"
         case costUsd = "costUsd"
         case lastActivityAt = "lastActivityAt"
+        case snoozedUntil = "snoozedUntil"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
         case startedAt = "startedAt"
@@ -3200,6 +3204,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         links: [WorkLink],
         costUsd: String? = nil,
         lastActivityAt: String? = nil,
+        snoozedUntil: String? = nil,
         createdAt: String,
         updatedAt: String,
         startedAt: String? = nil,
@@ -3229,6 +3234,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         self.links = links
         self.costUsd = costUsd
         self.lastActivityAt = lastActivityAt
+        self.snoozedUntil = snoozedUntil
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.startedAt = startedAt

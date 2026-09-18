@@ -449,6 +449,19 @@ notifications:
     publicKey: ""
     privateKey: ""
     subject: ""  # e.g. mailto:ops@example.com
+  # ── iOS push (APNs, token-based auth) — see docs/ios-push.md ──
+  # Leave keyId empty to disable. Create a key under Certificates, Identifiers &
+  # Profiles → Keys with the "Apple Push Notifications service (APNs)" capability.
+  apns:
+    keyId: ""          # 10-char key id from the developer portal
+    teamId: ""         # 10-char Apple Developer team id
+    key: ""            # PEM contents of the AuthKey_<keyId>.p8 file (multi-line ok)
+    bundleId: "dev.optio.ios"
+    environment: "sandbox"   # sandbox (Xcode builds) | production (TestFlight / App Store)
+    # Name of a pre-created Secret carrying OPTIO_APNS_KEY_ID, OPTIO_APNS_TEAM_ID,
+    # OPTIO_APNS_KEY (and optionally OPTIO_APNS_BUNDLE_ID / OPTIO_APNS_ENVIRONMENT)
+    # for clusters that keep the key out of values. When set, keyId/teamId/key above are ignored.
+    existingSecret: ""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Observability (OpenTelemetry)

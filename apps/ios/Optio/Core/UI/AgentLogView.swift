@@ -92,6 +92,8 @@ struct AgentLogRow: View {
 struct ChatComposer: View {
     var placeholder = "Message"
     var disabled = false
+    /// Raise the keyboard on appear (deep links with `compose=1`).
+    var autofocus = false
     var onSend: (String) async -> Void
     @State private var text = ""
     @State private var sending = false
@@ -114,6 +116,7 @@ struct ChatComposer: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.bar)
+        .onAppear { if autofocus { focused = true } }
     }
 
     private func send() async {

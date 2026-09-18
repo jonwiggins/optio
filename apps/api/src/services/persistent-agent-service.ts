@@ -285,6 +285,14 @@ export async function transitionPersistentAgentState(
     timestamp: new Date().toISOString(),
     errorMessage: extras.errorMessage ?? undefined,
   });
+  if (toState === PersistentAgentState.FAILED) {
+    // iOS: "agent stopped" alert to the creator (no-op unless APNs is configured).
+    import("./glance-service.js")
+      .then(({ onAgentFailed }) =>
+        onAgentFailed(current, extras.lastFailureReason ?? extras.errorMessage ?? null),
+      )
+      .catch((err) => logger.warn({ err, agentId }, "APNs agent failed hook failed"));
+  }
   return true;
 }
 
@@ -493,6 +501,10 @@ export async function haltPersistentAgentTurn(input: HaltTurnInput) {
         summary: input.summary ?? undefined,
         timestamp: new Date().toISOString(),
       });
+      // iOS: reply notification to the users whose messages this turn drained.
+      import("./glance-service.js")
+        .then(({ onAgentTurnHalted }) => onAgentTurnHalted(turn, agent))
+        .catch((err) => logger.warn({ err, turnId: turn.id }, "APNs agent reply hook failed"));
     }
   }
   return turn;

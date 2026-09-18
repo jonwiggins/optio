@@ -5,10 +5,11 @@ import SwiftUI
 struct RunHubView: View {
     enum Section: String, CaseIterable { case tasks, jobs, reviews, issues, scheduled }
     @State private var section: Section = .tasks
+    @State private var path = NavigationPath()
     @Environment(AppRouter.self) private var router
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 ChipPicker(options: [(.tasks, "Tasks"), (.jobs, "Jobs"), (.reviews, "Reviews"), (.issues, "Issues"), (.scheduled, "Scheduled")], selection: $section)
                 Divider()
@@ -20,8 +21,12 @@ struct RunHubView: View {
                 case .scheduled: ScheduledListView()
                 }
             }
+            .navigationDestination(for: AppRouter.PendingDetail.self) { detail in
+                TaskDetailView(taskId: detail.id, focusComposer: detail.compose)
+            }
             .onAppear(perform: consumeRoute)
             .onChange(of: router.pendingSection) { _, _ in consumeRoute() }
+            .onChange(of: router.pendingDetail) { _, _ in consumeRoute() }
         }
     }
 
@@ -39,5 +44,14 @@ struct RunHubView: View {
         guard let mapped else { return }
         section = mapped
         router.pendingSection = nil
+        consumeDetail()
+    }
+
+    /// `optio://tasks/<id>` (widgets, Live Activity, notifications): replace the stack
+    /// with the task detail so the deep link lands in one hop.
+    private func consumeDetail() {
+        guard let detail = router.pendingDetail, detail.kind == .task else { return }
+        router.pendingDetail = nil
+        path = NavigationPath([detail])
     }
 }

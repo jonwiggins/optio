@@ -1,0 +1,13 @@
+{
+  "Simulator Target Bundle": "dev.optio.ios",
+  "aps": {
+    "alert": { "title": "Needs attention", "subtitle": "fix/login-redirect", "body": "Merge conflict — resume?" },
+    "sound": "default",
+    "category": "TASK_ATTENTION",
+    "thread-id": "task-0001",
+    "interruption-level": "time-sensitive"
+  },
+  "url": "optio://tasks/task-0001",
+  "kind": "task",
+  "id": "task-0001"
+}

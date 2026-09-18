@@ -67,19 +67,24 @@ final class TaskDetailModel {
 
 struct TaskDetailView: View {
     let taskId: String
+    /// Deep link `?compose=1`: land on Logs where the composer lives.
+    var focusComposer = false
     @Environment(APIClient.self) private var api
     @State private var model: TaskDetailModel
     @State private var logs: TaskLogStream
     @State private var section = "logs"
+    @State private var followed = false
     @State private var messageMode = "soft"
     @State private var confirm: String?
     @State private var showCreateSubtask = false
     @State private var showAddDependency = false
 
-    init(taskId: String) {
+    init(taskId: String, focusComposer: Bool = false) {
         self.taskId = taskId
+        self.focusComposer = focusComposer
         _model = State(initialValue: TaskDetailModel(id: taskId))
         _logs = State(initialValue: TaskLogStream(taskId: taskId))
+        _followed = State(initialValue: FollowedTasks.contains(taskId))
     }
 
     var body: some View {
@@ -106,7 +111,9 @@ struct TaskDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
         .task {
+            if focusComposer { section = "logs" }
             await model.load(api: api)
+            if model.isTerminal, followed { FollowedTasks.remove(taskId); followed = false }
             logs.onStateChanged = { Task { await model.load(api: api) } }
             logs.start(api: api)
             while !Task.isCancelled {
@@ -148,8 +155,25 @@ struct TaskDetailView: View {
     private var confirmButton: String { confirm == "redo" ? "Force redo" : "Cancel task" }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        if !model.isTerminal {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    followed = FollowedTasks.toggle(taskId)
+                } label: {
+                    Image(systemName: followed ? "lock.rectangle.stack.fill" : "lock.rectangle.stack")
+                }
+                .tint(followed ? AppTheme.accent : nil)
+                .accessibilityLabel(followed ? "Unfollow on Lock Screen" : "Follow on Lock Screen")
+            }
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
+                if !model.isTerminal {
+                    Button(followed ? "Unfollow on Lock Screen" : "Follow on Lock Screen", systemImage: followed ? "lock.rectangle.stack.fill" : "lock.rectangle.stack") {
+                        followed = FollowedTasks.toggle(taskId)
+                    }
+                    Divider()
+                }
                 if model.canCancel { Button("Cancel task", systemImage: "xmark.circle", role: .destructive) { confirm = "cancel" } }
                 if model.canRetry { Button("Retry", systemImage: "arrow.clockwise") { Task { await model.run(api: api) { try await api.retryTask(taskId) } } } }
                 if model.canStart { Button("Start", systemImage: "play") { Task { await model.run(api: api) { try await api.retryTask(taskId) } } } }
@@ -283,7 +307,7 @@ struct TaskDetailView: View {
                     }
                     .buttonStyle(.borderedProminent).controlSize(.small).tint(AppTheme.accent)
                 }
-                ChatComposer(placeholder: model.canMessageRunning ? "Message the running agent…" : "Resume the agent with a message…", disabled: model.busy) { text in
+                ChatComposer(placeholder: model.canMessageRunning ? "Message the running agent…" : "Resume the agent with a message…", disabled: model.busy, autofocus: focusComposer) { text in
                     await model.run(api: api) {
                         if model.canMessage {
                             try await api.sendTaskMessage(taskId, content: text, mode: model.canMessageRunning ? messageMode : "soft")

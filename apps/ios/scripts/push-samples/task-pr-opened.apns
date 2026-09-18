@@ -1,0 +1,13 @@
+{
+  "Simulator Target Bundle": "dev.optio.ios",
+  "aps": {
+    "alert": { "title": "PR #581 open", "subtitle": "fix/login-redirect", "body": "Fix login redirect loop on expired sessions" },
+    "sound": "default",
+    "category": "TASK_PR_OPENED",
+    "thread-id": "task-0001"
+  },
+  "url": "optio://tasks/task-0001",
+  "kind": "task",
+  "id": "task-0001",
+  "prUrl": "https://github.com/jonwiggins/optio/pull/581"
+}

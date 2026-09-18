@@ -131,6 +131,9 @@ importers:
       '@optio/ticket-providers':
         specifier: workspace:*
         version: link:../../packages/ticket-providers
+      apns2:
+        specifier: ^12.2.0
+        version: 12.2.0
       bullmq:
         specifier: ^5.52.2
         version: 5.71.0
@@ -2757,6 +2760,10 @@ packages:
   any-promise@1.3.0:
     resolution: {integrity: sha512-7UvmKalWRt1wgjL1RrGxoSJW/0QZFIegpeGvZG9kjp8vrRu55XTHbwnqq2GpXm9uLbcuhxm3IqX9OB4MZR1b2A==}
 
+  apns2@12.2.0:
+    resolution: {integrity: sha512-HySXBzPDMTX8Vxy/ilU9/XcNndJBlgCc+no2+Hj4BaY7CjkStkszufAI6CRK1yDw8K+6ALH+V+mXuQKZe2zeZA==}
+    engines: {node: '>=20'}
+
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
 
@@ -3550,6 +3557,10 @@ packages:
 
   fast-json-stringify@6.3.0:
     resolution: {integrity: sha512-oRCntNDY/329HJPlmdNLIdogNtt6Vyjb1WuT01Soss3slIdyUp8kAcDU3saQTOquEK8KFVfwIIF7FebxUAu+yA==}
+
+  fast-jwt@6.3.3:
+    resolution: {integrity: sha512-pQDXx7IHeZT4jSmpE9o80RrBqfrG4fPrl8anazSM5vErIdK1iCc13z/EWX+H0j7liWSRnwTpHswIKMeLYGAckw==}
+    engines: {node: '>=20'}
 
   fast-levenshtein@2.0.6:
     resolution: {integrity: sha512-DCXu6Ifhqcks7TZKY3Hxp3y6qphY5SJZmrWMDrKcERSOXWQdMhU9Ig/PYrzyw/ul9jOIyh0N4M0tbC5hodg8dw==}
@@ -4489,6 +4500,9 @@ packages:
   mlly@1.8.2:
     resolution: {integrity: sha512-d+ObxMQFmbt10sretNDytwt85VrbkhhUA/JBGm1MPaWJ65Cl4wOgLaB1NYvJSZ0Ef03MMEU/0xpPMXUIQ29UfA==}
 
+  mnemonist@0.40.4:
+    resolution: {integrity: sha512-ZAv+KNavneRVzu4tUeOgzkScI3W5BGwZ3rkxIpKtzzVgfTtWQFN1CgX0U72cyvyh3iTuHL3SiSmrQxTlryEIcw==}
+
   mobx-react-lite@4.1.1:
     resolution: {integrity: sha512-iUxiMpsvNraCKXU+yPotsOncNNmyeS2B5DKL+TL6Tar/xm+wwNJAubJmtRSeAoYawdZqwv8Z/+5nPRHeQxTiXg==}
     peerDependencies:
@@ -4641,6 +4655,9 @@ packages:
   object-assign@4.1.1:
     resolution: {integrity: sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==}
     engines: {node: '>=0.10.0'}
+
+  obliterator@2.0.5:
+    resolution: {integrity: sha512-42CPE9AhahZRsMNslczq0ctAEtqk8Eka26QofnqC346BZdHDySk3LWka23LI7ULIw11NmltpiLagIq8gBozxTw==}
 
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
@@ -5593,6 +5610,10 @@ packages:
   undici@6.24.0:
     resolution: {integrity: sha512-lVLNosgqo5EkGqh5XUDhGfsMSoO8K0BAN0TyJLvwNRSl4xWGZlCVYsAIpa/OpA3TvmnM01GWcoKmc3ZWo5wKKA==}
     engines: {node: '>=18.17'}
+
+  undici@7.29.1:
+    resolution: {integrity: sha512-RYONW2MeafgYlkVOKYKkA/Ag7BmXqgIWCa8t1m0JcxrQg9pI9lEqRhAOruOBCbAohOa/gkCF+iPi9hrgvTzu6Q==}
+    engines: {node: '>=20.18.1'}
 
   unfetch@4.2.0:
     resolution: {integrity: sha512-F9p7yYCn6cIW9El1zi0HI6vqpeIvBsr3dSuRO6Xuppb1u5rXpCPmMvLSyECLhybr9isec8Ohl0hPekMVrEinDA==}
@@ -8533,6 +8554,11 @@ snapshots:
 
   any-promise@1.3.0: {}
 
+  apns2@12.2.0:
+    dependencies:
+      fast-jwt: 6.3.3
+      undici: 7.29.1
+
   argparse@2.0.1: {}
 
   aria-query@5.3.0:
@@ -9239,6 +9265,14 @@ snapshots:
       fast-uri: 3.1.2
       json-schema-ref-resolver: 3.0.0
       rfdc: 1.4.1
+
+  fast-jwt@6.3.3:
+    dependencies:
+      '@lukeed/ms': 2.0.2
+      asn1.js: 5.4.1
+      ecdsa-sig-formatter: 1.0.11
+      mnemonist: 0.40.4
+      safe-regex2: 5.1.0
 
   fast-levenshtein@2.0.6: {}
 
@@ -10400,6 +10434,10 @@ snapshots:
       pkg-types: 1.3.1
       ufo: 1.6.3
 
+  mnemonist@0.40.4:
+    dependencies:
+      obliterator: 2.0.5
+
   mobx-react-lite@4.1.1(mobx@6.15.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
       mobx: 6.15.0
@@ -10560,6 +10598,8 @@ snapshots:
   oauth4webapi@3.8.5: {}
 
   object-assign@4.1.1: {}
+
+  obliterator@2.0.5: {}
 
   on-exit-leak-free@2.1.2: {}
 
@@ -11656,6 +11696,8 @@ snapshots:
   undici-types@7.16.0: {}
 
   undici@6.24.0: {}
+
+  undici@7.29.1: {}
 
   unfetch@4.2.0: {}
 

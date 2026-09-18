@@ -2,6 +2,9 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as notificationService from "../services/notification-service.js";
+import * as apnsStore from "../services/apns-store.js";
+import { apnsService, defaultApnsEnvironment } from "../services/apns-service.js";
+import { requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import {
   NotificationSubscriptionSchema,
@@ -31,6 +34,63 @@ const preferencesSchema = z
   .record(z.string(), z.object({ push: z.boolean() }))
   .describe("Map of event-type → { push: boolean }");
 
+// ── APNs (iOS) ───────────────────────────────────────────────────────────────
+
+const apnsTokenSchema = z
+  .string()
+  .regex(/^[0-9a-fA-F]{32,512}$/, "hex token expected")
+  .transform((t) => t.toLowerCase());
+const apnsEnvironmentSchema = z.enum(["sandbox", "production"]);
+const liveActivityKindSchema = z.enum(["watch"]);
+
+const registerDeviceSchema = z
+  .object({
+    token: apnsTokenSchema.describe("APNs device token (hex)"),
+    platform: z.enum(["ios"]).default("ios"),
+    environment: apnsEnvironmentSchema
+      .optional()
+      .describe("APNs host the token belongs to; defaults to the server's OPTIO_APNS_ENVIRONMENT"),
+    bundleId: z.string().min(1).max(200),
+    appVersion: z.string().max(50).optional(),
+    deviceName: z.string().max(120).optional(),
+  })
+  .describe("Body for registering an iOS device for push (upsert by token)");
+
+const liveActivityTokenSchema = z
+  .object({
+    token: apnsTokenSchema.describe("ActivityKit push token (hex)"),
+    environment: apnsEnvironmentSchema.optional(),
+    subjectId: z.string().max(200).optional(),
+  })
+  .describe("Body for registering a Live Activity update token");
+
+const liveActivityTokenDeleteSchema = z.object({ token: apnsTokenSchema });
+
+const pushToStartSchema = z
+  .object({
+    token: apnsTokenSchema.describe("ActivityKit push-to-start token (hex)"),
+    environment: apnsEnvironmentSchema.optional(),
+  })
+  .describe("Body for registering a Live Activity push-to-start token");
+
+const ApnsDeviceSchema = z
+  .object({
+    id: z.string(),
+    token: z.string().describe("Masked"),
+    platform: z.string(),
+    environment: apnsEnvironmentSchema,
+    bundleId: z.string(),
+    appVersion: z.string().nullable(),
+    deviceName: z.string().nullable(),
+    failureCount: z.number().int(),
+    lastSeenAt: z.date(),
+    createdAt: z.date(),
+  })
+  .describe("A registered iOS device (token masked)");
+
+const DeviceResponseSchema = z.object({ device: ApnsDeviceSchema });
+const DevicesResponseSchema = z.object({ devices: z.array(ApnsDeviceSchema) });
+
 const VapidKeyResponseSchema = z.object({ publicKey: z.string() });
 const OkResponseSchema = z.object({ ok: z.boolean() });
 const SubscriptionsResponseSchema = z.object({
@@ -41,6 +101,7 @@ const TestResponseSchema = z.object({ sent: z.number().int() });
 
 export async function notificationRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
+  const member = { preHandler: [requireRole("member")] };
 
   app.get(
     "/api/notifications/vapid-public-key",
@@ -195,6 +256,198 @@ export async function notificationRoutes(rawApp: FastifyInstance) {
       }
 
       const sent = await notificationService.sendTestNotification(userId);
+      return reply.send({ sent });
+    },
+  );
+
+  // ── APNs devices (iOS) ─────────────────────────────────────────────────────
+
+  app.post(
+    "/api/notifications/devices",
+    {
+      ...member,
+      schema: {
+        operationId: "registerApnsDevice",
+        summary: "Register an iOS device for push",
+        description:
+          "Upsert the caller's APNs device token. A token that re-registers under " +
+          "another user moves to them. Resets the failure counter.",
+        tags: ["Workspaces"],
+        body: registerDeviceSchema,
+        response: { 201: DeviceResponseSchema, 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user?.id;
+      if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      const device = await apnsStore.registerDevice(userId, {
+        token: req.body.token,
+        platform: req.body.platform,
+        environment: req.body.environment ?? defaultApnsEnvironment(),
+        bundleId: req.body.bundleId,
+        appVersion: req.body.appVersion,
+        deviceName: req.body.deviceName,
+        workspaceId: req.user?.workspaceId ?? null,
+      });
+      return reply.status(201).send({ device });
+    },
+  );
+
+  app.get(
+    "/api/notifications/devices",
+    {
+      schema: {
+        operationId: "listApnsDevices",
+        summary: "List my iOS devices",
+        description: "Return the caller's registered APNs devices with masked tokens.",
+        tags: ["Workspaces"],
+        response: { 200: DevicesResponseSchema, 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user?.id;
+      if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      const devices = await apnsStore.listDevicesForUser(userId);
+      return reply.send({ devices });
+    },
+  );
+
+  app.delete(
+    "/api/notifications/devices/:token",
+    {
+      ...member,
+      schema: {
+        operationId: "unregisterApnsDevice",
+        summary: "Remove an iOS device",
+        description: "Delete one of the caller's APNs device tokens. 204 even when absent.",
+        tags: ["Workspaces"],
+        params: z.object({ token: apnsTokenSchema }),
+        response: { 204: z.null(), 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user?.id;
+      if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      await apnsStore.unregisterDevice(userId, req.params.token);
+      return reply.status(204).send(null);
+    },
+  );
+
+  // ── Live Activity tokens ───────────────────────────────────────────────────
+
+  app.post(
+    "/api/notifications/live-activities/:kind/token",
+    {
+      ...member,
+      schema: {
+        operationId: "registerLiveActivityToken",
+        summary: "Register a Live Activity update token",
+        description:
+          "Upsert the ActivityKit push token for a running activity. Only kind " +
+          "`watch` exists today (one aggregate activity per user).",
+        tags: ["Workspaces"],
+        params: z.object({ kind: liveActivityKindSchema }),
+        body: liveActivityTokenSchema,
+        response: { 201: OkResponseSchema, 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user?.id;
+      if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      await apnsStore.registerLiveActivityToken(userId, {
+        kind: req.params.kind,
+        token: req.body.token,
+        environment: req.body.environment ?? defaultApnsEnvironment(),
+        subjectId: req.body.subjectId,
+      });
+      return reply.status(201).send({ ok: true });
+    },
+  );
+
+  app.delete(
+    "/api/notifications/live-activities/:kind/token",
+    {
+      ...member,
+      schema: {
+        operationId: "unregisterLiveActivityToken",
+        summary: "Remove a Live Activity update token",
+        description: "Call when the app observes the activity ended or was dismissed.",
+        tags: ["Workspaces"],
+        params: z.object({ kind: liveActivityKindSchema }),
+        body: liveActivityTokenDeleteSchema,
+        response: { 204: z.null(), 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user?.id;
+      if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      await apnsStore.unregisterLiveActivityToken(userId, req.params.kind, req.body.token);
+      return reply.status(204).send(null);
+    },
+  );
+
+  app.post(
+    "/api/notifications/live-activities/:kind/push-to-start",
+    {
+      ...member,
+      schema: {
+        operationId: "registerLiveActivityStartToken",
+        summary: "Register a Live Activity push-to-start token",
+        description:
+          "Upsert the ActivityKit push-to-start token so the server can start the " +
+          "activity when the first agent begins running.",
+        tags: ["Workspaces"],
+        params: z.object({ kind: liveActivityKindSchema }),
+        body: pushToStartSchema,
+        response: { 201: OkResponseSchema, 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user?.id;
+      if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      await apnsStore.registerLiveActivityStartToken(userId, {
+        kind: req.params.kind,
+        token: req.body.token,
+        environment: req.body.environment ?? defaultApnsEnvironment(),
+      });
+      return reply.status(201).send({ ok: true });
+    },
+  );
+
+  app.post(
+    "/api/notifications/devices/test",
+    {
+      ...member,
+      schema: {
+        operationId: "sendTestApnsNotification",
+        summary: "Send a test push to my iOS devices",
+        description:
+          "Deliver a test alert to every APNs device the caller registered. " +
+          "Returns 503 if APNs is not configured.",
+        tags: ["Workspaces"],
+        response: {
+          200: TestResponseSchema,
+          401: ErrorResponseSchema,
+          503: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user?.id;
+      if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      if (!apnsService.isConfigured()) {
+        return reply.status(503).send({ error: "APNs not configured" });
+      }
+      // sendAlert has no preference gate (glance-service applies it), so a test always ships.
+      const sent = await apnsService.sendAlert(userId, {
+        title: "Optio test notification",
+        body: "If you see this, iOS push is working.",
+        category: "TEST",
+        threadId: "test",
+        url: "optio://settings",
+        kind: "test",
+        id: "test",
+      });
       return reply.send({ sent });
     },
   );

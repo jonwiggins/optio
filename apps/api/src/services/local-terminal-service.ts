@@ -76,6 +76,42 @@ async function notifyChanged(row: LocalTerminalRow): Promise<void> {
     hostId: row.hostId,
     userId: row.userId,
   }).catch((err) => logger.warn({ err }, "local: failed to publish change event"));
+  // iOS: Watch Live Activity + needs-you alerts (no-op unless APNs is configured).
+  import("./glance-service.js")
+    .then(({ onLocalTerminalChanged }) => onLocalTerminalChanged(row))
+    .catch((err) => logger.warn({ err, terminalId: row.id }, "local: glance hook failed"));
+}
+
+/** True while a "Later" window is open on the terminal. */
+export function isTerminalSnoozed(row: LocalTerminalRow, now = Date.now()): boolean {
+  return !!row.snoozedUntil && row.snoozedUntil.getTime() > now;
+}
+
+/**
+ * "Later": drop the terminal out of the needs-you queue (Watch, widgets,
+ * push) for `minutes`. Attention state is untouched — the daemon still owns
+ * it — so the item resurfaces when the window closes.
+ */
+export async function snoozeTerminal(
+  row: LocalTerminalRow,
+  minutes: number,
+): Promise<LocalTerminalRow> {
+  const snoozedUntil = new Date(Date.now() + Math.round(minutes * 60_000));
+  const updated = await updateTerminal(row.id, { snoozedUntil });
+  if (!updated) throw new Error("Terminal not found");
+  import("./glance-service.js")
+    .then(({ scheduleSnoozeExpiry }) => scheduleSnoozeExpiry(updated))
+    .catch(() => {});
+  return updated;
+}
+
+export async function unsnoozeTerminal(row: LocalTerminalRow): Promise<LocalTerminalRow> {
+  const updated = await updateTerminal(row.id, { snoozedUntil: null });
+  if (!updated) throw new Error("Terminal not found");
+  import("./glance-service.js")
+    .then(({ scheduleSnoozeExpiry }) => scheduleSnoozeExpiry(updated))
+    .catch(() => {});
+  return updated;
 }
 
 async function updateTerminal(

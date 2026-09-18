@@ -1,0 +1,12 @@
+{
+  "Simulator Target Bundle": "dev.optio.ios",
+  "aps": {
+    "alert": { "title": "Laptop unreachable", "body": "jon-mbp went offline at 10:42" },
+    "sound": "default",
+    "category": "HOST_OFFLINE",
+    "thread-id": "host-0001"
+  },
+  "url": "optio://section/local",
+  "kind": "host",
+  "id": "host-0001"
+}

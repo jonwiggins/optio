@@ -1,0 +1,13 @@
+{
+  "Simulator Target Bundle": "dev.optio.ios",
+  "aps": {
+    "alert": { "title": "Needs you", "subtitle": "apps/web", "body": "Claude stopped — reply to continue" },
+    "sound": "default",
+    "category": "LOCAL_NEEDS_YOU",
+    "thread-id": "576f09d9-c3ff-4480-ba65-ba4ef4d1bbe7",
+    "interruption-level": "time-sensitive"
+  },
+  "url": "optio://local/576f09d9-c3ff-4480-ba65-ba4ef4d1bbe7?compose=1",
+  "kind": "local",
+  "id": "576f09d9-c3ff-4480-ba65-ba4ef4d1bbe7"
+}

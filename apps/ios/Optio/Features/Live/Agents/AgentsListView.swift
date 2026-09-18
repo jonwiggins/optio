@@ -72,18 +72,16 @@ struct AgentsListView: View {
     }
 
     private func statsRow(_ s: PersistentAgentStats) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+        StatGrid {
                 StatTile(title: "Total", value: "\(s.total)")
                 StatTile(title: "Running", value: "\(s.running)", color: .blue)
                 StatTile(title: "Queued", value: "\(s.queued)", color: .orange)
                 StatTile(title: "Idle", value: "\(s.idle)")
                 StatTile(title: "Paused", value: "\(s.paused)", color: .yellow)
                 StatTile(title: "Failed", value: "\(s.failed)", color: .red)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 4)
         }
+        .padding(.horizontal)
+        .padding(.vertical, 4)
     }
 
     private func refresh() async {

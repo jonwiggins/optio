@@ -67,8 +67,7 @@ struct TasksListView: View {
         List {
             if let stats = model.stats {
                 Section {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
+                    StatGrid {
                             StatTile(title: "Running", value: "\(stats.running)", color: .blue)
                             StatTile(title: "Queued", value: "\(stats.queued)", color: .orange)
                             StatTile(title: "CI", value: "\(stats.ci)", color: AppTheme.accent)
@@ -76,8 +75,6 @@ struct TasksListView: View {
                             StatTile(title: "Attention", value: "\(stats.needsAttention)", color: .yellow)
                             StatTile(title: "Failed", value: "\(stats.failed)", color: .red)
                             StatTile(title: "Done", value: "\(stats.completed)", color: .green)
-                        }
-                        .fixedSize()
                     }
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)

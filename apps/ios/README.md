@@ -96,3 +96,14 @@ clears `pendingSection` to select its sub-section.
 `scripts/check-swift-types.sh` (job "Swift Types In Sync") fails the build when
 `SharedTypes.swift` is stale relative to `packages/shared/src/types`. The app
 itself is not built in CI yet (needs a macOS runner).
+
+## App icon
+
+`Design/app-icon.svg` is the source (lucide `bot` glyph, ISC licensed, on the
+Optio purple). Re-export with Quick Look and flatten (no alpha):
+
+```bash
+qlmanage -t -s 1024 -o /tmp/icon Design/app-icon.svg
+sips -s format jpeg /tmp/icon/app-icon.svg.png --out /tmp/icon.jpg
+sips -s format png /tmp/icon.jpg --out Optio/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+```

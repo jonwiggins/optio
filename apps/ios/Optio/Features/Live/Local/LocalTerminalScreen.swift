@@ -8,6 +8,8 @@ import SwiftTerm
 struct LocalTerminalScreen: View {
     let terminalId: String
     var hosts: [LocalHost] = []
+    /// Deep link `?compose=1` (Live Activity "Reply…"): raise the keyboard once the stream connects.
+    var focusComposer = false
 
     @Environment(APIClient.self) private var api
     @Environment(\.dismiss) private var dismiss
@@ -135,7 +137,7 @@ struct LocalTerminalScreen: View {
             }
             // Remount on leaving `pending` — the stream only attaches to a terminal
             // that is already launching/running when it connects.
-            LocalTerminalStreamView(terminalId: terminalId) { state, attention in
+            LocalTerminalStreamView(terminalId: terminalId, focusComposer: focusComposer) { state, attention in
                 applyStatus(state: state, attention: attention)
             } onExit: { code in
                 if var t = self.terminal, !LocalPresentation.isDead(t) {
@@ -240,6 +242,7 @@ extension LocalTerminal {
 
 struct LocalTerminalStreamView: View {
     let terminalId: String
+    var focusComposer = false
     var onStatus: (LocalTerminalState, LocalAttentionState) -> Void
     var onExit: (Int?) -> Void
 
@@ -271,6 +274,13 @@ struct LocalTerminalStreamView: View {
                 s.onExit = onExit
                 stream = s
                 s.connect()
+                if focusComposer {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(600))
+                        s.bridge.focus()
+                        keyboardShown = s.bridge.isFocused
+                    }
+                }
             }
         }
         .onDisappear {
@@ -396,6 +406,7 @@ struct ExtraKeysBar: View {
 
 struct SwiftTermView: UIViewRepresentable {
     let stream: LocalTerminalStream
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeCoordinator() -> Coordinator { Coordinator(stream: stream) }
 
@@ -403,10 +414,8 @@ struct SwiftTermView: UIViewRepresentable {
         let font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 360, height: 400), font: font)
         view.terminalDelegate = context.coordinator
-        view.nativeBackgroundColor = UIColor(red: 9 / 255, green: 9 / 255, blue: 11 / 255, alpha: 1)
-        view.nativeForegroundColor = UIColor(red: 250 / 255, green: 250 / 255, blue: 250 / 255, alpha: 1)
-        view.caretColor = UIColor(red: 0x6D / 255, green: 0x28 / 255, blue: 0xD9 / 255, alpha: 1)
-        view.keyboardAppearance = .dark
+        TerminalTheme.apply(to: view, scheme: colorScheme)
+        context.coordinator.scheme = colorScheme
         view.autocorrectionType = .no
         view.smartQuotesType = .no
         // Our own extra-keys bar lives in SwiftUI; drop SwiftTerm's accessory.
@@ -419,6 +428,10 @@ struct SwiftTermView: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalView, context: Context) {
         context.coordinator.stream = stream
         if stream.bridge.view !== uiView { stream.bridge.attach(uiView) }
+        if context.coordinator.scheme != colorScheme {
+            context.coordinator.scheme = colorScheme
+            TerminalTheme.apply(to: uiView, scheme: colorScheme)
+        }
     }
 
     static func dismantleUIView(_ uiView: TerminalView, coordinator: Coordinator) {
@@ -428,6 +441,7 @@ struct SwiftTermView: UIViewRepresentable {
     /// SwiftTerm calls its delegate on the main thread; the stream is main-actor.
     final class Coordinator: NSObject, TerminalViewDelegate {
         var stream: LocalTerminalStream
+        var scheme: ColorScheme?
         init(stream: LocalTerminalStream) { self.stream = stream }
 
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {

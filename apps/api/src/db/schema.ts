@@ -1146,6 +1146,71 @@ export const pushSubscriptions = pgTable(
   ],
 );
 
+// ── APNs (iOS push) ──────────────────────────────────────────────────────────
+// Mirrors push_subscriptions: one row per device token, 5 consecutive
+// failures (or a 410/Unregistered) drops the row. See docs/ios-push.md.
+
+export const apnsEnvironmentEnum = pgEnum("apns_environment", ["sandbox", "production"]);
+
+export const apnsDevices = pgTable(
+  "apns_devices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    // Hex device token from UIApplication; globally unique — a token that
+    // re-registers under another user moves to them.
+    token: text("token").notNull().unique("apns_devices_token_key"),
+    platform: text("platform").$type<"ios">().notNull().default("ios"),
+    environment: apnsEnvironmentEnum("environment").notNull().default("sandbox"),
+    bundleId: text("bundle_id").notNull(),
+    appVersion: text("app_version"),
+    deviceName: text("device_name"),
+    failureCount: integer("failure_count").notNull().default(0),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("apns_devices_user_id_idx").on(table.userId)],
+);
+
+// ActivityKit update tokens (one per running Live Activity per device). `kind`
+// is the activity type; only "watch" exists today (one aggregate activity per
+// user, docs/design/ios-glanceable-surfaces.md §2a), so subject_id is null.
+export const liveActivityTokens = pgTable(
+  "live_activity_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"watch">().notNull().default("watch"),
+    subjectId: text("subject_id"),
+    token: text("token").notNull().unique("live_activity_tokens_token_key"),
+    environment: apnsEnvironmentEnum("environment").notNull().default("sandbox"),
+    failureCount: integer("failure_count").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("live_activity_tokens_user_kind_idx").on(table.userId, table.kind)],
+);
+
+// ActivityKit push-to-start tokens (one per device per activity type).
+export const liveActivityStartTokens = pgTable(
+  "live_activity_start_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"watch">().notNull().default("watch"),
+    token: text("token").notNull().unique("live_activity_start_tokens_token_key"),
+    environment: apnsEnvironmentEnum("environment").notNull().default("sandbox"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("live_activity_start_tokens_user_kind_idx").on(table.userId, table.kind)],
+);
+
 // ── Notification Preferences ─────────────────────────────────────────────────
 
 export const notificationPreferences = pgTable(
@@ -1560,6 +1625,8 @@ export const localTerminals = pgTable(
       .default([]),
     costUsd: text("cost_usd"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+    // "Later": while in the future the terminal is out of the needs-you queue.
+    snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),

@@ -9,11 +9,27 @@ import { isAuthDisabled } from "./oauth/index.js";
 export type LocalHostRow = typeof localHosts.$inferSelect;
 
 /** Content-free nudge so the cockpit / issues page refresh host online state. */
-async function notifyHostChanged(host: { id: string; userId: string | null }): Promise<void> {
+async function notifyHostChanged(host: {
+  id: string;
+  userId: string | null;
+  state: "online" | "offline";
+  name: string;
+}): Promise<void> {
   await publishLocalChanged({ terminalId: null, hostId: host.id, userId: host.userId }).catch(
     (err) => logger.warn({ err, hostId: host.id }, "local: failed to publish host change"),
   );
+  // iOS: Watch phase + one-shot "laptop unreachable" alert (no-op unless APNs is configured).
+  import("./glance-service.js")
+    .then(({ onLocalHostChanged }) => onLocalHostChanged(host))
+    .catch((err) => logger.warn({ err, hostId: host.id }, "local: glance host hook failed"));
 }
+
+const HOST_CHANGE_COLUMNS = {
+  id: localHosts.id,
+  userId: localHosts.userId,
+  state: localHosts.state,
+  name: localHosts.name,
+};
 
 /** Ownership scope: rows with null userId belong to the auth-disabled dev user. */
 function ownedBy(userId: string | null | undefined) {
@@ -111,7 +127,7 @@ export async function markHostOnline(
       ...(updates.daemonVersion ? { daemonVersion: updates.daemonVersion } : {}),
     })
     .where(eq(localHosts.id, id))
-    .returning({ id: localHosts.id, userId: localHosts.userId });
+    .returning(HOST_CHANGE_COLUMNS);
   if (row) await notifyHostChanged(row);
 }
 
@@ -120,7 +136,7 @@ export async function markHostOffline(id: string): Promise<void> {
     .update(localHosts)
     .set({ state: "offline", updatedAt: new Date() })
     .where(eq(localHosts.id, id))
-    .returning({ id: localHosts.id, userId: localHosts.userId });
+    .returning(HOST_CHANGE_COLUMNS);
   if (row) await notifyHostChanged(row);
 }
 
@@ -139,7 +155,7 @@ export async function sweepStaleHosts(): Promise<string[]> {
     .update(localHosts)
     .set({ state: "offline", updatedAt: new Date() })
     .where(and(eq(localHosts.state, "online"), lt(localHosts.lastSeenAt, cutoff)))
-    .returning({ id: localHosts.id, userId: localHosts.userId });
+    .returning(HOST_CHANGE_COLUMNS);
   if (stale.length > 0) {
     logger.info({ hostIds: stale.map((h) => h.id) }, "local: marked stale hosts offline");
     for (const row of stale) await notifyHostChanged(row);

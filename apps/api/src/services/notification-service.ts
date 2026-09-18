@@ -42,7 +42,12 @@ export type NotificationEventType =
   | "task.needs_attention"
   | "task.stalled"
   | "task.review_requested"
-  | "task.commented";
+  | "task.commented"
+  // Optio Local + Persistent Agents (iOS APNs alerts; see glance-service.ts)
+  | "local.needs_you"
+  | "local.host_offline"
+  | "agent.turn_completed"
+  | "agent.failed";
 
 export const DEFAULT_PREFERENCES: Record<NotificationEventType, { push: boolean }> = {
   "task.pr_opened": { push: true },
@@ -52,6 +57,10 @@ export const DEFAULT_PREFERENCES: Record<NotificationEventType, { push: boolean 
   "task.stalled": { push: false },
   "task.review_requested": { push: false },
   "task.commented": { push: false },
+  "local.needs_you": { push: true },
+  "local.host_offline": { push: true },
+  "agent.turn_completed": { push: true },
+  "agent.failed": { push: true },
 };
 
 /** Map task states to notification event types. */
@@ -86,6 +95,10 @@ function buildPayload(
     "task.stalled": "Task stalled",
     "task.review_requested": "Review requested",
     "task.commented": "New comment",
+    "local.needs_you": "Terminal needs you",
+    "local.host_offline": "Laptop unreachable",
+    "agent.turn_completed": "Agent replied",
+    "agent.failed": "Agent stopped",
   };
 
   return {

@@ -3,6 +3,8 @@ import SwiftUI
 /// Chat-first detail for one persistent agent. Chips: Chat · Turns · Triggers · Config.
 struct AgentDetailView: View {
     let agentId: String
+    /// Deep link `?compose=1` (Live Activity "Reply…"): land on Chat with the composer ready.
+    var focusComposer = false
     @Environment(APIClient.self) private var api
     @Environment(\.dismiss) private var dismiss
     @State private var model: AgentDetailModel?
@@ -50,7 +52,7 @@ struct AgentDetailView: View {
             }
             Divider()
             switch section {
-            case .chat: AgentChatSection(model: model)
+            case .chat: AgentChatSection(model: model, focusComposer: focusComposer)
             case .turns: AgentTurnsSection(model: model)
             case .triggers: AgentTriggersSection(model: model, showNew: $showNewTrigger)
             case .config: AgentConfigSection(model: model, showEdit: $showEdit)
@@ -150,6 +152,7 @@ struct AgentDetailView: View {
 /// turn, in one scroll. Composer pinned at the bottom.
 struct AgentChatSection: View {
     @Bindable var model: AgentDetailModel
+    var focusComposer = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -194,8 +197,11 @@ struct AgentChatSection: View {
             Divider()
             ChatComposer(
                 placeholder: "Message \(model.agent?.name ?? "agent")…",
-                disabled: model.agent?.state == .archived
+                disabled: model.agent?.state == .archived,
+                autofocus: focusComposer
             ) { text in
+                // Turns triggered from this phone join the Watch for an hour (brief §2c).
+                RecentAgentSends.record(model.agentId)
                 await model.send(text)
             }
         }

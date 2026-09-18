@@ -77,8 +77,13 @@ public struct WatchItem: Codable, Hashable, Sendable, Identifiable {
     public var state: String
     /// Deep link, e.g. `optio://local/<id>?compose=1`.
     public var link: String
+    /// Pull request URL for followed tasks in `pr_opened` (drives the **Open PR** button). Optional, additive.
+    public var prUrl: String?
+    /// Server-side "Later" (`local_terminals.snoozedUntil`) or the App Group fallback; snoozed
+    /// items sort after unsnoozed ones while the window is open. Optional, additive.
+    public var snoozedUntil: Date?
 
-    public init(kind: Kind, id: String, title: String, mono: String, reason: String? = nil, preview: String? = nil, since: Date, state: String, link: String) {
+    public init(kind: Kind, id: String, title: String, mono: String, reason: String? = nil, preview: String? = nil, since: Date, state: String, link: String, prUrl: String? = nil, snoozedUntil: Date? = nil) {
         self.kind = kind
         self.id = id
         self.title = title
@@ -88,5 +93,13 @@ public struct WatchItem: Codable, Hashable, Sendable, Identifiable {
         self.since = since
         self.state = state
         self.link = link
+        self.prUrl = prUrl
+        self.snoozedUntil = snoozedUntil
+    }
+
+    /// True while a "Later" window is open.
+    public func isSnoozed(at now: Date = .now) -> Bool {
+        guard let snoozedUntil else { return false }
+        return snoozedUntil > now
     }
 }

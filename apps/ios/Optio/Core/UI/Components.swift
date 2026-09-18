@@ -165,3 +165,16 @@ struct Loadable<Value, Content: View>: View {
         do { value = try await load(); error = nil } catch { self.error = error }
     }
 }
+
+/// Stat tiles that always fit the screen width: wraps into rows instead of scrolling
+/// off the edge. Use for the counts strip at the top of list screens.
+struct StatGrid<Content: View>: View {
+    var minimum: CGFloat = 86
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: minimum), spacing: 8)], spacing: 8) {
+            content
+        }
+    }
+}

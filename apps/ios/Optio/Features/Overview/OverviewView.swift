@@ -224,13 +224,13 @@ struct OverviewStatsStrip: View {
     let stages: [OverviewStage]
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 0) {
-                ForEach(stages) { stage in
-                    let active = stage.value > 0
-                    VStack(spacing: 6) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 86), spacing: 0)], spacing: 0) {
+            ForEach(stages) { stage in
+                let active = stage.value > 0
+                VStack(spacing: 6) {
                         Text("\(stage.value)")
-                            .font(.system(.title, design: .monospaced).weight(.bold))
+                            .font(.system(.title2, design: .monospaced).weight(.bold))
+                            .contentTransition(.numericText())
                             .foregroundStyle(active ? stage.color : Color.secondary.opacity(0.3))
                         HStack(spacing: 4) {
                             Image(systemName: stage.icon)
@@ -238,20 +238,22 @@ struct OverviewStatsStrip: View {
                         }
                         .font(.caption2.weight(.semibold))
                         .textCase(.uppercase)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .foregroundStyle(active ? stage.color : .secondary)
                     }
-                    .frame(minWidth: 84)
-                    .padding(.vertical, 14)
-                    .padding(.horizontal, 8)
-                    .overlay(alignment: .top) {
-                        if active {
-                            Rectangle().fill(stage.color).frame(height: 2)
-                        }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .padding(.horizontal, 4)
+                .overlay(alignment: .top) {
+                    if active {
+                        Rectangle().fill(stage.color).frame(height: 2)
                     }
                 }
             }
         }
         .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

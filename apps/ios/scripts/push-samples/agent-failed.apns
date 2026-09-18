@@ -1,0 +1,12 @@
+{
+  "Simulator Target Bundle": "dev.optio.ios",
+  "aps": {
+    "alert": { "title": "Vesper stopped", "body": "3 turns failed in a row: pod OOM-killed" },
+    "sound": "default",
+    "category": "AGENT_FAILED",
+    "thread-id": "agent-0001"
+  },
+  "url": "optio://agents/agent-0001",
+  "kind": "agent",
+  "id": "agent-0001"
+}

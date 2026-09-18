@@ -74,6 +74,11 @@ export interface LocalTerminal {
   links: WorkLink[];
   costUsd: string | null;
   lastActivityAt: string | null;
+  /**
+   * "Later": while set and in the future the terminal is not in the needs-you
+   * queue (Watch, widgets, push). Cleared by DELETE /snooze or by expiry.
+   */
+  snoozedUntil?: string | null;
   createdAt: string;
   updatedAt: string;
   startedAt: string | null;

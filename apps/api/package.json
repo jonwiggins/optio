@@ -45,6 +45,7 @@
     "@optio/container-runtime": "workspace:*",
     "@optio/shared": "workspace:*",
     "@optio/ticket-providers": "workspace:*",
+    "apns2": "^12.2.0",
     "bullmq": "^5.52.2",
     "cron-parser": "^5.5.0",
     "dotenv": "^16.5.0",

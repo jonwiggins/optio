@@ -119,23 +119,27 @@ struct SessionTerminalView: View {
 /// UIViewRepresentable around SwiftTerm's `TerminalView`.
 struct TerminalHostView: UIViewRepresentable {
     let controller: SessionTerminalController
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
 
     func makeUIView(context: Context) -> TerminalView {
         let view = TerminalView(frame: .zero)
         view.terminalDelegate = context.coordinator
-        view.nativeBackgroundColor = .black
-        view.nativeForegroundColor = UIColor(white: 0.92, alpha: 1)
-        view.caretColor = UIColor(red: 0x6D / 255, green: 0x28 / 255, blue: 0xD9 / 255, alpha: 1)
         view.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        view.backgroundColor = .black
+        TerminalTheme.apply(to: view, scheme: colorScheme)
+        context.coordinator.scheme = colorScheme
         controller.terminal = view
         DispatchQueue.main.async { _ = view.becomeFirstResponder() }
         return view
     }
 
-    func updateUIView(_ uiView: TerminalView, context: Context) {}
+    func updateUIView(_ uiView: TerminalView, context: Context) {
+        if context.coordinator.scheme != colorScheme {
+            context.coordinator.scheme = colorScheme
+            TerminalTheme.apply(to: uiView, scheme: colorScheme)
+        }
+    }
 
     static func dismantleUIView(_ uiView: TerminalView, coordinator: Coordinator) {
         uiView.terminalDelegate = nil
@@ -143,6 +147,7 @@ struct TerminalHostView: UIViewRepresentable {
 
     final class Coordinator: NSObject, TerminalViewDelegate {
         let controller: SessionTerminalController
+        var scheme: ColorScheme?
         init(controller: SessionTerminalController) { self.controller = controller }
 
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {

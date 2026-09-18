@@ -85,6 +85,10 @@ spec:
             - secretRef:
                 name: {{ .Values.github.app.existingSecret }}
             {{- end }}
+            {{- if .Values.notifications.apns.existingSecret }}
+            - secretRef:
+                name: {{ .Values.notifications.apns.existingSecret }}
+            {{- end }}
           env:
             - name: API_PORT
               value: {{ .Values.api.port | quote }}

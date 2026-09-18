@@ -25,7 +25,9 @@ struct MainTabView: View {
                 .tag(AppRouter.Tab.more)
         }
         .environment(router)
+        .modifier(LiveActivityHost())
         .onOpenURL { url in router.handle(url: url) }
+        .onReceive(NotificationCenter.default.publisher(for: .optioOpenURL)) { note in if let url = note.object as? URL { router.handle(url: url) } }
         .onAppear(perform: applyDevSection)
     }
 

@@ -1,0 +1,12 @@
+{
+  "Simulator Target Bundle": "dev.optio.ios",
+  "aps": {
+    "alert": { "title": "Vesper", "body": "Shipped the healthz PR — #582 is open and CI is green." },
+    "sound": "default",
+    "category": "AGENT_REPLY",
+    "thread-id": "agent-0001"
+  },
+  "url": "optio://agents/agent-0001?compose=1",
+  "kind": "agent",
+  "id": "agent-0001"
+}

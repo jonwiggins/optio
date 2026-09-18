@@ -386,6 +386,54 @@ export async function localRoutes(rawApp: FastifyInstance) {
   );
 
   app.post(
+    "/api/local/terminals/:id/snooze",
+    {
+      ...member,
+      schema: {
+        operationId: "snoozeLocalTerminal",
+        summary: 'Snooze a terminal ("Later"): drop it from the needs-you queue for a while',
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        body: z
+          .object({ minutes: z.number().int().min(1).max(1440).optional() })
+          .nullish()
+          .describe("Snooze length in minutes (1–1440, default 15)"),
+        response: { 200: TerminalResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      const updated = await terminalService.snoozeTerminal(terminal, req.body?.minutes ?? 15);
+      reply.send({ terminal: updated });
+    },
+  );
+
+  app.delete(
+    "/api/local/terminals/:id/snooze",
+    {
+      ...member,
+      schema: {
+        operationId: "unsnoozeLocalTerminal",
+        summary: "Clear a terminal's snooze so it re-enters the needs-you queue",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: TerminalResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      const updated = await terminalService.unsnoozeTerminal(terminal);
+      reply.send({ terminal: updated });
+    },
+  );
+
+  app.post(
     "/api/local/terminals/:id/input",
     {
       ...member,

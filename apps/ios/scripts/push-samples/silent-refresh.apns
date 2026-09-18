@@ -1,0 +1,4 @@
+{
+  "Simulator Target Bundle": "dev.optio.ios",
+  "aps": { "content-available": 1 }
+}

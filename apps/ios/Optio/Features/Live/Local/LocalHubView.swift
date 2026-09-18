@@ -210,8 +210,7 @@ struct LocalHubView: View {
     private func statsBar(_ model: LocalHubModel) -> some View {
         @Bindable var model = model
         let s = model.stats
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+        return StatGrid(minimum: 100) {
                 statTile("Needs you", s.needsYou, .yellow, "exclamationmark.triangle", selected: model.filter == .needsYou) {
                     model.filter = model.filter == .needsYou ? .all : .needsYou
                 }
@@ -224,9 +223,7 @@ struct LocalHubView: View {
                 }
                 statTile(model.hosts.count == 1 ? "Host online" : "of \(model.hosts.count) hosts online",
                          s.hostsOnline, s.hostsOnline > 0 ? .green : .red, "server.rack", selected: false, action: nil)
-            }
         }
-        .scrollClipDisabled()
     }
 
     private func statTile(_ title: String, _ value: Int, _ color: Color, _ icon: String, selected: Bool, action: (() -> Void)?) -> some View {
