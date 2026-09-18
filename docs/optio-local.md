@@ -122,10 +122,12 @@ Daemon → server:
   viewer's attach; `{type:"attach-error", terminalId, attachId, message}` when unknown
 - `{type:"attention", terminalId, state, reason}`
 - `{type:"preview", terminalId, preview, lastActivityAt}` — throttled (≥2 s)
-- `{type:"links", terminalId, links:[{url, kind:"pr"|"issue", provider, label}]}` — PR /
+- `{type:"links", terminalId, links:[{url, kind:"pr"|"issue"|"ref", provider, label}]}` — PR /
   ticket links found anywhere in the scrollback ring (`extractWorkLinks` in
   `@optio/shared`: GitHub PRs/issues, GitLab MRs/issues, Linear, Jira; hard-wrapped URLs
-  are healed). Rides the preview throttle, sent only when the set changes; the server
+  are healed; URLs inside OSC 8 hyperlinks are harvested before ANSI stripping since
+  Claude Code / gh print `#581` with the URL only in the escape; bare `#N` mentions
+  resolve to the dir's GitHub/GitLab remote as kind `ref`). Rides the preview throttle, sent only when the set changes; the server
   sanitizes (https only, known kinds/providers, ≤50) and stores it in
   `local_terminals.links`
 - `{type:"exit", terminalId, exitCode}`

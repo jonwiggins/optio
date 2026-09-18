@@ -16,6 +16,12 @@ describe("stripAnsi", () => {
     );
   });
 
+  it("pads CHA (absolute column) moves so Claude Code's word layout keeps its spaces", () => {
+    // Real Claude Code output: words separated by ESC[nG, lines by \r ESC[2C ESC[1B.
+    const raw = "Note\x1b[8Gthat\x1b[13G#539\x1b[18Gis\r\x1b[2C\x1b[1Bbranch,\x1b[11Gso";
+    expect(stripAnsi(raw)).toBe("Note   that #539 is\r  \n  branch, so");
+  });
+
   it("removes stray control characters but keeps newlines and tabs", () => {
     expect(stripAnsi("a\x07b\x00c\nd\te")).toBe("abc\nd\te");
   });

@@ -5,7 +5,9 @@ import { dirname, join, sep } from "node:path";
 import {
   LOCAL_DEFAULT_COLS,
   LOCAL_DEFAULT_ROWS,
+  extractHyperlinkUrls,
   extractWorkLinks,
+  normalizeRepoUrl,
   workLinksKey,
   type LocalDaemonMessage,
   type LocalDaemonTerminalSync,
@@ -39,6 +41,8 @@ interface ManagedTerminal {
   lastPreviewAt: number;
   /** workLinksKey() of the last `links` frame sent, to emit only on change. */
   lastLinksKey: string;
+  /** Normalized git remote of the dir (for bare `#N` refs), when known. */
+  repoUrl?: string;
   killTimer: NodeJS.Timeout | null;
 }
 
@@ -47,6 +51,8 @@ export interface TerminalManagerOptions {
   attention: AttentionTracker;
   /** Current allowlist (absolute paths); re-read on every spawn. */
   getAllowedDirs: () => string[];
+  /** Git remote for the allowlisted dir containing `dir`, when detected. */
+  getRepoUrlForDir?: (dir: string) => string | undefined;
   hookSettingsPath: string;
   getHookServerPort: () => number;
   onStatus?: (line: string) => void;
@@ -113,6 +119,7 @@ export class TerminalManager {
         previewTimer: null,
         lastPreviewAt: 0,
         lastLinksKey: "",
+        repoUrl: normalizeOptional(this.opts.getRepoUrlForDir?.(dir)),
         killTimer: null,
       };
       this.terminals.set(msg.terminalId, term);
@@ -295,7 +302,11 @@ export class TerminalManager {
    * session). Rides the preview throttle; sent only when the set changes.
    */
   private emitLinks(term: ManagedTerminal): void {
-    const links = extractWorkLinks(stripAnsi(term.ring.toBuffer().toString("utf-8")));
+    const raw = term.ring.toBuffer().toString("utf-8");
+    // OSC 8 hyperlink URLs live only inside the escape sequence (the visible
+    // text is just "#581"); harvest them before the stripper discards them.
+    const text = `${extractHyperlinkUrls(raw).join("\n")}\n${stripAnsi(raw)}`;
+    const links = extractWorkLinks(text, { repoUrl: term.repoUrl });
     const key = workLinksKey(links);
     if (key === term.lastLinksKey) return;
     term.lastLinksKey = key;
@@ -329,6 +340,15 @@ export class TerminalManager {
       throw new Error(`Directory is not in the allowlist: ${dir} — run \`optio local add\``);
     }
     return resolved;
+  }
+}
+
+function normalizeOptional(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return normalizeRepoUrl(url);
+  } catch {
+    return undefined;
   }
 }
 

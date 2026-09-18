@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractWorkLinks, MAX_WORK_LINKS } from "./extract-work-links.js";
+import { extractHyperlinkUrls, extractWorkLinks, MAX_WORK_LINKS } from "./extract-work-links.js";
 
 describe("extractWorkLinks", () => {
   it("finds GitHub PRs and issues with owner/repo#N labels", () => {
@@ -69,5 +69,32 @@ describe("extractWorkLinks", () => {
       "\n",
     );
     expect(extractWorkLinks(text)).toHaveLength(MAX_WORK_LINKS);
+  });
+
+  it("harvests URLs from OSC 8 hyperlinks (BEL and ST terminated)", () => {
+    const raw =
+      "PR:\x1b[7G\x1b]8;id=pl872k;https://github.com/jonwiggins/optio/pull/581\x07#581\x1b]8;;\x07 and " +
+      "\x1b]8;;https://linear.app/acme/issue/ENG-7\x1b\\ENG-7\x1b]8;;\x1b\\";
+    expect(extractHyperlinkUrls(raw)).toEqual([
+      "https://github.com/jonwiggins/optio/pull/581",
+      "https://linear.app/acme/issue/ENG-7",
+    ]);
+  });
+
+  it("resolves bare #N mentions against the dir's GitHub remote, skipping numbers a URL already covers", () => {
+    const links = extractWorkLinks(
+      "Note that #539 is opened from a fork. See https://github.com/jonwiggins/optio/pull/581 (#581). Also #12, and issue#7 is not a ref, nor #fff.",
+      { repoUrl: "https://github.com/jonwiggins/optio" },
+    );
+    expect(links.map((l) => [l.kind, l.label, l.url])).toEqual([
+      ["pr", "jonwiggins/optio#581", "https://github.com/jonwiggins/optio/pull/581"],
+      ["ref", "#539", "https://github.com/jonwiggins/optio/issues/539"],
+      ["ref", "#12", "https://github.com/jonwiggins/optio/issues/12"],
+    ]);
+  });
+
+  it("ignores bare #N when the remote is not GitHub/GitLab or absent", () => {
+    expect(extractWorkLinks("fix #12", { repoUrl: "https://bitbucket.org/a/b" })).toEqual([]);
+    expect(extractWorkLinks("fix #12")).toEqual([]);
   });
 });

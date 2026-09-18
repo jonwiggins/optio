@@ -1551,7 +1551,7 @@ export const localTerminals = pgTable(
       .$type<
         Array<{
           url: string;
-          kind: "pr" | "issue";
+          kind: "pr" | "issue" | "ref";
           provider: "github" | "gitlab" | "linear" | "jira";
           label: string;
         }>

@@ -64,7 +64,7 @@ export const LocalTerminalSchema = z
       .array(
         z.object({
           url: z.string(),
-          kind: z.enum(["pr", "issue"]),
+          kind: z.enum(["pr", "issue", "ref"]),
           provider: z.enum(["github", "gitlab", "linear", "jira"]),
           label: z.string(),
         }),

@@ -16,18 +16,42 @@ const ANSI_RE =
 
 const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 
-// CSI cursor-forward (ESC [ n C): TUIs (Claude Code, Ink apps) position words
-// with these instead of literal spaces — dropping them would glue words
-// together in the preview, so render them as spaces (capped per sequence).
-const CURSOR_FORWARD_RE = /\x1b\[(\d*)C/g;
+// TUIs (Claude Code / Ink) lay text out with cursor moves instead of literal
+// spaces and newlines: CHA (ESC [ n G, absolute column) between words, CUF
+// (ESC [ n C, forward) for indents, CUD (ESC [ n B, down) for new lines.
+// Dropping them glues words together, so flatten them first: CUF → spaces,
+// CHA → pad to that column, CUD → newline. Column tracking resets on \r / \n.
+const CURSOR_MOVE_RE = /\x1b\[(\d*)([GCB])|(\r|\n)|([^\x1b\r\n]+)/g;
+
+export function flattenCursorMoves(text: string): string {
+  let col = 0;
+  return text.replace(CURSOR_MOVE_RE, (m, n: string, cmd: string, nl: string, run: string) => {
+    if (nl !== undefined) {
+      col = 0;
+      return nl;
+    }
+    if (run !== undefined) {
+      col += run.length;
+      return run;
+    }
+    const count = Math.min(Math.max(parseInt(n || "1", 10) || 1, 1), 400);
+    if (cmd === "C") {
+      col += count;
+      return " ".repeat(count);
+    }
+    if (cmd === "G") {
+      const target = count - 1;
+      const pad = Math.max(0, target - col);
+      col = Math.max(col, target);
+      return " ".repeat(pad);
+    }
+    // CUD keeps the column: the next word lands under the current one.
+    return "\n".repeat(Math.min(count, 5)) + " ".repeat(col);
+  });
+}
 
 export function stripAnsi(text: string): string {
-  return text
-    .replace(CURSOR_FORWARD_RE, (_m, n: string) =>
-      " ".repeat(Math.min(Math.max(parseInt(n || "1", 10) || 1, 1), 200)),
-    )
-    .replace(ANSI_RE, "")
-    .replace(CONTROL_RE, "");
+  return flattenCursorMoves(text).replace(ANSI_RE, "").replace(CONTROL_RE, "");
 }
 
 /**

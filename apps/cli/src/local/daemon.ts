@@ -96,6 +96,12 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
     send,
     attention,
     getAllowedDirs: () => loadLocalConfig().dirs.map((d) => d.path),
+    getRepoUrlForDir: (dir) => {
+      const entry = loadLocalConfig()
+        .dirs.filter((d) => dir === d.path || dir.startsWith(`${d.path}/`))
+        .sort((a, b) => b.path.length - a.path.length)[0];
+      return entry?.repoUrl;
+    },
     hookSettingsPath,
     getHookServerPort: () => hookServer.port,
     onStatus: status,

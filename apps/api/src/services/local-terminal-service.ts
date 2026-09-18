@@ -381,7 +381,7 @@ export async function handlePreview(
   // daemon-side but would still swamp the events channel across terminals).
 }
 
-const LINK_KINDS = new Set(["pr", "issue"]);
+const LINK_KINDS = new Set(["pr", "issue", "ref"]);
 const LINK_PROVIDERS = new Set(["github", "gitlab", "linear", "jira"]);
 
 /** Validate a daemon-supplied link list: https URLs only, known kinds/providers, capped. */

@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { GitPullRequest, CircleDot, ExternalLink } from "lucide-react";
+import { GitPullRequest, CircleDot, ExternalLink, Hash } from "lucide-react";
 import type { WorkLink } from "@optio/shared";
 
 /**
@@ -36,13 +36,13 @@ export function workLinksSearchText(links: WorkLink[]): string {
 }
 
 export function WorkLinkBadge({ link, size = "sm" }: { link: WorkLink; size?: "xs" | "sm" }) {
-  const Icon = link.kind === "pr" ? GitPullRequest : CircleDot;
+  const Icon = link.kind === "pr" ? GitPullRequest : link.kind === "ref" ? Hash : CircleDot;
   return (
     <a
       href={link.url}
       target="_blank"
       rel="noopener noreferrer"
-      title={`${link.kind === "pr" ? "Pull request" : "Ticket"} · ${link.url}`}
+      title={`${link.kind === "pr" ? "Pull request" : link.kind === "ref" ? "Reference" : "Ticket"} · ${link.url}`}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       className={cn(
