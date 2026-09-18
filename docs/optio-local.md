@@ -167,7 +167,21 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   terminal grouped as Needs you (oldest wait first) / Working / Idle / Finished, searchable
   by title, dir, host, or PR / ticket, with badges per row. Keyboard, captured before
   xterm: `Ctrl/⌘+Shift+↑/↓` previous / next session, `Ctrl/⌘+Shift+↵` jump to the oldest
-  "needs you" session.
+  "needs you" session, `Ctrl/⌘+Shift+B` hide / show the rail (also the ⊟ button in the
+  rail header and the ⊞ button in the terminal header; persisted in `localStorage`,
+  wide screens only — `components/local/rail-store.ts`). Inside the terminal,
+  `Shift+↵` sends `ESC CR` (what `claude /terminal-setup` installs) so Claude Code inserts
+  a newline instead of submitting; `components/local/conn-state.ts`.
+- **Attention from another tab** (`components/local/attention-watcher.tsx`, mounted on
+  every `/local*` route): the favicon gets a status dot — yellow = a session needs you,
+  green = agents working, grey = quiet — and the tab title a `(N)` needs-you count. The
+  same yellow / green / grey scheme is used for the attention dots in the rail, rows, and
+  cards. The **bell** in a session's header arms a browser Notification for that session
+  (per browser, `localStorage`, `components/local/bell-store.ts`): it fires the moment the
+  session flips to needs-you unless you're already looking at it, and clicking it focuses
+  the tab on that session. Uses the page-scoped Notification API, so the tab must be open
+  (server Web Push for Local sessions is not wired up yet). All Local pages share one
+  terminals/hosts feed (`components/local/local-feed.ts`).
 - **Split view** — up to three terminals at once: `/local/<primary>?split=<id2>,<id3>`
   (`&layout=rows` stacks them; phones always stack). Open a pane from the rail row's ⧉
   button or Shift+click; each extra pane has a one-line strip with kill / make-primary /

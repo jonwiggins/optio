@@ -252,14 +252,15 @@ html.light .glass-sidebar {
   background: rgba(246, 244, 240, 0.92);
 }
 
-/* Active nav — clean accent bar */
-.nav-active-glow {
-  box-shadow: inset 3px 0 0 0 var(--color-primary);
-  background: rgba(109, 40, 217, 0.06);
+/* Selected nav row / rail session: a solid pill with a hairline ring. No
+   left accent bar — inside a rounded box it clips into a "{" shape. */
+.nav-active {
+  background: rgba(109, 40, 217, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.35);
 }
-html.light .nav-active-glow {
-  box-shadow: inset 3px 0 0 0 var(--color-primary);
-  background: rgba(124, 58, 237, 0.06);
+html.light .nav-active {
+  background: rgba(124, 58, 237, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.3);
 }
 
 /* ──────────────────────────────────────
@@ -559,4 +560,15 @@ html.light .recharts-custom-tooltip {
     opacity: 1;
     animation: none;
   }
+}
+
+/* ──────────────────────────────────────
+   Optio Local terminal
+   ────────────────────────────────────── */
+
+/* Breathing room inside the terminal. Must live on `.xterm` (not its
+   parent) — that is the only padding @xterm/addon-fit subtracts when it
+   computes rows/cols. */
+.local-xterm .xterm {
+  padding: 8px 12px 4px;
 }

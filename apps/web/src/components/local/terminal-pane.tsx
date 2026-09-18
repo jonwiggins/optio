@@ -8,9 +8,12 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
+  Bell,
+  BellRing,
   Columns2,
   Loader2,
   Maximize2,
+  PanelLeftOpen,
   Play,
   Rows2,
   Server,
@@ -23,6 +26,10 @@ import { LocalStateBadge, SpawnSourceBadge, attentionLabel, dirTail } from "./te
 import { ErrorBoundary } from "@/components/error-boundary";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import type { SplitLayout } from "./split-state";
+import { useRailStore } from "./rail-store";
+import { useBellStore } from "./bell-store";
+import { ensureNotificationPermission } from "./attention-watcher";
+import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
 
 const LocalTerminal = dynamic(() => import("./local-terminal").then((m) => m.LocalTerminal), {
   ssr: false,
@@ -67,6 +74,29 @@ export function TerminalPane({
   const [terminal, setTerminal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [conn, setConn] = useState<ConnState>("connecting");
+  const railCollapsed = useRailStore((s) => s.collapsed);
+  const bellArmed = useBellStore((s) => s.armed.includes(terminalId));
+
+  const toggleBell = async () => {
+    if (bellArmed) {
+      useBellStore.getState().setArmed(terminalId, false);
+      return;
+    }
+    const perm = await ensureNotificationPermission();
+    if (perm === "unsupported") {
+      toast.error("This browser can't show notifications");
+      return;
+    }
+    if (perm === "denied") {
+      toast.error(
+        "Notifications are blocked for this site — allow them in the browser's site settings",
+      );
+      return;
+    }
+    useBellStore.getState().setArmed(terminalId, true);
+    toast.success("You'll be pinged when this session needs you");
+  };
 
   const fetchTerminal = useCallback(async () => {
     try {
@@ -218,13 +248,16 @@ export function TerminalPane({
     </div>
   );
 
+  const iconButton =
+    "inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors";
+
   const actions = (
     <>
       {canStart && (
         <button
           onClick={handleStart}
           disabled={busy}
-          className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
         >
           {busy ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -240,7 +273,7 @@ export function TerminalPane({
           disabled={busy}
           title="Kill the process"
           aria-label="Kill"
-          className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-error hover:border-error/30 disabled:opacity-50 transition-colors"
+          className={cn(iconButton, "hover:text-error")}
         >
           <XCircle className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Kill</span>
@@ -252,7 +285,7 @@ export function TerminalPane({
           disabled={busy}
           title="Delete this terminal record"
           aria-label="Delete"
-          className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-error hover:border-error/30 disabled:opacity-50 transition-colors"
+          className={cn(iconButton, "hover:text-error")}
         >
           <Trash2 className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Delete</span>
@@ -261,74 +294,132 @@ export function TerminalPane({
     </>
   );
 
+  const bellButton = !isDead && (
+    <button
+      type="button"
+      onClick={toggleBell}
+      aria-pressed={bellArmed}
+      title={
+        bellArmed
+          ? "Pinging you when this session needs you — click to stop"
+          : "Ping me when this session needs me"
+      }
+      aria-label={
+        bellArmed ? "Stop pinging for this session" : "Ping me when this session needs me"
+      }
+      className={cn(
+        iconButton,
+        "px-1.5",
+        bellArmed && "text-warning hover:text-warning bg-warning/10 hover:bg-warning/15",
+      )}
+    >
+      {bellArmed ? <BellRing className="w-3.5 h-3.5" /> : <Bell className="w-3.5 h-3.5" />}
+    </button>
+  );
+
+  const connDot = (
+    <span
+      className="hidden sm:inline-flex items-center"
+      title={`Stream ${CONN_LABEL[conn]}`}
+      aria-label={`Stream ${CONN_LABEL[conn]}`}
+    >
+      <span
+        className={cn(
+          "w-1.5 h-1.5 rounded-full",
+          CONN_DOT[conn],
+          conn !== "connected" && conn !== "disconnected" && "animate-pulse",
+        )}
+      />
+    </span>
+  );
+
+  // Header meta: what's worth a glance without stealing terminal rows.
+  const meta = (
+    <div className="hidden sm:flex items-center gap-2 min-w-0 text-[11px] text-text-muted">
+      {host && hosts.length > 1 && (
+        <span className="flex items-center gap-1 shrink-0">
+          <Server className="w-3 h-3" />
+          {host.name}
+        </span>
+      )}
+      <span className="font-mono truncate" title={terminal.dir}>
+        {dirTail(terminal.dir)}
+      </span>
+      {terminal.command && (
+        <span
+          className="font-mono truncate max-w-[16rem] hidden lg:inline text-text-muted/70"
+          title={terminal.command}
+        >
+          {terminal.command}
+        </span>
+      )}
+      {terminal.state === "exited" && terminal.exitCode != null && (
+        <span className={cn("shrink-0", terminal.exitCode !== 0 && "text-error")}>
+          exit {terminal.exitCode}
+        </span>
+      )}
+      {isDead && terminal.errorMessage && (
+        <span className={cn("truncate", terminal.state === "error" && "text-error")}>
+          {terminal.errorMessage}
+        </span>
+      )}
+    </div>
+  );
+
   const header =
     variant === "primary" ? (
-      <div className="shrink-0 px-3 sm:px-6 py-2.5 sm:py-3.5 border-b border-border bg-bg">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <Link
-              href="/local"
-              className="text-text-muted hover:text-text transition-colors p-1 -m-1"
-              aria-label="Back to Local"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Link>
-            <Terminal className="w-5 h-5 text-primary shrink-0 hidden sm:block" />
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
-                <h1 className="text-base sm:text-lg font-semibold tracking-tight truncate max-w-[60vw] sm:max-w-none">
-                  {terminal.title}
-                </h1>
-                <LocalStateBadge terminal={terminal} />
-                {terminal.attentionState === "needs_you" && (
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium tracking-wide uppercase text-warning bg-warning/10 border border-warning/20">
-                    <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
-                    {attentionLabel(terminal.attentionReason)}
-                  </span>
-                )}
-                <span className="hidden sm:inline-flex">
-                  <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
-                </span>
-              </div>
-              <div className="flex items-center gap-3 mt-0.5 text-xs text-text-muted flex-wrap">
-                {host && hosts.length > 1 && (
-                  <span className="flex items-center gap-1">
-                    <Server className="w-3 h-3" />
-                    {host.name}
-                  </span>
-                )}
-                <span className="font-mono" title={terminal.dir}>
-                  {dirTail(terminal.dir)}
-                </span>
-                {terminal.command && (
-                  <span
-                    className="font-mono truncate max-w-md hidden sm:inline"
-                    title={terminal.command}
-                  >
-                    {terminal.command}
-                  </span>
-                )}
-                {terminal.state === "exited" && terminal.exitCode != null && (
-                  <span className={cn(terminal.exitCode !== 0 && "text-error")}>
-                    exit {terminal.exitCode}
-                  </span>
-                )}
-                {isDead && terminal.errorMessage && (
-                  <span className={cn(terminal.state === "error" ? "text-error" : "")}>
-                    {terminal.errorMessage}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="hidden md:inline-flex">
-              <WorkLinkBadges links={links} max={4} />
+      // One slim toolbar: the terminal gets the rows, the header gets a glance.
+      <div className="shrink-0 flex items-center gap-2 sm:gap-3 h-11 px-2 sm:px-3 border-b border-border bg-bg">
+        {railCollapsed && (
+          <button
+            type="button"
+            onClick={() => useRailStore.getState().setCollapsed(false)}
+            title="Show sessions (⌃⇧B)"
+            aria-label="Show sessions"
+            className="hidden md:inline-flex p-1.5 rounded-md text-text-muted hover:text-text hover:bg-bg-hover/70 transition-colors"
+          >
+            <PanelLeftOpen className="w-4 h-4" />
+          </button>
+        )}
+        {/* The rail already has "← Local" on wide screens; the arrow only
+            shows when there's no rail (phones, or collapsed). */}
+        <Link
+          href="/local"
+          className={cn(
+            "p-1.5 rounded-md text-text-muted hover:text-text hover:bg-bg-hover/70 transition-colors",
+            !railCollapsed && "md:hidden",
+          )}
+          aria-label="Back to Local"
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </Link>
+        <Terminal className="w-4 h-4 text-text-muted shrink-0 hidden sm:block" />
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <h1 className="text-sm font-semibold tracking-tight truncate max-w-[40vw] sm:max-w-[24rem]">
+            {terminal.title}
+          </h1>
+          <LocalStateBadge terminal={terminal} />
+          {terminal.attentionState === "needs_you" && (
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium text-warning bg-warning/10 border border-warning/20 truncate">
+              <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse shrink-0" />
+              <span className="truncate">{attentionLabel(terminal.attentionReason)}</span>
             </span>
-            {layoutToggle}
-            {actions}
-          </div>
+          )}
+          <span className="hidden sm:inline-block w-px h-4 bg-border shrink-0" aria-hidden />
+          {meta}
+        </div>
+
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          <span className="hidden md:inline-flex">
+            <WorkLinkBadges links={links} size="xs" max={4} />
+          </span>
+          <span className="hidden lg:inline-flex">
+            <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
+          </span>
+          {connDot}
+          {bellButton}
+          {layoutToggle}
+          {actions}
         </div>
       </div>
     ) : (
@@ -339,7 +430,7 @@ export function TerminalPane({
             terminal.attentionState === "needs_you"
               ? "bg-warning animate-pulse"
               : terminal.attentionState === "working"
-                ? "bg-primary"
+                ? "bg-success"
                 : "bg-text-muted/40",
           )}
         />
@@ -357,6 +448,7 @@ export function TerminalPane({
           className="ml-auto flex items-center gap-1 shrink-0"
           onClick={(e) => e.stopPropagation()}
         >
+          {bellButton}
           {canKill && (
             <button
               onClick={handleKill}
@@ -419,6 +511,7 @@ export function TerminalPane({
               terminalId={terminalId}
               onStatus={handleStatus}
               onExit={handleExit}
+              onConn={setConn}
             />
           </ErrorBoundary>
         </div>

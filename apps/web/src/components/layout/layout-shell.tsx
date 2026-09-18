@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./sidebar";
 import { TerminalRail } from "@/components/local/terminal-rail";
+import { useRailStore } from "@/components/local/rail-store";
+import { LocalAttentionWatcher } from "@/components/local/attention-watcher";
 import { GlobalWebSocketProvider } from "./ws-provider";
 import { SetupCheck } from "./setup-check";
 import { ThemeProvider } from "./theme-provider";
@@ -20,7 +22,28 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   // Inside a local terminal the sidebar becomes the session rail, so jumping
   // between many terminals never leaves the terminal view.
   const inLocalTerminal = /^\/local\/[^/]+$/.test(pathname);
+  const inLocal = pathname === "/local" || pathname.startsWith("/local/");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Wide screens only — collapsing hands the rail's width to the terminal.
+  // The phone drawer ignores it. Persisted; hydrated after mount so SSR and
+  // the first client render agree.
+  const railCollapsed = useRailStore((s) => s.collapsed);
+  useEffect(() => {
+    useRailStore.getState().hydrate();
+  }, []);
+  useEffect(() => {
+    if (!inLocalTerminal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey) return;
+      if (e.key.toLowerCase() !== "b") return;
+      e.preventDefault();
+      e.stopPropagation();
+      useRailStore.getState().toggle();
+    };
+    // Capture phase so it wins over xterm's textarea, like the rail's shortcuts.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [inLocalTerminal]);
 
   // iOS Safari: the on-screen keyboard shrinks the *visual* viewport but not
   // 100dvh, so a focused terminal's input line ends up under the keyboard.
@@ -44,6 +67,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       {!isLogin && <SetupCheck />}
       {!isLogin && <GlobalWebSocketProvider />}
       {!isLogin && !isSetup && <PushSwRegistrar />}
+      {inLocal && <LocalAttentionWatcher />}
       {isSetup || isLogin ? (
         <main className="min-h-screen">{children}</main>
       ) : (
@@ -63,6 +87,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                   "w-60 shrink-0 border-r border-border/50 glass-sidebar flex flex-col",
                   "fixed inset-y-0 left-0 z-30 transition-transform duration-200 md:static md:translate-x-0",
                   sidebarOpen ? "translate-x-0" : "-translate-x-full",
+                  railCollapsed && "md:hidden",
                 )}
               >
                 <Suspense fallback={null}>
