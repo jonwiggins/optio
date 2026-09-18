@@ -126,9 +126,16 @@ struct TerminalHostView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
 
     func makeUIView(context: Context) -> TerminalView {
-        let view = TerminalView(frame: .zero)
+        let view = ScrollableTerminalView(frame: .zero)
         view.terminalDelegate = context.coordinator
         view.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        // Finger drags scroll and select; they never become mouse events.
+        view.allowMouseReporting = false
+        view.autocorrectionType = .default
+        view.spellCheckingType = .default
+        view.smartQuotesType = .no
+        view.smartDashesType = .no
+        view.smartInsertDeleteType = .no
         TerminalTheme.apply(to: view, scheme: colorScheme)
         context.coordinator.scheme = colorScheme
         controller.terminal = view

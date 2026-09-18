@@ -75,11 +75,11 @@ struct LocalTerminalScreen: View {
                     Text(terminal.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                     HStack(spacing: 5) {
                         if let tone = LocalPresentation.rowTone(terminal) { StateDot(tone: tone, size: 6) }
-                        Text(terminal.attentionState == .needsYou && !LocalPresentation.isDead(terminal)
-                             ? LocalPresentation.attentionLabel(terminal.attentionReason)
+                        Text(LocalPresentation.waitsOnYou(terminal)
+                             ? LocalPresentation.waitingLabel(terminal)
                              : LocalPresentation.stateLabel(terminal))
                             .font(.caption2)
-                            .foregroundStyle(terminal.attentionState == .needsYou && !LocalPresentation.isDead(terminal) ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(.secondary))
+                            .foregroundStyle(LocalPresentation.waitsOnYou(terminal) ? Tone.accent.textStyle : AnyShapeStyle(.secondary))
                             .lineLimit(1)
                     }
                 }
@@ -151,7 +151,7 @@ struct LocalTerminalScreen: View {
     }
 
     private func header(_ t: LocalTerminal) -> some View {
-        let needsYou = t.attentionState == .needsYou && !LocalPresentation.isDead(t)
+        let needsYou = LocalPresentation.waitsOnYou(t)
         var facts: [Text?] = []
         if hosts.count > 1, let host = hosts.first(where: { $0.id == t.hostId }) { facts.append(Text(host.name)) }
         if t.state == .exited, let code = t.exitCode { facts.append(Text("exit \(Int(code))")) }
@@ -169,7 +169,7 @@ struct LocalTerminalScreen: View {
             tone: LocalPresentation.stateTone(t) == .accent ? .working : LocalPresentation.stateTone(t),
             line: detailLine,
             secondary: secondary,
-            needsYou: needsYou ? LocalPresentation.attentionLabel(t.attentionReason).capitalizedFirst : nil
+            needsYou: needsYou ? LocalPresentation.waitingLabel(t).capitalizedFirst : nil
         ) {
             WorkLinkBadges(links: links, max: 2)
         }
@@ -372,12 +372,17 @@ struct SwiftTermView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> TerminalView {
         let font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 360, height: 400), font: font)
+        let view = ScrollableTerminalView(frame: CGRect(x: 0, y: 0, width: 360, height: 400), font: font)
         view.terminalDelegate = context.coordinator
         TerminalTheme.apply(to: view, scheme: colorScheme)
         context.coordinator.scheme = colorScheme
-        view.autocorrectionType = .no
+        // Prompts to an agent are prose: keep iOS autocorrect, spell check and the
+        // predictive bar. Smart quotes/dashes stay off so shell input survives.
+        view.autocorrectionType = .default
+        view.spellCheckingType = .default
         view.smartQuotesType = .no
+        view.smartDashesType = .no
+        view.smartInsertDeleteType = .no
         // Our own extra-keys bar lives in SwiftUI; drop SwiftTerm's accessory.
         view.inputAccessoryView = nil
         view.allowMouseReporting = false
