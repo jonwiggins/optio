@@ -15,7 +15,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: 3H2754M9U5
 packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
