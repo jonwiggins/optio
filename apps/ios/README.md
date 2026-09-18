@@ -64,3 +64,15 @@ Optio/
   Features/       one folder per screen group, each with its own APIClient extension
 OptioTests/       XCTest unit tests
 ```
+
+## Cross-tab navigation
+
+`AppRouter` (App/AppRouter.swift) lives in the environment. Call
+`router.open(.local)` from anywhere to switch tabs; the target hub reads and
+clears `pendingSection` to select its sub-section.
+
+## CI
+
+`scripts/check-swift-types.sh` (job "Swift Types In Sync") fails the build when
+`SharedTypes.swift` is stale relative to `packages/shared/src/types`. The app
+itself is not built in CI yet (needs a macOS runner).

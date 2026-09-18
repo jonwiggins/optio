@@ -33,6 +33,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo typecheck
 
+  swift-types:
+    name: Swift Types In Sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/check-swift-types.sh
+
   test:
     name: Test
     runs-on: ubuntu-latest

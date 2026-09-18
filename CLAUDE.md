@@ -164,6 +164,10 @@ These are well-documented in code; read the relevant service files for details:
 - **Cost tracking**: `GET /api/analytics/costs` with daily/repo/type breakdowns, UI at `/costs`
 - **Error classification**: `packages/shared/src/error-classifier.ts` pattern-matches errors into categories with remedies
 
+## iOS app
+
+Native SwiftUI client at `apps/ios/` (see `apps/ios/README.md`). Models are generated from `packages/shared/src/types` by `pnpm gen:swift` into `apps/ios/Optio/Generated/SharedTypes.swift`; CI fails if that file is stale. Auth is a PAT over HTTP bearer + WebSocket subprotocol, same as the CLI. Build with `cd apps/ios && make build` (needs Xcode + `brew install xcodegen`).
+
 ## Tech Stack
 
 | Layer      | Technology                       | Notes                                                                          |
