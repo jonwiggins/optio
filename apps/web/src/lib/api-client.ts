@@ -1805,6 +1805,25 @@ export const api = {
 
   getLocalTerminal: (id: string) => request<{ terminal: any }>(`/api/local/terminals/${id}`),
 
+  listRecentRuns: (limit = 12) =>
+    request<{
+      runs: Array<{
+        id: string;
+        kind: "task" | "job-run" | "agent-turn";
+        title: string;
+        state: string;
+        parentId: string | null;
+        href: string;
+        where: string | null;
+        detail: string | null;
+        agentType: string | null;
+        costUsd: string | null;
+        at: string;
+        startedAt: string | null;
+        endedAt: string | null;
+      }>;
+    }>(`/api/runs/recent?limit=${limit}`),
+
   updateLocalTerminal: (id: string, data: { title: string }) =>
     request<{ terminal: any }>(`/api/local/terminals/${id}`, {
       method: "PATCH",

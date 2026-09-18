@@ -7,8 +7,6 @@ import {
   PipelineStatsBar,
   UsagePanel,
   ClusterSummary,
-  ActiveSessions,
-  RecentTasks,
   RecentActivity,
   PodsList,
   WelcomeHero,
@@ -17,8 +15,14 @@ import {
   NeedsYou,
   collectNeedsYou,
   QuietSections,
+  RecentRuns,
+  LivePanel,
+  collectLive,
+  LimitsPanel,
+  collectProviderLimits,
   type QuietSection,
 } from "@/components/dashboard";
+import Link from "next/link";
 import {
   computeLocalStats,
   isLocalQuiet,
@@ -57,6 +61,8 @@ export default function OverviewPage() {
     localTerminals = [],
     localHosts = [],
     attentionTasks = [],
+    recentRuns = [],
+    persistentAgents = [],
     refresh,
     refreshUsage,
   } = useDashboardData();
@@ -96,6 +102,11 @@ export default function OverviewPage() {
 
   // ── What needs me? ─────────────────────────────────────────────────
   const needsYou = collectNeedsYou(localTerminals, attentionTasks);
+  // ── What's live right now, across concepts? ────────────────────────
+  const live = collectLive(localTerminals, localHosts, activeSessions, persistentAgents);
+  const liveLocalCount = live.filter((i) => i.kind === "local").length;
+  // ── How far along am I on each agent subscription? ─────────────────
+  const providerLimits = collectProviderLimits(usage, localHosts);
 
   // ── What's running? Each concept is either a full strip or one quiet line.
   const localStats =
@@ -178,6 +189,12 @@ export default function OverviewPage() {
                 {activeSessionCount} {activeSessionCount === 1 ? "session" : "sessions"}
               </span>
             )}
+            {liveLocalCount > 0 && (
+              <Link href="/local" className="text-success hover:underline">
+                {" \u00B7 "}
+                {liveLocalCount} local {liveLocalCount === 1 ? "terminal" : "terminals"}
+              </Link>
+            )}
             {(taskStats?.needsAttention ?? 0) > 0 && (
               <span className="text-warning">
                 {" \u00B7 "}
@@ -199,13 +216,17 @@ export default function OverviewPage() {
 
       <NeedsYou items={needsYou} />
 
+      <LimitsPanel providers={providerLimits} onRefresh={refreshUsage} />
+
+      <LivePanel items={live} />
+
       <div className="space-y-2">
         <SectionLabel icon={GitPullRequest}>Repo Tasks</SectionLabel>
         <PipelineStatsBar taskStats={taskStats} />
       </div>
 
       {localStats && !localQuiet && (
-        <LocalSessions stats={localStats} terminals={recentLocal} hosts={localHosts} />
+        <LocalSessions stats={localStats} terminals={[]} hosts={localHosts} />
       )}
 
       {(standaloneStats?.total ?? 0) > 0 && standaloneLive && (
@@ -233,7 +254,10 @@ export default function OverviewPage() {
 
       <AgentComparison />
 
-      <UsagePanel usage={usage} onRefresh={refreshUsage} />
+      {/* UsagePanel now only carries the token-refresh banners; meters live in LimitsPanel. */}
+      {(usage?.authFailures?.claude ||
+        usage?.authFailures?.github ||
+        usage?.hasRecentAuthFailure) && <UsagePanel usage={usage} onRefresh={refreshUsage} />}
 
       <ClusterSummary
         cluster={cluster}
@@ -242,10 +266,8 @@ export default function OverviewPage() {
         metricsHistory={metricsHistory}
       />
 
-      <ActiveSessions sessions={activeSessions} activeCount={activeSessionCount} />
-
       <div className="[column-width:28rem] [column-gap:2rem] [&>*]:break-inside-avoid [&>*]:mb-8 [&>*:last-child]:mb-0">
-        <RecentTasks tasks={recentTasks} />
+        <RecentRuns runs={recentRuns.length > 0 ? recentRuns : []} />
         <PodsList
           pods={pods}
           events={events}

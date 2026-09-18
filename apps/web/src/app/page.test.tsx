@@ -31,6 +31,19 @@ vi.mock("@/components/dashboard", () => ({
   AgentComparison: () => null,
   FailureInsights: () => null,
   LocalSessions: () => <div data-testid="local-sessions" />,
+  RecentRuns: () => <div data-testid="recent-tasks" />,
+  LivePanel: ({ items }: { items: unknown[] }) =>
+    items.length > 0 ? <div data-testid="live-panel" /> : null,
+  collectLive: (locals: any[], _h: any[], sessions: any[], agents: any[]) => [
+    ...locals
+      .filter((t) => ["pending", "launching", "running"].includes(t.state))
+      .map((t) => ({ kind: "local", key: t.id })),
+    ...sessions.map((s) => ({ kind: "session", key: s.id })),
+    ...agents.filter((a) => a.state === "running").map((a) => ({ kind: "agent", key: a.id })),
+  ],
+  LimitsPanel: ({ providers }: { providers: unknown[] }) =>
+    providers.length > 0 ? <div data-testid="limits" /> : null,
+  collectProviderLimits: (usage: any) => (usage?.available ? [{ key: "claude" }] : []),
   NeedsYou: ({ items }: { items: unknown[] }) =>
     items.length > 0 ? <div data-testid="needs-you" /> : null,
   collectNeedsYou: (locals: any[], tasks: any[]) => [

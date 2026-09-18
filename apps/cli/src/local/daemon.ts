@@ -5,6 +5,7 @@ import type {
   LocalAttentionState,
   LocalDaemonMessage,
   LocalHost,
+  LocalHostAgentLimits,
   LocalHostDir,
   LocalServerMessage,
 } from "@optio/shared";
@@ -17,6 +18,7 @@ import { AttentionTracker } from "./attention.js";
 import { detectRepoUrl } from "./git-remote.js";
 import { startHookServer, writeClaudeHookSettings, writeClaudeShim } from "./hook-server.js";
 import { UsageTracker } from "./usage-tracker.js";
+import { readAgentLimits } from "./codex-limits.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
 
 /**
@@ -29,6 +31,7 @@ import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager
  */
 
 const PING_INTERVAL_MS = 30_000;
+const AGENT_LIMITS_INTERVAL_MS = 3 * 60_000;
 const BACKOFF_INITIAL_MS = 1000;
 const BACKOFF_MAX_MS = 30_000;
 const SHUTDOWN_FLUSH_MS = 200;
@@ -50,6 +53,20 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
 
   let ws: WebSocket | null = null;
   let pingTimer: NodeJS.Timeout | null = null;
+  let limitsTimer: NodeJS.Timeout | null = null;
+  let lastLimitsKey = "";
+  const sendAgentLimits = () => {
+    let limits: LocalHostAgentLimits;
+    try {
+      limits = readAgentLimits();
+    } catch {
+      return;
+    }
+    const key = JSON.stringify(limits);
+    if (key === lastLimitsKey) return; // unchanged since last report
+    lastLimitsKey = key;
+    send({ type: "agent-limits", limits });
+  };
   let shuttingDown = false;
   let backoff = BACKOFF_INITIAL_MS;
 
@@ -211,6 +228,11 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
           }
         }
         pingTimer = setInterval(() => send({ type: "ping" }), PING_INTERVAL_MS);
+        // Agent subscription limits read off this machine (Codex session
+        // logs). Once on connect, then every few minutes; the reader only
+        // touches file tails so this is cheap.
+        sendAgentLimits();
+        limitsTimer = setInterval(sendAgentLimits, AGENT_LIMITS_INTERVAL_MS);
       });
 
       socket.on("message", (raw) => {
@@ -232,6 +254,10 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
       });
 
       socket.on("close", (code, reason) => {
+        if (limitsTimer) {
+          clearInterval(limitsTimer);
+          limitsTimer = null;
+        }
         if (pingTimer) {
           clearInterval(pingTimer);
           pingTimer = null;

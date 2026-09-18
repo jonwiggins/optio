@@ -610,6 +610,13 @@
       "when": 1789800000000,
       "tag": "1789800000_local_terminal_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1789900000000,
+      "tag": "1789900000_local_host_agent_limits",
+      "breakpoints": true
     }
   ]
 }

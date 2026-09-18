@@ -43,6 +43,7 @@ export function LocalSessions({
         </div>
       </div>
       <PipelineStatsBar variant="local" localStats={stats} />
+      {/* Cards are opt-in: the overview shows live terminals in its Live panel instead. */}
       {terminals.length > 0 && (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
           {terminals.map((t) => {

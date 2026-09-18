@@ -12,6 +12,30 @@ export interface LocalHostDir {
   repoUrl?: string;
 }
 
+/** One rate-limit window as an agent CLI reports it. */
+export interface AgentLimitWindow {
+  /** 0–100. */
+  usedPercent: number;
+  windowMinutes: number | null;
+  /** ISO time the window resets, when known. */
+  resetsAt: string | null;
+}
+
+/**
+ * Agent subscription limits the daemon reads off the machine (no tokens
+ * leave the laptop). Codex: the newest `rate_limits` snapshot in its
+ * session logs, so it's only as fresh as the last Codex turn — hence
+ * `observedAt`.
+ */
+export interface LocalHostAgentLimits {
+  codex?: {
+    primary: AgentLimitWindow | null;
+    secondary: AgentLimitWindow | null;
+    planType: string | null;
+    observedAt: string;
+  };
+}
+
 export interface LocalHost {
   id: string;
   /** Null only in auth-disabled dev installs. */
@@ -23,6 +47,8 @@ export interface LocalHost {
   arch: string | null;
   daemonVersion: string | null;
   dirs: LocalHostDir[];
+  /** Agent subscription limits read from the machine; null until reported. */
+  agentLimits: LocalHostAgentLimits | null;
   state: LocalHostState;
   lastSeenAt: string | null;
   createdAt: string;
@@ -136,6 +162,7 @@ export type LocalDaemonMessage =
   | { type: "preview"; terminalId: string; preview: string; lastActivityAt: string }
   | { type: "links"; terminalId: string; links: WorkLink[] }
   | { type: "usage"; terminalId: string; usage: LocalTerminalUsage }
+  | { type: "agent-limits"; limits: LocalHostAgentLimits }
   | { type: "exit"; terminalId: string; exitCode: number | null }
   | { type: "ping" };
 

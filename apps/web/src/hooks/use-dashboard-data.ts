@@ -30,6 +30,8 @@ export function useDashboardData() {
   const [localTerminals, setLocalTerminals] = useState<any[]>([]);
   const [localHosts, setLocalHosts] = useState<any[]>([]);
   const [attentionTasks, setAttentionTasks] = useState<any[]>([]);
+  const [recentRuns, setRecentRuns] = useState<any[]>([]);
+  const [persistentAgents, setPersistentAgents] = useState<any[]>([]);
 
   const refresh = useCallback(() => {
     Promise.all([
@@ -46,6 +48,8 @@ export function useDashboardData() {
       api.listLocalTerminals().catch(() => ({ terminals: [] })),
       api.listLocalHosts().catch(() => ({ hosts: [] })),
       api.listTasks({ state: "needs_attention", limit: 6 }).catch(() => ({ tasks: [] })),
+      api.listRecentRuns(12).catch(() => ({ runs: [] })),
+      api.listPersistentAgents().catch(() => ({ agents: [] })),
     ])
       .then(
         ([
@@ -60,7 +64,11 @@ export function useDashboardData() {
           localTerminalsRes,
           localHostsRes,
           attentionRes,
+          recentRunsRes,
+          agentsRes,
         ]) => {
+          setRecentRuns(recentRunsRes.runs ?? []);
+          setPersistentAgents(agentsRes.agents ?? []);
           setActiveSessions(sessionsRes.sessions);
           setActiveSessionCount(sessionsRes.activeCount);
           setTaskStats(statsRes.stats);
@@ -171,6 +179,8 @@ export function useDashboardData() {
     localTerminals,
     localHosts,
     attentionTasks,
+    recentRuns,
+    persistentAgents,
     refresh,
     refreshUsage,
   };
