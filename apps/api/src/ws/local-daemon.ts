@@ -123,6 +123,11 @@ export async function localDaemonWs(app: FastifyInstance) {
         case "attach-error":
           relay.deliverAttachError(msg.attachId, msg.message);
           return;
+        case "size":
+          if (Number.isInteger(msg.cols) && Number.isInteger(msg.rows)) {
+            relay.forwardSize(hostId, msg.terminalId, msg.cols, msg.rows);
+          }
+          return;
         case "started":
           await terminalService.handleStarted(hostId, msg.terminalId);
           return;

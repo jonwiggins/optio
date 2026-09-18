@@ -25,7 +25,12 @@ const h = vi.hoisted(() => {
       this.written.push(data);
     }
 
-    resize() {}
+    cols = 80;
+    rows = 24;
+    resize(cols: number, rows: number) {
+      this.cols = cols;
+      this.rows = rows;
+    }
 
     kill(signal?: string) {
       this.killed.push(signal ?? "SIGTERM");
@@ -88,9 +93,23 @@ describe("output subscription", () => {
   it("does not send output frames before an attach", () => {
     const { sent, manager } = setup();
     spawnTerminal(manager, "t-1");
-    expect(sent.at(-1)).toEqual({ type: "started", terminalId: "t-1" });
+    expect(sent).toContainEqual({ type: "started", terminalId: "t-1" });
     h.spawned[0].dataCb?.("hello");
     expect(outputFrames(sent)).toEqual([]);
+  });
+
+  it("announces the PTY grid on spawn, after a resize, and to each new attach", () => {
+    const { sent, manager } = setup();
+    spawnTerminal(manager, "t-1");
+    const sizes = () => sent.filter((m) => m.type === "size");
+    expect(sizes()).toEqual([{ type: "size", terminalId: "t-1", cols: 80, rows: 24 }]);
+
+    manager.resize("t-1", 45, 30);
+    expect(sizes().at(-1)).toEqual({ type: "size", terminalId: "t-1", cols: 45, rows: 30 });
+
+    manager.attach("t-1", "attach-1");
+    const idx = sent.findIndex((m) => m.type === "scrollback");
+    expect(sent[idx + 1]).toEqual({ type: "size", terminalId: "t-1", cols: 45, rows: 30 });
   });
 
   it("attach sends scrollback then streams output", () => {

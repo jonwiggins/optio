@@ -3,6 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { Maximize2 } from "lucide-react";
+import {
+  BASE_FONT_PX,
+  onGridAnnounced,
+  passiveFontPx,
+  sameGrid,
+  type Grid,
+  type SizingMode,
+} from "./sizing";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
@@ -48,6 +57,10 @@ export function LocalTerminal({
   onConnRef.current = onConn;
 
   const [connState, setConnStateRaw] = useState<ConnState>("connecting");
+  // Set while another viewer owns the PTY grid and we're rendering it
+  // scaled to fit. Drives the "sized for another device" strip.
+  const [foreignGrid, setForeignGrid] = useState<Grid | null>(null);
+  const claimRef = useRef<() => void>(() => {});
   const setConnState = (next: ConnState) => {
     setConnStateRaw(next);
     onConnRef.current?.(next);
@@ -58,7 +71,7 @@ export function LocalTerminal({
 
     const term = new XTerm({
       cursorBlink: true,
-      fontSize: 13,
+      fontSize: BASE_FONT_PX,
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       theme: {
         background: "#09090b",
@@ -101,7 +114,85 @@ export function LocalTerminal({
     };
     let disposed = false;
     const container = containerRef.current;
-    const resizeObserver = new ResizeObserver(() => safeFit());
+
+    // ── Who owns the PTY grid ────────────────────────────────────────────
+    // One PTY, one grid. Attaching never resizes it; interacting (pointer
+    // down in the terminal, typing) claims it for this screen. A viewer that
+    // hasn't claimed it renders the announced grid shrunk to fit its width,
+    // so a phone glancing at a laptop session sees the laptop's layout
+    // small rather than forcing the laptop down to phone width.
+    let mode: SizingMode = { kind: "unclaimed" };
+    let lastSent: Grid | null = null;
+
+    const sendResize = (grid: Grid) => {
+      lastSent = grid;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "resize", cols: grid.cols, rows: grid.rows }));
+      }
+    };
+
+    /** Renderer-measured cell width per px of font size (≈0.6 for monospace). */
+    const cellWidthPerFontPx = () => {
+      try {
+        const w = (term as any)._core?._renderService?.dimensions?.css?.cell?.width;
+        if (w > 0) return w / term.options.fontSize!;
+      } catch {
+        // renderer not ready
+      }
+      return 0.6;
+    };
+
+    /** What a fit to our own screen would produce at the base font. */
+    const naturalGrid = (): Grid => {
+      const prev = term.options.fontSize;
+      if (prev !== BASE_FONT_PX) term.options.fontSize = BASE_FONT_PX;
+      const d = fitAddon.proposeDimensions();
+      if (prev !== BASE_FONT_PX) term.options.fontSize = prev;
+      return d ? { cols: d.cols, rows: d.rows } : { cols: term.cols, rows: term.rows };
+    };
+
+    const renderPassive = (grid: Grid) => {
+      if (disposed) return;
+      // 24px = the .local-xterm horizontal padding (12 + 12).
+      const width = container.clientWidth - 24;
+      term.options.fontSize = passiveFontPx(width, grid.cols, cellWidthPerFontPx());
+      try {
+        term.resize(grid.cols, grid.rows);
+      } catch {
+        // renderer not ready yet
+      }
+    };
+
+    const applyMode = () => {
+      if (mode.kind === "passive") {
+        renderPassive(mode.grid);
+        setForeignGrid(mode.grid);
+      } else {
+        if (term.options.fontSize !== BASE_FONT_PX) term.options.fontSize = BASE_FONT_PX;
+        safeFit();
+        setForeignGrid(null);
+      }
+    };
+
+    /** This screen is being used: size the PTY to it. */
+    const claim = () => {
+      if (disposed) return;
+      mode = { kind: "owner" };
+      applyMode();
+      // fit() only fires onResize when the grid actually changes, so make
+      // sure the daemon hears our size even when it's already what we have.
+      const grid = { cols: term.cols, rows: term.rows };
+      if (!sameGrid(grid, lastSent)) sendResize(grid);
+    };
+    claimRef.current = claim;
+
+    const onGrid = (grid: Grid) => {
+      mode = onGridAnnounced(mode, grid, naturalGrid(), lastSent);
+      applyMode();
+    };
+
+    const resizeObserver = new ResizeObserver(() => applyMode());
+    container.addEventListener("pointerdown", claim);
     // Open on the next frame, after React's commit has been laid out: WebKit
     // otherwise syncs xterm's viewport against a renderer that doesn't exist
     // yet ("this._renderer.value.dimensions" TypeError) on a 0-height box.
@@ -148,7 +239,9 @@ export function LocalTerminal({
 
       socket.onopen = () => {
         setConnState("connected");
-        socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+        // Attaching never resizes the PTY. If we already own it (reconnect
+        // after a blip), re-assert our grid; otherwise wait for `size`.
+        if (mode.kind === "owner") sendResize({ cols: term.cols, rows: term.rows });
       };
 
       socket.onmessage = (msg) => {
@@ -163,6 +256,10 @@ export function LocalTerminal({
             if (isTerminalStateDead(parsed.state)) terminalDead = true;
             else liveOnThisConnection = true;
             onStatusRef.current?.(parsed.state, parsed.attentionState);
+          } else if (parsed.type === "size") {
+            if (Number.isInteger(parsed.cols) && Number.isInteger(parsed.rows)) {
+              onGrid({ cols: parsed.cols, rows: parsed.rows });
+            }
           } else if (parsed.type === "exit") {
             terminalDead = true;
             term.writeln(
@@ -219,15 +316,17 @@ export function LocalTerminal({
     connect();
 
     term.onData((data) => {
+      // Typing here means this is the screen in use — take the grid first so
+      // the program lays out for it before it processes the keystroke.
+      if (mode.kind !== "owner") claim();
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "input", data }));
       }
     });
 
     term.onResize(({ cols, rows }) => {
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "resize", cols, rows }));
-      }
+      // Passive renders call term.resize() too; only the owner tells the PTY.
+      if (mode.kind === "owner") sendResize({ cols, rows });
     });
 
     return () => {
@@ -235,6 +334,7 @@ export function LocalTerminal({
       cancelAnimationFrame(openFrame);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       resizeObserver.disconnect();
+      container.removeEventListener("pointerdown", claim);
       ws?.close();
       term.dispose();
     };
@@ -255,11 +355,34 @@ export function LocalTerminal({
           {CONN_LABEL[connState]}
         </div>
       )}
+      {foreignGrid && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1 text-[11px] bg-primary/10 text-text-muted">
+          <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+          <span className="min-w-0 truncate">
+            Sized for another device
+            <span className="font-mono ml-1 opacity-70">
+              {foreignGrid.cols}×{foreignGrid.rows}
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => claimRef.current()}
+            className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-text hover:bg-bg-hover/70 transition-colors"
+            title="Resize the session to this screen"
+          >
+            <Maximize2 className="w-3 h-3" />
+            Use this screen
+          </button>
+        </div>
+      )}
       {/* No padding here: FitAddon sizes the grid from this box's border-box
           height and only subtracts padding set on `.xterm` itself (see
           .local-xterm in globals.css). Padding on the parent oversizes the
           grid and the bottom rows flicker/clip. */}
-      <div ref={containerRef} className="local-xterm flex-1 min-h-0" />
+      <div
+        ref={containerRef}
+        className={cn("local-xterm flex-1 min-h-0", foreignGrid && "overflow-auto")}
+      />
       <div className="shrink-0 h-[env(safe-area-inset-bottom)]" aria-hidden />
     </div>
   );

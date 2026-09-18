@@ -6,6 +6,7 @@ import {
   deliverScrollback,
   detachBrowser,
   forwardOutput,
+  forwardSize,
   isHostOnline,
   notifyBrowsers,
   registerDaemon,
@@ -159,5 +160,22 @@ describe("local-relay", () => {
     const expected = JSON.stringify({ type: "exit", exitCode: 0 });
     expect(enrolled.sent.map(String)).toContain(expected);
     expect(pending.sent.map(String)).toContain(expected);
+  });
+
+  it("forwardSize reaches every viewer, only from the host that owns the terminal", () => {
+    const daemon = new FakeSocket();
+    registerDaemon("h1", null, daemon);
+    const viewer = new FakeSocket();
+    attachBrowser("h1", "t1", viewer);
+    const attachId = (daemon.jsonSent().find((m) => m.type === "attach") as any).attachId;
+    deliverScrollback(attachId, Buffer.from("hi"));
+
+    // Viewers get stream messages, not daemon-bound ones.
+    const sizes = () => viewer.jsonSent().filter((m) => (m as { type: string }).type === "size");
+    forwardSize("h2", "t1", 45, 30); // another host can't speak for t1
+    expect(sizes()).toHaveLength(0);
+
+    forwardSize("h1", "t1", 45, 30);
+    expect(sizes()).toEqual([{ type: "size", cols: 45, rows: 30 }]);
   });
 });

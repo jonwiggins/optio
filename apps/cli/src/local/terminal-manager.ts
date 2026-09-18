@@ -140,6 +140,7 @@ export class TerminalManager {
       pty.onExit(({ exitCode }) => this.handleExit(term, exitCode));
 
       this.opts.send({ type: "started", terminalId: msg.terminalId });
+      this.sendSize(term);
       this.opts.onStatus?.(`spawned terminal ${msg.terminalId} (${msg.spec.kind}) in ${dir}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -167,6 +168,19 @@ export class TerminalManager {
     } catch {
       // resizing a just-exited pty throws — ignore
     }
+    // Every viewer hears the new grid, including the one that asked: the
+    // others switch to rendering this size scaled-to-fit.
+    this.sendSize(term);
+  }
+
+  /** Tell the server (and so every viewer) the PTY's current grid. */
+  private sendSize(term: ManagedTerminal): void {
+    this.opts.send({
+      type: "size",
+      terminalId: term.terminalId,
+      cols: term.pty.cols,
+      rows: term.pty.rows,
+    });
   }
 
   kill(terminalId: string, signal?: string): void {
@@ -214,6 +228,8 @@ export class TerminalManager {
       dataB64: term.ring.toBuffer().toString("base64"),
     });
     term.subscribed = true;
+    // A new viewer must know the grid before it can render it faithfully.
+    this.sendSize(term);
   }
 
   detach(terminalId: string): void {

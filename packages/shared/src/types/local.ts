@@ -168,6 +168,8 @@ export type LocalDaemonMessage =
   | { type: "links"; terminalId: string; links: WorkLink[] }
   | { type: "usage"; terminalId: string; usage: LocalTerminalUsage }
   | { type: "agent-limits"; limits: LocalHostAgentLimits }
+  /** The PTY's current grid — sent on spawn, after every resize, and to each new attach. */
+  | { type: "size"; terminalId: string; cols: number; rows: number }
   | { type: "exit"; terminalId: string; exitCode: number | null }
   | { type: "ping" };
 
@@ -193,6 +195,11 @@ export type LocalServerMessage =
 
 export type LocalStreamServerMessage =
   | { type: "status"; state: LocalTerminalState; attentionState: LocalAttentionState }
+  /**
+   * The PTY's current grid. Viewers that did not ask for this size render it
+   * scaled to fit rather than fighting over the PTY (see local-terminal.tsx).
+   */
+  | { type: "size"; cols: number; rows: number }
   | { type: "exit"; exitCode: number | null }
   | { type: "error"; message: string };
 

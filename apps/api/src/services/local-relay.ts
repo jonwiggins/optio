@@ -188,6 +188,16 @@ export function forwardOutput(hostId: string, terminalId: string, data: Buffer):
   for (const socket of set) safeSend(socket, data);
 }
 
+/**
+ * Forward the daemon's PTY size to every viewer. Same ownership rule as
+ * output: only the host that holds the terminal's live subscription may
+ * speak for it.
+ */
+export function forwardSize(hostId: string, terminalId: string, cols: number, rows: number): void {
+  if (hostByTerminal.get(terminalId) !== hostId) return;
+  notifyBrowsers(terminalId, { type: "size", cols, rows });
+}
+
 /** Push a JSON control message to every browser viewing a terminal. */
 export function notifyBrowsers(terminalId: string, message: LocalStreamServerMessage): void {
   const payload = JSON.stringify(message);
