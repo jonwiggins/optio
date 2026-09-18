@@ -16,7 +16,12 @@ import { loadLocalConfig, saveLocalConfig, setHostIdForServer } from "../config/
 import { dim, green, red, yellow } from "../output/colors.js";
 import { AttentionTracker } from "./attention.js";
 import { detectRepoUrl } from "./git-remote.js";
-import { startHookServer, writeClaudeHookSettings, writeClaudeShim } from "./hook-server.js";
+import {
+  startHookServer,
+  writeClaudeHookSettings,
+  writeClaudeShim,
+  writeZshDotDir,
+} from "./hook-server.js";
 import { UsageTracker } from "./usage-tracker.js";
 import { readAgentLimits } from "./codex-limits.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
@@ -49,6 +54,7 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
   const hookSettingsPath = claudeHookSettingsPath();
   writeClaudeHookSettings(hookSettingsPath);
   const shimDir = writeClaudeShim(join(dirname(hookSettingsPath), "bin"));
+  const zdotDir = writeZshDotDir(join(dirname(hookSettingsPath), "zsh"));
   ensureSpawnHelperExecutable();
 
   let ws: WebSocket | null = null;
@@ -127,6 +133,7 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
     },
     hookSettingsPath,
     shimDir,
+    zdotDir,
     getHookServerPort: () => hookServer.port,
     onStatus: status,
   });

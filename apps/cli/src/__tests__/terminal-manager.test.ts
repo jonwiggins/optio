@@ -2,7 +2,11 @@ import os from "node:os";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { LocalDaemonMessage } from "@optio/shared";
 import { AttentionTracker } from "../local/attention.js";
-import { TerminalManager, scrubSpawnEnv } from "../local/terminal-manager.js";
+import {
+  TerminalManager,
+  scrubSpawnEnv,
+  type TerminalManagerOptions,
+} from "../local/terminal-manager.js";
 
 const h = vi.hoisted(() => {
   class FakePty {
@@ -27,6 +31,9 @@ const h = vi.hoisted(() => {
 
     cols = 80;
     rows = 24;
+    spawnFile = "";
+    spawnArgs: string[] = [];
+    spawnOpts: any = null;
     resize(cols: number, rows: number) {
       this.cols = cols;
       this.rows = rows;
@@ -41,14 +48,17 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("node-pty", () => ({
-  spawn: vi.fn(() => {
+  spawn: vi.fn((file: string, args: string[], opts: any) => {
     const pty = new h.FakePty();
+    pty.spawnFile = file;
+    pty.spawnArgs = args;
+    pty.spawnOpts = opts;
     h.spawned.push(pty);
     return pty;
   }),
 }));
 
-function setup() {
+function setup(extra: Partial<TerminalManagerOptions> = {}) {
   const sent: LocalDaemonMessage[] = [];
   // Mirrors the daemon's wiring: attention events go out as protocol frames.
   // Inert scheduler — no silence timers leak past the test.
@@ -67,6 +77,7 @@ function setup() {
     attention,
     getAllowedDirs: () => [os.tmpdir()],
     hookSettingsPath: "/tmp/optio-test-hooks.json",
+    ...extra,
     getHookServerPort: () => 0,
   });
   return { sent, attention, manager };
@@ -96,6 +107,22 @@ describe("output subscription", () => {
     expect(sent).toContainEqual({ type: "started", terminalId: "t-1" });
     h.spawned[0].dataCb?.("hello");
     expect(outputFrames(sent)).toEqual([]);
+  });
+
+  it("routes zsh spawns through the ZDOTDIR wrapper so the claude shim stays first", () => {
+    const prevShell = process.env.SHELL;
+    process.env.SHELL = "/bin/zsh";
+    try {
+      const { manager } = setup({ shimDir: "/opt/optio/bin", zdotDir: "/opt/optio/zsh" });
+      spawnTerminal(manager, "t-1");
+      const env = h.spawned[0].spawnOpts.env;
+      expect(env.ZDOTDIR).toBe("/opt/optio/zsh");
+      expect(env.OPTIO_USER_ZDOTDIR).toBeTruthy();
+      expect(env.OPTIO_LOCAL_SHIM_DIR).toBe("/opt/optio/bin");
+      expect(env.PATH.startsWith("/opt/optio/bin:")).toBe(true);
+    } finally {
+      process.env.SHELL = prevShell;
+    }
   });
 
   it("announces the PTY grid on spawn, after a resize, and to each new attach", () => {

@@ -7,12 +7,12 @@ import {
 } from "../local/attention.js";
 
 class FakeScheduler implements AttentionScheduler {
-  private timers = new Map<number, () => void>();
+  private timers = new Map<number, { fn: () => void; ms: number }>();
   private nextId = 1;
 
-  setTimeout(fn: () => void, _ms: number): unknown {
+  setTimeout(fn: () => void, ms: number): unknown {
     const id = this.nextId++;
-    this.timers.set(id, fn);
+    this.timers.set(id, { fn, ms });
     return id;
   }
 
@@ -24,10 +24,16 @@ class FakeScheduler implements AttentionScheduler {
     return this.timers.size;
   }
 
+  /** Fire the short (silence-scale) timers — the historical "time passes". */
   fireAll(): void {
-    const fns = [...this.timers.values()];
-    this.timers.clear();
-    for (const fn of fns) fn();
+    this.fireUpTo(60_000);
+  }
+
+  /** Fire every timer due within `ms`, including the 2 h stale decay. */
+  fireUpTo(ms: number): void {
+    const due = [...this.timers.entries()].filter(([, t]) => t.ms <= ms);
+    for (const [id] of due) this.timers.delete(id);
+    for (const [, t] of due) t.fn();
   }
 }
 
@@ -102,11 +108,25 @@ describe("attention output/silence heuristics", () => {
     expect(events).toEqual([{ terminalId: T, state: "working", reason: "output" }]);
   });
 
-  it("silence after output transitions to idle (not needs_you)", () => {
+  it("silence after output on a shell nobody typed in transitions to idle", () => {
     const { events, scheduler, tracker } = setup();
     tracker.feed(T, Buffer.from("output"));
     scheduler.fireAll();
     expect(events.at(-1)).toEqual({ terminalId: T, state: "idle", reason: "silence" });
+  });
+
+  it("silence after the human ran a command means needs_you/finished", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.feed(T, Buffer.from("$ "));
+    tracker.onInput(T); // typed a command
+    tracker.feed(T, Buffer.from("build output…"));
+    scheduler.fireAll();
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "finished" });
+    // More output while needs_you keeps it (sticky); typing again clears it.
+    tracker.feed(T, Buffer.from("more"));
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "finished" });
+    tracker.onInput(T);
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "working", reason: "input" });
   });
 
   it("silence on an AGENT terminal (no hooks yet) means needs_you/quiet", () => {
@@ -200,12 +220,12 @@ describe("needs_you stickiness", () => {
     expect(tracker.onInput(T)).toEqual([]);
   });
 
-  it("silence after onInput() downgrades working → idle again", () => {
+  it("silence after onInput() flags needs_you/finished (you ran something; it's done)", () => {
     const { events, scheduler, tracker } = setup();
-    tracker.feed(T, Buffer.from("done\x07"));
+    tracker.feed(T, Buffer.from("\x07"));
     tracker.onInput(T);
     scheduler.fireAll();
-    expect(events.at(-1)).toEqual({ terminalId: T, state: "idle", reason: "silence" });
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "finished" });
   });
 
   it("onInput() is a no-op for hook-owned terminals", () => {
@@ -220,6 +240,49 @@ describe("needs_you stickiness", () => {
     expect(tracker.hookEvent(T, "UserPromptSubmit")).toEqual([
       { terminalId: T, state: "working", reason: "prompt" },
     ]);
+  });
+});
+
+describe("stale decay", () => {
+  it("needs_you decays to idle/stale after STALE_MS with no response", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.markAgent(T);
+    tracker.feed(T, Buffer.from("prompt"));
+    scheduler.fireAll();
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "quiet" });
+    scheduler.fireUpTo(2 * 60 * 60 * 1000);
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "idle", reason: "stale" });
+  });
+
+  it("a response cancels the decay", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.feed(T, Buffer.from("\x07"));
+    expect(events.at(-1)?.state).toBe("needs_you");
+    tracker.onInput(T);
+    scheduler.fireUpTo(2 * 60 * 60 * 1000);
+    expect(events.filter((e) => e.reason === "stale")).toEqual([]);
+  });
+
+  it("applies to hook-owned terminals too, and a keystroke resets it", () => {
+    const { events, scheduler, tracker } = setup();
+    tracker.hookEvent(T, "Stop");
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "needs_you", reason: "stop" });
+    tracker.onInput(T); // Enter in a menu: no UserPromptSubmit, but you're there
+    scheduler.fireUpTo(2 * 60 * 60 * 1000);
+    expect(events.at(-1)?.reason).toBe("stop");
+
+    tracker.hookEvent(T, "UserPromptSubmit");
+    tracker.hookEvent(T, "Stop");
+    scheduler.fireUpTo(2 * 60 * 60 * 1000);
+    expect(events.at(-1)).toEqual({ terminalId: T, state: "idle", reason: "stale" });
+  });
+
+  it("remove() clears the stale timer", () => {
+    const { scheduler, tracker } = setup();
+    tracker.hookEvent(T, "Stop");
+    expect(scheduler.pending).toBe(1);
+    tracker.remove(T);
+    expect(scheduler.pending).toBe(0);
   });
 });
 

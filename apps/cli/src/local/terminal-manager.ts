@@ -1,7 +1,8 @@
 import { spawn as ptySpawn, type IPty } from "node-pty";
 import { chmodSync, realpathSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, sep } from "node:path";
+import os from "node:os";
+import { basename, dirname, join, sep } from "node:path";
 import {
   LOCAL_DEFAULT_COLS,
   LOCAL_DEFAULT_ROWS,
@@ -56,6 +57,8 @@ export interface TerminalManagerOptions {
   hookSettingsPath: string;
   /** Directory holding the `claude` shim; prepended to every spawn's PATH. */
   shimDir?: string;
+  /** ZDOTDIR wrapper (see writeZshDotDir) that keeps the shim first for zsh. */
+  zdotDir?: string;
   getHookServerPort: () => number;
   onStatus?: (line: string) => void;
 }
@@ -108,6 +111,13 @@ export class TerminalManager {
       if (this.opts.shimDir) {
         env.PATH = env.PATH ? `${this.opts.shimDir}:${env.PATH}` : this.opts.shimDir;
         env.OPTIO_LOCAL_HOOK_SETTINGS = this.opts.hookSettingsPath;
+        env.OPTIO_LOCAL_SHIM_DIR = this.opts.shimDir;
+        // zsh: route dotfiles through the wrapper so rc files that prepend
+        // their own bins (~/.local/bin, asdf shims) can't bury the shim.
+        if (this.opts.zdotDir && basename(shell) === "zsh") {
+          env.OPTIO_USER_ZDOTDIR = env.ZDOTDIR || env.HOME || os.homedir();
+          env.ZDOTDIR = this.opts.zdotDir;
+        }
       }
       const pty = ptySpawn(shell, args, {
         name: "xterm-256color",

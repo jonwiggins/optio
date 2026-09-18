@@ -45,12 +45,18 @@ Layered, best signal wins per terminal:
 2. **Terminal bell** (generic). A BEL (0x07) in PTY output that is **not** an OSC/DCS/APC
    string terminator → `needs_you` (reason `bell`). The scanner is a small cross-chunk
    state machine (ESC `]`/`P`/`_`/`^` opens a string; BEL or ESC `\` closes it).
-3. **Silence** (fallback). Output → `working`; ≥12 s of quiet after prior output → `idle`
-   for shells and commands (deliberately _not_ `needs_you` — a quiet test watcher isn't
-   asking for you). For **agent** spawns quiet means the opposite — an interactive agent
-   CLI is either streaming or waiting on the human (Claude Code's trust/login prompts fire
-   before any hook does; non-hooked agents sit at their input line) → `needs_you`
-   (reason `quiet`). Layer 1 disables this once a hook has fired.
+3. **Silence** (fallback). Output → `working`; ≥12 s of quiet after prior output means
+   the terminal is waiting on you → `needs_you`. For **agent** spawns always (reason
+   `quiet` — Claude Code's trust/login prompts fire before any hook does; non-hooked
+   agents sit at their input line). For shells and commands once you have typed in them
+   (reason `finished` — your command is done); a shell nobody has typed in that just went
+   quiet at its prompt is `idle`, not a request. Layer 1 disables this once a hook has
+   fired.
+
+`needs_you` is sticky against output and silence; it clears when you respond
+(`UserPromptSubmit` hook or any keystroke) and **decays to `idle` after 2 hours** with no
+response (reason `stale`, `STALE_MS`) — a session you walked away from stops shouting.
+The decay applies to hook-owned terminals too.
 
 Exit: `spawnedBy != "manual"` → `needs_you` (reason `exit`) so automation results land in
 the queue for review; manual shells exit to `idle`.
@@ -193,12 +199,17 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   `usage` frame; stored on `local_terminals.usage`. Works for agent spawns _and_ for a
   `claude` you start by hand in an Optio shell: the daemon prepends a `claude` shim
   (`<config>/bin/claude`, written by `writeClaudeShim`) to every spawn's PATH that adds
-  `--settings <hook file>` unless you passed your own. A login rc that _resets_ PATH
-  (rather than prepending) drops the shim, and that terminal falls back to the silence
-  heuristic.
+  `--settings <hook file>` unless you passed your own. For **zsh** the daemon also routes
+  the shell's dotfiles through a `ZDOTDIR` wrapper (`<config>/zsh/`, `writeZshDotDir`)
+  that sources your real `.zshenv`/`.zprofile`/`.zshrc`/`.zlogin` and then moves the shim
+  back to the front of PATH — otherwise an rc file that prepends `~/.local/bin` or asdf
+  shims buries the shim behind the real `claude` and that terminal silently loses hooks.
+  Bash keeps the plain prepend: an rc that _resets_ PATH drops the shim there, and the
+  terminal falls back to the silence heuristic.
 - **One status dot per header** (`StatusDot`, `statusDescriptor` in `terminal-card.tsx`):
-  lifecycle + attention folded into a single color — yellow pulse needs you, green working,
-  grey idle, amber launching/pending, red error, dim grey exited — with the description on
+  lifecycle + attention folded into a single color — purple working, yellow pulse needs
+  you, green completed (exit 0), grey idle/pending/killed/error (`sessionTone` in
+  `attention.ts`, shared by card, row, rail and favicon) — with the description on
   hover. Inside `/local/:id` the favicon shows _that_ session's dot; on `/local` it shows the
   fleet's (yellow beats green beats grey). The `(N)` title badge is always the fleet's
   needs-you count.

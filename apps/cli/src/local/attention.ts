@@ -7,17 +7,21 @@ import type { LocalAttentionState } from "@optio/shared";
  * 1. Claude Code hooks — once any hook fires for a terminal, heuristics are
  *    disabled for it.
  * 2. Terminal bell — a BEL that is not an OSC/DCS/APC/PM string terminator.
- * 3. Silence — output → working; 12 s of quiet after prior output → idle for
- *    shells/commands (deliberately NOT needs_you: a quiet test watcher isn't
- *    asking for you). For AGENT terminals quiet means the opposite: an
- *    interactive agent CLI is either streaming or waiting on the human (a
- *    trust/login/theme prompt before Claude Code's hooks even start firing,
- *    or a non-hooked agent at its input line) → needs_you (reason `quiet`).
+ * 3. Silence — output → working; 12 s of quiet after prior output means the
+ *    terminal is waiting on the human → needs_you: for AGENT terminals always
+ *    (reason `quiet`: a trust/login prompt before Claude Code's hooks start
+ *    firing, or a non-hooked agent at its input line); for shells/commands
+ *    once the human has typed in them (reason `finished`: your command is
+ *    done). A shell nobody has typed in yet just went quiet at its prompt —
+ *    that's idle, not a request.
  *
  * `needs_you` is sticky over the weaker heuristics: neither plain output nor
  * the silence timer may downgrade it (a bell followed by silence means the
- * terminal MOST needs you). It clears only on the "the human responded"
- * signals — a UserPromptSubmit hook, or user input via onInput().
+ * terminal MOST needs you). It clears on the "the human responded" signals —
+ * a UserPromptSubmit hook, or user input via onInput() — and decays to idle
+ * (reason `stale`) after STALE_MS with no response, so a session you've
+ * walked away from stops shouting. The decay applies to hook-owned terminals
+ * too (a Stop you never answered).
  *
  * Emits transitions only. Pure of any WS concern: events surface both as the
  * return value of feed()/hookEvent()/onInput() and via the onEvent callback
@@ -37,6 +41,8 @@ export interface AttentionScheduler {
 }
 
 export const SILENCE_MS = 12_000;
+/** needs_you with no response for this long → idle (reason `stale`). */
+export const STALE_MS = 2 * 60 * 60 * 1000;
 
 /** Map a Claude Code hook event onto an attention transition (null = no-op). */
 export function mapHookEvent(
@@ -69,6 +75,9 @@ interface TermAttention {
   /** Previous byte was ESC (survives chunk splits). */
   pendingEsc: boolean;
   silenceTimer: unknown | null;
+  staleTimer: unknown | null;
+  /** The human has typed in this terminal since spawn. */
+  hadInput: boolean;
 }
 
 const defaultScheduler: AttentionScheduler = {
@@ -81,15 +90,18 @@ export class AttentionTracker {
   private readonly onEvent: (event: AttentionEvent) => void;
   private readonly scheduler: AttentionScheduler;
   private readonly silenceMs: number;
+  private readonly staleMs: number;
 
   constructor(opts: {
     onEvent?: (event: AttentionEvent) => void;
     scheduler?: AttentionScheduler;
     silenceMs?: number;
+    staleMs?: number;
   }) {
     this.onEvent = opts.onEvent ?? (() => {});
     this.scheduler = opts.scheduler ?? defaultScheduler;
     this.silenceMs = opts.silenceMs ?? SILENCE_MS;
+    this.staleMs = opts.staleMs ?? STALE_MS;
   }
 
   /**
@@ -172,6 +184,10 @@ export class AttentionTracker {
    */
   onInput(terminalId: string): AttentionEvent[] {
     const t = this.get(terminalId);
+    t.hadInput = true;
+    // Any keystroke answers a needs_you for staleness purposes, even on a
+    // hook-owned terminal (an Enter in a menu fires no UserPromptSubmit).
+    this.clearStaleTimer(t);
     if (t.hasHooks) return []; // hooks own this terminal
     if (t.state !== "needs_you" && t.state !== "idle") return [];
     const event = this.transition(t, terminalId, "working", "input");
@@ -189,6 +205,7 @@ export class AttentionTracker {
     const t = this.terminals.get(terminalId);
     if (!t) return;
     this.clearSilenceTimer(t);
+    this.clearStaleTimer(t);
     this.terminals.delete(terminalId);
   }
 
@@ -204,6 +221,8 @@ export class AttentionTracker {
         inString: false,
         pendingEsc: false,
         silenceTimer: null,
+        staleTimer: null,
+        hadInput: false,
       };
       this.terminals.set(terminalId, t);
     }
@@ -220,9 +239,27 @@ export class AttentionTracker {
     if (t.state === state && t.reason === reason) return null;
     t.state = state;
     t.reason = reason;
+    if (state === "needs_you") this.armStaleTimer(terminalId, t);
+    else this.clearStaleTimer(t);
     const event: AttentionEvent = { terminalId, state, reason };
     this.onEvent(event);
     return event;
+  }
+
+  private armStaleTimer(terminalId: string, t: TermAttention): void {
+    this.clearStaleTimer(t);
+    t.staleTimer = this.scheduler.setTimeout(() => {
+      t.staleTimer = null;
+      if (t.state !== "needs_you") return;
+      this.transition(t, terminalId, "idle", "stale");
+    }, this.staleMs);
+  }
+
+  private clearStaleTimer(t: TermAttention): void {
+    if (t.staleTimer !== null) {
+      this.scheduler.clearTimeout(t.staleTimer);
+      t.staleTimer = null;
+    }
   }
 
   private resetSilenceTimer(terminalId: string, t: TermAttention): void {
@@ -233,6 +270,7 @@ export class AttentionTracker {
       // A needs_you terminal that goes quiet is still waiting on the user.
       if (t.hasHooks || !t.producedOutput || t.state !== "working") return;
       if (t.agent) this.transition(t, terminalId, "needs_you", "quiet");
+      else if (t.hadInput) this.transition(t, terminalId, "needs_you", "finished");
       else this.transition(t, terminalId, "idle", "silence");
     }, this.silenceMs);
   }

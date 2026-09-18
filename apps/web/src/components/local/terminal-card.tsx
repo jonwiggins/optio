@@ -201,6 +201,7 @@ const ATTENTION_LABELS: Record<string, string> = {
   notification: "wants your attention",
   bell: "rang the bell",
   quiet: "gone quiet — probably waiting on you",
+  finished: "command finished",
   exit: "finished — review the result",
 };
 

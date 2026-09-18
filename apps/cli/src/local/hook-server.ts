@@ -153,6 +153,42 @@ exec "$real" "$@"
 }
 
 /**
+ * Write a ZDOTDIR wrapper so the `claude` shim stays FIRST on PATH in zsh
+ * terminals. A plain PATH prepend is fragile: the user's own rc files run
+ * after the daemon sets PATH and routinely prepend their own bins (~/.local/bin,
+ * asdf shims), pushing the shim behind the real `claude`. The wrapper sources
+ * each of the user's dotfiles from their real ZDOTDIR (or $HOME) and then, at
+ * the end of .zshrc and .zlogin — the last files zsh reads for interactive and
+ * `-l -c` login shells respectively — moves the shim dir back to the front.
+ * Same trick VS Code's shell integration uses. Bash keeps the plain prepend.
+ */
+export function writeZshDotDir(dir: string): string {
+  const header = `# Optio Local wrapper — sources your real zsh dotfile, then keeps the
+# \`claude\` shim first on PATH so Optio can see when a session needs you.
+_optio_zdotdir="$ZDOTDIR"
+ZDOTDIR="\${OPTIO_USER_ZDOTDIR:-$HOME}"
+`;
+  const footer = `export OPTIO_USER_ZDOTDIR="$ZDOTDIR"
+ZDOTDIR="$_optio_zdotdir"
+unset _optio_zdotdir
+`;
+  const shimFirst = `if [[ -n "$OPTIO_LOCAL_SHIM_DIR" && -d "$OPTIO_LOCAL_SHIM_DIR" ]]; then
+  path=("$OPTIO_LOCAL_SHIM_DIR" \${path:#$OPTIO_LOCAL_SHIM_DIR})
+  export PATH
+fi
+`;
+  const wrapper = (name: string, fixPath: boolean) =>
+    `${header}[[ -f "$ZDOTDIR/${name}" ]] && source "$ZDOTDIR/${name}"
+${footer}${fixPath ? shimFirst : ""}`;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(`${dir}/.zshenv`, wrapper(".zshenv", false), "utf-8");
+  writeFileSync(`${dir}/.zprofile`, wrapper(".zprofile", false), "utf-8");
+  writeFileSync(`${dir}/.zshrc`, wrapper(".zshrc", true), "utf-8");
+  writeFileSync(`${dir}/.zlogin`, wrapper(".zlogin", true), "utf-8");
+  return dir;
+}
+
+/**
  * Write the Claude Code settings file injected via `claude --settings` for
  * agent spawns. Uses the documented hooks schema.
  */
