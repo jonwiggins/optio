@@ -32,6 +32,7 @@ import { ensureNotificationPermission } from "./attention-watcher";
 import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
 import { TitleEditor } from "./title-editor";
 import { AccountUsagePill, SessionUsageChip } from "./usage-chips";
+import { useTitleFit } from "./use-title-fit";
 
 const LocalTerminal = dynamic(() => import("./local-terminal").then((m) => m.LocalTerminal), {
   ssr: false,
@@ -77,6 +78,7 @@ export function TerminalPane({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
+  const fit = useTitleFit(!loading && terminal != null);
   const railCollapsed = useRailStore((s) => s.collapsed);
   const bellArmed = useBellStore((s) => s.armed.includes(terminalId));
 
@@ -319,6 +321,29 @@ export function TerminalPane({
     </button>
   );
 
+  // Hidden full-dress copy of the title row; useTitleFit compares its width
+  // to the row's to decide when the badges must drop to dots. Keep in sync
+  // with what the row renders at full width.
+  const titleGhost = (
+    <div
+      ref={fit.ghostRef}
+      aria-hidden
+      className="absolute left-0 top-0 invisible pointer-events-none flex items-center gap-2 whitespace-nowrap"
+    >
+      <span
+        className={
+          variant === "primary" ? "text-sm font-semibold px-1.5" : "text-sm font-medium px-1.5"
+        }
+      >
+        {terminal.title}
+      </span>
+      <LocalStateBadge terminal={terminal} />
+      {terminal.attentionState === "needs_you" && (
+        <span className="text-[11px] px-2">{attentionLabel(terminal.attentionReason)}</span>
+      )}
+    </div>
+  );
+
   const connDot = (
     <span
       className="hidden sm:inline-flex items-center"
@@ -337,7 +362,8 @@ export function TerminalPane({
 
   // Header meta: what's worth a glance without stealing terminal rows.
   const meta = (
-    <div className="hidden @lg:flex items-center gap-2 min-w-0 text-[11px] text-text-muted">
+    // shrink-[8]: the dir / command give way well before the title does.
+    <div className="hidden @lg:flex items-center gap-2 min-w-0 shrink-[8] text-[11px] text-text-muted">
       {host && hosts.length > 1 && (
         <span className="flex items-center gap-1 shrink-0">
           <Server className="w-3 h-3" />
@@ -396,8 +422,12 @@ export function TerminalPane({
           <ArrowLeft className="w-4 h-4" />
         </Link>
         <Terminal className="w-4 h-4 text-text-muted shrink-0 hidden sm:block" />
-        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-          <h1 className="min-w-0 shrink max-w-[24rem] flex">
+        <div
+          ref={fit.rowRef}
+          className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
+        >
+          {titleGhost}
+          <h1 className="min-w-0 shrink max-w-[28rem] flex">
             <TitleEditor
               terminalId={terminalId}
               title={terminal.title}
@@ -408,20 +438,27 @@ export function TerminalPane({
               inputClassName="text-sm font-semibold tracking-tight"
             />
           </h1>
-          <LocalStateBadge terminal={terminal} collapsible />
+          <LocalStateBadge terminal={terminal} compact={fit.compact} />
           {terminal.attentionState === "needs_you" && (
             <span
               title={attentionLabel(terminal.attentionReason)}
-              className="inline-flex items-center gap-1.5 px-1.5 py-1 @lg:px-2 @lg:py-0.5 rounded-md text-[11px] font-medium text-warning bg-warning/10 border border-warning/20 shrink-0 min-w-0"
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium text-warning bg-warning/10 border border-warning/20 shrink-0 min-w-0",
+                fit.compact ? "px-1.5 py-1" : "px-2 py-0.5",
+              )}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse shrink-0" />
-              <span className="truncate hidden @lg:inline">
-                {attentionLabel(terminal.attentionReason)}
-              </span>
+              {!fit.compact && (
+                <span className="truncate">{attentionLabel(terminal.attentionReason)}</span>
+              )}
             </span>
           )}
-          <span className="hidden @lg:inline-block w-px h-4 bg-border shrink-0" aria-hidden />
-          {meta}
+          {!fit.compact && (
+            <>
+              <span className="hidden @lg:inline-block w-px h-4 bg-border shrink-0" aria-hidden />
+              {meta}
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
@@ -451,22 +488,30 @@ export function TerminalPane({
                 : "bg-text-muted/40",
           )}
         />
-        <TitleEditor
-          terminalId={terminalId}
-          title={terminal.title}
-          onSaved={setTerminal}
-          className="max-w-[40%] shrink"
-          inputClassName="text-sm font-medium"
-        />
-        <LocalStateBadge terminal={terminal} collapsible />
-        {terminal.attentionState === "needs_you" && (
-          <span className="text-[11px] text-warning truncate hidden @xl:inline">
-            {attentionLabel(terminal.attentionReason)}
-          </span>
-        )}
-        <span className="hidden @3xl:inline-flex min-w-0">
-          <WorkLinkBadges links={links} size="xs" max={2} />
-        </span>
+        <div
+          ref={fit.rowRef}
+          className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
+        >
+          {titleGhost}
+          <TitleEditor
+            terminalId={terminalId}
+            title={terminal.title}
+            onSaved={setTerminal}
+            className="shrink max-w-[28rem]"
+            inputClassName="text-sm font-medium"
+          />
+          <LocalStateBadge terminal={terminal} compact={fit.compact} />
+          {terminal.attentionState === "needs_you" && !fit.compact && (
+            <span className="text-[11px] text-warning truncate">
+              {attentionLabel(terminal.attentionReason)}
+            </span>
+          )}
+          {!fit.compact && (
+            <span className="hidden @3xl:inline-flex min-w-0">
+              <WorkLinkBadges links={links} size="xs" max={2} />
+            </span>
+          )}
+        </div>
         <SessionUsageChip usage={terminal.usage} collapsible className="hidden @sm:inline-flex" />
         <AccountUsagePill collapsible className="hidden @md:inline-flex" />
         <div

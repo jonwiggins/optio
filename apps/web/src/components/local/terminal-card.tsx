@@ -31,32 +31,36 @@ const STATE_STYLES: Record<string, { label: string; className: string; pulse?: b
   error: { label: "Error", className: "text-error bg-error/10" },
 };
 
+export function localStateLabel(terminal: any): string {
+  const style = STATE_STYLES[terminal.state] ?? STATE_STYLES.pending;
+  return terminal.state === "pending" && terminal.pendingReason === "host_offline"
+    ? "Host offline"
+    : terminal.state === "pending" && terminal.pendingReason === "hold"
+      ? "Held"
+      : style.label;
+}
+
 export function LocalStateBadge({
   terminal,
-  collapsible,
+  compact,
 }: {
   terminal: any;
-  /** Inside an `@container`: drop to just the dot when the pane is narrow. */
-  collapsible?: boolean;
+  /** Just the dot (label on hover) — the header does this when the title needs the room. */
+  compact?: boolean;
 }) {
   const style = STATE_STYLES[terminal.state] ?? STATE_STYLES.pending;
-  const label =
-    terminal.state === "pending" && terminal.pendingReason === "host_offline"
-      ? "Host offline"
-      : terminal.state === "pending" && terminal.pendingReason === "hold"
-        ? "Held"
-        : style.label;
+  const label = localStateLabel(terminal);
   return (
     <span
       title={label}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium tracking-wide uppercase shrink-0",
-        collapsible ? "px-1.5 py-1 @lg:px-2 @lg:py-0.5" : "px-2 py-0.5",
+        compact ? "px-1.5 py-1" : "px-2 py-0.5",
         style.className,
       )}
     >
       <span className={cn("w-1.5 h-1.5 rounded-full bg-current", style.pulse && "animate-pulse")} />
-      <span className={cn(collapsible && "hidden @lg:inline")}>{label}</span>
+      {!compact && <span>{label}</span>}
     </span>
   );
 }
