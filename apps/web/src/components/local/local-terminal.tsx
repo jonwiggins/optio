@@ -73,7 +73,6 @@ export function LocalTerminal({
       theme: {
         background: "#09090b",
         foreground: "#fafafa",
-        cursor: "#6d28d9",
         selectionBackground: "#6d28d944",
         black: "#09090b",
         red: "#ef4444",
