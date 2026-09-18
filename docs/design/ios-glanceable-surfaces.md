@@ -69,18 +69,17 @@ No Live Activity of its own. A PA turn you triggered by message behaves like a t
 
 Sessions have a terminal and chat but no attention state today, so there is nothing honest to show. Defer: once sessions get the daemon-style hook/bell/quiet detector, they become a Watch source with the same card as a local terminal. Until then: notification on session exit/error only.
 
-### 2e. Home Screen widgets (three earn existence)
+### 2e. Home Screen widgets (two earn existence)
 
-1. **Needs You** — `systemSmall` and `systemMedium`. Small: large count, purple when >0, grey "Quiet" when 0, mono path of the oldest item. Medium: up to three rows `path · reason · wait`; each row deep-links; an interactive **Later** button per row (App Intent, no app launch). This is the Watch, persisted.
-2. **In Flight** — `systemMedium`/`systemLarge`. Running Repo Tasks and PA turns you own: title, mono branch, state pill, elapsed. Large adds the last PR opened with its CI status. Purely informational; no buttons.
-3. **Run** — `systemSmall`, configurable: pick a Job, Task blueprint, or Local blueprint. Single tap fires it via App Intent and flips to "Started · 2s ago" for one timeline entry. This is the phone-as-remote-control widget. Ships with a confirmation toggle in the widget config for anything with `spawn_mode=auto`.
+1. **Agents** — `systemSmall`, `systemMedium`, `systemLarge`, plus every lock-screen accessory family. One list: what needs you first (yellow), then what's working (purple), one row per item, every row a deep link. Small shows the count and the top row; medium three rows; large seven and the Repo Tasks in flight. Rows never carry a sentence: `[kind glyph] name ……… [symbol + one word] 4m`, where the word comes from a fixed vocabulary — `Allow?`, `Reply`, `Quiet`, `Bell`, `Review`, `Stuck`, `Conflict`, `Failed`, `PR`, `CI`, `Queued`, `Starting` — and the name is the leaf of the terminal title or path. A moon icon per needs-you row is **Later** (App Intent, no app launch). With several servers the row carries a coloured server dot instead of the list being sectioned. This replaced the earlier "Needs You" + "In Flight" pair, whose headers ("Nothing running · 3 need you") summarised without listing.
+2. **Run** — `systemSmall`, configurable: pick a Job, Task blueprint, or Local blueprint. Single tap fires it via App Intent and flips to "Started · 2s ago" for one timeline entry. This is the phone-as-remote-control widget. Ships with a confirmation toggle in the widget config for anything with `spawn_mode=auto`.
 
 Refresh: rely on push-triggered reloads (iOS 26 WidgetKit push) with a 15-minute timeline fallback; the ~40–70/day budget rules out polling. If push isn't wired yet, the widget shows its `asOf` time in the footer rather than lying.
 
 ### 2f. Lock Screen accessory widgets
 
 - `accessoryCircular`: count of needs-you items inside a ring; blank ring when quiet.
-- `accessoryRectangular`: "Needs you" / `apps/web` / "4m" — the oldest item only. Taps into it.
+- `accessoryRectangular`: "Needs you +2" / `[terminal] web · Allow?` / "4m" — the oldest item only. Taps into it.
 - `accessoryInline`: "Optio · 2 need you" or "Optio · quiet". Also the Apple Watch complication shape.
 
 All monochrome by design; hierarchy comes from weight and the mono face.
@@ -129,7 +128,7 @@ Grouping: `threadIdentifier` = the object id, so a chatty terminal collapses int
 
 - Watch Live Activity (local terminals as the only source) + APNs push-to-start/update. _Rationale: this is the wish, verbatim, and the one surface that changes behaviour._
 - `needs_you` notification with Reply/Later actions. _Same server plumbing; works on phones without the island._
-- Needs You widget (small/medium) + rectangular/inline accessories. _Pure read of the same data; near-zero regret._
+- Agents widget (small/medium/large) + rectangular/inline accessories. _Pure read of the same data; near-zero regret._
 
 **Tier 2**
 
@@ -140,7 +139,6 @@ Grouping: `threadIdentifier` = the object id, so a chatty terminal collapses int
 **Tier 3**
 
 - Run widget + Run control + full Shortcuts entity graph. _Useful, but "start work" is the opposite of the core job._
-- In Flight widget (large). _Nice, and closest to the vanity line._
 - Interactive Sessions as a Watch source. _Blocked on session attention detection._
 
 ## 5. Open questions

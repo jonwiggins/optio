@@ -81,7 +81,7 @@ enum GlanceStore {
     static func setStarted(_ targetId: String, at date: Date?) { defaults.set(date, forKey: Keys.started(targetId)) }
 }
 
-/// A Repo Task in flight, as much of `GET /api/tasks` as the In Flight widget needs.
+/// A Repo Task in flight, as much of `GET /api/tasks` as the Agents widget needs.
 /// Loose on purpose: every optional field may be missing on older servers.
 struct InFlightTask: Codable, Hashable, Identifiable {
     var id: String

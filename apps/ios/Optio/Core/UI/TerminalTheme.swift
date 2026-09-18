@@ -2,14 +2,114 @@ import SwiftTerm
 import SwiftUI
 import UIKit
 
-/// SwiftTerm view that keeps finger scrolling when the program turns on mouse
-/// reporting. Stock `TerminalView` reacts to a mouse-mode request by attaching its
-/// own pan recognizer, which starves `UIScrollView`'s pan; with `allowMouseReporting`
-/// off (our setting) that recognizer never does anything, so dragging a Claude Code
-/// session went dead. Skipping the recognizer leaves the native scroll in place.
+/// SwiftTerm view whose finger scrolling follows what the program wants.
+///
+/// With mouse reporting off (`allowMouseReporting = false`, our setting, so taps
+/// focus the keyboard instead of clicking), stock `TerminalView` still attaches
+/// its own pan recognizer when the program turns mouse mode on. That recognizer
+/// never does anything, but it starves `UIScrollView`'s pan, so dragging went dead.
+///
+/// Claude Code (2.1.x) runs in the alternate screen with mouse tracking on and
+/// scrolls its transcript itself in response to wheel events — there is no
+/// terminal scrollback to drag through at all. So while the program tracks the
+/// mouse, a vertical drag is translated into wheel reports (SGR buttons 64/65,
+/// one per cell row of travel, with a short fling), exactly what a desktop
+/// terminal does with the wheel. When mouse mode goes off again the native
+/// scroll view takes back over and history scrolls as before.
 final class ScrollableTerminalView: TerminalView {
+    private var wheelPan: UIPanGestureRecognizer?
+    private var wheelRemainder: CGFloat = 0
+    private var flingTimer: Timer?
+    private var flingVelocity: CGFloat = 0
+    private var flingLocation: CGPoint = .zero
+
     override func mouseModeChanged(source: Terminal) {
-        if allowMouseReporting { super.mouseModeChanged(source: source) }
+        if allowMouseReporting {
+            super.mouseModeChanged(source: source)
+            return
+        }
+        if source.mouseMode != .off { enableWheelPan() } else { disableWheelPan() }
+    }
+
+    private func enableWheelPan() {
+        guard wheelPan == nil else { return }
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleWheelPan(_:)))
+        pan.maximumNumberOfTouches = 1
+        addGestureRecognizer(pan)
+        wheelPan = pan
+        wheelRemainder = 0
+        // The program owns scrolling now; the scroll view's own pan would only fight it.
+        isScrollEnabled = false
+    }
+
+    private func disableWheelPan() {
+        stopFling()
+        if let pan = wheelPan { removeGestureRecognizer(pan) }
+        wheelPan = nil
+        isScrollEnabled = true
+    }
+
+    @objc private func handleWheelPan(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            stopFling()
+            wheelRemainder = 0
+        case .changed:
+            let dy = gesture.translation(in: self).y
+            gesture.setTranslation(.zero, in: self)
+            emitWheel(travel: dy, at: gesture.location(in: self))
+        case .ended:
+            startFling(velocity: gesture.velocity(in: self).y, at: gesture.location(in: self))
+        case .cancelled, .failed:
+            wheelRemainder = 0
+        default:
+            break
+        }
+    }
+
+    /// Finger travel in points → wheel notches. Dragging down (positive) pulls
+    /// older content into view, i.e. a wheel-up (button 4) report, matching the
+    /// direction of a native scroll.
+    private func emitWheel(travel: CGFloat, at location: CGPoint) {
+        guard let cell = cellSize(), cell.height > 0 else { return }
+        wheelRemainder += travel
+        let notches = Int(wheelRemainder / cell.height)
+        guard notches != 0 else { return }
+        wheelRemainder -= CGFloat(notches) * cell.height
+        let terminal = getTerminal()
+        let button = notches > 0 ? 4 : 5
+        let flags = terminal.encodeButton(button: button, release: false, shift: false, meta: false, control: false)
+        let col = max(0, min(terminal.cols - 1, Int(location.x / cell.width)))
+        let row = max(0, min(terminal.rows - 1, Int((location.y - contentOffset.y) / cell.height)))
+        for _ in 0..<abs(notches) {
+            terminal.sendEvent(buttonFlags: flags, x: col, y: row)
+        }
+    }
+
+    private func cellSize() -> CGSize? {
+        guard let px = cellSizeInPixels(source: getTerminal()) else { return nil }
+        let scale = max(traitCollection.displayScale, 1)
+        return CGSize(width: CGFloat(px.width) / scale, height: CGFloat(px.height) / scale)
+    }
+
+    // A short deceleration so a flick keeps scrolling a little, like the native view.
+    private func startFling(velocity: CGFloat, at location: CGPoint) {
+        stopFling()
+        guard abs(velocity) > 300 else { return }
+        flingVelocity = velocity
+        flingLocation = location
+        flingTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.emitWheel(travel: self.flingVelocity / 60, at: self.flingLocation)
+            self.flingVelocity *= 0.93
+            if abs(self.flingVelocity) < 120 { self.stopFling() }
+        }
+    }
+
+    private func stopFling() {
+        flingTimer?.invalidate()
+        flingTimer = nil
+        flingVelocity = 0
     }
 }
 

@@ -4,8 +4,7 @@ import WidgetKit
 @main
 struct OptioWidgetsBundle: WidgetBundle {
     var body: some Widget {
-        NeedsYouWidget()
-        InFlightWidget()
+        AgentsWidget()
         RunWidget()
         WatchLiveActivity()
         if #available(iOS 18, *) {

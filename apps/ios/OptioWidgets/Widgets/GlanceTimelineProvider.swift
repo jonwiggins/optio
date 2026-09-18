@@ -80,13 +80,13 @@ struct GlanceEntry: TimelineEntry {
     }
 }
 
-/// Shared provider for Needs You and In Flight: one fetch per server per reload via
+/// Provider for the Agents widget: one fetch per server per reload via
 /// `SharedFetch`, last good snapshot cached per server in App Group defaults,
 /// cadence from `GlancePolicy`.
 struct GlanceTimelineProvider: AppIntentTimelineProvider {
     typealias Intent = GlanceConfigurationIntent
 
-    /// In Flight (large) also lists Repo Tasks; the others skip that request.
+    /// Also list Repo Tasks in flight (the large family shows them).
     var includeTasks = false
 
     func placeholder(in context: Context) -> GlanceEntry { GlanceFixtures.waiting }

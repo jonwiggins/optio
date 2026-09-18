@@ -67,9 +67,9 @@ the widget extension sees the same list.
   `SessionStore.generation`, which the tab shell is keyed on, so every screen
   restarts with fresh state for the new instance. `More › Servers` renames,
   recolours, forgets and adds servers; "Sign out" forgets the active one.
-- **Widgets.** Needs You and In Flight take a _Server_ option: one server, or (the
-  default) all paired servers sectioned by name and colour. Snapshots are cached per
-  server, so one laptop being offline only greys out its section. The Run widget's
+- **Widgets.** The Agents widget takes a _Server_ option: one server, or (the
+  default) all paired servers, with a coloured server dot on each row. Snapshots are
+  cached per server, so one laptop being offline only flags its rows. The Run widget's
   targets are namespaced `<serverId>|local:<uuid>` / `<serverId>|job:<uuid>`; legacy
   ids without a prefix fire on the active server.
 - **Deep links.** Any `optio://` link may carry `?server=<id>`; `MainTabView`

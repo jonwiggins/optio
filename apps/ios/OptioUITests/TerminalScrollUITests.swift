@@ -3,6 +3,7 @@ import XCTest
 /// Drives a real drag on a terminal screen and checks the view actually scrolls.
 /// Needs a dev server and a terminal id:
 ///   OPTIO_UITEST_SERVER_URL, OPTIO_UITEST_TOKEN, OPTIO_UITEST_TERMINAL_ID
+///   (optional OPTIO_UITEST_TERMINAL_TITLE to navigate via the Live tab when the deep link misses)
 /// The screenshots land in the test attachments (and, when
 /// OPTIO_UITEST_SHOT_DIR is set, as PNG files in that directory).
 final class TerminalScrollUITests: XCTestCase {
@@ -16,7 +17,16 @@ final class TerminalScrollUITests: XCTestCase {
         app.launchEnvironment["OPTIO_DEV_TOKEN"] = token
         app.launchEnvironment["OPTIO_DEV_OPEN_URL"] = "optio://local/\(terminal)"
         app.launch()
-        sleep(8)
+        sleep(6)
+        // The dev deep link is best-effort; if we did not land on the terminal, walk there.
+        if !app.staticTexts["connected"].waitForExistence(timeout: 4), let title = env["OPTIO_UITEST_TERMINAL_TITLE"] {
+            app.tabBars.buttons["Live"].tap()
+            let row = app.staticTexts[title].firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 8), "terminal row \(title) not found on Live")
+            row.tap()
+            XCTAssertTrue(app.staticTexts["connected"].waitForExistence(timeout: 10), "terminal did not connect")
+            sleep(2)
+        }
         save(app.screenshot(), "before")
         let mid = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
         let lower = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
