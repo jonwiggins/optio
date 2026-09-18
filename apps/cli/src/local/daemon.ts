@@ -15,6 +15,7 @@ import { dim, green, red, yellow } from "../output/colors.js";
 import { AttentionTracker } from "./attention.js";
 import { detectRepoUrl } from "./git-remote.js";
 import { startHookServer, writeClaudeHookSettings } from "./hook-server.js";
+import { UsageTracker } from "./usage-tracker.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
 
 /**
@@ -58,6 +59,8 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
     process.stdout.write(`${dim(`[${ts}]`)} ${line}\n`);
   };
 
+  const usage = new UsageTracker();
+
   // One outbound path: drop while disconnected (don't queue), EXCEPT
   // attention state, which is remembered and re-sent after the next hello.
   const send = (msg: LocalDaemonMessage): void => {
@@ -69,6 +72,7 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
       });
     } else if (msg.type === "exit") {
       attentionByTerminal.delete(msg.terminalId);
+      usage.remove(msg.terminalId);
     }
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try {
@@ -107,8 +111,15 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
     onStatus: status,
   });
 
-  const hookServer = await startHookServer((terminalId, eventName) => {
-    if (manager.has(terminalId)) attention.hookEvent(terminalId, eventName);
+  const hookServer = await startHookServer((terminalId, eventName, payload) => {
+    if (!manager.has(terminalId)) return;
+    attention.hookEvent(terminalId, eventName);
+    // Every hook names the transcript; Stop is when a turn's usage is
+    // complete, but folding on each event keeps the header fresh mid-turn too.
+    if (payload.transcriptPath) {
+      const next = usage.update(terminalId, payload.transcriptPath);
+      if (next) send({ type: "usage", terminalId, usage: next });
+    }
   });
 
   function handleServerMessage(msg: LocalServerMessage): void {

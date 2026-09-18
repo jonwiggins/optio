@@ -1558,6 +1558,17 @@ export const localTerminals = pgTable(
       >()
       .notNull()
       .default([]),
+    // Token / cost totals the daemon summed from the agent's transcript.
+    usage: jsonb("usage").$type<{
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      turns: number;
+      model: string | null;
+      costUsd: number | null;
+      updatedAt: string;
+    } | null>(),
     costUsd: text("cost_usd"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

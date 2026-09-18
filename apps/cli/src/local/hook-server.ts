@@ -20,8 +20,15 @@ export interface HookServer {
   close(): Promise<void>;
 }
 
+/** The fields of a Claude Code hook payload the daemon acts on. */
+export interface HookPayload {
+  /** Absolute path of the session's JSONL transcript (usage lives there). */
+  transcriptPath?: string;
+  sessionId?: string;
+}
+
 export function startHookServer(
-  onHook: (terminalId: string, hookEventName: string) => void,
+  onHook: (terminalId: string, hookEventName: string, payload: HookPayload) => void,
 ): Promise<HookServer> {
   const server: Server = createServer((req, res) => {
     const match = req.method === "POST" ? HOOK_PATH_RE.exec(req.url ?? "") : null;
@@ -59,11 +66,18 @@ export function startHookServer(
     req.on("end", () => {
       if (done) return;
       let eventName: string | undefined;
+      const payload: HookPayload = {};
       try {
         const body = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as {
           hook_event_name?: unknown;
+          transcript_path?: unknown;
+          session_id?: unknown;
         };
         if (typeof body.hook_event_name === "string") eventName = body.hook_event_name;
+        if (typeof body.transcript_path === "string" && body.transcript_path.startsWith("/")) {
+          payload.transcriptPath = body.transcript_path;
+        }
+        if (typeof body.session_id === "string") payload.sessionId = body.session_id;
       } catch {
         // fall through — respond 204, nothing to act on
       }
@@ -74,7 +88,7 @@ export function startHookServer(
       // Any hook receipt marks hasHooks; unknown events are attention no-ops.
       const known = mapHookEvent(eventName) !== null;
       finish(known ? 200 : 204);
-      onHook(terminalId, eventName);
+      onHook(terminalId, eventName, payload);
     });
   });
 

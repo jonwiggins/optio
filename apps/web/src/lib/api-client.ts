@@ -1805,6 +1805,12 @@ export const api = {
 
   getLocalTerminal: (id: string) => request<{ terminal: any }>(`/api/local/terminals/${id}`),
 
+  updateLocalTerminal: (id: string, data: { title: string }) =>
+    request<{ terminal: any }>(`/api/local/terminals/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
   createLocalTerminal: (data: {
     hostId: string;
     dir?: string;

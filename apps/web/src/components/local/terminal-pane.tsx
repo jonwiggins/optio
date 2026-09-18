@@ -30,6 +30,8 @@ import { useRailStore } from "./rail-store";
 import { useBellStore } from "./bell-store";
 import { ensureNotificationPermission } from "./attention-watcher";
 import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
+import { TitleEditor } from "./title-editor";
+import { AccountUsagePill, SessionUsageChip } from "./usage-chips";
 
 const LocalTerminal = dynamic(() => import("./local-terminal").then((m) => m.LocalTerminal), {
   ssr: false,
@@ -395,8 +397,16 @@ export function TerminalPane({
         </Link>
         <Terminal className="w-4 h-4 text-text-muted shrink-0 hidden sm:block" />
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <h1 className="text-sm font-semibold tracking-tight truncate max-w-[40vw] sm:max-w-[24rem]">
-            {terminal.title}
+          <h1 className="min-w-0 max-w-[40vw] sm:max-w-[24rem] flex">
+            <TitleEditor
+              terminalId={terminalId}
+              title={terminal.title}
+              onSaved={(t) => {
+                setTerminal(t);
+                onTitle?.(t.title);
+              }}
+              inputClassName="text-sm font-semibold tracking-tight"
+            />
           </h1>
           <LocalStateBadge terminal={terminal} />
           {terminal.attentionState === "needs_you" && (
@@ -413,6 +423,8 @@ export function TerminalPane({
           <span className="hidden md:inline-flex">
             <WorkLinkBadges links={links} size="xs" max={4} />
           </span>
+          <SessionUsageChip usage={terminal.usage} className="hidden sm:inline-flex" />
+          <AccountUsagePill className="hidden lg:inline-flex" />
           <span className="hidden lg:inline-flex">
             <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
           </span>
@@ -434,7 +446,13 @@ export function TerminalPane({
                 : "bg-text-muted/40",
           )}
         />
-        <span className="text-sm font-medium truncate">{terminal.title}</span>
+        <TitleEditor
+          terminalId={terminalId}
+          title={terminal.title}
+          onSaved={setTerminal}
+          className="max-w-[40%]"
+          inputClassName="text-sm font-medium"
+        />
         <LocalStateBadge terminal={terminal} />
         {terminal.attentionState === "needs_you" && (
           <span className="text-[11px] text-warning truncate hidden sm:inline">
@@ -444,6 +462,7 @@ export function TerminalPane({
         <span className="hidden lg:inline-flex min-w-0">
           <WorkLinkBadges links={links} size="xs" max={2} />
         </span>
+        <SessionUsageChip usage={terminal.usage} className="hidden lg:inline-flex" />
         <div
           className="ml-auto flex items-center gap-1 shrink-0"
           onClick={(e) => e.stopPropagation()}

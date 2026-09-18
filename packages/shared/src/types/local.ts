@@ -2,6 +2,7 @@
 // (`optio local up`). See docs/optio-local.md for the full protocol.
 
 import type { WorkLink } from "../utils/extract-work-links.js";
+import type { LocalTerminalUsage } from "../utils/agent-usage.js";
 
 export type LocalHostState = "online" | "offline";
 
@@ -72,6 +73,8 @@ export interface LocalTerminal {
   preview: string | null;
   /** PR / ticket links the daemon spotted in the output (first-seen order). */
   links: WorkLink[];
+  /** Token / cost totals the daemon summed from the agent's transcript (agent spawns only). */
+  usage: LocalTerminalUsage | null;
   costUsd: string | null;
   lastActivityAt: string | null;
   createdAt: string;
@@ -132,6 +135,7 @@ export type LocalDaemonMessage =
   | { type: "attention"; terminalId: string; state: LocalAttentionState; reason: string }
   | { type: "preview"; terminalId: string; preview: string; lastActivityAt: string }
   | { type: "links"; terminalId: string; links: WorkLink[] }
+  | { type: "usage"; terminalId: string; usage: LocalTerminalUsage }
   | { type: "exit"; terminalId: string; exitCode: number | null }
   | { type: "ping" };
 

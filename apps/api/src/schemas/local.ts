@@ -70,6 +70,19 @@ export const LocalTerminalSchema = z
         }),
       )
       .describe("PR / ticket links seen in the output"),
+    usage: z
+      .object({
+        inputTokens: z.number(),
+        outputTokens: z.number(),
+        cacheReadTokens: z.number(),
+        cacheWriteTokens: z.number(),
+        turns: z.number(),
+        model: z.string().nullable(),
+        costUsd: z.number().nullable(),
+        updatedAt: z.string(),
+      })
+      .nullable()
+      .describe("Token / cost totals summed from the agent's transcript (agent spawns only)"),
     costUsd: z.string().nullable(),
     lastActivityAt: z.date().nullable(),
     createdAt: z.date(),
