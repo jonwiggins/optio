@@ -337,7 +337,7 @@ export function TerminalPane({
 
   // Header meta: what's worth a glance without stealing terminal rows.
   const meta = (
-    <div className="hidden sm:flex items-center gap-2 min-w-0 text-[11px] text-text-muted">
+    <div className="hidden @lg:flex items-center gap-2 min-w-0 text-[11px] text-text-muted">
       {host && hosts.length > 1 && (
         <span className="flex items-center gap-1 shrink-0">
           <Server className="w-3 h-3" />
@@ -349,7 +349,7 @@ export function TerminalPane({
       </span>
       {terminal.command && (
         <span
-          className="font-mono truncate max-w-[16rem] hidden lg:inline text-text-muted/70"
+          className="font-mono truncate max-w-[16rem] hidden @4xl:inline text-text-muted/70"
           title={terminal.command}
         >
           {terminal.command}
@@ -396,8 +396,8 @@ export function TerminalPane({
           <ArrowLeft className="w-4 h-4" />
         </Link>
         <Terminal className="w-4 h-4 text-text-muted shrink-0 hidden sm:block" />
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <h1 className="min-w-0 max-w-[40vw] sm:max-w-[24rem] flex">
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+          <h1 className="min-w-0 shrink max-w-[24rem] flex">
             <TitleEditor
               terminalId={terminalId}
               title={terminal.title}
@@ -408,24 +408,29 @@ export function TerminalPane({
               inputClassName="text-sm font-semibold tracking-tight"
             />
           </h1>
-          <LocalStateBadge terminal={terminal} />
+          <LocalStateBadge terminal={terminal} collapsible />
           {terminal.attentionState === "needs_you" && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium text-warning bg-warning/10 border border-warning/20 truncate">
+            <span
+              title={attentionLabel(terminal.attentionReason)}
+              className="inline-flex items-center gap-1.5 px-1.5 py-1 @lg:px-2 @lg:py-0.5 rounded-md text-[11px] font-medium text-warning bg-warning/10 border border-warning/20 shrink-0 min-w-0"
+            >
               <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse shrink-0" />
-              <span className="truncate">{attentionLabel(terminal.attentionReason)}</span>
+              <span className="truncate hidden @lg:inline">
+                {attentionLabel(terminal.attentionReason)}
+              </span>
             </span>
           )}
-          <span className="hidden sm:inline-block w-px h-4 bg-border shrink-0" aria-hidden />
+          <span className="hidden @lg:inline-block w-px h-4 bg-border shrink-0" aria-hidden />
           {meta}
         </div>
 
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          <span className="hidden md:inline-flex">
+          <span className="hidden @2xl:inline-flex">
             <WorkLinkBadges links={links} size="xs" max={4} />
           </span>
-          <SessionUsageChip usage={terminal.usage} className="hidden sm:inline-flex" />
-          <AccountUsagePill className="hidden lg:inline-flex" />
-          <span className="hidden lg:inline-flex">
+          <SessionUsageChip usage={terminal.usage} collapsible className="hidden @md:inline-flex" />
+          <AccountUsagePill collapsible className="hidden @lg:inline-flex" />
+          <span className="hidden @4xl:inline-flex">
             <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
           </span>
           {connDot}
@@ -450,19 +455,20 @@ export function TerminalPane({
           terminalId={terminalId}
           title={terminal.title}
           onSaved={setTerminal}
-          className="max-w-[40%]"
+          className="max-w-[40%] shrink"
           inputClassName="text-sm font-medium"
         />
-        <LocalStateBadge terminal={terminal} />
+        <LocalStateBadge terminal={terminal} collapsible />
         {terminal.attentionState === "needs_you" && (
-          <span className="text-[11px] text-warning truncate hidden sm:inline">
+          <span className="text-[11px] text-warning truncate hidden @xl:inline">
             {attentionLabel(terminal.attentionReason)}
           </span>
         )}
-        <span className="hidden lg:inline-flex min-w-0">
+        <span className="hidden @3xl:inline-flex min-w-0">
           <WorkLinkBadges links={links} size="xs" max={2} />
         </span>
-        <SessionUsageChip usage={terminal.usage} className="hidden lg:inline-flex" />
+        <SessionUsageChip usage={terminal.usage} collapsible className="hidden @sm:inline-flex" />
+        <AccountUsagePill collapsible className="hidden @md:inline-flex" />
         <div
           className="ml-auto flex items-center gap-1 shrink-0"
           onClick={(e) => e.stopPropagation()}
@@ -500,7 +506,10 @@ export function TerminalPane({
     );
 
   return (
-    <div className="h-full flex flex-col min-w-0 min-h-0">
+    // `@container`: header chrome hides by the PANE's width (container
+    // queries), not the window's — a three-way split on a big screen is
+    // three narrow panes.
+    <div className="@container h-full flex flex-col min-w-0 min-h-0">
       {header}
       {variant === "primary" && links.length > 0 && (
         <div className="md:hidden shrink-0 px-3 py-1.5 border-b border-border/60 bg-bg">
