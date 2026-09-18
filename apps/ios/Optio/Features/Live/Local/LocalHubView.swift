@@ -229,7 +229,7 @@ struct LocalHubView: View {
     private func statTile(_ title: String, _ value: Int, _ color: Color, _ icon: String, selected: Bool, action: (() -> Void)?) -> some View {
         Button { action?() } label: {
             StatTile(title: title, value: "\(value)", color: color, systemImage: icon)
-                .frame(width: 128)
+                .frame(maxWidth: .infinity)
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? color : .clear, lineWidth: 1.5))
         }
         .buttonStyle(.plain)
