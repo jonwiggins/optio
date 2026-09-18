@@ -32,6 +32,7 @@ struct OverviewView: View {
             .navigationTitle("Overview")
             .navigationSubtitleIfAvailable(subtitleText)
             .hubChrome()
+            .serverSwitcherToolbar()
             .navigationDestination(for: DashRecentTask.self) { TaskDetailView(taskId: $0.id) }
             .navigationDestination(for: DashSessionRow.self) { SessionDetailView(sessionId: $0.id) }
             .task {
@@ -53,6 +54,9 @@ struct OverviewView: View {
                         .listRowInsets(EdgeInsets(top: 0, leading: Spacing.l, bottom: Spacing.s, trailing: Spacing.l))
                         .listRowBackground(Color.clear)
                 }
+                ActiveServerCard()
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 if let error = model.error {
                     ErrorRow(error: error, what: "the overview") { Task { await model.refresh(api: api) } }
                         .listRowBackground(Color.clear)
@@ -133,6 +137,8 @@ struct OverviewView: View {
             } header: {
                 SectionHeader(title: "Recent tasks") { router.open(.tasks) }.textCase(nil)
             }
+
+            OtherServersSection()
         }
         .listStyle(.insetGrouped)
         .refreshable { await model.refresh(api: api) }

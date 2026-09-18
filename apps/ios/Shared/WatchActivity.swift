@@ -82,8 +82,12 @@ public struct WatchItem: Codable, Hashable, Sendable, Identifiable {
     /// Server-side "Later" (`local_terminals.snoozedUntil`) or the App Group fallback; snoozed
     /// items sort after unsnoozed ones while the window is open. Optional, additive.
     public var snoozedUntil: Date?
+    /// Which paired server this item lives on (`ServerProfile.id`) and its short name,
+    /// so surfaces that merge several servers can label and route it. Optional, additive.
+    public var serverId: String?
+    public var serverName: String?
 
-    public init(kind: Kind, id: String, title: String, mono: String, reason: String? = nil, preview: String? = nil, since: Date, state: String, link: String, prUrl: String? = nil, snoozedUntil: Date? = nil) {
+    public init(kind: Kind, id: String, title: String, mono: String, reason: String? = nil, preview: String? = nil, since: Date, state: String, link: String, prUrl: String? = nil, snoozedUntil: Date? = nil, serverId: String? = nil, serverName: String? = nil) {
         self.kind = kind
         self.id = id
         self.title = title
@@ -95,6 +99,8 @@ public struct WatchItem: Codable, Hashable, Sendable, Identifiable {
         self.link = link
         self.prUrl = prUrl
         self.snoozedUntil = snoozedUntil
+        self.serverId = serverId
+        self.serverName = serverName
     }
 
     /// True while a "Later" window is open.

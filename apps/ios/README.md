@@ -52,6 +52,41 @@ Plain-HTTP tailnet addresses are allowed by the app's ATS configuration
 (`NSAllowsArbitraryLoads` in `project.yml`). Tighten that to an exception domain
 once the API is behind TLS.
 
+## Multiple servers
+
+The phone can be paired with several Optio instances at once (two laptops, a
+laptop and a cluster, …). Each is a `ServerProfile` (`Shared/ServerRegistry.swift`)
+with a name, colour, URL and optional workspace override; profiles live in the App
+Group defaults and each token in the shared keychain group under `token.<id>`, so
+the widget extension sees the same list.
+
+- **Switching.** Every hub has a server chip in the leading toolbar slot
+  (`ServerSwitcherMenu`); the Overview also shows an `ActiveServerCard` and an
+  "Other servers" section with live counts fetched straight from each server.
+  Switching re-points the one `APIClient`/`EventHub` and bumps
+  `SessionStore.generation`, which the tab shell is keyed on, so every screen
+  restarts with fresh state for the new instance. `More › Servers` renames,
+  recolours, forgets and adds servers; "Sign out" forgets the active one.
+- **Widgets.** Needs You and In Flight take a _Server_ option: one server, or (the
+  default) all paired servers sectioned by name and colour. Snapshots are cached per
+  server, so one laptop being offline only greys out its section. The Run widget's
+  targets are namespaced `<serverId>|local:<uuid>` / `<serverId>|job:<uuid>`; legacy
+  ids without a prefix fire on the active server.
+- **Deep links.** Any `optio://` link may carry `?server=<id>`; `MainTabView`
+  switches first, stashes the link in `NotificationHandler`, and the rebuilt shell
+  routes it. Widgets and Live Activity buttons always set it. APNs payloads carry no
+  server, so `NotificationHandler` probes each paired server for the subject before
+  routing a tap or running a banner action.
+- **Live Activity.** One Watch merges every server (`NeedsYouSnapshot.loadAll`); items
+  carry `serverId`/`serverName` and the island shows a `WatchServerTag` when more
+  than one server is paired. Push tokens for the activity register with the active
+  server only; the 30 s foreground poll and background refresh cover the others.
+- **Push.** The device token registers with every paired server, and a forgotten
+  server gets a `DELETE` with the credentials it was registered under.
+
+Pre-multi-server installs are migrated on first launch from the old
+`optio.serverURL` + `accessToken` keys into a single profile named after the host.
+
 ## Driving the simulator from the CLI (DEBUG builds only)
 
 `make run` installs and launches the app. Debug builds accept environment
@@ -65,6 +100,18 @@ SIMCTL_CHILD_OPTIO_DEV_SECTION=local \
   xcrun simctl launch booted dev.optio.ios
 xcrun simctl io booted screenshot local.png
 ```
+
+`OPTIO_DEV_SERVER_URL_2` / `OPTIO_DEV_TOKEN_2` (and `_3`, `_4`) pair additional
+servers (ids `dev-server`, `dev-server_2`, …); `OPTIO_DEV_SERVER_NAME[_n]` names
+them. Pointing `_2` at `http://127.0.0.1:30400` gives a second profile on the same
+local API, enough to exercise the switcher and the sectioned widgets.
+`OPTIO_DEV_OPEN_URL=optio://section/tasks?server=dev-server_2` delivers a deep link
+two seconds after launch (without the "Open in Optio?" prompt `simctl openurl`
+shows), which is how a server switch is driven from the CLI.
+
+Pass the variables with `xcrun simctl launch --terminate-running-process …`: a
+separate `simctl terminate` followed by `launch` drops the `SIMCTL_CHILD_`
+environment, and the app then silently reuses whatever was paired last time.
 
 Sections: tasks, jobs, reviews, issues, scheduled, agents, sessions, local,
 analytics, costs, activity, cluster, more. With `OPTIO_AUTH_DISABLED=true` on

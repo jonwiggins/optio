@@ -182,12 +182,15 @@ final class LiveActivityManager {
             return
         }
         #endif
-        guard let fetch = SharedFetch() else { return }
+        // Every paired server feeds the one Watch; items carry their server so the
+        // island can label them and buttons/links land on the right instance.
+        let clients = SharedFetch.allServers
+        guard !clients.isEmpty else { return }
         let now = Date()
         let followed = FollowedTasks.all
         var snapshot: NeedsYouSnapshot
         do {
-            snapshot = try await NeedsYouSnapshot.load(using: fetch, followed: followed)
+            snapshot = try await NeedsYouSnapshot.loadAll(followed: followed).snapshot
             firstFailureAt = nil
             lastError = nil
         } catch {
@@ -204,21 +207,27 @@ final class LiveActivityManager {
         // Followed tasks that fell out of the snapshot are finished (or gone): unfollow.
         let present = Set((snapshot.needsYou + snapshot.running).filter { $0.kind == .task }.map(\.id))
         for id in followed.subtracting(present) {
-            await confirmUnfollow(id, using: fetch)
+            await confirmUnfollow(id, using: clients)
         }
 
-        // Persistent-agent turns triggered from this phone in the last hour.
+        // Persistent-agent turns triggered from this phone in the last hour. Agent ids
+        // are UUIDs, so the first server that knows one owns it.
         for (agentId, _) in RecentAgentSends.recent(at: now) {
-            guard let row = try? await fetch.get("/api/persistent-agents/\(agentId)", as: AgentEnvelope.self).agent else { continue }
+            var found: (AgentEnvelope.Agent, SharedFetch)?
+            for c in clients {
+                if let row = try? await c.get("/api/persistent-agents/\(agentId)", as: AgentEnvelope.self).agent { found = (row, c); break }
+            }
+            guard let (row, fetch) = found else { continue }
             let since = row.lastTurnAt ?? now
+            let link = DeepLink.agent(row.id, compose: true).url(server: fetch.serverId).absoluteString
             switch row.state {
             case "running", "queued", "provisioning":
                 snapshot.running.append(WatchItem(kind: .agent, id: row.id, title: "\(row.name) is thinking", mono: "@\(row.slug)",
-                                                  since: since, state: row.state, link: DeepLink.agent(row.id, compose: true).url.absoluteString))
+                                                  since: since, state: row.state, link: link, serverId: fetch.serverId, serverName: fetch.serverName))
             case "failed":
                 snapshot.needsYou.append(WatchItem(kind: .agent, id: row.id, title: row.name, mono: "@\(row.slug)",
                                                    reason: row.lastFailureReason.map { String($0.prefix(80)) } ?? "Turn failed — resume?",
-                                                   since: since, state: row.state, link: DeepLink.agent(row.id, compose: true).url.absoluteString))
+                                                   since: since, state: row.state, link: link, serverId: fetch.serverId, serverName: fetch.serverName))
             default: break
             }
         }
@@ -239,18 +248,24 @@ final class LiveActivityManager {
         await apply(snapshot.watchState())
     }
 
-    private func confirmUnfollow(_ id: String, using fetch: SharedFetch) async {
+    /// Unfollows once every paired server agrees the task is finished or unknown; a
+    /// transient failure on any server keeps the follow (a 404 on the wrong laptop is
+    /// not proof the task is gone).
+    private func confirmUnfollow(_ id: String, using clients: [SharedFetch]) async {
         struct Lite: Decodable { let state: String; let retryCount: Int?; let maxRetries: Int? }
         struct Env: Decodable { let task: Lite }
-        do {
-            let t = try await fetch.get("/api/tasks/\(id)", as: Env.self).task
-            let finalFailure = t.state == "failed" && (t.retryCount ?? 0) >= (t.maxRetries ?? 0)
-            if t.state == "completed" || t.state == "cancelled" || finalFailure { FollowedTasks.remove(id) }
-        } catch let e as SharedFetch.Failure where e.status == 404 {
-            FollowedTasks.remove(id)
-        } catch {
-            // Transient: keep following.
+        for fetch in clients {
+            do {
+                let t = try await fetch.get("/api/tasks/\(id)", as: Env.self).task
+                let finalFailure = t.state == "failed" && (t.retryCount ?? 0) >= (t.maxRetries ?? 0)
+                guard t.state == "completed" || t.state == "cancelled" || finalFailure else { return }
+            } catch let e as SharedFetch.Failure where e.status == 404 {
+                continue
+            } catch {
+                return // Transient: keep following.
+            }
         }
+        FollowedTasks.remove(id)
     }
 
     // MARK: - Apply

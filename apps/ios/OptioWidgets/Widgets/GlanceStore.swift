@@ -1,16 +1,16 @@
 import Foundation
 import WidgetKit
 
-/// Extension-side persistence in App Group defaults: the last good snapshot (so an
-/// offline reload renders stale-with-asOf instead of blank), local snoozes written by
-/// `LaterIntent`, and the Run widget's armed/started timestamps.
+/// Extension-side persistence in App Group defaults: the last good snapshot per
+/// server (so an offline reload renders stale-with-asOf instead of blank), local
+/// snoozes written by `LaterIntent`, and the Run widget's armed/started timestamps.
 enum GlanceStore {
     private static var defaults: UserDefaults { SharedCredentials.defaults }
 
     enum Keys {
-        static let snapshot = "optio.glance.snapshot"
-        static let tasks = "optio.glance.tasks"
-        static let unreachableSince = "optio.glance.unreachableSince"
+        static func snapshot(_ serverId: String) -> String { "optio.glance.snapshot.\(serverId)" }
+        static func tasks(_ serverId: String) -> String { "optio.glance.tasks.\(serverId)" }
+        static func unreachableSince(_ serverId: String) -> String { "optio.glance.unreachableSince.\(serverId)" }
         static func snoozed(_ id: String) -> String { "optio.snoozed.\(id)" }
         static func armed(_ id: String) -> String { "optio.run.armed.\(id)" }
         static func started(_ id: String) -> String { "optio.run.started.\(id)" }
@@ -19,22 +19,48 @@ enum GlanceStore {
     private static let encoder: JSONEncoder = { let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e }()
     private static let decoder: JSONDecoder = { let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d }()
 
-    // MARK: Snapshot cache
+    // MARK: Snapshot cache (per server)
 
-    static var cachedSnapshot: NeedsYouSnapshot? {
-        get { defaults.data(forKey: Keys.snapshot).flatMap { try? decoder.decode(NeedsYouSnapshot.self, from: $0) } }
-        set { defaults.set(newValue.flatMap { try? encoder.encode($0) }, forKey: Keys.snapshot) }
+    static func cachedSnapshot(for serverId: String) -> NeedsYouSnapshot? {
+        defaults.data(forKey: Keys.snapshot(serverId)).flatMap { try? decoder.decode(NeedsYouSnapshot.self, from: $0) }
     }
 
-    static var cachedTasks: [InFlightTask] {
-        get { defaults.data(forKey: Keys.tasks).flatMap { try? decoder.decode([InFlightTask].self, from: $0) } ?? [] }
-        set { defaults.set(try? encoder.encode(newValue), forKey: Keys.tasks) }
+    static func setCachedSnapshot(_ snapshot: NeedsYouSnapshot?, for serverId: String) {
+        defaults.set(snapshot.flatMap { try? encoder.encode($0) }, forKey: Keys.snapshot(serverId))
+    }
+
+    static func cachedTasks(for serverId: String) -> [InFlightTask] {
+        defaults.data(forKey: Keys.tasks(serverId)).flatMap { try? decoder.decode([InFlightTask].self, from: $0) } ?? []
+    }
+
+    static func setCachedTasks(_ tasks: [InFlightTask], for serverId: String) {
+        defaults.set(try? encoder.encode(tasks), forKey: Keys.tasks(serverId))
     }
 
     /// First failed reload after the last success; cleared on success.
-    static var unreachableSince: Date? {
-        get { defaults.object(forKey: Keys.unreachableSince) as? Date }
-        set { defaults.set(newValue, forKey: Keys.unreachableSince) }
+    static func unreachableSince(for serverId: String) -> Date? {
+        defaults.object(forKey: Keys.unreachableSince(serverId)) as? Date
+    }
+
+    static func setUnreachableSince(_ date: Date?, for serverId: String) {
+        defaults.set(date, forKey: Keys.unreachableSince(serverId))
+    }
+
+    /// Every paired server's last good snapshot merged (controls read this so they can
+    /// say "Quiet" without a network call).
+    static func mergedCachedSnapshot() -> NeedsYouSnapshot? {
+        var merged: NeedsYouSnapshot?
+        for server in ServerRegistry.configured {
+            guard let s = cachedSnapshot(for: server.id) else { continue }
+            if merged == nil { merged = s } else {
+                merged!.needsYou += s.needsYou
+                merged!.running += s.running
+                merged!.hostsOnline += s.hostsOnline
+                merged!.hostsTotal += s.hostsTotal
+                merged!.asOf = min(merged!.asOf, s.asOf)
+            }
+        }
+        return merged
     }
 
     // MARK: Snooze (Later)
@@ -68,6 +94,9 @@ struct InFlightTask: Codable, Hashable, Identifiable {
     var startedAt: Date?
     var updatedAt: Date?
     var createdAt: Date?
+    /// Set by the provider after decoding: which paired server the task came from.
+    var serverId: String?
+    var serverName: String?
 
     var since: Date { startedAt ?? updatedAt ?? createdAt ?? .distantPast }
     var branch: String { repoBranch ?? "" }

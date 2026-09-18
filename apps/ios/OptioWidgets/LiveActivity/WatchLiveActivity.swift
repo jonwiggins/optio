@@ -83,6 +83,28 @@ enum WatchCopy {
     }
 }
 
+/// "● MacBook" after the mono path when more than one server is paired, so the
+/// island says which laptop is asking. Nothing with a single server.
+struct WatchServerTag: View {
+    let item: WatchItem
+    var size: Font = .caption2
+
+    private var profile: ServerProfile? {
+        guard ServerRegistry.all.count > 1, let id = item.serverId else { return nil }
+        return ServerRegistry.profile(id)
+    }
+
+    var body: some View {
+        if let p = profile {
+            HStack(spacing: 3) {
+                Circle().fill(p.color.swiftUI).frame(width: 6, height: 6)
+                Text(p.shortName).font(size.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .accessibilityLabel("on \(p.name)")
+        }
+    }
+}
+
 /// Monospace path/branch/slug, truncating head-first so the leaf survives.
 struct MonoText: View {
     let text: String
@@ -185,7 +207,10 @@ struct WatchExpandedCenter: View {
             switch state.phase {
             case .waiting:
                 if let head = state.head {
-                    MonoText(text: head.mono)
+                    HStack(spacing: 6) {
+                        MonoText(text: head.mono)
+                        WatchServerTag(item: head)
+                    }
                     Text(head.preview ?? WatchCopy.reason(head))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -246,10 +271,10 @@ struct WatchButtons: View {
             HStack(spacing: 8) {
                 if state.phase == .waiting {
                     if WatchCopy.isAttentionTask(head) {
-                        Button(intent: ResumeTaskIntent(taskId: head.id)) { pill("Resume", prominent: true) }
+                        Button(intent: ResumeTaskIntent(taskId: head.id, serverId: head.serverId)) { pill("Resume", prominent: true) }
                             .buttonStyle(.plain)
                     } else if WatchCopy.isFailedTask(head) {
-                        Button(intent: RetryTaskIntent(taskId: head.id)) { pill("Retry", prominent: true) }
+                        Button(intent: RetryTaskIntent(taskId: head.id, serverId: head.serverId)) { pill("Retry", prominent: true) }
                             .buttonStyle(.plain)
                     }
                     if let url = URL(string: head.link) {
@@ -331,7 +356,10 @@ struct WatchLockScreenView: View {
         switch state.phase {
         case .waiting:
             if let head = state.head {
-                MonoText(text: head.mono, size: fullscreen ? .title2 : .body)
+                HStack(spacing: 6) {
+                    MonoText(text: head.mono, size: fullscreen ? .title2 : .body)
+                    WatchServerTag(item: head, size: fullscreen ? .footnote : .caption2)
+                }
                 if fullscreen {
                     Text(WatchCopy.reason(head)).font(.body).foregroundStyle(.secondary).lineLimit(1)
                 } else {

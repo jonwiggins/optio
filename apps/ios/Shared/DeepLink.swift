@@ -12,8 +12,13 @@ public enum DeepLink: Hashable, Sendable {
     case section(String)
 
     public static let scheme = "optio"
+    /// Query key carrying a `ServerProfile.id`; the app switches to that server before
+    /// routing, so a tap on one laptop's item lands there even when another is active.
+    public static let serverQuery = "server"
 
-    public var url: URL {
+    public var url: URL { url(server: nil) }
+
+    public func url(server: String?) -> URL {
         var c = URLComponents()
         c.scheme = Self.scheme
         switch self {
@@ -24,7 +29,13 @@ public enum DeepLink: Hashable, Sendable {
         case .needsYou: c.host = "needs-you"
         case .section(let name): c.host = "section"; c.path = "/\(name)"
         }
+        if let server { c.queryItems = (c.queryItems ?? []) + [URLQueryItem(name: Self.serverQuery, value: server)] }
         return c.url!
+    }
+
+    /// The `server=` hint on an `optio://` URL, if any.
+    public static func serverId(in url: URL) -> String? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == serverQuery }?.value
     }
 
     public init?(url: URL) {

@@ -27,6 +27,7 @@ struct InsightsHubView: View {
             }
             .navigationTitle("Insights")
             .hubChrome()
+            .serverSwitcherToolbar()
             .onAppear(perform: consumeRoute)
             .onChange(of: router.pendingSection) { _, _ in consumeRoute() }
         }

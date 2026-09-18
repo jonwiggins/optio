@@ -39,8 +39,10 @@ final class PushRegistrar {
     private weak var session: SessionStore?
     private var eventToken: EventHub.Subscription?
     private var lastKnownPhase: SessionStore.Phase?
-    /// Base URL + PAT used for the last successful POST, so sign-out can still DELETE.
-    private var registeredWith: (baseURL: URL, token: String)?
+    /// Base URL + PAT per server id used for the last successful POST there, so a
+    /// forgotten server can still be told to DELETE the device.
+    private var registeredWith: [String: (baseURL: URL, token: String)] = [:]
+    private var registryObserver: NSObjectProtocol?
     private var promptedForNeedsYou = false
 
     private enum Keys {
@@ -60,6 +62,16 @@ final class PushRegistrar {
         self.session = session
         IntentContext.session = session
         observePhase()
+        // Every paired server gets this device (each sends its own pushes); a server
+        // that is forgotten gets a DELETE with the credentials it was registered with.
+        registryObserver = NotificationCenter.default.addObserver(forName: ServerRegistry.changed, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                // Switching the active server changes nothing about who has this device;
+                // only a different set of paired servers needs a sync.
+                guard let self, Set(ServerRegistry.configured.map(\.id)) != Set(self.registeredWith.keys) else { return }
+                await self.syncDeviceIfPossible()
+            }
+        }
         Task { await refreshAuthorization() }
     }
 
@@ -226,32 +238,59 @@ final class PushRegistrar {
             deviceName: UIDevice.current.name)
     }
 
+    /// Registers this device with every paired server and unregisters from servers
+    /// that were forgotten since the last sync. `registration` reflects the active server.
     func syncDeviceIfPossible() async {
-        guard let session, session.phase == .signedIn, session.api.isConfigured,
-              let body = Self.currentRegistration else { return }
-        let api = session.api
-        do {
-            try await api.post("/api/notifications/devices", body: body)
-            registration = .registered
-            lastServerError = nil
-            if let base = api.baseURL, let tok = api.token { registeredWith = (base, tok) }
-        } catch let error as APIError where error.status == 404 {
-            registration = .tokenOnly(reason: "The server doesn't have a device registry yet — update Optio.")
-            lastServerError = nil
-        } catch {
-            registration = .tokenOnly(reason: "Couldn't reach the server to register this device.")
-            lastServerError = error.localizedDescription
+        guard let session, session.phase == .signedIn, let body = Self.currentRegistration else { return }
+        let servers = ServerRegistry.configured
+        let known = Set(servers.map(\.id))
+        for (id, creds) in registeredWith where !known.contains(id) {
+            await deleteDevice(from: creds)
+            registeredWith[id] = nil
+        }
+        let activeId = session.activeServer?.id
+        await withTaskGroup(of: (String, URL, String, Result<Void, Error>).self) { group in
+            for server in servers {
+                guard let token = ServerRegistry.token(for: server.id) else { continue }
+                let api = APIClient()
+                api.configure(baseURL: server.url, token: token, workspaceId: server.workspaceId)
+                group.addTask {
+                    do { try await api.post("/api/notifications/devices", body: body); return (server.id, server.url, token, .success(())) }
+                    catch { return (server.id, server.url, token, .failure(error)) }
+                }
+            }
+            for await (id, url, token, result) in group {
+                switch result {
+                case .success:
+                    registeredWith[id] = (url, token)
+                    if id == activeId { registration = .registered; lastServerError = nil }
+                case .failure(let error as APIError) where error.status == 404:
+                    if id == activeId {
+                        registration = .tokenOnly(reason: "The server doesn't have a device registry yet — update Optio.")
+                        lastServerError = nil
+                    }
+                case .failure(let error):
+                    if id == activeId {
+                        registration = .tokenOnly(reason: "Couldn't reach the server to register this device.")
+                        lastServerError = error.localizedDescription
+                    }
+                }
+            }
         }
     }
 
-    /// `DELETE /api/notifications/devices/:token` with the credentials that
-    /// registered it (the session may already be cleared by the time we run).
+    /// `DELETE /api/notifications/devices/:token` on every server that registered it
+    /// (the session may already be cleared by the time we run).
     func unregisterFromServer() async {
         defer {
-            registeredWith = nil
+            registeredWith = [:]
             if registration == .registered { registration = .idle }
         }
-        guard let token = deviceToken, let creds = registeredWith else { return }
+        for creds in registeredWith.values { await deleteDevice(from: creds) }
+    }
+
+    private func deleteDevice(from creds: (baseURL: URL, token: String)) async {
+        guard let token = deviceToken else { return }
         var req = URLRequest(url: creds.baseURL.appending(path: "/api/notifications/devices/\(token)"))
         req.httpMethod = "DELETE"
         req.timeoutInterval = 10

@@ -110,7 +110,17 @@ struct SettingsView: View {
                         AppIconThumbnail(option: .current, size: 28)
                     }
                 }
-                MoreInfoRow(label: "Server", value: session.serverURL?.absoluteString ?? "—", mono: true)
+                if let active = session.activeServer {
+                    HStack(alignment: .top) {
+                        Text("Server").foregroundStyle(.secondary)
+                        Spacer(minLength: 12)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            HStack(spacing: 6) { ServerDot(color: active.color); Text(active.name) }
+                            Text(active.url.absoluteString).font(.footnote.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                        .multilineTextAlignment(.trailing)
+                    }
+                }
                 MoreInfoRow(label: "Version", value: appVersion)
                 if let ws = context.workspaceId { MoreInfoRow(label: "Workspace", value: ws, mono: true) }
                 Button(role: .destructive) { showSignOutConfirm = true } label: {

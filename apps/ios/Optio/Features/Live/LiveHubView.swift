@@ -23,6 +23,7 @@ struct LiveHubView: View {
             }
             .navigationTitle("Live")
             .hubChrome()
+            .serverSwitcherToolbar()
             .navigationDestination(for: AppRouter.PendingDetail.self) { detail in
                 switch detail.kind {
                 case .local: LocalTerminalScreen(terminalId: detail.id, focusComposer: detail.compose)
