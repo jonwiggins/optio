@@ -4,11 +4,21 @@ import Observation
 /// The signed-in user as returned by `GET /api/auth/me`.
 struct CurrentUser: Codable, Hashable, Sendable {
     var id: String
+    var provider: String?
     var email: String?
     var displayName: String?
     var avatarUrl: String?
-    var role: String?
     var workspaceId: String?
+    /// Role in the current workspace (`workspaceRole` on the wire): admin / member / viewer.
+    var role: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, provider, email, displayName, avatarUrl, workspaceId
+        case role = "workspaceRole"
+    }
+
+    var isAdmin: Bool { role == "admin" }
+    var canMutate: Bool { role == "admin" || role == "member" }
 }
 
 /// Owns the server URL, the Personal Access Token, and the current user.

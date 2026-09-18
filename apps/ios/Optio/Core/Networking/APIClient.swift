@@ -29,7 +29,7 @@ final class APIClient: @unchecked Sendable {
     init(session: URLSession = .shared) {
         self.session = session
         decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom(Self.decodeDate)
+        decoder.dateDecodingStrategy = .custom { try Self.decodeDate($0) }
         encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
     }
