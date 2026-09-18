@@ -23,6 +23,9 @@ interface AccountUsage {
   fiveHour?: Bucket;
   sevenDay?: Bucket;
   error?: string;
+  /** Last good numbers, served because the latest upstream read failed. */
+  stale?: boolean;
+  asOf?: string;
 }
 
 const POLL_MS = 60_000;
@@ -80,6 +83,16 @@ function useAccountUsage(): AccountUsage | null {
     };
   }, []);
   return usage;
+}
+
+/** Coarse "how old are these numbers" for the stale note. */
+export function staleAge(asOf: string, now = Date.now()): string {
+  const mins = Math.max(0, Math.round((now - Date.parse(asOf)) / 60_000));
+  if (mins < 1) return "under a minute";
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 export function pctTone(pct: number): string {
@@ -167,16 +180,25 @@ export function AccountUsagePill({
           </span>
         );
       })}
-      <span className="block mt-1 text-[10px] text-text-muted/70">
-        Account-wide, refreshed every few minutes
-      </span>
+      {usage.stale ? (
+        <span className="block mt-1 text-[10px] text-warning/90">
+          Last known values{usage.asOf ? ` from ${staleAge(usage.asOf)} ago` : ""} — the latest read
+          failed ({usage.error ?? "unavailable"}); retrying automatically
+        </span>
+      ) : (
+        <span className="block mt-1 text-[10px] text-text-muted/70">
+          Account-wide, refreshed every few minutes
+        </span>
+      )}
     </>
   );
   return (
     <HoverCard content={card} className={className} interactive>
       <span
+        title={usage.stale ? "Showing last known usage — the latest read failed" : undefined}
         className={cn(
           "inline-flex items-center gap-1.5 @2xl:gap-2 h-6 px-1.5 @2xl:px-2 rounded-md border text-[11px] font-mono shrink-0",
+          usage.stale && "opacity-60 border-dashed",
           worst >= 95
             ? "border-error/40 bg-error/10"
             : worst >= 80

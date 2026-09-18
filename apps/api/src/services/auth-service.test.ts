@@ -175,3 +175,117 @@ describe("getClaudeUsage — auth failure handling", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("getClaudeUsage — rate limits and transient failures", () => {
+  let originalFetch: typeof globalThis.fetch;
+  const good = {
+    ok: true,
+    status: 200,
+    json: () =>
+      Promise.resolve({
+        five_hour: { utilization: 42, resets_at: "2026-09-18T20:00:00Z" },
+        seven_day: { utilization: 10, resets_at: null },
+      }),
+  };
+  const rateLimited = (retryAfter?: string) => ({
+    ok: false,
+    status: 429,
+    headers: { get: (k: string) => (k === "retry-after" ? (retryAfter ?? null) : null) },
+    text: () => Promise.resolve("Rate limited"),
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-18T17:00:00Z"));
+    invalidateUsageCache();
+    originalFetch = globalThis.fetch;
+    mockedRetrieveSecret.mockResolvedValue("test-oauth-token");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+  });
+
+  it("backs off after a 429 instead of going upstream on every poll", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(rateLimited());
+    globalThis.fetch = fetchMock;
+
+    const first = await getClaudeUsage();
+    expect(first).toEqual({ available: false, error: "Usage API returned 429" });
+
+    // Every poll inside the backoff window is answered from memory.
+    for (let i = 0; i < 5; i++) await getClaudeUsage();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(61_000);
+    await getClaudeUsage();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("honors Retry-After for the backoff window", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(rateLimited("300"));
+    globalThis.fetch = fetchMock;
+    await getClaudeUsage();
+    vi.advanceTimersByTime(200_000);
+    await getClaudeUsage();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(101_000);
+    await getClaudeUsage();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("serves the last good numbers flagged stale while a refresh fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(good);
+    globalThis.fetch = fetchMock;
+    const ok = await getClaudeUsage();
+    expect(ok.available).toBe(true);
+    expect(ok.fiveHour?.utilization).toBe(42);
+    expect(ok.stale).toBeUndefined();
+
+    // Cache expires; the refresh is rate-limited.
+    vi.advanceTimersByTime(5 * 60_000 + 1);
+    fetchMock.mockResolvedValue(rateLimited());
+    const stale = await getClaudeUsage();
+    expect(stale.available).toBe(true);
+    expect(stale.stale).toBe(true);
+    expect(stale.fiveHour?.utilization).toBe(42);
+    expect(stale.error).toBe("Usage API returned 429");
+    expect(stale.asOf).toBe("2026-09-18T17:00:00.000Z");
+
+    // Backoff elapses, upstream recovers: fresh numbers, no stale flag.
+    vi.advanceTimersByTime(61_000);
+    fetchMock.mockResolvedValue(good);
+    const fresh = await getClaudeUsage();
+    expect(fresh.stale).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not serve stale numbers after an auth failure", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(good);
+    globalThis.fetch = fetchMock;
+    await getClaudeUsage();
+    vi.advanceTimersByTime(5 * 60_000 + 1);
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: { get: () => null },
+      text: () => Promise.resolve("Unauthorized"),
+    });
+    const result = await getClaudeUsage();
+    expect(result.available).toBe(false);
+    expect(result.stale).toBeUndefined();
+  });
+
+  it("backs off on network errors too", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+    globalThis.fetch = fetchMock;
+    expect(await getClaudeUsage()).toEqual({
+      available: false,
+      error: "Failed to reach usage API",
+    });
+    await getClaudeUsage();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

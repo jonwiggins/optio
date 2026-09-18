@@ -146,6 +146,8 @@ export function invalidateCredentialsCache(): void {
 export function invalidateUsageCache(): void {
   cachedUsage = null;
   usageCacheTime = 0;
+  lastGoodUsage = null;
+  usageBackoffUntil = 0;
 }
 
 // --- Claude Max usage tracking ---
@@ -170,11 +172,46 @@ export interface ClaudeUsageResult {
   sevenDayOpus?: UsageBucket;
   extraUsage?: ExtraUsage;
   error?: string;
+  /** True when this is the last successful read, served because a refresh just failed. */
+  stale?: boolean;
+  /** ISO time of the read that produced the numbers (set when `stale`). */
+  asOf?: string;
 }
 
 let cachedUsage: ClaudeUsageResult | null = null;
 let usageCacheTime = 0;
 const USAGE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — endpoint is aggressively rate-limited
+
+/**
+ * Failure handling. The upstream endpoint rate-limits per token, and every
+ * open terminal header + the overview poll this route. If a failed read
+ * were not cached, each poll would go upstream again and keep the token
+ * rate-limited indefinitely (observed: continuous 429s after a restart
+ * dropped the in-memory cache). So a failure backs off — for `Retry-After`
+ * when given, else a minute — and meanwhile the last good numbers are
+ * served flagged `stale` so the UI dims rather than hides them.
+ */
+let lastGoodUsage: ClaudeUsageResult | null = null;
+let usageBackoffUntil = 0;
+let lastUsageError: string | null = null;
+const USAGE_FAILURE_BACKOFF_MS = 60 * 1000;
+const USAGE_FAILURE_BACKOFF_MAX_MS = 15 * 60 * 1000;
+
+function retryAfterMs(res: Response): number | null {
+  const raw = res.headers?.get?.("retry-after");
+  if (!raw) return null;
+  const secs = Number(raw);
+  if (Number.isFinite(secs) && secs >= 0) return secs * 1000;
+  const at = Date.parse(raw);
+  return Number.isNaN(at) ? null : Math.max(0, at - Date.now());
+}
+
+function usageFailure(error: string, backoffMs: number): ClaudeUsageResult {
+  lastUsageError = error;
+  usageBackoffUntil = Date.now() + Math.min(backoffMs, USAGE_FAILURE_BACKOFF_MAX_MS);
+  if (lastGoodUsage) return { ...lastGoodUsage, stale: true, error };
+  return { available: false, error };
+}
 
 function mapBucket(
   raw: { utilization: number | null; resets_at: string | null } | null,
@@ -187,6 +224,10 @@ export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
   const now = Date.now();
   if (cachedUsage && now - usageCacheTime < USAGE_CACHE_TTL_MS) {
     return cachedUsage;
+  }
+  if (now < usageBackoffUntil) {
+    const error = lastUsageError ?? "Usage API unavailable";
+    return lastGoodUsage ? { ...lastGoodUsage, stale: true, error } : { available: false, error };
   }
 
   // Try Keychain/file first (local dev), then secrets store (k8s oauth-token mode)
@@ -239,9 +280,13 @@ export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
           // non-fatal — best-effort notification
         }
         invalidateUsageCache();
+        return { available: false, error: errorMsg };
       }
 
-      return { available: false, error: `Usage API returned ${res.status}` };
+      return usageFailure(
+        `Usage API returned ${res.status}`,
+        retryAfterMs(res) ?? USAGE_FAILURE_BACKOFF_MS,
+      );
     }
 
     const data = await res.json();
@@ -261,11 +306,15 @@ export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
         : undefined,
     };
 
+    result.asOf = new Date(now).toISOString();
     cachedUsage = result;
     usageCacheTime = now;
+    lastGoodUsage = result;
+    lastUsageError = null;
+    usageBackoffUntil = 0;
     return result;
   } catch (err) {
     logger.warn({ err }, "Error fetching Claude usage");
-    return { available: false, error: "Failed to reach usage API" };
+    return usageFailure("Failed to reach usage API", USAGE_FAILURE_BACKOFF_MS);
   }
 }
