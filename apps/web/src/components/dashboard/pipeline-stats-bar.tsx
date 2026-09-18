@@ -11,8 +11,15 @@ import {
   Moon,
   Archive,
   XCircle,
+  Server,
 } from "lucide-react";
-import type { TaskStats, StandaloneStats, PersistentAgentStats, SessionStats } from "./types.js";
+import type {
+  TaskStats,
+  StandaloneStats,
+  PersistentAgentStats,
+  SessionStats,
+  LocalStats,
+} from "./types.js";
 
 export type Stage = {
   key: string;
@@ -203,11 +210,58 @@ function sessionStages(stats: SessionStats | null): Stage[] {
   ];
 }
 
+function localStages(stats: LocalStats | null): Stage[] {
+  const hosts = stats?.hosts ?? 0;
+  return [
+    {
+      key: "needs_you",
+      label: "Needs you",
+      value: stats?.needsYou ?? 0,
+      icon: AlertTriangle,
+      color: "var(--color-warning)",
+      href: "/local?state=needs_you",
+    },
+    {
+      key: "working",
+      label: "Working",
+      value: stats?.working ?? 0,
+      icon: Activity,
+      color: "var(--color-success)",
+      href: "/local?state=active",
+    },
+    {
+      key: "idle",
+      label: "Idle",
+      value: stats?.idle ?? 0,
+      icon: Pause,
+      color: "var(--color-text-muted)",
+      href: "/local",
+    },
+    {
+      key: "finished",
+      label: "Finished",
+      value: stats?.finished ?? 0,
+      icon: CheckCircle,
+      color: "var(--color-text-muted)",
+      href: "/local?state=exited",
+    },
+    {
+      key: "hosts",
+      label: hosts === 1 ? "Host online" : `of ${hosts} hosts online`,
+      value: stats?.hostsOnline ?? 0,
+      icon: Server,
+      color: (stats?.hostsOnline ?? 0) > 0 ? "var(--color-success)" : "var(--color-error)",
+      href: "/local",
+    },
+  ];
+}
+
 type PipelineStatsBarProps =
   | { variant?: "tasks"; taskStats: TaskStats | null }
   | { variant: "standalone"; standaloneStats: StandaloneStats | null }
   | { variant: "agents"; agentStats: PersistentAgentStats | null }
-  | { variant: "sessions"; sessionStats: SessionStats | null };
+  | { variant: "sessions"; sessionStats: SessionStats | null }
+  | { variant: "local"; localStats: LocalStats | null };
 
 export function PipelineStatsBar(props: PipelineStatsBarProps) {
   let stages: Stage[];
@@ -220,6 +274,9 @@ export function PipelineStatsBar(props: PipelineStatsBarProps) {
       break;
     case "sessions":
       stages = sessionStages(props.sessionStats);
+      break;
+    case "local":
+      stages = localStages(props.localStats);
       break;
     default:
       stages = taskStages(props.taskStats);

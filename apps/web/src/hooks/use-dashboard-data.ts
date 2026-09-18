@@ -27,6 +27,9 @@ export function useDashboardData() {
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [metricsAvailable, setMetricsAvailable] = useState<boolean | null>(null);
   const [metricsHistory, setMetricsHistory] = useState<MetricsHistoryPoint[]>([]);
+  const [localTerminals, setLocalTerminals] = useState<any[]>([]);
+  const [localHosts, setLocalHosts] = useState<any[]>([]);
+  const [attentionTasks, setAttentionTasks] = useState<any[]>([]);
 
   const refresh = useCallback(() => {
     Promise.all([
@@ -40,6 +43,9 @@ export function useDashboardData() {
       api.getJobStats().catch(() => null),
       api.getPersistentAgentStats().catch(() => null),
       api.getSessionStats().catch(() => null),
+      api.listLocalTerminals().catch(() => ({ terminals: [] })),
+      api.listLocalHosts().catch(() => ({ hosts: [] })),
+      api.listTasks({ state: "needs_attention", limit: 6 }).catch(() => ({ tasks: [] })),
     ])
       .then(
         ([
@@ -51,6 +57,9 @@ export function useDashboardData() {
           jobStatsRes,
           agentStatsRes,
           sessionStatsRes,
+          localTerminalsRes,
+          localHostsRes,
+          attentionRes,
         ]) => {
           setActiveSessions(sessionsRes.sessions);
           setActiveSessionCount(sessionsRes.activeCount);
@@ -58,6 +67,9 @@ export function useDashboardData() {
           setStandaloneStats(jobStatsRes?.stats ?? null);
           setAgentStats(agentStatsRes?.stats ?? null);
           setSessionStats(sessionStatsRes?.stats ?? null);
+          setLocalTerminals(localTerminalsRes.terminals ?? []);
+          setLocalHosts(localHostsRes.hosts ?? []);
+          setAttentionTasks(attentionRes.tasks ?? []);
           setRecentTasks(tasksRes.tasks);
           setRepoCount(reposRes.repos.length);
           if (clusterRes) {
@@ -156,6 +168,9 @@ export function useDashboardData() {
     usage,
     metricsAvailable,
     metricsHistory,
+    localTerminals,
+    localHosts,
+    attentionTasks,
     refresh,
     refreshUsage,
   };

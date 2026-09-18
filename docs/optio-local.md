@@ -216,6 +216,15 @@ eliminates the classic "pasted JSON swallowed as control" bug):
 - Issues page (`/issues`) gains **"Work on locally"** next to "Assign to Optio" when an
   online host advertises a dir whose `repoUrl` matches the issue's repo.
 - Sidebar: **Local** under the "Live" group.
+- **Overview (`/`)**: the dashboard opens with a cross-concept **Needs you** strip (local
+  terminals waiting on you + repo tasks in `needs_attention`, oldest wait first —
+  `components/dashboard/needs-you.tsx`), then one stats strip per concept. **Local** gets
+  the same strip as the others (needs you / working / idle / finished / hosts online,
+  `variant="local"`) plus cards for live terminals and anything finished in the last 24 h.
+  A concept with nothing live folds into the single **Quiet** line (`quiet-sections.tsx`)
+  so the page is only as tall as what's happening; roll-up rules live in
+  `components/dashboard/local-stats.ts`. A paired host with an open terminal counts as
+  "started" — the welcome hero no longer shows just because there are zero repo tasks.
 
 ## CLI
 
