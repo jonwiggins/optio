@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import {
   Bot,
   Layers,
@@ -198,6 +199,8 @@ export function TerminalCard({
           </span>
         )}
       </div>
+
+      <WorkLinkBadges links={collectWorkLinks(terminal)} size="xs" max={4} />
 
       {terminal.preview && (
         <pre className="font-mono text-[10px] leading-4 max-h-24 overflow-hidden whitespace-pre-wrap break-all text-text-muted/70 bg-bg/60 rounded p-2 border border-border/50">

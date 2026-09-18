@@ -8,17 +8,7 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
-import {
-  ArrowLeft,
-  ExternalLink,
-  Loader2,
-  Play,
-  Server,
-  Terminal,
-  Ticket,
-  Trash2,
-  XCircle,
-} from "lucide-react";
+import { ArrowLeft, Loader2, Play, Server, Terminal, Trash2, XCircle } from "lucide-react";
 import {
   LocalStateBadge,
   SpawnSourceBadge,
@@ -26,6 +16,7 @@ import {
   dirTail,
 } from "@/components/local/terminal-card";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { collectWorkLinks, WorkLinkBadges } from "@/components/local/work-links";
 
 const LocalTerminal = dynamic(
   () => import("@/components/local/local-terminal").then((m) => m.LocalTerminal),
@@ -212,19 +203,7 @@ export default function LocalTerminalPage({ params }: { params: Promise<{ id: st
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {terminal.ticketUrl && (
-              <a
-                href={terminal.ticketUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border bg-bg-card text-xs text-text-muted hover:text-text hover:border-primary/30 transition-colors"
-              >
-                <Ticket className="w-3.5 h-3.5" />
-                {terminal.ticketSource ?? "ticket"}
-                {terminal.ticketExternalId ? ` #${terminal.ticketExternalId}` : ""}
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            )}
+            <WorkLinkBadges links={collectWorkLinks(terminal)} max={4} />
             {canStart && (
               <button
                 onClick={handleStart}

@@ -60,6 +60,16 @@ export const LocalTerminalSchema = z
     ticketExternalId: z.string().nullable(),
     ticketUrl: z.string().nullable(),
     preview: z.string().nullable(),
+    links: z
+      .array(
+        z.object({
+          url: z.string(),
+          kind: z.enum(["pr", "issue"]),
+          provider: z.enum(["github", "gitlab", "linear", "jira"]),
+          label: z.string(),
+        }),
+      )
+      .describe("PR / ticket links seen in the output"),
     costUsd: z.string().nullable(),
     lastActivityAt: z.date().nullable(),
     createdAt: z.date(),

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn, formatDuration } from "@/lib/utils";
@@ -14,6 +15,7 @@ import { Loader2, MonitorSmartphone, Plus, Search, Terminal } from "lucide-react
 import { TerminalCard, attentionLabel } from "@/components/local/terminal-card";
 import { NewTerminalDialog } from "@/components/local/new-terminal-dialog";
 import { BlueprintsSection } from "@/components/local/blueprints-section";
+import { collectWorkLinks, workLinksSearchText } from "@/components/local/work-links";
 
 type StateFilter = "all" | "active" | "needs_you" | "exited";
 
@@ -26,6 +28,16 @@ export default function LocalPage() {
   const [terminals, setTerminals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewDialog, setShowNewDialog] = useState(false);
+  // The session rail links here with ?new=1 to open the dialog directly.
+  // (window.location rather than useSearchParams: the latter forces a
+  // Suspense boundary for static prerendering of this client page.)
+  const router = useRouter();
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") === "1") {
+      setShowNewDialog(true);
+      router.replace("/local");
+    }
+  }, [router]);
 
   const [hostFilter, setHostFilter] = useState("");
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
@@ -109,7 +121,11 @@ export default function LocalPage() {
       if (stateFilter === "active" && !ACTIVE_STATES.includes(t.state)) return false;
       if (stateFilter === "needs_you" && t.attentionState !== "needs_you") return false;
       if (stateFilter === "exited" && t.state !== "exited" && t.state !== "error") return false;
-      if (q && !`${t.title} ${t.dir}`.toLowerCase().includes(q)) return false;
+      if (
+        q &&
+        !`${t.title} ${t.dir} ${workLinksSearchText(collectWorkLinks(t))}`.toLowerCase().includes(q)
+      )
+        return false;
       return true;
     });
   }, [terminals, hostFilter, stateFilter, search]);
@@ -284,7 +300,7 @@ export default function LocalPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search title or dir…"
+                placeholder="Search title, dir, PR, ticket…"
                 className="pl-8 pr-3 py-1.5 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary w-56"
               />
             </div>

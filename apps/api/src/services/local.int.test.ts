@@ -25,6 +25,7 @@ import {
   getTerminal,
   handleAttention,
   handleExit,
+  handleLinks,
   handleSpawnError,
   handleStarted,
   killTerminal,
@@ -320,6 +321,40 @@ describe("local terminals", () => {
     // ...and now deletable.
     await deleteTerminal(row!);
     expect(await getTerminal(t.id)).toBeNull();
+  });
+});
+
+describe("local terminal links", () => {
+  it("persists sanitized daemon links, scoped to the owning host", async () => {
+    const host = await makeHost();
+    const other = await makeHost("it-links-other");
+    const socket = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, host.userId, socket);
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "shell" },
+    });
+    const good = {
+      url: "https://github.com/acme/optio/pull/7",
+      kind: "pr",
+      provider: "github",
+      label: "acme/optio#7",
+    };
+    await handleLinks(host.id, t.id, [
+      good,
+      { url: "javascript:alert(1)", kind: "pr", provider: "github", label: "x" },
+      { url: "https://github.com/acme/optio/pull/7", kind: "pr", provider: "github", label: "dup" },
+      { url: "https://linear.app/a/issue/ENG-1", kind: "issue", provider: "nope", label: "ENG-1" },
+      "garbage",
+    ]);
+    expect((await getTerminal(t.id))!.links).toEqual([good]);
+
+    // Another host can't rewrite them.
+    await handleLinks(other.id, t.id, []);
+    expect((await getTerminal(t.id))!.links).toEqual([good]);
   });
 });
 

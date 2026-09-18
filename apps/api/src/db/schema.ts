@@ -1546,6 +1546,18 @@ export const localTerminals = pgTable(
     ticketExternalId: text("ticket_external_id"),
     ticketUrl: text("ticket_url"),
     preview: text("preview"),
+    // PR / ticket links the daemon extracted from the output, first-seen order.
+    links: jsonb("links")
+      .$type<
+        Array<{
+          url: string;
+          kind: "pr" | "issue";
+          provider: "github" | "gitlab" | "linear" | "jira";
+          label: string;
+        }>
+      >()
+      .notNull()
+      .default([]),
     costUsd: text("cost_usd"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

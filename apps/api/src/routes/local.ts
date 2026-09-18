@@ -363,9 +363,11 @@ export async function localRoutes(rawApp: FastifyInstance) {
         summary: "Kill a running terminal",
         tags: ["Local"],
         params: z.object({ id: z.string().uuid() }),
+        // nullish: a bodiless POST reaches the validator as null, not undefined,
+        // so .default({}) alone would 400 every curl/CLI kill without a body.
         body: z
           .object({ signal: z.enum(["SIGTERM", "SIGINT", "SIGKILL", "SIGHUP"]).optional() })
-          .default({}),
+          .nullish(),
         response: { 200: EmptyResponseSchema, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
       },
     },
@@ -375,7 +377,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Terminal not found" });
       }
       try {
-        await terminalService.killTerminal(terminal, req.body.signal);
+        await terminalService.killTerminal(terminal, req.body?.signal);
         reply.send({});
       } catch (err) {
         reply.status(409).send({ error: err instanceof Error ? err.message : String(err) });
@@ -559,7 +561,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
         summary: "Spawn a terminal from a blueprint",
         tags: ["Local"],
         params: z.object({ id: z.string().uuid() }),
-        body: z.object({ params: z.record(z.unknown()).optional() }).default({}),
+        body: z.object({ params: z.record(z.unknown()).optional() }).nullish(),
         response: { 201: TerminalResponse, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
       },
     },
@@ -570,7 +572,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
       }
       try {
         const terminal = await blueprintService.spawnFromBlueprint(blueprint, {
-          params: req.body.params,
+          params: req.body?.params,
           spawnedBy: "blueprint",
         });
         reply.status(201).send({ terminal });

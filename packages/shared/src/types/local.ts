@@ -1,6 +1,8 @@
 // Optio Local — terminals on a user's own machine, managed via the daemon
 // (`optio local up`). See docs/optio-local.md for the full protocol.
 
+import type { WorkLink } from "../utils/extract-work-links.js";
+
 export type LocalHostState = "online" | "offline";
 
 export interface LocalHostDir {
@@ -68,6 +70,8 @@ export interface LocalTerminal {
   ticketExternalId: string | null;
   ticketUrl: string | null;
   preview: string | null;
+  /** PR / ticket links the daemon spotted in the output (first-seen order). */
+  links: WorkLink[];
   costUsd: string | null;
   lastActivityAt: string | null;
   createdAt: string;
@@ -127,6 +131,7 @@ export type LocalDaemonMessage =
   | { type: "attach-error"; terminalId: string; attachId: string; message: string }
   | { type: "attention"; terminalId: string; state: LocalAttentionState; reason: string }
   | { type: "preview"; terminalId: string; preview: string; lastActivityAt: string }
+  | { type: "links"; terminalId: string; links: WorkLink[] }
   | { type: "exit"; terminalId: string; exitCode: number | null }
   | { type: "ping" };
 

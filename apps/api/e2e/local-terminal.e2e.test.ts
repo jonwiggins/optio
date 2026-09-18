@@ -243,6 +243,32 @@ describe("optio local e2e", () => {
     );
   });
 
+  it("accepts a bodiless kill (curl / CLI callers send no JSON body)", async () => {
+    const hostId = await registerHost("e2e-bare-kill");
+    const daemon = new FakeDaemon();
+    await daemon.connect(hostId, DIRS);
+    try {
+      const created = await api<TerminalBody>("/api/local/terminals", {
+        method: "POST",
+        body: JSON.stringify({ hostId, dir: "/tmp/e2e-repo", spec: { kind: "shell" } }),
+      });
+      expect(created.status).toBe(201);
+      const id = created.body.terminal.id;
+      await daemon.next((m) => m.type === "spawn" && m.terminalId === id);
+      daemon.send({ type: "started", terminalId: id });
+      await waitFor(async () => (await getTerminal(id)).state === "running");
+
+      const res = await fetch(`${server.baseUrl}/api/local/terminals/${id}/kill`, {
+        method: "POST",
+      });
+      expect(res.status).toBe(200);
+      const kill = await daemon.next((m) => m.type === "kill" && m.terminalId === id);
+      expect(kill.signal).toBeUndefined();
+    } finally {
+      daemon.close();
+    }
+  });
+
   it("parks spawns while offline and flushes them on daemon connect", async () => {
     const hostId = await registerHost("e2e-parked");
 

@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { Sidebar } from "./sidebar";
+import { TerminalRail } from "@/components/local/terminal-rail";
 import { GlobalWebSocketProvider } from "./ws-provider";
 import { SetupCheck } from "./setup-check";
 import { ThemeProvider } from "./theme-provider";
@@ -15,6 +17,9 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isSetup = pathname === "/setup";
   const isLogin = pathname === "/login";
+  // Inside a local terminal the sidebar becomes the session rail, so jumping
+  // between many terminals never leaves the terminal view.
+  const inLocalTerminal = /^\/local\/[^/]+$/.test(pathname);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
@@ -35,7 +40,19 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 onClick={() => setSidebarOpen(false)}
               />
             )}
-            <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+            {inLocalTerminal ? (
+              <aside
+                className={cn(
+                  "w-60 shrink-0 border-r border-border/50 glass-sidebar flex flex-col",
+                  "fixed inset-y-0 left-0 z-30 transition-transform duration-200 md:static md:translate-x-0",
+                  sidebarOpen ? "translate-x-0" : "-translate-x-full",
+                )}
+              >
+                <TerminalRail onNavigate={() => setSidebarOpen(false)} />
+              </aside>
+            ) : (
+              <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+            )}
             <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
               {/* Mobile header */}
               <div className="md:hidden shrink-0 flex items-center gap-3 px-4 py-3 border-b border-border bg-bg-card">

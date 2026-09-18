@@ -122,6 +122,12 @@ Daemon → server:
   viewer's attach; `{type:"attach-error", terminalId, attachId, message}` when unknown
 - `{type:"attention", terminalId, state, reason}`
 - `{type:"preview", terminalId, preview, lastActivityAt}` — throttled (≥2 s)
+- `{type:"links", terminalId, links:[{url, kind:"pr"|"issue", provider, label}]}` — PR /
+  ticket links found anywhere in the scrollback ring (`extractWorkLinks` in
+  `@optio/shared`: GitHub PRs/issues, GitLab MRs/issues, Linear, Jira; hard-wrapped URLs
+  are healed). Rides the preview throttle, sent only when the set changes; the server
+  sanitizes (https only, known kinds/providers, ≤50) and stores it in
+  `local_terminals.links`
 - `{type:"exit", terminalId, exitCode}`
 - `{type:"ping"}` every 30 s (server updates `lastSeenAt`, replies `{type:"pong"}`)
 
@@ -154,7 +160,16 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   New Terminal dialog, Blueprints section, empty-state onboarding (`optio login` →
   `optio local up`).
 - `/local/[id]` — focus view: full xterm.js terminal + header (title, host, dir, state,
-  attention, ticket link, Kill / Start / Delete).
+  attention, PR / ticket badges, Kill / Start / Delete). Inside a terminal the app sidebar
+  is replaced by the **session rail** (`components/local/terminal-rail.tsx`): every
+  terminal grouped as Needs you (oldest wait first) / Working / Idle / Finished, searchable
+  by title, dir, host, or PR / ticket, with badges per row. Keyboard, captured before
+  xterm: `Ctrl/⌘+Shift+↑/↓` previous / next session, `Ctrl/⌘+Shift+↵` jump to the oldest
+  "needs you" session.
+- **Work-link badges** (`components/local/work-links.tsx`) — the daemon-scanned PR / ticket
+  links (plus the spawning ticket) render as badges on cockpit cards, the focus header,
+  and rail rows; each opens in a new tab. The cockpit and rail searches match badge labels
+  and URLs, so a session is findable by the PR or ticket it's working on.
 - Issues page (`/issues`) gains **"Work on locally"** next to "Assign to Optio" when an
   online host advertises a dir whose `repoUrl` matches the issue's repo.
 - Sidebar: **Local** under the "Live" group.

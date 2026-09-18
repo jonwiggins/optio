@@ -12,6 +12,8 @@ import {
   LOCAL_DEFAULT_COLS,
   LOCAL_DEFAULT_ROWS,
   LOCAL_LAUNCH_TIMEOUT_MS,
+  MAX_WORK_LINKS,
+  type WorkLink,
   type LocalAttentionState,
   type LocalDaemonTerminalSync,
   type LocalSpawnSource,
@@ -377,6 +379,55 @@ export async function handlePreview(
     .where(and(eq(localTerminals.id, terminalId), eq(localTerminals.hostId, hostId)));
   // Previews are wall-view sugar — no nudge per preview (they're throttled
   // daemon-side but would still swamp the events channel across terminals).
+}
+
+const LINK_KINDS = new Set(["pr", "issue"]);
+const LINK_PROVIDERS = new Set(["github", "gitlab", "linear", "jira"]);
+
+/** Validate a daemon-supplied link list: https URLs only, known kinds/providers, capped. */
+export function sanitizeWorkLinks(input: unknown): WorkLink[] {
+  if (!Array.isArray(input)) return [];
+  const out: WorkLink[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    if (!raw || typeof raw !== "object") continue;
+    const l = raw as Record<string, unknown>;
+    if (
+      typeof l.url !== "string" ||
+      !/^https:\/\/[^\s"'<>]{1,500}$/.test(l.url) ||
+      typeof l.label !== "string" ||
+      !LINK_KINDS.has(String(l.kind)) ||
+      !LINK_PROVIDERS.has(String(l.provider)) ||
+      seen.has(l.url)
+    ) {
+      continue;
+    }
+    seen.add(l.url);
+    out.push({
+      url: l.url,
+      kind: l.kind as WorkLink["kind"],
+      provider: l.provider as WorkLink["provider"],
+      label: l.label.slice(0, 120),
+    });
+    if (out.length >= MAX_WORK_LINKS) break;
+  }
+  return out;
+}
+
+/** Daemon spotted a changed set of PR / ticket links in the output. */
+export async function handleLinks(
+  hostId: string,
+  terminalId: string,
+  links: unknown,
+): Promise<void> {
+  const clean = sanitizeWorkLinks(links);
+  const [row] = await db
+    .update(localTerminals)
+    .set({ links: clean, updatedAt: new Date() })
+    .where(and(eq(localTerminals.id, terminalId), eq(localTerminals.hostId, hostId)))
+    .returning();
+  // Links change the card, so (unlike previews) this nudges the cockpit.
+  if (row) await notifyChanged(row);
 }
 
 /**

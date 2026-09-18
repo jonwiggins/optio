@@ -5,13 +5,15 @@ import { dirname, join, sep } from "node:path";
 import {
   LOCAL_DEFAULT_COLS,
   LOCAL_DEFAULT_ROWS,
+  extractWorkLinks,
+  workLinksKey,
   type LocalDaemonMessage,
   type LocalDaemonTerminalSync,
   type LocalServerMessage,
 } from "@optio/shared";
 import type { AttentionTracker } from "./attention.js";
 import { buildAgentCommand } from "./agent-command.js";
-import { buildPreview } from "./preview.js";
+import { buildPreview, stripAnsi } from "./preview.js";
 import { RingBuffer } from "./ring-buffer.js";
 
 /**
@@ -35,6 +37,8 @@ interface ManagedTerminal {
   subscribed: boolean;
   previewTimer: NodeJS.Timeout | null;
   lastPreviewAt: number;
+  /** workLinksKey() of the last `links` frame sent, to emit only on change. */
+  lastLinksKey: string;
   killTimer: NodeJS.Timeout | null;
 }
 
@@ -108,6 +112,7 @@ export class TerminalManager {
         subscribed: false,
         previewTimer: null,
         lastPreviewAt: 0,
+        lastLinksKey: "",
         killTimer: null,
       };
       this.terminals.set(msg.terminalId, term);
@@ -281,6 +286,20 @@ export class TerminalManager {
       preview,
       lastActivityAt: new Date().toISOString(),
     });
+    this.emitLinks(term);
+  }
+
+  /**
+   * PR / ticket links seen anywhere in the scrollback ring (not just the
+   * preview tail — a PR URL printed ten minutes ago still identifies this
+   * session). Rides the preview throttle; sent only when the set changes.
+   */
+  private emitLinks(term: ManagedTerminal): void {
+    const links = extractWorkLinks(stripAnsi(term.ring.toBuffer().toString("utf-8")));
+    const key = workLinksKey(links);
+    if (key === term.lastLinksKey) return;
+    term.lastLinksKey = key;
+    this.opts.send({ type: "links", terminalId: term.terminalId, links });
   }
 
   /**
