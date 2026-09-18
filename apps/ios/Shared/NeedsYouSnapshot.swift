@@ -71,7 +71,10 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
         let (hosts, terms) = try await (hostsTask, termsTask)
         var needs: [WatchItem] = []
         var running: [WatchItem] = []
-        for t in terms.terminals where t.state == "running" && t.spec?.kind == "agent" {
+        // Agent terminals always count; a plain shell counts once the daemon has seen an
+        // agent in it (attention state set by Claude Code hooks / bell scanner).
+        for t in terms.terminals where t.state == "running"
+            && (t.spec?.kind == "agent" || t.attentionState == "working" || t.attentionState == "needs_you") {
             let since = t.attentionChangedAt ?? t.updatedAt ?? t.startedAt ?? .now
             let item = WatchItem(
                 kind: .local, id: t.id, title: t.title, mono: (t.dir as NSString).lastPathComponent,
