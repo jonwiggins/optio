@@ -107,3 +107,33 @@ qlmanage -t -s 1024 -o /tmp/icon Design/app-icon.svg
 sips -s format jpeg /tmp/icon/app-icon.svg.png --out /tmp/icon.jpg
 sips -s format png /tmp/icon.jpg --out Optio/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 ```
+
+### Dark and tinted appearances (iOS 18+)
+
+`AppIcon.appiconset/Contents.json` also declares a `dark` and a `tinted`
+luminosity variant, rendered from `Design/app-icon-dark.svg` and
+`Design/app-icon-tinted.svg`. Both are glyph-only on a **transparent**
+background (the system supplies the dark backing / the user's tint colour).
+Quick Look composites SVGs onto opaque white, so render these two with `sharp`
+(librsvg, already in the monorepo's pnpm store), which keeps the alpha channel:
+
+```bash
+cd ../..   # repo root
+SHARP=$(ls -d node_modules/.pnpm/sharp@*/node_modules/sharp | head -1)
+for v in dark tinted; do
+  node -e "require('./$SHARP')('apps/ios/Design/app-icon-$v.svg').resize(1024,1024).png()
+    .toFile('apps/ios/Optio/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-$v.png')"
+done
+```
+
+Only the light/default PNG must be opaque. Check the compiled catalog with
+`xcrun assetutil --info <Optio.app>/Assets.car | grep -i -B2 -A6 appearance`.
+
+### Alternate icons
+
+`Design/icons/<slug>.svg` are the user-selectable alternates (Settings → App →
+App icon), rendered with the same opaque recipe into
+`AppIcon-<Slug>.appiconset` (registered via
+`ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES` in `project.yml`) plus an
+`IconPreview-<Slug>.imageset` copy for the in-app thumbnails.
+`Design/icons/contact-sheet.png` shows them all at 120px.

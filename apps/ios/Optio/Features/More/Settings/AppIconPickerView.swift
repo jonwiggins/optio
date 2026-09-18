@@ -19,6 +19,7 @@ struct AppIconOption: Identifiable, Hashable {
         .init(assetName: "AppIcon-Sticker", name: "Sticker", story: "Peeled off a laptop lid and slapped on slightly crooked."),
         .init(assetName: "AppIcon-Retro", name: "Retro", story: "A 1983 monitor in a basement lab. Phosphor green and the hum."),
         .init(assetName: "AppIcon-Sunrise", name: "Sunrise", story: "It worked through the night. Morning, and the PR is up."),
+        .init(assetName: "AppIcon-Chip", name: "Chip", story: "The silicon it runs on. One die, forty pins, the bot etched dead center."),
     ]
 
     /// The option matching what iOS currently shows on the home screen.

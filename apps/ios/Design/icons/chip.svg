@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Chip: the silicon it runs on. One die, forty pins, the bot etched dead center. -->
+  <defs>
+    <radialGradient id="substrate" cx="0.5" cy="0.4" r="0.75">
+      <stop offset="0" stop-color="#1d1728"/>
+      <stop offset="1" stop-color="#0a0810"/>
+    </radialGradient>
+    <linearGradient id="die" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b2a63"/>
+      <stop offset="0.5" stop-color="#22183a"/>
+      <stop offset="1" stop-color="#150f26"/>
+    </linearGradient>
+    <linearGradient id="dieEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="0.5" stop-color="#6d28d9"/>
+      <stop offset="1" stop-color="#3b1a82"/>
+    </linearGradient>
+    <linearGradient id="specular" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="pin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5a4a7a"/>
+      <stop offset="1" stop-color="#2c2340"/>
+    </linearGradient>
+    <linearGradient id="traceV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7c3aed" stop-opacity="0.0"/>
+      <stop offset="1" stop-color="#7c3aed" stop-opacity="0.55"/>
+    </linearGradient>
+    <radialGradient id="dieGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.6" stop-color="#7c3aed" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#substrate)"/>
+
+  <!-- faint routing traces on the substrate -->
+  <g fill="none" stroke="#7c3aed" stroke-opacity="0.16" stroke-width="4" stroke-linecap="round">
+    <path d="M120 120h120v120"/><path d="M904 120h-120v120"/>
+    <path d="M120 904h120v-120"/><path d="M904 904h-120v-120"/>
+    <path d="M60 300h90"/><path d="M60 724h90"/><path d="M874 300h90"/><path d="M874 724h90"/>
+    <path d="M300 60v90"/><path d="M724 60v90"/><path d="M300 874v90"/><path d="M724 874v90"/>
+  </g>
+  <g fill="#a78bfa" fill-opacity="0.45">
+    <circle cx="240" cy="240" r="8"/><circle cx="784" cy="240" r="8"/><circle cx="240" cy="784" r="8"/><circle cx="784" cy="784" r="8"/>
+  </g>
+
+  <!-- glow under the package -->
+  <rect x="200" y="200" width="624" height="624" rx="60" fill="url(#dieGlow)"/>
+
+  <!-- pins: 10 per side, 24 wide, 22 gap, spanning 512±216 -->
+  <g>
+    <!-- top / bottom -->
+    <g fill="url(#pin)">
+      <rect x="300" y="228" width="24" height="70" rx="8"/><rect x="346" y="228" width="24" height="70" rx="8"/><rect x="392" y="228" width="24" height="70" rx="8"/><rect x="438" y="228" width="24" height="70" rx="8"/><rect x="484" y="228" width="24" height="70" rx="8"/><rect x="530" y="228" width="24" height="70" rx="8"/><rect x="576" y="228" width="24" height="70" rx="8"/><rect x="622" y="228" width="24" height="70" rx="8"/><rect x="668" y="228" width="24" height="70" rx="8"/><rect x="714" y="228" width="24" height="70" rx="8"/>
+      <rect x="300" y="726" width="24" height="70" rx="8"/><rect x="346" y="726" width="24" height="70" rx="8"/><rect x="392" y="726" width="24" height="70" rx="8"/><rect x="438" y="726" width="24" height="70" rx="8"/><rect x="484" y="726" width="24" height="70" rx="8"/><rect x="530" y="726" width="24" height="70" rx="8"/><rect x="576" y="726" width="24" height="70" rx="8"/><rect x="622" y="726" width="24" height="70" rx="8"/><rect x="668" y="726" width="24" height="70" rx="8"/><rect x="714" y="726" width="24" height="70" rx="8"/>
+    </g>
+    <!-- left / right -->
+    <g fill="url(#pin)">
+      <rect x="228" y="300" width="70" height="24" rx="8"/><rect x="228" y="346" width="70" height="24" rx="8"/><rect x="228" y="392" width="70" height="24" rx="8"/><rect x="228" y="438" width="70" height="24" rx="8"/><rect x="228" y="484" width="70" height="24" rx="8"/><rect x="228" y="530" width="70" height="24" rx="8"/><rect x="228" y="576" width="70" height="24" rx="8"/><rect x="228" y="622" width="70" height="24" rx="8"/><rect x="228" y="668" width="70" height="24" rx="8"/><rect x="228" y="714" width="70" height="24" rx="8"/>
+      <rect x="726" y="300" width="70" height="24" rx="8"/><rect x="726" y="346" width="70" height="24" rx="8"/><rect x="726" y="392" width="70" height="24" rx="8"/><rect x="726" y="438" width="70" height="24" rx="8"/><rect x="726" y="484" width="70" height="24" rx="8"/><rect x="726" y="530" width="70" height="24" rx="8"/><rect x="726" y="576" width="70" height="24" rx="8"/><rect x="726" y="622" width="70" height="24" rx="8"/><rect x="726" y="668" width="70" height="24" rx="8"/><rect x="726" y="714" width="70" height="24" rx="8"/>
+    </g>
+    <!-- lit pin tips (purple accents) -->
+    <g fill="#a78bfa" fill-opacity="0.85">
+      <rect x="300" y="228" width="24" height="10" rx="5"/><rect x="392" y="228" width="24" height="10" rx="5"/><rect x="484" y="228" width="24" height="10" rx="5"/><rect x="576" y="228" width="24" height="10" rx="5"/><rect x="668" y="228" width="24" height="10" rx="5"/>
+      <rect x="346" y="786" width="24" height="10" rx="5"/><rect x="438" y="786" width="24" height="10" rx="5"/><rect x="530" y="786" width="24" height="10" rx="5"/><rect x="622" y="786" width="24" height="10" rx="5"/><rect x="714" y="786" width="24" height="10" rx="5"/>
+      <rect x="228" y="346" width="10" height="24" rx="5"/><rect x="228" y="438" width="10" height="24" rx="5"/><rect x="228" y="530" width="10" height="24" rx="5"/><rect x="228" y="622" width="10" height="24" rx="5"/><rect x="228" y="714" width="10" height="24" rx="5"/>
+      <rect x="786" y="300" width="10" height="24" rx="5"/><rect x="786" y="392" width="10" height="24" rx="5"/><rect x="786" y="484" width="10" height="24" rx="5"/><rect x="786" y="576" width="10" height="24" rx="5"/><rect x="786" y="668" width="10" height="24" rx="5"/>
+    </g>
+  </g>
+
+  <!-- package body -->
+  <rect x="290" y="290" width="444" height="444" rx="44" fill="url(#dieEdge)"/>
+  <rect x="298" y="298" width="428" height="428" rx="38" fill="url(#die)"/>
+  <!-- inner die outline -->
+  <rect x="330" y="330" width="364" height="364" rx="22" fill="none" stroke="#a78bfa" stroke-opacity="0.35" stroke-width="3"/>
+  <!-- pin-1 marker -->
+  <circle cx="358" cy="358" r="11" fill="#c4b5fd" fill-opacity="0.9"/>
+  <!-- specular sweep -->
+  <rect x="298" y="298" width="428" height="428" rx="38" fill="url(#specular)"/>
+
+  <!-- the bot, etched center. 24-grid scaled to 336px -->
+  <g transform="translate(344 344) scale(14)" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 8V4H8"/>
+    <rect width="16" height="12" x="4" y="8" rx="2.4"/>
+    <path d="M2 14h2"/>
+    <path d="M20 14h2"/>
+    <path d="M15 13v2"/>
+    <path d="M9 13v2"/>
+  </g>
+</svg>
