@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { createEventsClient } from "@/lib/ws-client";
 import { getWsTokenProvider } from "@/lib/ws-auth";
-import { ArrowLeft, Plus, Search, Server, Zap } from "lucide-react";
+import { ArrowLeft, Columns2, Plus, Search, Server, Zap } from "lucide-react";
 import { attentionLabel, dirTail } from "./terminal-card";
 import { collectWorkLinks, WorkLinkBadges, workLinksSearchText } from "./work-links";
+import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
 
 /**
  * Session rail: replaces the app sidebar while you're inside a terminal
@@ -20,6 +21,9 @@ import { collectWorkLinks, WorkLinkBadges, workLinksSearchText } from "./work-li
  * Keyboard (captured before xterm sees it):
  *   Ctrl/⌘ + Shift + ↑ / ↓   previous / next session in rail order
  *   Ctrl/⌘ + Shift + ↵       jump to the oldest "needs you" session
+ *
+ * Split view: the row's ⧉ button (or Shift+click) opens a session beside the
+ * current one; the extra panes ride along in ?split= as you switch primaries.
  */
 
 type Group = { key: string; label: string; tone: string; items: any[] };
@@ -76,6 +80,15 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const activeId = pathname.startsWith("/local/") ? pathname.slice("/local/".length) : null;
+  const searchParams = useSearchParams();
+  const splitState = useMemo(
+    () => parseSplit(searchParams, activeId ?? undefined),
+    [searchParams, activeId],
+  );
+  const shown = useMemo(
+    () => new Set(activeId ? [activeId, ...splitState.split] : []),
+    [activeId, splitState],
+  );
 
   const [terminals, setTerminals] = useState<any[]>([]);
   const [hosts, setHosts] = useState<any[]>([]);
@@ -128,11 +141,17 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
   const order = useMemo(() => groups.flatMap((g) => g.items.map((t) => t.id)), [groups]);
 
   const go = useCallback(
-    (id: string) => {
-      router.push(`/local/${id}`);
+    (id: string, opts: { split?: boolean } = {}) => {
+      if (opts.split && activeId && id !== activeId) {
+        // Open beside the current primary.
+        router.push(splitHref(activeId, addToSplit(activeId, splitState, id), splitState.layout));
+      } else {
+        // Switch primary; panes already open stay open (minus the new primary).
+        router.push(splitHref(id, splitState.split, splitState.layout));
+      }
       onNavigate?.();
     },
-    [router, onNavigate],
+    [router, onNavigate, activeId, splitState],
   );
 
   // Keyboard switching. Capture phase on window so it wins over xterm's
@@ -228,21 +247,33 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
               {g.items.map((t) => {
                 const active = t.id === activeId;
                 const links = collectWorkLinks(t);
+                const inSplit = !active && shown.has(t.id);
+                const canSplit = !!activeId && !shown.has(t.id);
                 return (
-                  <button
+                  <div
                     key={t.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     data-terminal-id={t.id}
-                    onClick={() => go(t.id)}
+                    onClick={(e) => go(t.id, { split: e.shiftKey })}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        go(t.id, { split: e.shiftKey });
+                      }
+                    }}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "w-full text-left px-2 py-1.5 rounded-md transition-colors group",
+                      "relative w-full text-left px-2 py-1.5 rounded-md transition-colors group cursor-pointer",
                       active
                         ? "bg-primary/10 text-text nav-active-glow"
-                        : "text-text-muted hover:bg-bg-hover/60 hover:text-text",
+                        : inSplit
+                          ? "bg-primary/5 text-text"
+                          : "text-text-muted hover:bg-bg-hover/60 hover:text-text",
                     )}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 pr-6">
                       <span
                         className={cn(
                           "w-1.5 h-1.5 rounded-full shrink-0",
@@ -258,7 +289,27 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                       >
                         {t.title}
                       </span>
+                      {inSplit && (
+                        <Columns2
+                          className="w-3 h-3 text-primary shrink-0"
+                          aria-label="Open in a split pane"
+                        />
+                      )}
                     </div>
+                    {canSplit && shown.size < MAX_PANES && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          go(t.id, { split: true });
+                        }}
+                        title="Open side by side (Shift+click)"
+                        aria-label={`Open ${t.title} side by side`}
+                        className="absolute right-1.5 top-1.5 p-1 rounded text-text-muted/70 hover:text-primary hover:bg-primary/10 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                      >
+                        <Columns2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <div className="flex items-center gap-1.5 mt-0.5 pl-3.5 text-[10px] text-text-muted/80 min-w-0">
                       <span className="font-mono truncate">{dirTail(t.dir)}</span>
                       {hosts.length > 1 && (
@@ -281,7 +332,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                     {links.length > 0 && (
                       <WorkLinkBadges links={links} size="xs" max={2} className="pl-3.5 mt-1" />
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -296,6 +347,9 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
         <div>
           <kbd className="font-mono">⌃⇧↵</kbd> next needs you
           {needsYouCount > 0 ? ` (${needsYouCount})` : ""}
+        </div>
+        <div>
+          <kbd className="font-mono">⇧click</kbd> open side by side
         </div>
       </div>
     </div>

@@ -168,6 +168,11 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   by title, dir, host, or PR / ticket, with badges per row. Keyboard, captured before
   xterm: `Ctrl/⌘+Shift+↑/↓` previous / next session, `Ctrl/⌘+Shift+↵` jump to the oldest
   "needs you" session.
+- **Split view** — up to three terminals at once: `/local/<primary>?split=<id2>,<id3>`
+  (`&layout=rows` stacks them; phones always stack). Open a pane from the rail row's ⧉
+  button or Shift+click; each extra pane has a one-line strip with kill / make-primary /
+  close. Switching primaries keeps the open panes. State helpers in
+  `components/local/split-state.ts`, per-pane UI in `components/local/terminal-pane.tsx`.
 - **Work-link badges** (`components/local/work-links.tsx`) — the daemon-scanned PR / ticket
   links (plus the spawning ticket) render as badges on cockpit cards, the focus header,
   and rail rows; each opens in a new tab. The cockpit and rail searches match badge labels
