@@ -4,14 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Maximize2 } from "lucide-react";
-import {
-  BASE_FONT_PX,
-  onGridAnnounced,
-  passiveFontPx,
-  sameGrid,
-  type Grid,
-  type SizingMode,
-} from "./sizing";
+import { BASE_FONT_PX, onGridAnnounced, passiveFontPx, type Grid, type SizingMode } from "./sizing";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
@@ -179,10 +172,10 @@ export function LocalTerminal({
       if (disposed) return;
       mode = { kind: "owner" };
       applyMode();
-      // fit() only fires onResize when the grid actually changes, so make
-      // sure the daemon hears our size even when it's already what we have.
-      const grid = { cols: term.cols, rows: term.rows };
-      if (!sameGrid(grid, lastSent)) sendResize(grid);
+      // Always tell the daemon, even if our grid is what we last sent:
+      // another viewer may have resized the PTY in between (a click is one
+      // cheap frame, and typing only lands here when we were demoted).
+      sendResize({ cols: term.cols, rows: term.rows });
     };
     claimRef.current = claim;
 
