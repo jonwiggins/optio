@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import { HoverCard } from "./hover-card";
+import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
 import {
   Bot,
   Layers,
@@ -48,7 +49,33 @@ export function localStateLabel(terminal: any): string {
  *   yellow pulse  needs you        green  working      grey  idle
  *   amber dim     pending/launching red    error        grey dim  exited
  */
-export function statusDescriptor(terminal: any): {
+/**
+ * One dot for "what is this terminal doing". The header passes the stream's
+ * `conn` too: while the process is live but the browser's stream to it is
+ * not healthy, that is the more urgent fact, so the dot takes the stream's
+ * color and the hover names it. A healthy stream never adds a second
+ * indicator — "working" already implies the output is flowing.
+ */
+export function statusDescriptor(
+  terminal: any,
+  conn?: ConnState,
+): {
+  dot: string;
+  label: string;
+  detail: string | null;
+} {
+  const base = baseStatusDescriptor(terminal);
+  const live = terminal.state === "running" || terminal.state === "launching";
+  if (!conn || conn === "connected" || !live) return base;
+  const streamDetail = `Stream ${CONN_LABEL[conn]}`;
+  return {
+    dot: cn(CONN_DOT[conn], conn !== "disconnected" && "animate-pulse"),
+    label: base.label,
+    detail: base.detail ? `${base.detail} · ${streamDetail}` : streamDetail,
+  };
+}
+
+function baseStatusDescriptor(terminal: any): {
   dot: string;
   label: string;
   detail: string | null;
@@ -99,8 +126,17 @@ export function statusDescriptor(terminal: any): {
 }
 
 /** Single status dot with the description on hover. */
-export function StatusDot({ terminal, className }: { terminal: any; className?: string }) {
-  const s = statusDescriptor(terminal);
+export function StatusDot({
+  terminal,
+  conn,
+  className,
+}: {
+  terminal: any;
+  /** Stream health, when the caller has a live stream (the pane header). */
+  conn?: ConnState;
+  className?: string;
+}) {
+  const s = statusDescriptor(terminal, conn);
   return (
     <HoverCard
       align="left"

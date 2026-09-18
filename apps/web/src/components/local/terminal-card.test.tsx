@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { TerminalCard, LocalStateBadge, dirTail, attentionLabel } from "./terminal-card";
+import {
+  TerminalCard,
+  LocalStateBadge,
+  dirTail,
+  attentionLabel,
+  statusDescriptor,
+} from "./terminal-card";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -41,6 +47,44 @@ describe("attentionLabel", () => {
     expect(attentionLabel("stop")).toBe("waiting for you");
     expect(attentionLabel("bell")).toBe("rang the bell");
     expect(attentionLabel(null)).toBe("needs you");
+  });
+});
+
+const running = { state: "running", attentionState: "working" };
+
+describe("statusDescriptor", () => {
+  it("is a single green dot for a working terminal with a healthy stream", () => {
+    const s = statusDescriptor(running, "connected");
+    expect(s.label).toBe("Working");
+    expect(s.dot).toBe("bg-success");
+    expect(s.detail).toBeNull();
+  });
+
+  it("takes the stream's color and names it when the stream is unhealthy", () => {
+    const s = statusDescriptor(running, "reconnecting");
+    expect(s.label).toBe("Working");
+    expect(s.dot).toContain("bg-warning");
+    expect(s.dot).toContain("animate-pulse");
+    expect(s.detail).toBe("Stream reconnecting…");
+
+    const d = statusDescriptor(running, "disconnected");
+    expect(d.dot).toBe("bg-error");
+    expect(d.detail).toBe("Stream disconnected");
+  });
+
+  it("appends the stream note to an existing detail", () => {
+    const s = statusDescriptor(
+      { state: "running", attentionState: "needs_you", attentionReason: "stop" },
+      "connecting",
+    );
+    expect(s.label).toBe("Needs you");
+    expect(s.detail).toMatch(/ · Stream connecting…$/);
+  });
+
+  it("ignores stream health once the process is gone", () => {
+    const s = statusDescriptor({ state: "exited", exitCode: 0 }, "disconnected");
+    expect(s.label).toBe("Exited");
+    expect(s.dot).toBe("bg-text-muted/40");
   });
 });
 

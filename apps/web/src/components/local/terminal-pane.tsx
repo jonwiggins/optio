@@ -29,7 +29,7 @@ import type { SplitLayout } from "./split-state";
 import { useRailStore } from "./rail-store";
 import { useBellStore } from "./bell-store";
 import { ensureNotificationPermission } from "./attention-watcher";
-import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
+import { type ConnState } from "./conn-state";
 import { TitleEditor } from "./title-editor";
 import { AccountUsagePill, SessionUsageChip } from "./usage-chips";
 import { useTitleFit } from "./use-title-fit";
@@ -351,22 +351,6 @@ export function TerminalPane({
     </span>
   );
 
-  const connDot = (
-    <span
-      className="hidden sm:inline-flex items-center"
-      title={`Stream ${CONN_LABEL[conn]}`}
-      aria-label={`Stream ${CONN_LABEL[conn]}`}
-    >
-      <span
-        className={cn(
-          "w-1.5 h-1.5 rounded-full",
-          CONN_DOT[conn],
-          conn !== "connected" && conn !== "disconnected" && "animate-pulse",
-        )}
-      />
-    </span>
-  );
-
   // Header meta: what's worth a glance without stealing terminal rows.
   const meta = (
     // shrink-[8]: the dir / command give way well before the title does.
@@ -428,7 +412,7 @@ export function TerminalPane({
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>
-        <StatusDot terminal={terminal} />
+        <StatusDot terminal={terminal} conn={conn} />
         <div
           ref={fit.rowRef}
           className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
@@ -463,7 +447,6 @@ export function TerminalPane({
           <span className="hidden @4xl:inline-flex">
             <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
           </span>
-          {connDot}
           {bellButton}
           {layoutToggle}
           {actions}
@@ -471,7 +454,7 @@ export function TerminalPane({
       </div>
     ) : (
       <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-border bg-bg">
-        <StatusDot terminal={terminal} />
+        <StatusDot terminal={terminal} conn={conn} />
         <div
           ref={fit.rowRef}
           className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
