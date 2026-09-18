@@ -34,9 +34,7 @@ struct StatusBadge: View {
 
     private var badgeFill: AnyShapeStyle {
         switch tone {
-        case .accent: return AnyShapeStyle(AppTheme.accent.opacity(0.12))
-        case .danger: return AnyShapeStyle(Color.red.opacity(0.12))
-        case .success: return AnyShapeStyle(Color.green.opacity(0.12))
+        case .accent, .danger, .success, .working: return AnyShapeStyle(tone.color.opacity(0.14))
         default: return AnyShapeStyle(.fill.tertiary)
         }
     }
@@ -44,8 +42,8 @@ struct StatusBadge: View {
 
 // MARK: - State dot
 
-/// 6pt state dot. Accent = needs you (the only element allowed to pulse),
-/// red = failed, secondary = working. Nothing for done / idle.
+/// 6pt state dot. Yellow = needs you (the only element allowed to pulse),
+/// purple = working, red = failed. Nothing for done / idle.
 struct StateDot: View {
     let tone: Tone
     var size: CGFloat = 7
@@ -195,7 +193,7 @@ struct StatStrip: View {
                 }
             }
         }
-        .background(Surface.card, in: RoundedRectangle(cornerRadius: Radius.card))
+        .background(Surface.card, in: Radius.cardShape)
         .sensoryFeedback(.selection, trigger: tapCount)
     }
 
@@ -237,8 +235,7 @@ struct StatStrip: View {
     private func valueStyle(_ item: StatItem) -> AnyShapeStyle {
         if item.isZero { return AnyShapeStyle(.tertiary) }
         switch item.tone {
-        case .accent: return AnyShapeStyle(AppTheme.accent)
-        case .danger: return AnyShapeStyle(.red)
+        case .accent, .danger: return (item.tone ?? .idle).textStyle
         default: return AnyShapeStyle(.primary)
         }
     }
@@ -501,7 +498,7 @@ extension View {
 
     /// Row surface for cards on the grouped page: no stroke, one colour.
     func cardSurface() -> some View {
-        padding(Spacing.m).background(Surface.card, in: RoundedRectangle(cornerRadius: Radius.card))
+        padding(Spacing.m).background(Surface.card, in: Radius.cardShape)
     }
 }
 
@@ -514,7 +511,7 @@ struct NoticeBanner<Content: View>: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.m) {
-            RoundedRectangle(cornerRadius: 1.5).fill(tone.color).frame(width: 3)
+            Capsule().fill(tone.color).frame(width: 3)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 if let title {
                     HStack(spacing: 6) {

@@ -2,46 +2,48 @@ import SwiftUI
 
 // Design tokens for the iOS app. See docs/design/ios-ui-review.md §2.
 //
-// The palette is deliberately small: near-black type on flat grouped surfaces,
-// purple reserved for "needs you", semantic colour only for terminal outcomes.
-// Blue / orange / yellow / gray / teal literals do not exist in the app; every
-// state goes through `Tone.forState(_:)`.
+// The palette is deliberately small: near-black type on flat grouped surfaces and
+// one status palette (Shared/StatusColor.swift): purple working, yellow needs
+// input, green completed, grey idle, red failed. Every state goes through
+// `Tone.forState(_:)`, which mirrors `StatusKind.forState(_:)`.
 
 /// The five tones a piece of UI can carry. `accent` is the only one that may
 /// draw attention on a resting screen.
 enum Tone: Hashable {
-    /// #6d28d9 — "needs you": attention badges, the needs-you count, composer send, selected tab.
+    /// Yellow — "needs you": attention badges and the needs-you count.
     case accent
     /// Failed, error, destructive.
     case danger
     /// Completed, merged, healthy, CI passing. Text only, never a fill.
     case success
-    /// Running / provisioning / active / online.
+    /// Purple — running / provisioning / active / online.
     case working
     /// Queued / pending / idle / exited / archived.
     case idle
     /// Skeletons and disabled.
     case muted
 
-    /// Concrete colour for dots, tints and chart fills.
+    /// Concrete colour for dots, tints and chart fills. Purple = working, yellow =
+    /// needs input, green = completed, grey = idle / dead, red = failed
+    /// (Shared/StatusColor.swift, the same palette the widgets and island use).
     var color: Color {
         switch self {
-        case .accent: return AppTheme.accent
-        case .danger: return .red
-        case .success: return .green
-        case .working: return .secondary
-        case .idle: return Color(.tertiaryLabel)
+        case .accent: return StatusColor.yellow
+        case .danger: return StatusColor.red
+        case .success: return StatusColor.green
+        case .working: return StatusColor.purple
+        case .idle: return StatusColor.grey
         case .muted: return Color(.quaternaryLabel)
         }
     }
 
-    /// Text style: `.secondary` / `.tertiary` keep their vibrancy on materials.
+    /// Text style: `.tertiary` / `.quaternary` keep their vibrancy on materials.
     var textStyle: AnyShapeStyle {
         switch self {
-        case .accent: return AnyShapeStyle(AppTheme.accent)
-        case .danger: return AnyShapeStyle(.red)
-        case .success: return AnyShapeStyle(.green)
-        case .working: return AnyShapeStyle(.secondary)
+        case .accent: return AnyShapeStyle(StatusColor.yellow)
+        case .danger: return AnyShapeStyle(StatusColor.red)
+        case .success: return AnyShapeStyle(StatusColor.green)
+        case .working: return AnyShapeStyle(StatusColor.purple)
         case .idle: return AnyShapeStyle(.tertiary)
         case .muted: return AnyShapeStyle(.quaternary)
         }
@@ -87,11 +89,25 @@ enum Spacing {
     static let row: CGFloat = 6
 }
 
+/// Corner radii. Every rounded rect in the app is `.continuous` (Apple's
+/// superellipse corners); use the shape helpers rather than a literal.
 enum Radius {
-    /// Badge-shaped rects, icon tiles.
-    static let small: CGFloat = 8
-    /// All cards, tiles, code blocks.
-    static let card: CGFloat = 12
+    /// Badge-shaped rects, icon tiles, code chips.
+    static let small: CGFloat = 10
+    /// Cards on the grouped page: the same radius iOS gives inset-grouped list
+    /// sections, so hand-built cards sit flush with native rows (26 on iOS 26, 12 before).
+    static let card: CGFloat = {
+        if #available(iOS 26, *) { return 26 } else { return 12 }
+    }()
+    /// A rounded child inset by `Spacing.m` inside a card: concentric with the card corner.
+    static let inner: CGFloat = max(card - Spacing.m, small)
+    /// Chat bubbles, composer fields, banners that stand alone.
+    static let bubble: CGFloat = 18
+
+    static let cardShape = RoundedRectangle(cornerRadius: card, style: .continuous)
+    static let smallShape = RoundedRectangle(cornerRadius: small, style: .continuous)
+    static let innerShape = RoundedRectangle(cornerRadius: inner, style: .continuous)
+    static let bubbleShape = RoundedRectangle(cornerRadius: bubble, style: .continuous)
 }
 
 enum Cost {

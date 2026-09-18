@@ -24,9 +24,18 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
 
     @MainActor
     func deliver(url: URL) {
-        pendingURL = url
+        // Signed in: the shell handles the post synchronously (and may `stash` it for a
+        // server switch), so nothing is pending afterwards. Not signed in: keep it for
+        // `flushPendingURL()` once the shell mounts.
+        pendingURL = IntentContext.session?.phase == .signedIn ? nil : url
         NotificationCenter.default.post(name: .optioOpenURL, object: url)
-        if IntentContext.session?.phase == .signedIn { pendingURL = nil }
+    }
+
+    /// Holds a link for the next `flushPendingURL()` without posting it now (used when
+    /// the shell is about to be rebuilt for a server switch).
+    @MainActor
+    func stash(url: URL) {
+        pendingURL = url
     }
 
     /// Re-posts a link that arrived while the app was still restoring its session.
@@ -62,8 +71,18 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
         let info = content.userInfo
         let kind = info[NotificationUserInfo.kind] as? String ?? ""
         let id = info[NotificationUserInfo.id] as? String ?? ""
-        let url = (info[NotificationUserInfo.url] as? String).flatMap(URL.init(string:)) ?? fallbackURL(kind: kind, id: id)
-        let api = await MainActor.run { IntentContext.session?.api }
+        var url = (info[NotificationUserInfo.url] as? String).flatMap(URL.init(string:)) ?? fallbackURL(kind: kind, id: id)
+        // APNs payloads don't say which paired server sent them; find the one that
+        // knows this subject so the tap (and any action) lands on the right instance.
+        let serverId = await resolveServer(kind: kind, id: id)
+        let api = await MainActor.run { () -> APIClient? in
+            guard let session = IntentContext.session else { return nil }
+            if let serverId, serverId != session.activeServer?.id { return session.client(for: serverId) }
+            return session.api
+        }
+        if let serverId, let u = url, DeepLink.serverId(in: u) == nil, let link = DeepLink(url: u) {
+            url = link.url(server: serverId)
+        }
 
         switch response.actionIdentifier {
         case UNNotificationDefaultActionIdentifier, NotificationAction.open.rawValue:
@@ -110,6 +129,26 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
         default:
             if let url { await deliver(url: url) }
         }
+    }
+
+    /// The paired server that has `kind`/`id`, active first. Nil when there is only
+    /// one server (nothing to disambiguate) or when none of them answers.
+    private func resolveServer(kind: String, id: String) async -> String? {
+        let servers = ServerRegistry.configured
+        guard servers.count > 1, !id.isEmpty else { return nil }
+        let path: String
+        switch kind {
+        case "local": path = "/api/local/terminals/\(id)"
+        case "task": path = "/api/tasks/\(id)"
+        case "agent": path = "/api/persistent-agents/\(id)"
+        case "host": path = "/api/local/hosts/\(id)"
+        default: return nil
+        }
+        for server in servers {
+            guard let fetch = SharedFetch(server: server) else { continue }
+            if (try? await fetch.raw("GET", path, query: [:], body: nil, timeout: 6)) != nil { return server.id }
+        }
+        return nil
     }
 
     private func fallbackURL(kind: String, id: String) -> URL? {

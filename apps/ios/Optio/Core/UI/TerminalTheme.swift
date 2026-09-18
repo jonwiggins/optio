@@ -2,6 +2,17 @@ import SwiftTerm
 import SwiftUI
 import UIKit
 
+/// SwiftTerm view that keeps finger scrolling when the program turns on mouse
+/// reporting. Stock `TerminalView` reacts to a mouse-mode request by attaching its
+/// own pan recognizer, which starves `UIScrollView`'s pan; with `allowMouseReporting`
+/// off (our setting) that recognizer never does anything, so dragging a Claude Code
+/// session went dead. Skipping the recognizer leaves the native scroll in place.
+final class ScrollableTerminalView: TerminalView {
+    override func mouseModeChanged(source: Terminal) {
+        if allowMouseReporting { super.mouseModeChanged(source: source) }
+    }
+}
+
 /// Terminal colors that follow the app's light/dark appearance. Both SwiftTerm
 /// wrappers (Sessions and Optio Local) call `apply` from make/update so switching
 /// appearance re-themes a live terminal without reconnecting.

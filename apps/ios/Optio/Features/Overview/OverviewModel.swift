@@ -37,8 +37,59 @@ final class OverviewModel {
 
     private var lastUsageRefresh: Date?
 
+    /// Optio Local: paired hosts and their terminals (`local-stats.tsx`, `needs-you.tsx`).
+    var localHosts: [LocalHost] = []
+    var localTerminals: [LocalTerminal] = []
+
     var totalRecentCost: Double { recentTasks.reduce(0) { $0 + $1.cost } }
-    var isFirstRun: Bool { (taskStats?.total ?? 0) == 0 }
+    /// A paired machine with a terminal open counts as "started", even with zero repo tasks.
+    var isFirstRun: Bool { (taskStats?.total ?? 0) == 0 && localTerminals.isEmpty }
+
+    // MARK: Local (mirrors computeLocalStats / collectNeedsYou / collectLive)
+
+    var hasLocal: Bool { !localHosts.isEmpty || !localTerminals.isEmpty }
+    var localHostName: [String: String] { Dictionary(uniqueKeysWithValues: localHosts.map { ($0.id, $0.name) }) }
+    var localHostsOnline: Int { localHosts.filter { $0.state == .online }.count }
+
+    /// Terminals waiting on the human, oldest first.
+    var localNeedsYou: [LocalTerminal] {
+        localTerminals.filter { LocalPresentation.waitsOnYou($0) }.sorted { activity($0) < activity($1) }
+    }
+
+    /// Live terminals that are working, most recent first.
+    var localWorking: [LocalTerminal] {
+        localTerminals
+            .filter { LocalPresentation.activeStates.contains($0.state) && !LocalPresentation.waitsOnYou($0) }
+            .sorted { activity($0) > activity($1) }
+    }
+
+    var localLiveCount: Int { localTerminals.filter { LocalPresentation.activeStates.contains($0.state) }.count }
+
+    struct LocalStats {
+        var needsYou = 0, working = 0, idle = 0, finished = 0
+    }
+
+    var localStats: LocalStats {
+        var s = LocalStats()
+        let live = localTerminals.filter { LocalPresentation.activeStates.contains($0.state) }
+        s.needsYou = localNeedsYou.count
+        s.working = live.filter { $0.attentionState == .working }.count
+        s.idle = live.filter { $0.attentionState != .working && !LocalPresentation.waitsOnYou($0) }.count
+        s.finished = localTerminals.filter { LocalPresentation.isDead($0) }.count
+        return s
+    }
+
+    /// Nothing live and nothing waiting: the strip collapses to one quiet line.
+    var localQuiet: Bool { localLiveCount == 0 && localNeedsYou.isEmpty }
+
+    /// Recent repo tasks that need attention (the web's `attentionTasks`).
+    var attentionTasks: [DashRecentTask] {
+        recentTasks.filter { Tone.forState($0.state) == .accent }
+    }
+
+    private func activity(_ t: LocalTerminal) -> Date {
+        (t.lastActivityAt ?? t.updatedAt).isoDate ?? .distantPast
+    }
 
     func refresh(api: APIClient) async {
         async let stats = api.dashTaskStats()
@@ -48,6 +99,8 @@ final class OverviewModel {
         async let jobs = Self.quiet { try await api.dashJobStats() }
         async let agents = Self.quiet { try await api.dashAgentStats() }
         async let sessStats = Self.quiet { try await api.dashSessionStats() }
+        async let hosts = Self.quiet { try await api.listLocalHosts() }
+        async let terminals = Self.quiet { try await api.listLocalTerminals() }
 
         var clusterResult: ClusterOverview?
         var forbidden = false
@@ -74,6 +127,8 @@ final class OverviewModel {
         standaloneStats = await jobs
         agentStats = await agents
         sessionStats = await sessStats
+        if let h = await hosts { localHosts = h }
+        if let t = await terminals { localTerminals = t }
 
         clusterForbidden = forbidden
         if let c = clusterResult {

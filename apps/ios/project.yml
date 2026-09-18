@@ -121,6 +121,17 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: dev.optio.ios.tests
+  OptioUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [OptioUITests]
+    dependencies:
+      - target: Optio
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: dev.optio.ios.uitests
+        TEST_TARGET_NAME: Optio
 schemes:
   Optio:
     build:
@@ -128,8 +139,9 @@ schemes:
         Optio: all
         OptioWidgets: all
         OptioTests: [test]
+        OptioUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
-      targets: [OptioTests]
+      targets: [OptioTests, OptioUITests]

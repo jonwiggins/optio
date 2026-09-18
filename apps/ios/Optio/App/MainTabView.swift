@@ -1,19 +1,39 @@
+import OSLog
 import SwiftUI
 
 /// Top-level navigation. Mirrors the web sidebar groups:
 /// Overview · Run (Tasks/Jobs/Reviews/Issues/Scheduled) · Live (Local/Agents/Sessions)
 /// · Insights (Analytics/Costs/Activity/Cluster) · More (Library + Admin + Settings).
 struct MainTabView: View {
+    @Environment(SessionStore.self) private var session
     @State private var router = AppRouter()
+    private static let log = Logger(subsystem: "dev.optio.ios", category: "router")
 
     var body: some View {
         tabs
             .tint(AppTheme.accent)
             .environment(router)
-            .modifier(LiveActivityHost())
-            .onOpenURL { url in router.handle(url: url) }
-            .onReceive(NotificationCenter.default.publisher(for: .optioOpenURL)) { note in if let url = note.object as? URL { router.handle(url: url) } }
-            .onAppear(perform: applyDevSection)
+            .onOpenURL { url in handle(url: url) }
+            .onReceive(NotificationCenter.default.publisher(for: .optioOpenURL)) { note in if let url = note.object as? URL { handle(url: url) } }
+            .onAppear {
+                applyDevSection()
+                // A link that arrived mid-switch (or before sign-in) is re-posted now that
+                // the shell for the right server is on screen.
+                NotificationHandler.shared.flushPendingURL()
+            }
+    }
+
+    /// `optio://…?server=<id>` targets a specific paired server: switch first, then let
+    /// the rebuilt shell route the link. Links without a hint route on the active server.
+    private func handle(url: URL) {
+        Self.log.notice("deep link \(url.absoluteString, privacy: .public) active=\(session.activeServer?.id ?? "-", privacy: .public) servers=\(session.servers.map(\.id).joined(separator: ","), privacy: .public)")
+        if let target = DeepLink.serverId(in: url), target != session.activeServer?.id,
+           session.servers.contains(where: { $0.id == target }) {
+            NotificationHandler.shared.stash(url: url)
+            Task { await session.switchTo(target) }
+            return
+        }
+        router.handle(url: url)
     }
 
     @ViewBuilder
@@ -46,10 +66,23 @@ struct MainTabView: View {
         }
     }
 
+    #if DEBUG
+    @MainActor private static var devURLDelivered = false
+    #endif
+
     /// DEBUG: `SIMCTL_CHILD_OPTIO_DEV_SECTION=local xcrun simctl launch booted dev.optio.ios`
     /// opens the app on a given section so screens can be screenshotted from the CLI.
     private func applyDevSection() {
         #if DEBUG
+        // `OPTIO_DEV_OPEN_URL=optio://section/tasks?server=dev-server_2` delivers a deep link
+        // ~2 s after launch, without the system "Open in Optio?" prompt `simctl openurl` shows.
+        if let raw = ProcessInfo.processInfo.environment["OPTIO_DEV_OPEN_URL"], let url = URL(string: raw), !Self.devURLDelivered {
+            Self.devURLDelivered = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                NotificationHandler.shared.deliver(url: url)
+            }
+        }
         guard let raw = ProcessInfo.processInfo.environment["OPTIO_DEV_SECTION"] else { return }
         let sections: [String: AppRouter.Section] = [
             "tasks": .tasks, "jobs": .jobs, "reviews": .reviews, "issues": .issues, "scheduled": .scheduled,

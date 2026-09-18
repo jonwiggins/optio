@@ -26,6 +26,7 @@ struct RunHubView: View {
             }
             .navigationTitle("Run")
             .hubChrome()
+            .serverSwitcherToolbar()
             .navigationDestination(for: AppRouter.PendingDetail.self) { detail in
                 TaskDetailView(taskId: detail.id, focusComposer: detail.compose)
             }

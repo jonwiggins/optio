@@ -30,14 +30,14 @@
   <!-- horizon ground -->
   <rect y="860" width="1024" height="164" fill="#2e1065"/>
   <!-- bot silhouette, backlit -->
-  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#2e1065" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(92 92) scale(35)" fill="none" stroke="#2e1065" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
     <path d="M12 8V4H8"/>
     <rect width="16" height="12" x="4" y="8" rx="2.4" fill="#2e1065"/>
     <path d="M2 14h2"/>
     <path d="M20 14h2"/>
   </g>
   <!-- warm eyes catching the light -->
-  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#fde68a" stroke-width="1.9" stroke-linecap="round">
+  <g transform="translate(92 92) scale(35)" fill="none" stroke="#fde68a" stroke-width="1.9" stroke-linecap="round">
     <path d="M15 13v2"/>
     <path d="M9 13v2"/>
   </g>

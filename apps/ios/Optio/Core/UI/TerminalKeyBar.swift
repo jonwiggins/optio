@@ -109,8 +109,8 @@ struct TerminalKeyBar: View {
             .font(.system(.footnote, design: .monospaced).weight(.medium))
             .frame(minWidth: 36, minHeight: 30)
             .padding(.horizontal, 6)
-            .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
+            .background(.fill.tertiary, in: Radius.smallShape)
             .foregroundStyle(.primary)
-            .contentShape(RoundedRectangle(cornerRadius: Radius.small))
+            .contentShape(Radius.smallShape)
     }
 }

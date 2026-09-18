@@ -36,7 +36,7 @@ final class LocalHubModel {
 
     var needsYou: [LocalTerminal] {
         terminals
-            .filter { $0.attentionState == .needsYou }
+            .filter { LocalPresentation.waitsOnYou($0) }
             .sorted { activity($0) < activity($1) }
     }
 
@@ -47,9 +47,9 @@ final class LocalHubModel {
     var stats: Stats {
         var s = Stats()
         let live = terminals.filter { LocalPresentation.activeStates.contains($0.state) }
-        s.needsYou = terminals.filter { $0.attentionState == .needsYou }.count
+        s.needsYou = terminals.filter { LocalPresentation.waitsOnYou($0) }.count
         s.working = live.filter { $0.attentionState == .working }.count
-        s.idle = live.filter { $0.attentionState != .working && $0.attentionState != .needsYou }.count
+        s.idle = live.filter { $0.attentionState != .working && !LocalPresentation.waitsOnYou($0) }.count
         s.finished = terminals.filter { LocalPresentation.isDead($0) }.count
         s.hostsOnline = hosts.filter { $0.state == .online }.count
         return s
@@ -64,7 +64,7 @@ final class LocalHubModel {
                 switch filter {
                 case .all: break
                 case .active: if !LocalPresentation.activeStates.contains(t.state) { return false }
-                case .needsYou: if t.attentionState != .needsYou { return false }
+                case .needsYou: if !LocalPresentation.waitsOnYou(t) { return false }
                 case .exited: if !LocalPresentation.isDead(t) { return false }
                 }
                 if !q.isEmpty {
@@ -81,7 +81,7 @@ final class LocalHubModel {
     }
 
     private func rank(_ t: LocalTerminal) -> Int {
-        if t.attentionState == .needsYou { return 0 }
+        if LocalPresentation.waitsOnYou(t) { return 0 }
         if LocalPresentation.activeStates.contains(t.state) { return 1 }
         return 2
     }

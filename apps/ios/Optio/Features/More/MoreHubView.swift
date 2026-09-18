@@ -46,6 +46,20 @@ struct MoreHubView: View {
 
                 Section {
                     accountCard
+                    NavigationLink { ServersView() } label: {
+                        HStack {
+                            Label("Servers", systemImage: "laptopcomputer.and.iphone")
+                            Spacer()
+                            if let active = session.activeServer {
+                                HStack(spacing: 6) {
+                                    ServerDot(color: active.color)
+                                    Text(session.hasMultipleServers ? "\(active.shortName) · \(session.servers.count)" : active.shortName)
+                                }
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            }
+                        }
+                    }
                     Button {
                         showWorkspaceSwitcher = true
                     } label: {
@@ -70,6 +84,7 @@ struct MoreHubView: View {
             .symbolRenderingMode(.hierarchical)
             .navigationTitle("More")
             .hubChrome()
+            .serverSwitcherToolbar()
             .environment(context)
             .task { await refresh() }
             .refreshable { await refresh() }
@@ -77,10 +92,12 @@ struct MoreHubView: View {
                 WorkspaceSwitcherSheet { await refresh() }
                     .environment(context)
             }
-            .confirmationDialog("Sign out of Optio?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
+            .confirmationDialog(session.hasMultipleServers ? "Sign out of \(session.activeServer?.name ?? "this server")?" : "Sign out of Optio?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { session.signOut() }
             } message: {
-                Text("Your access token will be removed from this device.")
+                Text(session.hasMultipleServers
+                     ? "Its access token is removed from this phone; the app switches to your next server."
+                     : "Your access token will be removed from this device.")
             }
         }
         // On the stack itself, not the List: pushed destinations (Settings, Repos, …)

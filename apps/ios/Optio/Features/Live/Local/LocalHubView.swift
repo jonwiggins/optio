@@ -277,10 +277,10 @@ struct TerminalRowView: View {
     let terminal: LocalTerminal
     var hostName: String?
 
-    private var needsYou: Bool { terminal.attentionState == .needsYou && !LocalPresentation.isDead(terminal) }
+    private var needsYou: Bool { LocalPresentation.waitsOnYou(terminal) }
 
     private var trailing: (String, Tone?) {
-        if needsYou { return (LocalPresentation.attentionLabel(terminal.attentionReason), .accent) }
+        if needsYou { return (LocalPresentation.waitingLabel(terminal), .accent) }
         if terminal.state == .error { return ("Error", .danger) }
         if terminal.state == .exited, let code = terminal.exitCode, code != 0 { return ("exit \(Int(code))", .danger) }
         if terminal.state == .exited { return ("Finished", nil) }

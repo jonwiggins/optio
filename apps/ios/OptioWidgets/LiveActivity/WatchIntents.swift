@@ -6,23 +6,26 @@ import WidgetKit
 /// launch), talk to the API through `SharedFetch`, and degrade to App-Group state
 /// when the server is unreachable or the endpoint is not deployed yet.
 ///
+/// Every intent carries the item's `serverId` so a button on a second laptop's
+/// item talks to that laptop; a missing id (older payloads) means the active server.
+///
 /// The island itself is only refreshed by the app (`LiveActivityManager`) or by an
 /// APNs update: after **Later** the reorder shows up on the next reconcile / push.
 enum WatchActions {
     /// "Later": server-side snooze (`POST /api/local/terminals/:id/snooze`) mirrored in
     /// the App Group (`optio.snoozed.<id>` = expiry) — the same fallback the Needs You
     /// widget reads — so phone surfaces agree even when the request fails.
-    static func snooze(id: String, kind: String, minutes: Int = 15) async {
+    static func snooze(id: String, kind: String, serverId: String?, minutes: Int = 15) async {
         let until = Date().addingTimeInterval(TimeInterval(minutes * 60))
         SharedCredentials.defaults.set(until, forKey: "optio.snoozed.\(id)")
-        if kind == WatchItem.Kind.local.rawValue, let fetch = SharedFetch() {
+        if kind == WatchItem.Kind.local.rawValue, let fetch = SharedFetch.resolve(serverId) {
             _ = try? await fetch.post("/api/local/terminals/\(id)/snooze", json: ["minutes": minutes])
         }
         WidgetCenter.shared.reloadAllTimelines()
     }
 
-    static func taskAction(id: String, _ action: String) async {
-        guard let fetch = SharedFetch() else { return }
+    static func taskAction(id: String, serverId: String?, _ action: String) async {
+        guard let fetch = SharedFetch.resolve(serverId) else { return }
         _ = try? await fetch.post("/api/tasks/\(id)/\(action)", json: [:])
         WidgetCenter.shared.reloadAllTimelines()
     }
@@ -35,15 +38,17 @@ struct LaterIntent: AppIntent {
 
     @Parameter(title: "Item") var itemId: String
     @Parameter(title: "Kind") var kind: String
+    @Parameter(title: "Server") var serverId: String?
 
     init() {}
     init(item: WatchItem) {
         itemId = item.id
         kind = item.kind.rawValue
+        serverId = item.serverId
     }
 
     func perform() async throws -> some IntentResult {
-        await WatchActions.snooze(id: itemId, kind: kind)
+        await WatchActions.snooze(id: itemId, kind: kind, serverId: serverId)
         return .result()
     }
 }
@@ -54,12 +59,16 @@ struct ResumeTaskIntent: AppIntent {
     static let isDiscoverable = false
 
     @Parameter(title: "Task") var taskId: String
+    @Parameter(title: "Server") var serverId: String?
 
     init() {}
-    init(taskId: String) { self.taskId = taskId }
+    init(taskId: String, serverId: String? = nil) {
+        self.taskId = taskId
+        self.serverId = serverId
+    }
 
     func perform() async throws -> some IntentResult {
-        await WatchActions.taskAction(id: taskId, "resume")
+        await WatchActions.taskAction(id: taskId, serverId: serverId, "resume")
         return .result()
     }
 }
@@ -70,12 +79,16 @@ struct RetryTaskIntent: AppIntent {
     static let isDiscoverable = false
 
     @Parameter(title: "Task") var taskId: String
+    @Parameter(title: "Server") var serverId: String?
 
     init() {}
-    init(taskId: String) { self.taskId = taskId }
+    init(taskId: String, serverId: String? = nil) {
+        self.taskId = taskId
+        self.serverId = serverId
+    }
 
     func perform() async throws -> some IntentResult {
-        await WatchActions.taskAction(id: taskId, "retry")
+        await WatchActions.taskAction(id: taskId, serverId: serverId, "retry")
         return .result()
     }
 }

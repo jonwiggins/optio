@@ -2,17 +2,20 @@ import SwiftUI
 import WidgetKit
 
 /// "Needs You": the Watch, persisted. Home screen small/medium plus every lock-screen
-/// accessory family. Purple only when something needs you; grey "Quiet" otherwise.
+/// accessory family. Yellow when something needs you; grey "Quiet" otherwise.
+///
+/// Configurable per server: left empty it shows every paired server, sectioned by
+/// name and colour, so two laptops can share one widget or each get their own.
 struct NeedsYouWidget: Widget {
     static let kind = WidgetKinds.needsYou
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: Self.kind, provider: GlanceTimelineProvider()) { entry in
+        AppIntentConfiguration(kind: Self.kind, intent: GlanceConfigurationIntent.self, provider: GlanceTimelineProvider()) { entry in
             NeedsYouView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Needs You")
-        .description("What's waiting on you.")
+        .description("What's waiting on you, on one server or all of them.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }
@@ -32,6 +35,29 @@ struct NeedsYouView: View {
     }
 }
 
+// MARK: - Sectioning helper
+
+/// Rows per server for the multi-server layouts, within a total row budget. Servers
+/// with nothing to show are skipped; a server that gets cut off reports the overflow.
+struct ServerRows {
+    let slice: GlanceSlice
+    let items: [WatchItem]
+    let overflow: Int
+
+    static func split(_ slices: [GlanceSlice], items: (GlanceSlice) -> [WatchItem], budget: Int) -> [ServerRows] {
+        var remaining = budget
+        var out: [ServerRows] = []
+        for s in slices {
+            let all = items(s)
+            guard !all.isEmpty else { continue }
+            let shown = Array(all.prefix(max(remaining, 0)))
+            out.append(ServerRows(slice: s, items: shown, overflow: all.count - shown.count))
+            remaining -= shown.count
+        }
+        return out
+    }
+}
+
 // MARK: - Home screen
 
 struct NeedsYouSmall: View {
@@ -42,11 +68,13 @@ struct NeedsYouSmall: View {
             SignedOutView()
         } else {
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Image(systemName: GlanceStyle.glyph)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(entry.count > 0 ? GlanceStyle.purple : .secondary)
-                        .widgetAccentable(entry.count > 0)
+                HStack(spacing: 6) {
+                    GlanceStyle.headerGlyph(needsYou: entry.count, size: 18)
+                    if entry.showsServerName, let s = entry.server {
+                        ServerTag(s)
+                    } else if entry.isMulti {
+                        Text("\(entry.slices.count) servers").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
                     Spacer()
                     if entry.reachability == .unreachable {
                         Image(systemName: "wifi.slash").foregroundStyle(.tertiary)
@@ -59,12 +87,15 @@ struct NeedsYouSmall: View {
                     Text(entry.count == 1 ? "needs you" : "need you")
                         .font(.footnote.weight(.medium)).foregroundStyle(.secondary)
                     if let head = entry.needsYou.first {
-                        MonoPath(text: head.mono, size: .footnote).foregroundStyle(.primary)
+                        HStack(spacing: 4) {
+                            MonoPath(text: head.mono, size: .footnote).foregroundStyle(.primary)
+                            if entry.isMulti, let tag = ServerTag(item: head) { tag }
+                        }
                     }
                 } else {
                     Text("Quiet").font(.title.weight(.semibold)).foregroundStyle(.secondary)
                     Text(entry.running.isEmpty ? "nothing running" : "\(entry.running.count) running")
-                        .font(.footnote).foregroundStyle(.tertiary)
+                        .font(.footnote).foregroundStyle(entry.running.isEmpty ? AnyShapeStyle(.tertiary) : AnyShapeStyle(GlanceStyle.working))
                 }
                 HonestyFooter(entry: entry)
             }
@@ -77,39 +108,56 @@ struct NeedsYouSmall: View {
 struct NeedsYouMedium: View {
     let entry: GlanceEntry
 
+    private var sections: [ServerRows] {
+        ServerRows.split(entry.slices, items: { $0.snapshot.needsYou }, budget: 3)
+    }
+
     var body: some View {
         if entry.reachability == .signedOut {
             SignedOutView()
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: GlanceStyle.glyph)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(entry.count > 0 ? GlanceStyle.purple : .secondary)
-                        .widgetAccentable(entry.count > 0)
+                    GlanceStyle.headerGlyph(needsYou: entry.count)
                     if entry.count > 0 {
                         Text("\(entry.count)")
                             .contentTransition(.numericText())
-                            .foregroundStyle(GlanceStyle.purple)
+                            .foregroundStyle(GlanceStyle.needsYou)
                             .widgetAccentable()
                         Text(entry.count == 1 ? "needs you" : "need you").foregroundStyle(.secondary)
                     } else {
                         Text("Quiet").foregroundStyle(.secondary)
                         if !entry.running.isEmpty {
-                            Text("· \(entry.running.count) running").foregroundStyle(.tertiary)
+                            Text("· \(entry.running.count) running").foregroundStyle(GlanceStyle.working)
                         }
+                    }
+                    if entry.showsServerName, let s = entry.server {
+                        Text("·").foregroundStyle(.tertiary)
+                        ServerTag(s)
                     }
                     Spacer()
                     HonestyFooter(entry: entry)
                 }
                 .font(.subheadline.weight(.semibold))
                 if entry.count > 0 {
-                    ForEach(entry.needsYou.prefix(3)) { item in
-                        NeedsYouRow(item: item, now: entry.date)
+                    if entry.isMulti {
+                        ForEach(sections, id: \.slice.server.id) { section in
+                            ServerSectionHeader(slice: section.slice, count: section.slice.count)
+                            ForEach(section.items) { item in
+                                NeedsYouRow(item: item, now: entry.date)
+                            }
+                            if section.overflow > 0 {
+                                Text("+\(section.overflow) more").font(.caption2).foregroundStyle(.tertiary)
+                            }
+                        }
+                    } else {
+                        ForEach(entry.needsYou.prefix(3)) { item in
+                            NeedsYouRow(item: item, now: entry.date)
+                        }
                     }
                 } else {
                     Spacer(minLength: 0)
-                    Text("Nothing waiting on you.")
+                    Text(entry.isMulti ? "Nothing waiting on you on \(entry.slices.count) servers." : "Nothing waiting on you.")
                         .font(.footnote).foregroundStyle(.tertiary)
                 }
                 Spacer(minLength: 0)
@@ -128,6 +176,7 @@ struct NeedsYouRow: View {
         HStack(spacing: 8) {
             Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
                 HStack(spacing: 6) {
+                    StateDotView(state: item.state)
                     MonoPath(text: item.mono, size: .footnote)
                         .frame(maxWidth: 120, alignment: .leading)
                     Text(item.reason ?? "Needs you")
@@ -159,7 +208,7 @@ struct NeedsYouCircular: View {
             AccessoryWidgetBackground()
             Circle().strokeBorder(.primary.opacity(entry.count > 0 ? 1 : 0.35), lineWidth: 3)
             if entry.reachability == .signedOut {
-                Image(systemName: GlanceStyle.glyph).font(.caption)
+                OptioGlyph(size: 16, style: .primary)
             } else if entry.count > 0 {
                 Text("\(entry.count)")
                     .font(.system(.title3, design: .rounded).weight(.bold))
@@ -182,7 +231,7 @@ struct NeedsYouRectangular: View {
                 Text("Sign in to Optio").font(.caption).foregroundStyle(.secondary)
             case .unreachable where entry.count == 0:
                 Text("Optio").font(.headline)
-                Text("Laptop unreachable").font(.caption)
+                Text("\(entry.server?.shortName ?? "Laptop") unreachable").font(.caption)
                 if let since = entry.unreachableSince { Text("since \(GlanceStyle.time(since))").font(.caption).foregroundStyle(.secondary) }
             default:
                 if let head = entry.needsYou.first {
@@ -190,11 +239,16 @@ struct NeedsYouRectangular: View {
                         Text("Needs you").font(.headline).widgetAccentable()
                         if entry.count > 1 { Text("+\(entry.count - 1)").font(.caption).foregroundStyle(.secondary) }
                     }
-                    MonoPath(text: head.mono, size: .caption)
+                    HStack(spacing: 4) {
+                        MonoPath(text: head.mono, size: .caption)
+                        if entry.isMulti || entry.showsServerName, let name = head.serverName {
+                            Text("· \(name)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
                     Text(GlancePolicy.waitText(since: head.since, now: entry.date))
                         .font(.caption).foregroundStyle(.secondary)
                 } else {
-                    Text("Optio").font(.headline)
+                    Text(entry.showsServerName ? "Optio · \(entry.server?.shortName ?? "")" : "Optio").font(.headline)
                     Text("Quiet").font(.caption)
                     Text(entry.running.isEmpty ? "nothing running" : "\(entry.running.count) running")
                         .font(.caption).foregroundStyle(.secondary)
@@ -209,15 +263,20 @@ struct NeedsYouRectangular: View {
 struct NeedsYouInline: View {
     let entry: GlanceEntry
 
+    private var prefix: String {
+        if entry.showsServerName, let s = entry.server { return "Optio · \(s.shortName)" }
+        return "Optio"
+    }
+
     var body: some View {
         switch entry.reachability {
         case .signedOut: Text("Optio · sign in")
-        case .unreachable where entry.count == 0: Text("Optio · unreachable")
+        case .unreachable where entry.count == 0: Text("\(prefix) · unreachable")
         default:
             if entry.count > 0 {
-                Text("Optio · \(entry.count) need\(entry.count == 1 ? "s" : "") you")
+                Text("\(prefix) · \(entry.count) need\(entry.count == 1 ? "s" : "") you")
             } else {
-                Text("Optio · quiet")
+                Text("\(prefix) · quiet")
             }
         }
     }
@@ -226,23 +285,23 @@ struct NeedsYouInline: View {
 // MARK: - Previews
 
 #Preview("Small · waiting", as: .systemSmall) { NeedsYouWidget() } timeline: {
-    GlanceFixtures.waiting; GlanceFixtures.one; GlanceFixtures.quiet; GlanceFixtures.stale
+    GlanceFixtures.waiting; GlanceFixtures.one; GlanceFixtures.single; GlanceFixtures.quiet; GlanceFixtures.stale
 }
 #Preview("Small · offline / signed out", as: .systemSmall) { NeedsYouWidget() } timeline: {
-    GlanceFixtures.offline; GlanceFixtures.signedOut
+    GlanceFixtures.offline; GlanceFixtures.partial; GlanceFixtures.signedOut
 }
 #Preview("Medium · waiting", as: .systemMedium) { NeedsYouWidget() } timeline: {
-    GlanceFixtures.waiting; GlanceFixtures.one; GlanceFixtures.stale
+    GlanceFixtures.waiting; GlanceFixtures.one; GlanceFixtures.single; GlanceFixtures.stale
 }
 #Preview("Medium · quiet / offline / signed out", as: .systemMedium) { NeedsYouWidget() } timeline: {
-    GlanceFixtures.quiet; GlanceFixtures.idle; GlanceFixtures.offline; GlanceFixtures.signedOut
+    GlanceFixtures.quiet; GlanceFixtures.idle; GlanceFixtures.offline; GlanceFixtures.partial; GlanceFixtures.signedOut
 }
 #Preview("Circular", as: .accessoryCircular) { NeedsYouWidget() } timeline: {
     GlanceFixtures.waiting; GlanceFixtures.quiet; GlanceFixtures.offline; GlanceFixtures.signedOut
 }
 #Preview("Rectangular", as: .accessoryRectangular) { NeedsYouWidget() } timeline: {
-    GlanceFixtures.waiting; GlanceFixtures.quiet; GlanceFixtures.offline; GlanceFixtures.signedOut
+    GlanceFixtures.waiting; GlanceFixtures.one; GlanceFixtures.quiet; GlanceFixtures.offline; GlanceFixtures.signedOut
 }
 #Preview("Inline", as: .accessoryInline) { NeedsYouWidget() } timeline: {
-    GlanceFixtures.waiting; GlanceFixtures.quiet; GlanceFixtures.offline; GlanceFixtures.signedOut
+    GlanceFixtures.waiting; GlanceFixtures.one; GlanceFixtures.quiet; GlanceFixtures.offline; GlanceFixtures.signedOut
 }

@@ -14,7 +14,7 @@
   <circle cx="168" cy="75" r="26" fill="#febc2e"/>
   <circle cx="244" cy="75" r="26" fill="#28c840"/>
   <!-- bot as prompt glyph -->
-  <g transform="translate(118 280) scale(18.5)" fill="none" stroke="#a78bfa" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(70 134) scale(24)" fill="none" stroke="#a78bfa" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
     <path d="M12 8V4H8"/>
     <rect width="16" height="12" x="4" y="8" rx="2.4"/>
     <path d="M2 14h2"/>

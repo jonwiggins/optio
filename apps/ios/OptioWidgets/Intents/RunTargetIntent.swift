@@ -34,7 +34,7 @@ struct RunTargetIntent: AppIntent {
             return .result(dialog: "Tap again to run \(target.name).")
         }
         GlanceStore.setArmed(target.id, at: nil)
-        guard let fetch = SharedFetch() else { return .result(dialog: "Sign in to Optio first.") }
+        guard let fetch = SharedFetch.resolve(target.serverId) else { return .result(dialog: "Sign in to Optio first.") }
         do {
             try await fetch.post(path, json: [:], timeout: 15)
         } catch {

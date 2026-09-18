@@ -25,7 +25,7 @@ struct NeedsYouControl: ControlWidget {
                     Image(systemName: value.count > 0 ? GlanceStyle.glyph : "moon")
                 }
             }
-            .tint(value.count > 0 ? GlanceStyle.purple : .secondary)
+            .tint(value.count > 0 ? GlanceStyle.needsYou : .secondary)
         }
         .displayName("Jump to what needs me")
         .description("Open Optio at the oldest item waiting on you.")
@@ -45,7 +45,11 @@ struct NeedsYouControlProvider: ControlValueProvider {
 
     func currentValue() async throws -> NeedsYouControlValue {
         guard SharedCredentials.isConfigured else { return NeedsYouControlValue(count: 0, path: nil, signedOut: true) }
-        let cached = GlanceStore.cachedSnapshot.map { GlanceTimelineProvider.ordered($0, now: .now) }
-        return NeedsYouControlValue(count: cached?.needsYou.count ?? 0, path: cached?.needsYou.first?.mono, signedOut: false)
+        let cached = GlanceStore.mergedCachedSnapshot().map { GlanceTimelineProvider.ordered($0, now: .now) }
+        let head = cached?.needsYou.first
+        let path = head.map { h in
+            (ServerRegistry.all.count > 1 && h.serverName != nil) ? "\(h.mono) · \(h.serverName!)" : h.mono
+        }
+        return NeedsYouControlValue(count: cached?.needsYou.count ?? 0, path: path, signedOut: false)
     }
 }

@@ -231,9 +231,23 @@ enum LocalPresentation {
         }
     }
 
+    /// A live terminal that is waiting on the human: the daemon's `needs_you`, or a
+    /// running terminal that has gone `idle` (an agent at its prompt in a plain shell,
+    /// which the daemon cannot tell from a quiet command).
+    static func waitsOnYou(_ t: LocalTerminal) -> Bool {
+        guard !isDead(t) else { return false }
+        if t.attentionState == .needsYou { return true }
+        return t.state == .running && t.attentionState == .idle
+    }
+
+    /// Trailing label for a terminal that waits on you.
+    static func waitingLabel(_ t: LocalTerminal) -> String {
+        t.attentionState == .needsYou ? attentionLabel(t.attentionReason) : "waiting for input"
+    }
+
     /// Terminal state → tone. Needs-you wins over everything while the process is alive.
     static func stateTone(_ t: LocalTerminal) -> Tone {
-        if t.attentionState == .needsYou, !isDead(t) { return .accent }
+        if waitsOnYou(t) { return .accent }
         switch t.state {
         case .pending: return .idle
         case .launching, .running: return .working
@@ -251,9 +265,9 @@ enum LocalPresentation {
         }
     }
 
-    /// Row dot: accent while it needs you, red on error, secondary while working, none once finished.
+    /// Row dot: yellow while it waits on you, red on error, purple while working, none once finished.
     static func rowTone(_ t: LocalTerminal) -> Tone? {
-        if t.attentionState == .needsYou, !isDead(t) { return .accent }
+        if waitsOnYou(t) { return .accent }
         if t.state == .error { return .danger }
         if t.state == .exited { return (t.exitCode ?? 0) == 0 ? nil : .danger }
         if t.state == .pending || t.state == .launching { return .idle }
@@ -336,7 +350,7 @@ struct WorkLinkBadges: View {
                                 .fixedSize()
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: Radius.small))
+                                .background(.fill.tertiary, in: Radius.smallShape)
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)

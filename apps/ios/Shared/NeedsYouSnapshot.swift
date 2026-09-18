@@ -79,14 +79,48 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
             let item = WatchItem(
                 kind: .local, id: t.id, title: t.title, mono: (t.dir as NSString).lastPathComponent,
                 reason: t.attentionReason.map(Self.reasonText), preview: t.preview?.split(whereSeparator: \.isNewline).last.map(String.init),
-                since: since, state: t.attentionState ?? t.state, link: DeepLink.local(t.id, compose: true).url.absoluteString,
-                snoozedUntil: t.snoozedUntil)
+                since: since, state: t.attentionState ?? t.state, link: DeepLink.local(t.id, compose: true).url(server: fetch.serverId).absoluteString,
+                snoozedUntil: t.snoozedUntil, serverId: fetch.serverId, serverName: fetch.serverName)
             if t.attentionState == "needs_you" { needs.append(item) } else { running.append(item) }
         }
         let tasks = await tasksTask
         needs += tasks.needsYou
         running += tasks.running
         return NeedsYouSnapshot(needsYou: needs, running: running, hostsOnline: hosts.hosts.filter { $0.state == "online" }.count, hostsTotal: hosts.hosts.count)
+    }
+
+    /// Every paired server merged into one snapshot. Servers that fail are skipped;
+    /// throws only when none answered. Host counts sum across servers.
+    public static func loadAll(followed: Set<String> = []) async throws -> (snapshot: NeedsYouSnapshot, failed: [String]) {
+        let clients = SharedFetch.allServers
+        guard !clients.isEmpty else { throw SharedFetch.Failure(status: 0, message: "no servers") }
+        var merged = NeedsYouSnapshot.empty
+        var any = false
+        var failed: [String] = []
+        var lastError: Error?
+        await withTaskGroup(of: (String?, Result<NeedsYouSnapshot, Error>).self) { group in
+            for c in clients {
+                group.addTask {
+                    do { return (c.serverId, .success(try await load(using: c, followed: followed))) } catch { return (c.serverId, .failure(error)) }
+                }
+            }
+            for await (id, r) in group {
+                switch r {
+                case .success(let s):
+                    any = true
+                    merged.needsYou += s.needsYou
+                    merged.running += s.running
+                    merged.hostsOnline += s.hostsOnline
+                    merged.hostsTotal += s.hostsTotal
+                case .failure(let e):
+                    lastError = e
+                    if let id { failed.append(id) }
+                }
+            }
+        }
+        guard any else { throw lastError ?? SharedFetch.Failure(status: 0, message: "unreachable") }
+        merged.asOf = .now
+        return (merged, failed)
     }
 
     /// Followed tasks, split like terminals. Failures per task are ignored (a deleted
@@ -98,7 +132,7 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
         await withTaskGroup(of: TaskRowLite?.self) { group in
             for id in ids { group.addTask { try? await fetch.get("/api/tasks/\(id)", as: TaskEnvelope.self).task } }
             for await row in group {
-                guard let t = row, let item = taskItem(t) else { continue }
+                guard let t = row, let item = taskItem(t, server: fetch) else { continue }
                 if t.state == "needs_attention" || t.state == "failed" { needs.append(item) } else { running.append(item) }
             }
         }
@@ -107,7 +141,7 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
 
     /// Watch row for a followed task; nil when the task is finished. Copy per the brief:
     /// "Queued · branch" → "Running" → "PR #581 open · CI running" → "CI passed · review pending".
-    static func taskItem(_ t: TaskRowLite) -> WatchItem? {
+    static func taskItem(_ t: TaskRowLite, server: SharedFetch? = nil) -> WatchItem? {
         switch t.state {
         case "completed", "cancelled": return nil
         default: break
@@ -116,7 +150,8 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
         let mono = t.repoBranch ?? t.prNumber.map { "#\($0)" } ?? (t.repoUrl.map { ($0 as NSString).lastPathComponent } ?? "")
         return WatchItem(
             kind: .task, id: t.id, title: t.title, mono: mono, reason: taskReason(t), preview: nil,
-            since: since, state: t.state, link: DeepLink.task(t.id).url.absoluteString, prUrl: t.prUrl)
+            since: since, state: t.state, link: DeepLink.task(t.id).url(server: server?.serverId).absoluteString, prUrl: t.prUrl,
+            serverId: server?.serverId, serverName: server?.serverName)
     }
 
     static func taskReason(_ t: TaskRowLite) -> String? {

@@ -78,8 +78,18 @@ struct RunView: View {
                             .foregroundStyle(entry.showsStarted ? .primary : .secondary)
                             .contentTransition(.symbolEffect(.replace))
                         Spacer()
-                        Text(target.kind == .local ? "blueprint" : "job")
-                            .font(.caption2).foregroundStyle(.tertiary)
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(target.kind == .local ? "blueprint" : "job")
+                            if let server = target.serverName ?? target.serverId.flatMap({ ServerRegistry.profile($0)?.shortName }), ServerRegistry.all.count > 1 {
+                                HStack(spacing: 3) {
+                                    if let c = target.serverId.flatMap({ ServerRegistry.profile($0)?.color }) {
+                                        Circle().fill(c.swiftUI).frame(width: 5, height: 5)
+                                    }
+                                    Text(server).lineLimit(1)
+                                }
+                            }
+                        }
+                        .font(.caption2).foregroundStyle(.tertiary)
                     }
                     Spacer(minLength: 0)
                     Text(target.name)

@@ -32,8 +32,12 @@ struct OverviewView: View {
             .navigationTitle("Overview")
             .navigationSubtitleIfAvailable(subtitleText)
             .hubChrome()
+            .serverSwitcherToolbar()
             .navigationDestination(for: DashRecentTask.self) { TaskDetailView(taskId: $0.id) }
             .navigationDestination(for: DashSessionRow.self) { SessionDetailView(sessionId: $0.id) }
+            .navigationDestination(for: LocalRoute.self) { route in
+                if case .terminal(let id) = route { LocalTerminalScreen(terminalId: id, hosts: model.localHosts) }
+            }
             .task {
                 while !Task.isCancelled {
                     await model.refresh(api: api)
@@ -53,13 +57,38 @@ struct OverviewView: View {
                         .listRowInsets(EdgeInsets(top: 0, leading: Spacing.l, bottom: Spacing.s, trailing: Spacing.l))
                         .listRowBackground(Color.clear)
                 }
+                ActiveServerCard(hostsOnline: model.hasLocal ? model.localHostsOnline : nil, hostsTotal: model.hasLocal ? model.localHosts.count : nil)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 if let error = model.error {
                     ErrorRow(error: error, what: "the overview") { Task { await model.refresh(api: api) } }
                         .listRowBackground(Color.clear)
                 }
             }
 
+            needsYouSection
+
             stripSection("Tasks", destination: .tasks, items: taskItems(model.taskStats))
+
+            if model.hasLocal {
+                if model.localQuiet {
+                    Section {
+                        Button { router.open(.local) } label: {
+                            OptioRow(title: "Local", meta: Text(model.localHostsOnline > 0
+                                                                ? "\(model.localHostsOnline) host\(model.localHostsOnline == 1 ? "" : "s") online · quiet"
+                                                                : "no hosts online"),
+                                     trailing: "Open")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    let s = model.localStats
+                    stripSection("Local", destination: .local, items: [
+                        StatItem("Needs you", s.needsYou, tone: .accent), StatItem("Working", s.working),
+                        StatItem("Idle", s.idle), StatItem("Finished", s.finished),
+                    ])
+                }
+            }
 
             if let s = model.standaloneStats, s.total > 0 {
                 stripSection("Jobs", destination: .jobs, items: [
@@ -104,22 +133,7 @@ struct OverviewView: View {
                 SectionHeader(title: "Cluster", action: model.clusterForbidden ? nil : { router.open(.cluster) }).textCase(nil)
             }
 
-            if !model.activeSessions.isEmpty {
-                Section {
-                    ForEach(model.activeSessions) { s in
-                        NavigationLink(value: s) {
-                            OptioRow(
-                                title: s.branch ?? "Session \(s.id.prefix(8))",
-                                tone: .working,
-                                meta: Text.meta([InsightsFormat.repoShortName(s.repoUrl ?? ""), s.createdAt.map { "started \($0.relativeDescription)" }]),
-                                titleLineLimit: 1
-                            )
-                        }
-                    }
-                } header: {
-                    SectionHeader(title: "Active sessions", detail: "\(model.activeSessionCount)") { router.open(.sessions) }.textCase(nil)
-                }
-            }
+            liveSection
 
             Section {
                 if model.recentTasks.isEmpty {
@@ -133,9 +147,73 @@ struct OverviewView: View {
             } header: {
                 SectionHeader(title: "Recent tasks") { router.open(.tasks) }.textCase(nil)
             }
+
+            OtherServersSection()
         }
         .listStyle(.insetGrouped)
         .refreshable { await model.refresh(api: api) }
+    }
+
+    /// The web's first section: everything waiting on you, whatever concept it
+    /// belongs to (`needs-you.tsx`). Renders nothing when empty.
+    @ViewBuilder private var needsYouSection: some View {
+        let terminals = model.localNeedsYou
+        let tasks = model.attentionTasks
+        if !terminals.isEmpty || !tasks.isEmpty {
+            Section {
+                ForEach(terminals.prefix(4), id: \.id) { t in
+                    NavigationLink(value: LocalRoute.terminal(id: t.id)) {
+                        TerminalRowView(terminal: t, hostName: model.localHosts.count > 1 ? model.localHostName[t.hostId] : nil)
+                    }
+                }
+                ForEach(tasks.prefix(3)) { task in
+                    NavigationLink(value: task) {
+                        OptioRow(
+                            title: task.title ?? "Task \(task.id.prefix(8))",
+                            tone: .accent,
+                            meta: Text.meta([Text(InsightsFormat.repoShortName(task.repoUrl ?? "")), task.repoBranch.map { Text.mono($0) }]),
+                            trailing: task.errorMessage ?? "needs attention",
+                            trailingTone: .accent,
+                            titleLineLimit: 1
+                        )
+                    }
+                }
+                if terminals.count > 4 {
+                    Button("\(terminals.count - 4) more waiting in Local") { router.open(.local) }.font(.footnote)
+                }
+            } header: {
+                SectionHeader(title: "Needs you", detail: "\(terminals.count + tasks.count)", tone: .accent) { router.open(.local) }.textCase(nil)
+            }
+        }
+    }
+
+    /// What's live right now across concepts (`live-panel.tsx`): working local
+    /// terminals, then interactive sessions.
+    @ViewBuilder private var liveSection: some View {
+        let working = Array(model.localWorking.prefix(3))
+        if !working.isEmpty || !model.activeSessions.isEmpty {
+            Section {
+                ForEach(working, id: \.id) { t in
+                    NavigationLink(value: LocalRoute.terminal(id: t.id)) {
+                        TerminalRowView(terminal: t, hostName: model.localHosts.count > 1 ? model.localHostName[t.hostId] : nil)
+                    }
+                }
+                ForEach(model.activeSessions) { s in
+                    NavigationLink(value: s) {
+                        OptioRow(
+                            title: s.branch ?? "Session \(s.id.prefix(8))",
+                            tone: .working,
+                            meta: Text.meta([InsightsFormat.repoShortName(s.repoUrl ?? ""), s.createdAt.map { "started \($0.relativeDescription)" }]),
+                            titleLineLimit: 1
+                        )
+                    }
+                }
+            } header: {
+                SectionHeader(title: "Live now", detail: "\(model.localLiveCount + model.activeSessionCount)") {
+                    router.open(working.isEmpty ? .sessions : .local)
+                }.textCase(nil)
+            }
+        }
     }
 
     private func stripSection(_ title: String, destination: AppRouter.Section, items: [StatItem]) -> some View {
@@ -152,7 +230,9 @@ struct OverviewView: View {
         let running = model.taskStats?.running ?? 0
         let attention = model.taskStats?.needsAttention ?? 0
         var s = "\(running) active"
-        if attention > 0 { s += " · \(attention) need\(attention == 1 ? "s" : "") you" }
+        if model.localLiveCount > 0 { s += " · \(model.localLiveCount) local" }
+        let waiting = attention + model.localNeedsYou.count
+        if waiting > 0 { s += " · \(waiting) need\(waiting == 1 ? "s" : "") you" }
         return s
     }
 
@@ -166,10 +246,15 @@ struct OverviewView: View {
                 Text("·").foregroundStyle(.tertiary)
                 Text("\(model.activeSessionCount) \(model.activeSessionCount == 1 ? "session" : "sessions")")
             }
-            if attention > 0 {
+            if model.localLiveCount > 0 {
                 Text("·").foregroundStyle(.tertiary)
-                Text("\(attention) need\(attention == 1 ? "s" : "") you")
-                    .foregroundStyle(AppTheme.accent)
+                Text("\(model.localLiveCount) local")
+            }
+            let waiting = attention + model.localNeedsYou.count
+            if waiting > 0 {
+                Text("·").foregroundStyle(.tertiary)
+                Text("\(waiting) need\(waiting == 1 ? "s" : "") you")
+                    .foregroundStyle(Tone.accent.textStyle)
                     .contentTransition(.numericText())
             }
         }

@@ -9,18 +9,43 @@ public struct SharedFetch: Sendable {
     public let baseURL: URL
     public let token: String
     public let workspaceId: String?
+    /// The `ServerProfile.id` this client talks to; nil for ad-hoc clients.
+    public let serverId: String?
+    public let serverName: String?
 
+    /// The active server, or nil when nothing is paired.
     public init?() {
-        guard let url = SharedCredentials.serverURL, let token = SharedCredentials.token else { return nil }
-        baseURL = url
-        self.token = token
-        workspaceId = SharedCredentials.workspaceId
+        guard let active = ServerRegistry.active else { return nil }
+        self.init(server: active)
     }
 
-    public init(baseURL: URL, token: String, workspaceId: String? = nil) {
+    /// A specific paired server; nil when its token is missing.
+    public init?(server: ServerProfile) {
+        guard let token = ServerRegistry.token(for: server.id) else { return nil }
+        baseURL = server.url
+        self.token = token
+        workspaceId = server.workspaceId
+        serverId = server.id
+        serverName = server.shortName
+    }
+
+    public init(baseURL: URL, token: String, workspaceId: String? = nil, serverId: String? = nil, serverName: String? = nil) {
         self.baseURL = baseURL
         self.token = token
         self.workspaceId = workspaceId
+        self.serverId = serverId
+        self.serverName = serverName
+    }
+
+    /// One client per configured server, active first. Empty when signed out.
+    public static var allServers: [SharedFetch] {
+        ServerRegistry.configured.compactMap { SharedFetch(server: $0) }
+    }
+
+    /// The client for `serverId`, falling back to the active server.
+    public static func resolve(_ serverId: String?) -> SharedFetch? {
+        if let serverId, let p = ServerRegistry.profile(serverId), let f = SharedFetch(server: p) { return f }
+        return SharedFetch()
     }
 
     public static let decoder: JSONDecoder = {
