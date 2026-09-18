@@ -182,6 +182,18 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   the tab on that session. Uses the page-scoped Notification API, so the tab must be open
   (server Web Push for Local sessions is not wired up yet). All Local pages share one
   terminals/hosts feed (`components/local/local-feed.ts`).
+- **Usage in the header** (`components/local/usage-chips.tsx`): the gauge pill shows the
+  Claude subscription's 5-hour / 7-day limit utilization (account-wide, from
+  `GET /api/auth/usage`, polled every minute; the server caches the upstream call for
+  5 min), turning yellow at 80% and red at 95%. The coin chip is _this session's_ tokens
+  and estimated spend: the daemon reads the `transcript_path` from Claude Code's hooks
+  and folds the transcript's assistant turns incrementally (`cli/src/local/usage-tracker.ts`,
+  deduped by message id since Claude Code writes one line per content block), prices them
+  with the public list prices in `packages/shared/src/utils/agent-usage.ts`, and sends a
+  `usage` frame; stored on `local_terminals.usage`. Agent spawns only — a shell where you
+  typed `claude` has no hooks, so it gets neither usage nor Stop-driven attention.
+- **Rename in place**: the title in the terminal header is a text box (Enter / blur saves,
+  Escape reverts); `PATCH /api/local/terminals/:id { title }`.
 - **Split view** — up to three terminals at once: `/local/<primary>?split=<id2>,<id3>`
   (`&layout=rows` stacks them; phones always stack). Open a pane from the rail row's ⧉
   button or Shift+click; each extra pane has a one-line strip with kill / make-primary /

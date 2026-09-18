@@ -130,6 +130,9 @@ export async function localDaemonWs(app: FastifyInstance) {
         case "links":
           await terminalService.handleLinks(hostId, msg.terminalId, msg.links);
           return;
+        case "usage":
+          await terminalService.handleUsage(hostId, msg.terminalId, msg.usage);
+          return;
         case "preview":
           await terminalService.handlePreview(
             hostId,

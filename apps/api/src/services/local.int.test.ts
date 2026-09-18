@@ -26,6 +26,8 @@ import {
   handleAttention,
   handleExit,
   handleLinks,
+  handleUsage,
+  renameTerminal,
   handleSpawnError,
   handleStarted,
   killTerminal,
@@ -355,6 +357,58 @@ describe("local terminal links", () => {
     // Another host can't rewrite them.
     await handleLinks(other.id, t.id, []);
     expect((await getTerminal(t.id))!.links).toEqual([good]);
+  });
+
+  it("stores sanitized usage from the owning host only", async () => {
+    const host = await makeHost();
+    const other = await makeHost();
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "agent", agent: "claude-code" },
+    });
+    await handleUsage(host.id, t.id, {
+      inputTokens: 10,
+      outputTokens: -5, // clamped
+      cacheReadTokens: 1000,
+      cacheWriteTokens: "nope", // dropped
+      turns: 2,
+      model: "claude-opus-5",
+      costUsd: 0.0123,
+      updatedAt: "2026-09-17T00:00:00.000Z",
+    });
+    expect((await getTerminal(t.id))!.usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 0,
+      cacheReadTokens: 1000,
+      cacheWriteTokens: 0,
+      turns: 2,
+      model: "claude-opus-5",
+      costUsd: 0.0123,
+      updatedAt: "2026-09-17T00:00:00.000Z",
+    });
+
+    // Zero turns / garbage is ignored; another host can't overwrite.
+    await handleUsage(host.id, t.id, { turns: 0 });
+    await handleUsage(other.id, t.id, { turns: 9, inputTokens: 1 });
+    expect((await getTerminal(t.id))!.usage?.turns).toBe(2);
+  });
+
+  it("renames with trimming and a length cap", async () => {
+    const host = await makeHost();
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "shell" },
+    });
+    const renamed = await renameTerminal(t, "  fix flaky tests  ");
+    expect(renamed.title).toBe("fix flaky tests");
+    expect((await renameTerminal(renamed, "   ")).title).toBe("fix flaky tests");
+    expect((await renameTerminal(renamed, "x".repeat(300))).title).toHaveLength(200);
   });
 });
 
