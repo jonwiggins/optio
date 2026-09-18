@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-18
+
+### Added
+
+- **Optio Local** — terminals on your own machine, managed from the web UI at `/local`. The CLI daemon (`optio local up`) makes one outbound WebSocket to the server, advertises a directory allowlist, and runs PTYs; the browser attaches over a relay. Attention detection is layered (Claude Code hooks → bell → silence) and drives a "needs you" queue. Local Blueprints spawn terminals from webhook/schedule/ticket triggers with shell-quoted params. See [docs/optio-local.md](docs/optio-local.md).
+- **Local cockpit UX** — split view (up to three terminals side by side or stacked), a session rail with PR/ticket badges and link-aware search, Shift+Enter for newlines in agent REPLs, a collapsible rail (`⌃⇧B`), inline session rename, a single status dot per header that folds lifecycle and attention into one color, and headers that collapse by pane width so the title always keeps its text.
+- **Attention from another tab** — the favicon shows the focused session's status (yellow needs you / green working / grey quiet), the tab title carries a `(N)` needs-you count, and a per-session bell arms a browser notification for when that session needs input.
+- **Usage in the terminal header** — Claude's 5-hour / 7-day account limits as a gauge pill with a hover card and a manual refresh (`GET /api/auth/usage?fresh=1` bypasses the 5-minute cache), and a per-session tokens/cost chip summed by the daemon from the Claude Code transcript. A `claude` shim on every spawned terminal's PATH gives a hand-launched Claude Code the same hooks as an agent spawn.
+- **Overview redesign** — the dashboard now opens with a cross-concept **Needs you** strip, then a **Usage limits** panel showing Claude next to **Codex** (the daemon reads Codex's newest rate-limit snapshot from its session logs, no token leaves the laptop), a **Live** panel of every open terminal, session, and awake agent, per-concept stats strips with **Local** as a peer, quiet concepts folded into one line, and a **Recent** feed mixing repo tasks, job runs, and persistent-agent turns via `GET /api/runs/recent`.
+- **Cursor (`cursor-agent`)** as a supported agent type.
+- **Workspace RBAC** enforced across the API and WebSockets: viewers are read-only on all mutating routes, member/admin gates on the rest, and workspace scoping on activity, log streams, persistent agents, jobs, connections, and webhooks (#574, #575, #576).
+- **Deterministic test tiers** — integration tests against real Postgres + Redis, a full-pipeline e2e tier with a fake agent runtime, Playwright web e2e, and a live smoke harness.
+- **Opt-in rootless mode** for agent StatefulSet pods; a storage class setting for the built-in Postgres PVC (#577); `--check` mode for `update-claude-auth.sh`.
+
+### Fixed
+
+- Agent prompt arguments are shell-quoted everywhere they reach a shell; PR-open task state is cleaned safely (#555, #558).
+- Scraped PR URLs are verified against the git platform before a task enters `pr_opened` (#561); in-pod agents are terminated on cancel and post-cancel PR adoption is guarded (#564).
+- Runs fail on terminal Claude API errors instead of being marked Done (#563); cost accumulates across resumes and survives bare retries (#573).
+- Tasks created by webhooks, tickets, and subtasks get a `workspace_id` (#560); missing secrets fail provisioning permanently instead of retrying forever (#569).
+- Schedule triggers compute `nextFireAt` again (#568); cancelled standalone runs are no longer auto-retried (#567).
+- Setup re-runs no longer rotate the encryption key, and decrypt failures are actionable (#562); built-in connection providers stop duplicating on restart.
+- GitHub rate limiting is respected (#546); the enterprise security posture is hardened (#545); Gemini/Vertex credentials count as setup-complete signals.
+- Agent images pin CLIs to work around a Bun exec crash (#566) and install the Codex CLI (#559); the web production build excludes e2e files (#578); log catch-up replay frames are ignored in the web log view (#535).
+
 ## [0.4.1] - 2026-06-11
 
 ### Added
