@@ -140,8 +140,14 @@ export async function recentRunsRoutes(app: FastifyInstance) {
         `;
         const result = await db.execute(query);
         const rows = (result as unknown as { rows?: any[] }).rows ?? (result as unknown as any[]);
-        const iso = (v: unknown) =>
-          v instanceof Date ? v.toISOString() : typeof v === "string" ? v : null;
+        // Raw SQL hands timestamps back as Postgres text ("2026-06-15 04:35:33+00"),
+        // which Safari's Date won't parse — normalize to ISO.
+        const iso = (v: unknown) => {
+          if (v instanceof Date) return v.toISOString();
+          if (typeof v !== "string") return null;
+          const t = Date.parse(v.replace(" ", "T").replace(/\+00$/, "Z"));
+          return isNaN(t) ? null : new Date(t).toISOString();
+        };
         const runs: RecentRun[] = rows.map((r: any) => {
           const kind = r.kind as RecentRun["kind"];
           const href =
