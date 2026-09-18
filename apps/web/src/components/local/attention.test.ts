@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { faviconDataUrl, ringingBells, summarizeAttention, TONE_COLOR } from "./attention";
+import {
+  faviconDataUrl,
+  ringingBells,
+  summarizeAttention,
+  terminalTone,
+  TONE_COLOR,
+} from "./attention";
 
 const t = (id: string, attentionState: string, state = "running") => ({
   id,
@@ -23,6 +29,17 @@ describe("summarizeAttention", () => {
     const s = summarizeAttention([t("a", "working"), t("b", "needs_you"), t("c", "needs_you")]);
     expect(s.tone).toBe("needs_you");
     expect(s.needsYou).toBe(2);
+  });
+});
+
+describe("terminalTone", () => {
+  it("reads one terminal's status", () => {
+    expect(terminalTone(t("a", "needs_you"))).toBe("needs_you");
+    expect(terminalTone(t("a", "working"))).toBe("working");
+    expect(terminalTone(t("a", "idle"))).toBe("idle");
+    expect(terminalTone(t("a", "working", "exited"))).toBe("idle");
+    expect(terminalTone(t("a", "needs_you", "exited"))).toBe("needs_you");
+    expect(terminalTone(t("a", "idle", "error"))).toBe("error");
   });
 });
 

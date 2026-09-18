@@ -3,7 +3,18 @@
  * badge, bell notifications). Kept free of DOM so they can be unit tested.
  */
 
-export type AttentionTone = "needs_you" | "working" | "idle";
+export type AttentionTone = "needs_you" | "working" | "idle" | "error";
+
+/**
+ * The tone for ONE terminal — what the favicon shows while you're inside
+ * a session, so the tab reflects the thing you're actually looking at.
+ */
+export function terminalTone(t: any): AttentionTone {
+  if (t.state === "error") return "error";
+  if (t.attentionState === "needs_you") return "needs_you";
+  if (isLive(t) && t.attentionState === "working") return "working";
+  return "idle";
+}
 
 export interface AttentionSummary {
   tone: AttentionTone;
@@ -30,6 +41,7 @@ export const TONE_COLOR: Record<AttentionTone, string> = {
   needs_you: "#f0a040",
   working: "#34d399",
   idle: "#807c88",
+  error: "#f06060",
 };
 
 /** The Optio bolt favicon with a status dot in the corner. */

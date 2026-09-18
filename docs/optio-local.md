@@ -190,8 +190,18 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   and folds the transcript's assistant turns incrementally (`cli/src/local/usage-tracker.ts`,
   deduped by message id since Claude Code writes one line per content block), prices them
   with the public list prices in `packages/shared/src/utils/agent-usage.ts`, and sends a
-  `usage` frame; stored on `local_terminals.usage`. Agent spawns only — a shell where you
-  typed `claude` has no hooks, so it gets neither usage nor Stop-driven attention.
+  `usage` frame; stored on `local_terminals.usage`. Works for agent spawns _and_ for a
+  `claude` you start by hand in an Optio shell: the daemon prepends a `claude` shim
+  (`<config>/bin/claude`, written by `writeClaudeShim`) to every spawn's PATH that adds
+  `--settings <hook file>` unless you passed your own. A login rc that _resets_ PATH
+  (rather than prepending) drops the shim, and that terminal falls back to the silence
+  heuristic.
+- **One status dot per header** (`StatusDot`, `statusDescriptor` in `terminal-card.tsx`):
+  lifecycle + attention folded into a single color — yellow pulse needs you, green working,
+  grey idle, amber launching/pending, red error, dim grey exited — with the description on
+  hover. Inside `/local/:id` the favicon shows _that_ session's dot; on `/local` it shows the
+  fleet's (yellow beats green beats grey). The `(N)` title badge is always the fleet's
+  needs-you count.
 - **Rename in place**: the title in the terminal header is a text box (Enter / blur saves,
   Escape reverts); `PATCH /api/local/terminals/:id { title }`.
 - **Split view** — up to three terminals at once: `/local/<primary>?split=<id2>,<id3>`

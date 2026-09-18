@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { mapHookEvent } from "./attention.js";
 
@@ -112,6 +112,45 @@ export function startHookServer(
 // The ${...} placeholders are expanded by the shell running the hook, from
 // the terminal process's environment — not by the daemon.
 const HOOK_COMMAND = `curl -sf -m 3 -X POST "http://127.0.0.1:\${OPTIO_LOCAL_DAEMON_PORT}/hook/\${OPTIO_LOCAL_TERMINAL_ID}" --data-binary @- -H 'Content-Type: application/json'`;
+
+/**
+ * A `claude` shim, prepended to PATH for every spawn, so a Claude Code you
+ * start by hand inside an Optio shell gets the same hook settings as an
+ * agent spawn (attention + usage). Finds the real binary by walking PATH
+ * past its own directory; adds nothing when the caller already passes
+ * `--settings`. Returns the directory to prepend to PATH.
+ */
+export function writeClaudeShim(dir: string): string {
+  const script = `#!/bin/sh
+# Optio Local shim: run Claude Code with this terminal's hook settings so the
+# cockpit can tell when it needs you and how much it has used. Installed on
+# PATH by the daemon for terminals it spawns; harmless elsewhere.
+shim_dir=$(cd "$(dirname "$0")" && pwd)
+real=""
+old_ifs=$IFS; IFS=:
+for d in $PATH; do
+  [ "$d" = "$shim_dir" ] && continue
+  if [ -x "$d/claude" ] && [ ! -d "$d/claude" ]; then real="$d/claude"; break; fi
+done
+IFS=$old_ifs
+if [ -z "$real" ]; then
+  echo "claude: command not found (Optio shim could not locate Claude Code on PATH)" >&2
+  exit 127
+fi
+for a in "$@"; do
+  case "$a" in --settings|--settings=*) exec "$real" "$@" ;; esac
+done
+if [ -n "$OPTIO_LOCAL_HOOK_SETTINGS" ] && [ -f "$OPTIO_LOCAL_HOOK_SETTINGS" ]; then
+  exec "$real" --settings "$OPTIO_LOCAL_HOOK_SETTINGS" "$@"
+fi
+exec "$real" "$@"
+`;
+  mkdirSync(dir, { recursive: true });
+  const path = `${dir}/claude`;
+  writeFileSync(path, script, { encoding: "utf-8", mode: 0o755 });
+  chmodSync(path, 0o755);
+  return dir;
+}
 
 /**
  * Write the Claude Code settings file injected via `claude --settings` for
