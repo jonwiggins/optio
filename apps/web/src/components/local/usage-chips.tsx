@@ -87,7 +87,17 @@ function Meter({ label, bucket }: { label: string; bucket: Bucket }) {
   );
 }
 
-export function AccountUsagePill({ className }: { className?: string }) {
+/**
+ * `collapsible` (inside an `@container`): below @2xl the pill is just the
+ * gauge icon plus the worse of the two percentages; hover for the rest.
+ */
+export function AccountUsagePill({
+  className,
+  collapsible,
+}: {
+  className?: string;
+  collapsible?: boolean;
+}) {
   const usage = useAccountUsage();
   if (!usage || !usage.available) return null;
   const buckets: Array<[string, Bucket]> = [];
@@ -105,7 +115,7 @@ export function AccountUsagePill({ className }: { className?: string }) {
     <span
       title={`Claude usage limits (account-wide)\n${tip}`}
       className={cn(
-        "inline-flex items-center gap-2 h-6 px-2 rounded-md border text-[11px] font-mono",
+        "inline-flex items-center gap-1.5 @2xl:gap-2 h-6 px-1.5 @2xl:px-2 rounded-md border text-[11px] font-mono shrink-0",
         worst >= 95
           ? "border-error/40 bg-error/10"
           : worst >= 80
@@ -115,19 +125,31 @@ export function AccountUsagePill({ className }: { className?: string }) {
       )}
     >
       <Gauge className={cn("w-3 h-3 shrink-0", pctTone(worst))} />
-      {buckets.map(([l, b]) => (
-        <Meter key={l} label={l} bucket={b} />
-      ))}
+      {collapsible && (
+        <span className={cn("@2xl:hidden tabular-nums font-medium", pctTone(worst))}>
+          {Math.round(worst)}%
+        </span>
+      )}
+      <span
+        className={cn("inline-flex items-center gap-2", collapsible && "hidden @2xl:inline-flex")}
+      >
+        {buckets.map(([l, b]) => (
+          <Meter key={l} label={l} bucket={b} />
+        ))}
+      </span>
     </span>
   );
 }
 
+/** `collapsible`: below @xl only the coin icon shows (numbers on hover). */
 export function SessionUsageChip({
   usage,
   className,
+  collapsible,
 }: {
   usage: LocalTerminalUsage | null | undefined;
   className?: string;
+  collapsible?: boolean;
 }) {
   if (!usage || usage.turns === 0) return null;
   const tokens =
@@ -144,14 +166,18 @@ export function SessionUsageChip({
     <span
       title={tip}
       className={cn(
-        "inline-flex items-center gap-1.5 h-6 px-2 rounded-md border border-border/70 bg-bg-card/60 text-[11px] font-mono text-text-muted",
+        "inline-flex items-center gap-1.5 h-6 px-1.5 @xl:px-2 rounded-md border border-border/70 bg-bg-card/60 text-[11px] font-mono text-text-muted shrink-0",
         className,
       )}
     >
       <Coins className="w-3 h-3 shrink-0 text-text-muted/70" />
-      <span className="tabular-nums">{formatTokens(tokens)}</span>
+      <span className={cn("tabular-nums", collapsible && "hidden @xl:inline")}>
+        {formatTokens(tokens)}
+      </span>
       {usage.costUsd != null && (
-        <span className="tabular-nums text-text">{formatUsd(usage.costUsd)}</span>
+        <span className={cn("tabular-nums text-text", collapsible && "hidden @xl:inline")}>
+          {formatUsd(usage.costUsd)}
+        </span>
       )}
     </span>
   );
