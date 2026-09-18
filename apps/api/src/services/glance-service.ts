@@ -86,8 +86,14 @@ export function isSnoozed(row: { snoozedUntil: Date | null }, now = Date.now()):
   return !!row.snoozedUntil && row.snoozedUntil.getTime() > now;
 }
 
+/**
+ * Terminals that feed the Watch: agent-spec terminals always, plus plain shells
+ * once the daemon has observed an agent in them (attention state set by Claude
+ * Code hooks or the bell scanner). Mirrors apps/ios/Shared/NeedsYouSnapshot.swift.
+ */
 function isAgentTerminal(row: LocalTerminalRow): boolean {
-  return (row.spec as { kind?: string } | null)?.kind === "agent";
+  if ((row.spec as { kind?: string } | null)?.kind === "agent") return true;
+  return row.attentionState === "working" || row.attentionState === "needs_you";
 }
 
 export function terminalToWatchItem(row: LocalTerminalRow): WatchItem {

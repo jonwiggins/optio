@@ -153,13 +153,17 @@ describe("terminalToWatchItem / computeWatchState", () => {
       }),
       terminal({ id: "c", attentionState: "working" }),
       terminal({ id: "d", state: "exited", attentionState: "needs_you" }),
+      // A plain shell counts once the daemon has seen an agent in it (attention set)…
       terminal({ id: "e", spec: { kind: "shell" }, attentionState: "needs_you" }),
       terminal({ id: "f", attentionState: "needs_you", snoozedUntil: new Date(NOW.getTime() - 1) }),
+      // …but an idle shell with no agent activity never does.
+      terminal({ id: "g", spec: { kind: "shell" }, attentionState: "idle" }),
+      terminal({ id: "h", spec: { kind: "shell" }, attentionState: null }),
     ]);
     const state = await computeWatchState("u1", NOW);
     expect(state.phase).toBe("waiting");
-    expect(state.needsYouCount).toBe(2);
-    expect([state.head?.id, ...state.others.map((o) => o.id)].sort()).toEqual(["a", "f"]);
+    expect(state.needsYouCount).toBe(3);
+    expect([state.head?.id, ...state.others.map((o) => o.id)].sort()).toEqual(["a", "e", "f"]);
     expect(state.runningCount).toBe(2);
     expect(state.offlineSince).toBeNull();
   });
