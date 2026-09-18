@@ -161,54 +161,71 @@ struct OtherServerRow: View {
     }
 }
 
-/// Card at the top of the Overview naming the active server: colour, name, host,
-/// who you are there. The one place the identity is spelled out in full.
+/// Card at the top of the Overview naming the active server. Laid out like a
+/// Settings row: a coloured icon tile carries the server colour, then title,
+/// subtitle and a chevron into Manage servers.
 struct ActiveServerCard: View {
     @Environment(SessionStore.self) private var session
     var hostsOnline: Int? = nil
     var hostsTotal: Int? = nil
+    @State private var showServers = false
 
     var body: some View {
         if let server = session.activeServer {
-            HStack(spacing: Spacing.m) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(server.name).font(.headline)
-                        if session.hasMultipleServers {
-                            Text("· 1 of \(session.servers.count)").font(.footnote).foregroundStyle(.tertiary)
-                        }
+            Button { showServers = true } label: {
+                HStack(spacing: Spacing.m) {
+                    ServerIconTile(color: server.color)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(server.name).font(.body.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                        Text(server.host).font(.monoFootnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        if let detail { detail.font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                     }
-                    Text(server.host).font(.monoFootnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    HStack(spacing: 6) {
-                        if let u = session.user?.displayName ?? session.user?.email {
-                            Text(u)
-                        } else if session.switching {
-                            Text("Connecting…")
-                        }
-                        if let total = hostsTotal, total > 0, let online = hostsOnline {
-                            Text("·").foregroundStyle(.tertiary)
-                            Text(online == 0 ? "local host offline" : "\(online)/\(total) local host\(total == 1 ? "" : "s") online")
-                        }
+                    Spacer(minLength: Spacing.s)
+                    if session.hasMultipleServers {
+                        Text("1 of \(session.servers.count)").font(.footnote).foregroundStyle(.tertiary)
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer(minLength: 0)
+                .padding(.vertical, Spacing.m)
+                .padding(.horizontal, Spacing.l)
+                .contentShape(Radius.cardShape)
             }
-            .padding(.vertical, Spacing.m)
-            .padding(.leading, Spacing.l + 4)
-            .padding(.trailing, Spacing.m)
-            .background {
-                // The server colour runs down the leading edge *inside* the card
-                // shape, so it follows the corner curve instead of floating beside it.
-                ZStack(alignment: .leading) {
-                    Surface.card
-                    server.color.swiftUI.frame(width: 5)
-                }
-                .clipShape(Radius.cardShape)
-            }
+            .buttonStyle(.plain)
+            .background(Surface.card, in: Radius.cardShape)
             .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens Manage servers")
+            .sheet(isPresented: $showServers) { NavigationStack { ServersView(inSheet: true) } }
         }
+    }
+
+    private var detail: Text? {
+        var parts: [Text?] = []
+        if let u = session.user?.displayName ?? session.user?.email {
+            parts.append(Text(u))
+        } else if session.switching {
+            parts.append(Text("Connecting…"))
+        }
+        if let total = hostsTotal, total > 0, let online = hostsOnline {
+            parts.append(Text(online == 0 ? "local host offline" : "\(online)/\(total) local host\(total == 1 ? "" : "s") online"))
+        }
+        return Text.meta(parts)
+    }
+}
+
+/// The Settings-style icon tile: a continuous rounded square in the server
+/// colour with a white laptop symbol.
+struct ServerIconTile: View {
+    let color: ServerColor
+    var size: CGFloat = 36
+
+    var body: some View {
+        Image(systemName: "laptopcomputer")
+            .font(.system(size: size * 0.5, weight: .medium))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(color.swiftUI, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
