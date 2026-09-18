@@ -225,6 +225,16 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   so the page is only as tall as what's happening; roll-up rules live in
   `components/dashboard/local-stats.ts`. A paired host with an open terminal counts as
   "started" — the welcome hero no longer shows just because there are zero repo tasks.
+  Three more overview panels: **Usage limits** (`limits-panel.tsx`) shows Claude's live
+  5h / 7d account utilization next to **Codex**'s — the daemon reads Codex's newest
+  `rate_limits` snapshot from `~/.codex/sessions/**/rollout-*.jsonl` (no token leaves the
+  laptop; `cli/src/local/codex-limits.ts`), reports it in an `agent-limits` frame every few
+  minutes, and it lands on `local_hosts.agent_limits`; the panel labels it "as of <when>"
+  since it only moves when Codex runs, and zeroes a window whose reset has passed.
+  **Live** (`live-panel.tsx`) is one grid of every open local terminal, interactive
+  session, and awake persistent agent, each linking into its view. **Recent**
+  (`recent-runs.tsx`) is a newest-first feed of repo tasks, job runs, and agent turns from
+  `GET /api/runs/recent` (`routes/recent-runs.ts`, a workspace-scoped UNION).
 
 ## CLI
 
