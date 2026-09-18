@@ -33,6 +33,7 @@ import {
   type AgentType,
 } from "@optio/shared";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
+import { ApiKeysManager } from "@/components/settings/api-keys-manager";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
 
 function PromptTemplateEditor() {
@@ -1750,6 +1751,15 @@ export default function SettingsPage() {
       <section>
         <h2 className="text-sm font-medium text-text-muted mb-3">Authentication</h2>
         <AuthenticationSettings />
+      </section>
+
+      {/* Personal access tokens */}
+      <section>
+        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
+          <KeyRound className="w-4 h-4" />
+          API Keys
+        </h2>
+        <ApiKeysManager />
       </section>
 
       {/* GitHub Token */}

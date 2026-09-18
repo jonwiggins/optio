@@ -347,3 +347,44 @@ describe("api-client", () => {
     });
   });
 });
+
+describe("api-client api keys", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("localStorage", { getItem: vi.fn().mockReturnValue(null), setItem: vi.fn() });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("lists, creates and revokes personal access tokens", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ keys: [] }),
+    });
+    await expect(api.listApiKeys()).resolves.toEqual({ keys: [] });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/auth/api-keys");
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: () =>
+        Promise.resolve({ token: "optio_pat_x", tokenId: "k1", name: "iPhone", expiresAt: null }),
+    });
+    const created = await api.createApiKey({ name: "iPhone" });
+    expect(created.token).toBe("optio_pat_x");
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ name: "iPhone" }),
+    });
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ ok: true }),
+    });
+    await api.revokeApiKey("k1");
+    expect(fetchMock.mock.calls[2][0]).toBe("/api/auth/api-keys/k1");
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "DELETE" });
+  });
+});

@@ -31,6 +31,23 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface ApiKeySummary {
+  id: string;
+  name: string;
+  prefix: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface ApiKeyCreated {
+  /** Raw token; shown once and never retrievable again. */
+  token: string;
+  tokenId: string;
+  name: string;
+  expiresAt: string | null;
+}
+
 export const api = {
   // Tasks
   listTasks: (params?: { state?: string; limit?: number; offset?: number }) => {
@@ -818,6 +835,16 @@ export const api = {
     }),
 
   getWsToken: () => request<{ token: string }>("/api/auth/ws-token"),
+
+  // Personal access tokens (API keys)
+  listApiKeys: () => request<{ keys: ApiKeySummary[] }>("/api/auth/api-keys"),
+  createApiKey: (data: { name?: string; expiresAt?: string }) =>
+    request<ApiKeyCreated>("/api/auth/api-keys", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  revokeApiKey: (id: string) =>
+    request<{ ok: boolean }>(`/api/auth/api-keys/${id}`, { method: "DELETE" }),
 
   // Workspaces
   listWorkspaces: () =>
