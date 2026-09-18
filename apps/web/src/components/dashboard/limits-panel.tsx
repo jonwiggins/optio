@@ -1,5 +1,8 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Gauge, Clock, RefreshCw } from "lucide-react";
+import { Check, Gauge, Clock, RefreshCw } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { UsageData } from "./types.js";
 
@@ -145,31 +148,98 @@ function Meter({ label, window }: { label: string; window: LimitWindow }) {
 export function LimitsPanel({
   providers,
   onRefresh,
+  onRefreshHosts,
 }: {
   providers: ProviderLimits[];
+  /** Re-read Claude from Anthropic (bypassing the server cache). */
   onRefresh?: () => void | Promise<void>;
+  /** Re-fetch hosts so a fresh Codex snapshot from the daemon shows up. */
+  onRefreshHosts?: () => void | Promise<void>;
 }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [, tick] = useState(0);
+
+  // Keep "updated 12s ago" honest while it's on screen.
+  useEffect(() => {
+    if (refreshedAt == null) return;
+    const t = setInterval(() => tick((n) => n + 1), 5_000);
+    return () => clearInterval(t);
+  }, [refreshedAt]);
+
   if (providers.length === 0) return null;
+
+  const doRefresh = async () => {
+    if (refreshing || !onRefresh) return;
+    setRefreshing(true);
+    setError(null);
+    const started = Date.now();
+    try {
+      await Promise.all([onRefresh(), onRefreshHosts?.()]);
+      // Anthropic answers fast; hold the spinner ≥400 ms so the click
+      // visibly did something even when the numbers don't change.
+      const wait = 400 - (Date.now() - started);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      setRefreshedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Refresh failed");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const updatedLabel =
+    refreshedAt == null
+      ? null
+      : Date.now() - refreshedAt < 10_000
+        ? "updated just now"
+        : `updated ${formatRelativeTime(new Date(refreshedAt).toISOString())}`;
+
   return (
     <div className="rounded-xl border border-border/50 bg-bg-card p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Gauge className="w-3.5 h-3.5 text-text-muted" />
           <span className="text-xs font-medium text-text-heading">Usage limits</span>
+          {error ? (
+            <span className="text-[10px] text-error">{error}</span>
+          ) : refreshing ? (
+            <span className="text-[10px] text-text-muted/70">checking with Anthropic…</span>
+          ) : updatedLabel ? (
+            <span className="text-[10px] text-success/80 flex items-center gap-1">
+              <Check className="w-3 h-3" />
+              {updatedLabel}
+            </span>
+          ) : null}
         </div>
         {onRefresh && (
           <button
             type="button"
-            onClick={() => onRefresh()}
-            className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text transition-colors"
-            title="Re-read Claude usage now"
+            onClick={doRefresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+            className={cn(
+              "flex items-center gap-1 px-2 py-1 -my-1 -mr-2 rounded-md text-[11px] transition-colors",
+              refreshing
+                ? "text-text bg-bg-hover/60 cursor-wait"
+                : "text-text-muted hover:text-text hover:bg-bg-hover/60",
+            )}
+            title="Re-read Claude usage from Anthropic now"
           >
-            <RefreshCw className="w-3 h-3" />
-            refresh
+            <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
+            {refreshing ? "refreshing" : "refresh"}
           </button>
         )}
       </div>
-      <div className={cn("grid gap-6", providers.length > 1 ? "md:grid-cols-2" : "")}>
+      <div
+        aria-live="polite"
+        className={cn(
+          "grid gap-6 transition-opacity duration-200",
+          providers.length > 1 ? "md:grid-cols-2" : "",
+          refreshing && "opacity-50",
+        )}
+      >
         {providers.map((p) => (
           <div key={p.key} className="min-w-0">
             <div className="flex items-center gap-2 mb-2">
