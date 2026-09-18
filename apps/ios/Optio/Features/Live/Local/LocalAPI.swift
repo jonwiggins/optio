@@ -325,7 +325,11 @@ struct WorkLinkBadges: View {
                 ForEach(links.prefix(max), id: \.url) { link in
                     if let url = URL(string: link.url) {
                         Link(destination: url) {
-                            Label(Self.shortLabel(link), systemImage: link.kind == .pr ? "arrow.triangle.pull" : link.kind == .ref ? "number" : "circle.circle")
+                            // Explicit HStack: `Label` collapses to icon-only inside a List row's Link.
+                            HStack(spacing: 3) {
+                                Image(systemName: link.kind == .pr ? "arrow.triangle.pull" : link.kind == .ref ? "number" : "circle.circle")
+                                Text(Self.shortLabel(link))
+                            }
                                 .font(.caption2.monospaced())
                                 .lineLimit(1)
                                 .fixedSize()
