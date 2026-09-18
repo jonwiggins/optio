@@ -14,13 +14,18 @@ import {
 } from "lucide-react";
 import type { TaskStats, StandaloneStats, PersistentAgentStats, SessionStats } from "./types.js";
 
-type Stage = {
+export type Stage = {
   key: string;
   label: string;
   value: number;
   icon: typeof Activity;
   color: string;
-  href: string;
+  /** Navigate on click (dashboard) … */
+  href?: string;
+  /** … or act in place (a page's own filter toggle). */
+  onClick?: () => void;
+  /** Highlight as the currently selected filter. */
+  selected?: boolean;
 };
 
 function taskStages(stats: TaskStats | null): Stage[] {
@@ -220,25 +225,32 @@ export function PipelineStatsBar(props: PipelineStatsBarProps) {
       stages = taskStages(props.taskStats);
   }
 
+  return <StatsBar stages={stages} />;
+}
+
+/**
+ * The dashboard's stat strip, reusable by any page: big mono numbers, a
+ * colored top accent while non-zero, icon + uppercase label. Stages link
+ * (dashboard) or toggle in place (a page's own filters, `selected` ring).
+ */
+export function StatsBar({ stages, className }: { stages: Stage[]; className?: string }) {
   return (
-    <div className="rounded-xl border border-border/50 bg-bg-card overflow-hidden">
-      <div className="flex divide-x divide-border/30">
+    <div className={cn("rounded-xl border border-border/50 bg-bg-card overflow-hidden", className)}>
+      <div className="flex divide-x divide-border/30 overflow-x-auto">
         {stages.map((stage) => {
           const active = stage.value > 0;
           const Icon = stage.icon;
-
-          return (
-            <Link
-              key={stage.key}
-              href={stage.href}
-              className="flex-1 relative py-5 flex flex-col items-center gap-1.5 hover:bg-bg-hover/30 transition-all group"
-            >
+          const inner = (
+            <>
               {/* Colored top accent bar for active stages */}
               {active && (
                 <div
                   className="absolute top-0 inset-x-0 h-0.5"
                   style={{ backgroundColor: stage.color }}
                 />
+              )}
+              {stage.selected && (
+                <div className="absolute inset-0 bg-primary/[0.07] pointer-events-none" />
               )}
 
               <span
@@ -256,11 +268,44 @@ export function PipelineStatsBar(props: PipelineStatsBarProps) {
                   className={cn("w-3 h-3 transition-colors", !active && "text-text-muted/20")}
                   style={active ? { color: stage.color } : undefined}
                 />
-                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted/50">
+                <span
+                  className={cn(
+                    "text-[10px] font-semibold uppercase tracking-[0.12em] whitespace-nowrap",
+                    stage.selected ? "text-text" : "text-text-muted/50",
+                  )}
+                >
                   {stage.label}
                 </span>
               </div>
-            </Link>
+            </>
+          );
+          const cls =
+            "flex-1 min-w-[6.5rem] relative py-5 flex flex-col items-center gap-1.5 hover:bg-bg-hover/30 transition-all group";
+
+          if (stage.href) {
+            return (
+              <Link key={stage.key} href={stage.href} className={cls}>
+                {inner}
+              </Link>
+            );
+          }
+          if (stage.onClick) {
+            return (
+              <button
+                key={stage.key}
+                type="button"
+                onClick={stage.onClick}
+                aria-pressed={stage.selected}
+                className={cls}
+              >
+                {inner}
+              </button>
+            );
+          }
+          return (
+            <div key={stage.key} className={cn(cls, "cursor-default hover:bg-transparent")}>
+              {inner}
+            </div>
           );
         })}
       </div>

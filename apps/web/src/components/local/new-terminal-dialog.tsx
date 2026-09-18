@@ -25,6 +25,15 @@ export function NewTerminalDialog({ hosts, onClose }: { hosts: any[]; onClose: (
 
   const effectiveDir = dir || host?.dirs?.[0]?.path || "";
 
+  // Opened before the hosts fetch resolved (the rail's "New" link lands on
+  // /local?new=1): adopt the first online host once the list arrives so the
+  // directory select isn't left empty.
+  useEffect(() => {
+    if (hostId && hosts.some((h) => h.id === hostId)) return;
+    const pick = hosts.find((h) => h.state === "online") ?? hosts[0];
+    if (pick) setHostId(pick.id);
+  }, [hosts, hostId]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();

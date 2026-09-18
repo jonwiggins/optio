@@ -11,7 +11,21 @@ import { getWsTokenProvider } from "@/lib/ws-auth";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
-import { LayoutGrid, List, Loader2, MonitorSmartphone, Plus, Search, Terminal } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle,
+  LayoutGrid,
+  List,
+  Loader2,
+  MonitorSmartphone,
+  Pause,
+  Plus,
+  Search,
+  Server,
+  Terminal,
+} from "lucide-react";
+import { StatsBar } from "@/components/dashboard/pipeline-stats-bar";
 import { TerminalCard, attentionLabel } from "@/components/local/terminal-card";
 import { TerminalRow } from "@/components/local/terminal-row";
 import { NewTerminalDialog } from "@/components/local/new-terminal-dialog";
@@ -203,39 +217,7 @@ export default function LocalPage() {
         icon={Terminal}
         title="Local"
         description={
-          hasHosts ? (
-            <span className="flex items-center gap-x-4 gap-y-1 flex-wrap text-sm">
-              <StatButton
-                value={stats.needsYou}
-                label="need you"
-                tone={stats.needsYou > 0 ? "text-warning" : undefined}
-                active={stateFilter === "needs_you"}
-                onClick={() => setStateFilter(stateFilter === "needs_you" ? "all" : "needs_you")}
-              />
-              <StatButton
-                value={stats.working}
-                label="working"
-                tone={stats.working > 0 ? "text-primary" : undefined}
-                active={stateFilter === "active"}
-                onClick={() => setStateFilter(stateFilter === "active" ? "all" : "active")}
-              />
-              <StatButton value={stats.idle} label="idle" />
-              <StatButton
-                value={stats.finished}
-                label="finished"
-                active={stateFilter === "exited"}
-                onClick={() => setStateFilter(stateFilter === "exited" ? "all" : "exited")}
-              />
-              <span className="text-text-muted/50 hidden sm:inline">·</span>
-              <StatButton
-                value={stats.hostsOnline}
-                label={`of ${hosts.length} host${hosts.length === 1 ? "" : "s"} online`}
-                tone={stats.hostsOnline === 0 ? "text-error" : "text-success"}
-              />
-            </span>
-          ) : (
-            "Terminals on your own machines, spawned and watched from here."
-          )
+          hasHosts ? undefined : "Terminals on your own machines, spawned and watched from here."
         }
         meta={
           hasHosts ? (
@@ -295,6 +277,53 @@ export default function LocalPage() {
         />
       ) : (
         <>
+          <StatsBar
+            className="mb-5"
+            stages={[
+              {
+                key: "needs_you",
+                label: "Needs you",
+                value: stats.needsYou,
+                icon: AlertTriangle,
+                color: "var(--color-warning)",
+                selected: stateFilter === "needs_you",
+                onClick: () => setStateFilter(stateFilter === "needs_you" ? "all" : "needs_you"),
+              },
+              {
+                key: "working",
+                label: "Working",
+                value: stats.working,
+                icon: Activity,
+                color: "var(--color-primary)",
+                selected: stateFilter === "active",
+                onClick: () => setStateFilter(stateFilter === "active" ? "all" : "active"),
+              },
+              {
+                key: "idle",
+                label: "Idle",
+                value: stats.idle,
+                icon: Pause,
+                color: "var(--color-text-muted)",
+              },
+              {
+                key: "finished",
+                label: "Finished",
+                value: stats.finished,
+                icon: CheckCircle,
+                color: "var(--color-success)",
+                selected: stateFilter === "exited",
+                onClick: () => setStateFilter(stateFilter === "exited" ? "all" : "exited"),
+              },
+              {
+                key: "hosts",
+                label: hosts.length === 1 ? "Host online" : `of ${hosts.length} hosts online`,
+                value: stats.hostsOnline,
+                icon: Server,
+                color: stats.hostsOnline > 0 ? "var(--color-success)" : "var(--color-error)",
+              },
+            ]}
+          />
+
           {needsYou.length > 0 && (
             <section className="mb-5">
               <h2 className="text-xs font-semibold tracking-widest uppercase text-warning mb-2">
@@ -459,43 +488,5 @@ export default function LocalPage() {
 
       {showNewDialog && <NewTerminalDialog hosts={hosts} onClose={() => setShowNewDialog(false)} />}
     </div>
-  );
-}
-
-/** One headline number. Clickable stats double as filter toggles. */
-function StatButton({
-  value,
-  label,
-  tone,
-  active,
-  onClick,
-}: {
-  value: number;
-  label: string;
-  tone?: string;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  const body = (
-    <>
-      <span className={cn("text-lg font-semibold tabular-nums leading-none", tone ?? "text-text")}>
-        {value}
-      </span>
-      <span className="text-text-muted">{label}</span>
-    </>
-  );
-  if (!onClick) return <span className="inline-flex items-baseline gap-1.5">{body}</span>;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "inline-flex items-baseline gap-1.5 rounded-md px-1 -mx-1 transition-colors hover:bg-bg-hover/60",
-        active && "bg-primary/10 ring-1 ring-primary/30",
-      )}
-    >
-      {body}
-    </button>
   );
 }
