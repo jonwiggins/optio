@@ -18,7 +18,7 @@
   <!-- eye glow spilling onto the head -->
   <circle cx="592" cy="573" r="260" fill="url(#eyeGlow)"/>
   <!-- dim bot outline -->
-  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#5b4a80" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(92 92) scale(35)" fill="none" stroke="#5b4a80" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
     <path d="M12 8V4H8"/>
     <rect width="16" height="12" x="4" y="8" rx="2.4"/>
     <path d="M2 14h2"/>
@@ -26,7 +26,7 @@
     <path d="M9 13v2"/>
   </g>
   <!-- the lit eye -->
-  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke-linecap="round">
+  <g transform="translate(92 92) scale(35)" fill="none" stroke-linecap="round">
     <path d="M15 13v2" stroke="#c4b5fd" stroke-width="3.2" filter="url(#blur)" opacity="0.9"/>
     <path d="M15 13v2" stroke="#f5f3ff" stroke-width="1.9"/>
   </g>

@@ -8,8 +8,8 @@
   </defs>
   <rect width="1024" height="1024" fill="url(#bg)"/>
   <!-- crisp offset shadow (the sticker lifting at the edge) -->
-  <g transform="translate(512 512) rotate(-8) translate(-498 -492)">
-    <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#3b0764" stroke-opacity="0.35" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(512 512) rotate(-8) translate(-500 -496)">
+    <g transform="translate(140 140) scale(31)" fill="none" stroke="#3b0764" stroke-opacity="0.35" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 8V4H8"/>
       <rect width="16" height="12" x="4" y="8" rx="2.4"/>
       <path d="M2 14h2"/>
@@ -18,14 +18,14 @@
   </g>
   <g transform="translate(512 512) rotate(-8) translate(-512 -512)">
     <!-- thick white die-cut border -->
-    <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#ffffff" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="translate(140 140) scale(31)" fill="none" stroke="#ffffff" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 8V4H8"/>
       <rect width="16" height="12" x="4" y="8" rx="2.4"/>
       <path d="M2 14h2"/>
       <path d="M20 14h2"/>
     </g>
     <!-- purple bot on top -->
-    <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#6d28d9" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="translate(140 140) scale(31)" fill="none" stroke="#6d28d9" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 8V4H8"/>
       <rect width="16" height="12" x="4" y="8" rx="2.4" fill="#ffffff"/>
       <path d="M2 14h2"/>

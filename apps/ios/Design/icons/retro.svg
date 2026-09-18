@@ -19,7 +19,7 @@
   </defs>
   <rect width="1024" height="1024" fill="url(#tube)"/>
   <!-- bloom pass -->
-  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#39ff6a" stroke-opacity="0.55" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#bloom)">
+  <g transform="translate(92 92) scale(35)" fill="none" stroke="#39ff6a" stroke-opacity="0.55" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#bloom)">
     <path d="M12 8V4H8"/>
     <rect width="16" height="12" x="4" y="8" rx="2.4"/>
     <path d="M2 14h2"/>
@@ -28,7 +28,7 @@
     <path d="M9 13v2"/>
   </g>
   <!-- crisp phosphor pass -->
-  <g transform="translate(192 200) scale(26.6667)" fill="none" stroke="#b6ffc8" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(92 92) scale(35)" fill="none" stroke="#b6ffc8" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
     <path d="M12 8V4H8"/>
     <rect width="16" height="12" x="4" y="8" rx="2.4"/>
     <path d="M2 14h2"/>
