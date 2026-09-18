@@ -254,6 +254,54 @@ interface Variant {
   payloadHasDiscriminator: boolean;
 }
 
+const COMPILER_OPTIONS: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.NodeNext,
+  moduleResolution: ts.ModuleResolutionKind.NodeNext,
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+};
+
+/**
+ * Parsed standard-library files (lib.*.d.ts and bundled @types) reused across
+ * programs. Parsing them dominates the cost of a program — hundreds of ms per
+ * call — and every `generateSwift` call builds a fresh program. Source files
+ * are immutable, so sharing them between programs is safe (it is what the
+ * compiler's own incremental `oldProgram` reuse does).
+ */
+const sharedLibSourceFiles = new Map<string, ts.SourceFile>();
+
+function createCachingHost(): ts.CompilerHost {
+  const host = ts.createCompilerHost(COMPILER_OPTIONS, true);
+  const libDir = path.dirname(ts.getDefaultLibFilePath(COMPILER_OPTIONS));
+  const baseGetSourceFile = host.getSourceFile;
+  host.getSourceFile = (fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile) => {
+    const resolved = path.resolve(fileName);
+    const cacheable =
+      resolved.startsWith(libDir) || resolved.includes(`${path.sep}node_modules${path.sep}`);
+    if (!cacheable) {
+      return baseGetSourceFile(
+        fileName,
+        languageVersionOrOptions,
+        onError,
+        shouldCreateNewSourceFile,
+      );
+    }
+    const hit = sharedLibSourceFiles.get(resolved);
+    if (hit) return hit;
+    const sf = baseGetSourceFile(
+      fileName,
+      languageVersionOrOptions,
+      onError,
+      shouldCreateNewSourceFile,
+    );
+    if (sf) sharedLibSourceFiles.set(resolved, sf);
+    return sf;
+  };
+  return host;
+}
+
 export function generateSwift(sourceFiles: string[]): GenerateResult {
   const warnings: string[] = [];
   const warn = (msg: string) => {
@@ -266,14 +314,7 @@ export function generateSwift(sourceFiles: string[]): GenerateResult {
     return ba < bb ? -1 : ba > bb ? 1 : a < b ? -1 : a > b ? 1 : 0;
   });
 
-  const program = ts.createProgram(files, {
-    target: ts.ScriptTarget.ES2022,
-    module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    strict: true,
-    noEmit: true,
-    skipLibCheck: true,
-  });
+  const program = ts.createProgram(files, COMPILER_OPTIONS, createCachingHost());
   const checker = program.getTypeChecker();
 
   const entries: Entry[] = [];
