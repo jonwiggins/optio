@@ -19,7 +19,8 @@
     "db:migrate": "turbo db:migrate",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "husky"
+    "prepare": "husky",
+    "gen:swift": "pnpm --filter @optio/shared gen:swift"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.0",

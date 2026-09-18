@@ -422,6 +422,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.2.6
         version: 3.2.6(vitest@3.2.6(@types/debug@4.1.13)(@types/node@22.19.15)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
