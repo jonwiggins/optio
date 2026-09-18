@@ -3137,6 +3137,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
     public let preview: String?
     /// PR / ticket links the daemon spotted in the output (first-seen order).
     public let links: [WorkLink]
+    /// Token / cost totals the daemon summed from the agent's transcript (agent spawns only).
+    public let usage: AnyCodable?
     public let costUsd: String?
     public let lastActivityAt: String?
     public let createdAt: String
@@ -3167,6 +3169,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         case ticketUrl = "ticketUrl"
         case preview = "preview"
         case links = "links"
+        case usage = "usage"
         case costUsd = "costUsd"
         case lastActivityAt = "lastActivityAt"
         case createdAt = "createdAt"
@@ -3198,6 +3201,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         ticketUrl: String? = nil,
         preview: String? = nil,
         links: [WorkLink],
+        usage: AnyCodable? = nil,
         costUsd: String? = nil,
         lastActivityAt: String? = nil,
         createdAt: String,
@@ -3227,6 +3231,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         self.ticketUrl = ticketUrl
         self.preview = preview
         self.links = links
+        self.usage = usage
         self.costUsd = costUsd
         self.lastActivityAt = lastActivityAt
         self.createdAt = createdAt
@@ -3349,6 +3354,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case attention(AttentionPayload)
     case preview(PreviewPayload)
     case links(LinksPayload)
+    case usage(UsagePayload)
     case exit(ExitPayload)
     case ping
     /// Fallback for discriminator values this client does not know about yet.
@@ -3509,6 +3515,21 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct UsagePayload: Codable, Hashable, Sendable {
+        public let terminalId: String
+        public let usage: AnyCodable
+
+        private enum CodingKeys: String, CodingKey {
+            case terminalId = "terminalId"
+            case usage = "usage"
+        }
+
+        public init(terminalId: String, usage: AnyCodable) {
+            self.terminalId = terminalId
+            self.usage = usage
+        }
+    }
+
     public struct ExitPayload: Codable, Hashable, Sendable {
         public let terminalId: String
         public let exitCode: Double?
@@ -3541,6 +3562,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case "attention": self = .attention(try AttentionPayload(from: decoder))
         case "preview": self = .preview(try PreviewPayload(from: decoder))
         case "links": self = .links(try LinksPayload(from: decoder))
+        case "usage": self = .usage(try UsagePayload(from: decoder))
         case "exit": self = .exit(try ExitPayload(from: decoder))
         case "ping": self = .ping
         default: self = .unknown(try AnyCodable(from: decoder))
@@ -3584,6 +3606,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case .links(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("links", forKey: .type)
+            try payload.encode(to: encoder)
+        case .usage(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("usage", forKey: .type)
             try payload.encode(to: encoder)
         case .exit(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
