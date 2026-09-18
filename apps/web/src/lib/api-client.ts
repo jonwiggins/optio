@@ -470,7 +470,7 @@ export const api = {
       subscription: { available: boolean; expiresAt?: string; error?: string };
     }>("/api/auth/refresh", { method: "POST" }),
 
-  getUsage: () =>
+  getUsage: (opts?: { fresh?: boolean }) =>
     request<{
       usage: {
         available: boolean;
@@ -488,7 +488,7 @@ export const api = {
         };
         error?: string;
       };
-    }>("/api/auth/usage"),
+    }>(`/api/auth/usage${opts?.fresh ? "?fresh=1" : ""}`),
 
   // Bulk operations
   bulkRetryFailed: () =>

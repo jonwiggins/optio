@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Coins, Gauge } from "lucide-react";
+import { Coins, Gauge, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { formatTokens, formatUsd, type LocalTerminalUsage } from "@optio/shared";
@@ -29,15 +30,34 @@ const POLL_MS = 60_000;
 let cached: AccountUsage | null = null;
 const listeners = new Set<(u: AccountUsage | null) => void>();
 let timer: ReturnType<typeof setInterval> | null = null;
+let inFlight: Promise<void> | null = null;
+let lastFreshAt = 0;
+/** Manual refreshes bypass the server cache — and hit Anthropic — so pace them. */
+const FRESH_MIN_GAP_MS = 15_000;
 
-async function fetchUsage() {
-  try {
-    const res = await api.getUsage();
-    cached = res.usage as AccountUsage;
-  } catch {
-    cached = { available: false, error: "unreachable" };
-  }
-  for (const l of listeners) l(cached);
+async function fetchUsage(fresh = false): Promise<void> {
+  if (inFlight) return inFlight;
+  inFlight = (async () => {
+    try {
+      const res = await api.getUsage(fresh ? { fresh: true } : undefined);
+      cached = res.usage as AccountUsage;
+    } catch {
+      cached = { available: false, error: "unreachable" };
+    } finally {
+      inFlight = null;
+    }
+    for (const l of listeners) l(cached);
+  })();
+  return inFlight;
+}
+
+/** Force a re-read from Anthropic (rate-paced). Returns false when paced out. */
+export async function refreshAccountUsage(): Promise<boolean> {
+  const now = Date.now();
+  if (now - lastFreshAt < FRESH_MIN_GAP_MS) return false;
+  lastFreshAt = now;
+  await fetchUsage(true);
+  return true;
 }
 
 /** One poller shared by every chip on screen. */
@@ -100,15 +120,38 @@ export function AccountUsagePill({
   collapsible?: boolean;
 }) {
   const usage = useAccountUsage();
+  const [refreshing, setRefreshing] = useState(false);
   if (!usage || !usage.available) return null;
   const buckets: Array<[string, Bucket]> = [];
   if (usage.fiveHour?.utilization != null) buckets.push(["5h", usage.fiveHour]);
   if (usage.sevenDay?.utilization != null) buckets.push(["7d", usage.sevenDay]);
   if (buckets.length === 0) return null;
   const worst = Math.max(...buckets.map(([, b]) => b.utilization ?? 0));
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const ok = await refreshAccountUsage();
+      if (!ok) toast.message("Usage was refreshed a moment ago — try again in a few seconds");
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const card = (
     <>
-      <span className="block font-medium text-text mb-1">Claude usage limits</span>
+      <span className="flex items-center justify-between gap-4 mb-1">
+        <span className="font-medium text-text">Claude usage limits</span>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          title="Re-read from Anthropic now"
+          aria-label="Refresh usage"
+          className="inline-flex items-center gap-1 -mr-1 px-1.5 py-0.5 rounded text-[10px] text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors"
+        >
+          <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
+          refresh
+        </button>
+      </span>
       {buckets.map(([l, b]) => {
         const pct = Math.round(b.utilization ?? 0);
         const r = resetsIn(b.resetsAt);
@@ -130,7 +173,7 @@ export function AccountUsagePill({
     </>
   );
   return (
-    <HoverCard content={card} className={className}>
+    <HoverCard content={card} className={className} interactive>
       <span
         className={cn(
           "inline-flex items-center gap-1.5 @2xl:gap-2 h-6 px-1.5 @2xl:px-2 rounded-md border text-[11px] font-mono shrink-0",

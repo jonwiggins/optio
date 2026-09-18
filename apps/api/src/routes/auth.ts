@@ -6,6 +6,7 @@ import {
   getClaudeAuthToken,
   getClaudeUsage,
   invalidateCredentialsCache,
+  invalidateUsageCache,
 } from "../services/auth-service.js";
 import { getRecentAuthFailures } from "../services/auth-failure-detector.js";
 import { getOAuthProvider, getEnabledProviders, isAuthDisabled } from "../services/oauth/index.js";
@@ -310,12 +311,15 @@ export async function authRoutes(rawApp: FastifyInstance) {
         summary: "Get Claude usage and recent auth failures",
         description:
           "Return the current Claude usage statistics plus recent " +
-          "auth failure counts for Claude and GitHub.",
+          "auth failure counts for Claude and GitHub. `fresh=1` bypasses the " +
+          "5-minute cache (the upstream endpoint is rate-limited — use sparingly).",
         tags: ["Auth & Sessions"],
+        querystring: z.object({ fresh: z.enum(["1"]).optional() }),
         response: { 200: AuthUsageResponseSchema },
       },
     },
-    async (_req, reply) => {
+    async (req, reply) => {
+      if (req.query.fresh === "1") invalidateUsageCache();
       const [usage, authFailures] = await Promise.all([
         getClaudeUsage(),
         getRecentAuthFailures().catch(() => ({ claude: false, github: false })),
