@@ -31,7 +31,11 @@ function block(swift: string, name: string): string {
   return m[0];
 }
 
-describe("generateSwift", () => {
+// Every case builds a fresh TypeScript program; CI runners with coverage on
+// can take a few seconds per program, so give these room beyond the 5s default.
+const PROGRAM_TIMEOUT_MS = 60_000;
+
+describe("generateSwift", { timeout: PROGRAM_TIMEOUT_MS }, () => {
   it("emits a header and imports Foundation", () => {
     const f = fixture("header.ts", `export interface A { id: string }`);
     const { swift } = generateSwift([f]);
@@ -418,7 +422,7 @@ describe("naming helpers", () => {
   });
 });
 
-describe("reserved Swift type names", () => {
+describe("reserved Swift type names", { timeout: PROGRAM_TIMEOUT_MS }, () => {
   it("prefixes names that shadow stdlib types", () => {
     const { swift } = generateSwift([
       fixture(

@@ -22,6 +22,7 @@ import {
 import {
   createTerminal,
   deleteTerminal,
+  flushParkedTerminals,
   getTerminal,
   handleAttention,
   handleExit,
@@ -158,6 +159,32 @@ describe("local terminals", () => {
     expect(flushed?.state).toBe("launching");
     const spawn = daemon.messages().find((m) => m.type === "spawn");
     expect(spawn).toMatchObject({ terminalId: terminal.id, dir: "/home/dev/scratch" });
+  });
+
+  it("claims a parked row under CAS so concurrent flushes send exactly one spawn", async () => {
+    const host = await makeHost();
+    const terminal = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/scratch",
+      spec: { kind: "shell" },
+    });
+    expect(terminal.state).toBe("pending");
+
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, null, daemon);
+    // A hello flush racing a user-initiated start (or a second flush) must
+    // not double-spawn: only the caller that wins pending → launching sends.
+    await Promise.all([
+      flushParkedTerminals(host.id),
+      flushParkedTerminals(host.id),
+      startTerminal(terminal).catch(() => undefined),
+    ]);
+
+    const spawns = daemon.messages().filter((m) => m.type === "spawn");
+    expect(spawns).toHaveLength(1);
+    expect((await getTerminal(terminal.id))?.state).toBe("launching");
   });
 
   it("runs the started → exit lifecycle with attention semantics", async () => {

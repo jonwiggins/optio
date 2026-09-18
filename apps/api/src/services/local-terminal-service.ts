@@ -220,8 +220,23 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
   return (await trySpawn(row)) ?? row;
 }
 
-/** Send the spawn to the daemon; parks in pending/host_offline when unreachable. */
+/**
+ * Send the spawn to the daemon; parks in pending/host_offline when unreachable.
+ *
+ * The row is claimed (pending → launching) under CAS *before* the spawn frame
+ * goes out, so two concurrent callers — a fresh createTerminal and the parked
+ * flush on a daemon hello — can never both send a spawn for the same row.
+ * Returns the current row when someone else already claimed it.
+ */
 async function trySpawn(row: LocalTerminalRow): Promise<LocalTerminalRow | null> {
+  if (!relay.isHostOnline(row.hostId)) {
+    return updateTerminal(row.id, { state: "pending", pendingReason: "host_offline" });
+  }
+  const claimed = await transitionTerminal(row.id, ["pending"], {
+    state: "launching",
+    pendingReason: null,
+  });
+  if (!claimed) return getTerminal(row.id);
   const sent = relay.sendToHost(row.hostId, {
     type: "spawn",
     terminalId: row.id,
@@ -230,10 +245,12 @@ async function trySpawn(row: LocalTerminalRow): Promise<LocalTerminalRow | null>
     rows: LOCAL_DEFAULT_ROWS,
     spec: row.spec as unknown as LocalTerminalSpec,
   });
-  if (sent) {
-    return updateTerminal(row.id, { state: "launching", pendingReason: null });
-  }
-  return updateTerminal(row.id, { state: "pending", pendingReason: "host_offline" });
+  if (sent) return claimed;
+  // The daemon dropped between the liveness check and the send: un-claim.
+  return transitionTerminal(row.id, ["launching"], {
+    state: "pending",
+    pendingReason: "host_offline",
+  });
 }
 
 /** Start a pending (held or parked) terminal. */
@@ -521,9 +538,23 @@ export async function renameTerminal(
  * the daemon doesn't have died with the previous daemon process; parked
  * spawns are flushed.
  */
+/**
+ * Reconcile DB liveness against the daemon's hello. Rows the daemon no longer
+ * has are failed; rows it reports running are promoted. Must run BEFORE the
+ * daemon is registered in the relay: once it is registered, a concurrent
+ * createTerminal can send a spawn that this pass would then mistake for a
+ * terminal orphaned by the restart and kill it (the daemon's hello predates
+ * the spawn, so the terminal isn't in its list).
+ *
+ * `flushParked` (default true) also re-spawns terminals parked while the host
+ * was offline; the daemon socket must be registered for that to succeed. The
+ * daemon handler passes false and calls `flushParkedTerminals` itself after
+ * registration.
+ */
 export async function reconcileHello(
   hostId: string,
   daemonTerminals: LocalDaemonTerminalSync[],
+  opts: { flushParked?: boolean } = {},
 ): Promise<void> {
   const alive = new Set(daemonTerminals.filter((t) => t.running).map((t) => t.terminalId));
 
@@ -573,6 +604,11 @@ export async function reconcileHello(
     }
   }
 
+  if (opts.flushParked ?? true) await flushParkedTerminals(hostId);
+}
+
+/** Re-spawn terminals parked in pending/host_offline now that the host is online. */
+export async function flushParkedTerminals(hostId: string): Promise<void> {
   const parked = await db
     .select()
     .from(localTerminals)

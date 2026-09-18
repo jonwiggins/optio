@@ -85,12 +85,19 @@ export async function localDaemonWs(app: FastifyInstance) {
         }
         hostId = host.id;
         clearTimeout(helloTimer);
+        // Liveness reconcile runs before the socket is registered: once the
+        // relay can route spawns here, a concurrent createTerminal could send
+        // one that the reconcile would mistake for an orphan and kill.
+        await terminalService.reconcileHello(host.id, msg.terminals ?? [], {
+          flushParked: false,
+        });
+        if (closed) return;
         relay.registerDaemon(host.id, host.userId, socket);
         await markHostOnline(host.id, {
           dirs: msg.dirs,
           daemonVersion: msg.daemonVersion,
         });
-        await terminalService.reconcileHello(host.id, msg.terminals ?? []);
+        await terminalService.flushParkedTerminals(host.id);
         log.info({ hostId: host.id, hostname: host.hostname }, "local daemon connected");
         return;
       }
