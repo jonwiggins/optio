@@ -3,12 +3,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { api } from "@/lib/api-client";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { createEventsClient } from "@/lib/ws-client";
-import { getWsTokenProvider } from "@/lib/ws-auth";
-import { ArrowLeft, Columns2, Plus, Search, Server, Zap } from "lucide-react";
+import {
+  ArrowLeft,
+  BellRing,
+  Columns2,
+  PanelLeftClose,
+  Plus,
+  Search,
+  Server,
+  Zap,
+} from "lucide-react";
 import { attentionLabel, dirTail } from "./terminal-card";
+import { useRailStore } from "./rail-store";
+import { useLocalFeed } from "./local-feed";
+import { useBellStore } from "./bell-store";
 import { collectWorkLinks, WorkLinkBadges, workLinksSearchText } from "./work-links";
 import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
 
@@ -28,9 +37,10 @@ import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
 
 type Group = { key: string; label: string; tone: string; items: any[] };
 
+// Same scheme as the favicon dot: yellow needs you, green working, grey quiet.
 const DOT: Record<string, string> = {
   needs_you: "bg-warning",
-  working: "bg-primary",
+  working: "bg-success",
   idle: "bg-text-muted/40",
   dead: "bg-text-muted/25",
   pending: "bg-warning/60",
@@ -70,7 +80,7 @@ function groupTerminals(terminals: any[]): Group[] {
     .sort(byTime);
   return [
     { key: "needs_you", label: "Needs you", tone: "text-warning", items: needsYou },
-    { key: "working", label: "Working", tone: "text-primary", items: working },
+    { key: "working", label: "Working", tone: "text-success", items: working },
     { key: "idle", label: "Idle", tone: "text-text-muted", items: idle },
     { key: "finished", label: "Finished", tone: "text-text-muted/70", items: finished },
   ].filter((g) => g.items.length > 0);
@@ -90,40 +100,9 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
     [activeId, splitState],
   );
 
-  const [terminals, setTerminals] = useState<any[]>([]);
-  const [hosts, setHosts] = useState<any[]>([]);
+  const { terminals, hosts } = useLocalFeed();
   const [search, setSearch] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
-
-  const refetch = useCallback(async () => {
-    try {
-      const [t, h] = await Promise.all([api.listLocalTerminals(), api.listLocalHosts()]);
-      setTerminals(t.terminals);
-      setHosts(h.hosts);
-    } catch {
-      // transient — the poll retries
-    }
-  }, []);
-
-  useEffect(() => {
-    refetch();
-    let debounce: ReturnType<typeof setTimeout> | null = null;
-    const client = createEventsClient(getWsTokenProvider());
-    const off = client.on("local:changed", () => {
-      if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(() => refetch(), 400);
-    });
-    client.connect();
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") refetch();
-    }, 5000);
-    return () => {
-      if (debounce) clearTimeout(debounce);
-      off();
-      client.disconnect();
-      clearInterval(interval);
-    };
-  }, [refetch]);
 
   const hostName = useMemo(() => new Map(hosts.map((h) => [h.id, h.name])), [hosts]);
 
@@ -189,6 +168,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
   }, [activeId, groups]);
 
   const needsYouCount = groups.find((g) => g.key === "needs_you")?.items.length ?? 0;
+  const armed = useBellStore((s) => s.armed);
 
   return (
     <div className="flex flex-col h-full">
@@ -202,15 +182,26 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
             <ArrowLeft className="w-3.5 h-3.5" />
             Local
           </Link>
-          <Link
-            href="/local?new=1"
-            onClick={onNavigate}
-            title="New terminal"
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-          >
-            <Plus className="w-3 h-3" />
-            New
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link
+              href="/local?new=1"
+              onClick={onNavigate}
+              title="New terminal"
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            >
+              <Plus className="w-3 h-3" />
+              New
+            </Link>
+            <button
+              type="button"
+              onClick={() => useRailStore.getState().setCollapsed(true)}
+              title="Hide sessions (⌃⇧B)"
+              aria-label="Hide sessions"
+              className="hidden md:inline-flex p-1 rounded-md text-text-muted hover:text-text hover:bg-bg-hover/60 transition-colors"
+            >
+              <PanelLeftClose className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
         <div className="relative mt-2">
           <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
@@ -267,7 +258,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                     className={cn(
                       "relative w-full text-left px-2 py-1.5 rounded-md transition-colors group cursor-pointer",
                       active
-                        ? "bg-primary/10 text-text nav-active-glow"
+                        ? "text-text-heading nav-active"
                         : inSplit
                           ? "bg-primary/5 text-text"
                           : "text-text-muted hover:bg-bg-hover/60 hover:text-text",
@@ -293,6 +284,12 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                         <Columns2
                           className="w-3 h-3 text-primary shrink-0"
                           aria-label="Open in a split pane"
+                        />
+                      )}
+                      {armed.includes(t.id) && (
+                        <BellRing
+                          className="w-3 h-3 text-warning/80 shrink-0"
+                          aria-label="Will ping you when it needs you"
                         />
                       )}
                     </div>
@@ -350,6 +347,9 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
         </div>
         <div>
           <kbd className="font-mono">⇧click</kbd> open side by side
+        </div>
+        <div className="hidden md:block">
+          <kbd className="font-mono">⌃⇧B</kbd> hide sessions
         </div>
       </div>
     </div>

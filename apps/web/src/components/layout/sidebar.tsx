@@ -111,7 +111,7 @@ function NavLink({
       className={cn(
         "flex items-center gap-2.5 py-2 px-2.5 rounded-lg text-[13px] font-medium transition-all duration-150",
         active
-          ? "bg-primary/10 text-text nav-active-glow"
+          ? "text-text-heading nav-active"
           : "text-text-muted hover:bg-bg-hover/60 hover:text-text",
       )}
     >

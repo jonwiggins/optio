@@ -1,5 +1,11 @@
 import { and, eq, isNull, lt } from "drizzle-orm";
-import { normalizeRepoUrl, LOCAL_HOST_OFFLINE_AFTER_MS, type LocalHostDir } from "@optio/shared";
+import {
+  normalizeRepoUrl,
+  LOCAL_HOST_OFFLINE_AFTER_MS,
+  type AgentLimitWindow,
+  type LocalHostAgentLimits,
+  type LocalHostDir,
+} from "@optio/shared";
 import { db } from "../db/client.js";
 import { localHosts } from "../db/schema.js";
 import { logger } from "../logger.js";
@@ -146,6 +152,63 @@ export async function touchHost(id: string): Promise<void> {
     .update(localHosts)
     .set({ lastSeenAt: new Date(), state: "online", updatedAt: new Date() })
     .where(eq(localHosts.id, id));
+}
+
+function cleanWindow(raw: unknown): AgentLimitWindow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const w = raw as Record<string, unknown>;
+  if (typeof w.usedPercent !== "number" || !Number.isFinite(w.usedPercent)) return null;
+  const resets =
+    typeof w.resetsAt === "string" && !isNaN(Date.parse(w.resetsAt))
+      ? new Date(w.resetsAt).toISOString()
+      : null;
+  return {
+    usedPercent: Math.max(0, Math.min(100, w.usedPercent)),
+    windowMinutes:
+      typeof w.windowMinutes === "number" && Number.isFinite(w.windowMinutes)
+        ? Math.max(0, Math.round(w.windowMinutes))
+        : null,
+    resetsAt: resets,
+  };
+}
+
+/** Validate a daemon-supplied limits report; unknown agents are dropped. */
+export function sanitizeAgentLimits(input: unknown): LocalHostAgentLimits {
+  const out: LocalHostAgentLimits = {};
+  if (!input || typeof input !== "object") return out;
+  const codex = (input as Record<string, unknown>).codex;
+  if (codex && typeof codex === "object") {
+    const c = codex as Record<string, unknown>;
+    const primary = cleanWindow(c.primary);
+    const secondary = cleanWindow(c.secondary);
+    const observed =
+      typeof c.observedAt === "string" && !isNaN(Date.parse(c.observedAt))
+        ? new Date(c.observedAt).toISOString()
+        : null;
+    if ((primary || secondary) && observed) {
+      out.codex = {
+        primary,
+        secondary,
+        planType: typeof c.planType === "string" ? c.planType.slice(0, 40) : null,
+        observedAt: observed,
+      };
+    }
+  }
+  return out;
+}
+
+export async function handleAgentLimits(hostId: string, limits: unknown): Promise<void> {
+  const clean = sanitizeAgentLimits(limits);
+  const [row] = await db
+    .update(localHosts)
+    .set({ agentLimits: clean, updatedAt: new Date() })
+    .where(eq(localHosts.id, hostId))
+    .returning();
+  if (row) {
+    await publishLocalChanged({ terminalId: null, hostId: row.id, userId: row.userId }).catch(
+      (err) => logger.warn({ err }, "local: failed to publish host limits change"),
+    );
+  }
 }
 
 /** Mark hosts offline whose daemon stopped pinging. Returns affected ids. */

@@ -20,6 +20,7 @@ import * as relay from "../services/local-relay.js";
 import {
   canAccessHost,
   getHost,
+  handleAgentLimits,
   markHostOnline,
   touchHost,
 } from "../services/local-host-service.js";
@@ -129,6 +130,12 @@ export async function localDaemonWs(app: FastifyInstance) {
           return;
         case "links":
           await terminalService.handleLinks(hostId, msg.terminalId, msg.links);
+          return;
+        case "usage":
+          await terminalService.handleUsage(hostId, msg.terminalId, msg.usage);
+          return;
+        case "agent-limits":
+          await handleAgentLimits(hostId, msg.limits);
           return;
         case "preview":
           await terminalService.handlePreview(

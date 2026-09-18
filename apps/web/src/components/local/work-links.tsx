@@ -35,28 +35,38 @@ export function workLinksSearchText(links: WorkLink[]): string {
   return links.map((l) => `${l.label} ${l.url}`).join(" ");
 }
 
+/**
+ * Quiet chips: neutral surface, the kind carried by the icon's color (PR
+ * green, ticket blue, plain ref grey — the colors those things have on
+ * GitHub), so a row of badges reads as a list, not a row of buttons.
+ */
+const KIND: Record<WorkLink["kind"], { icon: typeof GitPullRequest; tint: string; title: string }> =
+  {
+    pr: { icon: GitPullRequest, tint: "text-success", title: "Pull request" },
+    issue: { icon: CircleDot, tint: "text-info", title: "Ticket" },
+    ref: { icon: Hash, tint: "text-text-muted", title: "Reference" },
+  };
+
 export function WorkLinkBadge({ link, size = "sm" }: { link: WorkLink; size?: "xs" | "sm" }) {
-  const Icon = link.kind === "pr" ? GitPullRequest : link.kind === "ref" ? Hash : CircleDot;
+  const kind = KIND[link.kind] ?? KIND.ref;
+  const Icon = kind.icon;
   return (
     <a
       href={link.url}
       target="_blank"
       rel="noopener noreferrer"
-      title={`${link.kind === "pr" ? "Pull request" : link.kind === "ref" ? "Reference" : "Ticket"} · ${link.url}`}
+      title={`${kind.title} · ${link.url}`}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       className={cn(
-        "inline-flex items-center gap-1 rounded-md border font-mono transition-colors max-w-full",
-        "hover:text-text hover:border-primary/50",
-        link.kind === "pr"
-          ? "border-primary/30 bg-primary/10 text-primary"
-          : "border-border bg-bg text-text-muted",
+        "inline-flex items-center gap-1 rounded-md border border-border/70 bg-bg-card/60 font-mono max-w-full",
+        "text-text-muted hover:text-text hover:border-border-strong transition-colors",
         size === "xs" ? "px-1.5 py-px text-[10px]" : "px-2 py-0.5 text-[11px]",
       )}
     >
-      <Icon className={cn("shrink-0", size === "xs" ? "w-2.5 h-2.5" : "w-3 h-3")} />
+      <Icon className={cn("shrink-0", kind.tint, size === "xs" ? "w-2.5 h-2.5" : "w-3 h-3")} />
       <span className="truncate">{link.label}</span>
-      {size === "sm" && <ExternalLink className="w-2.5 h-2.5 opacity-50 shrink-0" />}
+      {size === "sm" && <ExternalLink className="w-2.5 h-2.5 opacity-40 shrink-0" />}
     </a>
   );
 }

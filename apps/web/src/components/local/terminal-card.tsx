@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
+import { HoverCard } from "./hover-card";
 import {
   Bot,
   Layers,
@@ -31,23 +32,118 @@ const STATE_STYLES: Record<string, { label: string; className: string; pulse?: b
   error: { label: "Error", className: "text-error bg-error/10" },
 };
 
-export function LocalStateBadge({ terminal }: { terminal: any }) {
+export function localStateLabel(terminal: any): string {
   const style = STATE_STYLES[terminal.state] ?? STATE_STYLES.pending;
-  const label =
-    terminal.state === "pending" && terminal.pendingReason === "host_offline"
-      ? "Host offline"
-      : terminal.state === "pending" && terminal.pendingReason === "hold"
-        ? "Held"
-        : style.label;
+  return terminal.state === "pending" && terminal.pendingReason === "host_offline"
+    ? "Host offline"
+    : terminal.state === "pending" && terminal.pendingReason === "hold"
+      ? "Held"
+      : style.label;
+}
+
+/**
+ * The ONE status a terminal header shows. Folds lifecycle state and
+ * attention into a single color so there's never a "Running" badge next to
+ * a green dot next to a yellow dot:
+ *   yellow pulse  needs you        green  working      grey  idle
+ *   amber dim     pending/launching red    error        grey dim  exited
+ */
+export function statusDescriptor(terminal: any): {
+  dot: string;
+  label: string;
+  detail: string | null;
+} {
+  const a = terminal.attentionState;
+  switch (terminal.state) {
+    case "error":
+      return {
+        dot: "bg-error",
+        label: "Error",
+        detail: terminal.errorMessage ?? null,
+      };
+    case "exited":
+      return a === "needs_you"
+        ? {
+            dot: "bg-warning animate-pulse",
+            label: "Finished",
+            detail: attentionLabel(terminal.attentionReason),
+          }
+        : {
+            dot: "bg-text-muted/40",
+            label: "Exited",
+            detail: terminal.exitCode != null ? `exit code ${terminal.exitCode}` : null,
+          };
+    case "pending":
+      return {
+        dot: "bg-warning/50",
+        label:
+          terminal.pendingReason === "host_offline"
+            ? "Waiting for host"
+            : terminal.pendingReason === "hold"
+              ? "Held"
+              : "Pending",
+        detail: null,
+      };
+    case "launching":
+      return { dot: "bg-warning/70 animate-pulse", label: "Launching", detail: null };
+    default:
+      if (a === "needs_you")
+        return {
+          dot: "bg-warning animate-pulse",
+          label: "Needs you",
+          detail: attentionLabel(terminal.attentionReason),
+        };
+      if (a === "working") return { dot: "bg-success", label: "Working", detail: null };
+      return { dot: "bg-text-muted/40", label: "Idle", detail: "running, nothing happening" };
+  }
+}
+
+/** Single status dot with the description on hover. */
+export function StatusDot({ terminal, className }: { terminal: any; className?: string }) {
+  const s = statusDescriptor(terminal);
+  return (
+    <HoverCard
+      align="left"
+      className={cn("shrink-0", className)}
+      content={
+        <>
+          <span className="block font-medium text-text">{s.label}</span>
+          {s.detail && <span className="block">{s.detail}</span>}
+        </>
+      }
+    >
+      <span
+        role="img"
+        aria-label={s.detail ? `${s.label} — ${s.detail}` : s.label}
+        className="inline-flex items-center justify-center w-5 h-5"
+      >
+        <span className={cn("w-2 h-2 rounded-full", s.dot)} />
+      </span>
+    </HoverCard>
+  );
+}
+
+export function LocalStateBadge({
+  terminal,
+  compact,
+}: {
+  terminal: any;
+  /** Just the dot (label on hover) — the header does this when the title needs the room. */
+  compact?: boolean;
+}) {
+  const style = STATE_STYLES[terminal.state] ?? STATE_STYLES.pending;
+  const label = localStateLabel(terminal);
   return (
     <span
+      title={label}
       className={cn(
-        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium tracking-wide uppercase",
+        "inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium tracking-wide uppercase shrink-0",
+        compact ? "px-1.5 py-1" : "px-2 py-0.5",
         style.className,
       )}
     >
       <span className={cn("w-1.5 h-1.5 rounded-full bg-current", style.pulse && "animate-pulse")} />
-      {label}
+      {!compact && <span>{label}</span>}
     </span>
   );
 }
@@ -92,7 +188,7 @@ function cardAccent(terminal: any): string {
     case "needs_you":
       return "border-l-warning ring-1 ring-warning/25";
     case "working":
-      return "border-l-primary";
+      return "border-l-success";
     default:
       return "border-l-border-strong";
   }

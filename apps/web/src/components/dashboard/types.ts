@@ -33,6 +33,17 @@ export interface SessionStats {
   ended: number;
 }
 
+/** Optio Local terminals (the user's own machines). */
+export interface LocalStats {
+  total: number;
+  needsYou: number;
+  working: number;
+  idle: number;
+  finished: number;
+  hosts: number;
+  hostsOnline: number;
+}
+
 export interface UsageData {
   available: boolean;
   error?: string;

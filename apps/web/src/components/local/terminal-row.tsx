@@ -13,7 +13,7 @@ function rowDot(t: any): string {
   if (t.state === "error") return "bg-error";
   if (t.state === "exited") return "bg-text-muted/30";
   if (t.state === "pending" || t.state === "launching") return "bg-warning/60";
-  if (t.attentionState === "working") return "bg-primary";
+  if (t.attentionState === "working") return "bg-success";
   return "bg-text-muted/40";
 }
 

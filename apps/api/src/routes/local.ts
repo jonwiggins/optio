@@ -328,6 +328,28 @@ export async function localRoutes(rawApp: FastifyInstance) {
     },
   );
 
+  app.patch(
+    "/api/local/terminals/:id",
+    {
+      ...member,
+      schema: {
+        operationId: "updateLocalTerminal",
+        summary: "Rename a terminal",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        body: z.object({ title: z.string().min(1).max(200) }),
+        response: { 200: TerminalResponse, 404: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      reply.send({ terminal: await terminalService.renameTerminal(terminal, req.body.title) });
+    },
+  );
+
   app.post(
     "/api/local/terminals/:id/start",
     {

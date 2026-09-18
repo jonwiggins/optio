@@ -2897,6 +2897,69 @@ public struct LocalHostDir: Codable, Hashable, Sendable {
     }
 }
 
+/// One rate-limit window as an agent CLI reports it.
+public struct AgentLimitWindow: Codable, Hashable, Sendable {
+    /// 0–100.
+    public let usedPercent: Double
+    public let windowMinutes: Double?
+    /// ISO time the window resets, when known.
+    public let resetsAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case usedPercent = "usedPercent"
+        case windowMinutes = "windowMinutes"
+        case resetsAt = "resetsAt"
+    }
+
+    public init(usedPercent: Double, windowMinutes: Double? = nil, resetsAt: String? = nil) {
+        self.usedPercent = usedPercent
+        self.windowMinutes = windowMinutes
+        self.resetsAt = resetsAt
+    }
+}
+
+/// Agent subscription limits the daemon reads off the machine (no tokens
+/// leave the laptop). Codex: the newest `rate_limits` snapshot in its
+/// session logs, so it's only as fresh as the last Codex turn — hence
+/// `observedAt`.
+public struct LocalHostAgentLimits: Codable, Hashable, Sendable {
+    public struct Codex: Codable, Hashable, Sendable {
+        public let primary: AgentLimitWindow?
+        public let secondary: AgentLimitWindow?
+        public let planType: String?
+        public let observedAt: String
+
+        private enum CodingKeys: String, CodingKey {
+            case primary = "primary"
+            case secondary = "secondary"
+            case planType = "planType"
+            case observedAt = "observedAt"
+        }
+
+        public init(
+            primary: AgentLimitWindow? = nil,
+            secondary: AgentLimitWindow? = nil,
+            planType: String? = nil,
+            observedAt: String
+        ) {
+            self.primary = primary
+            self.secondary = secondary
+            self.planType = planType
+            self.observedAt = observedAt
+        }
+    }
+
+    public let codex: Codex?
+
+    private enum CodingKeys: String, CodingKey {
+        case codex = "codex"
+    }
+
+    public init(codex: Codex? = nil) {
+        self.codex = codex
+    }
+}
+
 public struct LocalHost: Codable, Hashable, Sendable {
     public let id: String
     /// Null only in auth-disabled dev installs.
@@ -2908,6 +2971,8 @@ public struct LocalHost: Codable, Hashable, Sendable {
     public let arch: String?
     public let daemonVersion: String?
     public let dirs: [LocalHostDir]
+    /// Agent subscription limits read from the machine; null until reported.
+    public let agentLimits: LocalHostAgentLimits?
     public let state: LocalHostState
     public let lastSeenAt: String?
     public let createdAt: String
@@ -2923,6 +2988,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         case arch = "arch"
         case daemonVersion = "daemonVersion"
         case dirs = "dirs"
+        case agentLimits = "agentLimits"
         case state = "state"
         case lastSeenAt = "lastSeenAt"
         case createdAt = "createdAt"
@@ -2939,6 +3005,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         arch: String? = nil,
         daemonVersion: String? = nil,
         dirs: [LocalHostDir],
+        agentLimits: LocalHostAgentLimits? = nil,
         state: LocalHostState,
         lastSeenAt: String? = nil,
         createdAt: String,
@@ -2953,6 +3020,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         self.arch = arch
         self.daemonVersion = daemonVersion
         self.dirs = dirs
+        self.agentLimits = agentLimits
         self.state = state
         self.lastSeenAt = lastSeenAt
         self.createdAt = createdAt
@@ -3137,6 +3205,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
     public let preview: String?
     /// PR / ticket links the daemon spotted in the output (first-seen order).
     public let links: [WorkLink]
+    /// Token / cost totals the daemon summed from the agent's transcript (agent spawns only).
+    public let usage: AnyCodable?
     public let costUsd: String?
     public let lastActivityAt: String?
     /// "Later": while set and in the future the terminal is not in the needs-you
@@ -3170,6 +3240,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         case ticketUrl = "ticketUrl"
         case preview = "preview"
         case links = "links"
+        case usage = "usage"
         case costUsd = "costUsd"
         case lastActivityAt = "lastActivityAt"
         case snoozedUntil = "snoozedUntil"
@@ -3202,6 +3273,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         ticketUrl: String? = nil,
         preview: String? = nil,
         links: [WorkLink],
+        usage: AnyCodable? = nil,
         costUsd: String? = nil,
         lastActivityAt: String? = nil,
         snoozedUntil: String? = nil,
@@ -3232,6 +3304,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         self.ticketUrl = ticketUrl
         self.preview = preview
         self.links = links
+        self.usage = usage
         self.costUsd = costUsd
         self.lastActivityAt = lastActivityAt
         self.snoozedUntil = snoozedUntil
@@ -3355,6 +3428,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case attention(AttentionPayload)
     case preview(PreviewPayload)
     case links(LinksPayload)
+    case usage(UsagePayload)
+    case agentLimits(AgentLimitsPayload)
     case exit(ExitPayload)
     case ping
     /// Fallback for discriminator values this client does not know about yet.
@@ -3515,6 +3590,33 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct UsagePayload: Codable, Hashable, Sendable {
+        public let terminalId: String
+        public let usage: AnyCodable
+
+        private enum CodingKeys: String, CodingKey {
+            case terminalId = "terminalId"
+            case usage = "usage"
+        }
+
+        public init(terminalId: String, usage: AnyCodable) {
+            self.terminalId = terminalId
+            self.usage = usage
+        }
+    }
+
+    public struct AgentLimitsPayload: Codable, Hashable, Sendable {
+        public let limits: LocalHostAgentLimits
+
+        private enum CodingKeys: String, CodingKey {
+            case limits = "limits"
+        }
+
+        public init(limits: LocalHostAgentLimits) {
+            self.limits = limits
+        }
+    }
+
     public struct ExitPayload: Codable, Hashable, Sendable {
         public let terminalId: String
         public let exitCode: Double?
@@ -3547,6 +3649,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case "attention": self = .attention(try AttentionPayload(from: decoder))
         case "preview": self = .preview(try PreviewPayload(from: decoder))
         case "links": self = .links(try LinksPayload(from: decoder))
+        case "usage": self = .usage(try UsagePayload(from: decoder))
+        case "agent-limits": self = .agentLimits(try AgentLimitsPayload(from: decoder))
         case "exit": self = .exit(try ExitPayload(from: decoder))
         case "ping": self = .ping
         default: self = .unknown(try AnyCodable(from: decoder))
@@ -3590,6 +3694,14 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case .links(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("links", forKey: .type)
+            try payload.encode(to: encoder)
+        case .usage(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("usage", forKey: .type)
+            try payload.encode(to: encoder)
+        case .agentLimits(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("agent-limits", forKey: .type)
             try payload.encode(to: encoder)
         case .exit(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)

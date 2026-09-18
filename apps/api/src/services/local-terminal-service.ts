@@ -18,6 +18,7 @@ import {
   type LocalDaemonTerminalSync,
   type LocalSpawnSource,
   type LocalTerminalSpec,
+  type LocalTerminalUsage,
 } from "@optio/shared";
 import { db } from "../db/client.js";
 import { localTerminals } from "../db/schema.js";
@@ -464,6 +465,55 @@ export async function handleLinks(
     .returning();
   // Links change the card, so (unlike previews) this nudges the cockpit.
   if (row) await notifyChanged(row);
+}
+
+const USAGE_MAX = 1e12;
+
+/** Validate a daemon-supplied usage summary: finite non-negative numbers, bounded strings. */
+export function sanitizeUsage(input: unknown): LocalTerminalUsage | null {
+  if (!input || typeof input !== "object") return null;
+  const u = input as Record<string, unknown>;
+  const num = (v: unknown) =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(v, USAGE_MAX) : 0;
+  const turns = num(u.turns);
+  if (turns === 0) return null;
+  const updatedAt = new Date(typeof u.updatedAt === "string" ? u.updatedAt : NaN);
+  return {
+    inputTokens: num(u.inputTokens),
+    outputTokens: num(u.outputTokens),
+    cacheReadTokens: num(u.cacheReadTokens),
+    cacheWriteTokens: num(u.cacheWriteTokens),
+    turns,
+    model: typeof u.model === "string" ? u.model.slice(0, 100) : null,
+    costUsd: typeof u.costUsd === "number" && Number.isFinite(u.costUsd) ? num(u.costUsd) : null,
+    updatedAt: (isNaN(updatedAt.getTime()) ? new Date() : updatedAt).toISOString(),
+  };
+}
+
+export async function handleUsage(
+  hostId: string,
+  terminalId: string,
+  usage: unknown,
+): Promise<void> {
+  const clean = sanitizeUsage(usage);
+  if (!clean) return;
+  const [row] = await db
+    .update(localTerminals)
+    .set({ usage: clean, updatedAt: new Date() })
+    .where(and(eq(localTerminals.id, terminalId), eq(localTerminals.hostId, hostId)))
+    .returning();
+  // Once per agent turn at most — cheap enough to nudge the header live.
+  if (row) await notifyChanged(row);
+}
+
+/** User-facing rename; the daemon never sets titles after spawn. */
+export async function renameTerminal(
+  terminal: LocalTerminalRow,
+  title: string,
+): Promise<LocalTerminalRow> {
+  const clean = title.trim().slice(0, 200);
+  if (!clean || clean === terminal.title) return terminal;
+  return (await updateTerminal(terminal.id, { title: clean })) ?? terminal;
 }
 
 /**

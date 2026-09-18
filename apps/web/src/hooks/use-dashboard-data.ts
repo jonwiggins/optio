@@ -27,6 +27,11 @@ export function useDashboardData() {
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [metricsAvailable, setMetricsAvailable] = useState<boolean | null>(null);
   const [metricsHistory, setMetricsHistory] = useState<MetricsHistoryPoint[]>([]);
+  const [localTerminals, setLocalTerminals] = useState<any[]>([]);
+  const [localHosts, setLocalHosts] = useState<any[]>([]);
+  const [attentionTasks, setAttentionTasks] = useState<any[]>([]);
+  const [recentRuns, setRecentRuns] = useState<any[]>([]);
+  const [persistentAgents, setPersistentAgents] = useState<any[]>([]);
 
   const refresh = useCallback(() => {
     Promise.all([
@@ -40,6 +45,11 @@ export function useDashboardData() {
       api.getJobStats().catch(() => null),
       api.getPersistentAgentStats().catch(() => null),
       api.getSessionStats().catch(() => null),
+      api.listLocalTerminals().catch(() => ({ terminals: [] })),
+      api.listLocalHosts().catch(() => ({ hosts: [] })),
+      api.listTasks({ state: "needs_attention", limit: 6 }).catch(() => ({ tasks: [] })),
+      api.listRecentRuns(12).catch(() => ({ runs: [] })),
+      api.listPersistentAgents().catch(() => ({ agents: [] })),
     ])
       .then(
         ([
@@ -51,13 +61,23 @@ export function useDashboardData() {
           jobStatsRes,
           agentStatsRes,
           sessionStatsRes,
+          localTerminalsRes,
+          localHostsRes,
+          attentionRes,
+          recentRunsRes,
+          agentsRes,
         ]) => {
+          setRecentRuns(recentRunsRes.runs ?? []);
+          setPersistentAgents(agentsRes.agents ?? []);
           setActiveSessions(sessionsRes.sessions);
           setActiveSessionCount(sessionsRes.activeCount);
           setTaskStats(statsRes.stats);
           setStandaloneStats(jobStatsRes?.stats ?? null);
           setAgentStats(agentStatsRes?.stats ?? null);
           setSessionStats(sessionStatsRes?.stats ?? null);
+          setLocalTerminals(localTerminalsRes.terminals ?? []);
+          setLocalHosts(localHostsRes.hosts ?? []);
+          setAttentionTasks(attentionRes.tasks ?? []);
           setRecentTasks(tasksRes.tasks);
           setRepoCount(reposRes.repos.length);
           if (clusterRes) {
@@ -91,9 +111,14 @@ export function useDashboardData() {
       .finally(() => setLoading(false));
   }, []);
 
-  const refreshUsage = useCallback(async () => {
+  /**
+   * `fresh` bypasses the server's 5-minute cache and re-reads from Anthropic
+   * (the manual refresh button); background polls leave it off. Throws on a
+   * hard failure when `fresh` so the caller can show it.
+   */
+  const refreshUsage = useCallback(async (opts?: { fresh?: boolean }) => {
     try {
-      const res = await api.getUsage();
+      const res = await api.getUsage(opts?.fresh ? { fresh: true } : undefined);
       if (!res.usage.available && !res.usage.error) {
         // Usage unavailable without error — check if token is expired
         const authRes = await api.getAuthStatus().catch(() => null);
@@ -103,7 +128,10 @@ export function useDashboardData() {
         }
       }
       setUsage(res.usage);
-    } catch {
+      if (opts?.fresh && !res.usage.available) {
+        throw new Error(res.usage.error ?? "Usage unavailable");
+      }
+    } catch (err) {
       // If usage endpoint itself fails, check auth status
       try {
         const authRes = await api.getAuthStatus();
@@ -111,6 +139,7 @@ export function useDashboardData() {
           setUsage({ available: false, error: "OAuth token has expired" });
         }
       } catch {}
+      if (opts?.fresh) throw err;
     }
   }, []);
 
@@ -156,6 +185,11 @@ export function useDashboardData() {
     usage,
     metricsAvailable,
     metricsHistory,
+    localTerminals,
+    localHosts,
+    attentionTasks,
+    recentRuns,
+    persistentAgents,
     refresh,
     refreshUsage,
   };

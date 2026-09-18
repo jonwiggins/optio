@@ -9,6 +9,7 @@ export * from "./types/agent-events.js";
 export * from "./utils/state-machine.js";
 export * from "./utils/normalize-repo-url.js";
 export * from "./utils/extract-work-links.js";
+export * from "./utils/agent-usage.js";
 export * from "./utils/dag.js";
 export * from "./utils/k8s-resources.js";
 export * from "./constants.js";

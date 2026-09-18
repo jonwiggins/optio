@@ -7,6 +7,12 @@ export const LocalHostDirSchema = z
   })
   .describe("Allowlisted directory on a local host");
 
+const AgentLimitWindowSchema = z.object({
+  usedPercent: z.number(),
+  windowMinutes: z.number().nullable(),
+  resetsAt: z.string().nullable(),
+});
+
 export const LocalHostSchema = z
   .object({
     id: z.string(),
@@ -18,6 +24,19 @@ export const LocalHostSchema = z
     arch: z.string().nullable(),
     daemonVersion: z.string().nullable(),
     dirs: z.array(LocalHostDirSchema),
+    agentLimits: z
+      .object({
+        codex: z
+          .object({
+            primary: AgentLimitWindowSchema.nullable(),
+            secondary: AgentLimitWindowSchema.nullable(),
+            planType: z.string().nullable(),
+            observedAt: z.string(),
+          })
+          .optional(),
+      })
+      .nullable()
+      .describe("Agent subscription limits the daemon read off the machine"),
     state: z.enum(["online", "offline"]),
     lastSeenAt: z.date().nullable(),
     createdAt: z.date(),
@@ -70,6 +89,19 @@ export const LocalTerminalSchema = z
         }),
       )
       .describe("PR / ticket links seen in the output"),
+    usage: z
+      .object({
+        inputTokens: z.number(),
+        outputTokens: z.number(),
+        cacheReadTokens: z.number(),
+        cacheWriteTokens: z.number(),
+        turns: z.number(),
+        model: z.string().nullable(),
+        costUsd: z.number().nullable(),
+        updatedAt: z.string(),
+      })
+      .nullable()
+      .describe("Token / cost totals summed from the agent's transcript (agent spawns only)"),
     costUsd: z.string().nullable(),
     lastActivityAt: z.date().nullable(),
     snoozedUntil: z

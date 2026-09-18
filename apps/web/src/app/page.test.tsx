@@ -30,6 +30,30 @@ vi.mock("@/components/dashboard", () => ({
   PerformanceSummary: () => null,
   AgentComparison: () => null,
   FailureInsights: () => null,
+  LocalSessions: () => <div data-testid="local-sessions" />,
+  RecentRuns: () => <div data-testid="recent-tasks" />,
+  LivePanel: ({ items }: { items: unknown[] }) =>
+    items.length > 0 ? <div data-testid="live-panel" /> : null,
+  collectLive: (locals: any[], _h: any[], sessions: any[], agents: any[]) => [
+    ...locals
+      .filter((t) => ["pending", "launching", "running"].includes(t.state))
+      .map((t) => ({ kind: "local", key: t.id })),
+    ...sessions.map((s) => ({ kind: "session", key: s.id })),
+    ...agents.filter((a) => a.state === "running").map((a) => ({ kind: "agent", key: a.id })),
+  ],
+  LimitsPanel: ({ providers }: { providers: unknown[] }) =>
+    providers.length > 0 ? <div data-testid="limits" /> : null,
+  collectProviderLimits: (usage: any) => (usage?.available ? [{ key: "claude" }] : []),
+  NeedsYou: ({ items }: { items: unknown[] }) =>
+    items.length > 0 ? <div data-testid="needs-you" /> : null,
+  collectNeedsYou: (locals: any[], tasks: any[]) => [
+    ...locals.filter((t) => t.attentionState === "needs_you"),
+    ...tasks,
+  ],
+  QuietSections: ({ sections }: { sections: Array<{ label: string }> }) =>
+    sections.length > 0 ? (
+      <div data-testid="quiet">{sections.map((s) => s.label).join(", ")}</div>
+    ) : null,
 }));
 
 const makeDashboardData = (overrides: Record<string, unknown> = {}) => ({
@@ -155,5 +179,68 @@ describe("OverviewPage — Persistent Agents and Sessions stats bars", () => {
     render(<OverviewPage />);
 
     expect(screen.getByText("Sessions")).toBeInTheDocument();
+  });
+});
+
+describe("OverviewPage — Local, Needs you, and quiet folding", () => {
+  afterEach(() => cleanup());
+
+  const live = (id: string, attentionState: string) => ({
+    id,
+    title: id,
+    dir: "/home/dev/optio",
+    state: "running",
+    attentionState,
+    lastActivityAt: new Date().toISOString(),
+  });
+
+  it("shows the Local section when a terminal is live, and Needs you when one waits", () => {
+    vi.mocked(useDashboardData).mockReturnValue(
+      makeDashboardData({
+        localTerminals: [live("a", "working"), live("b", "needs_you")],
+        localHosts: [{ id: "h", name: "mac", state: "online" }],
+      }) as any,
+    );
+
+    render(<OverviewPage />);
+
+    expect(screen.getByTestId("local-sessions")).toBeInTheDocument();
+    expect(screen.getByTestId("needs-you")).toBeInTheDocument();
+    expect(screen.queryByTestId("quiet")).not.toBeInTheDocument();
+  });
+
+  it("folds idle concepts into the quiet line instead of full strips", () => {
+    vi.mocked(useDashboardData).mockReturnValue(
+      makeDashboardData({
+        localTerminals: [],
+        localHosts: [{ id: "h", name: "mac", state: "online" }],
+        agentStats: { total: 3, idle: 3, queued: 0, running: 0, paused: 0, failed: 0, archived: 0 },
+        sessionStats: { total: 4, active: 0, ended: 4 },
+        standaloneStats: { total: 9, queued: 0, running: 0, failed: 1, completed: 8 },
+      }) as any,
+    );
+
+    render(<OverviewPage />);
+
+    expect(screen.queryByTestId("local-sessions")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("needs-you")).not.toBeInTheDocument();
+    expect(screen.getByTestId("quiet")).toHaveTextContent(
+      "Local, Jobs, Persistent Agents, Sessions",
+    );
+  });
+
+  it("skips the welcome hero when there are no repo tasks but a local terminal exists", () => {
+    vi.mocked(useDashboardData).mockReturnValue(
+      makeDashboardData({
+        taskStats: { total: 0, running: 0, failed: 0, needsAttention: 0 },
+        localTerminals: [live("a", "idle")],
+        localHosts: [{ id: "h", name: "mac", state: "online" }],
+      }) as any,
+    );
+
+    render(<OverviewPage />);
+
+    expect(screen.queryByTestId("welcome-hero")).not.toBeInTheDocument();
+    expect(screen.getByTestId("local-sessions")).toBeInTheDocument();
   });
 });

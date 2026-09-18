@@ -2,6 +2,7 @@
 // (`optio local up`). See docs/optio-local.md for the full protocol.
 
 import type { WorkLink } from "../utils/extract-work-links.js";
+import type { LocalTerminalUsage } from "../utils/agent-usage.js";
 
 export type LocalHostState = "online" | "offline";
 
@@ -9,6 +10,30 @@ export interface LocalHostDir {
   path: string;
   /** Normalized git remote URL detected for the dir, when it is a git repo. */
   repoUrl?: string;
+}
+
+/** One rate-limit window as an agent CLI reports it. */
+export interface AgentLimitWindow {
+  /** 0–100. */
+  usedPercent: number;
+  windowMinutes: number | null;
+  /** ISO time the window resets, when known. */
+  resetsAt: string | null;
+}
+
+/**
+ * Agent subscription limits the daemon reads off the machine (no tokens
+ * leave the laptop). Codex: the newest `rate_limits` snapshot in its
+ * session logs, so it's only as fresh as the last Codex turn — hence
+ * `observedAt`.
+ */
+export interface LocalHostAgentLimits {
+  codex?: {
+    primary: AgentLimitWindow | null;
+    secondary: AgentLimitWindow | null;
+    planType: string | null;
+    observedAt: string;
+  };
 }
 
 export interface LocalHost {
@@ -22,6 +47,8 @@ export interface LocalHost {
   arch: string | null;
   daemonVersion: string | null;
   dirs: LocalHostDir[];
+  /** Agent subscription limits read from the machine; null until reported. */
+  agentLimits: LocalHostAgentLimits | null;
   state: LocalHostState;
   lastSeenAt: string | null;
   createdAt: string;
@@ -72,6 +99,8 @@ export interface LocalTerminal {
   preview: string | null;
   /** PR / ticket links the daemon spotted in the output (first-seen order). */
   links: WorkLink[];
+  /** Token / cost totals the daemon summed from the agent's transcript (agent spawns only). */
+  usage: LocalTerminalUsage | null;
   costUsd: string | null;
   lastActivityAt: string | null;
   /**
@@ -137,6 +166,8 @@ export type LocalDaemonMessage =
   | { type: "attention"; terminalId: string; state: LocalAttentionState; reason: string }
   | { type: "preview"; terminalId: string; preview: string; lastActivityAt: string }
   | { type: "links"; terminalId: string; links: WorkLink[] }
+  | { type: "usage"; terminalId: string; usage: LocalTerminalUsage }
+  | { type: "agent-limits"; limits: LocalHostAgentLimits }
   | { type: "exit"; terminalId: string; exitCode: number | null }
   | { type: "ping" };
 

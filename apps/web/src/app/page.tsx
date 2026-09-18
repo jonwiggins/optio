@@ -2,19 +2,45 @@
 
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
-import { RefreshCw, GitPullRequest, Terminal, Bot, MessageSquare } from "lucide-react";
+import { RefreshCw, GitPullRequest, Terminal, Bot, MessageSquare, Laptop } from "lucide-react";
 import {
   PipelineStatsBar,
   UsagePanel,
   ClusterSummary,
-  ActiveSessions,
-  RecentTasks,
   RecentActivity,
   PodsList,
   WelcomeHero,
   AgentComparison,
+  LocalSessions,
+  NeedsYou,
+  collectNeedsYou,
+  QuietSections,
+  RecentRuns,
+  LivePanel,
+  collectLive,
+  LimitsPanel,
+  collectProviderLimits,
+  type QuietSection,
 } from "@/components/dashboard";
+import Link from "next/link";
+import {
+  computeLocalStats,
+  isLocalQuiet,
+  recentLocalTerminals,
+} from "@/components/dashboard/local-stats";
 import { UpdateBanner } from "@/components/update-banner";
+
+/** Section header used by every concept strip on the overview. */
+function SectionLabel({ icon: Icon, children }: { icon: typeof Terminal; children: string }) {
+  return (
+    <div className="flex items-center gap-1.5 px-1">
+      <Icon className="w-3 h-3 text-text-muted/60" />
+      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted/60">
+        {children}
+      </span>
+    </div>
+  );
+}
 
 export default function OverviewPage() {
   usePageTitle("Overview");
@@ -32,6 +58,11 @@ export default function OverviewPage() {
     usage,
     metricsAvailable,
     metricsHistory,
+    localTerminals = [],
+    localHosts = [],
+    attentionTasks = [],
+    recentRuns = [],
+    persistentAgents = [],
     refresh,
     refreshUsage,
   } = useDashboardData();
@@ -62,9 +93,73 @@ export default function OverviewPage() {
     );
   }
 
-  const isFirstRun = (taskStats?.total ?? 0) === 0;
+  // Local sessions are a first-class way in: a machine paired and a
+  // terminal open counts as "started", even with zero repo tasks.
+  const isFirstRun = (taskStats?.total ?? 0) === 0 && localTerminals.length === 0;
   if (isFirstRun) {
     return <WelcomeHero repoCount={repoCount ?? 0} />;
+  }
+
+  // ── What needs me? ─────────────────────────────────────────────────
+  const needsYou = collectNeedsYou(localTerminals, attentionTasks);
+  // ── What's live right now, across concepts? ────────────────────────
+  const live = collectLive(localTerminals, localHosts, activeSessions, persistentAgents);
+  const liveLocalCount = live.filter((i) => i.kind === "local").length;
+  // ── How far along am I on each agent subscription? ─────────────────
+  const providerLimits = collectProviderLimits(usage, localHosts);
+
+  // ── What's running? Each concept is either a full strip or one quiet line.
+  const localStats =
+    localHosts.length > 0 || localTerminals.length > 0
+      ? computeLocalStats(localTerminals, localHosts)
+      : null;
+  const recentLocal = recentLocalTerminals(localTerminals);
+  const localQuiet = isLocalQuiet(localStats, recentLocal);
+
+  const standaloneLive = (standaloneStats?.running ?? 0) + (standaloneStats?.queued ?? 0) > 0;
+  const agentsLive =
+    (agentStats?.running ?? 0) + (agentStats?.queued ?? 0) + (agentStats?.paused ?? 0) > 0;
+  const sessionsLive = (sessionStats?.active ?? 0) > 0;
+
+  const quiet: QuietSection[] = [];
+  if (localStats && localQuiet) {
+    quiet.push({
+      key: "local",
+      label: "Local",
+      href: "/local",
+      icon: Laptop,
+      summary:
+        localStats.hostsOnline > 0
+          ? `${localStats.hostsOnline} host${localStats.hostsOnline === 1 ? "" : "s"} online`
+          : "no hosts online",
+    });
+  }
+  if ((standaloneStats?.total ?? 0) > 0 && !standaloneLive) {
+    quiet.push({
+      key: "standalone",
+      label: "Jobs",
+      href: "/jobs",
+      icon: Terminal,
+      summary: `${standaloneStats?.completed ?? 0} done`,
+    });
+  }
+  if ((agentStats?.total ?? 0) > 0 && !agentsLive) {
+    quiet.push({
+      key: "agents",
+      label: "Persistent Agents",
+      href: "/agents",
+      icon: Bot,
+      summary: `${agentStats?.idle ?? 0} idle`,
+    });
+  }
+  if ((sessionStats?.total ?? 0) > 0 && !sessionsLive) {
+    quiet.push({
+      key: "sessions",
+      label: "Sessions",
+      href: "/sessions",
+      icon: MessageSquare,
+      summary: `${sessionStats?.ended ?? 0} ended today`,
+    });
   }
 
   const totalCost = recentTasks.reduce((sum: number, t: any) => {
@@ -94,6 +189,12 @@ export default function OverviewPage() {
                 {activeSessionCount} {activeSessionCount === 1 ? "session" : "sessions"}
               </span>
             )}
+            {liveLocalCount > 0 && (
+              <Link href="/local" className="text-success hover:underline">
+                {" \u00B7 "}
+                {liveLocalCount} local {liveLocalCount === 1 ? "terminal" : "terminals"}
+              </Link>
+            )}
             {(taskStats?.needsAttention ?? 0) > 0 && (
               <span className="text-warning">
                 {" \u00B7 "}
@@ -113,55 +214,54 @@ export default function OverviewPage() {
 
       <UpdateBanner />
 
+      <NeedsYou items={needsYou} />
+
+      <LimitsPanel
+        providers={providerLimits}
+        onRefresh={() => refreshUsage({ fresh: true })}
+        onRefreshHosts={refresh}
+      />
+
+      <LivePanel items={live} />
+
       <div className="space-y-2">
-        <div className="flex items-center gap-1.5 px-1">
-          <GitPullRequest className="w-3 h-3 text-text-muted/60" />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted/60">
-            Repo Tasks
-          </span>
-        </div>
+        <SectionLabel icon={GitPullRequest}>Repo Tasks</SectionLabel>
         <PipelineStatsBar taskStats={taskStats} />
       </div>
 
-      {(standaloneStats?.total ?? 0) > 0 && (
+      {localStats && !localQuiet && (
+        <LocalSessions stats={localStats} terminals={[]} hosts={localHosts} />
+      )}
+
+      {(standaloneStats?.total ?? 0) > 0 && standaloneLive && (
         <div className="space-y-2">
-          <div className="flex items-center gap-1.5 px-1">
-            <Terminal className="w-3 h-3 text-text-muted/60" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted/60">
-              Standalone Tasks
-            </span>
-          </div>
+          <SectionLabel icon={Terminal}>Standalone Tasks</SectionLabel>
           <PipelineStatsBar variant="standalone" standaloneStats={standaloneStats} />
         </div>
       )}
 
-      {(agentStats?.total ?? 0) > 0 && (
+      {(agentStats?.total ?? 0) > 0 && agentsLive && (
         <div className="space-y-2">
-          <div className="flex items-center gap-1.5 px-1">
-            <Bot className="w-3 h-3 text-text-muted/60" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted/60">
-              Persistent Agents
-            </span>
-          </div>
+          <SectionLabel icon={Bot}>Persistent Agents</SectionLabel>
           <PipelineStatsBar variant="agents" agentStats={agentStats} />
         </div>
       )}
 
-      {(sessionStats?.total ?? 0) > 0 && (
+      {(sessionStats?.total ?? 0) > 0 && sessionsLive && (
         <div className="space-y-2">
-          <div className="flex items-center gap-1.5 px-1">
-            <MessageSquare className="w-3 h-3 text-text-muted/60" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted/60">
-              Sessions
-            </span>
-          </div>
+          <SectionLabel icon={MessageSquare}>Sessions</SectionLabel>
           <PipelineStatsBar variant="sessions" sessionStats={sessionStats} />
         </div>
       )}
 
+      <QuietSections sections={quiet} />
+
       <AgentComparison />
 
-      <UsagePanel usage={usage} onRefresh={refreshUsage} />
+      {/* UsagePanel now only carries the token-refresh banners; meters live in LimitsPanel. */}
+      {(usage?.authFailures?.claude ||
+        usage?.authFailures?.github ||
+        usage?.hasRecentAuthFailure) && <UsagePanel usage={usage} onRefresh={refreshUsage} />}
 
       <ClusterSummary
         cluster={cluster}
@@ -170,10 +270,8 @@ export default function OverviewPage() {
         metricsHistory={metricsHistory}
       />
 
-      <ActiveSessions sessions={activeSessions} activeCount={activeSessionCount} />
-
       <div className="[column-width:28rem] [column-gap:2rem] [&>*]:break-inside-avoid [&>*]:mb-8 [&>*:last-child]:mb-0">
-        <RecentTasks tasks={recentTasks} />
+        <RecentRuns runs={recentRuns.length > 0 ? recentRuns : []} />
         <PodsList
           pods={pods}
           events={events}

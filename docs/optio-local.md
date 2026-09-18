@@ -167,7 +167,43 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   terminal grouped as Needs you (oldest wait first) / Working / Idle / Finished, searchable
   by title, dir, host, or PR / ticket, with badges per row. Keyboard, captured before
   xterm: `Ctrl/⌘+Shift+↑/↓` previous / next session, `Ctrl/⌘+Shift+↵` jump to the oldest
-  "needs you" session.
+  "needs you" session, `Ctrl/⌘+Shift+B` hide / show the rail (also the ⊟ button in the
+  rail header and the ⊞ button in the terminal header; persisted in `localStorage`,
+  wide screens only — `components/local/rail-store.ts`). Inside the terminal,
+  `Shift+↵` sends `ESC CR` (what `claude /terminal-setup` installs) so Claude Code inserts
+  a newline instead of submitting; `components/local/conn-state.ts`.
+- **Attention from another tab** (`components/local/attention-watcher.tsx`, mounted on
+  every `/local*` route): the favicon gets a status dot — yellow = a session needs you,
+  green = agents working, grey = quiet — and the tab title a `(N)` needs-you count. The
+  same yellow / green / grey scheme is used for the attention dots in the rail, rows, and
+  cards. The **bell** in a session's header arms a browser Notification for that session
+  (per browser, `localStorage`, `components/local/bell-store.ts`): it fires the moment the
+  session flips to needs-you unless you're already looking at it, and clicking it focuses
+  the tab on that session. Uses the page-scoped Notification API, so the tab must be open
+  (server Web Push for Local sessions is not wired up yet). All Local pages share one
+  terminals/hosts feed (`components/local/local-feed.ts`).
+- **Usage in the header** (`components/local/usage-chips.tsx`): the gauge pill shows the
+  Claude subscription's 5-hour / 7-day limit utilization (account-wide, from
+  `GET /api/auth/usage`, polled every minute; the server caches the upstream call for
+  5 min), turning yellow at 80% and red at 95%. The coin chip is _this session's_ tokens
+  and estimated spend: the daemon reads the `transcript_path` from Claude Code's hooks
+  and folds the transcript's assistant turns incrementally (`cli/src/local/usage-tracker.ts`,
+  deduped by message id since Claude Code writes one line per content block), prices them
+  with the public list prices in `packages/shared/src/utils/agent-usage.ts`, and sends a
+  `usage` frame; stored on `local_terminals.usage`. Works for agent spawns _and_ for a
+  `claude` you start by hand in an Optio shell: the daemon prepends a `claude` shim
+  (`<config>/bin/claude`, written by `writeClaudeShim`) to every spawn's PATH that adds
+  `--settings <hook file>` unless you passed your own. A login rc that _resets_ PATH
+  (rather than prepending) drops the shim, and that terminal falls back to the silence
+  heuristic.
+- **One status dot per header** (`StatusDot`, `statusDescriptor` in `terminal-card.tsx`):
+  lifecycle + attention folded into a single color — yellow pulse needs you, green working,
+  grey idle, amber launching/pending, red error, dim grey exited — with the description on
+  hover. Inside `/local/:id` the favicon shows _that_ session's dot; on `/local` it shows the
+  fleet's (yellow beats green beats grey). The `(N)` title badge is always the fleet's
+  needs-you count.
+- **Rename in place**: the title in the terminal header is a text box (Enter / blur saves,
+  Escape reverts); `PATCH /api/local/terminals/:id { title }`.
 - **Split view** — up to three terminals at once: `/local/<primary>?split=<id2>,<id3>`
   (`&layout=rows` stacks them; phones always stack). Open a pane from the rail row's ⧉
   button or Shift+click; each extra pane has a one-line strip with kill / make-primary /
@@ -180,6 +216,25 @@ eliminates the classic "pasted JSON swallowed as control" bug):
 - Issues page (`/issues`) gains **"Work on locally"** next to "Assign to Optio" when an
   online host advertises a dir whose `repoUrl` matches the issue's repo.
 - Sidebar: **Local** under the "Live" group.
+- **Overview (`/`)**: the dashboard opens with a cross-concept **Needs you** strip (local
+  terminals waiting on you + repo tasks in `needs_attention`, oldest wait first —
+  `components/dashboard/needs-you.tsx`), then one stats strip per concept. **Local** gets
+  the same strip as the others (needs you / working / idle / finished / hosts online,
+  `variant="local"`) plus cards for live terminals and anything finished in the last 24 h.
+  A concept with nothing live folds into the single **Quiet** line (`quiet-sections.tsx`)
+  so the page is only as tall as what's happening; roll-up rules live in
+  `components/dashboard/local-stats.ts`. A paired host with an open terminal counts as
+  "started" — the welcome hero no longer shows just because there are zero repo tasks.
+  Three more overview panels: **Usage limits** (`limits-panel.tsx`) shows Claude's live
+  5h / 7d account utilization next to **Codex**'s — the daemon reads Codex's newest
+  `rate_limits` snapshot from `~/.codex/sessions/**/rollout-*.jsonl` (no token leaves the
+  laptop; `cli/src/local/codex-limits.ts`), reports it in an `agent-limits` frame every few
+  minutes, and it lands on `local_hosts.agent_limits`; the panel labels it "as of <when>"
+  since it only moves when Codex runs, and zeroes a window whose reset has passed.
+  **Live** (`live-panel.tsx`) is one grid of every open local terminal, interactive
+  session, and awake persistent agent, each linking into its view. **Recent**
+  (`recent-runs.tsx`) is a newest-first feed of repo tasks, job runs, and agent turns from
+  `GET /api/runs/recent` (`routes/recent-runs.ts`, a workspace-scoped UNION).
 
 ## CLI
 

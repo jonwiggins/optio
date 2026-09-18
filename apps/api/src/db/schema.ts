@@ -1555,6 +1555,23 @@ export const localHosts = pgTable(
     arch: text("arch"),
     daemonVersion: text("daemon_version"),
     dirs: jsonb("dirs").$type<Array<{ path: string; repoUrl?: string }>>().notNull().default([]),
+    // Agent subscription limits the daemon read off the machine (Codex session logs).
+    agentLimits: jsonb("agent_limits").$type<{
+      codex?: {
+        primary: {
+          usedPercent: number;
+          windowMinutes: number | null;
+          resetsAt: string | null;
+        } | null;
+        secondary: {
+          usedPercent: number;
+          windowMinutes: number | null;
+          resetsAt: string | null;
+        } | null;
+        planType: string | null;
+        observedAt: string;
+      };
+    } | null>(),
     state: localHostStateEnum("state").notNull().default("offline"),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1623,6 +1640,17 @@ export const localTerminals = pgTable(
       >()
       .notNull()
       .default([]),
+    // Token / cost totals the daemon summed from the agent's transcript.
+    usage: jsonb("usage").$type<{
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      turns: number;
+      model: string | null;
+      costUsd: number | null;
+      updatedAt: string;
+    } | null>(),
     costUsd: text("cost_usd"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
     // "Later": while in the future the terminal is out of the needs-you queue.
