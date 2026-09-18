@@ -9,29 +9,14 @@ import { getWsBaseUrl } from "@/lib/ws-client.js";
 import { getWsTokenProvider } from "@/lib/ws-auth";
 import { cn } from "@/lib/utils";
 import { closeAction, isTerminalStateDead } from "./stream-policy";
+import {
+  CONN_DOT,
+  CONN_LABEL,
+  SHIFT_ENTER_SEQUENCE,
+  isShiftEnter,
+  type ConnState,
+} from "./conn-state";
 import type { LocalAttentionState, LocalTerminalState } from "@optio/shared";
-
-const ATTENTION_LABEL: Record<LocalAttentionState, string> = {
-  working: "working",
-  needs_you: "needs you",
-  idle: "idle",
-};
-
-type ConnState = "connecting" | "connected" | "reconnecting" | "disconnected";
-
-const CONN_LABEL: Record<ConnState, string> = {
-  connecting: "connecting…",
-  connected: "connected",
-  reconnecting: "reconnecting…",
-  disconnected: "disconnected",
-};
-
-const CONN_DOT: Record<ConnState, string> = {
-  connecting: "bg-text-muted/40",
-  connected: "bg-success",
-  reconnecting: "bg-warning",
-  disconnected: "bg-error",
-};
 
 const RECONNECT_DELAY_MS = 2000;
 
@@ -46,22 +31,27 @@ export function LocalTerminal({
   terminalId,
   onStatus,
   onExit,
+  onConn,
 }: {
   terminalId: string;
   onStatus?: (state: LocalTerminalState, attentionState: LocalAttentionState) => void;
   onExit?: (exitCode: number | null) => void;
+  /** Stream connection state, for chrome that wants to show it. */
+  onConn?: (conn: ConnState) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onStatusRef = useRef(onStatus);
   const onExitRef = useRef(onExit);
+  const onConnRef = useRef(onConn);
   onStatusRef.current = onStatus;
   onExitRef.current = onExit;
+  onConnRef.current = onConn;
 
-  const [status, setStatus] = useState<{
-    state: LocalTerminalState;
-    attentionState: LocalAttentionState;
-  } | null>(null);
-  const [connState, setConnState] = useState<ConnState>("connecting");
+  const [connState, setConnStateRaw] = useState<ConnState>("connecting");
+  const setConnState = (next: ConnState) => {
+    setConnStateRaw(next);
+    onConnRef.current?.(next);
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -88,6 +78,16 @@ export function LocalTerminal({
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
+
+    // Shift+Enter → newline in agent REPLs (see SHIFT_ENTER_SEQUENCE). Only
+    // the bare Shift chord: Ctrl/⌘+Shift+Enter belongs to the rail.
+    term.attachCustomKeyEventHandler((e) => {
+      if (!isShiftEnter(e)) return true;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "input", data: SHIFT_ENTER_SEQUENCE }));
+      }
+      return false;
+    });
     // fit() reads the renderer's dimensions; WebKit can hit this before the
     // renderer exists (first paint) and any engine after dispose(), so guard
     // it and retry on the next frame.
@@ -162,7 +162,6 @@ export function LocalTerminal({
           if (parsed.type === "status") {
             if (isTerminalStateDead(parsed.state)) terminalDead = true;
             else liveOnThisConnection = true;
-            setStatus({ state: parsed.state, attentionState: parsed.attentionState });
             onStatusRef.current?.(parsed.state, parsed.attentionState);
           } else if (parsed.type === "exit") {
             terminalDead = true;
@@ -243,27 +242,24 @@ export function LocalTerminal({
 
   return (
     <div className="h-full flex flex-col bg-[#09090b]">
-      <div className="shrink-0 flex items-center gap-3 px-3 py-1.5 border-b border-border/50 text-[11px] text-text-muted">
-        <span className="flex items-center gap-1.5">
+      {/* Only speak up when the stream isn't healthy — the header carries the
+          state/attention badges, so a "connected · running" strip is noise. */}
+      {connState !== "connected" && (
+        <div
+          className={cn(
+            "shrink-0 flex items-center gap-2 px-3 py-1 text-[11px]",
+            connState === "disconnected" ? "bg-error/10 text-error" : "bg-warning/10 text-warning",
+          )}
+        >
           <span className={cn("w-1.5 h-1.5 rounded-full", CONN_DOT[connState])} />
           {CONN_LABEL[connState]}
-        </span>
-        {status && (
-          <>
-            <span className="uppercase tracking-wide">{status.state}</span>
-            <span
-              className={cn(
-                "uppercase tracking-wide",
-                status.attentionState === "needs_you" && "text-warning",
-                status.attentionState === "working" && "text-primary",
-              )}
-            >
-              {ATTENTION_LABEL[status.attentionState] ?? status.attentionState}
-            </span>
-          </>
-        )}
-      </div>
-      <div ref={containerRef} className="flex-1 min-h-0" />
+        </div>
+      )}
+      {/* No padding here: FitAddon sizes the grid from this box's border-box
+          height and only subtracts padding set on `.xterm` itself (see
+          .local-xterm in globals.css). Padding on the parent oversizes the
+          grid and the bottom rows flicker/clip. */}
+      <div ref={containerRef} className="local-xterm flex-1 min-h-0" />
       <div className="shrink-0 h-[env(safe-area-inset-bottom)]" aria-hidden />
     </div>
   );

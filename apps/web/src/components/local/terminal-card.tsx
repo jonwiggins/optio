@@ -92,7 +92,7 @@ function cardAccent(terminal: any): string {
     case "needs_you":
       return "border-l-warning ring-1 ring-warning/25";
     case "working":
-      return "border-l-primary";
+      return "border-l-success";
     default:
       return "border-l-border-strong";
   }
