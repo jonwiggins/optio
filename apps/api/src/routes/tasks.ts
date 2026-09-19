@@ -108,6 +108,7 @@ const createTaskSchema = z
     prompt: z.string().min(1).describe("Prompt passed to the agent"),
     description: z.string().optional(),
     agentType: AgentTypeSchema.optional().describe("Agent runtime override"),
+    model: z.string().optional().describe("Standalone: model override passed to the agent CLI"),
     maxRetries: z.number().int().min(0).max(10).optional(),
     // Repo-task / repo-blueprint fields
     repoUrl: z.string().url().optional().describe("Repository URL (required for repo kinds)"),
@@ -123,6 +124,11 @@ const createTaskSchema = z
     dependsOn: z.array(z.string().uuid()).optional(),
     // Repo-blueprint-only fields
     enabled: z.boolean().optional(),
+    agentOptions: z
+      .record(z.union([z.string(), z.boolean()]))
+      .nullable()
+      .optional()
+      .describe("Blueprints: per-run agent parameters copied to each spawned task"),
     // Run location (all kinds): an Optio pod (`cluster`, default) or the
     // caller's own machine (`local`) in an allowlisted directory, via the
     // Optio Local daemon.
@@ -482,6 +488,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             description: input.description,
             promptTemplate: input.prompt,
             agentRuntime: input.agentType,
+            model: input.model,
             maxRetries: input.maxRetries,
             enabled: input.enabled ?? true,
             createdBy: req.user?.id,
@@ -524,6 +531,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             agentType: input.agentType ?? null,
             maxRetries: input.maxRetries ?? 3,
             priority: input.priority ?? 100,
+            agentOptions: input.agentOptions ?? null,
             enabled: input.enabled ?? true,
             workspaceId: req.user?.workspaceId ?? null,
             createdBy: req.user?.id ?? null,
@@ -558,6 +566,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         name: _n,
         description: _d,
         enabled: _e,
+        agentOptions: _ao,
+        model: _model,
         runTarget: _rt,
         localHostId: _lh,
         localDir: _ld,

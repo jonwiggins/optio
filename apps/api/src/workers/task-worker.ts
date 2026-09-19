@@ -374,8 +374,19 @@ export function startTaskWorker() {
         const finalRenderedPrompt = reviewOverride?.renderedPrompt ?? renderedPrompt;
         const finalTaskFileContent = reviewOverride?.taskFileContent ?? taskFileContent;
         const finalTaskFilePath = reviewOverride?.taskFilePath ?? taskFilePath;
-        const finalClaudeModel =
-          reviewOverride?.claudeModel ?? repoConfig?.claudeModel ?? undefined;
+        // Per-run agent options (the New session form's Who parameters) win
+        // over the repo's defaults; anything unset falls through as before.
+        const agentOptions = ((task.metadata as any)?.agentOptions ?? {}) as Record<
+          string,
+          string | boolean | undefined
+        >;
+        const opt = <K extends string>(key: K): string | undefined => {
+          const v = agentOptions[key];
+          if (typeof v === "string" && v !== "") return v;
+          const fromRepo = (repoConfig as Record<string, unknown> | null | undefined)?.[key];
+          return typeof fromRepo === "string" ? fromRepo : undefined;
+        };
+        const finalClaudeModel = reviewOverride?.claudeModel ?? opt("claudeModel");
 
         const agentConfig = adapter.buildContainerConfig({
           taskId: task.id,
@@ -390,19 +401,23 @@ export function startTaskWorker() {
           taskFileContent: finalTaskFileContent,
           taskFilePath: finalTaskFilePath,
           claudeModel: finalClaudeModel,
-          claudeContextWindow: repoConfig?.claudeContextWindow ?? undefined,
-          claudeThinking: repoConfig?.claudeThinking ?? undefined,
-          claudeEffort: repoConfig?.claudeEffort ?? undefined,
-          copilotModel: repoConfig?.copilotModel ?? undefined,
-          copilotEffort: repoConfig?.copilotEffort ?? undefined,
-          opencodeModel: repoConfig?.opencodeModel ?? opencodeDefaultModel,
-          opencodeAgent: repoConfig?.opencodeAgent ?? undefined,
-          opencodeBaseUrl: repoConfig?.opencodeBaseUrl ?? opencodeDefaultBaseUrl,
-          cursorModel: repoConfig?.cursorModel ?? undefined,
+          claudeContextWindow: opt("claudeContextWindow"),
+          claudeThinking:
+            typeof agentOptions.claudeThinking === "boolean"
+              ? agentOptions.claudeThinking
+              : (repoConfig?.claudeThinking ?? undefined),
+          claudeEffort: opt("claudeEffort"),
+          copilotModel: opt("copilotModel"),
+          copilotEffort: opt("copilotEffort"),
+          opencodeModel: opt("opencodeModel") ?? opencodeDefaultModel,
+          opencodeAgent: opt("opencodeAgent"),
+          opencodeBaseUrl: opt("opencodeBaseUrl") ?? opencodeDefaultBaseUrl,
+          cursorModel: opt("cursorModel"),
           geminiAuthMode,
-          geminiModel: repoConfig?.geminiModel ?? undefined,
+          geminiModel: opt("geminiModel"),
           geminiApprovalMode:
-            (repoConfig?.geminiApprovalMode as "default" | "auto_edit" | "yolo") ?? undefined,
+            (opt("geminiApprovalMode") as "default" | "auto_edit" | "yolo" | undefined) ??
+            undefined,
           maxTurnsCoding: repoConfig?.maxTurnsCoding ?? undefined,
           maxTurnsReview: repoConfig?.maxTurnsReview ?? undefined,
           googleCloudProject,

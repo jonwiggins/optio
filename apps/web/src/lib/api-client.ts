@@ -1528,6 +1528,10 @@ export const api = {
     prompt: string;
     description?: string;
     agentType?: string;
+    /** Standalone: model override for the agent CLI. */
+    model?: string;
+    /** Repo blueprints: per-run agent parameters copied to every spawned task. */
+    agentOptions?: Record<string, string | boolean> | null;
     maxRetries?: number;
     repoUrl?: string;
     repoBranch?: string;
@@ -1903,7 +1907,7 @@ export const api = {
     spec?:
       | { kind: "shell" }
       | { kind: "command"; command: string }
-      | { kind: "agent"; agent: string; prompt?: string };
+      | { kind: "agent"; agent: string; prompt?: string; model?: string };
     ticket?: {
       repoId: string;
       issueNumber: number;

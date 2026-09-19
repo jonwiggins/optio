@@ -27,9 +27,11 @@ import {
   TASK_BRANCH_PREFIX,
   TaskState,
   WorkflowRunState,
+  getProviderCatalog,
   normalizeRepoUrl,
   parsePrUrl,
   parseRepoUrl,
+  providerForAgentType,
   toLocalAgentKind,
   type LocalAgentKind,
   type LocalAgentSessionMode,
@@ -158,6 +160,21 @@ export async function validateRunLocation(
 }
 
 // ── Dispatch (workers) ───────────────────────────────────────────────────────
+
+/**
+ * The model a local run should pass to its CLI (`--model`), from the run's
+ * per-run agent options. The daemon only takes a model — the other provider
+ * options (effort, context window, …) apply to pod runs.
+ */
+export function localModelFor(
+  agentType: string,
+  agentOptions: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (!agentOptions) return undefined;
+  const catalog = getProviderCatalog(providerForAgentType(agentType));
+  const v = catalog ? agentOptions[catalog.modelField] : undefined;
+  return typeof v === "string" && v !== "" ? v : undefined;
+}
 
 interface ResolvedLocalHost {
   host: LocalHostRow;
@@ -351,12 +368,14 @@ export async function dispatchLocalTask(
     opts.resumeSessionId && (resolved.agent === "claude-code" || resolved.agent === "codex")
       ? opts.resumeSessionId
       : undefined;
+  const model = localModelFor(task.agentType, (task.metadata as any)?.agentOptions);
   const spec: LocalTerminalSpec = {
     kind: "agent",
     agent: resolved.agent,
     prompt: buildLocalTaskPrompt(task, opts.resumePrompt),
     mode: task.localSessionMode ?? "headless",
     ...(resumeSessionId ? { resumeSessionId } : {}),
+    ...(model ? { model } : {}),
   };
   const ticketUrl = (task.metadata as Record<string, unknown> | null)?.ticketUrl;
 

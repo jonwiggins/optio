@@ -17,6 +17,7 @@ export interface CreateTaskConfigInput {
   agentType?: string | null;
   maxRetries?: number;
   priority?: number;
+  agentOptions?: Record<string, string | boolean> | null;
   enabled?: boolean;
   workspaceId?: string | null;
   createdBy?: string | null;
@@ -38,6 +39,7 @@ export interface UpdateTaskConfigInput {
   agentType?: string | null;
   maxRetries?: number;
   priority?: number;
+  agentOptions?: Record<string, string | boolean> | null;
   enabled?: boolean;
   runTarget?: RunTarget;
   localHostId?: string | null;
@@ -59,6 +61,7 @@ export async function createTaskConfig(input: CreateTaskConfigInput) {
       agentType: input.agentType ?? null,
       maxRetries: input.maxRetries ?? 3,
       priority: input.priority ?? 100,
+      agentOptions: input.agentOptions ?? null,
       runTarget: input.runTarget ?? "cluster",
       localHostId: input.runTarget === "local" ? (input.localHostId ?? null) : null,
       localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
@@ -122,6 +125,7 @@ export async function updateTaskConfig(id: string, input: UpdateTaskConfigInput)
   if (input.agentType !== undefined) updates.agentType = input.agentType;
   if (input.maxRetries !== undefined) updates.maxRetries = input.maxRetries;
   if (input.priority !== undefined) updates.priority = input.priority;
+  if (input.agentOptions !== undefined) updates.agentOptions = input.agentOptions;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (input.runTarget !== undefined) updates.runTarget = input.runTarget;
   if (input.localHostId !== undefined) updates.localHostId = input.localHostId;
@@ -204,6 +208,7 @@ export async function instantiateTask(
     metadata: {
       taskConfigId: config.id,
       taskConfigName: config.name,
+      ...(config.agentOptions ? { agentOptions: config.agentOptions } : {}),
       ...(opts?.triggerId ? { triggerId: opts.triggerId } : {}),
       ...(opts?.params ? { triggerParams: opts.params } : {}),
     },

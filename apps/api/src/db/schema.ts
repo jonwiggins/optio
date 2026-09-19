@@ -596,6 +596,9 @@ export const taskConfigs = pgTable(
     agentType: text("agent_type"),
     maxRetries: integer("max_retries").notNull().default(3),
     priority: integer("priority").notNull().default(100),
+    // Per-run agent parameters (model, effort, thinking, …) copied into each
+    // spawned task's metadata.agentOptions; null = the repo's defaults.
+    agentOptions: jsonb("agent_options").$type<Record<string, string | boolean>>(),
     // Run location inherited by every spawned task — see tasks.run_target.
     runTarget: text("run_target").$type<"cluster" | "local">().notNull().default("cluster"),
     localHostId: uuid("local_host_id").references(() => localHosts.id, { onDelete: "set null" }),

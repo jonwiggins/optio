@@ -125,6 +125,7 @@ export function RunLocationPicker({
   agentType,
   onRepoUrlChange,
   hideSessionMode = false,
+  clusterDisabled,
   className,
 }: {
   value: RunLocationValue;
@@ -140,6 +141,8 @@ export function RunLocationPicker({
   onRepoUrlChange?: (repoUrl: string | null) => void;
   /** The parent owns "what happens when a turn ends" (the session form's Then). */
   hideSessionMode?: boolean;
+  /** Why the pod can't be picked right now (e.g. an event trigger runs on your machine). */
+  clusterDisabled?: string;
   className?: string;
 }) {
   const { hosts, loading } = useLocalHosts();
@@ -186,6 +189,8 @@ export function RunLocationPicker({
           onClick={() => onChange({ ...value, runTarget: "cluster" })}
           icon={<Server className="w-4 h-4" />}
           title="Optio pod"
+          disabled={!!clusterDisabled}
+          hint={clusterDisabled}
           description={
             kind === "task"
               ? "An isolated Kubernetes pod clones one of your registered repos into a fresh worktree. Uses the server's agent credentials."

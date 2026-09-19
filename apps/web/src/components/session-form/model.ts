@@ -1,5 +1,6 @@
-import { toLocalAgentKind } from "@optio/shared";
+import { getProviderCatalog, providerForAgentType, toLocalAgentKind } from "@optio/shared";
 import type { TriggerConfig } from "@/components/trigger-selector";
+import type { AgentOptionsValues } from "@/components/agent-options-picker";
 import { CLUSTER_RUN_LOCATION, type RunLocationValue } from "@/components/run-location-picker";
 
 /**
@@ -8,12 +9,20 @@ import { CLUSTER_RUN_LOCATION, type RunLocationValue } from "@/components/run-lo
  * interactive terminal, a Persistent Agent — is a point in this space, and
  * the storage row it becomes (`deriveKind`) is a pure function of the point.
  *
- *   THEN   what happens when a turn ends: exits / waits for me / waits for messages
- *   WHERE  an Optio pod or the user's own machine, plus the repo or checkout
- *   WHO    the agent runtime (or a bare shell), and the persistent-agent identity
- *   WHAT   title, prompt, and the knobs on the run
- *   WHEN   what starts it: manual, schedule, webhook, ticket, or a GitHub / Slack /
- *          Linear event (machine only)
+ * The form asks in this order, each answer narrowing the next:
+ *
+ *   WHEN   what starts it: now, a schedule, a webhook, a ticket, or a GitHub /
+ *          Slack / Linear event (events run on your machine)
+ *   WHERE  an Optio pod (with one of your repos, or none) or your own machine
+ *          (in the directory as it is, or on a new branch that becomes a PR)
+ *   WHO    a terminal with no agent, or an agent runtime and its parameters
+ *   WHAT   the prompt (agents only), with the trigger's params available
+ *   THEN   what happens when a turn ends: exits / waits for me / persistent agent
+ *   NAME   yours, or "Session N"
+ *
+ * `normalize` keeps a draft inside the space: an upstream change (say, an
+ * event trigger) moves the downstream answers it invalidates (the location
+ * becomes your machine), never the other way round.
  */
 
 export type Then = "exits" | "waits-for-me" | "waits-for-messages";
@@ -27,76 +36,75 @@ export interface EventTrigger {
 }
 
 export interface SessionDraft {
-  then: Then;
+  when: WhenType;
+  trigger: TriggerConfig;
+  event: EventTrigger;
   location: RunLocationValue;
-  /** Pod: pick a registered repo. Machine: the checkout is the repo. */
+  /**
+   * Pod: one of your registered repos (vs. no repo). Machine: work on a new
+   * branch that becomes a PR (vs. the directory as it is). Either way it
+   * means "this session produces a PR".
+   */
   withRepo: boolean;
   repoId: string;
   repoUrl: string;
   repoBranch: string;
-  /** "" = a plain shell (only when the session waits for me on a machine). */
+  /** "" = a terminal with no agent. */
   runtime: string;
+  /** Model + provider options for the runtime (keys from the provider catalog). */
+  agentOptions: AgentOptionsValues;
+  prompt: string;
+  then: Then;
   agent: {
     slug: string;
-    name: string;
     podLifecycle: "sticky" | "always-on" | "on-demand";
-    model: string;
     systemPrompt: string;
     agentsMd: string;
   };
-  title: string;
-  prompt: string;
+  /** Blank = "Session N". */
+  name: string;
   description: string;
   priority: number;
   maxRetries: number;
   dependsOn: string[];
-  when: WhenType;
-  trigger: TriggerConfig;
-  event: EventTrigger;
 }
 
 export const RUNTIMES: Array<{ value: string; label: string }> = [
   { value: "claude-code", label: "Claude Code" },
   { value: "codex", label: "OpenAI Codex" },
   { value: "copilot", label: "GitHub Copilot" },
-  { value: "opencode", label: "OpenCode (Experimental)" },
   { value: "gemini", label: "Google Gemini" },
-  { value: "openclaw", label: "OpenClaw (Experimental)" },
   { value: "cursor", label: "Cursor" },
+  { value: "opencode", label: "OpenCode" },
+  { value: "openclaw", label: "OpenClaw" },
 ];
 
-export const SHELL = "";
+export const TERMINAL = "";
 
 export function runtimeLabel(runtime: string): string {
-  if (runtime === SHELL) return "shell";
+  if (runtime === TERMINAL) return "terminal";
   return RUNTIMES.find((r) => r.value === runtime)?.label ?? runtime;
 }
 
 export const EMPTY_DRAFT: SessionDraft = {
-  then: "exits",
+  when: "manual",
+  trigger: { type: "manual" },
+  event: { type: "github", config: { events: ["review_requested", "mentioned"], login: "" } },
   location: CLUSTER_RUN_LOCATION,
   withRepo: true,
   repoId: "",
   repoUrl: "",
   repoBranch: "main",
   runtime: "claude-code",
-  agent: {
-    slug: "",
-    name: "",
-    podLifecycle: "sticky",
-    model: "",
-    systemPrompt: "",
-    agentsMd: "",
-  },
-  title: "",
+  agentOptions: {},
   prompt: "",
+  then: "exits",
+  agent: { slug: "", podLifecycle: "sticky", systemPrompt: "", agentsMd: "" },
+  name: "",
   description: "",
   priority: 100,
   maxRetries: 3,
   dependsOn: [],
-  when: "manual",
-  trigger: { type: "manual" },
-  event: { type: "github", config: { events: ["review_requested", "mentioned"], login: "" } },
 };
 
 // ── Presets ──────────────────────────────────────────────────────────────────
@@ -115,24 +123,26 @@ export const PRESETS: Preset[] = [
     hint: "An agent changes a repo on a branch and opens a pull request.",
     apply: (d) => ({
       ...d,
-      then: "exits",
-      location: { ...d.location, runTarget: "cluster" },
-      withRepo: true,
       when: "manual",
       trigger: { type: "manual" },
+      location: { ...d.location, runTarget: "cluster" },
+      withRepo: true,
+      runtime: d.runtime || "claude-code",
+      then: "exits",
     }),
   },
   {
     id: "chat",
     label: "Interactive chat",
-    hint: "An interactive session on your machine you can type into.",
+    hint: "An agent session on your machine you can type into.",
     apply: (d) => ({
       ...d,
-      then: "waits-for-me",
-      location: { ...d.location, runTarget: "local", localSessionMode: "interactive" },
-      withRepo: false,
       when: "manual",
       trigger: { type: "manual" },
+      location: { ...d.location, runTarget: "local", localSessionMode: "interactive" },
+      withRepo: false,
+      runtime: d.runtime || "claude-code",
+      then: "waits-for-me",
     }),
   },
   {
@@ -141,11 +151,12 @@ export const PRESETS: Preset[] = [
     hint: "An agent runs on a cron with no repo and exits.",
     apply: (d) => ({
       ...d,
-      then: "exits",
-      location: { ...d.location, runTarget: "cluster" },
-      withRepo: false,
       when: "schedule",
       trigger: { type: "schedule", cronExpression: "0 9 * * *" },
+      location: { ...d.location, runTarget: "cluster" },
+      withRepo: false,
+      runtime: d.runtime || "claude-code",
+      then: "exits",
     }),
   },
   {
@@ -154,14 +165,70 @@ export const PRESETS: Preset[] = [
     hint: "A named agent that keeps memory and wakes on messages.",
     apply: (d) => ({
       ...d,
-      then: "waits-for-messages",
-      location: { ...d.location, runTarget: "cluster" },
-      withRepo: false,
       when: "manual",
       trigger: { type: "manual" },
+      location: { ...d.location, runTarget: "cluster" },
+      withRepo: false,
+      runtime: d.runtime || "claude-code",
+      then: "waits-for-messages",
     }),
   },
 ];
+
+// ── Trigger params ───────────────────────────────────────────────────────────
+
+/**
+ * The `{{param}}`s a prompt can use, per trigger — what the trigger worker,
+ * the webhook receiver, and the local event service put in `params`.
+ */
+export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
+  manual: [],
+  schedule: [],
+  webhook: [],
+  ticket: [
+    "ticketSource",
+    "ticketExternalId",
+    "ticketTitle",
+    "ticketBody",
+    "ticketUrl",
+    "ticketLabels",
+  ],
+  github: [
+    "event",
+    "kind",
+    "repo",
+    "repoUrl",
+    "number",
+    "title",
+    "body",
+    "url",
+    "author",
+    "headBranch",
+    "baseBranch",
+    "commentBody",
+    "commentUrl",
+  ],
+  slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink"],
+  linear: [
+    "event",
+    "identifier",
+    "title",
+    "description",
+    "url",
+    "labels",
+    "teamKey",
+    "assignee",
+    "priority",
+    "state",
+    "commentBody",
+    "commentUrl",
+    "actor",
+    "ticketTitle",
+    "ticketBody",
+    "ticketUrl",
+    "ticketLabels",
+  ],
+};
 
 // ── Derived facts ────────────────────────────────────────────────────────────
 
@@ -170,53 +237,154 @@ export const isEventWhen = (w: WhenType): w is EventTriggerType =>
   w === "github" || w === "slack" || w === "linear";
 export const isTriggered = (d: SessionDraft) => d.when !== "manual";
 
-/** The runtimes the picked Then / Where allow. */
-export function runtimeOptions(d: SessionDraft): Array<{ value: string; label: string }> {
-  const list = isLocal(d)
-    ? RUNTIMES.filter((r) => toLocalAgentKind(r.value) !== null)
-    : RUNTIMES.filter((r) => d.then !== "waits-for-messages" || r.value !== "openclaw");
-  if (d.then === "waits-for-me" && isLocal(d))
-    return [...list, { value: SHELL, label: "Just a shell" }];
-  return list;
+export const WHEN_TYPES: WhenType[] = [
+  "manual",
+  "schedule",
+  "webhook",
+  "ticket",
+  "github",
+  "slack",
+  "linear",
+];
+
+export interface Choice<T> {
+  value: T;
+  /** Why it can't be picked right now, if it can't. */
+  disabled?: string;
 }
 
-/** Which When choices make sense for the picked Then / Where. */
-export function whenOptions(d: SessionDraft): WhenType[] {
-  if (d.then === "waits-for-me" && !isLocal(d)) return ["manual"];
-  if (d.then === "waits-for-messages") return ["manual", "schedule", "webhook", "ticket"];
-  const base: WhenType[] = ["manual", "schedule", "webhook", "ticket"];
-  return isLocal(d) ? [...base, "github", "slack", "linear"] : base;
+/** Pod or machine, given the trigger. */
+export function whereOptions(d: SessionDraft): Choice<"cluster" | "local">[] {
+  return [
+    {
+      value: "cluster",
+      ...(isEventWhen(d.when)
+        ? { disabled: "GitHub, Slack, and Linear events run sessions on your machine." }
+        : {}),
+    },
+    { value: "local" },
+  ];
 }
 
-/** Pod sessions that wait for you are a repo terminal; nothing else is forced. */
-export function needsRepo(d: SessionDraft): boolean {
-  return d.withRepo || (d.then === "waits-for-me" && !isLocal(d));
+/** The terminal and the runtimes the picked Where allows. */
+export function runtimeOptions(d: SessionDraft): Choice<string>[] {
+  const local = isLocal(d);
+  const terminal: Choice<string> = {
+    value: TERMINAL,
+    ...(!local && !d.withRepo
+      ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
+      : !local && isTriggered(d)
+        ? { disabled: "A pod terminal is opened by hand — pick Now above." }
+        : {}),
+  };
+  const agents: Choice<string>[] = RUNTIMES.map((r) => ({
+    value: r.value,
+    ...(local && toLocalAgentKind(r.value) === null ? { disabled: "runs in pods only" } : {}),
+  }));
+  return [terminal, ...agents];
 }
+
+/** Exit conditions, given everything above them. */
+export function thenOptions(d: SessionDraft): Choice<Then>[] {
+  const local = isLocal(d);
+  const terminal = d.runtime === TERMINAL;
+  return [
+    {
+      value: "exits",
+      ...(terminal ? { disabled: "A terminal with no agent waits for you." } : {}),
+    },
+    {
+      value: "waits-for-me",
+      ...(!local && !d.withRepo
+        ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
+        : !local && isTriggered(d)
+          ? {
+              disabled: "A pod terminal is opened by hand. On your machine, triggers can open one.",
+            }
+          : {}),
+    },
+    {
+      value: "waits-for-messages",
+      ...(local
+        ? { disabled: "Persistent agents run in an Optio pod so they stay reachable." }
+        : terminal
+          ? { disabled: "A persistent agent needs an agent runtime." }
+          : isEventWhen(d.when)
+            ? { disabled: "Persistent agents wake on messages, schedules, webhooks, and tickets." }
+            : d.withRepo
+              ? { disabled: "Persistent agents don't attach to a repo — pick No repo above." }
+              : {}),
+    },
+  ];
+}
+
+const firstEnabled = <T>(choices: Choice<T>[], current: T): T =>
+  choices.find((c) => c.value === current && !c.disabled)?.value ??
+  choices.find((c) => !c.disabled)?.value ??
+  current;
 
 /**
- * Snap a draft back into the space its Then / Where allow, after either
- * changes: an agent that can't run here, a When that doesn't exist here, a
- * repo requirement that vanished.
+ * Snap a draft back into the space its upstream answers allow, after any
+ * change. Upstream wins: When over Where over Who over Then.
  */
 export function normalize(d: SessionDraft): SessionDraft {
   let next = d;
-  if (next.then === "waits-for-messages" && isLocal(next)) {
-    next = { ...next, location: { ...next.location, runTarget: "cluster" } };
+  const where = firstEnabled(whereOptions(next), next.location.runTarget);
+  if (where !== next.location.runTarget) {
+    next = { ...next, location: { ...next.location, runTarget: where } };
   }
-  if (next.then === "waits-for-me" && !isLocal(next)) next = { ...next, withRepo: true };
-  if (next.then === "waits-for-messages") next = { ...next, withRepo: false };
+  // A runtime that can't run here falls back to the first agent that can —
+  // never silently to a bare terminal, which is a different kind of session.
   const runtimes = runtimeOptions(next);
-  if (!runtimes.some((r) => r.value === next.runtime)) {
-    next = { ...next, runtime: runtimes[0]?.value ?? "claude-code" };
-  }
-  if (!whenOptions(next).includes(next.when)) {
-    next = { ...next, when: "manual", trigger: { type: "manual" } };
-  }
+  const runtime = runtimes.some((r) => r.value === next.runtime && !r.disabled)
+    ? next.runtime
+    : firstEnabled(
+        runtimes.filter((r) => r.value !== TERMINAL),
+        next.runtime,
+      );
+  if (runtime !== next.runtime) next = { ...next, runtime, agentOptions: {} };
+  const then = firstEnabled(thenOptions(next), next.then);
+  if (then !== next.then) next = { ...next, then };
   const mode = next.then === "waits-for-me" ? "interactive" : "headless";
   if (next.location.localSessionMode !== mode) {
     next = { ...next, location: { ...next.location, localSessionMode: mode } };
   }
   return next;
+}
+
+/**
+ * Which agent parameters the run will honor. A pod Task reads the full
+ * provider option set (per-run over the repo's defaults); a Job, a
+ * persistent agent, and anything on your machine take just a model.
+ */
+export function fullOptionsApply(d: SessionDraft): boolean {
+  return !isLocal(d) && d.withRepo && d.then === "exits";
+}
+
+/** The repo's configured values for this runtime's options, to seed the picker. */
+export function optionsFromRepo(
+  runtime: string,
+  repo: Record<string, unknown> | null | undefined,
+): AgentOptionsValues {
+  if (!repo || runtime === TERMINAL) return {};
+  const catalog = getProviderCatalog(providerForAgentType(runtime));
+  if (!catalog) return {};
+  const keys = [catalog.modelField, ...catalog.options.map((o) => o.key)];
+  const out: AgentOptionsValues = {};
+  for (const k of keys) {
+    const v = repo[k];
+    if (typeof v === "string" || typeof v === "boolean") out[k] = v;
+  }
+  return out;
+}
+
+/** A slug for a persistent agent, from its name. */
+export function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
 }
 
 // ── Kind: the storage row a draft becomes ────────────────────────────────────
@@ -245,17 +413,9 @@ export function deriveKind(d: SessionDraft): SessionKind {
 
 export type SentencePart = { text: string } | { missing: string; field: SentenceField };
 
-export type SentenceField =
-  | "checkout"
-  | "repo"
-  | "machine"
-  | "title"
-  | "prompt"
-  | "slug"
-  | "cron"
-  | "webhook";
+export type SentenceField = "checkout" | "repo" | "machine" | "prompt" | "cron" | "webhook";
 
-const WEEKDAY_CRON: Record<string, string> = {
+const CRON_WORDS: Record<string, string> = {
   "0 * * * *": "every hour",
   "0 */6 * * *": "every 6 hours",
   "0 9 * * *": "daily at 09:00 UTC",
@@ -266,26 +426,27 @@ const WEEKDAY_CRON: Record<string, string> = {
 function whenPhrase(d: SessionDraft): SentencePart[] {
   switch (d.when) {
     case "manual":
-      if (d.then === "waits-for-messages") return [{ text: "woken by messages" }];
-      return [{ text: d.then === "exits" ? "started now" : "opened now" }];
+      if (d.then === "waits-for-messages") return [{ text: "Woken by messages," }];
+      return [{ text: d.then === "exits" ? "Started now," : "Opened now," }];
     case "schedule": {
       const cron = d.trigger.cronExpression?.trim();
-      if (!cron || cron.split(/\s+/).length !== 5)
-        return [{ missing: "a schedule", field: "cron" }];
-      return [{ text: `running ${WEEKDAY_CRON[cron] ?? `on \`${cron}\``}` }];
+      if (!cron || cron.split(/\s+/).length !== 5) {
+        return [{ text: "Running" }, { missing: "on a schedule", field: "cron" }, { text: "," }];
+      }
+      return [{ text: `Running ${CRON_WORDS[cron] ?? `on \`${cron}\``},` }];
     }
     case "webhook":
       return d.trigger.webhookPath
-        ? [{ text: `started by a webhook at /api/hooks/${d.trigger.webhookPath}` }]
-        : [{ missing: "a webhook path", field: "webhook" }];
+        ? [{ text: `Started by a webhook at /api/hooks/${d.trigger.webhookPath},` }]
+        : [{ text: "Started by" }, { missing: "a webhook path", field: "webhook" }, { text: "," }];
     case "ticket":
-      return [{ text: `started by ${d.trigger.ticketSource ?? "github"} tickets` }];
+      return [{ text: `Started by ${d.trigger.ticketSource ?? "github"} tickets,` }];
     case "github":
-      return [{ text: "started by GitHub events" }];
+      return [{ text: "Started by GitHub events," }];
     case "slack":
-      return [{ text: "started by Slack messages" }];
+      return [{ text: "Started by Slack messages," }];
     case "linear":
-      return [{ text: "started by Linear events" }];
+      return [{ text: "Started by Linear events," }];
   }
 }
 
@@ -294,22 +455,20 @@ function shortDir(dir: string): string {
 }
 
 /**
- * "A Claude Code session on my machine in ~/repos/optio that opens a PR and
- * exits when done, started now." Missing pieces are rendered as gaps that
- * point at the field, so the sentence is also the validation.
+ * "Started now, a Claude Code session in an Optio pod with acme/app that
+ * opens a PR and exits when done." Missing pieces render as gaps that point
+ * at their field, so the sentence is also the validation.
  */
 export function describe(
   d: SessionDraft,
   ctx: { repoName?: string | null; machineName?: string | null } = {},
 ): SentencePart[] {
-  const parts: SentencePart[] = [];
-  const who = d.runtime === SHELL ? "A shell" : `A ${runtimeLabel(d.runtime)}`;
-  parts.push({ text: `${who} ${d.then === "waits-for-messages" ? "agent" : "session"}` });
+  const parts: SentencePart[] = [...whenPhrase(d)];
+  const who = d.runtime === TERMINAL ? "a terminal" : `a ${runtimeLabel(d.runtime)}`;
+  const noun = d.then === "waits-for-messages" ? "agent" : "session";
+  parts.push({ text: d.runtime === TERMINAL ? who : `${who} ${noun}` });
 
   if (d.then === "waits-for-messages") {
-    parts.push(
-      d.agent.slug ? { text: `named ${d.agent.slug}` } : { missing: "a name", field: "slug" },
-    );
     parts.push({ text: "in an Optio pod" });
   } else if (isLocal(d)) {
     parts.push(
@@ -319,12 +478,12 @@ export function describe(
     );
     parts.push(
       d.location.localDir
-        ? { text: `in ${shortDir(d.location.localDir)}` }
+        ? { text: `${d.withRepo ? "on a new branch in" : "in"} ${shortDir(d.location.localDir)}` }
         : { missing: d.withRepo ? "a checkout" : "a directory", field: "checkout" },
     );
   } else {
     parts.push({ text: "in an Optio pod" });
-    if (needsRepo(d)) {
+    if (d.withRepo) {
       parts.push(
         d.repoUrl
           ? { text: `with ${ctx.repoName ?? d.repoUrl}` }
@@ -335,27 +494,23 @@ export function describe(
 
   if (d.then === "exits") {
     parts.push({
-      text: d.withRepo ? "that opens a PR and exits when done," : "that exits when done,",
+      text: d.withRepo ? "that opens a PR and exits when done." : "that exits when done.",
     });
   } else if (d.then === "waits-for-me") {
-    parts.push({ text: "that waits for you between turns," });
+    parts.push({ text: "that waits for you between turns." });
   } else {
-    parts.push({ text: "that keeps its memory and waits for messages," });
+    parts.push({ text: "that keeps its memory between turns." });
   }
-
-  parts.push(...whenPhrase(d));
-  parts.push({ text: "." });
   return parts;
 }
 
-/** Fields the sentence can't fill in, plus the ones the sentence doesn't mention. */
+/** What the sentence can't fill in, plus the prompt when the session needs one. */
 export function missingFields(d: SessionDraft, ctx: Parameters<typeof describe>[1] = {}) {
   const gaps = describe(d, ctx).flatMap((p) => ("missing" in p ? [p.field] : []));
   const kind = deriveKind(d);
-  // A terminal you open by hand needs neither: it's a place to type, and its
-  // title defaults to the directory. Everything else is named and prompted.
+  // A terminal you open by hand needs no prompt; everything an agent runs
+  // unattended does.
   const adHocTerminal = kind === "pod-session" || kind === "local-terminal";
-  if (!adHocTerminal && !d.title.trim()) gaps.push("title");
-  if (!adHocTerminal && d.runtime !== SHELL && !d.prompt.trim()) gaps.push("prompt");
+  if (!adHocTerminal && d.runtime !== TERMINAL && !d.prompt.trim()) gaps.push("prompt");
   return gaps;
 }

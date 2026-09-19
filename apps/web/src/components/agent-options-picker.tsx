@@ -25,6 +25,8 @@ interface Props {
   inputClass?: string;
   /** Hide the Refresh button (e.g. in wizards). */
   hideRefresh?: boolean;
+  /** Render only the model control (e.g. a local run, where the daemon takes just `--model`). */
+  modelOnly?: boolean;
 }
 
 const DEFAULT_INPUT_CLASS =
@@ -64,6 +66,7 @@ export function AgentOptionsPicker({
   onChange,
   inputClass = DEFAULT_INPUT_CLASS,
   hideRefresh = false,
+  modelOnly = false,
 }: Props) {
   const baseline = getProviderCatalog(provider);
 
@@ -187,52 +190,56 @@ export function AgentOptionsPicker({
           )}
         </div>
 
-        {catalog.options
-          .filter((f) => f.kind === "select")
-          .map((field) => {
-            const v = values[field.key];
-            const val = typeof v === "string" ? v : String(field.default ?? "");
-            return (
-              <div key={field.key}>
-                <label className="block text-xs text-text-muted mb-1">{field.label}</label>
-                <select
-                  value={val}
-                  onChange={(e) => setField(field.key, e.target.value)}
-                  className={inputClass}
-                >
-                  {field.choices?.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-                {field.helpText && <p className="text-xs text-text-muted mt-1">{field.helpText}</p>}
-              </div>
-            );
-          })}
+        {!modelOnly &&
+          catalog.options
+            .filter((f) => f.kind === "select")
+            .map((field) => {
+              const v = values[field.key];
+              const val = typeof v === "string" ? v : String(field.default ?? "");
+              return (
+                <div key={field.key}>
+                  <label className="block text-xs text-text-muted mb-1">{field.label}</label>
+                  <select
+                    value={val}
+                    onChange={(e) => setField(field.key, e.target.value)}
+                    className={inputClass}
+                  >
+                    {field.choices?.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                  {field.helpText && (
+                    <p className="text-xs text-text-muted mt-1">{field.helpText}</p>
+                  )}
+                </div>
+              );
+            })}
 
-        {catalog.options
-          .filter((f) => f.kind === "boolean")
-          .map((field) => {
-            const v = values[field.key];
-            const checked = typeof v === "boolean" ? v : Boolean(field.default);
-            return (
-              <div key={field.key} className="flex items-end pb-1">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(e) => setField(field.key, e.target.checked)}
-                    className="w-4 h-4 rounded"
-                  />
-                  <span className="text-sm">{field.label}</span>
-                </label>
-              </div>
-            );
-          })}
+        {!modelOnly &&
+          catalog.options
+            .filter((f) => f.kind === "boolean")
+            .map((field) => {
+              const v = values[field.key];
+              const checked = typeof v === "boolean" ? v : Boolean(field.default);
+              return (
+                <div key={field.key} className="flex items-end pb-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => setField(field.key, e.target.checked)}
+                      className="w-4 h-4 rounded"
+                    />
+                    <span className="text-sm">{field.label}</span>
+                  </label>
+                </div>
+              );
+            })}
       </div>
 
-      {catalog.options.some((f) => f.kind === "text") && (
+      {!modelOnly && catalog.options.some((f) => f.kind === "text") && (
         <div className="space-y-3">
           {catalog.options
             .filter((f) => f.kind === "text")
