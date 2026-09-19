@@ -6,21 +6,19 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
-  ListTodo,
   FolderGit2,
   Server,
-  Zap,
   DollarSign,
   Terminal,
   Laptop,
-  Bot,
   Plug,
   BarChart3,
   Activity,
   FileText,
   GitPullRequest,
-  Calendar,
-  CircleDot,
+  Inbox,
+  Bot,
+  Zap,
   ChevronDown,
 } from "lucide-react";
 import { UserMenu } from "./user-menu";
@@ -41,21 +39,13 @@ const NAV_GROUPS: NavGroup[] = [
     items: [{ href: "/", label: "Overview", icon: LayoutDashboard }],
   },
   {
-    label: "Run",
+    // One noun. Every Task, Job, automation, terminal, and agent is a
+    // session with a When / Where / Who / What / Then; the list filters them.
+    label: "Work",
     items: [
-      { href: "/tasks", label: "Tasks", icon: ListTodo },
-      { href: "/jobs", label: "Jobs", icon: Zap },
-      { href: "/reviews", label: "Reviews", icon: GitPullRequest },
-      { href: "/issues", label: "Issues", icon: CircleDot },
-      { href: "/tasks/scheduled", label: "Scheduled", icon: Calendar },
-    ],
-  },
-  {
-    label: "Live",
-    items: [
-      { href: "/agents", label: "Agents", icon: Bot },
       { href: "/sessions", label: "Sessions", icon: Terminal },
-      { href: "/local", label: "Local", icon: Laptop },
+      { href: "/reviews", label: "Reviews", icon: GitPullRequest },
+      { href: "/issues", label: "Inbox", icon: Inbox },
     ],
   },
   {
@@ -63,6 +53,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/templates", label: "Prompts", icon: FileText },
       { href: "/repos", label: "Repos", icon: FolderGit2 },
+      { href: "/machines", label: "Machines", icon: Laptop },
       { href: "/connections", label: "Connections", icon: Plug },
     ],
   },

@@ -61,7 +61,7 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
       icon: Rocket,
       title: "Create your first task",
       description: "Describe what you want built. Optio spins up an agent and opens a PR.",
-      href: "/tasks/new",
+      href: "/sessions/new",
       done: false,
     },
   ];

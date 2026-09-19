@@ -336,7 +336,7 @@ export function SessionForm() {
   const disabledRuntimes = runtimes.filter((r) => r.disabled);
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
+    <div className="p-6 max-w-3xl mx-auto">
       <h1 className="text-2xl font-semibold tracking-tight mb-2">New session</h1>
       <p className="text-sm text-text-muted mb-5">
         Everything Optio runs is a session. Say what starts it, where it runs, who drives it, what
@@ -563,7 +563,7 @@ export function SessionForm() {
         {/* ── Who ─────────────────────────────────────────────────────── */}
         <Section label="Who" hint="A terminal, or an agent?" id="session-who">
           <div className="space-y-3">
-            <div className="flex flex-wrap gap-1.5 p-1 rounded-lg bg-bg-card border border-border">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-lg bg-bg-card border border-border">
               {runtimes.map((r) => (
                 <button
                   key={r.value || "terminal"}
@@ -576,7 +576,7 @@ export function SessionForm() {
                   disabled={!!r.disabled}
                   onClick={() => setDraft({ runtime: r.value, agentOptions: {} })}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors",
+                    "flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-sm transition-colors whitespace-nowrap",
                     draft.runtime === r.value
                       ? "bg-primary text-white"
                       : r.disabled

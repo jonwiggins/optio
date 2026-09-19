@@ -20,7 +20,7 @@ export default function JobsPage() {
         description="Standalone agent runs — no repo checkout. Side effects via Connections (Slack, DBs, tickets) or pure logs."
         actions={
           <Link
-            href="/tasks/new?mode=standalone"
+            href="/sessions/new"
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
           >
             <Plus className="w-4 h-4" />

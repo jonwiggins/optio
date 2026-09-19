@@ -91,7 +91,7 @@ export function TriggerSelector({
   return (
     <div className="space-y-3">
       {label && <label className="block text-sm text-text-muted">{label}</label>}
-      <div className="flex gap-2 p-1 rounded-lg bg-bg-card border border-border w-fit">
+      <div className="flex flex-wrap gap-1.5 p-1 rounded-lg bg-bg-card border border-border w-fit max-w-full">
         {!hideManual && (
           <TriggerTypeButton
             icon={<Play className="w-3.5 h-3.5" />}

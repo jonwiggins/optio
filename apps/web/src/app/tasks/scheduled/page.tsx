@@ -152,7 +152,7 @@ export default function ScheduledTasksPage() {
           </p>
         </div>
         <Link
-          href="/tasks/new"
+          href="/sessions/new"
           className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
         >
           <Plus className="w-4 h-4" />
@@ -169,7 +169,7 @@ export default function ScheduledTasksPage() {
           <Clock className="w-8 h-8 text-text-muted mx-auto mb-3" />
           <p className="text-sm text-text-muted">
             No scheduled tasks yet. Create one from{" "}
-            <Link href="/tasks/new" className="text-primary hover:underline">
+            <Link href="/sessions/new" className="text-primary hover:underline">
               New Task
             </Link>{" "}
             and pick <strong>Schedule</strong> instead of Run now.

@@ -17,6 +17,14 @@ export const ADMIN_ITEMS: NavItem[] = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+/** Pages that no longer have their own nav entry: they're all sessions now. */
+const SESSION_ROUTES = ["/tasks", "/jobs", "/agents", "/local"];
+
 export function isNavActive(pathname: string, href: string): boolean {
-  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(href + "/");
+  if (href === "/") return pathname === "/";
+  if (pathname === href || pathname.startsWith(href + "/")) return true;
+  return (
+    href === "/sessions" &&
+    SESSION_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"))
+  );
 }

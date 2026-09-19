@@ -62,7 +62,7 @@ export default function AgentsPage() {
         description="Long-lived agents that wake on messages and events. Address them by slug from other agents, webhooks, or the chat below."
         actions={
           <Link
-            href="/agents/new"
+            href="/sessions/new"
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -80,7 +80,7 @@ export default function AgentsPage() {
           description="Create an agent that lives in your workspace, listens for messages and events, and wakes to do work."
           action={
             <Link
-              href="/agents/new"
+              href="/sessions/new"
               className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
             >
               <Plus className="w-4 h-4" /> Create your first agent

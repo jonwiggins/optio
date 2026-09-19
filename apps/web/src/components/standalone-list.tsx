@@ -358,7 +358,7 @@ export function StandaloneList() {
         <Workflow className="w-8 h-8 text-text-muted mx-auto mb-3" />
         <p className="text-sm text-text-muted">
           No standalone tasks yet.{" "}
-          <Link href="/tasks/new" className="text-primary hover:underline">
+          <Link href="/sessions/new" className="text-primary hover:underline">
             Create one
           </Link>{" "}
           — leave "Attach a repo" off.
