@@ -22,7 +22,7 @@ What we will **not** do: dashboards in the island; a Live Activity per terminal 
 
 **Decision: one aggregate activity, not one per terminal, task, or episode.** A per-episode activity (`needs_you` → answered) is too short and too frequent: Claude Code stops every few minutes, so the island would start/end constantly and burn push budget. A per-terminal activity breaks the moment you run two agents (iOS shows two activities as minimal pills, three as nothing). One activity whose _content_ is "the oldest thing waiting on you, plus how many more" maps exactly to the job statement and gives the island one stable tenant.
 
-**Sources feeding the Watch:** Local terminals with `spec.kind=agent` (attention state from the daemon), Repo Tasks the user started or follows, Persistent Agent turns the user triggered by message, and Interactive Sessions once they gain attention hooks (see 2d). Each source contributes an item with `{kind, id, title, mono (dir/branch/slug), attention, since, reason, link?}`.
+**Sources feeding the Watch:** Local terminals with `spec.kind=agent` (attention state from the daemon), Repo Tasks the user started or follows, Persistent Agent turns the user triggered by message, and Interactive Sessions once they gain attention hooks (see 2d). Since v0.5 every item is a **session** and rides with the same four attributes the app's session row shows — `{kind, id, title, mono, reason, since, state, link, source, when, where {target, detail}, who, then, statusLabel}` (`WatchItem` in `packages/shared/src/types/glance.ts`; the session fields are optional so older frames still decode, and the app derives every chip from `kind` / `title` / `mono` when they are missing). The frame also carries the board tiles the Watch cannot derive from its own items: `waitingCount`, `recurringCount`, `agentCount`.
 
 **Lifecycle**
 
@@ -33,27 +33,27 @@ What we will **not** do: dashboards in the island; a Live Activity per terminal 
 
 **States** → `waiting` (queue non-empty) · `working` (queue empty, n running) · `offline` (host or API unreachable >90 s) · `done`.
 
-**Dynamic Island content**
+**Dynamic Island content** (session vocabulary; the head is rendered as a session row)
 
-| Region            | `waiting`                                                                                                                      | `working`                                                                             |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| Compact leading   | Optio glyph, purple                                                                                                            | Optio glyph, secondary                                                                |
-| Compact trailing  | `web-ui` in mono, purple · "+2" if more                                                                                        | "3 running" secondary                                                                 |
-| Minimal           | Purple dot with count                                                                                                          | Grey glyph                                                                            |
-| Expanded leading  | State glyph + attention word "Needs you"                                                                                       | "Working"                                                                             |
-| Expanded center   | `optio/apps/web` (mono, truncating head) · one line of the last prompt/permission text from `preview` (plain text, 1 line max) | Title of the most recent item · elapsed time (`timerInterval`, the only live element) |
-| Expanded trailing | "4m" waiting (relative timer)                                                                                                  | Count "3"                                                                             |
-| Expanded bottom   | **Reply…** and **Later** buttons                                                                                               | none (no filler)                                                                      |
+| Region            | `waiting`                                                                                                                                                                                                    | `working`                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Compact leading   | Yellow status dot + needs-you count                                                                                                                                                                          | Purple status dot + running count                                                                            |
+| Compact trailing  | The head's **Who** glyph (terminal glyph for a terminal, the Optio bot for an agent runtime) + the head's short name, yellow                                                                                 | Same, purple; "quiet" when nothing is running                                                                |
+| Minimal           | Yellow dot with the needs-you count                                                                                                                                                                          | Purple dot with the running count; grey dot when quiet / offline / ended                                     |
+| Expanded leading  | Status dot + "Needs you"                                                                                                                                                                                     | "Running"                                                                                                    |
+| Expanded center   | `● name [server]` then one line: the last prompt/permission text from `preview` (plain text, `privacySensitive`) or `status · reason`                                                                        | `● name` then `status · reason` ("PR #581 open · CI running", "running")                                     |
+| Expanded trailing | "4:00" waiting (relative timer)                                                                                                                                                                              | Elapsed time (`timerInterval`)                                                                               |
+| Expanded bottom   | The four session chips in a 2×2 grid — `▷ when`, `💻/🗄 where`, `⚡/⌨ who`, `then` — the counts line ("2 more need you · 3 running"), then **Reply…** (or **Message…** for a persistent agent) and **Later** | Chips, "2 more running", and **Open PR** for a followed task at an open PR; otherwise no buttons (no filler) |
 
-Never show the terminal preview verbatim if it contains ANSI residue; the server's `preview` is already stripped, take the last non-empty line only.
+Chip icons are the app's (`SessionRowView`): When = `play` / `cpu` (messages) / `clock`; Where = `laptopcomputer` (your machine) / `server.rack` (Optio pod); Who = `terminal` / `bolt`; Then = `rectangle.portrait.and.arrow.right` (exits) / `terminal` (waits for me) / `cpu` (persistent). Where copy is `host · leaf` on the island and `host · ~/dir` on the lock screen. Never show the terminal preview verbatim if it contains ANSI residue; the server's `preview` is already stripped, take the last non-empty line only.
 
-**Lock screen / StandBy:** same hierarchy as expanded, two lines plus the button row. StandBy inherits automatically; the only adjustments are larger mono sizes and dropping the preview line.
+**Lock screen / StandBy:** headline row ("3 sessions need you" / "Nothing needs you · 3 running" / "Machine unreachable" / "Sessions ended") with the since-timer, then the head as a session row — `● name`, `status · reason`, the 2×2 chip grid, the counts line — then the button row. StandBy inherits automatically; it uses larger type and drops the chips and buttons.
 
-**Interactivity (App Intents on Button):** `Later` — an intent that acknowledges the item (client-side "seen" set, drops it to the back of the queue for 15 minutes; no server state). `Reply…` — `openAppWhenRun` to the item's composer (`optio://local/terminals/<id>?compose=1`, `optio://agents/<id>?compose=1`, `optio://tasks/<id>`). For followed tasks in `pr_opened`: **Open PR** (opens `prUrl` in Safari) and, when `needs_attention`, **Resume**. No blind "Continue"/"y" button: sending an Enter into a permission prompt you can't read is the opposite of tasteful.
+**Interactivity (App Intents on Button):** `Later` — an intent that acknowledges the session (server-side snooze mirrored in the App Group; drops it to the back of the queue for 15 minutes). `Reply…` / `Message…` — `openAppWhenRun` to the session's composer (`optio://local/<id>?compose=1`, `optio://agents/<id>?compose=1`, `optio://tasks/<id>`). For followed tasks in `pr_opened`: **Open PR** (opens `prUrl` in Safari) and, when `needs_attention`, **Resume**; `failed`: **Retry**. No blind "Continue"/"y" button: sending an Enter into a permission prompt you can't read is the opposite of tasteful.
 
-**Locked vs unlocked:** the preview line is `privacySensitive()` — locked shows the mono path and "Needs you", the prompt text appears only after Face ID. Buttons work locked (they're App Intents), but `Reply…` opens the app and therefore prompts to unlock.
+**Locked vs unlocked:** the preview line is `privacySensitive()` — locked shows the name, `status · reason` and the chips, the prompt text appears only after Face ID. Buttons work locked (they're App Intents), but `Reply…` opens the app and therefore prompts to unlock.
 
-**Copy:** "Needs you · `apps/web` · 4m" / "Waiting on a permission" / "Claude stopped — reply to continue" / "3 running · quiet" / "Laptop unreachable since 10:42" / "Quiet. 3 answered, 1 PR merged."
+**Copy:** "3 sessions need you" / "1 session needs you" / "needs you · Waiting on a permission" / "needs attention · Merge conflict — resume?" / "2 more need you · 3 running" / "Nothing needs you · 3 sessions running" / "Machine unreachable since 10:42" / "Sessions ended. 3 answered, 1 PR merged."
 
 ### 2b. Repo Task (queued → running → PR opened → CI → merged)
 
@@ -71,25 +71,31 @@ Sessions have a terminal and chat but no attention state today, so there is noth
 
 ### 2e. Home Screen widgets (two earn existence)
 
-1. **Agents** — `systemSmall`, `systemMedium`, `systemLarge`, plus every lock-screen accessory family. One list: what needs you first (yellow), then what's working (purple), one row per item, every row a deep link. Small shows the count and the top row; medium three rows; large seven and the Repo Tasks in flight. Rows never carry a sentence: `[kind glyph] name ……… [symbol + one word] 4m`, where the word comes from a fixed vocabulary — `Allow?`, `Reply`, `Quiet`, `Bell`, `Review`, `Stuck`, `Conflict`, `Failed`, `PR`, `CI`, `Queued`, `Starting` — and the name is the leaf of the terminal title or path. A moon icon per needs-you row is **Later** (App Intent, no app launch). With several servers the row carries a coloured server dot instead of the list being sectioned. This replaced the earlier "Needs You" + "In Flight" pair, whose headers ("Nothing running · 3 need you") summarised without listing.
-2. **Run** — `systemSmall`, configurable: pick a Job, Task blueprint, or Local blueprint. Single tap fires it via App Intent and flips to "Started · 2s ago" for one timeline entry. This is the phone-as-remote-control widget. Ships with a confirmation toggle in the widget config for anything with `spawn_mode=auto`.
+1. **Sessions** — `systemSmall`, `systemMedium`, `systemLarge`, plus every lock-screen accessory family. A slice of the app's Sessions board (`/sessions`), driven by the same glance store / provider. Rows are ranked like the app: needs-you (oldest first, snoozed last), running (newest first), then waiting at an open PR; every row is a deep link into that session.
+   - **Small:** the number that matters (needs-you, else running) and its noun, then the head session — `● name` and its **Where** chip. The whole widget opens the Sessions list, Active view (`optio://section/sessions?view=active`).
+   - **Medium:** header, the five board tiles from the web overview in one row — **Need you / Running / Waiting / Recurring / Agents**, each a link into the matching Sessions view — then the top two active sessions as one-line rows: `● name  [where]  status 4m`.
+   - **Large:** the same tiles and up to six sessions as two-line rows — `● name  status 4m` over the four chips `▷ when  💻 where  ⚡ who  then` — with a moon (**Later**, App Intent, no app launch) on needs-you rows.
+   - Status words come from a fixed vocabulary — `Allow?`, `Reply`, `Quiet`, `Bell`, `Review`, `Stuck`, `Conflict`, `Failed`, `PR`, `CI`, `Queued`, `Starting` — falling back to the session's own status label (`working`, `PR open`). Need-you and Running tiles come from the rows; Waiting / Recurring / Agents come from the server's Watch frame (`GET /api/glance/watch`) and are hidden on servers that predate it (two honest tiles instead of three blanks). With several servers the row carries a coloured server dot instead of the list being sectioned.
+   - Kind id `dev.optio.ios.needs-you` is unchanged from the "Needs You" → "Agents" → "Sessions" renames so placed widgets survive.
+2. **Start** (formerly **Run**) — `systemSmall`, configurable: pick a recurring session (Task blueprint, Job, or Local automation). Single tap fires it via App Intent and flips to "Started · 2s ago" for one timeline entry. This is the phone-as-remote-control widget. Ships with a confirmation toggle in the widget config for anything with `spawn_mode=auto`. Kind id `dev.optio.ios.run` unchanged.
 
 Refresh: rely on push-triggered reloads (iOS 26 WidgetKit push) with a 15-minute timeline fallback; the ~40–70/day budget rules out polling. If push isn't wired yet, the widget shows its `asOf` time in the footer rather than lying.
 
 ### 2f. Lock Screen accessory widgets
 
-- `accessoryCircular`: count of needs-you items inside a ring; blank ring when quiet.
-- `accessoryRectangular`: "Needs you +2" / `[terminal] web · Allow?` / "4m" — the oldest item only. Taps into it.
-- `accessoryInline`: "Optio · 2 need you" or "Optio · quiet". Also the Apple Watch complication shape.
+- `accessoryCircular`: needs-you count inside a ring (bold, full ring); the running count in a dim ring when nothing needs you; blank ring when quiet.
+- `accessoryRectangular`: "Needs you +2" / `[who] web · Allow?` / `4m 💻 MacBook · web` — the oldest session only, with its Where. "Running +2" with the newest running session when nothing needs you. Taps into it.
+- `accessoryInline`: "Optio · web Allow? +2", "Optio · 3 running" or "Optio · quiet". Also the Apple Watch complication shape.
 
 All monochrome by design; hierarchy comes from weight and the mono face.
 
 ### 2g. Control Center controls (iOS 18)
 
-Two, no more:
+Three, no more:
 
-- **Jump to what needs me** — button; opens the app at the oldest needs-you item (`router.open(.local)` with the terminal id). Grey when quiet.
-- **Run ⟨blueprint⟩** — configurable button that fires one Job/blueprint. Shows a checkmark for 3 s after firing.
+- **Jump to what needs me** — button; "2 sessions need you · web" / "Quiet · No session needs you"; opens the Sessions list, Active view (needs-you rows rank first). Grey when quiet.
+- **New session** — button; opens the app at the New session sheet (`optio://sessions/new`): When · Where · Who · What · Then. Static, never touches the network.
+- **Run ⟨blueprint⟩** — configurable button that fires one recurring session. Shows a checkmark for 3 s after firing.
 
 A "quiet hours" toggle was considered and rejected: Focus modes already do this per app.
 
@@ -128,7 +134,7 @@ Grouping: `threadIdentifier` = the object id, so a chatty terminal collapses int
 
 - Watch Live Activity (local terminals as the only source) + APNs push-to-start/update. _Rationale: this is the wish, verbatim, and the one surface that changes behaviour._
 - `needs_you` notification with Reply/Later actions. _Same server plumbing; works on phones without the island._
-- Agents widget (small/medium/large) + rectangular/inline accessories. _Pure read of the same data; near-zero regret._
+- Sessions widget (small/medium/large; was "Agents", before that "Needs You") + rectangular/inline accessories. _Pure read of the same data; near-zero regret._
 
 **Tier 2**
 

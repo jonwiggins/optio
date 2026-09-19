@@ -20,6 +20,11 @@ const { store, apns } = vi.hoisted(() => ({
 }));
 vi.mock("../services/apns-store.js", () => store);
 
+const glance = vi.hoisted(() => ({ computeWatchState: vi.fn() }));
+vi.mock("../services/glance-service.js", () => ({
+  computeWatchState: (...args: unknown[]) => glance.computeWatchState(...(args as [])),
+}));
+
 vi.mock("../services/apns-service.js", () => ({
   apnsService: {
     isConfigured: () => apns.configured,
@@ -215,5 +220,44 @@ describe("Live Activity token routes", () => {
       token: TOKEN,
       environment: "production",
     });
+  });
+});
+
+describe("GET /api/glance/watch", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns the caller's Watch frame with the session tiles", async () => {
+    glance.computeWatchState.mockResolvedValue({
+      phase: "working",
+      head: null,
+      others: [],
+      needsYouCount: 0,
+      runningCount: 2,
+      waitingCount: 1,
+      recurringCount: 4,
+      agentCount: 2,
+      offlineSince: null,
+      summary: null,
+      asOf: 811397839,
+    });
+    const app = await build();
+    const res = await app.inject({ method: "GET", url: "/api/glance/watch" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ phase: "working", recurringCount: 4, agentCount: 2 });
+    expect(glance.computeWatchState).toHaveBeenCalledWith("user-1");
+  });
+
+  it("is readable by viewers and 401 without a user", async () => {
+    glance.computeWatchState.mockResolvedValue({
+      phase: "done",
+      others: [],
+      needsYouCount: 0,
+      runningCount: 0,
+      asOf: 1,
+    });
+    const viewer = await build({ workspaceRole: "viewer" });
+    expect((await viewer.inject({ method: "GET", url: "/api/glance/watch" })).statusCode).toBe(200);
+    const anon = await build(null);
+    expect((await anon.inject({ method: "GET", url: "/api/glance/watch" })).statusCode).toBe(401);
   });
 });

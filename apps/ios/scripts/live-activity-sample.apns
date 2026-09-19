@@ -18,7 +18,16 @@
         "state": "needs_you",
         "link": "optio://local/576f09d9-c3ff-4480-ba65-ba4ef4d1bbe7?compose=1",
         "prUrl": null,
-        "snoozedUntil": null
+        "snoozedUntil": null,
+        "source": "local-terminal",
+        "when": "now",
+        "where": {
+          "target": "machine",
+          "detail": "MacBook Pro · ~/repos/optio/apps/web"
+        },
+        "who": "claude-code",
+        "then": "waits-for-me",
+        "statusLabel": "needs you"
       },
       "others": [
         {
@@ -32,19 +41,31 @@
           "state": "pr_opened",
           "link": "optio://tasks/fa7b0b63-1702-4d0a-909e-d7d7a55d89f1",
           "prUrl": "https://github.com/jonwiggins/optio/pull/581",
-          "snoozedUntil": null
+          "snoozedUntil": null,
+          "source": "repo-task",
+          "when": "now",
+          "where": {
+            "target": "pod",
+            "detail": "jonwiggins/optio"
+          },
+          "who": "claude-code",
+          "then": "exits",
+          "statusLabel": "PR open"
         }
       ],
       "needsYouCount": 2,
       "runningCount": 3,
+      "waitingCount": 1,
+      "recurringCount": 4,
+      "agentCount": 2,
       "offlineSince": null,
       "summary": null,
       "asOf": 811397839
     },
     "alert": {
-      "title": "Needs you",
-      "body": "apps/web · Waiting on a permission"
+      "title": "A session needs you",
+      "body": "claude-code · web · Waiting on a permission"
     }
   },
-  "_note": "aps.timestamp / stale-date are Unix seconds (APNs); dates INSIDE content-state (since, asOf, offlineSince, snoozedUntil) are Apple reference-date seconds (Unix - 978307200), which is what ActivityKit's default Codable decoding expects."
+  "_note": "aps.timestamp / stale-date are Unix seconds (APNs); dates INSIDE content-state (since, asOf, offlineSince, snoozedUntil) are Apple reference-date seconds (Unix - 978307200), which is what ActivityKit's default Codable decoding expects. The session fields (source/when/where/who/then/statusLabel) and the board tiles (waitingCount/recurringCount/agentCount) are optional and additive — drop them to exercise the pre-v0.5 fallbacks."
 }

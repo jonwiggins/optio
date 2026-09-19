@@ -15,6 +15,33 @@ export type WatchPhase = "waiting" | "working" | "offline" | "done";
 
 export type WatchItemKind = "local" | "task" | "agent";
 
+// ── Session attributes (v0.5 "one noun: Sessions") ─────────────────────────
+//
+// Every kind of work is a session with When / Where / Who / Then. Glanceable
+// surfaces render the same four chips as the app's session row, so the Watch
+// carries them as optional, additive fields. Mirrors `SessionRow` in
+// apps/web/src/lib/sessions-feed.ts.
+
+export type WatchSessionSource =
+  | "repo-task"
+  | "repo-blueprint"
+  | "standalone"
+  | "local-blueprint"
+  | "local-terminal"
+  | "pod-session"
+  | "persistent-agent";
+
+export type WatchWhereTarget = "pod" | "machine";
+
+/** Where the session runs: an Optio pod (detail = repo) or the user's machine (detail = host · dir). */
+export interface WatchWhere {
+  target: WatchWhereTarget;
+  detail: string | null;
+}
+
+/** Exit condition: one-shot, halts for the user, or persistent (message-driven). */
+export type WatchThen = "exits" | "waits-for-me" | "waits-for-messages";
+
 /** One row in the Watch: a local terminal, a followed task, or an agent turn. */
 export interface WatchItem {
   kind: WatchItemKind;
@@ -37,6 +64,17 @@ export interface WatchItem {
   prUrl?: string | null;
   /** Server-side "Later" window end — Apple seconds. */
   snoozedUntil?: number | null;
+  // ── Session attributes (optional, additive) ──
+  /** Which kind of session this row is. */
+  source?: WatchSessionSource | null;
+  /** What starts it, as a short label ("now", "on a trigger", "messages", "schedule"). */
+  when?: string | null;
+  where?: WatchWhere | null;
+  /** Runtime id (`claude-code`, `codex`, …) or `terminal`. */
+  who?: string | null;
+  then?: WatchThen | null;
+  /** The session row's status word ("needs you", "working", "PR open", …). */
+  statusLabel?: string | null;
 }
 
 /** `WatchAttributes.ContentState` on the Swift side. */
@@ -49,6 +87,13 @@ export interface WatchState {
   /** Total items needing you, including `head` and beyond `others`. */
   needsYouCount: number;
   runningCount: number;
+  // ── Session board tiles (optional, additive) — the web overview's counts ──
+  /** Sessions halted at their prompt / PR open, not counting persistent agents. */
+  waitingCount?: number | null;
+  /** Enabled definitions that spawn runs (blueprints, jobs, automations). */
+  recurringCount?: number | null;
+  /** Persistent agents that are not archived. */
+  agentCount?: number | null;
   /** Apple seconds. */
   offlineSince?: number | null;
   summary?: string | null;
@@ -87,12 +132,33 @@ export interface BuildWatchStateInput {
   offlineSince?: number | null;
   /** Wrap-up line for the `done` frame. */
   summary?: string | null;
+  /** Board tile counts; omitted when the caller has none. */
+  counts?: WatchTileCounts | null;
   now?: Date;
 }
 
+/** The three board tiles the Watch cannot derive from its own items. */
+export interface WatchTileCounts {
+  waiting: number;
+  recurring: number;
+  agents: number;
+}
+
+/** Longest `where.detail` the Watch carries (host · ~/dir or owner/repo). */
+export const WATCH_WHERE_DETAIL_MAX_CHARS = 60;
+
 function clampItem(item: WatchItem): WatchItem {
   const preview = item.preview ? item.preview.slice(0, WATCH_PREVIEW_MAX_CHARS) : item.preview;
-  return { ...item, preview };
+  const where =
+    item.where && item.where.detail && item.where.detail.length > WATCH_WHERE_DETAIL_MAX_CHARS
+      ? { ...item.where, detail: clampHead(item.where.detail, WATCH_WHERE_DETAIL_MAX_CHARS) }
+      : item.where;
+  return { ...item, preview, where };
+}
+
+/** Keep the tail (the leaf of a path survives), prefixed with an ellipsis. */
+function clampHead(s: string, max: number): string {
+  return s.length <= max ? s : "…" + s.slice(s.length - (max - 1));
 }
 
 /**
@@ -120,6 +186,9 @@ export function buildWatchState(input: BuildWatchStateInput): WatchState {
     others: needsYou.slice(1, 1 + WATCH_OTHERS_MAX),
     needsYouCount: needsYou.length,
     runningCount: running.length,
+    waitingCount: input.counts?.waiting ?? null,
+    recurringCount: input.counts?.recurring ?? null,
+    agentCount: input.counts?.agents ?? null,
     offlineSince: input.offlineSince ?? null,
     summary: input.summary ?? null,
     asOf: appleSeconds(now),

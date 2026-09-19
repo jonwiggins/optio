@@ -2,8 +2,8 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// Control Center: "Jump to what needs me". Opens the app at the oldest needs-you item;
-/// reads the cached snapshot so it can say "Quiet" without a network call.
+/// Control Center: "Jump to what needs me". Opens the app at the oldest session needing
+/// you; reads the cached snapshot so it can say "Quiet" without a network call.
 @available(iOS 18, *)
 struct NeedsYouControl: ControlWidget {
     static let kind = WidgetKinds.needsYouControl
@@ -15,11 +15,11 @@ struct NeedsYouControl: ControlWidget {
                     if value.signedOut {
                         Text("Sign in to Optio")
                     } else if value.count > 0 {
-                        Text("Jump to what needs me")
+                        Text(value.count == 1 ? "1 session needs you" : "\(value.count) sessions need you")
                         if let path = value.path { Text(path) }
                     } else {
                         Text("Quiet")
-                        Text("Nothing needs you")
+                        Text("No session needs you")
                     }
                 } icon: {
                     Image(systemName: value.count > 0 ? GlanceStyle.glyph : "moon")
@@ -28,7 +28,7 @@ struct NeedsYouControl: ControlWidget {
             .tint(value.count > 0 ? GlanceStyle.needsYou : .secondary)
         }
         .displayName("Jump to what needs me")
-        .description("Open Optio at the oldest item waiting on you.")
+        .description("Open Optio at the oldest session waiting on you.")
     }
 }
 

@@ -5,13 +5,41 @@ vi.mock("../logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-const mockSelectDistinct = vi.hoisted(() => vi.fn());
+const { mockSelectDistinct, tiles } = vi.hoisted(() => ({
+  mockSelectDistinct: vi.fn(),
+  /** Rows `db.select().from(<table>).where()` resolves per table name. */
+  tiles: { rows: new Map<string, unknown[]>(), fail: false },
+}));
 vi.mock("../db/client.js", () => ({
-  db: { selectDistinct: (...args: unknown[]) => mockSelectDistinct(...args) },
+  db: {
+    selectDistinct: (...args: unknown[]) => mockSelectDistinct(...args),
+    select: () => ({
+      from: (table: { _name: string }) => ({
+        where: async () => {
+          if (tiles.fail) throw new Error("db down");
+          return tiles.rows.get(table._name) ?? [];
+        },
+      }),
+    }),
+  },
 }));
-vi.mock("../db/schema.js", () => ({
-  persistentAgentMessages: { turnId: "turn_id", senderType: "sender_type", senderId: "sender_id" },
-}));
+vi.mock("../db/schema.js", () => {
+  const t = (name: string, cols: string[]) =>
+    Object.fromEntries([["_name", name], ...cols.map((c) => [c, `${name}.${c}`])]);
+  return {
+    persistentAgentMessages: {
+      turnId: "turn_id",
+      senderType: "sender_type",
+      senderId: "sender_id",
+    },
+    workspaceMembers: t("workspace_members", ["workspaceId", "userId"]),
+    taskConfigs: t("task_configs", ["enabled", "workspaceId"]),
+    workflows: t("workflows", ["enabled", "workspaceId"]),
+    localBlueprints: t("local_blueprints", ["enabled", "userId"]),
+    persistentAgents: t("persistent_agents", ["state", "workspaceId"]),
+    tasks: t("tasks", ["state", "createdBy"]),
+  };
+});
 
 const { apns, mockShouldNotify, mockListTerminals, mockListHosts } = vi.hoisted(() => {
   type AlertFn = (
@@ -57,8 +85,11 @@ vi.mock("./local-host-service.js", () => ({
 }));
 
 import {
+  agentToWatchItem,
   computeWatchState,
+  countSessionTiles,
   lastPreviewLine,
+  taskToWatchItem,
   onAgentFailed,
   onAgentTurnHalted,
   onLocalHostChanged,
@@ -119,8 +150,29 @@ beforeEach(() => {
   mockShouldNotify.mockResolvedValue(true);
   mockListHosts.mockResolvedValue([host()]);
   mockListTerminals.mockResolvedValue([]);
+  tiles.rows.clear();
+  tiles.fail = false;
 });
 afterEach(() => vi.useRealTimers());
+
+function seedTiles(input: {
+  workspaces?: string[];
+  taskConfigs?: number;
+  workflows?: number;
+  localBlueprints?: number;
+  agents?: number;
+  prOpen?: number;
+}) {
+  tiles.rows.set(
+    "workspace_members",
+    (input.workspaces ?? ["ws1"]).map((workspaceId) => ({ workspaceId })),
+  );
+  tiles.rows.set("task_configs", [{ n: input.taskConfigs ?? 0 }]);
+  tiles.rows.set("workflows", [{ n: input.workflows ?? 0 }]);
+  tiles.rows.set("local_blueprints", [{ n: input.localBlueprints ?? 0 }]);
+  tiles.rows.set("persistent_agents", [{ n: input.agents ?? 0 }]);
+  tiles.rows.set("tasks", [{ n: input.prOpen ?? 0 }]);
+}
 
 describe("terminalToWatchItem / computeWatchState", () => {
   it("maps a terminal row to a Watch item with reason copy and last preview line", () => {
@@ -138,9 +190,113 @@ describe("terminalToWatchItem / computeWatchState", () => {
       state: "needs_you",
       link: "optio://local/t1?compose=1",
       snoozedUntil: null,
+      source: "local-terminal",
+      when: "now",
+      where: { target: "machine", detail: "~/optio/apps/web" },
+      who: "claude-code",
+      then: "waits-for-me",
+      statusLabel: "needs you",
     });
     expect(lastPreviewLine("a\n\n  \n")).toBe("a");
     expect(lastPreviewLine(null)).toBeNull();
+  });
+
+  it("carries the session chips: host in Where, headless agents exit, shells are terminals", () => {
+    const headless = terminalToWatchItem(
+      terminal({
+        spec: { kind: "agent", agent: "codex", mode: "headless" },
+        spawnedBy: "job",
+        attentionState: "working",
+      }),
+      { name: "mbp" },
+    );
+    expect(headless).toMatchObject({
+      when: "job",
+      where: { target: "machine", detail: "mbp · ~/optio/apps/web" },
+      who: "codex",
+      then: "exits",
+      statusLabel: "working",
+    });
+    const shell = terminalToWatchItem(
+      terminal({ spec: { kind: "shell" }, attentionState: "idle", dir: "/home/dev/x" }),
+    );
+    expect(shell).toMatchObject({
+      who: "terminal",
+      then: "waits-for-me",
+      statusLabel: "idle",
+      where: { target: "machine", detail: "~/x" },
+    });
+    expect(
+      terminalToWatchItem(terminal({ state: "pending", pendingReason: "host_offline" }))
+        .statusLabel,
+    ).toBe("host offline");
+  });
+
+  it("builds task and agent rows with the same four attributes", () => {
+    const task = taskToWatchItem({
+      id: "task1",
+      title: "Fix login",
+      state: "pr_opened",
+      repoUrl: "https://github.com/acme/web.git",
+      repoBranch: "fix/login",
+      prUrl: "https://github.com/acme/web/pull/7",
+      prNumber: 7,
+      agentType: "codex",
+      updatedAt: NOW,
+      metadata: { taskConfigId: "cfg" },
+    });
+    expect(task).toMatchObject({
+      kind: "task",
+      mono: "fix/login",
+      reason: "PR #7 open",
+      link: "optio://tasks/task1",
+      source: "repo-task",
+      when: "on a trigger",
+      where: { target: "pod", detail: "acme/web" },
+      who: "codex",
+      then: "exits",
+      statusLabel: "PR open",
+      since: appleSeconds(NOW),
+    });
+    expect(
+      taskToWatchItem({
+        id: "t2",
+        title: "Local run",
+        state: "needs_attention",
+        repoUrl: "https://github.com/acme/web",
+        runTarget: "local",
+        localDir: "/Users/dev/web",
+        errorMessage: "Merge conflict",
+        updatedAt: NOW,
+      }),
+    ).toMatchObject({
+      reason: "Merge conflict",
+      where: { target: "machine", detail: "~/web" },
+      who: "claude-code",
+      when: "now",
+      statusLabel: "needs attention",
+    });
+
+    const agent = agentToWatchItem({
+      id: "a1",
+      name: "Vesper",
+      slug: "vesper",
+      state: "failed",
+      lastFailureReason: "boom",
+      updatedAt: NOW,
+    });
+    expect(agent).toMatchObject({
+      kind: "agent",
+      mono: "@vesper",
+      reason: "boom",
+      link: "optio://agents/a1?compose=1",
+      source: "persistent-agent",
+      when: "messages",
+      where: { target: "pod", detail: "@vesper" },
+      who: "claude-code",
+      then: "waits-for-messages",
+      statusLabel: "failed",
+    });
   });
 
   it("queues running agent terminals needing you (unsnoozed) and counts the rest as running", async () => {
@@ -166,6 +322,33 @@ describe("terminalToWatchItem / computeWatchState", () => {
     expect([state.head?.id, ...state.others.map((o) => o.id)].sort()).toEqual(["a", "e", "f"]);
     expect(state.runningCount).toBe(2);
     expect(state.offlineSince).toBeNull();
+  });
+
+  it("adds the board tiles: recurring, agents, and waiting (open PRs + idle terminals)", async () => {
+    seedTiles({ taskConfigs: 2, workflows: 1, localBlueprints: 3, agents: 4, prOpen: 2 });
+    mockListTerminals.mockResolvedValue([
+      terminal({ id: "a", attentionState: "idle" }),
+      terminal({ id: "b", attentionState: "working" }),
+      terminal({ id: "c", spec: { kind: "shell" }, attentionState: "idle" }), // plain shell: not a session
+    ]);
+    const state = await computeWatchState("u1", NOW);
+    expect(state).toMatchObject({
+      recurringCount: 6,
+      agentCount: 4,
+      waitingCount: 3,
+      runningCount: 2,
+    });
+    expect(state.head).toMatchObject({ where: { detail: "mbp · ~/optio/apps/web" } });
+  });
+
+  it("counts nothing workspace-scoped for a user without memberships, and survives a DB error", async () => {
+    seedTiles({ workspaces: [], localBlueprints: 1, prOpen: 1 });
+    expect(await countSessionTiles("u1")).toEqual({ waiting: 1, recurring: 1, agents: 0 });
+    tiles.fail = true;
+    const state = await computeWatchState("u1", NOW);
+    expect(state.recurringCount).toBeNull();
+    expect(state.agentCount).toBeNull();
+    expect(state.waitingCount).toBeNull();
   });
 
   it("reports offline when a running terminal's host is unreachable", async () => {

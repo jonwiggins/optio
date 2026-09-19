@@ -44,13 +44,20 @@ struct SessionsView: View {
         .onAppear { model?.start() }
         .onDisappear { model?.stop() }
         .onChange(of: router.pendingSessionView) { _, _ in consumeView() }
+        .onChange(of: router.pendingNewSession) { _, _ in consumeView() }
     }
 
-    /// `optio://section/sessions?view=recurring` and the Overview tiles land on a view.
+    /// `optio://section/sessions?view=recurring` and the Overview tiles land on a view;
+    /// `optio://sessions/new` (the New session control) opens the sheet.
     private func consumeView() {
-        guard let pending = router.pendingSessionView else { return }
-        router.pendingSessionView = nil
-        withAnimation(.snappy) { view = pending }
+        if let pending = router.pendingSessionView {
+            router.pendingSessionView = nil
+            withAnimation(.snappy) { view = pending }
+        }
+        if router.pendingNewSession {
+            router.pendingNewSession = false
+            showNew = true
+        }
     }
 
     @ViewBuilder

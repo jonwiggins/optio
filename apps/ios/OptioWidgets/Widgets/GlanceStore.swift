@@ -53,10 +53,7 @@ enum GlanceStore {
         for server in ServerRegistry.configured {
             guard let s = cachedSnapshot(for: server.id) else { continue }
             if merged == nil { merged = s } else {
-                merged!.needsYou += s.needsYou
-                merged!.running += s.running
-                merged!.hostsOnline += s.hostsOnline
-                merged!.hostsTotal += s.hostsTotal
+                merged!.merge(s)
                 merged!.asOf = min(merged!.asOf, s.asOf)
             }
         }
@@ -81,13 +78,17 @@ enum GlanceStore {
     static func setStarted(_ targetId: String, at date: Date?) { defaults.set(date, forKey: Keys.started(targetId)) }
 }
 
-/// A Repo Task in flight, as much of `GET /api/tasks` as the Agents widget needs.
+/// A Repo Task in flight, as much of `GET /api/tasks` as the Sessions widget needs.
 /// Loose on purpose: every optional field may be missing on older servers.
 struct InFlightTask: Codable, Hashable, Identifiable {
     var id: String
     var title: String
     var state: String
     var repoBranch: String?
+    var repoUrl: String?
+    var agentType: String?
+    var runTarget: String?
+    var localDir: String?
     var prNumber: Int?
     var prUrl: String?
     var prChecksStatus: String?

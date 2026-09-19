@@ -20,6 +20,9 @@ final class AppRouter {
     /// The Sessions view to select once the Sessions screen is on screen (Overview
     /// tiles, `optio://section/sessions?view=…`). The screen consumes it.
     var pendingSessionView: SessionView?
+    /// `optio://sessions/new` (the New session control / widget): the Sessions screen
+    /// presents its New session sheet and sets this back to false.
+    var pendingNewSession = false
     /// A detail to open once the owning hub is on screen: (kind, id, compose). Hubs
     /// consume it (set nil) after pushing the detail view.
     var pendingDetail: PendingDetail?
@@ -64,6 +67,8 @@ final class AppRouter {
         case .agent(let id, let compose): pendingDetail = .init(kind: .agent, id: id, compose: compose); open(.sessions)
         case .session(let id): pendingDetail = .init(kind: .session, id: id); open(.sessions)
         case .needsYou: pendingDetail = nil; open(.sessions, view: .active)
+        case .newSession: pendingDetail = nil; pendingNewSession = true; open(.sessions)
+        case .sessions(let view): pendingDetail = nil; open(.sessions, view: SessionView(rawValue: view) ?? .active)
         case .section(let name):
             if let (section, view) = Self.section(named: name) {
                 let explicit = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
