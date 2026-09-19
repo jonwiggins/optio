@@ -19,6 +19,41 @@ import {
   getPrAnalytics,
 } from "../services/analytics-service.js";
 
+// Every row that can carry AI spend, normalised to the `tasks` cost columns so
+// the /costs queries below read one source:
+//   - `tasks`: Repo Task runs (cluster and local — a local Task's terminal folds
+//     its usage into the task row via syncLinkedRun)
+//   - `workflow_runs`: Job runs (same folding for local Jobs)
+//   - `local_terminals`: ad-hoc / blueprint local sessions that are not linked
+//     to a task or run. Linked terminals are excluded so cost is never counted
+//     twice. Their working directory stands in for repo_url.
+const costRows = sql`(
+  SELECT id, title, repo_url, task_type, state::text AS state, cost_usd, model_used,
+    input_tokens, output_tokens, created_at, workspace_id
+  FROM tasks
+  UNION ALL
+  SELECT r.id, w.name AS title, 'job:' || w.name AS repo_url, 'job' AS task_type,
+    r.state, r.cost_usd, r.model_used, r.input_tokens, r.output_tokens,
+    r.created_at, w.workspace_id
+  FROM workflow_runs r
+  JOIN workflows w ON w.id = r.workflow_id
+  UNION ALL
+  SELECT id, title, dir AS repo_url, 'local-session' AS task_type,
+    CASE
+      WHEN state = 'exited' AND exit_code = 0 THEN 'completed'
+      WHEN state = 'exited' THEN 'failed'
+      ELSE state::text
+    END AS state,
+    usage->>'costUsd' AS cost_usd,
+    usage->>'model' AS model_used,
+    (usage->>'inputTokens')::integer AS input_tokens,
+    (usage->>'outputTokens')::integer AS output_tokens,
+    created_at, workspace_id
+  FROM local_terminals
+  WHERE task_id IS NULL AND workflow_run_id IS NULL
+    AND usage->>'costUsd' IS NOT NULL
+) AS tasks`;
+
 const costsQuerySchema = z
   .object({
     days: z.coerce
@@ -108,7 +143,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         COALESCE(SUM(CAST(cost_usd AS NUMERIC)), 0) AS total_cost,
         COUNT(*) AS task_count,
         COUNT(cost_usd) AS tasks_with_cost
-      FROM tasks
+      FROM ${costRows}
       WHERE cost_usd IS NOT NULL
         ${dateFilter}
         ${repoFilter}
@@ -121,7 +156,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
       }>(sql`
       SELECT
         COALESCE(SUM(CAST(cost_usd AS NUMERIC)), 0) AS total_cost
-      FROM tasks
+      FROM ${costRows}
       WHERE cost_usd IS NOT NULL
         AND created_at >= NOW() - INTERVAL '1 day' * ${days * 2}
         AND created_at < NOW() - INTERVAL '1 day' * ${days}
@@ -139,7 +174,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         DATE(created_at) AS date,
         COALESCE(SUM(CAST(cost_usd AS NUMERIC)), 0) AS cost,
         COUNT(*) AS task_count
-      FROM tasks
+      FROM ${costRows}
       WHERE cost_usd IS NOT NULL
         ${dateFilter}
         ${repoFilter}
@@ -158,7 +193,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         repo_url,
         COALESCE(SUM(CAST(cost_usd AS NUMERIC)), 0) AS total_cost,
         COUNT(*) AS task_count
-      FROM tasks
+      FROM ${costRows}
       WHERE cost_usd IS NOT NULL
         ${dateFilter}
         ${repoFilter}
@@ -177,7 +212,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         task_type,
         COALESCE(SUM(CAST(cost_usd AS NUMERIC)), 0) AS total_cost,
         COUNT(*) AS task_count
-      FROM tasks
+      FROM ${costRows}
       WHERE cost_usd IS NOT NULL
         ${dateFilter}
         ${repoFilter}
@@ -204,7 +239,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         COALESCE(AVG(CAST(cost_usd AS NUMERIC)), 0) AS avg_cost,
         COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
         COALESCE(SUM(output_tokens), 0) AS total_output_tokens
-      FROM tasks
+      FROM ${costRows}
       WHERE cost_usd IS NOT NULL
         ${dateFilter}
         ${repoFilter}
@@ -230,7 +265,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         SELECT
           repo_url,
           AVG(CAST(cost_usd AS NUMERIC)) AS avg_cost
-        FROM tasks
+        FROM ${costRows}
         WHERE cost_usd IS NOT NULL
           ${dateFilter}
           ${wsFilter}
@@ -238,24 +273,24 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         HAVING COUNT(*) >= 3
       )
       SELECT
-        t.id,
-        t.title,
-        t.repo_url,
-        t.task_type,
-        t.state,
-        t.cost_usd,
-        COALESCE(t.model_used, 'unknown') AS model_used,
+        tasks.id,
+        tasks.title,
+        tasks.repo_url,
+        tasks.task_type,
+        tasks.state,
+        tasks.cost_usd,
+        COALESCE(tasks.model_used, 'unknown') AS model_used,
         ra.avg_cost::text AS repo_avg_cost,
-        (CAST(t.cost_usd AS NUMERIC) / ra.avg_cost)::text AS cost_ratio,
-        t.created_at::text
-      FROM tasks t
-      JOIN repo_avgs ra ON t.repo_url = ra.repo_url
-      WHERE t.cost_usd IS NOT NULL
-        AND CAST(t.cost_usd AS NUMERIC) >= ra.avg_cost * 3
+        (CAST(tasks.cost_usd AS NUMERIC) / ra.avg_cost)::text AS cost_ratio,
+        tasks.created_at::text
+      FROM ${costRows}
+      JOIN repo_avgs ra ON tasks.repo_url = ra.repo_url
+      WHERE tasks.cost_usd IS NOT NULL
+        AND CAST(tasks.cost_usd AS NUMERIC) >= ra.avg_cost * 3
         ${dateFilter}
         ${repoFilter}
         ${wsFilter}
-      ORDER BY CAST(t.cost_usd AS NUMERIC) DESC
+      ORDER BY CAST(tasks.cost_usd AS NUMERIC) DESC
       LIMIT 20
     `);
 
@@ -280,7 +315,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
       SELECT
         COALESCE(SUM(CAST(cost_usd AS NUMERIC)), 0) AS month_cost,
         COUNT(*) AS month_tasks
-      FROM tasks
+      FROM ${costRows}
       WHERE cost_usd IS NOT NULL
         AND created_at >= DATE_TRUNC('month', NOW())
         ${repoFilter}
@@ -304,7 +339,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
           COUNT(*) AS task_count,
           AVG(CAST(cost_usd AS NUMERIC)) AS avg_cost,
           COUNT(*) FILTER (WHERE state IN ('completed', 'pr_opened')) AS success_count
-        FROM tasks
+        FROM ${costRows}
         WHERE cost_usd IS NOT NULL
           AND model_used IS NOT NULL
           ${dateFilter}
@@ -348,7 +383,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         COALESCE(output_tokens, 0)::text AS output_tokens,
         COALESCE(model_used, 'unknown') AS model_used,
         created_at
-      FROM tasks
+      FROM ${costRows}
       WHERE cost_usd IS NOT NULL
         ${dateFilter}
         ${repoFilter}
