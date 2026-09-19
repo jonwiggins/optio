@@ -45,83 +45,6 @@ struct DashTaskStats: Decodable, Hashable, Sendable {
     }
 }
 
-// MARK: - Claude usage / auth status
-
-struct UsageWindow: Decodable, Hashable, Sendable {
-    var utilization: Double?
-    var resetsAt: String?
-}
-
-struct ExtraUsage: Decodable, Hashable, Sendable {
-    var isEnabled: Bool?
-    var monthlyLimit: Double?
-    var usedCredits: Double?
-    var utilization: Double?
-}
-
-struct AuthFailures: Decodable, Hashable, Sendable {
-    var claude: Bool?
-    var github: Bool?
-}
-
-struct ClaudeUsageData: Decodable, Hashable, Sendable {
-    var available: Bool = false
-    var error: String?
-    var hasRecentAuthFailure: Bool?
-    var authFailures: AuthFailures?
-    var fiveHour: UsageWindow?
-    var sevenDay: UsageWindow?
-    var sevenDaySonnet: UsageWindow?
-    var sevenDayOpus: UsageWindow?
-    var extraUsage: ExtraUsage?
-
-    private enum CodingKeys: String, CodingKey {
-        case available, error, hasRecentAuthFailure, authFailures, fiveHour, sevenDay, sevenDaySonnet, sevenDayOpus, extraUsage
-    }
-
-    init(available: Bool, error: String? = nil) {
-        self.available = available
-        self.error = error
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        available = try c.decodeIfPresent(Bool.self, forKey: .available) ?? false
-        error = try c.decodeIfPresent(String.self, forKey: .error)
-        hasRecentAuthFailure = try c.decodeIfPresent(Bool.self, forKey: .hasRecentAuthFailure)
-        authFailures = try c.decodeIfPresent(AuthFailures.self, forKey: .authFailures)
-        fiveHour = try c.decodeIfPresent(UsageWindow.self, forKey: .fiveHour)
-        sevenDay = try c.decodeIfPresent(UsageWindow.self, forKey: .sevenDay)
-        sevenDaySonnet = try c.decodeIfPresent(UsageWindow.self, forKey: .sevenDaySonnet)
-        sevenDayOpus = try c.decodeIfPresent(UsageWindow.self, forKey: .sevenDayOpus)
-        extraUsage = try c.decodeIfPresent(ExtraUsage.self, forKey: .extraUsage)
-    }
-
-    /// Mirrors `UsagePanel`'s Claude-failure detection.
-    var claudeAuthFailed: Bool {
-        if let c = authFailures?.claude { return c }
-        if hasRecentAuthFailure == true { return true }
-        if !available, let error {
-            return error.contains("401") || error.lowercased().contains("expired")
-        }
-        return false
-    }
-
-    var githubAuthFailed: Bool { authFailures?.github ?? false }
-}
-
-struct AuthSubscriptionStatus: Decodable, Hashable, Sendable {
-    var available: Bool?
-    var expiresAt: String?
-    var error: String?
-    var expired: Bool?
-    var lastValidated: String?
-}
-
-struct DashAuthStatus: Decodable, Hashable, Sendable {
-    var subscription: AuthSubscriptionStatus?
-}
-
 // MARK: - Cluster overview (apps/api/src/routes/cluster.ts)
 
 struct ClusterNode: Decodable, Hashable, Sendable, Identifiable {
@@ -305,12 +228,4 @@ extension APIClient {
         try await get("/api/cluster/overview")
     }
 
-    func dashUsage() async throws -> ClaudeUsageData {
-        struct R: Decodable { var usage: ClaudeUsageData }
-        return try await get("/api/usage", as: R.self).usage
-    }
-
-    func dashAuthStatus() async throws -> DashAuthStatus {
-        try await get("/api/auth/status")
-    }
 }

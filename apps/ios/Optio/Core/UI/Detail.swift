@@ -13,19 +13,27 @@ struct DetailHeader<Accessory: View>: View {
     var secondary: Text? = nil
     /// Accent row shown only when the item needs the user.
     var needsYou: String? = nil
+    /// Show the shared Claude usage pill (`AccountUsagePill`) at the end of the
+    /// second line — the number that decides whether another session can start.
+    var showsUsage = false
     @ViewBuilder var accessory: Accessory
 
     init(state: String, tone: Tone? = nil, line: Text? = nil, secondary: Text? = nil, needsYou: String? = nil,
-         @ViewBuilder accessory: () -> Accessory = { EmptyView() }) {
+         showsUsage: Bool = false, @ViewBuilder accessory: () -> Accessory = { EmptyView() }) {
         self.state = state
         self.tone = tone
         self.line = line
         self.secondary = secondary
         self.needsYou = needsYou
+        self.showsUsage = showsUsage
         self.accessory = accessory()
     }
 
     private var resolvedTone: Tone { tone ?? Tone.forState(state) }
+
+    private func secondaryText(_ text: Text) -> some View {
+        text.font(.monoFootnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
@@ -37,8 +45,23 @@ struct DetailHeader<Accessory: View>: View {
                 Spacer(minLength: 0)
                 accessory
             }
-            if let secondary {
-                secondary.font(.monoFootnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+            if let secondary, showsUsage {
+                // Path and pill share a line when both fit; otherwise the pill takes its own.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Spacing.s) {
+                        secondaryText(secondary)
+                        Spacer(minLength: 0)
+                        AccountUsagePill().fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        secondaryText(secondary)
+                        AccountUsagePill()
+                    }
+                }
+            } else if let secondary {
+                secondaryText(secondary)
+            } else if showsUsage {
+                AccountUsagePill()
             }
             if let needsYou {
                 HStack(spacing: 6) {
@@ -52,6 +75,15 @@ struct DetailHeader<Accessory: View>: View {
         .padding(.vertical, Spacing.m)
         .background(.regularMaterial)
         .overlay(alignment: .bottom) { Divider() }
+        .modifier(UsageObserverIf(enabled: showsUsage))
+    }
+}
+
+/// `observesUsage()` only for headers that show the pill.
+private struct UsageObserverIf: ViewModifier {
+    let enabled: Bool
+    func body(content: Content) -> some View {
+        if enabled { content.observesUsage() } else { content }
     }
 }
 

@@ -49,7 +49,7 @@ struct MachinesView: View {
         .task {
             await refresh()
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
+                try? await Task.sleep(for: .seconds(30))
                 await refresh()
             }
         }

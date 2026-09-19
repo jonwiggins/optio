@@ -1,13 +1,15 @@
 import Charts
 import SwiftUI
 
-/// The Overview tab. Mirrors `apps/web/src/app/page.tsx`: what needs you, usage
-/// limits, then the sessions board over the unified feed (five tiles, active
-/// sessions, recurring + persistent agents), cluster summary, recent tasks. The
-/// dashboard model polls every 10 seconds while visible, the feed every 15.
+/// The Overview tab, a mirror of `apps/web/src/app/page.tsx` top to bottom:
+/// header (title, feed-count subtitle, refresh, new session) → needs you →
+/// usage limits → the sessions board (five tiles, active sessions, recurring +
+/// persistent agents) → token banners → cluster summary → recent. The dashboard
+/// model polls every 10 seconds while visible, the feed every 15, usage every 60.
 struct OverviewView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppRouter.self) private var router
+    @Environment(UsageStore.self) private var usage
     @State private var model = OverviewModel()
     @State private var feed: SessionsFeedModel?
     @State private var showNew = false
@@ -42,12 +44,15 @@ struct OverviewView: View {
             }
             .sessionDestinations()
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { Task { await refreshAll() } } label: { Image(systemName: "arrow.clockwise") }
+                        .accessibilityLabel("Refresh")
                     Button { showNew = true } label: { Image(systemName: "plus") }
                         .accessibilityLabel("New session")
                 }
             }
             .sheet(isPresented: $showNew) { NewSessionSheet() }
+            .observesUsage()
             .task {
                 if feed == nil { feed = SessionsFeedModel(api: api) }
                 feed?.start()
@@ -59,6 +64,14 @@ struct OverviewView: View {
             .onAppear { feed?.start() }
             .onDisappear { feed?.stop() }
         }
+    }
+
+    /// The header's refresh button: dashboard data, the feed and (fresh) usage at once.
+    private func refreshAll() async {
+        async let dash: Void = model.refresh(api: api)
+        async let rows: Void = feed?.refresh() ?? ()
+        async let limits: Bool = usage.refreshFresh()
+        _ = await (dash, rows, limits)
     }
 
     // MARK: Sections
@@ -82,18 +95,24 @@ struct OverviewView: View {
 
             needsYouSection
 
-            if let usage = model.usage, usage.claudeAuthFailed || usage.githubAuthFailed || usage.available {
+            if !usage.providerLimits.isEmpty {
                 Section {
-                    UsagePanelView(usage: usage) { await model.refreshUsage(api: api) }
+                    LimitsPanelView()
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
-                } header: {
-                    if usage.available, !usage.claudeAuthFailed { SectionHeader(title: "Claude usage").textCase(nil) }
                 }
             }
 
             if let feed {
                 SessionsBoardSections(feed: feed) { showNew = true }
+            }
+
+            if let u = usage.usage, u.claudeAuthFailed || u.githubAuthFailed {
+                Section {
+                    UsageTokenBanners()
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
             }
 
             Section {
@@ -119,7 +138,7 @@ struct OverviewView: View {
                     }
                 }
             } header: {
-                SectionHeader(title: "Recent tasks") { router.openSessions(.history) }.textCase(nil)
+                SectionHeader(title: "Recent") { router.openSessions(.history) }.textCase(nil)
             }
 
             OtherServersSection()
@@ -128,6 +147,7 @@ struct OverviewView: View {
         .refreshable {
             await model.refresh(api: api)
             await feed?.refresh()
+            await usage.refresh()
         }
     }
 
@@ -200,6 +220,7 @@ struct OverviewView: View {
         .foregroundStyle(.secondary)
     }
 
+    /// `welcome-hero.tsx`: a truly empty install (no tasks, no local terminals).
     private var welcome: some View {
         ScrollView {
             VStack(spacing: Spacing.l) {
@@ -214,7 +235,7 @@ struct OverviewView: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                 Button("New session") { showNew = true }.buttonStyle(.borderedProminent).tint(.primary)
-                UsagePanelView(usage: model.usage) { await model.refreshUsage(api: api) }
+                UsageTokenBanners()
             }
             .padding()
             .frame(maxWidth: .infinity)
@@ -230,113 +251,6 @@ private extension View {
             self.navigationSubtitle(text)
         } else {
             self
-        }
-    }
-}
-
-// MARK: - Usage panel (usage-panel.tsx)
-
-struct UsagePanelView: View {
-    let usage: ClaudeUsageData?
-    let onRefresh: () async -> Void
-
-    var body: some View {
-        if let usage {
-            if usage.claudeAuthFailed || usage.githubAuthFailed {
-                VStack(spacing: Spacing.s) {
-                    if usage.claudeAuthFailed {
-                        tokenBanner(
-                            title: "Claude token expired",
-                            message: "Agents are failing to authenticate. Renew the Claude OAuth token from the web UI (Settings → Secrets), or run scripts/update-claude-auth.sh on the host."
-                        )
-                    }
-                    if usage.githubAuthFailed {
-                        tokenBanner(
-                            title: "GitHub token failing",
-                            message: "Recent tasks hit GitHub auth errors. Rotate GITHUB_TOKEN in Settings → Secrets."
-                        )
-                    }
-                }
-            } else if usage.available {
-                let meters = self.meters(usage)
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                    ForEach(meters, id: \.label) { m in
-                        ClaudeUsageMeter(label: m.label, utilization: m.utilization, resetsAt: m.resetsAt, sublabel: m.sublabel)
-                    }
-                }
-                .cardSurface()
-            }
-        }
-    }
-
-    private struct Meter { let label: String; let utilization: Double; let resetsAt: String?; let sublabel: String? }
-
-    private func meters(_ u: ClaudeUsageData) -> [Meter] {
-        var out: [Meter] = []
-        if let w = u.fiveHour, let v = w.utilization { out.append(Meter(label: "5-hour", utilization: v, resetsAt: w.resetsAt, sublabel: nil)) }
-        if let w = u.sevenDay, let v = w.utilization { out.append(Meter(label: "7-day", utilization: v, resetsAt: w.resetsAt, sublabel: nil)) }
-        if let w = u.sevenDaySonnet, let v = w.utilization { out.append(Meter(label: "7d Sonnet", utilization: v, resetsAt: w.resetsAt, sublabel: nil)) }
-        if let w = u.sevenDayOpus, let v = w.utilization { out.append(Meter(label: "7d Opus", utilization: v, resetsAt: w.resetsAt, sublabel: nil)) }
-        if let x = u.extraUsage, x.isEnabled == true, let used = x.usedCredits {
-            let spent = Cost.format(used / 100)
-            let sub = x.monthlyLimit.map { "\(spent) / \(Cost.format($0 / 100)) spent" } ?? "\(spent) spent"
-            out.append(Meter(label: "Extra credits", utilization: x.utilization ?? 0, resetsAt: nil, sublabel: sub))
-        }
-        return out
-    }
-
-    private func tokenBanner(title: String, message: String) -> some View {
-        NoticeBanner(tone: .danger, systemImage: "key.slash", title: title) {
-            Text(message)
-            Button("Re-check") { Task { await onRefresh() } }
-                .font(.footnote.weight(.semibold))
-                .buttonStyle(.plain)
-                .foregroundStyle(AppTheme.accent)
-        }
-    }
-}
-
-struct ClaudeUsageMeter: View {
-    let label: String
-    let utilization: Double
-    let resetsAt: String?
-    var sublabel: String? = nil
-
-    private var pct: Double { min(max(utilization, 0), 100) }
-    private var tone: Tone { pct >= 90 ? .danger : .working }
-
-    private var resetLabel: String? {
-        guard let resetsAt, let date = resetsAt.isoDate else { return nil }
-        let diff = date.timeIntervalSinceNow
-        guard diff > 0 else { return nil }
-        let h = Int(diff / 3600)
-        let m = Int(diff.truncatingRemainder(dividingBy: 3600) / 60)
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            HStack {
-                Text(label).font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Text("\(Int(pct.rounded()))%")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(tone == .danger ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
-                    .contentTransition(.numericText())
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.fill.secondary)
-                    Capsule().fill(tone == .danger ? AnyShapeStyle(.red) : AnyShapeStyle(.primary)).frame(width: geo.size.width * pct / 100)
-                }
-            }
-            .frame(height: 5)
-            if let sublabel {
-                Text(sublabel).font(.caption2).foregroundStyle(.tertiary)
-            }
-            if let resetLabel {
-                Text("resets in \(resetLabel)").font(.caption2).foregroundStyle(.tertiary)
-            }
         }
     }
 }

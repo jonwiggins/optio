@@ -218,7 +218,8 @@ struct TaskDetailView: View {
             tone: stalled ? .working : (task.state == "needs_attention" ? .working : nil),
             line: Text.meta(facts),
             secondary: Text.meta(line2),
-            needsYou: needsYou
+            needsYou: needsYou,
+            showsUsage: true
         ) {
             if let prUrl = task.prUrl, let url = URL(string: prUrl) {
                 Link(destination: url) { Image(systemName: "arrow.up.right.square") }
