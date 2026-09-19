@@ -51,6 +51,33 @@ secrets to your machine.
   `claude --resume <id>` (or `codex resume <id>`), inheriting the ticket / automation
   badges; `spawnedBy = "resume"`, so exiting it later goes quiet like a manual shell.
 
+## Claude token refresh from your machine
+
+The cluster's `CLAUDE_CODE_OAUTH_TOKEN` expires; the old fix was a Keychain one-liner and a
+paste into Secrets. A paired machine already holds a fresh login, so the daemon can hand it
+over (`services/local-auth-refresh-service.ts`, `cli/src/local/claude-credentials.ts`):
+
+- The daemon's `hello` carries `claudeCredentials: true` when the machine has a Claude Code
+  login (macOS Keychain item "Claude Code-credentials", else
+  `$CLAUDE_CONFIG_DIR/.credentials.json`). Live only — `GET /api/local/hosts` reports it
+  per host, false while offline.
+- The server sends `{type:"credentials", requestId}`; the daemon answers
+  `{type:"credentials-result", requestId, token, expiresAt}` with the **access token only**
+  (the refresh token never leaves the machine), or an `error`. The server validates the
+  token against Anthropic, stores it as the global `CLAUDE_CODE_OAUTH_TOKEN` (what the
+  validation worker, usage probe, and agent pods read), invalidates the credential / usage
+  caches, marks the validation cache good, and publishes `auth:status_changed`.
+- Who may: a host owned by a workspace **admin** (the same gate as the Secrets page), or
+  any host in auth-disabled dev.
+- **Explicit**: `POST /api/auth/claude-token/refresh-from-host {hostId}` (admin, own host);
+  the expired-token banner shows a "Refresh from _machine_" button for every online host
+  that can, above the copy/paste steps.
+- **Automatic**: when the token-validation worker finds the stored token expired it tries
+  every capable online host first and only raises the `auth:failed` banner if none worked;
+  and a capable daemon that connects while the stored token is known-bad refreshes it on
+  hello. Each host is tried at most once per 10 minutes, so a machine whose own login is
+  also stale ("run `claude` there to sign in again") isn't polled on every cycle.
+
 ## Local runs: Tasks and Jobs on your machine
 
 Run location is a first-class attribute of every **Task**, **Job**, and scheduled Task
@@ -291,8 +318,8 @@ single quoted argv element, never interpolated into shell syntax; a prompt that 
 
 Daemon → server:
 
-- `{type:"hello", hostId, daemonVersion, dirs, terminals:[{terminalId, running}]}` —
-  first frame; server reconciles DB rows against `terminals` (rows believed running that
+- `{type:"hello", hostId, daemonVersion, dirs, terminals:[{terminalId, running}],
+claudeCredentials?}` — first frame; server reconciles DB rows against `terminals` (rows believed running that
   the daemon doesn't have → `exited`, reason `daemon_restart`) and flushes
   `pending/host_offline` spawns.
 - `{type:"started", terminalId}` / `{type:"spawn-error", terminalId, message}`
@@ -323,6 +350,8 @@ toolUseId, isError, at}]}` — new conversation entries distilled from the agent
   (>1 MB) can never swallow the exit. Accepted only from the owning host while the row
   is still live.
 - `{type:"exit", terminalId, exitCode}`
+- `{type:"credentials-result", requestId, token?, expiresAt?, error?}` — answer to the
+  server's `credentials` request (see "Claude token refresh from your machine")
 - `{type:"ping"}` every 30 s (server updates `lastSeenAt`, replies `{type:"pong"}`)
 
 Server → daemon:
@@ -335,6 +364,7 @@ Server → daemon:
 - `{type:"attach", terminalId, attachId}` / `{type:"detach", terminalId}` — daemon
   snapshots the ring buffer and enables live output atomically on attach; the snapshot
   is routed only to the attaching viewer (no gap, no duplicated history for others)
+- `{type:"credentials", requestId}` — ask for the machine's Claude OAuth access token
 - `{type:"pong"}`
 
 Host liveness: sweeper marks hosts offline after 90 s without a ping and fails

@@ -25,6 +25,10 @@ import {
   touchHost,
 } from "../services/local-host-service.js";
 import * as terminalService from "../services/local-terminal-service.js";
+import {
+  deliverCredentialsResult,
+  maybeRefreshOnHello,
+} from "../services/local-auth-refresh-service.js";
 
 const HELLO_TIMEOUT_MS = 10_000;
 
@@ -92,13 +96,22 @@ export async function localDaemonWs(app: FastifyInstance) {
           flushParked: false,
         });
         if (closed) return;
-        relay.registerDaemon(host.id, host.userId, socket);
+        relay.registerDaemon(host.id, host.userId, socket, {
+          claudeCredentials: msg.claudeCredentials === true,
+        });
         await markHostOnline(host.id, {
           dirs: msg.dirs,
           daemonVersion: msg.daemonVersion,
         });
         await terminalService.flushParkedTerminals(host.id);
         log.info({ hostId: host.id, hostname: host.hostname }, "local daemon connected");
+        // Off the frame queue: a token refresh round-trips to this daemon
+        // and to Anthropic, and must not hold up its next frames.
+        if (msg.claudeCredentials === true) {
+          void maybeRefreshOnHello(host).catch((err) =>
+            log.warn({ err, hostId: host.id }, "token refresh on hello failed"),
+          );
+        }
         return;
       }
 
@@ -166,6 +179,9 @@ export async function localDaemonWs(app: FastifyInstance) {
           return;
         case "agent-limits":
           await handleAgentLimits(hostId, msg.limits);
+          return;
+        case "credentials-result":
+          deliverCredentialsResult(hostId, msg);
           return;
         case "preview":
           await terminalService.handlePreview(

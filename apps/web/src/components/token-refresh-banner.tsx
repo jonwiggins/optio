@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { AlertTriangle, Check, Copy, ExternalLink, Key, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, Copy, ExternalLink, Key, Laptop, Loader2 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 
@@ -25,9 +25,57 @@ export function useIsTokenRefreshBannerMounted() {
   );
 }
 
+/**
+ * Machines running `optio local up` that can hand over their own Claude
+ * login. Polled while the banner is up: starting the daemon on your laptop
+ * should make the one-click button appear without a reload.
+ */
+function useCredentialHosts(): Array<{ id: string; name: string }> {
+  const [hosts, setHosts] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await api.listLocalHosts();
+        if (cancelled) return;
+        setHosts(
+          res.hosts
+            .filter((h: any) => h.state === "online" && h.claudeCredentials)
+            .map((h: any) => ({ id: h.id, name: h.name })),
+        );
+      } catch {
+        // Local not set up — the paste flow stands alone.
+      }
+    };
+    load();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+  return hosts;
+}
+
 export function TokenRefreshBanner({ onSaved }: { onSaved?: () => void | Promise<void> } = {}) {
   const [token, setToken] = useState("");
   const [saving, setSaving] = useState(false);
+  const hosts = useCredentialHosts();
+  const [refreshingHost, setRefreshingHost] = useState<string | null>(null);
+
+  const handleRefreshFromHost = async (host: { id: string; name: string }) => {
+    setRefreshingHost(host.id);
+    try {
+      await api.refreshClaudeTokenFromHost(host.id);
+      toast.success(`Token refreshed from ${host.name}`);
+      await onSaved?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to refresh from that machine");
+    }
+    setRefreshingHost(null);
+  };
 
   useEffect(() => {
     mountedCount++;
@@ -74,6 +122,36 @@ export function TokenRefreshBanner({ onSaved }: { onSaved?: () => void | Promise
           </div>
         </div>
       </div>
+
+      {hosts.length > 0 && (
+        <div className="p-2.5 rounded-md bg-primary/5 border border-primary/30">
+          <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1.5">
+            One click: use the login on your machine
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {hosts.map((host) => (
+              <button
+                key={host.id}
+                type="button"
+                onClick={() => handleRefreshFromHost(host)}
+                disabled={refreshingHost !== null}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
+              >
+                {refreshingHost === host.id ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Laptop className="w-3 h-3" />
+                )}
+                Refresh from {host.name}
+              </button>
+            ))}
+          </div>
+          <div className="text-[11px] text-text-muted mt-1.5">
+            Optio Local reads the token Claude Code already holds there — nothing to copy. Or, by
+            hand:
+          </div>
+        </div>
+      )}
 
       <div className="p-2.5 rounded-md bg-bg/50 border border-border">
         <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1.5">

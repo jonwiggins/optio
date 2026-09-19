@@ -77,6 +77,15 @@ export interface AuthTokenResult {
 }
 
 /**
+ * Claude Code stores `expiresAt` as epoch milliseconds; the status API
+ * promises an ISO string (a number here failed response serialization).
+ */
+function isoExpiry(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return new Date(value).toISOString();
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
  * Get the Claude OAuth access token from the host's credentials.
  * This is used by agent containers via the apiKeyHelper callback.
  */
@@ -105,7 +114,7 @@ export function getClaudeAuthToken(): AuthTokenResult {
         return {
           available: true,
           token: freshCreds.claudeAiOauth.accessToken,
-          expiresAt: freshCreds.claudeAiOauth.expiresAt,
+          expiresAt: isoExpiry(freshCreds.claudeAiOauth.expiresAt),
         };
       }
       return {
@@ -118,7 +127,7 @@ export function getClaudeAuthToken(): AuthTokenResult {
   return {
     available: true,
     token: oauth.accessToken,
-    expiresAt: oauth.expiresAt,
+    expiresAt: isoExpiry(oauth.expiresAt),
   };
 }
 

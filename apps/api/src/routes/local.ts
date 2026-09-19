@@ -28,6 +28,7 @@ import {
   LocalTriggerSchema,
 } from "../schemas/local.js";
 import * as hostService from "../services/local-host-service.js";
+import * as relay from "../services/local-relay.js";
 import * as terminalService from "../services/local-terminal-service.js";
 import * as blueprintService from "../services/local-blueprint-service.js";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
@@ -214,7 +215,12 @@ export async function localRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const hosts = await hostService.listHosts(req.user?.id ?? null);
-      reply.send({ hosts });
+      reply.send({
+        hosts: hosts.map((h) => ({
+          ...h,
+          claudeCredentials: relay.hostHasClaudeCredentials(h.id),
+        })),
+      });
     },
   );
 

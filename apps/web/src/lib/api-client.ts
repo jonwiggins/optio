@@ -213,6 +213,13 @@ export const api = {
     return request<{ secrets: any[] }>(`/api/secrets${qs}`);
   },
 
+  /** Pull a fresh Claude OAuth token from one of the caller's machines via its Optio Local daemon. */
+  refreshClaudeTokenFromHost: (hostId: string) =>
+    request<{ ok: true; hostId: string }>("/api/auth/claude-token/refresh-from-host", {
+      method: "POST",
+      body: JSON.stringify({ hostId }),
+    }),
+
   createSecret: (data: { name: string; value: string; scope?: string }) =>
     request<{ name: string; scope: string; validation?: { valid: boolean; error?: string } }>(
       "/api/secrets",

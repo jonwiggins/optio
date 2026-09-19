@@ -21,6 +21,8 @@ import { storeUserGitHubTokens } from "../services/github-token-service.js";
 import { SESSION_COOKIE_NAME, requireRole } from "../plugins/auth.js";
 import { getRedisClient } from "../services/event-bus.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import { canAccessHost, getHost } from "../services/local-host-service.js";
+import { refreshClaudeTokenFromHost } from "../services/local-auth-refresh-service.js";
 
 // ── Request / response schemas for the auth endpoints ───────────────────
 
@@ -223,6 +225,39 @@ export async function authRoutes(rawApp: FastifyInstance) {
         return reply.status(503).send({ error: result.error ?? "Token not available" });
       }
       reply.type("text/plain").send(result.token);
+    },
+  );
+
+  app.post(
+    "/api/auth/claude-token/refresh-from-host",
+    {
+      preHandler: [requireRole("admin")],
+      schema: {
+        operationId: "refreshClaudeTokenFromHost",
+        summary: "Refresh the Claude OAuth token from a paired machine",
+        description:
+          "Asks the Optio Local daemon on one of the caller's own machines for " +
+          "that machine's Claude Code login (access token only), validates it " +
+          "against Anthropic, and stores it as CLAUDE_CODE_OAUTH_TOKEN — the " +
+          "no-copy/paste alternative to the Secrets page. The host must be " +
+          "online and have advertised `claudeCredentials`.",
+        tags: ["Auth & Sessions"],
+        body: z.object({ hostId: z.string().uuid() }),
+        response: {
+          200: z.object({ ok: z.literal(true), hostId: z.string() }),
+          404: ErrorResponseSchema,
+          409: z.object({ ok: z.literal(false), error: z.string() }),
+        },
+      },
+    },
+    async (req, reply) => {
+      const host = await getHost(req.body.hostId);
+      if (!host || !canAccessHost(host, req.user?.id)) {
+        return reply.status(404).send({ error: "Host not found" });
+      }
+      const outcome = await refreshClaudeTokenFromHost(host, "manual");
+      if (!outcome.ok) return reply.status(409).send(outcome);
+      reply.send(outcome);
     },
   );
 
