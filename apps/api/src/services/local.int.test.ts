@@ -748,11 +748,13 @@ describe("local automations (event triggers + session modes)", () => {
       dirs: [{ path: "/home/dev/scoped", repoUrl }],
     });
     relay.registerDaemon(host.id, null, new FakeDaemonSocket());
-    for (const ws of [wsA, wsB]) {
+    // wsA owns the repo, wsB must not hear about it, and a workspace-less
+    // (auth-disabled) blueprint is unscoped and still fires.
+    for (const ws of [wsA, wsB, null]) {
       const bp = await createBlueprint({
         userId: null,
-        workspaceId: ws.id,
-        name: `auto-ws-${ws.id.slice(0, 8)}`,
+        workspaceId: ws?.id ?? null,
+        name: `auto-ws-${ws?.id.slice(0, 8) ?? "unscoped"}-${Math.random().toString(36).slice(2, 6)}`,
         hostId: host.id,
         agent: "claude-code",
         commandTemplate: "Review {{url}}",
@@ -779,9 +781,11 @@ describe("local automations (event triggers + session modes)", () => {
         },
       })!,
     );
-    expect(fired).toHaveLength(1);
-    const terminal = await getTerminal(fired[0].terminalId);
-    expect(terminal?.workspaceId).toBe(wsA.id);
+    expect(fired).toHaveLength(2);
+    const workspaces = await Promise.all(
+      fired.map(async (f) => (await getTerminal(f.terminalId))?.workspaceId ?? null),
+    );
+    expect(workspaces.sort()).toEqual([wsA.id, null].sort());
   });
 
   it("records the agent session id, lands headless exits as done, and resumes as a new terminal", async () => {

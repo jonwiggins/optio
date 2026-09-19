@@ -584,7 +584,10 @@ export async function fireLocalEventTriggers<S extends LocalEventSource>(
     try {
       const blueprint = await getBlueprint(trigger.targetId);
       if (!blueprint || !blueprint.enabled) continue;
-      if (repoWorkspace && blueprint.workspaceId !== repoWorkspace) {
+      // A blueprint without a workspace is unscoped (auth-disabled dev, or a
+      // row from before workspaces) — only a blueprint that belongs to a
+      // *different* workspace is refused.
+      if (repoWorkspace && blueprint.workspaceId && blueprint.workspaceId !== repoWorkspace) {
         logger.info(
           { source, triggerId: trigger.id, blueprintId: blueprint.id },
           "Local event trigger skipped: repo belongs to another workspace",

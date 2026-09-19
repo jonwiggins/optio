@@ -88,7 +88,8 @@ not a fallback: "review acme/api#12" must never run inside an unrelated checkout
 checked out, and skips the ones you don't.
 
 **Scoping and replay**: a GitHub event about a repo registered in Optio only reaches
-automations in that repo's workspace, whatever `login` they claim. Deliveries are
+automations in that repo's workspace (or workspace-less ones, i.e. auth-disabled dev),
+whatever `login` they claim. Deliveries are
 de-duplicated in-process by id (`X-GitHub-Delivery`, Slack `event_id`, Linear
 type+action+entity+timestamp) so provider retries don't fire twice. An automation's
 pinned `hostId` must be the caller's own host — checked on create/update and again at
