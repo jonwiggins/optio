@@ -47,9 +47,36 @@ export type SizingMode =
   /** Another viewer sized the PTY; we render its grid scaled to fit. */
   | { kind: "passive"; grid: Grid };
 
+/** Resize requests we've sent that the daemon hasn't echoed yet (oldest first). */
+export const MAX_PENDING_GRIDS = 32;
+
+/** Record a grid we just asked the daemon for. */
+export function pushSentGrid(sent: readonly Grid[], grid: Grid): Grid[] {
+  const next = [...sent, grid];
+  return next.length > MAX_PENDING_GRIDS ? next.slice(next.length - MAX_PENDING_GRIDS) : next;
+}
+
+/**
+ * The daemon echoed `grid`: if it matches one of our pending requests, that
+ * request and every older one are answered (echoes arrive in order). Returns
+ * the remaining queue, or null when the echo matched nothing we sent.
+ */
+export function ackSentGrid(sent: readonly Grid[], grid: Grid): Grid[] | null {
+  const i = sent.findIndex((g) => sameGrid(g, grid));
+  return i < 0 ? null : sent.slice(i + 1);
+}
+
 /**
  * Next mode when the daemon announces the PTY grid. `natural` is what a fit
- * to our own screen would produce; `lastSent` the grid we last asked for.
+ * to our own screen would produce; `sent` the grids we've asked for that
+ * haven't been echoed yet.
+ *
+ * Every echo of our own request is still ours — not just the latest. A
+ * claim can fit twice in a few ms (the "sized for another device" strip
+ * leaves, the pane grows, the observer refits), so the echo of the first
+ * request lands after the second was sent. Treating that stale echo as
+ * another viewer's grid pinned the pane to a grid taller than the pane and
+ * hid its bottom rows.
  *
  * `recorded`: the terminal has exited and this is the grid its final screen
  * was drawn for. There is no PTY left to size, so the grid is pinned —
@@ -60,14 +87,14 @@ export function onGridAnnounced(
   mode: SizingMode,
   grid: Grid,
   natural: Grid,
-  lastSent: Grid | null,
+  sent: readonly Grid[],
   recorded = false,
 ): SizingMode {
   if (recorded) return { kind: "passive", grid };
   if (mode.kind === "owner") {
-    // Our own request echoed back — still ours. Anything else means another
-    // viewer took over since.
-    return sameGrid(grid, lastSent) ? mode : { kind: "passive", grid };
+    // One of our own requests echoed back — still ours. Anything else means
+    // another viewer took over since.
+    return sent.some((g) => sameGrid(g, grid)) ? mode : { kind: "passive", grid };
   }
   // Unclaimed or already passive: if the announced grid happens to be our
   // natural fit there's nothing to scale, and no reason to show the banner.

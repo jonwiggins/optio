@@ -4,7 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Maximize2 } from "lucide-react";
-import { BASE_FONT_PX, onGridAnnounced, passiveFontPx, type Grid, type SizingMode } from "./sizing";
+import {
+  BASE_FONT_PX,
+  ackSentGrid,
+  onGridAnnounced,
+  passiveFontPx,
+  pushSentGrid,
+  type Grid,
+  type SizingMode,
+} from "./sizing";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
@@ -127,10 +135,11 @@ export function LocalTerminal({
     // so a phone glancing at a laptop session sees the laptop's layout
     // small rather than forcing the laptop down to phone width.
     let mode: SizingMode = { kind: "unclaimed" };
-    let lastSent: Grid | null = null;
+    // Grids we've asked for and not yet heard echoed, oldest first.
+    let sent: Grid[] = [];
 
     const sendResize = (grid: Grid) => {
-      lastSent = grid;
+      sent = pushSentGrid(sent, grid);
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "resize", cols: grid.cols, rows: grid.rows }));
       }
@@ -196,7 +205,8 @@ export function LocalTerminal({
     claimRef.current = claim;
 
     const onGrid = (grid: Grid) => {
-      mode = onGridAnnounced(mode, grid, naturalGrid(), lastSent, terminalDead);
+      mode = onGridAnnounced(mode, grid, naturalGrid(), sent, terminalDead);
+      sent = ackSentGrid(sent, grid) ?? sent;
       if (terminalDead) setRecorded(true);
       applyMode();
     };
