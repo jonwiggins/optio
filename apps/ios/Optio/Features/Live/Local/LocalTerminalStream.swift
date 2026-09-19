@@ -178,6 +178,10 @@ final class LocalTerminalStream {
                 } else {
                     retrying = false
                 }
+            case .size:
+                // The recorded grid of an exited terminal. The web resizes xterm to it before
+                // the replay; SwiftTerm follows the view's own size, so the replay reflows.
+                break
             case .unknown:
                 break
             }

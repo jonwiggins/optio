@@ -1,35 +1,39 @@
 import SwiftUI
 
-/// "Live" tab: Local (Optio Local terminals on the user's own machine, first and
-/// default) · Agents (persistent agents) · Sessions (interactive workspaces).
-struct LiveHubView: View {
-    enum Section: Hashable { case local, agents, sessions }
-    @State private var section: Section = .local
+/// The "Work" tab: Sessions · Reviews · Inbox, matching the web sidebar group.
+/// One large title; the section switcher lives under it and each section owns
+/// its own list → detail flow inside this stack. The per-kind detail screens
+/// (task, job run, agent, local terminal, pod session) are destinations of
+/// Sessions rows, not sections of their own.
+struct WorkHubView: View {
+    enum Section: String, CaseIterable { case sessions, reviews, inbox }
+    @State private var section: Section = .sessions
     @State private var path = NavigationPath()
     @Environment(AppRouter.self) private var router
 
     var body: some View {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
-                HubSwitcher(options: [(Section.local, "Local"), (.agents, "Agents"), (.sessions, "Sessions")], selection: $section)
+                HubSwitcher(options: [(Section.sessions, "Sessions"), (.reviews, "Reviews"), (.inbox, "Inbox")], selection: $section)
                 Group {
                     switch section {
-                    case .local: LocalHubView()
-                    case .agents: AgentsListView()
-                    case .sessions: SessionsListView()
+                    case .sessions: SessionsView()
+                    case .reviews: ReviewsListView()
+                    case .inbox: IssuesListView()
                     }
                 }
                 .id(section)
             }
-            .navigationTitle("Live")
+            .navigationTitle("Work")
             .hubChrome()
             .serverSwitcherToolbar()
+            .sessionDestinations()
             .navigationDestination(for: AppRouter.PendingDetail.self) { detail in
                 switch detail.kind {
+                case .task: TaskDetailView(taskId: detail.id, focusComposer: detail.compose)
                 case .local: LocalTerminalScreen(terminalId: detail.id, focusComposer: detail.compose)
                 case .agent: AgentDetailView(agentId: detail.id, focusComposer: detail.compose)
                 case .session: SessionDetailView(sessionId: detail.id)
-                case .task: TaskDetailView(taskId: detail.id)
                 }
             }
             .onAppear(perform: consumeRoute)
@@ -42,9 +46,9 @@ struct LiveHubView: View {
     private func consumeRoute() {
         guard let pending = router.pendingSection else { return }
         let mapped: Section? = switch pending {
-        case .agents: .agents
         case .sessions: .sessions
-        case .local: .local
+        case .reviews: .reviews
+        case .inbox: .inbox
         default: nil
         }
         guard let mapped else { return }
@@ -53,10 +57,11 @@ struct LiveHubView: View {
         consumeDetail()
     }
 
-    /// `optio://local/<id>?compose=1`, `optio://agents/<id>?compose=1`, `optio://sessions/<id>`:
-    /// replace the stack with the detail so the deep link lands in one hop.
+    /// `optio://tasks/<id>`, `optio://local/<id>?compose=1`, `optio://agents/<id>?compose=1`,
+    /// `optio://sessions/<id>` (widgets, Live Activity, notifications): replace the
+    /// stack with the detail so the deep link lands in one hop.
     private func consumeDetail() {
-        guard let detail = router.pendingDetail, detail.kind != .task else { return }
+        guard let detail = router.pendingDetail else { return }
         router.pendingDetail = nil
         path = NavigationPath([detail])
     }

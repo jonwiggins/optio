@@ -53,7 +53,7 @@ struct ScheduledListView: View {
             if !model.loaded {
                 SkeletonRows()
             } else if model.items.isEmpty {
-                EmptyState(title: "Nothing scheduled", systemImage: "calendar", message: "Save a task blueprint and attach a schedule, webhook or ticket trigger.", actionTitle: "New schedule") { showNew = true }
+                EmptyState(title: "Nothing scheduled", systemImage: "calendar", message: "Save a task blueprint and attach a schedule, webhook or ticket trigger.", actionTitle: "New session") { showNew = true }
                     .listRowSeparator(.hidden)
             }
             ForEach(model.items) { item in
@@ -75,8 +75,8 @@ struct ScheduledListView: View {
         }
         .listStyle(.plain)
         .navigationDestination(for: String.self) { id in ScheduledDetailView(configId: id) }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { showNew = true } label: { Image(systemName: "plus") }.accessibilityLabel("New schedule") } }
-        .sheet(isPresented: $showNew) { TaskConfigFormSheet(existing: nil) { _ in Task { await model.load(api: api) } } }
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { showNew = true } label: { Image(systemName: "plus") }.accessibilityLabel("New session") } }
+        .sheet(isPresented: $showNew) { NewSessionSheet() }
         .confirmationDialog("Delete “\(pendingDelete?.name ?? "")”? This removes the schedule and all its triggers.", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 guard let c = pendingDelete else { return }

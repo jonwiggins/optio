@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The "More" tab: the web sidebar's Library + Admin groups plus Settings and
-/// the account card. Each row pushes its own screen; creation flows are sheets.
+/// The "More" tab: the web sidebar's Admin group plus Settings and the account
+/// card (the Library group has its own tab). Each row pushes its own screen;
+/// creation flows are sheets.
 struct MoreHubView: View {
     @Environment(APIClient.self) private var api
     @Environment(SessionStore.self) private var session
@@ -13,20 +14,6 @@ struct MoreHubView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    NavigationLink { PromptsListView() } label: {
-                        Label("Prompts", systemImage: "text.quote")
-                    }
-                    NavigationLink { ReposListView() } label: {
-                        Label("Repos", systemImage: "folder")
-                    }
-                    NavigationLink { ConnectionsView() } label: {
-                        Label("Connections", systemImage: "powerplug")
-                    }
-                } header: {
-                    SectionHeader(title: "Library").textCase(nil)
-                }
-
                 Section {
                     NavigationLink { SecretsView() } label: {
                         Label("Secrets", systemImage: "key")
