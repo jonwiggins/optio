@@ -50,13 +50,20 @@ export type SizingMode =
 /**
  * Next mode when the daemon announces the PTY grid. `natural` is what a fit
  * to our own screen would produce; `lastSent` the grid we last asked for.
+ *
+ * `recorded`: the terminal has exited and this is the grid its final screen
+ * was drawn for. There is no PTY left to size, so the grid is pinned —
+ * always passive, even when it happens to equal our natural fit — so a
+ * window resize can never reflow the replayed screen into something else.
  */
 export function onGridAnnounced(
   mode: SizingMode,
   grid: Grid,
   natural: Grid,
   lastSent: Grid | null,
+  recorded = false,
 ): SizingMode {
+  if (recorded) return { kind: "passive", grid };
   if (mode.kind === "owner") {
     // Our own request echoed back — still ours. Anything else means another
     // viewer took over since.

@@ -58,6 +58,9 @@ export function LocalTerminal({
   // Set while another viewer owns the PTY grid and we're rendering it
   // scaled to fit. Drives the "sized for another device" strip.
   const [foreignGrid, setForeignGrid] = useState<Grid | null>(null);
+  // The terminal has exited: `foreignGrid` is then the grid its final screen
+  // was recorded at, pinned so it reads the way it ran (no "use this screen").
+  const [recorded, setRecorded] = useState(false);
   const claimRef = useRef<() => void>(() => {});
   const setConnState = (next: ConnState) => {
     setConnStateRaw(next);
@@ -112,6 +115,10 @@ export function LocalTerminal({
     };
     let disposed = false;
     const container = containerRef.current;
+    // The terminal has exited/errored — nothing more will ever stream, so a
+    // reconnect could only wipe the history left on screen. Declared up here
+    // because the sizing closures consult it.
+    let terminalDead = false;
 
     // ── Who owns the PTY grid ────────────────────────────────────────────
     // One PTY, one grid. Attaching never resizes it; interacting (pointer
@@ -175,6 +182,10 @@ export function LocalTerminal({
     /** This screen is being used: size the PTY to it. */
     const claim = () => {
       if (disposed) return;
+      // Nothing left to size once the process is gone — and a click to
+      // select text must not reflow a replayed screen out of its recorded
+      // grid.
+      if (terminalDead) return;
       mode = { kind: "owner" };
       applyMode();
       // Always tell the daemon, even if our grid is what we last sent:
@@ -185,7 +196,8 @@ export function LocalTerminal({
     claimRef.current = claim;
 
     const onGrid = (grid: Grid) => {
-      mode = onGridAnnounced(mode, grid, naturalGrid(), lastSent);
+      mode = onGridAnnounced(mode, grid, naturalGrid(), lastSent, terminalDead);
+      if (terminalDead) setRecorded(true);
       applyMode();
     };
 
@@ -203,9 +215,6 @@ export function LocalTerminal({
 
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    // The terminal has exited/errored — nothing more will ever stream, so a
-    // reconnect could only wipe the history left on screen.
-    let terminalDead = false;
     // Set when we close the socket ourselves to recover from a retryable
     // error frame (e.g. "Host is offline"), so onclose knows to reconnect.
     let retryRequested = false;
@@ -362,20 +371,22 @@ export function LocalTerminal({
         <div className="shrink-0 flex items-center gap-2 px-3 py-1 text-[11px] bg-primary/10 text-text-muted">
           <span className="w-1.5 h-1.5 rounded-full bg-primary" />
           <span className="min-w-0 truncate">
-            Sized for another device
+            {recorded ? "Recorded screen" : "Sized for another device"}
             <span className="font-mono ml-1 opacity-70">
               {foreignGrid.cols}×{foreignGrid.rows}
             </span>
           </span>
-          <button
-            type="button"
-            onClick={() => claimRef.current()}
-            className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-text hover:bg-bg-hover/70 transition-colors"
-            title="Resize the session to this screen"
-          >
-            <Maximize2 className="w-3 h-3" />
-            Use this screen
-          </button>
+          {!recorded && (
+            <button
+              type="button"
+              onClick={() => claimRef.current()}
+              className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-text hover:bg-bg-hover/70 transition-colors"
+              title="Resize the session to this screen"
+            >
+              <Maximize2 className="w-3 h-3" />
+              Use this screen
+            </button>
+          )}
         </div>
       )}
       {/* No padding here: FitAddon sizes the grid from this box's border-box

@@ -163,7 +163,13 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   `terminalId`. Browsers never connect to the daemon; the daemon never accepts inbound
   connections (its hook server binds 127.0.0.1 only).
 - Scrollback lives in the daemon (512 KB ring per terminal). The DB stores only metadata
-  plus a throttled ANSI-stripped `preview` (last ~12 lines) for the wall view.
+  plus a throttled ANSI-stripped `preview` (last ~12 lines) for the wall view — and, once
+  a terminal exits, its **final screen**: the daemon sends the ring's tail (≤384 KB, raw
+  bytes) plus the PTY grid right before `exit`, stored in `local_terminal_snapshots`
+  (own table, so terminal rows and list responses stay lean; cascades on delete). Opening
+  an exited terminal replays it into the xterm at the recorded grid, so a finished session
+  reads the way it ran instead of as a text preview; the preview is the fallback for rows
+  recorded before snapshots existed.
 - Live UI updates: content-free nudges `{type:"local:changed", terminalId, hostId, userId}`
   on the shared `/ws/events` stream (that stream is visible to all authenticated users, so
   no terminal content may ever be published there); clients refetch via REST.
@@ -235,6 +241,10 @@ Daemon → server:
   resolve to the dir's GitHub/GitLab remote as kind `ref`). Rides the preview throttle, sent only when the set changes; the server
   sanitizes (https only, known kinds/providers, ≤50) and stores it in
   `local_terminals.links`
+- `{type:"snapshot", terminalId, dataB64, cols, rows}` — the final screen (ring tail +
+  grid), sent right before `exit`; its own frame so an oversize one the server drops
+  (>1 MB) can never swallow the exit. Accepted only from the owning host while the row
+  is still live.
 - `{type:"exit", terminalId, exitCode}`
 - `{type:"ping"}` every 30 s (server updates `lastSeenAt`, replies `{type:"pong"}`)
 
@@ -255,8 +265,12 @@ Host liveness: sweeper marks hosts offline after 90 s without a ping and fails
 
 Auth: standard WS auth + `requireWsRole(member)` + terminal ownership. Server → client:
 **binary frames are raw terminal bytes** (scrollback replay first, then live); JSON text
-frames are control: `{type:"status", state, attentionState}` | `{type:"exit", exitCode}` |
-`{type:"error", message}`. Client → server (JSON only — no raw-keystroke frames, which
+frames are control: `{type:"status", state, attentionState}` | `{type:"size", cols, rows}` |
+`{type:"exit", exitCode}` | `{type:"error", message}`. An exited terminal is not attached:
+the server sends `size` (the grid the final screen was recorded at), the screen bytes, then
+`exit` — in that order, so the viewer lays the grid out before painting. The web pane pins
+that grid ("Recorded screen 132×40" strip, no "use this screen"), so a click to select text or
+a window resize can never reflow the replay. Client → server (JSON only — no raw-keystroke frames, which
 eliminates the classic "pasted JSON swallowed as control" bug):
 `{type:"input", data}` | `{type:"resize", cols, rows}`.
 

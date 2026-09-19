@@ -26,6 +26,9 @@ import { RingBuffer } from "./ring-buffer.js";
  */
 
 const RING_CAPACITY = 512 * 1024;
+// Tail of the ring persisted server-side as the terminal's final screen.
+// Kept under the server's 1 MB frame limit with base64 overhead to spare.
+const SNAPSHOT_BYTES = 384 * 1024;
 const PREVIEW_THROTTLE_MS = 2000;
 const PREVIEW_SOURCE_BYTES = 16 * 1024;
 const KILL_ESCALATION_MS = 5000;
@@ -196,6 +199,23 @@ export class TerminalManager {
     });
   }
 
+  /**
+   * The final screen, sent right before `exit`: what a viewer attached at
+   * that moment would have seen, at the grid it was drawn for. The server
+   * persists it so the session can be read back after the PTY is gone.
+   */
+  private sendSnapshot(term: ManagedTerminal): void {
+    const tail = term.ring.tail(SNAPSHOT_BYTES);
+    if (tail.length === 0) return;
+    this.opts.send({
+      type: "snapshot",
+      terminalId: term.terminalId,
+      dataB64: tail.toString("base64"),
+      cols: term.pty.cols,
+      rows: term.pty.rows,
+    });
+  }
+
   kill(terminalId: string, signal?: string): void {
     const term = this.terminals.get(terminalId);
     if (!term) return;
@@ -271,6 +291,7 @@ export class TerminalManager {
     for (const term of this.terminals.values()) {
       if (term.previewTimer) clearTimeout(term.previewTimer);
       if (term.killTimer) clearTimeout(term.killTimer);
+      this.sendSnapshot(term);
       this.opts.send({ type: "exit", terminalId: term.terminalId, exitCode: null });
       this.opts.attention.remove(term.terminalId);
       try {
@@ -306,8 +327,10 @@ export class TerminalManager {
       clearTimeout(term.killTimer);
       term.killTimer = null;
     }
-    // Final preview so the wall shows the last output.
+    // Final preview so the wall shows the last output, and the final screen
+    // so the pane can replay it.
     this.emitPreview(term);
+    this.sendSnapshot(term);
     this.opts.send({ type: "exit", terminalId: term.terminalId, exitCode: exitCode ?? null });
     this.opts.attention.remove(term.terminalId);
     this.terminals.delete(term.terminalId);

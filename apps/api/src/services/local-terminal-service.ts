@@ -21,7 +21,7 @@ import {
   type LocalTerminalUsage,
 } from "@optio/shared";
 import { db } from "../db/client.js";
-import { localTerminals } from "../db/schema.js";
+import { localTerminalSnapshots, localTerminals } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { publishLocalChanged } from "./event-bus.js";
 import { isAuthDisabled } from "./oauth/index.js";
@@ -501,6 +501,67 @@ export async function handlePreview(
     .where(and(eq(localTerminals.id, terminalId), eq(localTerminals.hostId, hostId)));
   // Previews are wall-view sugar — no nudge per preview (they're throttled
   // daemon-side but would still swamp the events channel across terminals).
+}
+
+/**
+ * Largest final screen we keep per terminal. The daemon's ring is 512 KB
+ * and it sends a bounded tail (see terminal-manager.ts), so this only guards
+ * against a misbehaving daemon; a snapshot over the cap is dropped, and the
+ * pane falls back to the text preview.
+ */
+export const MAX_SNAPSHOT_BYTES = 1024 * 1024;
+const MAX_SNAPSHOT_DIMENSION = 1000;
+
+export interface LocalTerminalSnapshot {
+  data: Buffer;
+  cols: number;
+  rows: number;
+}
+
+/**
+ * The daemon's final screen for a terminal, sent right before `exit`. Only
+ * the owning host may write it, and only while the terminal is still live —
+ * a stale daemon can't overwrite the screen of a resumed/re-run row.
+ */
+export async function handleSnapshot(
+  hostId: string,
+  terminalId: string,
+  dataB64: string,
+  cols: number,
+  rows: number,
+): Promise<boolean> {
+  if (typeof dataB64 !== "string" || dataB64.length === 0) return false;
+  if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1) return false;
+  const data = Buffer.from(dataB64, "base64");
+  if (data.length === 0 || data.length > MAX_SNAPSHOT_BYTES) return false;
+  const row = await getTerminal(terminalId);
+  if (!row || row.hostId !== hostId) return false;
+  if (row.state !== "running" && row.state !== "launching") return false;
+  const grid = {
+    cols: Math.min(cols, MAX_SNAPSHOT_DIMENSION),
+    rows: Math.min(rows, MAX_SNAPSHOT_DIMENSION),
+  };
+  await db
+    .insert(localTerminalSnapshots)
+    .values({ terminalId, data, ...grid })
+    .onConflictDoUpdate({
+      target: localTerminalSnapshots.terminalId,
+      set: { data, ...grid, createdAt: new Date() },
+    });
+  return true;
+}
+
+/** The recorded final screen of an exited terminal, if the daemon sent one. */
+export async function getSnapshot(terminalId: string): Promise<LocalTerminalSnapshot | null> {
+  const [row] = await db
+    .select({
+      data: localTerminalSnapshots.data,
+      cols: localTerminalSnapshots.cols,
+      rows: localTerminalSnapshots.rows,
+    })
+    .from(localTerminalSnapshots)
+    .where(eq(localTerminalSnapshots.terminalId, terminalId));
+  return row ?? null;
 }
 
 const LINK_KINDS = new Set(["pr", "issue", "ref"]);

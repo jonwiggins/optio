@@ -1670,6 +1670,21 @@ export const localTerminals = pgTable(
   ],
 );
 
+// The final screen of an exited terminal: the tail of the daemon's output
+// ring as raw bytes plus the PTY grid it was laid out for, so opening a
+// finished session replays what was on screen at the size it ran at
+// (scrollback otherwise dies with the PTY). Its own table keeps the
+// terminal row — and every list response — free of a few hundred KB.
+export const localTerminalSnapshots = pgTable("local_terminal_snapshots", {
+  terminalId: uuid("terminal_id")
+    .primaryKey()
+    .references(() => localTerminals.id, { onDelete: "cascade" }),
+  data: bytea("data").notNull(),
+  cols: integer("cols").notNull(),
+  rows: integer("rows").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const localBlueprints = pgTable(
   "local_blueprints",
   {

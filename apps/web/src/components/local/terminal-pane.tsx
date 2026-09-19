@@ -81,15 +81,24 @@ export function TerminalPane({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
-  // True once the stream has painted real bytes into the xterm. A terminal
-  // that exits while we're attached keeps its screen; one we open after it
-  // exited gets nothing (scrollback dies with the PTY) — see the render.
+  // True once the stream has painted real bytes into the xterm: live output,
+  // or the final screen the daemon recorded at exit. `streamSettled` marks
+  // the stream's end (exit frame, or a stop with nothing more to come) — only
+  // then do we know a dead terminal has no screen to show. See the render.
   const [streamedOutput, setStreamedOutput] = useState(false);
+  const [streamSettled, setStreamSettled] = useState(false);
   const handleOutput = useCallback(() => setStreamedOutput(true), []);
+  const handleConn = useCallback((next: ConnState) => {
+    setConn(next);
+    if (next === "disconnected") setStreamSettled(true);
+  }, []);
   // Resume/restart parks the terminal in `pending` and remounts the xterm
   // fresh — forget the old screen so a second exit falls back to the preview.
   useEffect(() => {
-    if (terminal?.state === "pending") setStreamedOutput(false);
+    if (terminal?.state === "pending") {
+      setStreamedOutput(false);
+      setStreamSettled(false);
+    }
   }, [terminal?.state]);
   const fit = useTitleFit(!loading && terminal != null);
   const railCollapsed = useRailStore((s) => s.collapsed);
@@ -199,6 +208,9 @@ export function TerminalPane({
 
   const handleExit = useCallback(
     (exitCode: number | null) => {
+      // The exit frame is the last thing the stream sends (after any
+      // recorded screen), so from here `streamedOutput` is final.
+      setStreamSettled(true);
       setTerminal((prev: any) =>
         prev && prev.state !== "exited" && prev.state !== "error"
           ? { ...prev, state: "exited", exitCode }
@@ -571,13 +583,14 @@ export function TerminalPane({
         </div>
       )}
       <div className="flex-1 min-h-0 flex flex-col">
-        {/* Scrollback lives in the daemon and dies with the PTY, so a terminal
-            opened after it finished has nothing to stream — show the persisted
-            preview (the last lines of output) in the terminal's place so
-            "review the result" has a result. A terminal that finishes while
-            we're watching keeps its own screen instead: stacking the preview
-            above it would squeeze the xterm into a few unreadable rows. */}
-        {isDead && !streamedOutput && terminal.preview ? (
+        {/* A finished terminal replays the screen the daemon recorded at exit
+            into the xterm, at the grid it ran at, so it reads the way it did
+            live. Only when the stream has ended without a byte — a row from
+            before screens were recorded — does the persisted text preview
+            (the last lines of output) take the terminal's place, full height,
+            so "review the result" still has a result. Never stack the two:
+            that squeezes the xterm into a few unreadable rows. */}
+        {isDead && streamSettled && !streamedOutput && terminal.preview ? (
           <div className="flex-1 min-h-0 flex flex-col bg-[#09090b] px-4 py-3">
             <div className="shrink-0 text-[10px] uppercase tracking-wide text-text-muted mb-1.5">
               Last output
@@ -596,7 +609,7 @@ export function TerminalPane({
                 terminalId={terminalId}
                 onStatus={handleStatus}
                 onExit={handleExit}
-                onConn={setConn}
+                onConn={handleConn}
                 onOutput={handleOutput}
               />
             </ErrorBoundary>

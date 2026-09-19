@@ -23,9 +23,11 @@ import {
   createTerminal,
   deleteTerminal,
   flushParkedTerminals,
+  getSnapshot,
   getTerminal,
   handleAttention,
   handleExit,
+  handleSnapshot,
   handleLinks,
   handleSession,
   handleUsage,
@@ -356,6 +358,75 @@ describe("local terminals", () => {
     // ...and now deletable.
     await deleteTerminal(row!);
     expect(await getTerminal(t.id)).toBeNull();
+  });
+});
+
+describe("local terminal snapshots", () => {
+  async function runningTerminal(host: Awaited<ReturnType<typeof makeHost>>) {
+    relay.registerDaemon(host.id, null, new FakeDaemonSocket());
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "command", command: "make test" },
+    });
+    await handleStarted(host.id, t.id);
+    return t;
+  }
+
+  it("records the final screen from the owning host while the terminal is live", async () => {
+    const host = await makeHost();
+    const t = await runningTerminal(host);
+    const screen = Buffer.from("\x1b[2J\x1b[H$ make test\r\nok\r\n");
+
+    expect(await handleSnapshot(host.id, t.id, screen.toString("base64"), 132, 40)).toBe(true);
+    await handleExit(host.id, t.id, 0);
+
+    const snap = await getSnapshot(t.id);
+    expect(snap?.cols).toBe(132);
+    expect(snap?.rows).toBe(40);
+    expect(Buffer.from(snap!.data).equals(screen)).toBe(true);
+    // The terminal row itself stays lean — no screen bytes ride on it.
+    expect(Object.keys((await getTerminal(t.id))!)).not.toContain("data");
+  });
+
+  it("ignores snapshots from another host, after exit, or with bad input", async () => {
+    const host = await makeHost();
+    const other = await makeHost();
+    const t = await runningTerminal(host);
+    const b64 = Buffer.from("hello").toString("base64");
+
+    expect(await handleSnapshot(other.id, t.id, b64, 80, 24)).toBe(false);
+    expect(await handleSnapshot(host.id, t.id, "", 80, 24)).toBe(false);
+    expect(await handleSnapshot(host.id, t.id, b64, 0, 24)).toBe(false);
+    expect(await handleSnapshot(host.id, t.id, b64, 80, 1.5)).toBe(false);
+    expect(await getSnapshot(t.id)).toBeNull();
+
+    await handleExit(host.id, t.id, 0);
+    // A late frame from a stale daemon can't rewrite a finished row's screen.
+    expect(await handleSnapshot(host.id, t.id, b64, 80, 24)).toBe(false);
+    expect(await getSnapshot(t.id)).toBeNull();
+  });
+
+  it("clamps oversize grids and drops screens over the byte cap", async () => {
+    const host = await makeHost();
+    const t = await runningTerminal(host);
+    const big = Buffer.alloc(1024 * 1024 + 1, 0x41).toString("base64");
+    expect(await handleSnapshot(host.id, t.id, big, 80, 24)).toBe(false);
+
+    const b64 = Buffer.from("x").toString("base64");
+    expect(await handleSnapshot(host.id, t.id, b64, 5000, 5000)).toBe(true);
+    expect(await getSnapshot(t.id)).toMatchObject({ cols: 1000, rows: 1000 });
+  });
+
+  it("goes away with the terminal", async () => {
+    const host = await makeHost();
+    const t = await runningTerminal(host);
+    await handleSnapshot(host.id, t.id, Buffer.from("bye").toString("base64"), 80, 24);
+    await handleExit(host.id, t.id, 0);
+    await deleteTerminal((await getTerminal(t.id))!);
+    expect(await getSnapshot(t.id)).toBeNull();
   });
 });
 

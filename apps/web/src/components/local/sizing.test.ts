@@ -60,4 +60,17 @@ describe("onGridAnnounced", () => {
     expect(sameGrid(null, laptop)).toBe(false);
     expect(sameGrid(laptop, { ...laptop })).toBe(true);
   });
+
+  it("pins a recorded grid even when it matches our natural fit", () => {
+    // An exited terminal's final screen was drawn for `laptop`; there is no
+    // PTY to size, so the grid stays passive rather than following resizes.
+    expect(onGridAnnounced({ kind: "unclaimed" }, laptop, laptop, null, true)).toEqual({
+      kind: "passive",
+      grid: laptop,
+    });
+    expect(onGridAnnounced({ kind: "owner" }, laptop, laptop, laptop, true)).toEqual({
+      kind: "passive",
+      grid: laptop,
+    });
+  });
 });

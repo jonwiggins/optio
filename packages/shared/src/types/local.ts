@@ -338,6 +338,14 @@ export type LocalDaemonMessage =
   | { type: "agent-limits"; limits: LocalHostAgentLimits }
   /** The PTY's current grid — sent on spawn, after every resize, and to each new attach. */
   | { type: "size"; terminalId: string; cols: number; rows: number }
+  /**
+   * The final screen, sent right before `exit`: the tail of the output ring
+   * plus the grid it was laid out for. Persisted so a terminal opened after
+   * it finished can replay what was on screen at the recorded size
+   * (scrollback otherwise dies with the PTY). Its own frame so an oversize
+   * snapshot the server rejects can never swallow the `exit`.
+   */
+  | { type: "snapshot"; terminalId: string; dataB64: string; cols: number; rows: number }
   | { type: "exit"; terminalId: string; exitCode: number | null }
   | { type: "ping" };
 
@@ -366,6 +374,8 @@ export type LocalStreamServerMessage =
   /**
    * The PTY's current grid. Viewers that did not ask for this size render it
    * scaled to fit rather than fighting over the PTY (see local-terminal.tsx).
+   * For an exited terminal it is the grid its final screen was recorded at:
+   * the replay that follows only reads right at that size.
    */
   | { type: "size"; cols: number; rows: number }
   | { type: "exit"; exitCode: number | null }
