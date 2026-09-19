@@ -59,9 +59,11 @@ export function describeSpec(spec: LocalTerminalSpec): string | null {
       return spec.command;
     case "agent": {
       const bin = AGENT_BINS[spec.agent] ?? spec.agent;
-      if (!spec.prompt) return bin;
+      if (spec.resumeSessionId) return `${bin} --resume ${spec.resumeSessionId.slice(0, 8)}…`;
+      const flag = spec.mode === "headless" ? " -p" : "";
+      if (!spec.prompt) return `${bin}${flag}`;
       const short = spec.prompt.length > 120 ? `${spec.prompt.slice(0, 117)}...` : spec.prompt;
-      return `${bin} "${short.replaceAll("\n", " ")}"`;
+      return `${bin}${flag} "${short.replaceAll("\n", " ")}"`;
     }
   }
 }
@@ -385,14 +387,80 @@ export async function handleExit(
       state: "exited",
       exitCode,
       endedAt: new Date(),
-      // Automation results land in the "needs you" queue for review; a shell
-      // you typed `exit` into does not demand attention.
-      attentionState: row.spawnedBy === "manual" ? "idle" : "needs_you",
-      attentionReason: row.spawnedBy === "manual" ? null : "exit",
+      ...exitAttention(row, exitCode),
     },
     { hostId },
   );
   if (updated) relay.notifyBrowsers(terminalId, { type: "exit", exitCode });
+}
+
+/**
+ * Attention after exit. Automation results land in the "needs you" queue for
+ * review (a headless run that finished cleanly is `done`, anything else is
+ * `exit`); a shell you typed `exit` into does not demand attention.
+ */
+export function exitAttention(
+  row: Pick<LocalTerminalRow, "spawnedBy" | "spec">,
+  exitCode: number | null,
+): { attentionState: LocalAttentionState; attentionReason: string | null } {
+  if (row.spawnedBy === "manual" || row.spawnedBy === "resume") {
+    return { attentionState: "idle", attentionReason: null };
+  }
+  const spec = row.spec as unknown as LocalTerminalSpec;
+  const headless = spec.kind === "agent" && spec.mode === "headless";
+  return {
+    attentionState: "needs_you",
+    attentionReason: headless && exitCode === 0 ? "done" : "exit",
+  };
+}
+
+/** The daemon learned the agent CLI's own session id (from its hooks). */
+export async function handleSession(
+  hostId: string,
+  terminalId: string,
+  agentSessionId: unknown,
+): Promise<void> {
+  if (typeof agentSessionId !== "string" || !/^[\w.-]{1,128}$/.test(agentSessionId)) return;
+  const row = await getTerminal(terminalId);
+  if (!row || row.hostId !== hostId || row.agentSessionId === agentSessionId) return;
+  const updated = await updateTerminal(terminalId, { agentSessionId });
+  if (updated) await notifyChanged(updated);
+}
+
+/**
+ * Resume an exited (or still running) agent session as a fresh interactive
+ * terminal in the same dir — `claude --resume <id>`. The new row inherits the
+ * blueprint / ticket links so its badges carry over; it is `spawnedBy:
+ * "resume"`, so exiting it later doesn't re-enter the needs-you queue.
+ */
+export async function resumeTerminal(row: LocalTerminalRow): Promise<LocalTerminalRow> {
+  const spec = row.spec as unknown as LocalTerminalSpec;
+  if (spec.kind !== "agent") throw new Error("Only agent sessions can be resumed");
+  if (!row.agentSessionId) throw new Error("This session never reported a session id to resume");
+  if (spec.agent !== "claude-code" && spec.agent !== "codex") {
+    throw new Error(`Resume is not supported for ${spec.agent}`);
+  }
+  const host = await getHost(row.hostId);
+  if (!host) throw new Error("Host not found");
+  return createTerminal({
+    host,
+    userId: row.userId,
+    workspaceId: row.workspaceId,
+    dir: row.dir,
+    spec: { kind: "agent", agent: spec.agent, resumeSessionId: row.agentSessionId },
+    title: row.title.startsWith("↺ ") ? row.title : `↺ ${row.title}`,
+    spawnedBy: "resume",
+    blueprintId: row.blueprintId ?? undefined,
+    triggerId: row.triggerId ?? undefined,
+    ticket:
+      row.ticketSource && row.ticketExternalId
+        ? {
+            source: row.ticketSource,
+            externalId: row.ticketExternalId,
+            url: row.ticketUrl ?? undefined,
+          }
+        : undefined,
+  });
 }
 
 export async function handleAttention(
@@ -596,8 +664,7 @@ export async function reconcileHello(
           state: "exited",
           errorMessage: "Daemon restarted while the terminal was running",
           endedAt: new Date(),
-          attentionState: row.spawnedBy === "manual" ? "idle" : "needs_you",
-          attentionReason: row.spawnedBy === "manual" ? null : "exit",
+          ...exitAttention(row, null),
         },
         { hostId },
       );

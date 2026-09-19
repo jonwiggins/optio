@@ -138,9 +138,17 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
     onStatus: status,
   });
 
+  // Agent session ids already reported, so each terminal sends its id once.
+  const reportedSessions = new Map<string, string>();
+
   const hookServer = await startHookServer((terminalId, eventName, payload) => {
     if (!manager.has(terminalId)) return;
     attention.hookEvent(terminalId, eventName);
+    // The agent's own session id makes the run resumable (`claude --resume`).
+    if (payload.sessionId && reportedSessions.get(terminalId) !== payload.sessionId) {
+      reportedSessions.set(terminalId, payload.sessionId);
+      send({ type: "session", terminalId, agentSessionId: payload.sessionId });
+    }
     // Every hook names the transcript; Stop is when a turn's usage is
     // complete, but folding on each event keeps the header fresh mid-turn too.
     if (payload.transcriptPath) {

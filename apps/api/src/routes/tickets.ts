@@ -361,6 +361,19 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       const rawPayload = req.body;
       const payload = rawPayload as Record<string, Record<string, unknown> | string | undefined>;
 
+      // Local automations: review requests, @-mentions, assignments, new
+      // PRs / issues → spawn terminals on the user's own machine.
+      if (typeof event === "string") {
+        try {
+          const { normalizeGitHubEvent, fireLocalEventTriggers } =
+            await import("../services/local-event-service.js");
+          const normalized = normalizeGitHubEvent(event, rawPayload);
+          if (normalized) await fireLocalEventTriggers("github", normalized);
+        } catch (err) {
+          logger.warn({ err, event }, "GitHub event → local automation dispatch failed");
+        }
+      }
+
       if (event === "issues" && payload.action === "labeled") {
         const label = (payload.label as Record<string, unknown> | undefined)?.name;
         if (label === "optio") {

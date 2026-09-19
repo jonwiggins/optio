@@ -145,6 +145,9 @@ export async function localDaemonWs(app: FastifyInstance) {
           return;
         case "usage":
           await terminalService.handleUsage(hostId, msg.terminalId, msg.usage);
+          break;
+        case "session":
+          await terminalService.handleSession(hostId, msg.terminalId, msg.agentSessionId);
           return;
         case "agent-limits":
           await handleAgentLimits(hostId, msg.limits);

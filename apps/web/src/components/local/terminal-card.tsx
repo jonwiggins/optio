@@ -183,6 +183,7 @@ const SPAWN_SOURCE: Record<string, { label: string; icon: any }> = {
   trigger: { label: "trigger", icon: Webhook },
   blueprint: { label: "blueprint", icon: Layers },
   api: { label: "api", icon: Bot },
+  resume: { label: "resumed", icon: User },
 };
 
 export function SpawnSourceBadge({ spawnedBy }: { spawnedBy: string }) {
@@ -203,6 +204,8 @@ const ATTENTION_LABELS: Record<string, string> = {
   quiet: "gone quiet — probably waiting on you",
   finished: "command finished",
   exit: "finished — review the result",
+  done: "done — review the result",
+  stale: "went quiet a while ago",
 };
 
 export function attentionLabel(reason: string | null): string {

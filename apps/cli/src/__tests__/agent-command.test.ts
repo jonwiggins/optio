@@ -40,3 +40,34 @@ describe("buildAgentCommand", () => {
     expect(buildAgentCommand("opencode", undefined, SETTINGS)).toBe("opencode");
   });
 });
+
+describe("buildAgentCommand session modes", () => {
+  it("headless mode uses each CLI's one-shot entry point", () => {
+    const o = { mode: "headless" as const };
+    expect(buildAgentCommand("claude-code", "p", SETTINGS, o)).toBe(
+      `claude --settings '${SETTINGS}' -p 'p'`,
+    );
+    expect(buildAgentCommand("codex", "p", SETTINGS, o)).toBe(`codex exec 'p'`);
+    expect(buildAgentCommand("cursor", "p", SETTINGS, o)).toBe(`cursor-agent -p 'p'`);
+    expect(buildAgentCommand("gemini", "p", SETTINGS, o)).toBe(`gemini -p 'p'`);
+    expect(buildAgentCommand("opencode", "p", SETTINGS, o)).toBe(`opencode run 'p'`);
+  });
+
+  it("interactive mode is the default and matches the legacy shape", () => {
+    expect(buildAgentCommand("claude-code", "p", SETTINGS, { mode: "interactive" })).toBe(
+      buildAgentCommand("claude-code", "p", SETTINGS),
+    );
+  });
+
+  it("resume passes the session id as a quoted argv element and is always interactive", () => {
+    expect(
+      buildAgentCommand("claude-code", undefined, SETTINGS, {
+        mode: "headless",
+        resumeSessionId: "abc-123",
+      }),
+    ).toBe(`claude --settings '${SETTINGS}' --resume 'abc-123'`);
+    expect(buildAgentCommand("codex", undefined, SETTINGS, { resumeSessionId: "x'y" })).toBe(
+      `codex resume 'x'\\''y'`,
+    );
+  });
+});

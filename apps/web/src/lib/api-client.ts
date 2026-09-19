@@ -1890,6 +1890,13 @@ export const api = {
   deleteLocalTerminal: (id: string) =>
     request<{}>(`/api/local/terminals/${id}`, { method: "DELETE" }),
 
+  /** Open an exited agent session again as a fresh interactive terminal. */
+  resumeLocalTerminal: (id: string) =>
+    request<{ terminal: any }>(`/api/local/terminals/${id}/resume`, {
+      method: "POST",
+      body: "{}",
+    }),
+
   listLocalBlueprints: () => request<{ blueprints: any[] }>("/api/local/blueprints"),
 
   createLocalBlueprint: (data: {
@@ -1902,6 +1909,8 @@ export const api = {
     /** Run the rendered template as this agent's prompt; null = raw shell command. */
     agent?: "claude-code" | "codex" | "cursor" | "gemini" | "opencode" | null;
     spawnMode?: "auto" | "hold";
+    /** Agent spawns: stay open for chat (default) or exit when the turn is done. */
+    sessionMode?: "interactive" | "headless";
   }) =>
     request<{ blueprint: any }>("/api/local/blueprints", {
       method: "POST",
@@ -1920,6 +1929,7 @@ export const api = {
       /** Run the rendered template as this agent's prompt; null = raw shell command. */
       agent: "claude-code" | "codex" | "cursor" | "gemini" | "opencode" | null;
       spawnMode: "auto" | "hold";
+      sessionMode: "interactive" | "headless";
       enabled: boolean;
     }>,
   ) =>
@@ -1943,7 +1953,7 @@ export const api = {
   createLocalBlueprintTrigger: (
     id: string,
     data: {
-      type: "manual" | "schedule" | "webhook" | "ticket";
+      type: "manual" | "schedule" | "webhook" | "ticket" | "github" | "slack" | "linear";
       config?: Record<string, unknown>;
       paramMapping?: Record<string, unknown>;
       enabled?: boolean;
@@ -1951,6 +1961,16 @@ export const api = {
   ) =>
     request<{ trigger: any }>(`/api/local/blueprints/${id}/triggers`, {
       method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateLocalBlueprintTrigger: (
+    id: string,
+    triggerId: string,
+    data: { config?: Record<string, unknown>; enabled?: boolean },
+  ) =>
+    request<{ trigger: any }>(`/api/local/blueprints/${id}/triggers/${triggerId}`, {
+      method: "PATCH",
       body: JSON.stringify(data),
     }),
 

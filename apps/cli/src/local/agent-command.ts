@@ -1,28 +1,51 @@
-import { shellQuote, type LocalAgentKind } from "@optio/shared";
+import { shellQuote, type LocalAgentKind, type LocalAgentSessionMode } from "@optio/shared";
+
+export interface AgentCommandOptions {
+  /** `interactive` (default) stays at the agent's prompt; `headless` runs one turn and exits. */
+  mode?: LocalAgentSessionMode;
+  /** Resume this agent session instead of starting fresh (always interactive). */
+  resumeSessionId?: string;
+}
 
 /**
- * Build the shell command string for an `{kind: "agent"}` spawn. Prompts are
- * always passed as a single shell-quoted argv element — never interpolated
- * into shell syntax (see docs/optio-local.md, "Command safety").
+ * Build the shell command string for an `{kind: "agent"}` spawn. Prompts and
+ * session ids are always passed as single shell-quoted argv elements — never
+ * interpolated into shell syntax (see docs/optio-local.md, "Command safety").
+ *
+ * Headless mode maps to each CLI's non-interactive entry point (`claude -p`,
+ * `codex exec`, …): the process prints its result and exits, which is the
+ * "exit when done" automation shape. Claude Code still fires hooks in `-p`
+ * mode, so the session id is captured and the run can be resumed later.
  */
 export function buildAgentCommand(
   agent: LocalAgentKind,
   prompt: string | undefined,
   hookSettingsPath: string,
+  opts: AgentCommandOptions = {},
 ): string {
+  const headless = opts.mode === "headless" && !opts.resumeSessionId;
+  const resume = opts.resumeSessionId ? shellQuote(opts.resumeSessionId) : null;
+  const p = prompt ? shellQuote(prompt) : null;
   switch (agent) {
-    case "claude-code":
-      return (
-        `claude --settings ${shellQuote(hookSettingsPath)}` +
-        (prompt ? ` ${shellQuote(prompt)}` : "")
-      );
-    case "codex":
-      return `codex` + (prompt ? ` ${shellQuote(prompt)}` : "");
+    case "claude-code": {
+      const base = `claude --settings ${shellQuote(hookSettingsPath)}`;
+      if (resume) return `${base} --resume ${resume}` + (p ? ` ${p}` : "");
+      if (headless) return `${base} -p` + (p ? ` ${p}` : "");
+      return base + (p ? ` ${p}` : "");
+    }
+    case "codex": {
+      if (resume) return `codex resume ${resume}` + (p ? ` ${p}` : "");
+      if (headless) return `codex exec` + (p ? ` ${p}` : "");
+      return `codex` + (p ? ` ${p}` : "");
+    }
     case "cursor":
-      return `cursor-agent` + (prompt ? ` ${shellQuote(prompt)}` : "");
+      if (headless) return `cursor-agent -p` + (p ? ` ${p}` : "");
+      return `cursor-agent` + (p ? ` ${p}` : "");
     case "gemini":
-      return `gemini` + (prompt ? ` -i ${shellQuote(prompt)}` : "");
+      if (headless) return `gemini` + (p ? ` -p ${p}` : "");
+      return `gemini` + (p ? ` -i ${p}` : "");
     case "opencode":
-      return `opencode` + (prompt ? ` --prompt ${shellQuote(prompt)}` : "");
+      if (headless) return `opencode run` + (p ? ` ${p}` : "");
+      return `opencode` + (p ? ` --prompt ${p}` : "");
   }
 }

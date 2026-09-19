@@ -9,7 +9,13 @@
  * extra quotes around params (`claude {{prompt}}`, not `claude "{{prompt}}"`).
  */
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { shellQuote, type LocalAgentKind, type LocalTerminalSpec } from "@optio/shared";
+import {
+  shellQuote,
+  type LocalAgentKind,
+  type LocalAgentSessionMode,
+  type LocalTerminalSpec,
+  type LocalTriggerType,
+} from "@optio/shared";
 import { db } from "../db/client.js";
 import { localBlueprints, workflowTriggers } from "../db/schema.js";
 import { logger } from "../logger.js";
@@ -50,12 +56,16 @@ export interface CreateBlueprintInput {
   commandTemplate: string;
   agent?: LocalAgentKind | null;
   spawnMode?: "auto" | "hold";
+  /** Agent spawns only: stay open for chat (default) or exit when the turn is done. */
+  sessionMode?: LocalAgentSessionMode;
 }
 
+/**
+ * Where a blueprint runs. `dir` and `repoUrl` are both optional: an event
+ * trigger (GitHub / Linear) can carry the repo, and as a last resort the
+ * host's first allowlisted dir is used — see resolveBlueprintDir.
+ */
 export async function createBlueprint(input: CreateBlueprintInput): Promise<LocalBlueprintRow> {
-  if (!input.dir && !input.repoUrl) {
-    throw new Error("Blueprint needs a dir or a repoUrl to resolve one");
-  }
   const [row] = await db
     .insert(localBlueprints)
     .values({
@@ -69,6 +79,7 @@ export async function createBlueprint(input: CreateBlueprintInput): Promise<Loca
       commandTemplate: input.commandTemplate,
       agent: input.agent ?? null,
       spawnMode: input.spawnMode ?? "auto",
+      sessionMode: input.sessionMode ?? "interactive",
     })
     .returning();
   return row;
@@ -94,15 +105,14 @@ export async function updateBlueprint(
   updates: Partial<
     Pick<
       CreateBlueprintInput,
-      | "name"
-      | "description"
-      | "hostId"
-      | "dir"
-      | "repoUrl"
-      | "commandTemplate"
-      | "agent"
-      | "spawnMode"
-    > & { enabled: boolean }
+      "name" | "commandTemplate" | "agent" | "spawnMode" | "sessionMode"
+    > & {
+      description: string | null;
+      hostId: string | null;
+      dir: string | null;
+      repoUrl: string | null;
+      enabled: boolean;
+    }
   >,
 ): Promise<LocalBlueprintRow | null> {
   const [row] = await db
@@ -124,10 +134,33 @@ export async function deleteBlueprint(id: string): Promise<boolean> {
 }
 
 /**
+ * Dir resolution for a spawn: the blueprint's explicit dir → the allowlisted
+ * dir whose git remote matches the blueprint's repoUrl → the dir matching the
+ * event's repo (`repoUrlHint`, e.g. the PR's repository) → the host's first
+ * allowlisted dir. Null when the host advertises nothing.
+ */
+export function resolveBlueprintDir(
+  blueprint: Pick<LocalBlueprintRow, "dir" | "repoUrl">,
+  host: LocalHostRow,
+  repoUrlHint?: string,
+): string | null {
+  if (blueprint.dir) return blueprint.dir;
+  if (blueprint.repoUrl) {
+    const byRepo = findHostDirForRepo(host, blueprint.repoUrl);
+    if (byRepo) return byRepo;
+  }
+  if (repoUrlHint) {
+    const byHint = findHostDirForRepo(host, repoUrlHint);
+    if (byHint) return byHint;
+  }
+  if (blueprint.repoUrl) return null; // a pinned repo that isn't on this host is an error, not a fallback
+  return host.dirs?.[0]?.path ?? null;
+}
+
+/**
  * Spawn a terminal from a blueprint. Host resolution: pinned host → the
  * owner's most recently seen online host → any host of the owner (parks
- * pending until it comes online). Dir resolution: explicit dir → allowlisted
- * dir whose git remote matches repoUrl.
+ * pending until it comes online). Dir resolution: see resolveBlueprintDir.
  */
 export async function spawnFromBlueprint(
   blueprint: LocalBlueprintRow,
@@ -136,6 +169,10 @@ export async function spawnFromBlueprint(
     triggerId?: string;
     spawnedBy?: "trigger" | "blueprint" | "ticket";
     ticket?: { source: string; externalId: string; url?: string };
+    /** Repo the triggering event was about; used when the blueprint pins no dir. */
+    repoUrlHint?: string;
+    /** Terminal title override (defaults to the blueprint name). */
+    title?: string;
   } = {},
 ): Promise<LocalTerminalRow> {
   if (!blueprint.enabled) throw new Error("Blueprint is disabled");
@@ -153,8 +190,7 @@ export async function spawnFromBlueprint(
   }
   if (!host) throw new Error("No local host available for this blueprint");
 
-  const dir =
-    blueprint.dir ?? (blueprint.repoUrl ? findHostDirForRepo(host, blueprint.repoUrl) : null);
+  const dir = resolveBlueprintDir(blueprint, host, opts.repoUrlHint);
   if (!dir) {
     throw new Error(
       `No directory on host "${host.name}" matches this blueprint (dir unset, repo not in the host's dir list)`,
@@ -171,7 +207,12 @@ export async function spawnFromBlueprint(
       rawParams[key] = String(value ?? "");
     }
     const prompt = renderTemplateString(blueprint.commandTemplate, rawParams).trim();
-    spec = { kind: "agent", agent: blueprint.agent, prompt: prompt || undefined };
+    spec = {
+      kind: "agent",
+      agent: blueprint.agent,
+      prompt: prompt || undefined,
+      mode: blueprint.sessionMode ?? "interactive",
+    };
   } else {
     // Command mode: params are shell-single-quoted before substitution so a
     // trigger payload can never inject shell syntax.
@@ -190,7 +231,7 @@ export async function spawnFromBlueprint(
     workspaceId: blueprint.workspaceId,
     dir,
     spec,
-    title: blueprint.name,
+    title: opts.title ?? blueprint.name,
     spawnedBy: opts.spawnedBy ?? (opts.triggerId ? "trigger" : "blueprint"),
     blueprintId: blueprint.id,
     triggerId: opts.triggerId,
@@ -216,7 +257,7 @@ export async function listBlueprintTriggers(blueprintId: string) {
 
 export async function createBlueprintTrigger(input: {
   blueprintId: string;
-  type: "manual" | "schedule" | "webhook" | "ticket";
+  type: LocalTriggerType;
   config?: Record<string, unknown>;
   paramMapping?: Record<string, unknown>;
   enabled?: boolean;

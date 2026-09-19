@@ -9,7 +9,12 @@ import { z } from "zod";
 import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import { parseRepoUrl, type LocalTerminalSpec } from "@optio/shared";
+import {
+  LOCAL_GITHUB_EVENT_KINDS,
+  LOCAL_LINEAR_EVENT_KINDS,
+  parseRepoUrl,
+  type LocalTerminalSpec,
+} from "@optio/shared";
 import { logger } from "../logger.js";
 import { requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema, EmptyResponseSchema } from "../schemas/common.js";
@@ -70,12 +75,16 @@ const blueprintBodySchema = z
       .nullish()
       .describe("Run the rendered template as this agent (gets attention hooks); null = shell"),
     spawnMode: z.enum(["auto", "hold"]).optional(),
+    sessionMode: z
+      .enum(["interactive", "headless"])
+      .optional()
+      .describe("Agent spawns: stay open for chat (default) or exit when the turn is done"),
   })
-  .describe("Local blueprint definition");
+  .describe("Local automation (blueprint) definition");
 
 const triggerBodySchema = z
   .object({
-    type: z.enum(["manual", "schedule", "webhook", "ticket"]),
+    type: z.enum(["manual", "schedule", "webhook", "ticket", "github", "slack", "linear"]),
     config: z.record(z.unknown()).optional(),
     paramMapping: z.record(z.unknown()).optional(),
     enabled: z.boolean().optional(),
@@ -100,6 +109,40 @@ function validateTriggerConfig(
   }
   if (type === "webhook" && typeof config?.path !== "string") {
     return "Webhook triggers require config.path";
+  }
+  if (type === "github") {
+    if (config?.events !== undefined) {
+      if (!Array.isArray(config.events)) return "github.events must be an array";
+      const bad = config.events.find((e) => !LOCAL_GITHUB_EVENT_KINDS.includes(e));
+      if (bad) return `Unknown GitHub event kind: ${String(bad)}`;
+    }
+    const personal = (config?.events as string[] | undefined)?.some((e) =>
+      ["review_requested", "mentioned", "assigned"].includes(e),
+    );
+    if ((personal || !config?.events) && typeof config?.login !== "string") {
+      return "GitHub triggers need config.login (your GitHub username) for review / mention / assign events";
+    }
+    if (config?.repos !== undefined && !Array.isArray(config.repos)) {
+      return "github.repos must be an array of owner/name";
+    }
+  }
+  if (type === "slack") {
+    if (typeof config?.channelId !== "string" || !/^[A-Z][A-Z0-9]{5,}$/.test(config.channelId)) {
+      return "Slack triggers require config.channelId (e.g. C0123ABCD)";
+    }
+  }
+  if (type === "linear") {
+    if (config?.events !== undefined) {
+      if (!Array.isArray(config.events)) return "linear.events must be an array";
+      const bad = config.events.find((e) => !LOCAL_LINEAR_EVENT_KINDS.includes(e));
+      if (bad) return `Unknown Linear event kind: ${String(bad)}`;
+    }
+    const personal = (config?.events as string[] | undefined)?.some((e) =>
+      ["assigned", "mentioned"].includes(e),
+    );
+    if ((personal || !config?.events) && typeof config?.user !== "string") {
+      return "Linear triggers need config.user (your Linear name, handle, or user id) for assign / mention events";
+    }
   }
   return null;
 }
@@ -408,6 +451,39 @@ export async function localRoutes(rawApp: FastifyInstance) {
   );
 
   app.post(
+    "/api/local/terminals/:id/resume",
+    {
+      ...member,
+      schema: {
+        operationId: "resumeLocalTerminal",
+        summary: "Resume an agent session as a new interactive terminal",
+        description:
+          "Opens a fresh interactive terminal in the same directory that resumes the " +
+          "agent's own session (`claude --resume <id>`). Works for headless runs that " +
+          "already exited and for sessions still open. The agent must have reported a " +
+          "session id (Claude Code / Codex).",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        // nullish: a bodiless POST reaches the validator as null (see kill).
+        body: z.object({}).nullish(),
+        response: { 201: TerminalResponse, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      try {
+        const resumed = await terminalService.resumeTerminal(terminal);
+        reply.status(201).send({ terminal: resumed });
+      } catch (err) {
+        reply.status(409).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  app.post(
     "/api/local/terminals/:id/snooze",
     {
       ...member,
@@ -586,7 +662,13 @@ export async function localRoutes(rawApp: FastifyInstance) {
         summary: "Update a local blueprint",
         tags: ["Local"],
         params: z.object({ id: z.string().uuid() }),
-        body: blueprintBodySchema.partial().extend({ enabled: z.boolean().optional() }),
+        body: blueprintBodySchema.partial().extend({
+          enabled: z.boolean().optional(),
+          description: z.string().max(2000).nullable().optional(),
+          hostId: z.string().uuid().nullable().optional(),
+          dir: z.string().max(1000).nullable().optional(),
+          repoUrl: z.string().max(500).nullable().optional(),
+        }),
         response: { 200: BlueprintResponse, 404: ErrorResponseSchema },
       },
     },

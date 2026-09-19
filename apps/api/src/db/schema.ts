@@ -1619,7 +1619,7 @@ export const localTerminals = pgTable(
     attentionState: localAttentionStateEnum("attention_state").notNull().default("idle"),
     attentionReason: text("attention_reason"),
     spawnedBy: text("spawned_by")
-      .$type<"manual" | "ticket" | "trigger" | "blueprint" | "api">()
+      .$type<"manual" | "ticket" | "trigger" | "blueprint" | "api" | "resume">()
       .notNull()
       .default("manual"),
     blueprintId: uuid("blueprint_id"),
@@ -1627,6 +1627,9 @@ export const localTerminals = pgTable(
     ticketSource: text("ticket_source"),
     ticketExternalId: text("ticket_external_id"),
     ticketUrl: text("ticket_url"),
+    // The agent CLI's own session id (Claude Code hooks' `session_id`), so an
+    // exited run can be resumed as an interactive chat (`claude --resume`).
+    agentSessionId: text("agent_session_id"),
     preview: text("preview"),
     // PR / ticket links the daemon extracted from the output, first-seen order.
     links: jsonb("links")
@@ -1686,6 +1689,12 @@ export const localBlueprints = pgTable(
     // hooks. Null = plain shell command (params shell-quoted).
     agent: text("agent").$type<"claude-code" | "codex" | "cursor" | "gemini" | "opencode">(),
     spawnMode: text("spawn_mode").$type<"auto" | "hold">().notNull().default("auto"),
+    // Agent spawns only. "interactive" = stay open at the prompt for chat
+    // (needs-you queue); "headless" = one-shot print mode, exit when done.
+    sessionMode: text("session_mode")
+      .$type<"interactive" | "headless">()
+      .notNull()
+      .default("interactive"),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

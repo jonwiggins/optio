@@ -29,7 +29,7 @@ import { StatsBar } from "@/components/dashboard/pipeline-stats-bar";
 import { TerminalCard, attentionLabel } from "@/components/local/terminal-card";
 import { TerminalRow } from "@/components/local/terminal-row";
 import { NewTerminalDialog } from "@/components/local/new-terminal-dialog";
-import { BlueprintsSection } from "@/components/local/blueprints-section";
+import { AutomationsSection } from "@/components/local/automations-section";
 import { collectWorkLinks, workLinksSearchText } from "@/components/local/work-links";
 
 type StateFilter = "all" | "active" | "needs_you" | "exited";
@@ -482,7 +482,7 @@ export default function LocalPage() {
             </div>
           )}
 
-          <BlueprintsSection hosts={hosts} />
+          <AutomationsSection hosts={hosts} />
         </>
       )}
 

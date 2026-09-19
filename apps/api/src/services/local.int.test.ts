@@ -27,8 +27,10 @@ import {
   handleAttention,
   handleExit,
   handleLinks,
+  handleSession,
   handleUsage,
   renameTerminal,
+  resumeTerminal,
   handleSpawnError,
   handleStarted,
   killTerminal,
@@ -40,8 +42,10 @@ import {
   createBlueprint,
   createBlueprintTrigger,
   fireLocalTicketTriggers,
+  resolveBlueprintDir,
   spawnFromBlueprint,
 } from "./local-blueprint-service.js";
+import { fireLocalEventTriggers, normalizeGitHubEvent } from "./local-event-service.js";
 
 class FakeDaemonSocket implements relay.RelaySocket {
   readyState = 1;
@@ -562,6 +566,158 @@ describe("local blueprints", () => {
     await expect(
       createBlueprintTrigger({ blueprintId: blueprint.id, type: "webhook", config: { path } }),
     ).rejects.toThrow("duplicate_webhook_path");
+  });
+});
+
+describe("local automations (event triggers + session modes)", () => {
+  it("resolves the dir from the blueprint, the event's repo, or the host's first folder", () => {
+    const host = {
+      dirs: [
+        { path: "/home/dev/optio", repoUrl: "https://github.com/acme/optio" },
+        { path: "/home/dev/scratch" },
+      ],
+    } as Parameters<typeof resolveBlueprintDir>[1];
+    expect(resolveBlueprintDir({ dir: "/x", repoUrl: null }, host)).toBe("/x");
+    expect(resolveBlueprintDir({ dir: null, repoUrl: "git@github.com:acme/optio.git" }, host)).toBe(
+      "/home/dev/optio",
+    );
+    expect(
+      resolveBlueprintDir({ dir: null, repoUrl: null }, host, "https://github.com/acme/optio"),
+    ).toBe("/home/dev/optio");
+    expect(resolveBlueprintDir({ dir: null, repoUrl: null }, host, "https://github.com/x/y")).toBe(
+      "/home/dev/optio",
+    );
+    // A pinned repo the host doesn't have is an error, not a silent fallback.
+    expect(resolveBlueprintDir({ dir: null, repoUrl: "https://github.com/x/y" }, host)).toBeNull();
+  });
+
+  it("fires a GitHub review-request trigger for the configured login, with event params and a headless spec", async () => {
+    const host = await makeHost();
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, null, daemon);
+
+    const blueprint = await createBlueprint({
+      userId: null,
+      workspaceId: null,
+      name: `auto-gh-${Math.random().toString(36).slice(2, 8)}`,
+      hostId: host.id,
+      agent: "claude-code",
+      sessionMode: "headless",
+      commandTemplate: "Review {{url}} ({{repo}} #{{number}}) on {{headBranch}}",
+    });
+    await createBlueprintTrigger({
+      blueprintId: blueprint.id,
+      type: "github",
+      config: { events: ["review_requested"], login: "Jon" },
+    });
+
+    const payload = {
+      action: "review_requested",
+      repository: { full_name: "acme/optio", html_url: "https://github.com/acme/optio" },
+      pull_request: {
+        number: 7,
+        title: "feat: x",
+        body: "",
+        html_url: "https://github.com/acme/optio/pull/7",
+        user: { login: "alice" },
+        head: { ref: "feat/x" },
+        base: { ref: "main" },
+      },
+      requested_reviewer: { login: "someone-else" },
+    };
+    const miss = await fireLocalEventTriggers(
+      "github",
+      normalizeGitHubEvent("pull_request", payload)!,
+    );
+    expect(miss).toHaveLength(0);
+
+    payload.requested_reviewer = { login: "jon" };
+    const hit = await fireLocalEventTriggers(
+      "github",
+      normalizeGitHubEvent("pull_request", payload)!,
+    );
+    expect(hit).toHaveLength(1);
+    expect(hit[0].matched).toBe("review_requested");
+
+    const terminal = await getTerminal(hit[0].terminalId);
+    expect(terminal?.spawnedBy).toBe("trigger");
+    expect(terminal?.dir).toBe("/home/dev/optio"); // resolved from the PR's repo
+    expect(terminal?.ticketExternalId).toBe("acme/optio#7");
+    expect(terminal?.title).toContain("PR #7");
+    const spec = terminal?.spec as { kind: string; prompt: string; mode: string };
+    expect(spec.kind).toBe("agent");
+    expect(spec.mode).toBe("headless");
+    expect(spec.prompt).toBe(
+      "Review https://github.com/acme/optio/pull/7 (acme/optio #7) on feat/x",
+    );
+    expect(terminal?.command).toContain("claude -p");
+  });
+
+  it("records the agent session id, lands headless exits as done, and resumes as a new terminal", async () => {
+    const host = await makeHost();
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, null, daemon);
+
+    const run = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "agent", agent: "claude-code", prompt: "triage", mode: "headless" },
+      spawnedBy: "trigger",
+      ticket: { source: "linear", externalId: "ENG-1", url: "https://linear.app/x" },
+    });
+    await handleStarted(host.id, run.id);
+    await handleSession(host.id, run.id, "sess-abc-123");
+    await handleSession(host.id, run.id, "not valid!!"); // ignored
+    await handleExit(host.id, run.id, 0);
+
+    const done = await getTerminal(run.id);
+    expect(done?.agentSessionId).toBe("sess-abc-123");
+    expect(done?.attentionState).toBe("needs_you");
+    expect(done?.attentionReason).toBe("done");
+
+    const resumed = await resumeTerminal(done!);
+    expect(resumed.spawnedBy).toBe("resume");
+    expect(resumed.dir).toBe("/home/dev/optio");
+    expect(resumed.ticketExternalId).toBe("ENG-1");
+    expect(resumed.title.startsWith("↺ ")).toBe(true);
+    const spawn = daemon
+      .messages()
+      .find((m) => m.type === "spawn" && m.terminalId === resumed.id) as {
+      spec: { resumeSessionId: string };
+    };
+    expect(spawn.spec.resumeSessionId).toBe("sess-abc-123");
+
+    // A resumed session that exits goes quiet, like a manual one.
+    await handleStarted(host.id, resumed.id);
+    await handleExit(host.id, resumed.id, 0);
+    expect((await getTerminal(resumed.id))?.attentionState).toBe("idle");
+
+    // Shells and non-headless agents keep the plain "exit" reason.
+    const shell = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "command", command: "make test" },
+      spawnedBy: "blueprint",
+    });
+    await handleStarted(host.id, shell.id);
+    await handleExit(host.id, shell.id, 0);
+    expect((await getTerminal(shell.id))?.attentionReason).toBe("exit");
+  });
+
+  it("rejects resume for sessions without a session id", async () => {
+    const host = await makeHost();
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "agent", agent: "gemini" },
+    });
+    await expect(resumeTerminal(t)).rejects.toThrow(/session id|not supported/);
   });
 });
 

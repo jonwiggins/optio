@@ -62,13 +62,34 @@ export type LocalTerminalPendingReason = "hold" | "host_offline";
 
 export type LocalAttentionState = "working" | "needs_you" | "idle";
 
-export type LocalSpawnSource = "manual" | "ticket" | "trigger" | "blueprint" | "api";
+export type LocalSpawnSource = "manual" | "ticket" | "trigger" | "blueprint" | "api" | "resume";
+
+/**
+ * What happens once an agent finishes its first turn.
+ * - `interactive`: the agent halts at its prompt and waits for you (the
+ *   session lands in the "needs you" queue; you can chat with it).
+ * - `headless`: the agent runs in one-shot / print mode and the process exits
+ *   when the turn is done. The transcript is kept, so the session can still be
+ *   resumed into an interactive chat later.
+ */
+export type LocalAgentSessionMode = "interactive" | "headless";
 
 /** How the daemon should build the process for a terminal. */
 export type LocalTerminalSpec =
   | { kind: "shell" }
   | { kind: "command"; command: string }
-  | { kind: "agent"; agent: LocalAgentKind; prompt?: string };
+  | {
+      kind: "agent";
+      agent: LocalAgentKind;
+      prompt?: string;
+      /** Default `interactive`. */
+      mode?: LocalAgentSessionMode;
+      /**
+       * Resume a previous agent session (its id as reported by the agent's
+       * hooks) instead of starting a fresh one. Always interactive.
+       */
+      resumeSessionId?: string;
+    };
 
 /** Agent CLIs the daemon knows how to launch (and, for claude-code, hook). */
 export type LocalAgentKind = "claude-code" | "codex" | "cursor" | "gemini" | "opencode";
@@ -96,6 +117,11 @@ export interface LocalTerminal {
   ticketSource: string | null;
   ticketExternalId: string | null;
   ticketUrl: string | null;
+  /**
+   * The agent CLI's own session id (Claude Code `session_id` from hooks).
+   * Lets an exited run be resumed as an interactive chat.
+   */
+  agentSessionId: string | null;
   preview: string | null;
   /** PR / ticket links the daemon spotted in the output (first-seen order). */
   links: WorkLink[];
@@ -138,9 +164,149 @@ export interface LocalBlueprint {
   /** Non-null = run the rendered template as this agent (gets attention hooks). */
   agent: LocalAgentKind | null;
   spawnMode: LocalBlueprintSpawnMode;
+  /** Agent spawns only: stay open for chat, or exit when the turn is done. */
+  sessionMode: LocalAgentSessionMode;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+// ── Automation triggers ─────────────────────────────────────────────────────
+// Rows in `workflow_triggers` with target_type = "local_blueprint". The classic
+// four (manual / schedule / webhook / ticket) are shared with Jobs and Task
+// Configs; `github` / `slack` / `linear` are event triggers fed by the signed
+// ingress endpoints under /api/webhooks/*.
+
+export type LocalTriggerType =
+  | "manual"
+  | "schedule"
+  | "webhook"
+  | "ticket"
+  | "github"
+  | "slack"
+  | "linear";
+
+export const LOCAL_TRIGGER_TYPES: readonly LocalTriggerType[] = [
+  "manual",
+  "schedule",
+  "webhook",
+  "ticket",
+  "github",
+  "slack",
+  "linear",
+];
+
+/** Things that can happen to you on GitHub. */
+export type LocalGitHubEventKind =
+  | "review_requested"
+  | "mentioned"
+  | "assigned"
+  | "pr_opened"
+  | "issue_opened";
+
+export const LOCAL_GITHUB_EVENT_KINDS: readonly LocalGitHubEventKind[] = [
+  "review_requested",
+  "mentioned",
+  "assigned",
+  "pr_opened",
+  "issue_opened",
+];
+
+export interface LocalGitHubTriggerConfig {
+  /** Which kinds fire this trigger (empty / missing = any). */
+  events?: LocalGitHubEventKind[];
+  /** Your GitHub login: `review_requested` / `mentioned` / `assigned` match against it. */
+  login?: string;
+  /** Restrict to these `owner/name` repos (empty = any). */
+  repos?: string[];
+}
+
+/** One normalized GitHub happening (from the webhook payload). */
+export interface LocalGitHubEvent {
+  kinds: LocalGitHubEventKind[];
+  /** Logins the event concerns: requested reviewer, assignee, @-mentions. */
+  targets: string[];
+  repo: string;
+  repoUrl: string;
+  kind: "pr" | "issue";
+  number: number;
+  title: string;
+  body: string;
+  url: string;
+  author: string;
+  headBranch: string | null;
+  baseBranch: string | null;
+  /** Comment / review body when the event is a comment or review. */
+  commentBody: string | null;
+  commentUrl: string | null;
+  /** Raw `X-GitHub-Event` + `action`. */
+  event: string;
+  action: string;
+}
+
+export interface LocalSlackTriggerConfig {
+  /** Channel id (C0123…) to listen on. Required. */
+  channelId: string;
+  /** Only fire when the message contains this text (case-insensitive). */
+  keyword?: string;
+  /** Only fire for messages that @-mention the app (`app_mention` events). */
+  mentionOnly?: boolean;
+  /** Also fire for thread replies (default: top-level messages only). */
+  includeThreads?: boolean;
+}
+
+export interface LocalSlackEvent {
+  /** `message` | `app_mention`. */
+  event: string;
+  channelId: string;
+  userId: string;
+  text: string;
+  ts: string;
+  threadTs: string | null;
+  teamId: string | null;
+  eventId: string | null;
+}
+
+export type LocalLinearEventKind = "assigned" | "mentioned" | "created" | "labeled";
+
+export const LOCAL_LINEAR_EVENT_KINDS: readonly LocalLinearEventKind[] = [
+  "assigned",
+  "mentioned",
+  "created",
+  "labeled",
+];
+
+export interface LocalLinearTriggerConfig {
+  /** Which kinds fire this trigger (empty / missing = any). */
+  events?: LocalLinearEventKind[];
+  /** Your Linear user id, or display name / `@handle` — `assigned` / `mentioned` match against it. */
+  user?: string;
+  /** Any-match label filter (empty = any). */
+  labels?: string[];
+  /** Restrict to these team keys (empty = any). */
+  teams?: string[];
+}
+
+export interface LocalLinearEvent {
+  kinds: LocalLinearEventKind[];
+  /** User ids / names the event concerns: new assignee, @-mentions. */
+  targets: string[];
+  /** e.g. ENG-123 */
+  identifier: string;
+  title: string;
+  description: string;
+  url: string;
+  labels: string[];
+  teamKey: string | null;
+  assignee: string | null;
+  priority: number | null;
+  state: string | null;
+  commentBody: string | null;
+  commentUrl: string | null;
+  actor: string | null;
+  /** Raw `type` + `action`. */
+  type: string;
+  action: string;
 }
 
 // ── Daemon ⇄ server WebSocket protocol (/ws/local/daemon) ──────────────────
@@ -167,6 +333,8 @@ export type LocalDaemonMessage =
   | { type: "preview"; terminalId: string; preview: string; lastActivityAt: string }
   | { type: "links"; terminalId: string; links: WorkLink[] }
   | { type: "usage"; terminalId: string; usage: LocalTerminalUsage }
+  /** The agent CLI's own session id, once its hooks report it (sent once). */
+  | { type: "session"; terminalId: string; agentSessionId: string }
   | { type: "agent-limits"; limits: LocalHostAgentLimits }
   /** The PTY's current grid — sent on spawn, after every resize, and to each new attach. */
   | { type: "size"; terminalId: string; cols: number; rows: number }

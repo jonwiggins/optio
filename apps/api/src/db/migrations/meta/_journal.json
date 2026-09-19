@@ -624,6 +624,13 @@
       "when": 1789900000000,
       "tag": "1789900000_local_host_agent_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "1790000000_local_automations",
+      "breakpoints": true
     }
   ]
 }

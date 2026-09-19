@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
@@ -15,6 +16,7 @@ import {
   Maximize2,
   PanelLeftOpen,
   Play,
+  RotateCcw,
   Rows2,
   Server,
   Terminal,
@@ -74,6 +76,7 @@ export function TerminalPane({
   onDeleted?: () => void;
   onTitle?: (title: string) => void;
 }) {
+  const router = useRouter();
   const [terminal, setTerminal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -136,6 +139,18 @@ export function TerminalPane({
       toast.success("Starting terminal…");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to start terminal");
+    }
+    setBusy(false);
+  };
+
+  const handleResume = async () => {
+    setBusy(true);
+    try {
+      const res = await api.resumeLocalTerminal(terminalId);
+      toast.success("Resuming session in a new terminal");
+      router.push(`/local/${res.terminal.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to resume");
     }
     setBusy(false);
   };
@@ -218,6 +233,12 @@ export function TerminalPane({
   const canDelete =
     terminal.state === "exited" || terminal.state === "error" || terminal.state === "pending";
   const isDead = terminal.state === "exited" || terminal.state === "error";
+  // A run whose agent reported its own session id can be picked up as a chat.
+  const canResume =
+    terminal.state === "exited" &&
+    terminal.spec?.kind === "agent" &&
+    (terminal.spec.agent === "claude-code" || terminal.spec.agent === "codex") &&
+    !!terminal.agentSessionId;
   const links = collectWorkLinks(terminal);
 
   const layoutToggle = chrome.paneCount > 1 && (
@@ -269,6 +290,22 @@ export function TerminalPane({
             <Play className="w-3.5 h-3.5" />
           )}
           <span className="hidden sm:inline">Start</span>
+        </button>
+      )}
+      {canResume && (
+        <button
+          onClick={handleResume}
+          disabled={busy}
+          title="Open this session again as an interactive chat (claude --resume)"
+          aria-label="Resume chat"
+          className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
+        >
+          {busy ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RotateCcw className="w-3.5 h-3.5" />
+          )}
+          <span className="hidden sm:inline">Resume chat</span>
         </button>
       )}
       {canKill && (

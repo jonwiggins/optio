@@ -21,16 +21,91 @@ secrets to your machine.
 - **Terminal** (`local_terminals`) — one PTY on a host: state machine
   `pending → launching → running → exited | error`, plus an **attention state**
   (`working` / `needs_you` / `idle`) that drives the UI's "needs you" queue.
-- **Blueprint** (`local_blueprints`) — a reusable terminal spec (dir + command template
-  rendered with `{{param}}` substitution). Triggers (`workflow_triggers` with
-  `target_type = "local_blueprint"`) spawn terminals from blueprints on webhook, schedule,
-  or ticket events. `spawn_mode = "hold"` creates the terminal `pending` for one-click
-  human start; `"auto"` spawns immediately (or queues as `pending`/`host_offline` when the
-  host is offline, flushed on reconnect). When `agent` is set (`claude-code` / `codex` /
-  `cursor` / `gemini` / `opencode`), the rendered template is the agent's prompt and the
-  spawn runs through the daemon's agent path — so automation-spawned agents get the same
-  attention hooks as hand-started ones and enter the "needs you" queue while alive, not
-  only on exit. When `agent` is null it's a plain shell command.
+- **Automation** (`local_blueprints`; "blueprint" in the API and code) — "when X happens,
+  run this agent on my machine". Who (`agent`: `claude-code` / `codex` / `cursor` /
+  `gemini` / `opencode`, or null for a plain shell command), What (`commandTemplate`,
+  rendered with `{{param}}` substitution — the agent's prompt, or the shell command), Where
+  (`hostId` / `dir` / `repoUrl`, all optional — see dir resolution below), When (triggers)
+  and Then (`sessionMode`). Triggers are rows in `workflow_triggers` with
+  `target_type = "local_blueprint"`: the generic `manual` / `schedule` / `webhook` / `ticket`
+  ones shared with Jobs and Task Configs, plus the **event triggers** `github` / `slack` /
+  `linear` fed by the signed ingress endpoints (see "Automations" below).
+  `spawn_mode = "hold"` creates the terminal `pending` for one-click human start; `"auto"`
+  spawns immediately (or parks as `pending`/`host_offline` when the host is offline, flushed
+  on reconnect). Agent spawns get the same attention hooks as hand-started ones and enter
+  the "needs you" queue while alive, not only on exit.
+- **Session mode** (`sessionMode`, agent automations only):
+  - `interactive` (default) — the agent runs at its normal prompt. When its turn ends it
+    halts and waits (`needs_you`, reason `stop`); you open the session and keep chatting.
+  - `headless` — the agent's one-shot entry point (`claude -p`, `codex exec`,
+    `cursor-agent -p`, `gemini -p`, `opencode run`): it prints its result and the process
+    exits. A clean exit lands in the queue as `needs_you` / `done` for review. Claude Code
+    still fires hooks in `-p` mode, so the daemon captures the agent's own `session_id`
+    (`local_terminals.agent_session_id`) and the run can be **resumed** later.
+- **Resume** — `POST /api/local/terminals/:id/resume` (the "Resume chat" button on an
+  exited agent session) opens a fresh interactive terminal in the same dir with
+  `claude --resume <id>` (or `codex resume <id>`), inheriting the ticket / automation
+  badges; `spawnedBy = "resume"`, so exiting it later goes quiet like a manual shell.
+
+## Automations: event triggers
+
+Three ingress endpoints turn things that happen to _you_ into automation runs. They are
+public, verified purely by the provider's HMAC, workspace-wide (one webhook per GitHub
+org / Slack app / Linear workspace), and each trigger's `config` carries the identity it
+listens for, so several people's automations can share one ingress.
+
+| Source | Ingress                                                                                            | Secret                  | Trigger `config`                                                                                                                    |
+| ------ | -------------------------------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub | `POST /api/webhooks/github` (the existing receiver, `X-Hub-Signature-256`)                         | `GITHUB_WEBHOOK_SECRET` | `{ events?: ("review_requested" \| "mentioned" \| "assigned" \| "pr_opened" \| "issue_opened")[], login?, repos?: ["owner/name"] }` |
+| Slack  | `POST /api/webhooks/slack/events` (Events API; answers `url_verification`; `X-Slack-Signature` v0) | `SLACK_SIGNING_SECRET`  | `{ channelId, keyword?, mentionOnly?, includeThreads? }`                                                                            |
+| Linear | `POST /api/webhooks/linear` (`Linear-Signature` over the raw body + `webhookTimestamp` ≤ 60 s)     | `LINEAR_WEBHOOK_SECRET` | `{ events?: ("assigned" \| "mentioned" \| "created" \| "labeled")[], user?, labels?, teams? }`                                      |
+
+Matching lives in `services/local-event-service.ts` as pure functions
+(`normalize*` → one event; `match*` → the matched kind or null); `fireLocalEventTriggers`
+fans an event out to every enabled trigger of that type and spawns each match's automation
+with the event's fields as prompt params. Personal kinds (`review_requested`, `mentioned`,
+`assigned`) only match when the trigger's `login` / `user` is among the event's targets
+(reviewer, assignee, `@`-mentions, case-insensitive; Linear matches user id, name, display
+name, or the `@handle` in a mention link); `pr_opened` / `issue_opened` / `created` /
+`labeled` need no identity. A comment you wrote that mentions yourself never fires.
+
+Prompt params: GitHub `{{event}} {{kind}} {{repo}} {{repoUrl}} {{number}} {{title}} {{body}}
+{{url}} {{author}} {{headBranch}} {{baseBranch}} {{commentBody}} {{commentUrl}} {{action}}`;
+Slack `{{channelId}} {{userId}} {{text}} {{ts}} {{threadTs}} {{permalink}}`; Linear
+`{{event}} {{identifier}} {{title}} {{description}} {{url}} {{labels}} {{teamKey}}
+{{assignee}} {{priority}} {{state}} {{commentBody}} {{commentUrl}} {{actor}}` plus the
+`ticket*` aliases used by ticket triggers. GitHub and Linear runs are linked to the PR /
+issue (`ticket_*` columns) so the session shows the badge.
+
+**Dir resolution** (`resolveBlueprintDir`): the automation's `dir` → the host dir whose git
+remote matches its `repoUrl` → the dir matching the _event's_ repo (a GitHub PR's
+repository) → the host's first allowlisted dir. A pinned `repoUrl` the host doesn't have
+is an error, not a fallback. So "Where: the event's repo" makes one PR-review automation
+cover every repo you have checked out.
+
+Slack notes: subscribe the app to `message.channels` (plain messages) and/or
+`app_mention` (`mentionOnly` triggers listen to the latter only, so an @-mention never
+fires twice), invite the app to the channel, and use the channel _id_ (`C0…`) from the
+channel details. Bot messages, edits, and other subtypes are dropped; thread replies only
+match with `includeThreads`; `event_id`s are remembered so Slack's retries don't
+double-fire. The endpoint acks before dispatching (Slack retries anything slower than 3 s).
+
+### Recipes
+
+- **"When I'm tagged on a PR, review it, then stop"**: automation with agent Claude Code,
+  Where = the event's repo, Then = exit when done, prompt using `{{url}}` /
+  `{{headBranch}}` / `{{baseBranch}}`; trigger `github` with `events:
+["review_requested", "mentioned"]` and your `login`. The result lands in Needs you with
+  reason `done`; "Resume chat" picks the session back up if you want to discuss it.
+- **"When a message lands in #channel, do it and wait for me"**: agent automation with
+  Then = keep the session open and a prompt around `{{text}}` / `{{permalink}}`; trigger
+  `slack` with the `channelId` (optionally a `keyword`).
+- **"When a Linear ticket is assigned to me, triage it and open a PR"**: agent automation
+  pinned to the repo's dir (or `repoUrl`), Then = exit when done, prompt around
+  `{{identifier}}` / `{{title}}` / `{{description}}` / `{{url}}`; trigger `linear` with
+  `events: ["assigned"]` and your `user`.
+
+The Automations section on `/local` ships these three as one-click presets.
 
 ## Attention detection (daemon-side)
 
@@ -98,16 +173,23 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   host allowlist.
 - `GET /api/local/terminals/:id`
 - `POST /api/local/terminals/:id/start` — spawn a `pending` terminal
+- `POST /api/local/terminals/:id/resume` — new interactive terminal resuming the agent's
+  own session (`agentSessionId`); 409 when the session never reported one
 - `POST /api/local/terminals/:id/kill` — `{signal?}` (default SIGTERM)
 - `POST /api/local/terminals/:id/input` — `{data}` (fallback for non-WS input; primary
   input path is the stream WS)
 - `DELETE /api/local/terminals/:id` — delete a non-running record
-- `GET|POST /api/local/blueprints`, `GET|PATCH|DELETE /api/local/blueprints/:id`
+- `GET|POST /api/local/blueprints`, `GET|PATCH|DELETE /api/local/blueprints/:id` —
+  automations (`agent`, `commandTemplate`, `hostId?`, `dir?`, `repoUrl?`, `spawnMode`,
+  `sessionMode`)
 - `POST /api/local/blueprints/:id/spawn` — `{params?}` manual run
 - `GET|POST /api/local/blueprints/:id/triggers`,
-  `PATCH|DELETE /api/local/blueprints/:id/triggers/:triggerId` — standard trigger CRUD
-  (`manual` | `schedule` | `webhook` | `ticket`), rows in `workflow_triggers` with
-  `target_type = "local_blueprint"`. Webhook ingress reuses `POST /api/hooks/:webhookPath`.
+  `PATCH|DELETE /api/local/blueprints/:id/triggers/:triggerId` — trigger CRUD
+  (`manual` | `schedule` | `webhook` | `ticket` | `github` | `slack` | `linear`), rows in
+  `workflow_triggers` with `target_type = "local_blueprint"`. Generic webhook ingress
+  reuses `POST /api/hooks/:webhookPath`; event ingress is described under "Automations".
+- `POST /api/webhooks/slack/events`, `POST /api/webhooks/linear` — signed event ingress
+  (`routes/local-ingress.ts`); GitHub events ride the existing `POST /api/webhooks/github`.
 
 **Command safety**: webhook/trigger payloads never carry commands. Params substitute into
 the blueprint's user-authored `commandTemplate` via `renderTemplateString`, and every
@@ -128,6 +210,9 @@ Daemon → server:
   viewer's attach; `{type:"attach-error", terminalId, attachId, message}` when unknown
 - `{type:"attention", terminalId, state, reason}`
 - `{type:"preview", terminalId, preview, lastActivityAt}` — throttled (≥2 s)
+- `{type:"session", terminalId, agentSessionId}` — the agent CLI's own session id, once its
+  hooks report it (sent once per terminal); stored on `local_terminals.agent_session_id`
+  and what `POST /api/local/terminals/:id/resume` hands back to `claude --resume`
 - `{type:"links", terminalId, links:[{url, kind:"pr"|"issue"|"ref", provider, label}]}` — PR /
   ticket links found anywhere in the scrollback ring (`extractWorkLinks` in
   `@optio/shared`: GitHub PRs/issues, GitLab MRs/issues, Linear, Jira; hard-wrapped URLs
@@ -257,9 +342,9 @@ eliminates the classic "pasted JSON swallowed as control" bug):
 ## Non-goals / follow-ups (v1)
 
 - **Cost tracking** for local terminals (needs transcript-sidecar parsing; column exists).
-- **GitHub notifications poller** (review-requested → blueprint spawn) — requires the
-  GitHub OAuth `notifications` scope / App permission, which the login flow doesn't
-  request yet.
+- **GitHub notifications poller** as an alternative to the webhook for review requests
+  (for installs without a public URL) — needs the `notifications` OAuth scope, which the
+  login flow doesn't request yet.
 - Web push for `needs_you` transitions (in-app only for now).
 - Multi-replica API relay (daemon sockets are in-process, matching exec-based sessions).
 - Terminal survival across daemon restarts (PTYs are daemon children; `claude --continue`

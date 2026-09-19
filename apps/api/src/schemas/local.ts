@@ -52,6 +52,17 @@ export const LocalTerminalSpecSchema = z
       kind: z.literal("agent"),
       agent: z.enum(["claude-code", "codex", "cursor", "gemini", "opencode"]),
       prompt: z.string().max(100_000).optional(),
+      mode: z
+        .enum(["interactive", "headless"])
+        .optional()
+        .describe(
+          "interactive (default): stay open for chat; headless: exit when the turn is done",
+        ),
+      resumeSessionId: z
+        .string()
+        .max(128)
+        .optional()
+        .describe("Resume this agent session (its own session id) instead of starting fresh"),
     }),
   ])
   .describe("What the daemon runs in the PTY");
@@ -78,6 +89,10 @@ export const LocalTerminalSchema = z
     ticketSource: z.string().nullable(),
     ticketExternalId: z.string().nullable(),
     ticketUrl: z.string().nullable(),
+    agentSessionId: z
+      .string()
+      .nullable()
+      .describe("The agent CLI's own session id, once its hooks reported it (resumable)"),
     preview: z.string().nullable(),
     links: z
       .array(
@@ -128,11 +143,14 @@ export const LocalBlueprintSchema = z
     commandTemplate: z.string(),
     agent: z.enum(["claude-code", "codex", "cursor", "gemini", "opencode"]).nullable(),
     spawnMode: z.enum(["auto", "hold"]),
+    sessionMode: z
+      .enum(["interactive", "headless"])
+      .describe("Agent spawns: stay open for chat, or exit when the turn is done"),
     enabled: z.boolean(),
     createdAt: z.date(),
     updatedAt: z.date(),
   })
-  .describe("Reusable local terminal spec spawned by triggers");
+  .describe("Local automation: a reusable terminal / agent spec spawned by triggers");
 
 export const LocalTriggerSchema = z
   .object({

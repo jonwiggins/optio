@@ -11,13 +11,19 @@
  * Uses Node's global WebSocket (undici) — no extra deps.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
 import { startApiServer, waitFor, type ApiServerHandle } from "../src/test-utils/e2e/api-server.js";
 
 let server: ApiServerHandle;
 let wsBase: string;
 
+const GITHUB_WEBHOOK_SECRET = "e2e-github-secret";
+const SLACK_SIGNING_SECRET = "e2e-slack-secret";
+
 beforeAll(async () => {
-  server = await startApiServer();
+  server = await startApiServer({
+    env: { GITHUB_WEBHOOK_SECRET, SLACK_SIGNING_SECRET },
+  });
   wsBase = server.baseUrl.replace(/^http/, "ws");
 }, 150_000);
 
@@ -343,6 +349,153 @@ describe("optio local e2e", () => {
 
     const terminal = await getTerminal(body.terminalId);
     expect(terminal.spec.kind).toBe("command");
+  });
+
+  it("spawns a headless agent from a GitHub review request and resumes it as a chat", async () => {
+    const hostId = await registerHost("e2e-github");
+    const daemon = new FakeDaemon();
+    cleanups.push(() => daemon.close());
+    await daemon.connect(hostId, DIRS);
+
+    const { body: bpBody } = await api<{ blueprint: { id: string; sessionMode: string } }>(
+      "/api/local/blueprints",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: `e2e-pr-review-${Date.now()}`,
+          hostId,
+          agent: "claude-code",
+          sessionMode: "headless",
+          commandTemplate: "Review {{url}} on {{headBranch}}",
+        }),
+      },
+    );
+    expect(bpBody.blueprint.sessionMode).toBe("headless");
+    const { status: trigStatus, body: trigBody } = await api(
+      `/api/local/blueprints/${bpBody.blueprint.id}/triggers`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          type: "github",
+          config: { events: ["review_requested"], login: "jon" },
+        }),
+      },
+    );
+    expect(trigStatus, JSON.stringify(trigBody)).toBe(201);
+
+    const raw = JSON.stringify({
+      action: "review_requested",
+      repository: { full_name: "acme/e2e", html_url: "https://github.com/acme/e2e" },
+      pull_request: {
+        number: 9,
+        title: "feat: e2e",
+        body: "",
+        html_url: "https://github.com/acme/e2e/pull/9",
+        user: { login: "alice" },
+        head: { ref: "feat/e2e" },
+        base: { ref: "main" },
+      },
+      requested_reviewer: { login: "jon" },
+    });
+    const sig = `sha256=${createHmac("sha256", GITHUB_WEBHOOK_SECRET).update(raw).digest("hex")}`;
+    const res = await fetch(`${server.baseUrl}/api/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "pull_request",
+        "x-hub-signature-256": sig,
+      },
+      body: raw,
+    });
+    expect(res.status).toBe(200);
+
+    const spawn = await daemon.next((m) => m.type === "spawn");
+    const spec = spawn.spec as Json;
+    expect(spec.kind).toBe("agent");
+    expect(spec.mode).toBe("headless");
+    expect(spec.prompt).toBe("Review https://github.com/acme/e2e/pull/9 on feat/e2e");
+    expect(spawn.dir).toBe("/tmp/e2e-repo"); // the PR's repo → the host's matching folder
+    const terminalId = String(spawn.terminalId);
+
+    // The daemon reports the agent's session id, the run finishes, and it's resumable.
+    daemon.send({ type: "started", terminalId });
+    daemon.send({ type: "session", terminalId, agentSessionId: "sess-e2e-1" });
+    daemon.send({ type: "exit", terminalId, exitCode: 0 });
+    await waitFor(async () => (await getTerminal(terminalId)).state === "exited");
+    const finished = await api<{ terminal: { agentSessionId: string; attentionReason: string } }>(
+      `/api/local/terminals/${terminalId}`,
+    );
+    expect(finished.body.terminal.agentSessionId).toBe("sess-e2e-1");
+    expect(finished.body.terminal.attentionReason).toBe("done");
+
+    const { status: resumeStatus, body: resumed } = await api<TerminalBody>(
+      `/api/local/terminals/${terminalId}/resume`,
+      { method: "POST", body: "{}" },
+    );
+    expect(resumeStatus, JSON.stringify(resumed)).toBe(201);
+    const resumeSpawn = await daemon.next(
+      (m) => m.type === "spawn" && m.terminalId === resumed.terminal.id,
+    );
+    expect((resumeSpawn.spec as Json).resumeSessionId).toBe("sess-e2e-1");
+  });
+
+  it("spawns an interactive agent from a Slack channel message", async () => {
+    const hostId = await registerHost("e2e-slack");
+    const daemon = new FakeDaemon();
+    cleanups.push(() => daemon.close());
+    await daemon.connect(hostId, DIRS);
+
+    const { body: bpBody } = await api<{ blueprint: { id: string } }>("/api/local/blueprints", {
+      method: "POST",
+      body: JSON.stringify({
+        name: `e2e-slack-${Date.now()}`,
+        hostId,
+        agent: "claude-code",
+        commandTemplate: "Slack ({{permalink}}): {{text}}",
+      }),
+    });
+    await api(`/api/local/blueprints/${bpBody.blueprint.id}/triggers`, {
+      method: "POST",
+      body: JSON.stringify({
+        type: "slack",
+        config: { channelId: "C0E2E0001", keyword: "deploy" },
+      }),
+    });
+
+    const raw = JSON.stringify({
+      type: "event_callback",
+      event_id: `Ev-${Date.now()}`,
+      team_id: "T1",
+      event: {
+        type: "message",
+        channel: "C0E2E0001",
+        user: "U1",
+        text: "please deploy the fix",
+        ts: "1700000000.000100",
+      },
+    });
+    const ts = String(Math.floor(Date.now() / 1000));
+    const sig = `v0=${createHmac("sha256", SLACK_SIGNING_SECRET).update(`v0:${ts}:${raw}`).digest("hex")}`;
+    const res = await fetch(`${server.baseUrl}/api/webhooks/slack/events`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": ts,
+        "x-slack-signature": sig,
+      },
+      body: raw,
+    });
+    expect(res.status).toBe(200);
+
+    const spawn = await daemon.next((m) => m.type === "spawn");
+    const spec = spawn.spec as Json;
+    expect(spec.kind).toBe("agent");
+    expect(spec.mode).toBe("interactive");
+    expect(spec.prompt).toBe(
+      "Slack (https://slack.com/archives/C0E2E0001/p1700000000000100): please deploy the fix",
+    );
+    // No repo on the event → the host's first folder.
+    expect(spawn.dir).toBe("/tmp/e2e-repo");
   });
 
   it("closes viewers when the daemon disconnects and reconciles on reconnect", async () => {

@@ -333,6 +333,9 @@ auth:
 # ──────────────────────────────────────────────────────────────────────────────
 webhook:
   githubSecret: ""  # Generate with: openssl rand -hex 32. Must match GitHub's webhook config.
+  # Optio Local automations: signed event ingress for Slack and Linear.
+  slackSigningSecret: ""  # Slack app → Basic Information → Signing Secret
+  linearSecret: ""  # Linear → Settings → API → Webhooks → signing secret
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GitHub App (recommended — replaces OAuth App + PAT for GitHub operations)

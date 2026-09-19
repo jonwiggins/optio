@@ -3081,14 +3081,35 @@ public enum LocalSpawnSource: String, Codable, Hashable, Sendable, CaseIterable 
     case trigger = "trigger"
     case blueprint = "blueprint"
     case api = "api"
+    case resume = "resume"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [LocalSpawnSource] = [.manual, .ticket, .trigger, .blueprint, .api]
+    public static let allCases: [LocalSpawnSource] = [.manual, .ticket, .trigger, .blueprint, .api, .resume]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = LocalSpawnSource(rawValue: raw) ?? .unknown
+    }
+}
+
+/// What happens once an agent finishes its first turn.
+/// - `interactive`: the agent halts at its prompt and waits for you (the
+/// session lands in the "needs you" queue; you can chat with it).
+/// - `headless`: the agent runs in one-shot / print mode and the process exits
+/// when the turn is done. The transcript is kept, so the session can still be
+/// resumed into an interactive chat later.
+public enum LocalAgentSessionMode: String, Codable, Hashable, Sendable, CaseIterable {
+    case interactive = "interactive"
+    case headless = "headless"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalAgentSessionMode] = [.interactive, .headless]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalAgentSessionMode(rawValue: raw) ?? .unknown
     }
 }
 
@@ -3115,15 +3136,29 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
     public struct AgentPayload: Codable, Hashable, Sendable {
         public let agent: LocalAgentKind
         public let prompt: String?
+        /// Default `interactive`.
+        public let mode: LocalAgentSessionMode?
+        /// Resume a previous agent session (its id as reported by the agent's
+        /// hooks) instead of starting a fresh one. Always interactive.
+        public let resumeSessionId: String?
 
         private enum CodingKeys: String, CodingKey {
             case agent = "agent"
             case prompt = "prompt"
+            case mode = "mode"
+            case resumeSessionId = "resumeSessionId"
         }
 
-        public init(agent: LocalAgentKind, prompt: String? = nil) {
+        public init(
+            agent: LocalAgentKind,
+            prompt: String? = nil,
+            mode: LocalAgentSessionMode? = nil,
+            resumeSessionId: String? = nil
+        ) {
             self.agent = agent
             self.prompt = prompt
+            self.mode = mode
+            self.resumeSessionId = resumeSessionId
         }
     }
 
@@ -3202,6 +3237,9 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
     public let ticketSource: String?
     public let ticketExternalId: String?
     public let ticketUrl: String?
+    /// The agent CLI's own session id (Claude Code `session_id` from hooks).
+    /// Lets an exited run be resumed as an interactive chat.
+    public let agentSessionId: String?
     public let preview: String?
     /// PR / ticket links the daemon spotted in the output (first-seen order).
     public let links: [WorkLink]
@@ -3238,6 +3276,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         case ticketSource = "ticketSource"
         case ticketExternalId = "ticketExternalId"
         case ticketUrl = "ticketUrl"
+        case agentSessionId = "agentSessionId"
         case preview = "preview"
         case links = "links"
         case usage = "usage"
@@ -3271,6 +3310,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         ticketSource: String? = nil,
         ticketExternalId: String? = nil,
         ticketUrl: String? = nil,
+        agentSessionId: String? = nil,
         preview: String? = nil,
         links: [WorkLink],
         usage: AnyCodable? = nil,
@@ -3302,6 +3342,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         self.ticketSource = ticketSource
         self.ticketExternalId = ticketExternalId
         self.ticketUrl = ticketUrl
+        self.agentSessionId = agentSessionId
         self.preview = preview
         self.links = links
         self.usage = usage
@@ -3349,6 +3390,8 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
     /// Non-null = run the rendered template as this agent (gets attention hooks).
     public let agent: LocalAgentKind?
     public let spawnMode: LocalBlueprintSpawnMode
+    /// Agent spawns only: stay open for chat, or exit when the turn is done.
+    public let sessionMode: LocalAgentSessionMode
     public let enabled: Bool
     public let createdAt: String
     public let updatedAt: String
@@ -3365,6 +3408,7 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
         case commandTemplate = "commandTemplate"
         case agent = "agent"
         case spawnMode = "spawnMode"
+        case sessionMode = "sessionMode"
         case enabled = "enabled"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
@@ -3382,6 +3426,7 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
         commandTemplate: String,
         agent: LocalAgentKind? = nil,
         spawnMode: LocalBlueprintSpawnMode,
+        sessionMode: LocalAgentSessionMode,
         enabled: Bool,
         createdAt: String,
         updatedAt: String
@@ -3397,9 +3442,360 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
         self.commandTemplate = commandTemplate
         self.agent = agent
         self.spawnMode = spawnMode
+        self.sessionMode = sessionMode
         self.enabled = enabled
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+}
+
+public enum LocalTriggerType: String, Codable, Hashable, Sendable, CaseIterable {
+    case manual = "manual"
+    case schedule = "schedule"
+    case webhook = "webhook"
+    case ticket = "ticket"
+    case github = "github"
+    case slack = "slack"
+    case linear = "linear"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalTriggerType(rawValue: raw) ?? .unknown
+    }
+}
+
+/// Things that can happen to you on GitHub.
+public enum LocalGitHubEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case reviewRequested = "review_requested"
+    case mentioned = "mentioned"
+    case assigned = "assigned"
+    case prOpened = "pr_opened"
+    case issueOpened = "issue_opened"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalGitHubEventKind] = [.reviewRequested, .mentioned, .assigned, .prOpened, .issueOpened]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalGitHubEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct LocalGitHubTriggerConfig: Codable, Hashable, Sendable {
+    /// Which kinds fire this trigger (empty / missing = any).
+    public let events: [LocalGitHubEventKind]?
+    /// Your GitHub login: `review_requested` / `mentioned` / `assigned` match against it.
+    public let login: String?
+    /// Restrict to these `owner/name` repos (empty = any).
+    public let repos: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case events = "events"
+        case login = "login"
+        case repos = "repos"
+    }
+
+    public init(
+        events: [LocalGitHubEventKind]? = nil,
+        login: String? = nil,
+        repos: [String]? = nil
+    ) {
+        self.events = events
+        self.login = login
+        self.repos = repos
+    }
+}
+
+/// One normalized GitHub happening (from the webhook payload).
+public struct LocalGitHubEvent: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, Hashable, Sendable, CaseIterable {
+        case pr = "pr"
+        case issue = "issue"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Kind] = [.pr, .issue]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let kinds: [LocalGitHubEventKind]
+    /// Logins the event concerns: requested reviewer, assignee,
+    public let targets: [String]
+    public let repo: String
+    public let repoUrl: String
+    public let kind: Kind
+    public let number: Double
+    public let title: String
+    public let body: String
+    public let url: String
+    public let author: String
+    public let headBranch: String?
+    public let baseBranch: String?
+    /// Comment / review body when the event is a comment or review.
+    public let commentBody: String?
+    public let commentUrl: String?
+    /// Raw `X-GitHub-Event` + `action`.
+    public let event: String
+    public let action: String
+
+    private enum CodingKeys: String, CodingKey {
+        case kinds = "kinds"
+        case targets = "targets"
+        case repo = "repo"
+        case repoUrl = "repoUrl"
+        case kind = "kind"
+        case number = "number"
+        case title = "title"
+        case body = "body"
+        case url = "url"
+        case author = "author"
+        case headBranch = "headBranch"
+        case baseBranch = "baseBranch"
+        case commentBody = "commentBody"
+        case commentUrl = "commentUrl"
+        case event = "event"
+        case action = "action"
+    }
+
+    public init(
+        kinds: [LocalGitHubEventKind],
+        targets: [String],
+        repo: String,
+        repoUrl: String,
+        kind: Kind,
+        number: Double,
+        title: String,
+        body: String,
+        url: String,
+        author: String,
+        headBranch: String? = nil,
+        baseBranch: String? = nil,
+        commentBody: String? = nil,
+        commentUrl: String? = nil,
+        event: String,
+        action: String
+    ) {
+        self.kinds = kinds
+        self.targets = targets
+        self.repo = repo
+        self.repoUrl = repoUrl
+        self.kind = kind
+        self.number = number
+        self.title = title
+        self.body = body
+        self.url = url
+        self.author = author
+        self.headBranch = headBranch
+        self.baseBranch = baseBranch
+        self.commentBody = commentBody
+        self.commentUrl = commentUrl
+        self.event = event
+        self.action = action
+    }
+}
+
+public struct LocalSlackTriggerConfig: Codable, Hashable, Sendable {
+    /// Channel id (C0123…) to listen on. Required.
+    public let channelId: String
+    /// Only fire when the message contains this text (case-insensitive).
+    public let keyword: String?
+    /// Only fire for messages that
+    public let mentionOnly: Bool?
+    /// Also fire for thread replies (default: top-level messages only).
+    public let includeThreads: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case channelId = "channelId"
+        case keyword = "keyword"
+        case mentionOnly = "mentionOnly"
+        case includeThreads = "includeThreads"
+    }
+
+    public init(
+        channelId: String,
+        keyword: String? = nil,
+        mentionOnly: Bool? = nil,
+        includeThreads: Bool? = nil
+    ) {
+        self.channelId = channelId
+        self.keyword = keyword
+        self.mentionOnly = mentionOnly
+        self.includeThreads = includeThreads
+    }
+}
+
+public struct LocalSlackEvent: Codable, Hashable, Sendable {
+    /// `message` | `app_mention`.
+    public let event: String
+    public let channelId: String
+    public let userId: String
+    public let text: String
+    public let ts: String
+    public let threadTs: String?
+    public let teamId: String?
+    public let eventId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case event = "event"
+        case channelId = "channelId"
+        case userId = "userId"
+        case text = "text"
+        case ts = "ts"
+        case threadTs = "threadTs"
+        case teamId = "teamId"
+        case eventId = "eventId"
+    }
+
+    public init(
+        event: String,
+        channelId: String,
+        userId: String,
+        text: String,
+        ts: String,
+        threadTs: String? = nil,
+        teamId: String? = nil,
+        eventId: String? = nil
+    ) {
+        self.event = event
+        self.channelId = channelId
+        self.userId = userId
+        self.text = text
+        self.ts = ts
+        self.threadTs = threadTs
+        self.teamId = teamId
+        self.eventId = eventId
+    }
+}
+
+public enum LocalLinearEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case assigned = "assigned"
+    case mentioned = "mentioned"
+    case created = "created"
+    case labeled = "labeled"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalLinearEventKind] = [.assigned, .mentioned, .created, .labeled]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalLinearEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct LocalLinearTriggerConfig: Codable, Hashable, Sendable {
+    /// Which kinds fire this trigger (empty / missing = any).
+    public let events: [LocalLinearEventKind]?
+    /// Your Linear user id, or display name / `@handle` — `assigned` / `mentioned` match against it.
+    public let user: String?
+    /// Any-match label filter (empty = any).
+    public let labels: [String]?
+    /// Restrict to these team keys (empty = any).
+    public let teams: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case events = "events"
+        case user = "user"
+        case labels = "labels"
+        case teams = "teams"
+    }
+
+    public init(
+        events: [LocalLinearEventKind]? = nil,
+        user: String? = nil,
+        labels: [String]? = nil,
+        teams: [String]? = nil
+    ) {
+        self.events = events
+        self.user = user
+        self.labels = labels
+        self.teams = teams
+    }
+}
+
+public struct LocalLinearEvent: Codable, Hashable, Sendable {
+    public let kinds: [LocalLinearEventKind]
+    /// User ids / names the event concerns: new assignee,
+    public let targets: [String]
+    /// e.g. ENG-123
+    public let identifier: String
+    public let title: String
+    public let description: String
+    public let url: String
+    public let labels: [String]
+    public let teamKey: String?
+    public let assignee: String?
+    public let priority: Double?
+    public let state: String?
+    public let commentBody: String?
+    public let commentUrl: String?
+    public let `actor`: String?
+    /// Raw `type` + `action`.
+    public let type: String
+    public let action: String
+
+    private enum CodingKeys: String, CodingKey {
+        case kinds = "kinds"
+        case targets = "targets"
+        case identifier = "identifier"
+        case title = "title"
+        case description = "description"
+        case url = "url"
+        case labels = "labels"
+        case teamKey = "teamKey"
+        case assignee = "assignee"
+        case priority = "priority"
+        case state = "state"
+        case commentBody = "commentBody"
+        case commentUrl = "commentUrl"
+        case `actor` = "actor"
+        case type = "type"
+        case action = "action"
+    }
+
+    public init(
+        kinds: [LocalLinearEventKind],
+        targets: [String],
+        identifier: String,
+        title: String,
+        description: String,
+        url: String,
+        labels: [String],
+        teamKey: String? = nil,
+        assignee: String? = nil,
+        priority: Double? = nil,
+        state: String? = nil,
+        commentBody: String? = nil,
+        commentUrl: String? = nil,
+        `actor`: String? = nil,
+        type: String,
+        action: String
+    ) {
+        self.kinds = kinds
+        self.targets = targets
+        self.identifier = identifier
+        self.title = title
+        self.description = description
+        self.url = url
+        self.labels = labels
+        self.teamKey = teamKey
+        self.assignee = assignee
+        self.priority = priority
+        self.state = state
+        self.commentBody = commentBody
+        self.commentUrl = commentUrl
+        self.`actor` = `actor`
+        self.type = type
+        self.action = action
     }
 }
 
@@ -3429,7 +3825,9 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case preview(PreviewPayload)
     case links(LinksPayload)
     case usage(UsagePayload)
+    case session(SessionPayload)
     case agentLimits(AgentLimitsPayload)
+    case size(SizePayload)
     case exit(ExitPayload)
     case ping
     /// Fallback for discriminator values this client does not know about yet.
@@ -3605,6 +4003,21 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct SessionPayload: Codable, Hashable, Sendable {
+        public let terminalId: String
+        public let agentSessionId: String
+
+        private enum CodingKeys: String, CodingKey {
+            case terminalId = "terminalId"
+            case agentSessionId = "agentSessionId"
+        }
+
+        public init(terminalId: String, agentSessionId: String) {
+            self.terminalId = terminalId
+            self.agentSessionId = agentSessionId
+        }
+    }
+
     public struct AgentLimitsPayload: Codable, Hashable, Sendable {
         public let limits: LocalHostAgentLimits
 
@@ -3614,6 +4027,24 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
 
         public init(limits: LocalHostAgentLimits) {
             self.limits = limits
+        }
+    }
+
+    public struct SizePayload: Codable, Hashable, Sendable {
+        public let terminalId: String
+        public let cols: Double
+        public let rows: Double
+
+        private enum CodingKeys: String, CodingKey {
+            case terminalId = "terminalId"
+            case cols = "cols"
+            case rows = "rows"
+        }
+
+        public init(terminalId: String, cols: Double, rows: Double) {
+            self.terminalId = terminalId
+            self.cols = cols
+            self.rows = rows
         }
     }
 
@@ -3650,7 +4081,9 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case "preview": self = .preview(try PreviewPayload(from: decoder))
         case "links": self = .links(try LinksPayload(from: decoder))
         case "usage": self = .usage(try UsagePayload(from: decoder))
+        case "session": self = .session(try SessionPayload(from: decoder))
         case "agent-limits": self = .agentLimits(try AgentLimitsPayload(from: decoder))
+        case "size": self = .size(try SizePayload(from: decoder))
         case "exit": self = .exit(try ExitPayload(from: decoder))
         case "ping": self = .ping
         default: self = .unknown(try AnyCodable(from: decoder))
@@ -3699,9 +4132,17 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("usage", forKey: .type)
             try payload.encode(to: encoder)
+        case .session(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("session", forKey: .type)
+            try payload.encode(to: encoder)
         case .agentLimits(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("agent-limits", forKey: .type)
+            try payload.encode(to: encoder)
+        case .size(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("size", forKey: .type)
             try payload.encode(to: encoder)
         case .exit(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
@@ -3888,6 +4329,7 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
 
 public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
     case status(StatusPayload)
+    case size(SizePayload)
     case exit(ExitPayload)
     case error(ErrorPayload)
     /// Fallback for discriminator values this client does not know about yet.
@@ -3905,6 +4347,21 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
         public init(state: LocalTerminalState, attentionState: LocalAttentionState) {
             self.state = state
             self.attentionState = attentionState
+        }
+    }
+
+    public struct SizePayload: Codable, Hashable, Sendable {
+        public let cols: Double
+        public let rows: Double
+
+        private enum CodingKeys: String, CodingKey {
+            case cols = "cols"
+            case rows = "rows"
+        }
+
+        public init(cols: Double, rows: Double) {
+            self.cols = cols
+            self.rows = rows
         }
     }
 
@@ -3941,6 +4398,7 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
         let discriminator = try container.decodeIfPresent(String.self, forKey: .type) ?? ""
         switch discriminator {
         case "status": self = .status(try StatusPayload(from: decoder))
+        case "size": self = .size(try SizePayload(from: decoder))
         case "exit": self = .exit(try ExitPayload(from: decoder))
         case "error": self = .error(try ErrorPayload(from: decoder))
         default: self = .unknown(try AnyCodable(from: decoder))
@@ -3952,6 +4410,10 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
         case .status(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("status", forKey: .type)
+            try payload.encode(to: encoder)
+        case .size(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("size", forKey: .type)
             try payload.encode(to: encoder)
         case .exit(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)

@@ -98,7 +98,10 @@ export class TerminalManager {
           args = [
             "-l",
             "-c",
-            buildAgentCommand(msg.spec.agent, msg.spec.prompt, this.opts.hookSettingsPath),
+            buildAgentCommand(msg.spec.agent, msg.spec.prompt, this.opts.hookSettingsPath, {
+              mode: msg.spec.mode,
+              resumeSessionId: msg.spec.resumeSessionId,
+            }),
           ];
           break;
       }
