@@ -124,6 +124,7 @@ export function RunLocationPicker({
   kind,
   agentType,
   onRepoUrlChange,
+  hideSessionMode = false,
   className,
 }: {
   value: RunLocationValue;
@@ -137,6 +138,8 @@ export function RunLocationPicker({
    * when no directory is picked). The parent sends it as the task's repo.
    */
   onRepoUrlChange?: (repoUrl: string | null) => void;
+  /** The parent owns "what happens when a turn ends" (the session form's Then). */
+  hideSessionMode?: boolean;
   className?: string;
 }) {
   const { hosts, loading } = useLocalHosts();
@@ -284,37 +287,39 @@ export function RunLocationPicker({
             </div>
           )}
 
-          <div>
-            <label className="block text-sm text-text-muted mb-1.5">Then</label>
-            <div className="flex gap-1.5 p-1 rounded-lg bg-bg border border-border w-fit">
-              {(
-                [
-                  ["headless", Square, "Exit when done"],
-                  ["interactive", MessageSquare, "Keep the session open"],
-                ] as Array<[LocalSessionMode, typeof Square, string]>
-              ).map(([mode, Icon, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => onChange({ ...value, localSessionMode: mode })}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors",
-                    value.localSessionMode === mode
-                      ? "bg-primary text-white"
-                      : "text-text-muted hover:text-text",
-                  )}
-                >
-                  <Icon className="w-3 h-3" />
-                  {label}
-                </button>
-              ))}
+          {!hideSessionMode && (
+            <div>
+              <label className="block text-sm text-text-muted mb-1.5">Then</label>
+              <div className="flex gap-1.5 p-1 rounded-lg bg-bg border border-border w-fit">
+                {(
+                  [
+                    ["headless", Square, "Exit when done"],
+                    ["interactive", MessageSquare, "Keep the session open"],
+                  ] as Array<[LocalSessionMode, typeof Square, string]>
+                ).map(([mode, Icon, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => onChange({ ...value, localSessionMode: mode })}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors",
+                      value.localSessionMode === mode
+                        ? "bg-primary text-white"
+                        : "text-text-muted hover:text-text",
+                    )}
+                  >
+                    <Icon className="w-3 h-3" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-text-muted/80 mt-1.5">
+                {value.localSessionMode === "headless"
+                  ? "The agent runs one turn in print mode and the run finishes when it exits. You can still resume the session as a chat afterwards."
+                  : 'The agent stays at its prompt after the turn; the run keeps going until you close the session, and it lands in your "needs you" queue.'}
+              </p>
             </div>
-            <p className="text-[11px] text-text-muted/80 mt-1.5">
-              {value.localSessionMode === "headless"
-                ? "The agent runs one turn in print mode and the run finishes when it exits. You can still resume the session as a chat afterwards."
-                : 'The agent stays at its prompt after the turn; the run keeps going until you close the session, and it lands in your "needs you" queue.'}
-            </p>
-          </div>
+          )}
 
           {agentBlocked && (
             <p className="text-xs text-error">

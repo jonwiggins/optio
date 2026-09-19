@@ -49,9 +49,26 @@ interface Props {
   hideManual?: boolean;
   /** Optional label shown above the type pills. */
   label?: string;
+  /** Extra pills rendered after the built-in ones (e.g. event triggers the caller owns). */
+  extra?: React.ReactNode;
+  /** True when one of the caller's extra pills is the active one. */
+  extraActive?: boolean;
+  /** Hide the built-in config panels (the caller renders its own for an extra pill). */
+  hideConfig?: boolean;
+  /** Label for the manual pill (e.g. "Messages" for a persistent agent). */
+  manualLabel?: string;
 }
 
-export function TriggerSelector({ value, onChange, hideManual = false, label }: Props) {
+export function TriggerSelector({
+  value,
+  onChange,
+  hideManual = false,
+  label,
+  extra,
+  extraActive = false,
+  hideConfig = false,
+  manualLabel = "Manual",
+}: Props) {
   const hint = useMemo(() => {
     if (value.type !== "schedule") return null;
     if (!cronIsValid(value.cronExpression)) return "Expected five space-separated fields.";
@@ -78,32 +95,33 @@ export function TriggerSelector({ value, onChange, hideManual = false, label }: 
         {!hideManual && (
           <TriggerTypeButton
             icon={<Play className="w-3.5 h-3.5" />}
-            label="Manual"
-            active={value.type === "manual"}
+            label={manualLabel}
+            active={!extraActive && value.type === "manual"}
             onClick={() => setType("manual")}
           />
         )}
         <TriggerTypeButton
           icon={<Clock className="w-3.5 h-3.5" />}
           label="Schedule"
-          active={value.type === "schedule"}
+          active={!extraActive && value.type === "schedule"}
           onClick={() => setType("schedule")}
         />
         <TriggerTypeButton
           icon={<Webhook className="w-3.5 h-3.5" />}
           label="Webhook"
-          active={value.type === "webhook"}
+          active={!extraActive && value.type === "webhook"}
           onClick={() => setType("webhook")}
         />
         <TriggerTypeButton
           icon={<Ticket className="w-3.5 h-3.5" />}
           label="Ticket"
-          active={value.type === "ticket"}
+          active={!extraActive && value.type === "ticket"}
           onClick={() => setType("ticket")}
         />
+        {extra}
       </div>
 
-      {value.type === "schedule" && (
+      {!hideConfig && !extraActive && value.type === "schedule" && (
         <div className="p-3 rounded-lg bg-bg-card border border-border space-y-2">
           <label className="block text-xs text-text-muted">Cron expression</label>
           <input
@@ -128,7 +146,7 @@ export function TriggerSelector({ value, onChange, hideManual = false, label }: 
         </div>
       )}
 
-      {value.type === "webhook" && (
+      {!hideConfig && !extraActive && value.type === "webhook" && (
         <div className="p-3 rounded-lg bg-bg-card border border-border space-y-2">
           <label className="block text-xs text-text-muted">Webhook path</label>
           <div className="flex items-center gap-2">
@@ -146,7 +164,7 @@ export function TriggerSelector({ value, onChange, hideManual = false, label }: 
         </div>
       )}
 
-      {value.type === "ticket" && (
+      {!hideConfig && !extraActive && value.type === "ticket" && (
         <TicketConfigPanel
           source={value.ticketSource ?? "github"}
           labels={value.ticketLabels ?? []}
@@ -258,7 +276,7 @@ function TicketConfigPanel({
   );
 }
 
-function TriggerTypeButton({
+export function TriggerTypeButton({
   icon,
   label,
   active,

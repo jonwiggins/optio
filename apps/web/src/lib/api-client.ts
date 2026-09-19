@@ -1793,6 +1793,19 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  createPersistentAgentTrigger: (
+    id: string,
+    data: {
+      type: "manual" | "schedule" | "webhook" | "ticket";
+      config?: Record<string, unknown>;
+      enabled?: boolean;
+    },
+  ) =>
+    request<{ trigger: any }>(`/api/persistent-agents/${id}/triggers`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   updatePersistentAgent: (id: string, data: Record<string, unknown>) =>
     request<{ agent: any }>(`/api/persistent-agents/${id}`, {
       method: "PATCH",
