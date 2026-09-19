@@ -3275,6 +3275,95 @@ public struct RunLocation: Codable, Hashable, Sendable {
     }
 }
 
+/// One entry of an agent session's conversation, distilled by the daemon from
+/// the agent CLI's own transcript (Claude Code's JSONL at the hooks'
+/// `transcript_path`). Unlike the terminal's screen — which for a full-screen
+/// TUI holds only the last redraw — this is the whole exchange: every prompt,
+/// every reply, every tool call and its result, as plain text that reflows to
+/// any screen. `seq` is the daemon's per-terminal counter, 1-based and
+/// monotonic; the server stores entries keyed by it so a re-sent batch is
+/// idempotent.
+public enum LocalTranscriptRole: String, Codable, Hashable, Sendable, CaseIterable {
+    case user = "user"
+    case assistant = "assistant"
+    case tool = "tool"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalTranscriptRole] = [.user, .assistant, .tool]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalTranscriptRole(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum LocalTranscriptKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case text = "text"
+    case thinking = "thinking"
+    case toolUse = "tool_use"
+    case toolResult = "tool_result"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalTranscriptKind] = [.text, .thinking, .toolUse, .toolResult]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalTranscriptKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct LocalTranscriptEntry: Codable, Hashable, Sendable {
+    public let seq: Double
+    public let role: LocalTranscriptRole
+    public let kind: LocalTranscriptKind
+    /// The prompt / reply / thinking text, a tool call's one-line summary, or the tool's result.
+    public let text: String
+    /// `tool_use`: the full input (JSON, bounded); `tool_result`: unused.
+    public let detail: String?
+    public let toolName: String?
+    /// Pairs a `tool_use` with its `tool_result`.
+    public let toolUseId: String?
+    public let isError: Bool
+    /// The transcript line's timestamp, when it carried one.
+    public let at: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case seq = "seq"
+        case role = "role"
+        case kind = "kind"
+        case text = "text"
+        case detail = "detail"
+        case toolName = "toolName"
+        case toolUseId = "toolUseId"
+        case isError = "isError"
+        case at = "at"
+    }
+
+    public init(
+        seq: Double,
+        role: LocalTranscriptRole,
+        kind: LocalTranscriptKind,
+        text: String,
+        detail: String? = nil,
+        toolName: String? = nil,
+        toolUseId: String? = nil,
+        isError: Bool,
+        at: String? = nil
+    ) {
+        self.seq = seq
+        self.role = role
+        self.kind = kind
+        self.text = text
+        self.detail = detail
+        self.toolName = toolName
+        self.toolUseId = toolUseId
+        self.isError = isError
+        self.at = at
+    }
+}
+
 public struct LocalTerminal: Codable, Hashable, Sendable {
     public let id: String
     public let hostId: String
@@ -3896,6 +3985,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case preview(PreviewPayload)
     case links(LinksPayload)
     case usage(UsagePayload)
+    case transcript(TranscriptPayload)
     case session(SessionPayload)
     case agentLimits(AgentLimitsPayload)
     case size(SizePayload)
@@ -4075,6 +4165,21 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct TranscriptPayload: Codable, Hashable, Sendable {
+        public let terminalId: String
+        public let entries: [LocalTranscriptEntry]
+
+        private enum CodingKeys: String, CodingKey {
+            case terminalId = "terminalId"
+            case entries = "entries"
+        }
+
+        public init(terminalId: String, entries: [LocalTranscriptEntry]) {
+            self.terminalId = terminalId
+            self.entries = entries
+        }
+    }
+
     public struct SessionPayload: Codable, Hashable, Sendable {
         public let terminalId: String
         public let agentSessionId: String
@@ -4174,6 +4279,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case "preview": self = .preview(try PreviewPayload(from: decoder))
         case "links": self = .links(try LinksPayload(from: decoder))
         case "usage": self = .usage(try UsagePayload(from: decoder))
+        case "transcript": self = .transcript(try TranscriptPayload(from: decoder))
         case "session": self = .session(try SessionPayload(from: decoder))
         case "agent-limits": self = .agentLimits(try AgentLimitsPayload(from: decoder))
         case "size": self = .size(try SizePayload(from: decoder))
@@ -4225,6 +4331,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case .usage(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("usage", forKey: .type)
+            try payload.encode(to: encoder)
+        case .transcript(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("transcript", forKey: .type)
             try payload.encode(to: encoder)
         case .session(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
