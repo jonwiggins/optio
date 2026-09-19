@@ -87,7 +87,7 @@ export default function TasksPage() {
               Scheduled
             </Link>
             <Link
-              href="/tasks/new"
+              href="/sessions/new"
               className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
             >
               <Plus className="w-4 h-4" />

@@ -12,23 +12,20 @@ struct MetricsSample: Identifiable, Hashable, Sendable {
 }
 
 /// Screen state for the Overview tab. Mirrors `apps/web/src/hooks/use-dashboard-data.ts`:
-/// eight requests fanned out every 10 seconds, plus usage/auth every 5 minutes.
+/// task stats, recent tasks, repos, hosts + terminals and the cluster fanned out
+/// every 10 seconds, plus usage/auth every 5 minutes. The sessions board has its
+/// own `SessionsFeedModel`.
 @Observable
 @MainActor
 final class OverviewModel {
     private static let maxHistory = 60
 
     var taskStats: DashTaskStats?
-    var standaloneStats: DashJobStats?
-    var agentStats: DashAgentStats?
-    var sessionStats: DashSessionStats?
     var recentTasks: [DashRecentTask] = []
     var repoCount: Int?
     var cluster: ClusterOverview?
     /// True when `/api/cluster/overview` answered 403 (viewer/member role).
     var clusterForbidden = false
-    var activeSessions: [DashSessionRow] = []
-    var activeSessionCount = 0
     var usage: ClaudeUsageData?
     var metricsHistory: [MetricsSample] = []
     var loading = true
@@ -56,32 +53,6 @@ final class OverviewModel {
         localTerminals.filter { LocalPresentation.waitsOnYou($0) }.sorted { activity($0) < activity($1) }
     }
 
-    /// Live terminals that are working, most recent first.
-    var localWorking: [LocalTerminal] {
-        localTerminals
-            .filter { LocalPresentation.activeStates.contains($0.state) && !LocalPresentation.waitsOnYou($0) }
-            .sorted { activity($0) > activity($1) }
-    }
-
-    var localLiveCount: Int { localTerminals.filter { LocalPresentation.activeStates.contains($0.state) }.count }
-
-    struct LocalStats {
-        var needsYou = 0, working = 0, idle = 0, finished = 0
-    }
-
-    var localStats: LocalStats {
-        var s = LocalStats()
-        let live = localTerminals.filter { LocalPresentation.activeStates.contains($0.state) }
-        s.needsYou = localNeedsYou.count
-        s.working = live.filter { $0.attentionState == .working }.count
-        s.idle = live.filter { $0.attentionState != .working && !LocalPresentation.waitsOnYou($0) }.count
-        s.finished = localTerminals.filter { LocalPresentation.isDead($0) }.count
-        return s
-    }
-
-    /// Nothing live and nothing waiting: the strip collapses to one quiet line.
-    var localQuiet: Bool { localLiveCount == 0 && localNeedsYou.isEmpty }
-
     /// Recent repo tasks that need attention (the web's `attentionTasks`).
     var attentionTasks: [DashRecentTask] {
         recentTasks.filter { Tone.forState($0.state) == .accent }
@@ -95,10 +66,6 @@ final class OverviewModel {
         async let stats = api.dashTaskStats()
         async let tasks = Self.quiet { try await api.recentTasks(limit: 5) }
         async let repos = Self.quiet { try await api.repoCount() }
-        async let sessions = Self.quiet { try await api.activeSessions(limit: 5) }
-        async let jobs = Self.quiet { try await api.dashJobStats() }
-        async let agents = Self.quiet { try await api.dashAgentStats() }
-        async let sessStats = Self.quiet { try await api.dashSessionStats() }
         async let hosts = Self.quiet { try await api.listLocalHosts() }
         async let terminals = Self.quiet { try await api.listLocalTerminals() }
 
@@ -120,13 +87,6 @@ final class OverviewModel {
         }
         if let t = await tasks { recentTasks = t }
         if let r = await repos { repoCount = r }
-        if let s = await sessions {
-            activeSessions = s.sessions
-            activeSessionCount = s.activeCount
-        }
-        standaloneStats = await jobs
-        agentStats = await agents
-        sessionStats = await sessStats
         if let h = await hosts { localHosts = h }
         if let t = await terminals { localTerminals = t }
 

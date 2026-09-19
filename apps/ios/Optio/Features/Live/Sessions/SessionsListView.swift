@@ -56,7 +56,7 @@ struct SessionsListView: View {
                 .listRowSeparator(.hidden)
             }
             ForEach(sessions, id: \.id) { s in
-                NavigationLink(value: s.id) { SessionRow(session: s) }
+                NavigationLink(value: s.id) { PodSessionRow(session: s) }
             }
         }
         .listStyle(.plain)
@@ -76,9 +76,7 @@ struct SessionsListView: View {
                 }
             }
         }
-        .sheet(isPresented: $showNew) {
-            NewSessionSheet(repos: repos) { _ in Task { await refresh() } }
-        }
+        .sheet(isPresented: $showNew) { NewSessionSheet() }
         .onChange(of: filter) { _, _ in Task { await refresh() } }
         .onChange(of: repoFilter) { _, _ in Task { await refresh() } }
         .refreshable { await refresh() }
@@ -111,7 +109,7 @@ struct SessionsListView: View {
 }
 
 /// `dot · branch · owner/repo · started 2h · $0.78`, trailing Ended when done.
-struct SessionRow: View {
+struct PodSessionRow: View {
     let session: InteractiveSession
 
     private var repoName: String { session.repoUrl.replacingOccurrences(of: "https://github.com/", with: "") }
@@ -127,53 +125,5 @@ struct SessionRow: View {
             ]),
             trailing: session.state == .active ? nil : session.state.rawValue.capitalized
         )
-    }
-}
-
-struct NewSessionSheet: View {
-    let repos: [SessionRepoOption]
-    var onCreated: (InteractiveSession) -> Void
-    @Environment(APIClient.self) private var api
-    @Environment(\.dismiss) private var dismiss
-    @State private var repoUrl = ""
-    @State private var creating = false
-    @State private var error: Error?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                if repos.isEmpty {
-                    Text("Add a repo first under More › Repos.").foregroundStyle(.secondary)
-                } else {
-                    Picker("Repository", selection: $repoUrl) {
-                        ForEach(repos) { r in Text(r.displayName).tag(r.repoUrl) }
-                    }
-                    .pickerStyle(.inline)
-                }
-                if let error { ErrorRow(error: error) }
-            }
-            .navigationTitle("New session")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(creating ? "Creating…" : "Create") { Task { await create() } }
-                        .disabled(creating || repoUrl.isEmpty)
-                }
-            }
-            .onAppear { if repoUrl.isEmpty { repoUrl = repos.first?.repoUrl ?? "" } }
-        }
-    }
-
-    private func create() async {
-        creating = true
-        defer { creating = false }
-        do {
-            let s = try await api.createSession(repoUrl: repoUrl)
-            onCreated(s)
-            dismiss()
-        } catch {
-            self.error = error
-        }
     }
 }

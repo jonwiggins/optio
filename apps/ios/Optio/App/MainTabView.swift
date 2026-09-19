@@ -2,8 +2,8 @@ import OSLog
 import SwiftUI
 
 /// Top-level navigation. Mirrors the web sidebar groups:
-/// Overview · Run (Tasks/Jobs/Reviews/Issues/Scheduled) · Live (Local/Agents/Sessions)
-/// · Insights (Analytics/Costs/Activity/Cluster) · More (Library + Admin + Settings).
+/// Overview · Work (Sessions/Reviews/Inbox) · Library (Prompts/Repos/Machines/Connections)
+/// · Insights (Analytics/Costs/Activity/Cluster) · More (Admin + Settings + Account).
 struct MainTabView: View {
     @Environment(SessionStore.self) private var session
     @State private var router = AppRouter()
@@ -41,8 +41,8 @@ struct MainTabView: View {
         if #available(iOS 26, *) {
             TabView(selection: $router.selectedTab) {
                 Tab("Overview", systemImage: "square.grid.2x2", value: AppRouter.Tab.overview) { OverviewView() }
-                Tab("Run", systemImage: "play", value: AppRouter.Tab.run) { RunHubView() }
-                Tab("Live", systemImage: "dot.radiowaves.left.and.right", value: AppRouter.Tab.live) { LiveHubView() }
+                Tab("Work", systemImage: "terminal", value: AppRouter.Tab.work) { WorkHubView() }
+                Tab("Library", systemImage: "books.vertical", value: AppRouter.Tab.library) { LibraryHubView() }
                 Tab("Insights", systemImage: "chart.bar", value: AppRouter.Tab.insights) { InsightsHubView() }
                 Tab("More", systemImage: "ellipsis", value: AppRouter.Tab.more) { MoreHubView() }
             }
@@ -50,16 +50,16 @@ struct MainTabView: View {
         } else if #available(iOS 18, *) {
             TabView(selection: $router.selectedTab) {
                 Tab("Overview", systemImage: "square.grid.2x2", value: AppRouter.Tab.overview) { OverviewView() }
-                Tab("Run", systemImage: "play", value: AppRouter.Tab.run) { RunHubView() }
-                Tab("Live", systemImage: "dot.radiowaves.left.and.right", value: AppRouter.Tab.live) { LiveHubView() }
+                Tab("Work", systemImage: "terminal", value: AppRouter.Tab.work) { WorkHubView() }
+                Tab("Library", systemImage: "books.vertical", value: AppRouter.Tab.library) { LibraryHubView() }
                 Tab("Insights", systemImage: "chart.bar", value: AppRouter.Tab.insights) { InsightsHubView() }
                 Tab("More", systemImage: "ellipsis", value: AppRouter.Tab.more) { MoreHubView() }
             }
         } else {
             TabView(selection: $router.selectedTab) {
                 OverviewView().tabItem { Label("Overview", systemImage: "square.grid.2x2") }.tag(AppRouter.Tab.overview)
-                RunHubView().tabItem { Label("Run", systemImage: "play") }.tag(AppRouter.Tab.run)
-                LiveHubView().tabItem { Label("Live", systemImage: "dot.radiowaves.left.and.right") }.tag(AppRouter.Tab.live)
+                WorkHubView().tabItem { Label("Work", systemImage: "terminal") }.tag(AppRouter.Tab.work)
+                LibraryHubView().tabItem { Label("Library", systemImage: "books.vertical") }.tag(AppRouter.Tab.library)
                 InsightsHubView().tabItem { Label("Insights", systemImage: "chart.bar") }.tag(AppRouter.Tab.insights)
                 MoreHubView().tabItem { Label("More", systemImage: "ellipsis") }.tag(AppRouter.Tab.more)
             }
@@ -84,12 +84,8 @@ struct MainTabView: View {
             }
         }
         guard let raw = ProcessInfo.processInfo.environment["OPTIO_DEV_SECTION"] else { return }
-        let sections: [String: AppRouter.Section] = [
-            "tasks": .tasks, "jobs": .jobs, "reviews": .reviews, "issues": .issues, "scheduled": .scheduled,
-            "agents": .agents, "sessions": .sessions, "local": .local,
-            "analytics": .analytics, "costs": .costs, "activity": .activity, "cluster": .cluster,
-        ]
-        if let section = sections[raw] { router.open(section) } else if raw == "more" { router.selectedTab = .more }
+        // Section names are the deep-link names, legacy ones included (`tasks` → Sessions › All).
+        if let (section, view) = AppRouter.section(named: raw) { router.open(section, view: view) } else if raw == "more" { router.selectedTab = .more }
         #endif
     }
 }

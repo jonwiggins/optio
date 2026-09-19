@@ -54,7 +54,7 @@ struct JobsListView: View {
                     title: model.jobs.isEmpty ? "No jobs yet" : "No matching jobs",
                     systemImage: "bolt",
                     message: model.jobs.isEmpty ? "Run an agent with no repo checkout." : "Nothing matches this filter.",
-                    actionTitle: model.jobs.isEmpty ? "New job" : nil,
+                    actionTitle: model.jobs.isEmpty ? "New session" : nil,
                     action: { showNew = true }
                 )
                 .listRowSeparator(.hidden)
@@ -77,12 +77,10 @@ struct JobsListView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showNew = true } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("New job")
+                    .accessibilityLabel("New session")
             }
         }
-        .sheet(isPresented: $showNew) {
-            JobFormView(mode: .create) { _ in Task { await model.load(api) } }
-        }
+        .sheet(isPresented: $showNew) { NewSessionSheet() }
         .navigationDestination(for: JobRoute.self) { route in
             switch route {
             case .detail(let id): JobDetailView(jobId: id)

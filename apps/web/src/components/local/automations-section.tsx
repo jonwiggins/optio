@@ -47,14 +47,14 @@ const AGENT_LABELS: Record<string, string> = {
   opencode: "OpenCode",
 };
 const TICKET_SOURCES = ["github", "gitlab", "linear", "jira", "notion"] as const;
-const GITHUB_KINDS: Array<{ value: string; label: string; personal: boolean }> = [
+export const GITHUB_KINDS: Array<{ value: string; label: string; personal: boolean }> = [
   { value: "review_requested", label: "Review requested from me", personal: true },
   { value: "mentioned", label: "I'm @-mentioned", personal: true },
   { value: "assigned", label: "Assigned to me", personal: true },
   { value: "pr_opened", label: "Any PR opened", personal: false },
   { value: "issue_opened", label: "Any issue opened", personal: false },
 ];
-const LINEAR_KINDS: Array<{ value: string; label: string; personal: boolean }> = [
+export const LINEAR_KINDS: Array<{ value: string; label: string; personal: boolean }> = [
   { value: "assigned", label: "Assigned to me", personal: true },
   { value: "mentioned", label: "I'm @-mentioned", personal: true },
   { value: "created", label: "Any issue created", personal: false },

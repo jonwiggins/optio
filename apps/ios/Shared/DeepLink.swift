@@ -4,8 +4,10 @@ import Foundation
 ///
 ///   optio://tasks/<id>              optio://local/<id>?compose=1
 ///   optio://agents/<id>?compose=1   optio://sessions/<id>
-///   optio://needs-you               (oldest needs-you item, or the Local hub)
-///   optio://section/<name>          (tasks|jobs|reviews|issues|scheduled|agents|sessions|local|analytics|costs|activity|cluster|more)
+///   optio://needs-you               (the Sessions list, Active view — needs-you rows rank first)
+///   optio://section/<name>          (sessions[?view=active|recurring|agents|history|all]|reviews|inbox|prompts|repos|machines|
+///                                    connections|analytics|costs|activity|cluster|more; legacy tasks|jobs|scheduled|agents|local|
+///                                    issues map onto those)
 public enum DeepLink: Hashable, Sendable {
     case task(String), local(String, compose: Bool), agent(String, compose: Bool), session(String)
     case needsYou

@@ -157,7 +157,7 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
         case "local": return DeepLink.local(id, compose: false).url
         case "task": return DeepLink.task(id).url
         case "agent": return DeepLink.agent(id, compose: false).url
-        case "host": return DeepLink.section("local").url
+        case "host": return DeepLink.section("machines").url
         default: return nil
         }
     }

@@ -1,215 +1,175 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { api } from "@/lib/api-client";
-import { toast } from "sonner";
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import { cn, formatRelativeTime, formatDuration } from "@/lib/utils";
-import { Plus, Terminal, Loader2, FolderGit2, CircleDot, StopCircle } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { Plus, RefreshCw, Search, Terminal } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { usePageTitle } from "@/hooks/use-page-title";
+import { useSessionsFeed } from "@/hooks/use-sessions-feed";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
+import { SessionRowView } from "@/components/session-row";
+import { countSessions, inView, type SessionView } from "@/lib/sessions-feed";
+
+/**
+ * The one list. Every kind of work — PR tasks, jobs, automations, terminals,
+ * pod sessions, persistent agents — as rows with the same five attributes.
+ * Views are saved filters; the default is what's alive right now.
+ */
+
+const VIEWS: Array<{ id: SessionView; label: string }> = [
+  { id: "active", label: "Active" },
+  { id: "recurring", label: "Recurring" },
+  { id: "agents", label: "Agents" },
+  { id: "history", label: "History" },
+  { id: "all", label: "All" },
+];
 
 export default function SessionsPage() {
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [activeCount, setActiveCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "active" | "ended">("all");
-  const [repos, setRepos] = useState<any[]>([]);
-  const [selectedRepo, setSelectedRepo] = useState("");
-  const [creating, setCreating] = useState(false);
+  usePageTitle("Sessions");
+  return (
+    <Suspense fallback={<div className="p-6 max-w-6xl mx-auto h-32 skeleton-shimmer rounded-lg" />}>
+      <SessionsList />
+    </Suspense>
+  );
+}
 
-  useEffect(() => {
-    api
-      .listRepos()
-      .then((res) => setRepos(res.repos))
-      .catch(() => {});
-  }, []);
+function SessionsList() {
+  const params = useSearchParams();
+  const initial = (params.get("view") as SessionView | null) ?? "active";
+  const [view, setView] = useState<SessionView>(
+    VIEWS.some((v) => v.id === initial) ? initial : "active",
+  );
+  const [q, setQ] = useState("");
+  const { rows, loading, error, refetch } = useSessionsFeed();
 
-  useEffect(() => {
-    setLoading(true);
-    api
-      .listSessions({
-        state: filter === "all" ? undefined : filter,
-        repoUrl: selectedRepo || undefined,
-      })
-      .then((res) => {
-        setSessions(res.sessions);
-        setActiveCount(res.activeCount);
-      })
-      .catch(() => toast.error("Failed to load sessions"))
-      .finally(() => setLoading(false));
-  }, [filter, selectedRepo]);
-
-  const handleCreate = async () => {
-    if (repos.length === 0) {
-      toast.error("Add a repo first");
-      return;
-    }
-    const repoUrl = selectedRepo || repos[0]?.repoUrl;
-    if (!repoUrl) return;
-    setCreating(true);
-    try {
-      const res = await api.createSession({ repoUrl });
-      toast.success("Session created");
-      setSessions((prev) => [res.session, ...prev]);
-      setActiveCount((c) => c + 1);
-      // Navigate to the new session
-      window.location.href = `/sessions/${res.session.id}`;
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create session");
-    }
-    setCreating(false);
-  };
+  const counts = useMemo(() => countSessions(rows), [rows]);
+  const visible = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return rows.filter(
+      (r) =>
+        inView(r, view) &&
+        (!needle ||
+          [r.name, r.where.detail, r.who, r.statusLabel, r.note]
+            .filter(Boolean)
+            .some((s) => String(s).toLowerCase().includes(needle))),
+    );
+  }, [rows, view, q]);
+  const viewCount = (id: SessionView) => rows.filter((r) => inView(r, id)).length;
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <PageHeader
         icon={Terminal}
         title="Sessions"
-        description="Interactive workspaces connected to repo pods. Use the terminal + chat to drive an agent in real time."
+        description="Everything Optio is running, waiting on, or will run — one list, filtered by what matters now."
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={refetch}
+              className="p-2 rounded-lg hover:bg-bg-hover text-text-muted transition-all btn-press hover:text-text"
+              title="Refresh"
+            >
+              <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+            </button>
+            <Link
+              href="/sessions/new"
+              className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
+            >
+              <Plus className="w-4 h-4" /> New session
+            </Link>
+          </div>
+        }
         meta={
-          <>
-            {activeCount > 0 && (
-              <span className="inline-flex items-center gap-1.5 text-primary">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                {activeCount} active
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted">
+            {counts.needsYou > 0 && (
+              <span className="text-warning">
+                {counts.needsYou} need{counts.needsYou === 1 ? "s" : ""} you
               </span>
             )}
-            <div className="flex items-center gap-1.5">
-              {(["all", "active", "ended"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setFilter(tab)}
-                  className={cn(
-                    "px-2 py-0.5 rounded text-[11px] capitalize transition-colors",
-                    filter === tab
-                      ? "bg-primary/15 text-primary"
-                      : "text-text-muted/80 hover:text-text",
-                  )}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-          </>
-        }
-        actions={
-          <>
-            {repos.length > 1 && (
-              <select
-                value={selectedRepo}
-                onChange={(e) => setSelectedRepo(e.target.value)}
-                className="px-3 py-2 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
-              >
-                <option value="">All repos</option>
-                {repos.map((r: any) => (
-                  <option key={r.id} value={r.repoUrl}>
-                    {r.fullName}
-                  </option>
-                ))}
-              </select>
-            )}
-            <button
-              onClick={handleCreate}
-              disabled={creating || repos.length === 0}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
-            >
-              {creating ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Plus className="w-4 h-4" />
-              )}
-              New Session
-            </button>
-          </>
+            <span>
+              {counts.running} running · {counts.waiting} waiting · {counts.recurring} recurring ·{" "}
+              {counts.agents} agent{counts.agents === 1 ? "" : "s"}
+            </span>
+          </div>
         }
       />
 
-      {loading ? (
-        <div className="flex items-center justify-center py-16 text-text-muted">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" />
-          Loading sessions...
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+        <div className="flex gap-1 p-1 rounded-lg bg-bg-card border border-border w-fit">
+          {VIEWS.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => setView(v.id)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors",
+                view === v.id ? "bg-primary text-white" : "text-text-muted hover:text-text",
+              )}
+            >
+              {v.label}
+              <span
+                className={cn(
+                  "text-[10px] tabular-nums px-1 rounded",
+                  view === v.id ? "bg-white/20" : "bg-bg text-text-muted/70",
+                )}
+              >
+                {viewCount(v.id)}
+              </span>
+            </button>
+          ))}
         </div>
-      ) : sessions.length === 0 ? (
+        <div className="relative sm:ml-auto sm:w-64">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search name, place, agent…"
+            className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+          />
+        </div>
+      </div>
+
+      {error && <p className="text-sm text-error mb-3">{error}</p>}
+
+      {loading && rows.length === 0 ? (
+        <div className="space-y-2">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="h-14 skeleton-shimmer rounded-lg" />
+          ))}
+        </div>
+      ) : visible.length === 0 ? (
         <EmptyState
           icon={Terminal}
-          title="No sessions yet"
-          description="Start a new session to get an interactive terminal connected to a repo pod."
+          title={
+            view === "active"
+              ? "Nothing needs you right now"
+              : q
+                ? "No sessions match"
+                : "No sessions here yet"
+          }
+          description={
+            view === "active"
+              ? "Running, queued, and waiting sessions show up here. Recurring ones live under their own view until they fire."
+              : "Start something — a PR, a chat on your machine, a schedule, or a persistent agent."
+          }
+          action={
+            <Link
+              href="/sessions/new"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover"
+            >
+              <Plus className="w-4 h-4" /> New session
+            </Link>
+          }
         />
       ) : (
-        <div className="grid gap-2">
-          {sessions.map((session: any) => (
-            <SessionCard key={session.id} session={session} />
+        <div className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60">
+          {visible.map((r) => (
+            <SessionRowView key={r.key} row={r} />
           ))}
         </div>
       )}
     </div>
-  );
-}
-
-function SessionCard({ session }: { session: any }) {
-  const isActive = session.state === "active";
-  const repoName = session.repoUrl ? session.repoUrl.replace("https://github.com/", "") : "Unknown";
-
-  return (
-    <Link
-      href={`/sessions/${session.id}`}
-      className="card-hover block p-4 rounded-lg border border-border bg-bg-card hover:border-primary/30"
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 min-w-0">
-          <div
-            className={cn(
-              "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-              isActive ? "bg-primary/10 text-primary" : "bg-bg text-text-muted",
-            )}
-          >
-            <Terminal className="w-4 h-4" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium truncate">
-                {session.branch ?? `Session ${session.id.slice(0, 8)}`}
-              </span>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium tracking-wide uppercase",
-                  isActive ? "text-primary" : "text-text-muted",
-                )}
-              >
-                <span
-                  className={cn(
-                    "w-1.5 h-1.5 rounded-full",
-                    isActive ? "bg-primary animate-pulse" : "bg-text-muted",
-                  )}
-                />
-                {session.state}
-              </span>
-            </div>
-            <div className="flex items-center gap-3 mt-0.5 text-xs text-text-muted">
-              <span className="flex items-center gap-1">
-                <FolderGit2 className="w-3 h-3" />
-                {repoName}
-              </span>
-              <span>Started {formatRelativeTime(session.createdAt)}</span>
-              {isActive && (
-                <span className="text-primary">{formatDuration(session.createdAt)}</span>
-              )}
-              {session.endedAt && (
-                <span>Duration: {formatDuration(session.createdAt, session.endedAt)}</span>
-              )}
-            </div>
-          </div>
-        </div>
-        {isActive && (
-          <div className="shrink-0">
-            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium">
-              <CircleDot className="w-3 h-3" />
-              Connect
-            </span>
-          </div>
-        )}
-      </div>
-    </Link>
   );
 }

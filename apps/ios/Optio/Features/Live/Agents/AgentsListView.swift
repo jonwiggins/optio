@@ -54,7 +54,7 @@ struct AgentsListView: View {
                     title: filter == nil ? "No agents yet" : "No \(filter == "paused" ? "paused" : filter!) agents",
                     systemImage: "cpu",
                     message: filter == nil ? "A long-lived agent that listens for messages and events and wakes to do work." : "Nothing matches this filter.",
-                    actionTitle: filter == nil ? "New agent" : nil,
+                    actionTitle: filter == nil ? "New session" : nil,
                     action: { showNew = true }
                 )
                 .listRowSeparator(.hidden)
@@ -73,15 +73,13 @@ struct AgentsListView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showNew = true } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("New agent")
+                    .accessibilityLabel("New session")
             }
             ToolbarItem(placement: .secondaryAction) {
                 Toggle("Show archived", isOn: $showArchived)
             }
         }
-        .sheet(isPresented: $showNew) {
-            AgentFormSheet(mode: .create) { _ in Task { await refresh() } }
-        }
+        .sheet(isPresented: $showNew) { NewSessionSheet() }
         .refreshable { await refresh() }
         .task {
             await refresh()

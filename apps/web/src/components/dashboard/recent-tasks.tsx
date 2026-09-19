@@ -10,7 +10,7 @@ export function RecentTasks({ tasks }: { tasks: any[] }) {
         <h2 className="text-sm font-medium text-text-heading">Recent Tasks</h2>
         <div className="flex items-center gap-2">
           <Link
-            href="/tasks/new"
+            href="/sessions/new"
             className="text-xs text-primary hover:underline flex items-center gap-1"
           >
             <Plus className="w-3 h-3" /> New
@@ -25,7 +25,7 @@ export function RecentTasks({ tasks }: { tasks: any[] }) {
           icon={ListTodo}
           title="No tasks yet"
           description="Create your first task to get an AI agent working on your code."
-          action={{ label: "Create a task", href: "/tasks/new" }}
+          action={{ label: "Create a task", href: "/sessions/new" }}
         />
       ) : (
         <div className="grid gap-2">

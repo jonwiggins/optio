@@ -23,6 +23,10 @@ const TaskConfigSchema = z
     agentType: z.string().nullable(),
     maxRetries: z.number().int(),
     priority: z.number().int(),
+    agentOptions: z
+      .record(z.union([z.string(), z.boolean()]))
+      .nullable()
+      .optional(),
     runTarget: z
       .enum(["cluster", "local"])
       .default("cluster")
@@ -54,6 +58,11 @@ const createTaskConfigSchema = z.object({
   agentType: z.string().optional(),
   maxRetries: z.number().int().min(0).optional(),
   priority: z.number().int().optional(),
+  agentOptions: z
+    .record(z.union([z.string(), z.boolean()]))
+    .nullable()
+    .optional()
+    .describe("Per-run agent parameters (model, effort, …) applied to every spawned task"),
   enabled: z.boolean().optional(),
   runTarget: z
     .enum(["cluster", "local"])
@@ -75,6 +84,10 @@ const updateTaskConfigSchema = z.object({
   agentType: z.string().nullable().optional(),
   maxRetries: z.number().int().min(0).optional(),
   priority: z.number().int().optional(),
+  agentOptions: z
+    .record(z.union([z.string(), z.boolean()]))
+    .nullable()
+    .optional(),
   enabled: z.boolean().optional(),
   runTarget: z.enum(["cluster", "local"]).optional(),
   localHostId: z.string().uuid().nullable().optional(),

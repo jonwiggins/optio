@@ -22,7 +22,7 @@ test("overview dashboard renders with seeded stats", async ({ page }) => {
   await expect(
     page
       .locator("main")
-      .getByText(/E2E: opens a PR|Tasks/)
+      .getByText(/Active sessions|E2E: opens a PR/)
       .first(),
   ).toBeVisible({
     timeout: 30_000,
@@ -71,7 +71,10 @@ for (const { path, marker } of [
   { path: "/tasks/scheduled", marker: /No scheduled tasks yet|Scheduled/i },
   { path: "/reviews", marker: /No open pull requests found|pull request/i },
   { path: "/issues", marker: /No open issues found|issues/i },
-  { path: "/sessions", marker: /No sessions yet|Sessions/i },
+  { path: "/sessions", marker: /E2E: opens a PR|Sessions/i },
+  { path: "/sessions?view=all", marker: /E2E: opens a PR/ },
+  { path: "/sessions/new", marker: /New session/ },
+  { path: "/machines", marker: /No machines paired|Machines/i },
   { path: "/local", marker: /No machines paired yet|Local/i },
   { path: "/costs", marker: /cost/i },
   { path: "/repos", marker: /e2e-org\/e2e-repo/ },

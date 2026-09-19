@@ -45,51 +45,6 @@ struct DashTaskStats: Decodable, Hashable, Sendable {
     }
 }
 
-struct DashJobStats: Decodable, Hashable, Sendable {
-    var total = 0, queued = 0, running = 0, failed = 0, completed = 0
-
-    private enum CodingKeys: String, CodingKey { case total, queued, running, failed, completed }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        total = try c.decodeIfPresent(Int.self, forKey: .total) ?? 0
-        queued = try c.decodeIfPresent(Int.self, forKey: .queued) ?? 0
-        running = try c.decodeIfPresent(Int.self, forKey: .running) ?? 0
-        failed = try c.decodeIfPresent(Int.self, forKey: .failed) ?? 0
-        completed = try c.decodeIfPresent(Int.self, forKey: .completed) ?? 0
-    }
-}
-
-struct DashAgentStats: Decodable, Hashable, Sendable {
-    var total = 0, idle = 0, queued = 0, running = 0, paused = 0, failed = 0, archived = 0
-
-    private enum CodingKeys: String, CodingKey { case total, idle, queued, running, paused, failed, archived }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        total = try c.decodeIfPresent(Int.self, forKey: .total) ?? 0
-        idle = try c.decodeIfPresent(Int.self, forKey: .idle) ?? 0
-        queued = try c.decodeIfPresent(Int.self, forKey: .queued) ?? 0
-        running = try c.decodeIfPresent(Int.self, forKey: .running) ?? 0
-        paused = try c.decodeIfPresent(Int.self, forKey: .paused) ?? 0
-        failed = try c.decodeIfPresent(Int.self, forKey: .failed) ?? 0
-        archived = try c.decodeIfPresent(Int.self, forKey: .archived) ?? 0
-    }
-}
-
-struct DashSessionStats: Decodable, Hashable, Sendable {
-    var total = 0, active = 0, ended = 0
-
-    private enum CodingKeys: String, CodingKey { case total, active, ended }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        total = try c.decodeIfPresent(Int.self, forKey: .total) ?? 0
-        active = try c.decodeIfPresent(Int.self, forKey: .active) ?? 0
-        ended = try c.decodeIfPresent(Int.self, forKey: .ended) ?? 0
-    }
-}
-
 // MARK: - Claude usage / auth status
 
 struct UsageWindow: Decodable, Hashable, Sendable {
@@ -327,35 +282,12 @@ struct DashRecentTask: Decodable, Hashable, Sendable, Identifiable {
     var cost: Double { Double(costUsd ?? "") ?? 0 }
 }
 
-struct DashSessionRow: Decodable, Hashable, Sendable, Identifiable {
-    var id: String
-    var repoUrl: String?
-    var branch: String?
-    var state: String?
-    var createdAt: String?
-}
-
 // MARK: - Endpoints
 
 extension APIClient {
     func dashTaskStats() async throws -> DashTaskStats {
         struct R: Decodable { var stats: DashTaskStats }
         return try await get("/api/tasks/stats", as: R.self).stats
-    }
-
-    func dashJobStats() async throws -> DashJobStats {
-        struct R: Decodable { var stats: DashJobStats }
-        return try await get("/api/jobs/stats", as: R.self).stats
-    }
-
-    func dashAgentStats() async throws -> DashAgentStats {
-        struct R: Decodable { var stats: DashAgentStats }
-        return try await get("/api/persistent-agents/stats", as: R.self).stats
-    }
-
-    func dashSessionStats() async throws -> DashSessionStats {
-        struct R: Decodable { var stats: DashSessionStats }
-        return try await get("/api/sessions/stats", as: R.self).stats
     }
 
     func recentTasks(limit: Int = 5) async throws -> [DashRecentTask] {
@@ -367,12 +299,6 @@ extension APIClient {
         struct Row: Decodable { var id: String? }
         struct R: Decodable { var repos: [Row] }
         return try await get("/api/repos", as: R.self).repos.count
-    }
-
-    func activeSessions(limit: Int = 5) async throws -> (sessions: [DashSessionRow], activeCount: Int) {
-        struct R: Decodable { var sessions: [DashSessionRow]; var activeCount: Int? }
-        let r = try await get("/api/sessions", query: ["state": "active", "limit": String(limit)], as: R.self)
-        return (r.sessions, r.activeCount ?? r.sessions.count)
     }
 
     func clusterOverview() async throws -> ClusterOverview {

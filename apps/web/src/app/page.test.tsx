@@ -19,28 +19,16 @@ vi.mock("@/components/update-banner", () => ({
 
 // Stub every dashboard sub-component to a simple placeholder.
 vi.mock("@/components/dashboard", () => ({
-  PipelineStatsBar: () => <div data-testid="pipeline-stats" />,
   UsagePanel: () => null,
   ClusterSummary: () => null,
-  ActiveSessions: () => null,
-  RecentTasks: () => <div data-testid="recent-tasks" />,
   RecentActivity: () => <div data-testid="recent-activity" />,
   PodsList: () => <div data-testid="pods-list" />,
   WelcomeHero: () => <div data-testid="welcome-hero" />,
-  PerformanceSummary: () => null,
   AgentComparison: () => null,
-  FailureInsights: () => null,
-  LocalSessions: () => <div data-testid="local-sessions" />,
   RecentRuns: () => <div data-testid="recent-tasks" />,
-  LivePanel: ({ items }: { items: unknown[] }) =>
-    items.length > 0 ? <div data-testid="live-panel" /> : null,
-  collectLive: (locals: any[], _h: any[], sessions: any[], agents: any[]) => [
-    ...locals
-      .filter((t) => ["pending", "launching", "running"].includes(t.state))
-      .map((t) => ({ kind: "local", key: t.id })),
-    ...sessions.map((s) => ({ kind: "session", key: s.id })),
-    ...agents.filter((a) => a.state === "running").map((a) => ({ kind: "agent", key: a.id })),
-  ],
+  SessionsBoard: ({ rows }: { rows: unknown[] }) => (
+    <div data-testid="sessions-board">{rows.length}</div>
+  ),
   LimitsPanel: ({ providers }: { providers: unknown[] }) =>
     providers.length > 0 ? <div data-testid="limits" /> : null,
   collectProviderLimits: (usage: any) => (usage?.available ? [{ key: "claude" }] : []),
@@ -50,10 +38,6 @@ vi.mock("@/components/dashboard", () => ({
     ...locals.filter((t) => t.attentionState === "needs_you"),
     ...tasks,
   ],
-  QuietSections: ({ sections }: { sections: Array<{ label: string }> }) =>
-    sections.length > 0 ? (
-      <div data-testid="quiet">{sections.map((s) => s.label).join(", ")}</div>
-    ) : null,
 }));
 
 const makeDashboardData = (overrides: Record<string, unknown> = {}) => ({
@@ -62,8 +46,6 @@ const makeDashboardData = (overrides: Record<string, unknown> = {}) => ({
   repoCount: 2,
   cluster: { pods: [], events: [], repoPods: [] },
   loading: false,
-  activeSessions: [],
-  activeSessionCount: 0,
   usage: null,
   metricsAvailable: false,
   metricsHistory: [],
@@ -76,8 +58,32 @@ vi.mock("@/hooks/use-dashboard-data", () => ({
   useDashboardData: vi.fn(() => makeDashboardData()),
 }));
 
+const feedRow = (key: string, status: string, extra: Record<string, unknown> = {}) => ({
+  key,
+  source: "repo-task",
+  href: `/tasks/${key}`,
+  name: key,
+  when: "now",
+  where: { target: "pod", detail: null },
+  who: "claude-code",
+  then: "exits",
+  status,
+  statusLabel: status,
+  note: null,
+  prUrl: null,
+  lastActivity: null,
+  recurring: false,
+  spawned: false,
+  ...extra,
+});
+
+vi.mock("@/hooks/use-sessions-feed", () => ({
+  useSessionsFeed: vi.fn(() => ({ rows: [], hosts: [], loading: false, refetch: vi.fn() })),
+}));
+
 import OverviewPage from "./page";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
+import { useSessionsFeed } from "@/hooks/use-sessions-feed";
 
 describe("OverviewPage — failed-tasks banner removed", () => {
   afterEach(() => cleanup());
@@ -91,29 +97,19 @@ describe("OverviewPage — failed-tasks banner removed", () => {
 
     render(<OverviewPage />);
 
-    // The old banner text should not appear anywhere.
     expect(screen.queryByText(/failed today/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Ask Optio to help investigate/i)).not.toBeInTheDocument();
   });
 
-  it("does not render the 'failed today' banner when failed count is 1", () => {
-    vi.mocked(useDashboardData).mockReturnValue(
-      makeDashboardData({
-        taskStats: { total: 5, running: 0, failed: 1, needsAttention: 0 },
-      }) as any,
-    );
-
-    render(<OverviewPage />);
-
-    expect(screen.queryByText(/failed today/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Ask Optio to help investigate/i)).not.toBeInTheDocument();
-  });
-
-  it("still renders the Overview heading and pipeline stats", () => {
+  it("renders the Overview heading, the sessions board, and a New session button", () => {
     render(<OverviewPage />);
 
     expect(screen.getByText("Overview")).toBeInTheDocument();
-    expect(screen.getByTestId("pipeline-stats")).toBeInTheDocument();
+    expect(screen.getByTestId("sessions-board")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /New session/ })).toHaveAttribute(
+      "href",
+      "/sessions/new",
+    );
   });
 });
 
@@ -126,63 +122,41 @@ describe("OverviewPage — section ordering", () => {
     const recentTasks = screen.getByTestId("recent-tasks");
     const podsList = screen.getByTestId("pods-list");
     const recentActivity = screen.getByTestId("recent-activity");
-
-    // compareDocumentPosition bit 4 (DOCUMENT_POSITION_FOLLOWING) means the
-    // argument node comes after the reference node in document order.
     const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
 
-    // Recent Tasks should come before Pods
     expect(recentTasks.compareDocumentPosition(podsList) & FOLLOWING).toBeTruthy();
-    // Pods should come before Recent Activity
     expect(podsList.compareDocumentPosition(recentActivity) & FOLLOWING).toBeTruthy();
-    // Recent Tasks should come before Recent Activity
-    expect(recentTasks.compareDocumentPosition(recentActivity) & FOLLOWING).toBeTruthy();
   });
 });
 
-describe("OverviewPage — Persistent Agents and Sessions stats bars", () => {
+describe("OverviewPage — the sessions feed drives the summary", () => {
   afterEach(() => cleanup());
 
-  it("hides the Persistent Agents and Sessions section labels when totals are zero", () => {
-    vi.mocked(useDashboardData).mockReturnValue(
-      makeDashboardData({
-        agentStats: { total: 0, idle: 0, queued: 0, running: 0, paused: 0, failed: 0, archived: 0 },
-        sessionStats: { total: 0, active: 0, ended: 0 },
-      }) as any,
-    );
+  it("counts running / waiting / needs-you / recurring sessions in the subtitle", () => {
+    vi.mocked(useSessionsFeed).mockReturnValue({
+      rows: [
+        feedRow("a", "running"),
+        feedRow("b", "needs_you"),
+        feedRow("c", "waiting", { source: "local-terminal", then: "waits-for-me" }),
+        feedRow("d", "scheduled", { source: "standalone", recurring: true }),
+      ],
+      hosts: [],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
 
     render(<OverviewPage />);
 
-    expect(screen.queryByText("Persistent Agents")).not.toBeInTheDocument();
-    expect(screen.queryByText("Sessions")).not.toBeInTheDocument();
-  });
-
-  it("renders the Persistent Agents section when total > 0", () => {
-    vi.mocked(useDashboardData).mockReturnValue(
-      makeDashboardData({
-        agentStats: { total: 3, idle: 2, queued: 0, running: 1, paused: 0, failed: 0, archived: 0 },
-      }) as any,
-    );
-
-    render(<OverviewPage />);
-
-    expect(screen.getByText("Persistent Agents")).toBeInTheDocument();
-  });
-
-  it("renders the Sessions section when total > 0", () => {
-    vi.mocked(useDashboardData).mockReturnValue(
-      makeDashboardData({
-        sessionStats: { total: 2, active: 2, ended: 0 },
-      }) as any,
-    );
-
-    render(<OverviewPage />);
-
-    expect(screen.getByText("Sessions")).toBeInTheDocument();
+    expect(screen.getByText(/1 running/)).toBeInTheDocument();
+    expect(screen.getByText(/1 waiting for you/)).toBeInTheDocument();
+    expect(screen.getByText(/1 needs you/)).toBeInTheDocument();
+    expect(screen.getByText(/1 recurring/)).toBeInTheDocument();
+    expect(screen.getByTestId("sessions-board")).toHaveTextContent("4");
   });
 });
 
-describe("OverviewPage — Local, Needs you, and quiet folding", () => {
+describe("OverviewPage — Needs you and the welcome hero", () => {
   afterEach(() => cleanup());
 
   const live = (id: string, attentionState: string) => ({
@@ -194,7 +168,7 @@ describe("OverviewPage — Local, Needs you, and quiet folding", () => {
     lastActivityAt: new Date().toISOString(),
   });
 
-  it("shows the Local section when a terminal is live, and Needs you when one waits", () => {
+  it("shows Needs you when a local terminal waits", () => {
     vi.mocked(useDashboardData).mockReturnValue(
       makeDashboardData({
         localTerminals: [live("a", "working"), live("b", "needs_you")],
@@ -204,29 +178,7 @@ describe("OverviewPage — Local, Needs you, and quiet folding", () => {
 
     render(<OverviewPage />);
 
-    expect(screen.getByTestId("local-sessions")).toBeInTheDocument();
     expect(screen.getByTestId("needs-you")).toBeInTheDocument();
-    expect(screen.queryByTestId("quiet")).not.toBeInTheDocument();
-  });
-
-  it("folds idle concepts into the quiet line instead of full strips", () => {
-    vi.mocked(useDashboardData).mockReturnValue(
-      makeDashboardData({
-        localTerminals: [],
-        localHosts: [{ id: "h", name: "mac", state: "online" }],
-        agentStats: { total: 3, idle: 3, queued: 0, running: 0, paused: 0, failed: 0, archived: 0 },
-        sessionStats: { total: 4, active: 0, ended: 4 },
-        standaloneStats: { total: 9, queued: 0, running: 0, failed: 1, completed: 8 },
-      }) as any,
-    );
-
-    render(<OverviewPage />);
-
-    expect(screen.queryByTestId("local-sessions")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("needs-you")).not.toBeInTheDocument();
-    expect(screen.getByTestId("quiet")).toHaveTextContent(
-      "Local, Jobs, Persistent Agents, Sessions",
-    );
   });
 
   it("skips the welcome hero when there are no repo tasks but a local terminal exists", () => {
@@ -241,6 +193,19 @@ describe("OverviewPage — Local, Needs you, and quiet folding", () => {
     render(<OverviewPage />);
 
     expect(screen.queryByTestId("welcome-hero")).not.toBeInTheDocument();
-    expect(screen.getByTestId("local-sessions")).toBeInTheDocument();
+    expect(screen.getByTestId("sessions-board")).toBeInTheDocument();
+  });
+
+  it("shows the welcome hero on a truly empty install", () => {
+    vi.mocked(useDashboardData).mockReturnValue(
+      makeDashboardData({
+        taskStats: { total: 0, running: 0, failed: 0, needsAttention: 0 },
+        localTerminals: [],
+      }) as any,
+    );
+
+    render(<OverviewPage />);
+
+    expect(screen.getByTestId("welcome-hero")).toBeInTheDocument();
   });
 });

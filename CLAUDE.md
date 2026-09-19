@@ -42,7 +42,7 @@ Optio is an orchestration system for AI coding agents. Think of it as "CI/CD whe
 - **Agents** — Persistent Agents (the third tier; long-lived, message-driven)
 - **Prompts** — reusable prompt templates (was "Templates" in the Library)
 
-The sidebar groups these as **Run** (Tasks · Jobs · Reviews · Issues · Scheduled) and **Live** (Agents · Sessions). The `/tasks` hub-with-tabs from earlier versions is gone — each section is its own page now. Legacy `/tasks?tab=...` URLs redirect to the dedicated routes.
+**v0.5 — one noun: Sessions.** The UI now presents every one of these as a **session** with five attributes — **When** (what starts it), **Where** (pod / your machine), **Who** (a terminal or an agent runtime + its parameters), **What** (the prompt), and **Then** (exit conditions: exits when done / waits for me / persistent agent) — plus a name. The sidebar is **Work** (Sessions · Reviews · Inbox) and **Library** (Prompts · Repos · Machines · Connections). `/sessions` is the unified list (client-side merge of the per-kind endpoints in `lib/sessions-feed.ts`, views: Active / Recurring / Agents / History); `/sessions/new` is the one creation form (`components/session-form/`: `model.ts` derives which row to create — `deriveKind` — from the attributes, `submit.ts` calls the existing services). `/tasks/new`, `/jobs/new`, and `/agents/new` redirect there. The per-kind pages (`/tasks`, `/jobs`, `/agents`, `/local`, `/tasks/scheduled`) still exist as detail/management surfaces but are no longer in the nav. Legacy `/tasks?tab=...` URLs redirect to the dedicated routes.
 
 For the long-form explanation of how the two flavors map to the three internal types, the polymorphic HTTP layer, and how the UI presents them, see `docs/tasks.md`.
 

@@ -1,10 +1,19 @@
 # Optio for iOS
 
-Native SwiftUI client for the full Optio experience: overview stats, Tasks, Jobs,
-Reviews, Issues, Scheduled, Persistent Agents, Sessions, Optio Local terminals,
-Library, Insights, and Admin/Settings. Designed to be used over a Tailscale
-network: your phone and the machine (or cluster) running Optio join the same
-tailnet, and the app talks to the API at its MagicDNS address.
+Native SwiftUI client for the full Optio experience, built around one noun:
+**Sessions**. The tabs mirror the web sidebar — **Overview**; **Work** (Sessions ·
+Reviews · Inbox); **Library** (Prompts · Repos · Machines · Connections);
+**Insights** (Analytics · Costs · Activity · Cluster); **More** (Admin, Settings,
+Account). The Sessions screen merges every kind of work — PR tasks, jobs,
+scheduled blueprints, Local automations and terminals, pod sessions, persistent
+agents — into one list (`Features/Work/Sessions/SessionsFeed.swift`, a port of the
+web's `lib/sessions-feed.ts`) with Active / Recurring / Agents / History / All
+views; rows open the per-kind detail screens, and the per-kind lists remain
+reachable from the Sessions toolbar's "Browse by kind" menu. "New session" opens
+the web's five-attribute form (`<web UI>/sessions/new`) in an in-app Safari view.
+Designed to be used over a Tailscale network: your phone and the machine (or
+cluster) running Optio join the same tailnet, and the app talks to the API at its
+MagicDNS address.
 
 ## Prerequisites
 
@@ -113,8 +122,10 @@ Pass the variables with `xcrun simctl launch --terminate-running-process …`: a
 separate `simctl terminate` followed by `launch` drops the `SIMCTL_CHILD_`
 environment, and the app then silently reuses whatever was paired last time.
 
-Sections: tasks, jobs, reviews, issues, scheduled, agents, sessions, local,
-analytics, costs, activity, cluster, more. With `OPTIO_AUTH_DISABLED=true` on
+Sections: sessions, reviews, inbox, prompts, repos, machines, connections,
+analytics, costs, activity, cluster, more. The legacy names (tasks, jobs,
+scheduled, agents, local, issues) still work and land on the matching Sessions
+view (`optio://section/sessions?view=recurring` selects a view directly). With `OPTIO_AUTH_DISABLED=true` on
 the server any token string works; a few user-scoped routes (workspaces, API
 keys, notification preferences) return 401 in that mode because the synthetic
 dev user has no session, which is expected.
@@ -135,8 +146,9 @@ OptioTests/       XCTest unit tests
 ## Cross-tab navigation
 
 `AppRouter` (App/AppRouter.swift) lives in the environment. Call
-`router.open(.local)` from anywhere to switch tabs; the target hub reads and
-clears `pendingSection` to select its sub-section.
+`router.open(.machines)` or `router.openSessions(.recurring)` from anywhere to
+switch tabs; the target hub reads and clears `pendingSection` (and the Sessions
+screen `pendingSessionView`) to select its sub-section.
 
 ## CI
 

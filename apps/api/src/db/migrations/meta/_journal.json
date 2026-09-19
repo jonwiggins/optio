@@ -659,6 +659,13 @@
       "when": 1790400000000,
       "tag": "1790400000_local_terminal_transcripts",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1790500000000,
+      "tag": "1790500000_task_config_agent_options",
+      "breakpoints": true
     }
   ]
 }

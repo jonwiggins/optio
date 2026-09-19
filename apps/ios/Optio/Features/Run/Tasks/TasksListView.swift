@@ -58,7 +58,6 @@ struct TasksListView: View {
     @Environment(APIClient.self) private var api
     @State private var model = TasksListModel()
     @State private var showNew = false
-    @State private var pushTaskId: String?
     @State private var confirmBulk: String?
     @State private var actionError: Error?
     @State private var toast: String?
@@ -102,7 +101,7 @@ struct TasksListView: View {
                     title: emptyTitle,
                     systemImage: "checklist",
                     message: model.query.isEmpty && model.stage.isEmpty ? "Put an agent to work in a repo." : "Nothing matches this filter.",
-                    actionTitle: model.query.isEmpty && model.stage.isEmpty ? "New task" : nil,
+                    actionTitle: model.query.isEmpty && model.stage.isEmpty ? "New session" : nil,
                     action: { showNew = true }
                 )
                 .listRowSeparator(.hidden)
@@ -145,13 +144,10 @@ struct TasksListView: View {
                     Button("Cancel all active", role: .destructive) { confirmBulk = "cancel" }
                 } label: { Image(systemName: "line.3.horizontal.decrease") }
                 Button { showNew = true } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("New task")
+                    .accessibilityLabel("New session")
             }
         }
-        .sheet(isPresented: $showNew) {
-            NewTaskSheet { created in pushTaskId = created.id }
-        }
-        .navigationDestination(item: $pushTaskId) { id in TaskDetailView(taskId: id) }
+        .sheet(isPresented: $showNew) { NewSessionSheet() }
         .confirmationDialog(confirmBulk == "retry" ? "Retry all failed tasks?" : "Cancel all running and queued tasks?", isPresented: Binding(get: { confirmBulk != nil }, set: { if !$0 { confirmBulk = nil } }), titleVisibility: .visible) {
             Button(confirmBulk == "retry" ? "Retry failed" : "Cancel active", role: confirmBulk == "retry" ? nil : .destructive) {
                 let which = confirmBulk

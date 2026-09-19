@@ -295,6 +295,7 @@ enum LocalPresentation {
         case .ticket: return "ticket"
         case .trigger: return "antenna.radiowaves.left.and.right"
         case .blueprint: return "square.stack.3d.up"
+        case .resume: return "arrow.counterclockwise"
         case .api: return "cpu"
         case .job: return "briefcase"
         case .task: return "arrow.triangle.pull"

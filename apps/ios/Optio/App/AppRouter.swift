@@ -2,21 +2,24 @@ import Foundation
 import Observation
 
 /// Cross-tab navigation. Feature hubs read `selectedTab` / `pendingSection` so a tap on
-/// an Overview tile can land on, say, Run › Tasks or Live › Local. Hubs consume
-/// `pendingSection` (set it back to nil) once they've switched.
+/// an Overview tile can land on, say, Work › Sessions (in a given view) or Library ›
+/// Machines. Hubs consume `pendingSection` (set it back to nil) once they've switched.
 @MainActor
 @Observable
 final class AppRouter {
-    enum Tab: Hashable { case overview, run, live, insights, more }
+    enum Tab: Hashable { case overview, work, library, insights, more }
 
     enum Section: Hashable {
-        case tasks, jobs, reviews, issues, scheduled
-        case agents, sessions, local
+        case sessions, reviews, inbox
+        case prompts, repos, machines, connections
         case analytics, costs, activity, cluster
     }
 
     var selectedTab: Tab = .overview
     var pendingSection: Section?
+    /// The Sessions view to select once the Sessions screen is on screen (Overview
+    /// tiles, `optio://section/sessions?view=…`). The screen consumes it.
+    var pendingSessionView: SessionView?
     /// A detail to open once the owning hub is on screen: (kind, id, compose). Hubs
     /// consume it (set nil) after pushing the detail view.
     var pendingDetail: PendingDetail?
@@ -28,29 +31,67 @@ final class AppRouter {
         var compose = false
     }
 
+    /// Legacy `optio://section/<name>` names (and the pre-v0.5 nav) → where they live now.
+    /// Every old per-kind list is a view of the one Sessions list.
+    static func section(named name: String) -> (Section, SessionView?)? {
+        switch name {
+        case "sessions": return (.sessions, nil)
+        case "tasks": return (.sessions, .all)
+        case "jobs", "scheduled": return (.sessions, .recurring)
+        case "agents": return (.sessions, .agents)
+        case "local": return (.sessions, .active)
+        case "reviews": return (.reviews, nil)
+        case "issues", "inbox": return (.inbox, nil)
+        case "prompts", "templates": return (.prompts, nil)
+        case "repos": return (.repos, nil)
+        case "machines", "hosts": return (.machines, nil)
+        case "connections": return (.connections, nil)
+        case "analytics": return (.analytics, nil)
+        case "costs": return (.costs, nil)
+        case "activity": return (.activity, nil)
+        case "cluster": return (.cluster, nil)
+        default: return nil
+        }
+    }
+
     /// Handles `optio://` URLs from widgets, Live Activity buttons, notifications and intents.
     @discardableResult
     func handle(url: URL) -> Bool {
         guard let link = DeepLink(url: url) else { return false }
         switch link {
-        case .task(let id): pendingDetail = .init(kind: .task, id: id); open(.tasks)
-        case .local(let id, let compose): pendingDetail = .init(kind: .local, id: id, compose: compose); open(.local)
-        case .agent(let id, let compose): pendingDetail = .init(kind: .agent, id: id, compose: compose); open(.agents)
+        case .task(let id): pendingDetail = .init(kind: .task, id: id); open(.sessions)
+        case .local(let id, let compose): pendingDetail = .init(kind: .local, id: id, compose: compose); open(.sessions)
+        case .agent(let id, let compose): pendingDetail = .init(kind: .agent, id: id, compose: compose); open(.sessions)
         case .session(let id): pendingDetail = .init(kind: .session, id: id); open(.sessions)
-        case .needsYou: pendingDetail = nil; open(.local)
+        case .needsYou: pendingDetail = nil; open(.sessions, view: .active)
         case .section(let name):
-            let map: [String: Section] = ["tasks": .tasks, "jobs": .jobs, "reviews": .reviews, "issues": .issues, "scheduled": .scheduled, "agents": .agents, "sessions": .sessions, "local": .local, "analytics": .analytics, "costs": .costs, "activity": .activity, "cluster": .cluster]
-            if let s = map[name] { open(s) } else if name == "more" { selectedTab = .more } else { return false }
+            if let (section, view) = Self.section(named: name) {
+                let explicit = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                    .first { $0.name == "view" }?.value.flatMap(SessionView.init(rawValue:))
+                open(section, view: explicit ?? view)
+            } else if name == "more" {
+                selectedTab = .more
+            } else {
+                return false
+            }
         }
         return true
     }
 
-    func open(_ section: Section) {
+    func open(_ section: Section, view: SessionView? = nil) {
         pendingSection = section
+        if section == .sessions, let view { pendingSessionView = view }
+        selectedTab = tab(for: section)
+    }
+
+    /// Straight to the Sessions list in a given view (Overview tiles).
+    func openSessions(_ view: SessionView) { open(.sessions, view: view) }
+
+    func tab(for section: Section) -> Tab {
         switch section {
-        case .tasks, .jobs, .reviews, .issues, .scheduled: selectedTab = .run
-        case .agents, .sessions, .local: selectedTab = .live
-        case .analytics, .costs, .activity, .cluster: selectedTab = .insights
+        case .sessions, .reviews, .inbox: return .work
+        case .prompts, .repos, .machines, .connections: return .library
+        case .analytics, .costs, .activity, .cluster: return .insights
         }
     }
 }

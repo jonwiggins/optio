@@ -1,13 +1,16 @@
 import Charts
 import SwiftUI
 
-/// The Overview tab. Mirrors `apps/web/src/app/page.tsx`: pipeline stat strips for
-/// Tasks / Jobs / Agents / Sessions, Claude usage, cluster summary, active sessions,
-/// and recent tasks. Polls every 10 seconds while visible.
+/// The Overview tab. Mirrors `apps/web/src/app/page.tsx`: what needs you, usage
+/// limits, then the sessions board over the unified feed (five tiles, active
+/// sessions, recurring + persistent agents), cluster summary, recent tasks. The
+/// dashboard model polls every 10 seconds while visible, the feed every 15.
 struct OverviewView: View {
     @Environment(APIClient.self) private var api
     @Environment(AppRouter.self) private var router
     @State private var model = OverviewModel()
+    @State private var feed: SessionsFeedModel?
+    @State private var showNew = false
 
     var body: some View {
         NavigationStack {
@@ -17,7 +20,7 @@ struct OverviewView: View {
                         List { ErrorRow(error: error, what: "the overview") { Task { await model.refresh(api: api) } } }.listStyle(.plain)
                     } else {
                         List {
-                            Section { SkeletonStrip(labels: ["Queue", "Running", "In review", "Needs you", "Failed"]) }
+                            Section { SkeletonStrip(labels: ["Need you", "Running", "Waiting", "Recurring", "Agents"]) }
                                 .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                             Section { SkeletonRows() }
                         }
@@ -34,16 +37,27 @@ struct OverviewView: View {
             .hubChrome()
             .serverSwitcherToolbar()
             .navigationDestination(for: DashRecentTask.self) { TaskDetailView(taskId: $0.id) }
-            .navigationDestination(for: DashSessionRow.self) { SessionDetailView(sessionId: $0.id) }
             .navigationDestination(for: LocalRoute.self) { route in
                 if case .terminal(let id) = route { LocalTerminalScreen(terminalId: id, hosts: model.localHosts) }
             }
+            .sessionDestinations()
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showNew = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("New session")
+                }
+            }
+            .sheet(isPresented: $showNew) { NewSessionSheet() }
             .task {
+                if feed == nil { feed = SessionsFeedModel(api: api) }
+                feed?.start()
                 while !Task.isCancelled {
                     await model.refresh(api: api)
                     try? await Task.sleep(for: .seconds(10))
                 }
             }
+            .onAppear { feed?.start() }
+            .onDisappear { feed?.stop() }
         }
     }
 
@@ -68,48 +82,6 @@ struct OverviewView: View {
 
             needsYouSection
 
-            stripSection("Tasks", destination: .tasks, items: taskItems(model.taskStats))
-
-            if model.hasLocal {
-                if model.localQuiet {
-                    Section {
-                        Button { router.open(.local) } label: {
-                            OptioRow(title: "Local", meta: Text(model.localHostsOnline > 0
-                                                                ? "\(model.localHostsOnline) host\(model.localHostsOnline == 1 ? "" : "s") online · quiet"
-                                                                : "no hosts online"),
-                                     trailing: "Open")
-                        }
-                        .buttonStyle(.plain)
-                    }
-                } else {
-                    let s = model.localStats
-                    stripSection("Local", destination: .local, items: [
-                        StatItem("Needs you", s.needsYou, tone: .accent), StatItem("Working", s.working),
-                        StatItem("Idle", s.idle), StatItem("Finished", s.finished),
-                    ])
-                }
-            }
-
-            if let s = model.standaloneStats, s.total > 0 {
-                stripSection("Jobs", destination: .jobs, items: [
-                    StatItem("Queue", s.queued), StatItem("Running", s.running),
-                    StatItem("Failed", s.failed, tone: .danger), StatItem("Done", s.completed),
-                ])
-            }
-
-            if let s = model.agentStats, s.total > 0 {
-                stripSection("Agents", destination: .agents, items: [
-                    StatItem("Idle", s.idle), StatItem("Running", s.running + s.queued),
-                    StatItem("Needs you", s.paused, tone: .accent), StatItem("Failed", s.failed, tone: .danger),
-                ])
-            }
-
-            if let s = model.sessionStats, s.total > 0 {
-                stripSection("Sessions", destination: .sessions, items: [
-                    StatItem("Active", s.active), StatItem("Ended today", s.ended),
-                ])
-            }
-
             if let usage = model.usage, usage.claudeAuthFailed || usage.githubAuthFailed || usage.available {
                 Section {
                     UsagePanelView(usage: usage) { await model.refreshUsage(api: api) }
@@ -118,6 +90,10 @@ struct OverviewView: View {
                 } header: {
                     if usage.available, !usage.claudeAuthFailed { SectionHeader(title: "Claude usage").textCase(nil) }
                 }
+            }
+
+            if let feed {
+                SessionsBoardSections(feed: feed) { showNew = true }
             }
 
             Section {
@@ -133,11 +109,9 @@ struct OverviewView: View {
                 SectionHeader(title: "Cluster", action: model.clusterForbidden ? nil : { router.open(.cluster) }).textCase(nil)
             }
 
-            liveSection
-
             Section {
                 if model.recentTasks.isEmpty {
-                    EmptyState(title: "No tasks yet", systemImage: "checklist", message: "Put an agent to work in a repo from the Run tab.", actionTitle: "Go to Tasks") { router.open(.tasks) }
+                    EmptyState(title: "No tasks yet", systemImage: "checklist", message: "Start a session that opens a PR in one of your repos.", actionTitle: "New session") { showNew = true }
                         .listRowBackground(Color.clear)
                 } else {
                     ForEach(model.recentTasks) { task in
@@ -145,13 +119,16 @@ struct OverviewView: View {
                     }
                 }
             } header: {
-                SectionHeader(title: "Recent tasks") { router.open(.tasks) }.textCase(nil)
+                SectionHeader(title: "Recent tasks") { router.openSessions(.history) }.textCase(nil)
             }
 
             OtherServersSection()
         }
         .listStyle(.insetGrouped)
-        .refreshable { await model.refresh(api: api) }
+        .refreshable {
+            await model.refresh(api: api)
+            await feed?.refresh()
+        }
     }
 
     /// The web's first section: everything waiting on you, whatever concept it
@@ -179,83 +156,44 @@ struct OverviewView: View {
                     }
                 }
                 if terminals.count > 4 {
-                    Button("\(terminals.count - 4) more waiting in Local") { router.open(.local) }.font(.footnote)
+                    Button("\(terminals.count - 4) more waiting in Sessions") { router.openSessions(.active) }.font(.footnote)
                 }
             } header: {
-                SectionHeader(title: "Needs you", detail: "\(terminals.count + tasks.count)", tone: .accent) { router.open(.local) }.textCase(nil)
+                SectionHeader(title: "Needs you", detail: "\(terminals.count + tasks.count)", tone: .accent) { router.openSessions(.active) }.textCase(nil)
             }
         }
     }
 
-    /// What's live right now across concepts (`live-panel.tsx`): working local
-    /// terminals, then interactive sessions.
-    @ViewBuilder private var liveSection: some View {
-        let working = Array(model.localWorking.prefix(3))
-        if !working.isEmpty || !model.activeSessions.isEmpty {
-            Section {
-                ForEach(working, id: \.id) { t in
-                    NavigationLink(value: LocalRoute.terminal(id: t.id)) {
-                        TerminalRowView(terminal: t, hostName: model.localHosts.count > 1 ? model.localHostName[t.hostId] : nil)
-                    }
-                }
-                ForEach(model.activeSessions) { s in
-                    NavigationLink(value: s) {
-                        OptioRow(
-                            title: s.branch ?? "Session \(s.id.prefix(8))",
-                            tone: .working,
-                            meta: Text.meta([InsightsFormat.repoShortName(s.repoUrl ?? ""), s.createdAt.map { "started \($0.relativeDescription)" }]),
-                            titleLineLimit: 1
-                        )
-                    }
-                }
-            } header: {
-                SectionHeader(title: "Live now", detail: "\(model.localLiveCount + model.activeSessionCount)") {
-                    router.open(working.isEmpty ? .sessions : .local)
-                }.textCase(nil)
-            }
-        }
-    }
+    private var counts: SessionCounts { feed?.counts ?? SessionCounts() }
 
-    private func stripSection(_ title: String, destination: AppRouter.Section, items: [StatItem]) -> some View {
-        Section {
-            StatStrip(items: items)
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-        } header: {
-            SectionHeader(title: title) { router.open(destination) }.textCase(nil)
-        }
-    }
-
+    /// "N running · N waiting for you · N need you · N recurring" (the web's page subtitle).
     private var subtitleText: String {
-        let running = model.taskStats?.running ?? 0
-        let attention = model.taskStats?.needsAttention ?? 0
-        var s = "\(running) active"
-        if model.localLiveCount > 0 { s += " · \(model.localLiveCount) local" }
-        let waiting = attention + model.localNeedsYou.count
-        if waiting > 0 { s += " · \(waiting) need\(waiting == 1 ? "s" : "") you" }
+        let c = counts
+        var s = "\(c.running) running"
+        if c.waiting > 0 { s += " · \(c.waiting) waiting for you" }
+        if c.needsYou > 0 { s += " · \(c.needsYou) need\(c.needsYou == 1 ? "s" : "") you" }
+        if c.recurring > 0 { s += " · \(c.recurring) recurring" }
         return s
     }
 
-    /// "0 active · 2 need you" — only the second half in accent.
+    /// Same line for iOS < 26, with "waiting" in green and "need you" in accent.
     private var subtitle: some View {
-        let running = model.taskStats?.running ?? 0
-        let attention = model.taskStats?.needsAttention ?? 0
+        let c = counts
         return HStack(spacing: 6) {
-            Text("\(running) active").contentTransition(.numericText())
-            if model.activeSessionCount > 0 {
+            Text("\(c.running) running").contentTransition(.numericText())
+            if c.waiting > 0 {
                 Text("·").foregroundStyle(.tertiary)
-                Text("\(model.activeSessionCount) \(model.activeSessionCount == 1 ? "session" : "sessions")")
+                Text("\(c.waiting) waiting for you").foregroundStyle(Tone.success.textStyle)
             }
-            if model.localLiveCount > 0 {
+            if c.needsYou > 0 {
                 Text("·").foregroundStyle(.tertiary)
-                Text("\(model.localLiveCount) local")
-            }
-            let waiting = attention + model.localNeedsYou.count
-            if waiting > 0 {
-                Text("·").foregroundStyle(.tertiary)
-                Text("\(waiting) need\(waiting == 1 ? "s" : "") you")
+                Text("\(c.needsYou) need\(c.needsYou == 1 ? "s" : "") you")
                     .foregroundStyle(Tone.accent.textStyle)
                     .contentTransition(.numericText())
+            }
+            if c.recurring > 0 {
+                Text("·").foregroundStyle(.tertiary)
+                Text("\(c.recurring) recurring")
             }
         }
         .font(.subheadline)
@@ -271,31 +209,17 @@ struct OverviewView: View {
                     .foregroundStyle(.secondary)
                 Text("Welcome to Optio").font(.title2.weight(.semibold))
                 Text(model.repoCount == 0
-                     ? "Add a repository from the web UI, then create your first task to get an AI agent working on your code."
-                     : "\(model.repoCount ?? 0) \(model.repoCount == 1 ? "repo" : "repos") connected. Create your first task from the Run tab.")
+                     ? "Add a repository or pair a machine, then start your first session to get an AI agent working."
+                     : "\(model.repoCount ?? 0) \(model.repoCount == 1 ? "repo" : "repos") connected. Start your first session.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
-                if model.repoCount != 0 {
-                    Button("Go to Tasks") { router.open(.tasks) }.buttonStyle(.borderedProminent).tint(.primary)
-                }
+                Button("New session") { showNew = true }.buttonStyle(.borderedProminent).tint(.primary)
                 UsagePanelView(usage: model.usage) { await model.refreshUsage(api: api) }
             }
             .padding()
             .frame(maxWidth: .infinity)
         }
         .refreshable { await model.refresh(api: api) }
-    }
-
-    // MARK: Stages (pipeline-stats-bar.tsx)
-
-    private func taskItems(_ s: DashTaskStats?) -> [StatItem] {
-        [
-            StatItem("Queue", s?.queued ?? 0),
-            StatItem("Running", s?.running ?? 0),
-            StatItem("In review", (s?.ci ?? 0) + (s?.review ?? 0)),
-            StatItem("Needs you", s?.needsAttention ?? 0, tone: .accent),
-            StatItem("Failed", s?.failed ?? 0, tone: .danger),
-        ]
     }
 }
 

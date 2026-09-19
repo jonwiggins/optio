@@ -1542,6 +1542,10 @@ export const api = {
     prompt: string;
     description?: string;
     agentType?: string;
+    /** Standalone: model override for the agent CLI. */
+    model?: string;
+    /** Repo blueprints: per-run agent parameters copied to every spawned task. */
+    agentOptions?: Record<string, string | boolean> | null;
     maxRetries?: number;
     repoUrl?: string;
     repoBranch?: string;
@@ -1807,6 +1811,19 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  createPersistentAgentTrigger: (
+    id: string,
+    data: {
+      type: "manual" | "schedule" | "webhook" | "ticket";
+      config?: Record<string, unknown>;
+      enabled?: boolean;
+    },
+  ) =>
+    request<{ trigger: any }>(`/api/persistent-agents/${id}/triggers`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   updatePersistentAgent: (id: string, data: Record<string, unknown>) =>
     request<{ agent: any }>(`/api/persistent-agents/${id}`, {
       method: "PATCH",
@@ -1904,7 +1921,7 @@ export const api = {
     spec?:
       | { kind: "shell" }
       | { kind: "command"; command: string }
-      | { kind: "agent"; agent: string; prompt?: string };
+      | { kind: "agent"; agent: string; prompt?: string; model?: string };
     ticket?: {
       repoId: string;
       issueNumber: number;
