@@ -68,6 +68,20 @@ describe("UsagePanel → TokenRefreshBanner trigger", () => {
     expect(screen.getByText(/Claude Max Usage/i)).toBeInTheDocument();
     expect(screen.queryByText(/OAuth token expired/i)).not.toBeInTheDocument();
   });
+
+  it("shows a meter per model-scoped weekly limit (Fable)", () => {
+    render(
+      <UsagePanel
+        usage={makeUsage({
+          sevenDayModels: [
+            { model: "Fable", utilization: 98, resetsAt: null, severity: "critical" },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText("7d Fable")).toBeInTheDocument();
+    expect(screen.getByText("98%")).toBeInTheDocument();
+  });
 });
 
 describe("UsagePanel → per-token-type banners", () => {

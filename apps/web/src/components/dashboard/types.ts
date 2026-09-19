@@ -64,6 +64,13 @@ export interface UsageData {
   sevenDay?: { utilization: number | null; resetsAt: string | null };
   sevenDaySonnet?: { utilization: number | null; resetsAt: string | null };
   sevenDayOpus?: { utilization: number | null; resetsAt: string | null };
+  /** Per-model 7-day limits (e.g. Fable) — a model can be capped while the account-wide 7-day is fine. */
+  sevenDayModels?: Array<{
+    model: string;
+    utilization: number | null;
+    resetsAt: string | null;
+    severity: string | null;
+  }>;
   extraUsage?: {
     isEnabled: boolean;
     monthlyLimit: number | null;

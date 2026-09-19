@@ -136,6 +136,17 @@ export function UsagePanel({
             resetsAt={usage.sevenDayOpus.resetsAt}
           />
         )}
+        {usage.sevenDayModels?.map(
+          (m) =>
+            m.utilization != null && (
+              <UsageMeter
+                key={m.model}
+                label={`7d ${m.model}`}
+                utilization={m.utilization}
+                resetsAt={m.resetsAt}
+              />
+            ),
+        )}
         {usage.extraUsage?.isEnabled && usage.extraUsage.usedCredits != null && (
           <UsageMeter
             label="Extra Credits"

@@ -164,12 +164,26 @@ export interface ExtraUsage {
   utilization: number | null;
 }
 
+/**
+ * A per-model 7-day limit from the usage payload's `limits[]` list (kind
+ * `weekly_scoped`, e.g. Fable). These never appear as top-level buckets,
+ * and a model can be at 98% while the account-wide 7-day sits at 50%.
+ */
+export interface ModelUsageBucket extends UsageBucket {
+  /** The model's display name as the API labels it ("Fable"). */
+  model: string;
+  /** "normal" | "warning" | "critical" as reported, when present. */
+  severity: string | null;
+}
+
 export interface ClaudeUsageResult {
   available: boolean;
   fiveHour?: UsageBucket;
   sevenDay?: UsageBucket;
   sevenDaySonnet?: UsageBucket;
   sevenDayOpus?: UsageBucket;
+  /** Per-model 7-day limits (Fable, …), in the API's order. */
+  sevenDayModels?: ModelUsageBucket[];
   extraUsage?: ExtraUsage;
   error?: string;
   /** True when this is the last successful read, served because a refresh just failed. */
@@ -218,6 +232,26 @@ function mapBucket(
 ): UsageBucket | undefined {
   if (!raw) return undefined;
   return { utilization: raw.utilization, resetsAt: raw.resets_at };
+}
+
+/** Per-model weekly limits out of the payload's `limits[]` (see ModelUsageBucket). */
+export function mapModelLimits(limits: unknown): ModelUsageBucket[] {
+  if (!Array.isArray(limits)) return [];
+  const out: ModelUsageBucket[] = [];
+  for (const raw of limits) {
+    if (!raw || typeof raw !== "object") continue;
+    const l = raw as Record<string, any>;
+    if (l.kind !== "weekly_scoped") continue;
+    const model = l.scope?.model?.display_name;
+    if (typeof model !== "string" || !model) continue;
+    out.push({
+      model,
+      utilization: typeof l.percent === "number" ? l.percent : null,
+      resetsAt: typeof l.resets_at === "string" ? l.resets_at : null,
+      severity: typeof l.severity === "string" ? l.severity : null,
+    });
+  }
+  return out;
 }
 
 export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
@@ -296,6 +330,7 @@ export async function getClaudeUsage(): Promise<ClaudeUsageResult> {
       sevenDay: mapBucket(data.seven_day),
       sevenDaySonnet: mapBucket(data.seven_day_sonnet),
       sevenDayOpus: mapBucket(data.seven_day_opus),
+      sevenDayModels: mapModelLimits(data.limits),
       extraUsage: data.extra_usage
         ? {
             isEnabled: data.extra_usage.is_enabled,

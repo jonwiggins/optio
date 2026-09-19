@@ -153,6 +153,35 @@ describe("getClaudeUsage — auth failure handling", () => {
     expect(result.error).toBe("Usage API returned 401");
   });
 
+  it("lifts per-model weekly limits (Fable) out of the limits list", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          five_hour: { utilization: 26, resets_at: "2026-09-19T23:20:00Z" },
+          seven_day: { utilization: 50, resets_at: "2026-09-20T20:59:59Z" },
+          limits: [
+            { kind: "session", group: "session", percent: 26, severity: "normal" },
+            { kind: "weekly_all", group: "weekly", percent: 50, severity: "normal" },
+            {
+              kind: "weekly_scoped",
+              group: "weekly",
+              percent: 98,
+              severity: "critical",
+              resets_at: "2026-09-20T20:59:59Z",
+              scope: { model: { id: null, display_name: "Fable" }, surface: null },
+            },
+            { kind: "weekly_scoped", percent: 3, scope: { model: null, surface: "cowork" } },
+          ],
+        }),
+    });
+
+    const result = await getClaudeUsage();
+    expect(result.sevenDayModels).toEqual([
+      { model: "Fable", utilization: 98, resetsAt: "2026-09-20T20:59:59Z", severity: "critical" },
+    ]);
+  });
+
   it("returns cached result for successful usage calls", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
