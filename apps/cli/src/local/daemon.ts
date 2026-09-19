@@ -26,6 +26,7 @@ import {
 import { UsageTracker } from "./usage-tracker.js";
 import { TranscriptTracker } from "./transcript-tracker.js";
 import { readAgentLimits } from "./codex-limits.js";
+import { hasClaudeCredentials, readClaudeCredentials } from "./claude-credentials.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
 
 /**
@@ -224,6 +225,9 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
       case "detach":
         manager.detach(msg.terminalId);
         return;
+      case "credentials":
+        void answerCredentials(msg.requestId);
+        return;
       case "pong":
         return;
     }
@@ -259,8 +263,36 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
     return host;
   }
 
+  /**
+   * The server asked for this machine's Claude login (to refresh the
+   * cluster's token). Only the access token is sent; a machine that isn't
+   * logged in answers with the reason.
+   */
+  async function answerCredentials(requestId: string): Promise<void> {
+    const creds = await readClaudeCredentials().catch(() => null);
+    if (!creds) {
+      send({
+        type: "credentials-result",
+        requestId,
+        error: "No Claude Code login on this machine — run `claude` here and sign in first",
+      });
+      return;
+    }
+    send({
+      type: "credentials-result",
+      requestId,
+      token: creds.accessToken,
+      expiresAt: creds.expiresAt,
+    });
+    status("sent the Claude OAuth token from this machine to refresh the server's");
+  }
+
   /** One connection lifetime; resolves when the socket closes. */
-  function connectOnce(host: LocalHost, dirs: LocalHostDir[]): Promise<void> {
+  function connectOnce(
+    host: LocalHost,
+    dirs: LocalHostDir[],
+    claudeCredentials: boolean,
+  ): Promise<void> {
     return new Promise((resolve) => {
       const protocols = ["optio-ws-v1"];
       const token = client.getToken();
@@ -280,6 +312,7 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
           daemonVersion: CLI_VERSION,
           dirs,
           terminals: manager.terminalsSync(),
+          claudeCredentials,
         };
         socket.send(JSON.stringify(hello));
         status(green(`connected to ${client.serverUrl} as host "${host.name}" (${host.id})`));
@@ -360,7 +393,9 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
         status(yellow("no directories in the allowlist — run `optio local add <dir>`"));
       }
       const host = await register(dirs);
-      await connectOnce(host, dirs);
+      // Re-probed per connection: a `claude login` since the last one counts.
+      const claudeCredentials = await hasClaudeCredentials().catch(() => false);
+      await connectOnce(host, dirs, claudeCredentials);
     } catch (err) {
       if (!shuttingDown) {
         status(red(err instanceof Error ? err.message : String(err)));

@@ -49,6 +49,12 @@ export interface LocalHost {
   dirs: LocalHostDir[];
   /** Agent subscription limits read from the machine; null until reported. */
   agentLimits: LocalHostAgentLimits | null;
+  /**
+   * Whether the connected daemon can hand Optio a fresh Claude OAuth token
+   * from the machine's own Claude Code login (Keychain / credentials file).
+   * Live (from the daemon's hello), so false whenever the host is offline.
+   */
+  claudeCredentials?: boolean;
   state: LocalHostState;
   lastSeenAt: string | null;
   createdAt: string;
@@ -427,6 +433,19 @@ export type LocalDaemonMessage =
       daemonVersion: string;
       dirs: LocalHostDir[];
       terminals: LocalDaemonTerminalSync[];
+      /** The machine has a Claude Code login the server may ask for (see `credentials`). */
+      claudeCredentials?: boolean;
+    }
+  /**
+   * Answer to the server's `credentials` request: the machine's current
+   * Claude OAuth access token (never the refresh token), or why not.
+   */
+  | {
+      type: "credentials-result";
+      requestId: string;
+      token?: string;
+      expiresAt?: string | null;
+      error?: string;
     }
   | { type: "started"; terminalId: string }
   | { type: "spawn-error"; terminalId: string; message: string }
@@ -473,6 +492,12 @@ export type LocalServerMessage =
   | { type: "kill"; terminalId: string; signal?: string }
   | { type: "attach"; terminalId: string; attachId: string }
   | { type: "detach"; terminalId: string }
+  /**
+   * Ask the daemon for the machine's Claude OAuth access token so the
+   * cluster's CLAUDE_CODE_OAUTH_TOKEN can be refreshed without a copy/paste.
+   * Only ever sent to a host owned by an admin (or in auth-disabled dev).
+   */
+  | { type: "credentials"; requestId: string }
   | { type: "pong" };
 
 // ── Browser ⇄ server stream protocol (/ws/local/terminals/:id/stream) ──────

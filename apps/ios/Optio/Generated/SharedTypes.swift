@@ -2973,6 +2973,10 @@ public struct LocalHost: Codable, Hashable, Sendable {
     public let dirs: [LocalHostDir]
     /// Agent subscription limits read from the machine; null until reported.
     public let agentLimits: LocalHostAgentLimits?
+    /// Whether the connected daemon can hand Optio a fresh Claude OAuth token
+    /// from the machine's own Claude Code login (Keychain / credentials file).
+    /// Live (from the daemon's hello), so false whenever the host is offline.
+    public let claudeCredentials: Bool?
     public let state: LocalHostState
     public let lastSeenAt: String?
     public let createdAt: String
@@ -2989,6 +2993,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         case daemonVersion = "daemonVersion"
         case dirs = "dirs"
         case agentLimits = "agentLimits"
+        case claudeCredentials = "claudeCredentials"
         case state = "state"
         case lastSeenAt = "lastSeenAt"
         case createdAt = "createdAt"
@@ -3006,6 +3011,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         daemonVersion: String? = nil,
         dirs: [LocalHostDir],
         agentLimits: LocalHostAgentLimits? = nil,
+        claudeCredentials: Bool? = nil,
         state: LocalHostState,
         lastSeenAt: String? = nil,
         createdAt: String,
@@ -3021,6 +3027,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         self.daemonVersion = daemonVersion
         self.dirs = dirs
         self.agentLimits = agentLimits
+        self.claudeCredentials = claudeCredentials
         self.state = state
         self.lastSeenAt = lastSeenAt
         self.createdAt = createdAt
@@ -3976,6 +3983,7 @@ public struct LocalDaemonTerminalSync: Codable, Hashable, Sendable {
 
 public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case hello(HelloPayload)
+    case credentialsResult(CredentialsResultPayload)
     case started(StartedPayload)
     case spawnError(SpawnErrorPayload)
     case output(OutputPayload)
@@ -4000,24 +4008,55 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         public let daemonVersion: String
         public let dirs: [LocalHostDir]
         public let terminals: [LocalDaemonTerminalSync]
+        /// The machine has a Claude Code login the server may ask for (see `credentials`).
+        public let claudeCredentials: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case hostId = "hostId"
             case daemonVersion = "daemonVersion"
             case dirs = "dirs"
             case terminals = "terminals"
+            case claudeCredentials = "claudeCredentials"
         }
 
         public init(
             hostId: String,
             daemonVersion: String,
             dirs: [LocalHostDir],
-            terminals: [LocalDaemonTerminalSync]
+            terminals: [LocalDaemonTerminalSync],
+            claudeCredentials: Bool? = nil
         ) {
             self.hostId = hostId
             self.daemonVersion = daemonVersion
             self.dirs = dirs
             self.terminals = terminals
+            self.claudeCredentials = claudeCredentials
+        }
+    }
+
+    public struct CredentialsResultPayload: Codable, Hashable, Sendable {
+        public let requestId: String
+        public let token: String?
+        public let expiresAt: String?
+        public let error: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case requestId = "requestId"
+            case token = "token"
+            case expiresAt = "expiresAt"
+            case error = "error"
+        }
+
+        public init(
+            requestId: String,
+            token: String? = nil,
+            expiresAt: String? = nil,
+            error: String? = nil
+        ) {
+            self.requestId = requestId
+            self.token = token
+            self.expiresAt = expiresAt
+            self.error = error
         }
     }
 
@@ -4270,6 +4309,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         let discriminator = try container.decodeIfPresent(String.self, forKey: .type) ?? ""
         switch discriminator {
         case "hello": self = .hello(try HelloPayload(from: decoder))
+        case "credentials-result": self = .credentialsResult(try CredentialsResultPayload(from: decoder))
         case "started": self = .started(try StartedPayload(from: decoder))
         case "spawn-error": self = .spawnError(try SpawnErrorPayload(from: decoder))
         case "output": self = .output(try OutputPayload(from: decoder))
@@ -4295,6 +4335,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case .hello(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("hello", forKey: .type)
+            try payload.encode(to: encoder)
+        case .credentialsResult(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("credentials-result", forKey: .type)
             try payload.encode(to: encoder)
         case .started(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
@@ -4372,6 +4416,7 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
     case kill(KillPayload)
     case attach(AttachPayload)
     case detach(DetachPayload)
+    case credentials(CredentialsPayload)
     case pong
     /// Fallback for discriminator values this client does not know about yet.
     case unknown(AnyCodable)
@@ -4481,6 +4526,18 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct CredentialsPayload: Codable, Hashable, Sendable {
+        public let requestId: String
+
+        private enum CodingKeys: String, CodingKey {
+            case requestId = "requestId"
+        }
+
+        public init(requestId: String) {
+            self.requestId = requestId
+        }
+    }
+
     private enum DiscriminatorKey: String, CodingKey {
         case type
     }
@@ -4495,6 +4552,7 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         case "kill": self = .kill(try KillPayload(from: decoder))
         case "attach": self = .attach(try AttachPayload(from: decoder))
         case "detach": self = .detach(try DetachPayload(from: decoder))
+        case "credentials": self = .credentials(try CredentialsPayload(from: decoder))
         case "pong": self = .pong
         default: self = .unknown(try AnyCodable(from: decoder))
         }
@@ -4525,6 +4583,10 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         case .detach(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("detach", forKey: .type)
+            try payload.encode(to: encoder)
+        case .credentials(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("credentials", forKey: .type)
             try payload.encode(to: encoder)
         case .pong:
             var container = encoder.container(keyedBy: DiscriminatorKey.self)

@@ -41,6 +41,18 @@ export async function getCachedTokenValidation(): Promise<TokenValidationResult 
   }
 }
 
+/** Overwrite the cached validation result (e.g. right after a refresh stored a good token). */
+export async function recordTokenValidation(
+  result: Omit<TokenValidationResult, "lastValidated">,
+): Promise<void> {
+  const redis = getRedisClient();
+  await redis.setex(
+    TOKEN_VALIDATION_CACHE_KEY,
+    CACHE_TTL_SECS,
+    JSON.stringify({ ...result, lastValidated: new Date().toISOString() }),
+  );
+}
+
 /**
  * Validate a Claude OAuth token against the Anthropic API.
  * Returns { valid: true } if the token is accepted, or { valid: false, error } if rejected.
@@ -141,6 +153,19 @@ export function startTokenValidationWorker() {
 
       if (!validation.valid) {
         logger.warn("Claude OAuth token validation failed — token is expired or invalid");
+
+        // A paired machine (Optio Local daemon) may hold a fresh login: take
+        // it from there before bothering anyone with the paste banner.
+        try {
+          const { autoRefreshClaudeToken } =
+            await import("../services/local-auth-refresh-service.js");
+          if (await autoRefreshClaudeToken("validation-failed")) {
+            logger.info("Claude OAuth token refreshed automatically from a paired machine");
+            return;
+          }
+        } catch (err) {
+          logger.warn({ err }, "automatic Claude token refresh failed");
+        }
 
         // Invalidate the usage cache so the dashboard shows fresh data
         try {

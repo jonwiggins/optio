@@ -30,6 +30,8 @@ interface DaemonConn {
   hostId: string;
   userId: string | null;
   socket: RelaySocket;
+  /** From the hello: the machine can supply a Claude OAuth token on request. */
+  claudeCredentials: boolean;
 }
 
 interface PendingAttach {
@@ -57,7 +59,12 @@ function safeSend(socket: RelaySocket, data: string | Buffer): void {
  * same host is closed (the newest daemon wins — e.g. after a laptop resume
  * the old TCP connection may still look open).
  */
-export function registerDaemon(hostId: string, userId: string | null, socket: RelaySocket): void {
+export function registerDaemon(
+  hostId: string,
+  userId: string | null,
+  socket: RelaySocket,
+  capabilities: { claudeCredentials?: boolean } = {},
+): void {
   const existing = daemonsByHost.get(hostId);
   if (existing && existing.socket !== socket) {
     try {
@@ -66,7 +73,25 @@ export function registerDaemon(hostId: string, userId: string | null, socket: Re
       // ignore
     }
   }
-  daemonsByHost.set(hostId, { hostId, userId, socket });
+  daemonsByHost.set(hostId, {
+    hostId,
+    userId,
+    socket,
+    claudeCredentials: capabilities.claudeCredentials === true,
+  });
+}
+
+/** Whether the host's connected daemon can supply a Claude OAuth token (false when offline). */
+export function hostHasClaudeCredentials(hostId: string): boolean {
+  const conn = daemonsByHost.get(hostId);
+  return conn !== undefined && conn.socket.readyState === WS_OPEN && conn.claudeCredentials;
+}
+
+/** Online hosts whose daemon advertised Claude credentials. */
+export function hostsWithClaudeCredentials(): Array<{ hostId: string; userId: string | null }> {
+  return [...daemonsByHost.values()]
+    .filter((c) => c.claudeCredentials && c.socket.readyState === WS_OPEN)
+    .map((c) => ({ hostId: c.hostId, userId: c.userId }));
 }
 
 /**
