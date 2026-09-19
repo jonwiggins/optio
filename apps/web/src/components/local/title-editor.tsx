@@ -65,7 +65,7 @@ export function TitleEditor({
   };
 
   return (
-    <span className={cn("relative inline-flex min-w-0 -mx-1.5", className)}>
+    <span className={cn("relative inline-flex min-w-0", className)}>
       <span
         ref={spanRef}
         aria-hidden
@@ -97,10 +97,16 @@ export function TitleEditor({
         maxLength={200}
         style={width ? { width } : undefined}
         className={cn(
-          // The pull-in margin lives on the wrapper: on the input it shrank the
-          // wrapper, and max-w-full then clipped the input to that width.
-          "min-w-[4rem] max-w-full bg-transparent rounded-md px-1.5 border border-transparent outline-none truncate transition-colors",
-          "hover:border-border hover:bg-bg-card/60 focus:border-border-strong focus:bg-bg-card",
+          // The box owns its full border-box slot in the header row: no pull-in
+          // margin, or the row's overflow-hidden clips the left edge against
+          // the status dot and the right edge lands on the attention text.
+          "min-w-[4rem] max-w-full bg-transparent rounded-md px-1.5 py-0.5 border border-transparent truncate transition-colors",
+          "hover:border-border hover:bg-bg-card/60 focus:bg-bg-card",
+          // The global focus ring sits 2px outside the box, where the same
+          // overflow-hidden clips all but its right edge into a stray bar.
+          // Pull it inside the border instead (important: the global rule is
+          // unlayered, so a plain utility can't beat it).
+          "focus-visible:-outline-offset-2!",
           inputClassName,
         )}
       />
