@@ -119,15 +119,24 @@ export async function buildServer() {
   // the server without a Redis connection — it registers the plugin
   // in-memory, which is fine because nothing actually serves traffic
   // during the dump.
+  // The global limit is a per-IP backstop for the dashboard traffic pattern
+  // (the web overview, the Sessions list, and the iOS app each poll several
+  // endpoints every 15–30 s, and a phone talks to the API directly rather
+  // than through the web proxy). Auth routes carry their own, much stricter
+  // limits via route config. Override with OPTIO_RATE_LIMIT_MAX (per minute).
+  const rateLimitMax = Math.max(
+    1,
+    Number.parseInt(process.env.OPTIO_RATE_LIMIT_MAX ?? "", 10) || 600,
+  );
   if (process.env.OPTIO_SKIP_RATE_LIMIT_REDIS === "1") {
     await app.register(rateLimit, {
-      max: 100,
+      max: rateLimitMax,
       timeWindow: "1 minute",
       allowList: ["127.0.0.1", "::1"],
     });
   } else {
     await app.register(rateLimit, {
-      max: 100,
+      max: rateLimitMax,
       timeWindow: "1 minute",
       allowList: ["127.0.0.1", "::1"],
       redis: new Redis(redisConnectionUrl, { tls: redisTlsOptions }),

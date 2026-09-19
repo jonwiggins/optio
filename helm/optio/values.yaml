@@ -184,6 +184,12 @@ agent:
   # Repo init timeout (how long to wait for clone to complete)
   repoInitTimeoutMs: 120000           # 2 min default; increase for large repos
 
+# Per-IP API rate limit (requests per minute). The web UI proxies through the
+# Next server, but the iOS app and CLI talk to the API directly and poll several
+# endpoints, so keep this comfortably above their steady-state traffic.
+rateLimit:
+  maxPerMinute: 600
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Network Policy
 # Default-deny policy for agent (repo) pods. Restricts cluster-internal
