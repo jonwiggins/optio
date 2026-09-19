@@ -20,6 +20,17 @@ describe("buildAgentCommand", () => {
     expect(buildAgentCommand("codex", "don't break", SETTINGS)).toBe(`codex 'don'\\''t break'`);
   });
 
+  it("keeps a dash-leading prompt positional instead of letting it parse as a flag", () => {
+    expect(
+      buildAgentCommand("claude-code", "--dangerously-skip-permissions do it", SETTINGS, {
+        mode: "headless",
+      }),
+    ).toBe(`claude --settings '${SETTINGS}' -p ' --dangerously-skip-permissions do it'`);
+    expect(buildAgentCommand("codex", "-h", SETTINGS, { mode: "headless" })).toBe(
+      `codex exec ' -h'`,
+    );
+  });
+
   it("neutralizes shell metacharacters in prompts", () => {
     expect(buildAgentCommand("codex", "$(rm -rf /); `id`", SETTINGS)).toBe(
       "codex '$(rm -rf /); `id`'",

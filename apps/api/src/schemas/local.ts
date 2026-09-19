@@ -141,6 +141,12 @@ export const LocalBlueprintSchema = z
     dir: z.string().nullable(),
     repoUrl: z.string().nullable(),
     commandTemplate: z.string(),
+    promptTemplateId: z
+      .string()
+      .nullable()
+      .describe(
+        "Saved prompt (Prompts library) used as the agent prompt instead of commandTemplate",
+      ),
     agent: z.enum(["claude-code", "codex", "cursor", "gemini", "opencode"]).nullable(),
     spawnMode: z.enum(["auto", "hold"]),
     sessionMode: z

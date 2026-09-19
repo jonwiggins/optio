@@ -26,7 +26,7 @@ import type {
 } from "@optio/shared";
 import { LOCAL_GITHUB_EVENT_KINDS, LOCAL_LINEAR_EVENT_KINDS } from "@optio/shared";
 import { db } from "../db/client.js";
-import { workflowTriggers } from "../db/schema.js";
+import { repos, workflowTriggers } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { getBlueprint, spawnFromBlueprint } from "./local-blueprint-service.js";
 
@@ -504,6 +504,27 @@ type EventOf<S extends LocalEventSource> = S extends "github"
  * match spawns a terminal from the trigger's blueprint with the event's
  * fields as prompt params. Failures are per-trigger (logged, not thrown).
  */
+/** Workspace of a repo registered in Optio, matched by URL; null when unknown. */
+async function workspaceOfRepo(repoUrl: string | undefined): Promise<string | null> {
+  if (!repoUrl) return null;
+  const wanted = normalizeRepoKey(repoUrl);
+  if (!wanted) return null;
+  const rows = await db
+    .select({ repoUrl: repos.repoUrl, workspaceId: repos.workspaceId })
+    .from(repos);
+  const hit = rows.find((r) => normalizeRepoKey(r.repoUrl) === wanted);
+  return hit?.workspaceId ?? null;
+}
+
+/** "https://github.com/Acme/API.git" and "git@github.com:acme/api" → "github.com/acme/api". */
+export function normalizeRepoKey(url: string): string | null {
+  const m = url
+    .trim()
+    .replace(/\.git$/, "")
+    .match(/^(?:https?:\/\/|git@|ssh:\/\/git@)?([^/:]+)[/:](.+)$/);
+  return m ? `${m[1]}/${m[2]}`.toLowerCase() : null;
+}
+
 export async function fireLocalEventTriggers<S extends LocalEventSource>(
   source: S,
   event: EventOf<S>,
@@ -518,6 +539,13 @@ export async function fireLocalEventTriggers<S extends LocalEventSource>(
         eq(workflowTriggers.enabled, true),
       ),
     );
+
+  // A repo registered in Optio belongs to a workspace; its events must not
+  // reach automations in other workspaces, whatever login they claim.
+  // Unregistered repos (and Slack / Linear, which carry no repo) still match
+  // on the trigger's own filters only.
+  const repoWorkspace =
+    source === "github" ? await workspaceOfRepo((event as LocalGitHubEvent).repoUrl) : undefined;
 
   const results: LocalEventFireResult[] = [];
   for (const trigger of candidates) {
@@ -556,6 +584,13 @@ export async function fireLocalEventTriggers<S extends LocalEventSource>(
     try {
       const blueprint = await getBlueprint(trigger.targetId);
       if (!blueprint || !blueprint.enabled) continue;
+      if (repoWorkspace && blueprint.workspaceId !== repoWorkspace) {
+        logger.info(
+          { source, triggerId: trigger.id, blueprintId: blueprint.id },
+          "Local event trigger skipped: repo belongs to another workspace",
+        );
+        continue;
+      }
       const terminal = await spawnFromBlueprint(blueprint, {
         triggerId: trigger.id,
         spawnedBy: "trigger",

@@ -24,7 +24,9 @@ secrets to your machine.
 - **Automation** (`local_blueprints`; "blueprint" in the API and code) — "when X happens,
   run this agent on my machine". Who (`agent`: `claude-code` / `codex` / `cursor` /
   `gemini` / `opencode`, or null for a plain shell command), What (`commandTemplate`,
-  rendered with `{{param}}` substitution — the agent's prompt, or the shell command), Where
+  rendered with `{{param}}` substitution — the agent's prompt, or the shell command; or
+  `promptTemplateId`, a saved prompt from the Prompts library that replaces it, so one
+  reviewed "review this PR" prompt can back many automations), Where
   (`hostId` / `dir` / `repoUrl`, all optional — see dir resolution below), When (triggers)
   and Then (`sessionMode`). Triggers are rows in `workflow_triggers` with
   `target_type = "local_blueprint"`: the generic `manual` / `schedule` / `webhook` / `ticket`
@@ -79,9 +81,18 @@ issue (`ticket_*` columns) so the session shows the badge.
 
 **Dir resolution** (`resolveBlueprintDir`): the automation's `dir` → the host dir whose git
 remote matches its `repoUrl` → the dir matching the _event's_ repo (a GitHub PR's
-repository) → the host's first allowlisted dir. A pinned `repoUrl` the host doesn't have
-is an error, not a fallback. So "Where: the event's repo" makes one PR-review automation
-cover every repo you have checked out.
+repository) → the host's first allowlisted dir, but only when the spawn names no repo at
+all (Slack, manual). A repo the host doesn't have — pinned or from the event — is an error,
+not a fallback: "review acme/api#12" must never run inside an unrelated checkout. So
+"Where: the event's repo" makes one PR-review automation cover every repo you have
+checked out, and skips the ones you don't.
+
+**Scoping and replay**: a GitHub event about a repo registered in Optio only reaches
+automations in that repo's workspace, whatever `login` they claim. Deliveries are
+de-duplicated in-process by id (`X-GitHub-Delivery`, Slack `event_id`, Linear
+type+action+entity+timestamp) so provider retries don't fire twice. An automation's
+pinned `hostId` must be the caller's own host — checked on create/update and again at
+spawn.
 
 Slack notes: subscribe the app to `message.channels` (plain messages) and/or
 `app_mention` (`mentionOnly` triggers listen to the latter only, so an @-mention never
@@ -193,8 +204,10 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
 
 **Command safety**: webhook/trigger payloads never carry commands. Params substitute into
 the blueprint's user-authored `commandTemplate` via `renderTemplateString`, and every
-substituted value is shell-single-quoted before insertion. Agent prompts are passed as a
-single quoted argv element, never interpolated into shell syntax.
+substituted value is shell-single-quoted before insertion (`{{#if}}` blocks are decided on
+the raw values first, so an empty param drops its block). Agent prompts are passed as a
+single quoted argv element, never interpolated into shell syntax; a prompt that starts with
+`-` gets a leading space so an event payload can't smuggle in a CLI flag.
 
 ## Daemon WebSocket protocol (`/ws/local/daemon`, JSON text frames)
 

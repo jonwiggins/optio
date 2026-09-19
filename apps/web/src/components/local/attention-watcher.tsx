@@ -12,19 +12,29 @@ const DEFAULT_FAVICON = "/favicon.svg";
 
 let currentFavicon: string | null = null;
 
+// Our own <link>, kept apart from the one Next renders from the layout
+// metadata. That node belongs to React: removing it out from under React
+// throws "Cannot read properties of null (reading 'removeChild')" on the
+// next client navigation and the route change never lands.
+const OWN_ATTR = "data-optio-favicon";
+
 /**
- * Swap the tab icon. Chrome only reliably repaints when the <link> node is
- * replaced (an href change on the existing node is sometimes ignored), so
- * remove and re-add. Safari ignores dynamic favicons entirely — there the
+ * Swap the tab icon. Chrome only reliably repaints when a <link> node is
+ * inserted (an href change on the existing node is sometimes ignored), so
+ * we replace our own node each time and leave React's alone. Ours is
+ * appended last, so it wins while present; removing it hands the tab back
+ * to the default. Safari ignores dynamic favicons entirely — there the
  * "(N)" title badge is the signal.
  */
-function setFavicon(href: string) {
+function setFavicon(href: string | null) {
   if (currentFavicon === href) return;
   currentFavicon = href;
-  for (const old of document.querySelectorAll('link[rel~="icon"]')) old.remove();
+  for (const old of document.head.querySelectorAll(`link[${OWN_ATTR}]`)) old.remove();
+  if (!href) return;
   const link = document.createElement("link");
+  link.setAttribute(OWN_ATTR, "");
   link.rel = "icon";
-  link.type = href.startsWith("data:") ? "image/svg+xml" : "";
+  link.type = "image/svg+xml";
   link.href = href;
   document.head.appendChild(link);
 }
@@ -51,7 +61,7 @@ export function LocalAttentionWatcher() {
   useEffect(() => {
     useBellStore.getState().hydrate();
     return () => {
-      setFavicon(DEFAULT_FAVICON);
+      setFavicon(null);
       useTitleStore.getState().setBadge(0);
     };
   }, []);

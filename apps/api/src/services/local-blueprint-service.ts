@@ -20,7 +20,11 @@ import { db } from "../db/client.js";
 import { localBlueprints, workflowTriggers } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { computeNextFire } from "../utils/cron.js";
-import { renderTemplateString } from "./prompt-template-service.js";
+import {
+  getPromptTemplateById,
+  renderTemplateString,
+  resolveTemplateConditionals,
+} from "./prompt-template-service.js";
 import { isAuthDisabled } from "./oauth/index.js";
 import {
   findHostDirForRepo,
@@ -54,6 +58,8 @@ export interface CreateBlueprintInput {
   dir?: string;
   repoUrl?: string;
   commandTemplate: string;
+  /** Saved prompt (Prompts library) that replaces commandTemplate as the agent prompt. */
+  promptTemplateId?: string | null;
   agent?: LocalAgentKind | null;
   spawnMode?: "auto" | "hold";
   /** Agent spawns only: stay open for chat (default) or exit when the turn is done. */
@@ -77,6 +83,7 @@ export async function createBlueprint(input: CreateBlueprintInput): Promise<Loca
       dir: input.dir,
       repoUrl: input.repoUrl,
       commandTemplate: input.commandTemplate,
+      promptTemplateId: input.promptTemplateId ?? null,
       agent: input.agent ?? null,
       spawnMode: input.spawnMode ?? "auto",
       sessionMode: input.sessionMode ?? "interactive",
@@ -105,7 +112,7 @@ export async function updateBlueprint(
   updates: Partial<
     Pick<
       CreateBlueprintInput,
-      "name" | "commandTemplate" | "agent" | "spawnMode" | "sessionMode"
+      "name" | "commandTemplate" | "promptTemplateId" | "agent" | "spawnMode" | "sessionMode"
     > & {
       description: string | null;
       hostId: string | null;
@@ -137,7 +144,10 @@ export async function deleteBlueprint(id: string): Promise<boolean> {
  * Dir resolution for a spawn: the blueprint's explicit dir → the allowlisted
  * dir whose git remote matches the blueprint's repoUrl → the dir matching the
  * event's repo (`repoUrlHint`, e.g. the PR's repository) → the host's first
- * allowlisted dir. Null when the host advertises nothing.
+ * allowlisted dir, but only for events that name no repo (Slack, manual). A
+ * repo the host doesn't have — pinned or from the event — is null: running
+ * "review PR #12 of acme/api" inside an unrelated checkout is worse than not
+ * running.
  */
 export function resolveBlueprintDir(
   blueprint: Pick<LocalBlueprintRow, "dir" | "repoUrl">,
@@ -153,8 +163,24 @@ export function resolveBlueprintDir(
     const byHint = findHostDirForRepo(host, repoUrlHint);
     if (byHint) return byHint;
   }
-  if (blueprint.repoUrl) return null; // a pinned repo that isn't on this host is an error, not a fallback
+  if (blueprint.repoUrl || repoUrlHint) return null;
   return host.dirs?.[0]?.path ?? null;
+}
+
+/**
+ * The template text a spawn renders: the linked saved prompt when the
+ * blueprint has one (and it still exists), else the inline commandTemplate.
+ */
+async function effectiveTemplate(blueprint: LocalBlueprintRow): Promise<string> {
+  if (blueprint.promptTemplateId) {
+    const saved = await getPromptTemplateById(blueprint.promptTemplateId);
+    if (saved) return saved.template;
+    logger.warn(
+      { blueprintId: blueprint.id, promptTemplateId: blueprint.promptTemplateId },
+      "Blueprint's saved prompt no longer exists — falling back to its inline template",
+    );
+  }
+  return blueprint.commandTemplate;
 }
 
 /**
@@ -180,6 +206,12 @@ export async function spawnFromBlueprint(
   let host: LocalHostRow | null = null;
   if (blueprint.hostId) {
     host = await getHost(blueprint.hostId);
+    // The routes check this on create/update too; re-check here so a stale
+    // or hand-edited row can never run someone's automation on another
+    // user's machine.
+    if (host && host.userId && host.userId !== blueprint.userId) {
+      throw new Error("Blueprint host belongs to another user");
+    }
   } else {
     host = await pickOnlineHost(blueprint.userId);
     if (!host) {
@@ -193,8 +225,16 @@ export async function spawnFromBlueprint(
   const dir = resolveBlueprintDir(blueprint, host, opts.repoUrlHint);
   if (!dir) {
     throw new Error(
-      `No directory on host "${host.name}" matches this blueprint (dir unset, repo not in the host's dir list)`,
+      opts.repoUrlHint && !blueprint.dir && !blueprint.repoUrl
+        ? `Host "${host.name}" has no folder for ${opts.repoUrlHint} — add the checkout to its dir list`
+        : `No directory on host "${host.name}" matches this blueprint (dir unset, repo not in the host's dir list)`,
     );
+  }
+
+  const template = await effectiveTemplate(blueprint);
+  const rawParams: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(opts.params ?? {})) {
+    rawParams[key] = String(value ?? "");
   }
 
   let spec: LocalTerminalSpec;
@@ -202,11 +242,7 @@ export async function spawnFromBlueprint(
     // Agent mode: the rendered template is the prompt, passed to the agent as
     // a single argv element (the daemon shell-quotes the whole prompt), so
     // params are substituted raw rather than shell-quoted.
-    const rawParams: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(opts.params ?? {})) {
-      rawParams[key] = String(value ?? "");
-    }
-    const prompt = renderTemplateString(blueprint.commandTemplate, rawParams).trim();
+    const prompt = renderTemplateString(template, rawParams).trim();
     spec = {
       kind: "agent",
       agent: blueprint.agent,
@@ -215,12 +251,17 @@ export async function spawnFromBlueprint(
     };
   } else {
     // Command mode: params are shell-single-quoted before substitution so a
-    // trigger payload can never inject shell syntax.
+    // trigger payload can never inject shell syntax. `{{#if}}` blocks are
+    // decided on the raw values first — a quoted empty string is `''`, which
+    // would otherwise read as present.
     const quotedParams: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(opts.params ?? {})) {
-      quotedParams[key] = shellQuote(String(value ?? ""));
+    for (const [key, value] of Object.entries(rawParams)) {
+      quotedParams[key] = shellQuote(String(value));
     }
-    const command = renderTemplateString(blueprint.commandTemplate, quotedParams).trim();
+    const command = renderTemplateString(
+      resolveTemplateConditionals(template, rawParams),
+      quotedParams,
+    ).trim();
     if (!command) throw new Error("Blueprint command rendered empty");
     spec = { kind: "command", command };
   }

@@ -28,22 +28,28 @@ const ChallengeResponse = z.object({ challenge: z.string() });
 const SLACK_MAX_SKEW_MS = 5 * 60 * 1000;
 const LINEAR_MAX_SKEW_MS = 60 * 1000;
 
-/** Remember recent Slack event ids so retries / double-subscriptions don't double-fire. */
-const RECENT_EVENT_IDS_MAX = 2000;
-const recentSlackEventIds = new Set<string>();
-function rememberSlackEvent(id: string): boolean {
-  if (recentSlackEventIds.has(id)) return false;
-  recentSlackEventIds.add(id);
-  if (recentSlackEventIds.size > RECENT_EVENT_IDS_MAX) {
-    const first = recentSlackEventIds.values().next().value;
-    if (first) recentSlackEventIds.delete(first);
+/**
+ * Remember recent delivery ids so provider retries and replays inside the
+ * signature window don't fire an automation twice. In-process, like the
+ * local relay itself (single API replica): a restart forgets, which at
+ * worst re-fires a delivery retried across the restart.
+ */
+const RECENT_EVENT_IDS_MAX = 4000;
+const recentDeliveryIds = new Set<string>();
+export function rememberDelivery(provider: "slack" | "linear" | "github", id: string): boolean {
+  const key = `${provider}:${id}`;
+  if (recentDeliveryIds.has(key)) return false;
+  recentDeliveryIds.add(key);
+  if (recentDeliveryIds.size > RECENT_EVENT_IDS_MAX) {
+    const first = recentDeliveryIds.values().next().value;
+    if (first) recentDeliveryIds.delete(first);
   }
   return true;
 }
 
 /** Exported for tests. */
 export function resetSlackEventDedupe(): void {
-  recentSlackEventIds.clear();
+  recentDeliveryIds.clear();
 }
 
 function hmacHex(secret: string, message: string | Buffer): string {
@@ -153,7 +159,7 @@ export async function localIngressRoutes(rawApp: FastifyInstance) {
 
       const event = normalizeSlackEvent(body);
       if (!event) return reply.status(200).send({ ok: true });
-      if (event.eventId && !rememberSlackEvent(event.eventId)) {
+      if (event.eventId && !rememberDelivery("slack", event.eventId)) {
         return reply.status(200).send({ ok: true });
       }
 
@@ -195,6 +201,13 @@ export async function localIngressRoutes(rawApp: FastifyInstance) {
 
       const event = normalizeLinearEvent(body);
       if (!event) return reply.status(200).send({ ok: true });
+      // Linear sends no delivery id; the entity + action + its own timestamp
+      // identifies a delivery well enough to drop retries of it.
+      const data = (body.data ?? {}) as Record<string, unknown>;
+      const deliveryKey = `${body.type}:${body.action}:${data.id ?? ""}:${body.webhookTimestamp ?? ""}`;
+      if (!rememberDelivery("linear", deliveryKey)) {
+        return reply.status(200).send({ ok: true });
+      }
 
       await reply.status(200).send({ ok: true });
       fireLocalEventTriggers("linear", event).catch((err) => {

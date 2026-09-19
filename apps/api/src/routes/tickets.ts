@@ -367,8 +367,17 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         try {
           const { normalizeGitHubEvent, fireLocalEventTriggers } =
             await import("../services/local-event-service.js");
-          const normalized = normalizeGitHubEvent(event, rawPayload);
-          if (normalized) await fireLocalEventTriggers("github", normalized);
+          const { rememberDelivery } = await import("./local-ingress.js");
+          const delivery = req.headers["x-github-delivery"];
+          const fresh = typeof delivery !== "string" || rememberDelivery("github", delivery);
+          const normalized = fresh ? normalizeGitHubEvent(event, rawPayload) : null;
+          // Fire-and-forget: GitHub gives us 10 s to answer, and a fan-out
+          // that spawns N terminals mustn't eat it.
+          if (normalized) {
+            fireLocalEventTriggers("github", normalized).catch((err) => {
+              logger.warn({ err, event }, "GitHub event → local automation dispatch failed");
+            });
+          }
         } catch (err) {
           logger.warn({ err, event }, "GitHub event → local automation dispatch failed");
         }

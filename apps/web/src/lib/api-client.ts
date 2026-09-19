@@ -1906,6 +1906,8 @@ export const api = {
     dir?: string;
     repoUrl?: string;
     commandTemplate: string;
+    /** Saved prompt (Prompts library) rendered as the agent prompt instead of commandTemplate. */
+    promptTemplateId?: string | null;
     /** Run the rendered template as this agent's prompt; null = raw shell command. */
     agent?: "claude-code" | "codex" | "cursor" | "gemini" | "opencode" | null;
     spawnMode?: "auto" | "hold";
@@ -1926,6 +1928,8 @@ export const api = {
       dir: string | null;
       repoUrl: string | null;
       commandTemplate: string;
+      /** Saved prompt (Prompts library) rendered as the agent prompt instead of commandTemplate. */
+      promptTemplateId: string | null;
       /** Run the rendered template as this agent's prompt; null = raw shell command. */
       agent: "claude-code" | "codex" | "cursor" | "gemini" | "opencode" | null;
       spawnMode: "auto" | "hold";

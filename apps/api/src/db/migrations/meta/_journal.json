@@ -631,6 +631,13 @@
       "when": 1790000000000,
       "tag": "1790000000_local_automations",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1790100000000,
+      "tag": "1790100000_local_blueprint_prompt_template",
+      "breakpoints": true
     }
   ]
 }

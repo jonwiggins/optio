@@ -1683,6 +1683,12 @@ export const localBlueprints = pgTable(
     dir: text("dir"),
     repoUrl: text("repo_url"),
     commandTemplate: text("command_template").notNull(),
+    // A saved prompt from the Prompts library. When set, its text is the
+    // agent's prompt (rendered with the trigger params) and commandTemplate
+    // is ignored — so one reviewed prompt can back many automations.
+    promptTemplateId: uuid("prompt_template_id").references(() => promptTemplates.id, {
+      onDelete: "set null",
+    }),
     // When set, the rendered template is the agent's prompt (a single quoted
     // argv element, so params are NOT shell-quoted) and the spawn runs through
     // the daemon's agent path — so automation-spawned agents get attention
