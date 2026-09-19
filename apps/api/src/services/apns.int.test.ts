@@ -7,7 +7,21 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { apnsDevices, liveActivityStartTokens, liveActivityTokens, users } from "../db/schema.js";
+import {
+  apnsDevices,
+  liveActivityStartTokens,
+  liveActivityTokens,
+  localBlueprints,
+  persistentAgents,
+  users,
+  workspaceMembers,
+} from "../db/schema.js";
+import {
+  insertTask,
+  insertTaskConfig,
+  insertWorkflow,
+  insertWorkspace,
+} from "../test-utils/integration/fixtures.js";
 import { ApnsService, APNS_MAX_FAILURE_COUNT } from "./apns-service.js";
 import {
   drizzleApnsStore,
@@ -31,7 +45,7 @@ import {
   snoozeTerminal,
   unsnoozeTerminal,
 } from "./local-terminal-service.js";
-import { computeWatchState, resetGlanceForTests } from "./glance-service.js";
+import { computeWatchState, countSessionTiles, resetGlanceForTests } from "./glance-service.js";
 
 const hex = (seed: string) => seed.padEnd(64, "0").slice(0, 64);
 
@@ -255,6 +269,17 @@ describe("terminal snooze → Watch queue", () => {
     let state = await computeWatchState(u.id);
     expect(state.phase).toBe("waiting");
     expect(state.head?.id).toBe(t.id);
+    // Session chips ride along: Where = host · dir, Who = the agent, Then = interactive.
+    expect(state.head).toMatchObject({
+      source: "local-terminal",
+      when: "now",
+      where: { target: "machine", detail: `${host.name} · ~/optio` },
+      who: "claude-code",
+      then: "waits-for-me",
+      statusLabel: "needs you",
+    });
+    // No memberships yet: workspace-scoped tiles are zero, not an error.
+    expect(state).toMatchObject({ waitingCount: 0, recurringCount: 0, agentCount: 0 });
 
     const snoozed = await snoozeTerminal((await getTerminal(t.id))!, 15);
     expect(isTerminalSnoozed(snoozed)).toBe(true);
@@ -275,5 +300,35 @@ describe("terminal snooze → Watch queue", () => {
     const expired = { ...cleared, snoozedUntil: new Date(Date.now() - 1000) };
     expect(isTerminalSnoozed(expired)).toBe(false);
     expect(buildWatchState({ needsYou: [], running: [] }).phase).toBe("done");
+  });
+
+  it("counts the session board tiles from the user's workspaces and own rows", async () => {
+    const u = await makeUser("tiles");
+    const other = await makeUser("other");
+    const ws = await insertWorkspace();
+    const foreign = await insertWorkspace();
+    await db.insert(workspaceMembers).values({ workspaceId: ws.id, userId: u.id, role: "member" });
+
+    await insertTaskConfig({ workspaceId: ws.id });
+    await insertTaskConfig({ workspaceId: ws.id, enabled: false }); // paused: not recurring
+    await insertTaskConfig({ workspaceId: foreign.id }); // not my workspace
+    await insertWorkflow({ workspaceId: ws.id });
+    await db.insert(localBlueprints).values([
+      { userId: u.id, name: "nightly", commandTemplate: "echo hi" },
+      { userId: u.id, name: "off", commandTemplate: "echo hi", enabled: false },
+      { userId: other.id, name: "theirs", commandTemplate: "echo hi" },
+    ]);
+    await db.insert(persistentAgents).values([
+      { workspaceId: ws.id, slug: "vesper", name: "Vesper", initialPrompt: "hi" },
+      { workspaceId: ws.id, slug: "old", name: "Old", initialPrompt: "hi", state: "archived" },
+      { workspaceId: foreign.id, slug: "far", name: "Far", initialPrompt: "hi" },
+    ]);
+    await insertTask({ createdBy: u.id, state: "pr_opened", workspaceId: ws.id });
+    await insertTask({ createdBy: u.id, state: "running", workspaceId: ws.id });
+    await insertTask({ createdBy: other.id, state: "pr_opened", workspaceId: ws.id });
+
+    expect(await countSessionTiles(u.id)).toEqual({ waiting: 1, recurring: 3, agents: 1 });
+    const state = await computeWatchState(u.id);
+    expect(state).toMatchObject({ waitingCount: 1, recurringCount: 3, agentCount: 1 });
   });
 });

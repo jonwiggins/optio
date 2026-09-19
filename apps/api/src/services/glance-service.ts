@@ -14,11 +14,26 @@
  * worst case after a restart is one duplicate alert that `apns-collapse-id`
  * folds on the device.
  */
-import { and, eq } from "drizzle-orm";
-import { appleSeconds, buildWatchState, type WatchItem, type WatchState } from "@optio/shared";
+import { and, count, eq, inArray, ne } from "drizzle-orm";
+import {
+  appleSeconds,
+  buildWatchState,
+  type WatchItem,
+  type WatchState,
+  type WatchThen,
+  type WatchTileCounts,
+} from "@optio/shared";
 import type { TaskState } from "@optio/shared";
 import { db } from "../db/client.js";
-import { persistentAgentMessages } from "../db/schema.js";
+import {
+  localBlueprints,
+  persistentAgentMessages,
+  persistentAgents,
+  taskConfigs,
+  tasks,
+  workflows,
+  workspaceMembers,
+} from "../db/schema.js";
 import { logger } from "../logger.js";
 import { apnsService } from "./apns-service.js";
 import type { AlertInput } from "./apns-payloads.js";
@@ -82,6 +97,51 @@ function dirBasename(dir: string): string {
   return parts[parts.length - 1] ?? dir;
 }
 
+/** `/Users/me/repos/x` → `~/repos/x` (sessions-feed.ts `shortDir`). */
+export function shortDir(dir: string | null | undefined): string | null {
+  if (!dir) return null;
+  return dir.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
+}
+
+/** `https://github.com/o/r.git` → `o/r` (sessions-feed.ts `shortRepo`). */
+export function shortRepo(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
+}
+
+/** The session row's status word for a terminal (sessions-feed.ts `terminalStatus`). */
+export function terminalStatusLabel(row: {
+  state: string;
+  pendingReason?: string | null;
+  attentionState: string | null;
+}): string {
+  if (row.state === "error") return "error";
+  if (row.state === "exited") return "exited";
+  if (row.state === "pending")
+    return row.pendingReason === "host_offline" ? "host offline" : "pending";
+  if (row.attentionState === "needs_you") return "needs you";
+  if (row.attentionState === "idle") return "idle";
+  return "working";
+}
+
+/** The session row's status word for a Repo Task (sessions-feed.ts `taskStatus`). */
+export function taskStatusLabel(state: string): string {
+  switch (state) {
+    case "needs_attention":
+      return "needs attention";
+    case "pr_opened":
+      return "PR open";
+    case "completed":
+    case "failed":
+    case "cancelled":
+    case "running":
+    case "provisioning":
+      return state;
+    default:
+      return state.replace(/_/g, " ");
+  }
+}
+
 export function isSnoozed(row: { snoozedUntil: Date | null }, now = Date.now()): boolean {
   return !!row.snoozedUntil && row.snoozedUntil.getTime() > now;
 }
@@ -96,7 +156,20 @@ function isAgentTerminal(row: LocalTerminalRow): boolean {
   return row.attentionState === "working" || row.attentionState === "needs_you";
 }
 
-export function terminalToWatchItem(row: LocalTerminalRow): WatchItem {
+/**
+ * A terminal as a Watch row, carrying the session chips the app shows
+ * (`SessionRow` in sessions-feed.ts): Where = host · ~/dir, Who = the agent
+ * or `terminal`, Then = headless agents exit, everything else waits for you.
+ */
+export function terminalToWatchItem(
+  row: LocalTerminalRow,
+  host?: Pick<LocalHostRow, "name"> | null,
+): WatchItem {
+  const spec = row.spec as { kind?: string; agent?: string; mode?: string } | null;
+  const agent = spec?.kind === "agent" ? (spec.agent ?? "claude-code") : "terminal";
+  const then: WatchThen =
+    spec?.kind === "agent" && spec.mode === "headless" ? "exits" : "waits-for-me";
+  const detail = [host?.name ?? null, shortDir(row.dir)].filter(Boolean).join(" · ") || null;
   return {
     kind: "local",
     id: row.id,
@@ -108,6 +181,104 @@ export function terminalToWatchItem(row: LocalTerminalRow): WatchItem {
     state: row.attentionState,
     link: `optio://local/${row.id}?compose=1`,
     snoozedUntil: row.snoozedUntil ? appleSeconds(row.snoozedUntil) : null,
+    source: "local-terminal",
+    when: !row.spawnedBy || row.spawnedBy === "manual" ? "now" : row.spawnedBy,
+    where: { target: "machine", detail },
+    who: agent,
+    then,
+    statusLabel: terminalStatusLabel(row),
+  };
+}
+
+/**
+ * A Repo Task as a Watch row (followed tasks; the iOS app builds the same row
+ * from `GET /api/tasks/:id` in NeedsYouSnapshot.taskItem). Where = the repo,
+ * or the machine for local runs; Then is always `exits` (it opens a PR).
+ */
+export function taskToWatchItem(task: {
+  id: string;
+  title: string;
+  state: string;
+  repoUrl: string;
+  repoBranch?: string | null;
+  prUrl?: string | null;
+  prNumber?: number | null;
+  errorMessage?: string | null;
+  agentType?: string | null;
+  runTarget?: string | null;
+  localDir?: string | null;
+  updatedAt: Date;
+  metadata?: { taskConfigId?: string | null } | null;
+}): WatchItem {
+  const local = task.runTarget === "local";
+  const reason =
+    task.state === "needs_attention" || task.state === "failed"
+      ? (task.errorMessage?.slice(0, 80) ?? null)
+      : task.state === "pr_opened"
+        ? `PR ${task.prNumber ? `#${task.prNumber}` : ""} open`.replace("  ", " ")
+        : null;
+  return {
+    kind: "task",
+    id: task.id,
+    title: task.title,
+    mono:
+      task.repoBranch || (task.prNumber ? `#${task.prNumber}` : (shortRepo(task.repoUrl) ?? "")),
+    reason,
+    preview: null,
+    since: appleSeconds(task.updatedAt),
+    state: task.state,
+    link: `optio://tasks/${task.id}`,
+    prUrl: task.prUrl ?? null,
+    source: "repo-task",
+    when: task.metadata?.taskConfigId ? "on a trigger" : "now",
+    where: local
+      ? { target: "machine", detail: shortDir(task.localDir) }
+      : { target: "pod", detail: shortRepo(task.repoUrl) },
+    who: task.agentType ?? "claude-code",
+    then: "exits",
+    statusLabel: taskStatusLabel(task.state),
+  };
+}
+
+/** A Persistent Agent as a Watch row: When = messages, Where = pod @slug, Then = persistent. */
+export function agentToWatchItem(agent: {
+  id: string;
+  name: string;
+  slug: string;
+  state: string;
+  agentRuntime?: string | null;
+  lastFailureReason?: string | null;
+  lastTurnAt?: Date | null;
+  updatedAt: Date;
+}): WatchItem {
+  const statusLabel =
+    agent.state === "idle" ||
+    agent.state === "paused" ||
+    agent.state === "failed" ||
+    agent.state === "queued"
+      ? agent.state
+      : agent.state === "running" || agent.state === "provisioning"
+        ? agent.state
+        : agent.state === "archived"
+          ? "archived"
+          : "idle";
+  return {
+    kind: "agent",
+    id: agent.id,
+    title: agent.name,
+    mono: `@${agent.slug}`,
+    reason:
+      agent.state === "failed" ? (agent.lastFailureReason?.slice(0, 80) ?? "Turn failed") : null,
+    preview: null,
+    since: appleSeconds(agent.lastTurnAt ?? agent.updatedAt),
+    state: agent.state,
+    link: `optio://agents/${agent.id}?compose=1`,
+    source: "persistent-agent",
+    when: "messages",
+    where: { target: "pod", detail: `@${agent.slug}` },
+    who: agent.agentRuntime ?? "claude-code",
+    then: "waits-for-messages",
+    statusLabel,
   };
 }
 
@@ -125,26 +296,100 @@ export async function computeWatchState(userId: string, now = new Date()): Promi
     import("./local-terminal-service.js"),
     import("./local-host-service.js"),
   ]);
-  const [terminals, hosts] = await Promise.all([listTerminals(userId), listHosts(userId)]);
+  const [terminals, hosts, tiles] = await Promise.all([
+    listTerminals(userId),
+    listHosts(userId),
+    countSessionTiles(userId).catch((err) => {
+      logger.warn({ err, userId }, "glance: session tile counts failed");
+      return null;
+    }),
+  ]);
   const hostById = new Map(hosts.map((h) => [h.id, h]));
 
   const needsYou: WatchItem[] = [];
   const running: WatchItem[] = [];
   let offlineSince: number | null = null;
+  let idleTerminals = 0;
 
   for (const row of terminals) {
-    if (row.state !== "running" || !isAgentTerminal(row)) continue;
+    if (row.state !== "running") continue;
+    if (row.attentionState === "idle" && isAgentTerminal(row)) idleTerminals++;
+    if (!isAgentTerminal(row)) continue;
     const host = hostById.get(row.hostId);
     if (host && host.state === "offline") {
       const since = appleSeconds(host.updatedAt);
       offlineSince = offlineSince === null ? since : Math.min(offlineSince, since);
     }
-    const item = terminalToWatchItem(row);
+    const item = terminalToWatchItem(row, host);
     if (row.attentionState === "needs_you" && !isSnoozed(row, now.getTime())) needsYou.push(item);
     else running.push(item);
   }
 
-  return buildWatchState({ needsYou, running, offlineSince, now });
+  const counts: WatchTileCounts | null = tiles
+    ? { ...tiles, waiting: tiles.waiting + idleTerminals }
+    : null;
+  return buildWatchState({ needsYou, running, offlineSince, counts, now });
+}
+
+/**
+ * The board tiles the Watch cannot see in its own items (sessions-feed.ts
+ * `countSessions`): recurring = enabled blueprints / jobs in the user's
+ * workspaces plus their enabled Local automations; agents = persistent agents
+ * not archived; waiting = the user's tasks sitting at an open PR (idle
+ * terminals are added by the caller, which already has them).
+ */
+export async function countSessionTiles(userId: string): Promise<WatchTileCounts> {
+  const memberships = await db
+    .select({ workspaceId: workspaceMembers.workspaceId })
+    .from(workspaceMembers)
+    .where(eq(workspaceMembers.userId, userId));
+  const ws = memberships.map((m) => m.workspaceId);
+  const n = async (q: PromiseLike<{ n: number }[]>) => Number((await q)[0]?.n ?? 0);
+
+  const [blueprints, jobs, automations, agents, prOpen] = await Promise.all([
+    ws.length === 0
+      ? 0
+      : n(
+          db
+            .select({ n: count() })
+            .from(taskConfigs)
+            .where(and(eq(taskConfigs.enabled, true), inArray(taskConfigs.workspaceId, ws))),
+        ),
+    ws.length === 0
+      ? 0
+      : n(
+          db
+            .select({ n: count() })
+            .from(workflows)
+            .where(and(eq(workflows.enabled, true), inArray(workflows.workspaceId, ws))),
+        ),
+    n(
+      db
+        .select({ n: count() })
+        .from(localBlueprints)
+        .where(and(eq(localBlueprints.userId, userId), eq(localBlueprints.enabled, true))),
+    ),
+    ws.length === 0
+      ? 0
+      : n(
+          db
+            .select({ n: count() })
+            .from(persistentAgents)
+            .where(
+              and(
+                ne(persistentAgents.state, "archived"),
+                inArray(persistentAgents.workspaceId, ws),
+              ),
+            ),
+        ),
+    n(
+      db
+        .select({ n: count() })
+        .from(tasks)
+        .where(and(eq(tasks.createdBy, userId), eq(tasks.state, "pr_opened"))),
+    ),
+  ]);
+  return { waiting: prOpen, recurring: blueprints + jobs + automations, agents };
 }
 
 // ── Shared push helpers ─────────────────────────────────────────────────────

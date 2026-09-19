@@ -2,9 +2,10 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// "Run": the phone as a remote control. One configurable target, one tap. Modest by
-/// design (Tier 3): no status, no history, just the name and "Started · 2s ago" for one
-/// entry after firing.
+/// "Start": the phone as a remote control for one recurring session (a Task blueprint,
+/// Job, or Local automation). One configurable target, one tap. Modest by design
+/// (Tier 3): no status, no history, just the name and "Started · 2s ago" for one entry
+/// after firing. Kind id kept from its "Run" days so placed widgets survive.
 struct RunWidget: Widget {
     static let kind = WidgetKinds.run
 
@@ -13,8 +14,8 @@ struct RunWidget: Widget {
             RunView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Run")
-        .description("Start a blueprint or Job with one tap.")
+        .configurationDisplayName("Start")
+        .description("Fire a recurring session — a Task blueprint, Job, or Local automation — with one tap.")
         .supportedFamilies([.systemSmall])
     }
 }

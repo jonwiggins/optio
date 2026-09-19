@@ -333,6 +333,32 @@ export async function notificationRoutes(rawApp: FastifyInstance) {
     },
   );
 
+  // ── Watch state (read model for widgets) ──────────────────────────────────
+
+  app.get(
+    "/api/glance/watch",
+    {
+      schema: {
+        operationId: "getWatchState",
+        summary: "The caller's Watch frame",
+        description:
+          "The same `WatchState` the server pushes to the iOS Live Activity: the " +
+          "oldest session needing you, counts, and the session board tiles " +
+          "(waiting / recurring / agents). Widgets read this so they can render " +
+          "without the app running. Dates are Apple reference-date seconds.",
+        tags: ["Workspaces"],
+        response: { 200: z.record(z.unknown()), 401: ErrorResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.user?.id;
+      if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      const { computeWatchState } = await import("../services/glance-service.js");
+      const state = await computeWatchState(userId);
+      return state as unknown as Record<string, unknown>;
+    },
+  );
+
   // ── Live Activity tokens ───────────────────────────────────────────────────
 
   app.post(

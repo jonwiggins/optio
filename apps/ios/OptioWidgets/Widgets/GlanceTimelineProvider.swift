@@ -46,10 +46,7 @@ struct GlanceEntry: TimelineEntry {
         var merged = NeedsYouSnapshot.empty
         merged.asOf = .distantFuture
         for s in slices {
-            merged.needsYou += s.snapshot.needsYou
-            merged.running += s.snapshot.running
-            merged.hostsOnline += s.snapshot.hostsOnline
-            merged.hostsTotal += s.snapshot.hostsTotal
+            merged.merge(s.snapshot)
             merged.asOf = min(merged.asOf, s.snapshot.asOf)
         }
         if merged.asOf == .distantFuture { merged.asOf = date }
@@ -69,6 +66,8 @@ struct GlanceEntry: TimelineEntry {
     var running: [WatchItem] { snapshot.running }
     var count: Int { snapshot.needsYou.count }
     var unreachableSince: Date? { unreachableSlices.compactMap(\.unreachableSince).min() }
+    /// Server-supplied board tiles (summed across servers); nil on older servers.
+    var tileCounts: SessionTileCounts? { snapshot.counts }
 
     /// The one server a single-server layout labels itself with (nil when showing all).
     var server: ServerProfile? { slices.count == 1 ? slices[0].server : nil }
@@ -80,7 +79,7 @@ struct GlanceEntry: TimelineEntry {
     }
 }
 
-/// Provider for the Agents widget: one fetch per server per reload via
+/// Provider for the Sessions widget: one fetch per server per reload via
 /// `SharedFetch`, last good snapshot cached per server in App Group defaults,
 /// cadence from `GlancePolicy`.
 struct GlanceTimelineProvider: AppIntentTimelineProvider {
@@ -164,8 +163,8 @@ struct GlanceTimelineProvider: AppIntentTimelineProvider {
     private struct TasksEnvelope: Decodable { let tasks: [InFlightTask] }
 
     private static func loadTasks(_ fetch: SharedFetch) async -> [InFlightTask]? {
-        guard let env = try? await fetch.get("/api/tasks", query: ["limit": "5", "type": "repo-task"], as: TasksEnvelope.self) else { return nil }
-        return env.tasks.filter { $0.state == "running" || $0.state == "pr_opened" }.prefix(3).map {
+        guard let env = try? await fetch.get("/api/tasks", query: ["limit": "8", "type": "repo-task"], as: TasksEnvelope.self) else { return nil }
+        return env.tasks.filter { ["running", "provisioning", "queued", "pr_opened", "needs_attention"].contains($0.state) }.prefix(4).map {
             var t = $0
             t.serverId = fetch.serverId
             t.serverName = fetch.serverName
@@ -196,19 +195,26 @@ enum GlanceFixtures {
     static let laptop = ServerProfile(id: "srv-laptop", name: "MacBook Pro", url: URL(string: "http://laptop.tailnet.ts.net:30400")!, color: .slate)
     static let studio = ServerProfile(id: "srv-studio", name: "Studio", url: URL(string: "http://studio.tailnet.ts.net:30400")!, color: .teal)
 
-    static let web = WatchItem(kind: .local, id: "t-web", title: "claude-code · web", mono: "optio/apps/web", reason: "Waiting on a permission", preview: "Allow Bash(pnpm test)?", since: now.addingTimeInterval(-4 * 60), state: "needs_you", link: DeepLink.local("t-web", compose: true).url(server: laptop.id).absoluteString, serverId: laptop.id, serverName: laptop.shortName)
-    static let api = WatchItem(kind: .local, id: "t-api", title: "claude-code · api", mono: "optio/apps/api", reason: "Claude stopped — reply to continue", since: now.addingTimeInterval(-11 * 60), state: "needs_you", link: DeepLink.local("t-api", compose: true).url(server: laptop.id).absoluteString, serverId: laptop.id, serverName: laptop.shortName)
-    static let forge = WatchItem(kind: .agent, id: "a-vesper", title: "Vesper", mono: "vesper", reason: "Gone quiet", since: now.addingTimeInterval(-38 * 60), state: "needs_you", link: DeepLink.agent("a-vesper", compose: true).url(server: studio.id).absoluteString, serverId: studio.id, serverName: studio.shortName)
-    static let cli = WatchItem(kind: .local, id: "t-cli", title: "codex · cli", mono: "optio/apps/cli", since: now.addingTimeInterval(-23 * 60), state: "working", link: DeepLink.local("t-cli", compose: false).url(server: laptop.id).absoluteString, serverId: laptop.id, serverName: laptop.shortName)
-    static let docs = WatchItem(kind: .local, id: "t-docs", title: "claude-code · docs", mono: "optio/docs", since: now.addingTimeInterval(-2 * 60), state: "working", link: DeepLink.local("t-docs", compose: false).url(server: studio.id).absoluteString, serverId: studio.id, serverName: studio.shortName)
+    static let web = WatchItem(kind: .local, id: "t-web", title: "claude-code · web", mono: "optio/apps/web", reason: "Waiting on a permission", preview: "Allow Bash(pnpm test)?", since: now.addingTimeInterval(-4 * 60), state: "needs_you", link: DeepLink.local("t-web", compose: true).url(server: laptop.id).absoluteString, serverId: laptop.id, serverName: laptop.shortName,
+                               source: .localTerminal, when: "now", where: WatchWhere(target: .machine, detail: "MacBook Pro · ~/repos/optio/apps/web"), who: "claude-code", then: .waitsForMe, statusLabel: "needs you")
+    static let api = WatchItem(kind: .local, id: "t-api", title: "claude-code · api", mono: "optio/apps/api", reason: "Claude stopped — reply to continue", since: now.addingTimeInterval(-11 * 60), state: "needs_you", link: DeepLink.local("t-api", compose: true).url(server: laptop.id).absoluteString, serverId: laptop.id, serverName: laptop.shortName,
+                               source: .localTerminal, when: "github", where: WatchWhere(target: .machine, detail: "MacBook Pro · ~/repos/optio/apps/api"), who: "claude-code", then: .waitsForMe, statusLabel: "needs you")
+    static let forge = WatchItem(kind: .agent, id: "a-vesper", title: "Vesper", mono: "@vesper", reason: "Turn failed — resume?", since: now.addingTimeInterval(-38 * 60), state: "failed", link: DeepLink.agent("a-vesper", compose: true).url(server: studio.id).absoluteString, serverId: studio.id, serverName: studio.shortName,
+                                 source: .persistentAgent, when: "messages", where: WatchWhere(target: .pod, detail: "@vesper"), who: "claude-code", then: .waitsForMessages, statusLabel: "failed")
+    static let cli = WatchItem(kind: .local, id: "t-cli", title: "codex · cli", mono: "optio/apps/cli", since: now.addingTimeInterval(-23 * 60), state: "working", link: DeepLink.local("t-cli", compose: false).url(server: laptop.id).absoluteString, serverId: laptop.id, serverName: laptop.shortName,
+                               source: .localTerminal, when: "job", where: WatchWhere(target: .machine, detail: "MacBook Pro · ~/repos/optio/apps/cli"), who: "codex", then: .exits, statusLabel: "working")
+    static let docs = WatchItem(kind: .local, id: "t-docs", title: "claude-code · docs", mono: "optio/docs", since: now.addingTimeInterval(-2 * 60), state: "working", link: DeepLink.local("t-docs", compose: false).url(server: studio.id).absoluteString, serverId: studio.id, serverName: studio.shortName,
+                                source: .localTerminal, when: "now", where: WatchWhere(target: .machine, detail: "Studio · ~/repos/optio/docs"), who: "claude-code", then: .waitsForMe, statusLabel: "working")
 
     static let tasks = [
-        InFlightTask(id: "task-1", title: "fix: login redirect loops on expired PAT", state: "pr_opened", repoBranch: "fix/login-redirect", prNumber: 581, prUrl: "https://github.com/jonwiggins/optio/pull/581", prChecksStatus: "pending", startedAt: now.addingTimeInterval(-52 * 60), serverId: laptop.id, serverName: laptop.shortName),
-        InFlightTask(id: "task-2", title: "feat(ios): widgets and controls", state: "running", repoBranch: "feat/ios-widgets", startedAt: now.addingTimeInterval(-12 * 60), serverId: studio.id, serverName: studio.shortName),
+        InFlightTask(id: "task-1", title: "fix: login redirect loops on expired PAT", state: "pr_opened", repoBranch: "fix/login-redirect", repoUrl: "https://github.com/jonwiggins/optio", agentType: "claude-code", prNumber: 581, prUrl: "https://github.com/jonwiggins/optio/pull/581", prChecksStatus: "pending", startedAt: now.addingTimeInterval(-52 * 60), serverId: laptop.id, serverName: laptop.shortName),
+        InFlightTask(id: "task-2", title: "feat(ios): widgets and controls", state: "running", repoBranch: "feat/ios-widgets", repoUrl: "https://github.com/jonwiggins/optio", agentType: "codex", startedAt: now.addingTimeInterval(-12 * 60), serverId: studio.id, serverName: studio.shortName),
     ]
 
-    static func slice(_ server: ServerProfile, needs: [WatchItem], running: [WatchItem], tasks: [InFlightTask] = [], asOf: Date = now, reachability: GlancePolicy.Reachability = .live, unreachableSince: Date? = nil, hostsOnline: Int = 1) -> GlanceSlice {
-        GlanceSlice(server: server, reachability: reachability, snapshot: NeedsYouSnapshot(needsYou: needs, running: running, hostsOnline: hostsOnline, hostsTotal: 1, asOf: asOf), tasks: tasks, unreachableSince: unreachableSince)
+    static let counts = SessionTileCounts(waiting: 2, recurring: 4, agents: 3)
+
+    static func slice(_ server: ServerProfile, needs: [WatchItem], running: [WatchItem], tasks: [InFlightTask] = [], asOf: Date = now, reachability: GlancePolicy.Reachability = .live, unreachableSince: Date? = nil, hostsOnline: Int = 1, counts: SessionTileCounts? = counts) -> GlanceSlice {
+        GlanceSlice(server: server, reachability: reachability, snapshot: NeedsYouSnapshot(needsYou: needs, running: running, hostsOnline: hostsOnline, hostsTotal: 1, counts: counts, asOf: asOf), tasks: tasks, unreachableSince: unreachableSince)
     }
 
     static let waiting = GlanceEntry(date: now, slices: [slice(laptop, needs: [web, api], running: [cli], tasks: [tasks[0]]), slice(studio, needs: [forge], running: [docs], tasks: [tasks[1]])])
@@ -216,6 +222,8 @@ enum GlanceFixtures {
     static let single = GlanceEntry(date: now, slices: [slice(laptop, needs: [web, api], running: [cli], tasks: tasks)])
     static let quiet = GlanceEntry(date: now, slices: [slice(laptop, needs: [], running: [cli], tasks: tasks), slice(studio, needs: [], running: [docs])])
     static let idle = GlanceEntry(date: now, slices: [slice(laptop, needs: [], running: [])])
+    /// A server that predates `/api/glance/watch`: no board tiles beyond the two the rows give.
+    static let legacy = GlanceEntry(date: now, slices: [slice(laptop, needs: [web], running: [cli], tasks: tasks, counts: nil)])
     static let offline = GlanceEntry(date: now, slices: [slice(laptop, needs: [web], running: [cli], tasks: tasks, asOf: now.addingTimeInterval(-47 * 60), reachability: .unreachable, unreachableSince: now.addingTimeInterval(-41 * 60), hostsOnline: 0)])
     static let partial = GlanceEntry(date: now, slices: [slice(laptop, needs: [web], running: [cli], tasks: [tasks[0]]), slice(studio, needs: [], running: [], asOf: now.addingTimeInterval(-20 * 60), reachability: .unreachable, unreachableSince: now.addingTimeInterval(-9 * 60))])
     static let stale = GlanceEntry(date: now, slices: [slice(laptop, needs: [web, api], running: [cli], tasks: tasks, asOf: now.addingTimeInterval(-35 * 60))])

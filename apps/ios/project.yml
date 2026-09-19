@@ -121,6 +121,28 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: dev.optio.ios.tests
+  # Hostless: renders the widget extension's views (Sessions widget families, Live
+  # Activity lock screen + island regions) into contact-sheet PNGs with ImageRenderer
+  # when TEST_RUNNER_OPTIO_WIDGET_SHOT_DIR is set; otherwise it just checks they
+  # render. Not hosted by the app on purpose — a hosted runner hung before connecting.
+  #   xcodebuild test -scheme WidgetSnapshots -destination 'platform=iOS Simulator,name=iPhone 17e' \
+  #     TEST_RUNNER_OPTIO_WIDGET_SHOT_DIR=/tmp/shots
+  WidgetSnapshots:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: WidgetSnapshots
+      - path: Shared
+      - path: OptioWidgets
+        excludes:
+          - OptioWidgetsBundle.swift
+          - Info.plist
+          - "Resources/**"
+          - "*.entitlements"
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: dev.optio.ios.widget-snapshots
   OptioUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -133,6 +155,13 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.optio.ios.uitests
         TEST_TARGET_NAME: Optio
 schemes:
+  WidgetSnapshots:
+    build:
+      targets:
+        WidgetSnapshots: [test]
+    test:
+      config: Debug
+      targets: [WidgetSnapshots]
   Optio:
     build:
       targets:

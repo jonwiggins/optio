@@ -194,15 +194,52 @@ describe("buildLiveActivityMessage", () => {
     expect(aps["content-state"].head.since).toBe(811_339_200);
   });
 
-  it("stays under 4 KB with a full queue of long previews", () => {
+  it("stays under 4 KB with a full queue of long previews and every session chip set", () => {
     const items = Array.from({ length: 12 }, (_, i) =>
-      item({ id: `t${i}`, preview: "p".repeat(500), title: "t".repeat(100), mono: "m".repeat(60) }),
+      item({
+        id: `t${i}`,
+        preview: "p".repeat(500),
+        title: "t".repeat(100),
+        mono: "m".repeat(60),
+        reason: "r".repeat(80),
+        prUrl: "https://github.com/jonwiggins/optio/pull/" + "9".repeat(60),
+        snoozedUntil: appleSeconds(NOW),
+        source: "local-terminal",
+        when: "on a trigger",
+        where: { target: "machine", detail: "MacBook Pro · " + "/deep".repeat(60) },
+        who: "claude-code",
+        then: "waits-for-me",
+        statusLabel: "needs you",
+      }),
     );
-    const big = buildWatchState({ needsYou: items, running: items, now: NOW });
-    const msg = buildLiveActivityMessage({ event: "update", state: big }, { bundleId: BUNDLE });
+    const big = buildWatchState({
+      needsYou: items,
+      running: items,
+      counts: { waiting: 999, recurring: 999, agents: 999 },
+      now: NOW,
+    });
+    const msg = buildLiveActivityMessage(
+      { event: "update", state: big, alert: { title: "t".repeat(200), body: "b".repeat(500) } },
+      { bundleId: BUNDLE },
+    );
     expect(payloadBytes(msg.payload)).toBeLessThanOrEqual(APNS_MAX_PAYLOAD_BYTES);
     expect(big.others).toHaveLength(2);
     expect(big.head?.preview).toHaveLength(120);
+    expect(big.head?.where?.detail).toHaveLength(60);
+    expect(big.head?.where?.detail?.startsWith("…")).toBe(true);
+    expect(big).toMatchObject({ waitingCount: 999, recurringCount: 999, agentCount: 999 });
+  });
+
+  it("leaves the tile counts null when the caller has none (older frames decode unchanged)", () => {
+    const state = buildWatchState({
+      needsYou: [],
+      running: [item({ state: "working" })],
+      now: NOW,
+    });
+    expect(state.waitingCount).toBeNull();
+    expect(state.recurringCount).toBeNull();
+    expect(state.agentCount).toBeNull();
+    expect(state.head?.where).toBeUndefined();
   });
 });
 

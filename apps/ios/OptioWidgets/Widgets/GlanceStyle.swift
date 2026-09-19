@@ -110,58 +110,188 @@ struct KindIcon: View {
     }
 }
 
-/// `[kind] name [server] ……… [badge] 4m [later]` on one line. The whole row is a deep
-/// link; the Later button (needs-you rows only) is an App Intent and never opens the app.
-struct GlanceRow: View {
+/// The session's Who as a glyph: a terminal, or the Optio bot for an agent runtime.
+/// Shared by the island's compact trailing region and the accessory rows.
+struct WhoGlyph: View {
+    let item: WatchItem
+    var size: CGFloat = 14
+    var style: AnyShapeStyle = AnyShapeStyle(.primary)
+
+    var body: some View {
+        if item.whoIsTerminal {
+            Image(systemName: "terminal").font(.system(size: size, weight: .semibold)).foregroundStyle(style)
+                .frame(width: size + 4, height: size + 4)
+                .accessibilityLabel("terminal")
+        } else {
+            OptioGlyph(size: size + 2, style: style)
+                .accessibilityLabel(GlanceCopy.whoLabel(item.whoValue))
+        }
+    }
+}
+
+// MARK: - Session vocabulary (When · Where · Who · Then)
+
+/// One attribute chip: `[icon] label`, the same icons as the app's `SessionRowView`.
+struct SessionChip: View {
+    let systemImage: String
+    let label: String
+    var mono = false
+    var font: Font = .caption2
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage).font(font).foregroundStyle(Color(.tertiaryLabel))
+            Text(label)
+                .font(mono ? font.monospaced() : font)
+                .foregroundStyle(Color.secondary)
+                .lineLimit(1)
+                .truncationMode(mono ? .head : .tail)
+        }
+    }
+}
+
+/// The four chips of a session: one line (`short` trims Where to `host · leaf` so four
+/// chips fit a widget row) or, with `grid`, two columns of two like the app's session
+/// row — the Live Activity uses that so Where never has to be squeezed.
+struct SessionChips: View {
+    let item: WatchItem
+    var short = true
+    var grid = false
+    var font: Font = .caption2
+    var spacing: CGFloat = 8
+
+    var body: some View {
+        let place = item.whereValue
+        let when = SessionChip(systemImage: item.whenSystemImage, label: item.whenLabel, font: font)
+        let whereChip = SessionChip(systemImage: place.systemImage, label: GlanceCopy.whereLabel(place.detail, target: place.target.rawValue, short: short), mono: true, font: font)
+        let who = SessionChip(systemImage: item.whoSystemImage, label: GlanceCopy.whoLabel(item.whoValue), font: font)
+        let then = SessionChip(systemImage: item.thenValue.systemImage, label: item.thenValue.label, font: font)
+        if grid {
+            Grid(alignment: .leading, horizontalSpacing: spacing, verticalSpacing: 2) {
+                GridRow { when; whereChip }
+                GridRow { who; then }
+            }
+            .lineLimit(1)
+        } else {
+            HStack(spacing: spacing) {
+                when.fixedSize()
+                whereChip.layoutPriority(-1)
+                who.fixedSize()
+                then.fixedSize()
+            }
+            .lineLimit(1)
+        }
+    }
+}
+
+/// Status word for a row: the widget vocabulary (`Allow?`, `Reply`, `PR`…) when it
+/// has one, else the session row's own status label ("working", "PR open").
+extension WatchItem {
+    var statusWord: String { RowBadge.of(self)?.word ?? statusText }
+    var statusSymbol: String? { RowBadge.of(self)?.symbol }
+    var statusColor: Color { RowBadge.of(self)?.color ?? StatusKind.forState(state).color }
+}
+
+/// A session as a widget row. One line — `● name  [where]  status 4m` — or two, with
+/// the four chips underneath (`expanded`). The row is a deep link; the moon is
+/// **Later** (App Intent, no app launch) on needs-you rows.
+struct SessionGlanceRow: View {
     let item: WatchItem
     let now: Date
     var showsServer = false
     var showsLater = true
-    /// Small family: no wait time, no Later; the name and the badge are all that fit.
+    var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center, spacing: 6) {
+                Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
+                    HStack(spacing: 6) {
+                        StateDotView(state: item.state, size: 7)
+                        Text(item.rowName)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
+                        if showsServer, let tag = ServerTag(item: item) { tag.dot() }
+                        if !expanded {
+                            let place = item.whereValue
+                            SessionChip(systemImage: place.systemImage, label: GlanceCopy.whereLabel(place.detail, target: place.target.rawValue, short: true), mono: true)
+                                .layoutPriority(0)
+                        }
+                        Spacer(minLength: 4)
+                        HStack(spacing: 3) {
+                            if let symbol = item.statusSymbol { Image(systemName: symbol) }
+                            Text(item.statusWord)
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(item.statusColor)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        Text(GlancePolicy.waitText(since: item.since, now: now))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(Color(.tertiaryLabel))
+                            .frame(minWidth: 22, alignment: .trailing)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if showsLater, item.state == "needs_you" {
+                    Button(intent: LaterIntent(item: item)) {
+                        Image(systemName: "moon.zzz")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 22, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Later")
+                }
+            }
+            if expanded {
+                Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
+                    SessionChips(item: item).padding(.leading, 13)
+                }
+            }
+        }
+    }
+}
+
+/// The session board's tiles in one row: count over label, each a link into the
+/// matching Sessions view. Need-you is yellow and Running purple when non-zero.
+struct TileStrip: View {
+    let tiles: [GlanceCopy.Tile]
     var compact = false
 
     var body: some View {
         HStack(spacing: 6) {
-            Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
-                HStack(spacing: 6) {
-                    KindIcon(item: item)
-                    Text(item.rowName)
-                        .font(.system(.footnote, design: item.kind == .agent ? .default : .monospaced).weight(.semibold))
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                        .layoutPriority(compact ? 0 : 1)
-                    if showsServer, let tag = ServerTag(item: item) { tag.dot() }
-                    Spacer(minLength: 4)
-                    if let badge = RowBadge.of(item) {
-                        HStack(spacing: 3) {
-                            Image(systemName: badge.symbol)
-                            Text(badge.word)
-                        }
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(badge.color)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: compact, vertical: false)
+            ForEach(tiles, id: \.id) { tile in
+                Link(destination: DeepLink.sessions(view: tile.view).url) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("\(tile.count)")
+                            .font(.system(compact ? .callout : .title3, design: .rounded).weight(.semibold))
+                            .foregroundStyle(color(tile))
+                            .contentTransition(.numericText())
+                            .monospacedDigit()
+                        Text(tile.label)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Color.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
-                    if !compact {
-                        Text(GlancePolicy.waitText(since: item.since, now: now))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(Color(.tertiaryLabel))
-                            .frame(minWidth: 24, alignment: .trailing)
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if showsLater, !compact, item.state == "needs_you" {
-                Button(intent: LaterIntent(item: item)) {
-                    Image(systemName: "moon.zzz")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Later")
-            }
+        }
+    }
+
+    private func color(_ tile: GlanceCopy.Tile) -> Color {
+        switch tile.id {
+        case .needsYou: return tile.count > 0 ? GlanceStyle.needsYou : .secondary
+        case .running: return tile.count > 0 ? GlanceStyle.working : .secondary
+        default: return tile.count > 0 ? .primary : .secondary
         }
     }
 }

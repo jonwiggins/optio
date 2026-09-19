@@ -159,11 +159,20 @@ Live Activity payload (`apns-push-type: liveactivity`, topic
         "preview": "Allow Bash(rm -rf)?",
         "since": 811339200,
         "state": "needs_you",
-        "link": "optio://local/…?compose=1"
+        "link": "optio://local/…?compose=1",
+        "source": "local-terminal",
+        "when": "now",
+        "where": { "target": "machine", "detail": "mbp · ~/repos/optio/apps/web" },
+        "who": "claude-code",
+        "then": "waits-for-me",
+        "statusLabel": "needs you"
       },
       "others": [],
       "needsYouCount": 1,
       "runningCount": 2,
+      "waitingCount": 1,
+      "recurringCount": 4,
+      "agentCount": 2,
       "asOf": 811339200
     },
     "stale-date": 1789646520,
@@ -179,6 +188,19 @@ mirrored in `packages/shared/src/types/glance.ts`). **Dates are seconds since
 state with a default `JSONDecoder`. `end` frames add `dismissal-date`; `start`
 frames (push-to-start) add `"attributes-type": "WatchAttributes"` and
 `attributes: { userId, startedAt }`.
+
+Since v0.5 ("one noun: Sessions") every item also carries the four session
+chips the app shows — `source`, `when`, `where { target, detail }`, `who`,
+`then`, `statusLabel` — and the frame carries the board tiles the Watch cannot
+derive from its own items: `waitingCount` (the user's tasks at an open PR plus
+idle agent terminals), `recurringCount` (enabled blueprints / Jobs in the user's
+workspaces plus their enabled Local automations) and `agentCount` (persistent
+agents not archived). All of it is optional and additive: older apps ignore the
+keys, and the app's `WatchItem` derives every chip from `kind` / `title` / `mono`
+when a frame predates them. `where.detail` is clamped to 60 chars (head-first,
+the leaf survives) and `preview` to 120 so a full frame stays well under 4 KB.
+`GET /api/glance/watch` returns the caller's current frame — the widgets read it
+for the tiles so they render without the app running.
 
 Delivery rules: ≤1 Live Activity push per token per second (trailing edge, the
 latest frame wins, an alerting frame is never downgraded by a later silent one),

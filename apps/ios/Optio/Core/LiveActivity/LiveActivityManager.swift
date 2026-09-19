@@ -168,6 +168,7 @@ final class LiveActivityManager {
     private struct AgentEnvelope: Decodable {
         struct Agent: Decodable {
             let id: String; let name: String; let slug: String; let state: String
+            let agentRuntime: String?
             let lastTurnAt: Date?; let lastFailureReason: String?
         }
         let agent: Agent
@@ -220,14 +221,19 @@ final class LiveActivityManager {
             guard let (row, fetch) = found else { continue }
             let since = row.lastTurnAt ?? now
             let link = DeepLink.agent(row.id, compose: true).url(server: fetch.serverId).absoluteString
+            // The same four chips as the app's session row: When = messages, Where = pod @slug,
+            // Who = the runtime, Then = persistent.
+            func item(title: String, reason: String? = nil, statusLabel: String) -> WatchItem {
+                WatchItem(kind: .agent, id: row.id, title: title, mono: "@\(row.slug)", reason: reason,
+                          since: since, state: row.state, link: link, serverId: fetch.serverId, serverName: fetch.serverName,
+                          source: .persistentAgent, when: "messages", where: WatchWhere(target: .pod, detail: "@\(row.slug)"),
+                          who: row.agentRuntime ?? "claude-code", then: .waitsForMessages, statusLabel: statusLabel)
+            }
             switch row.state {
             case "running", "queued", "provisioning":
-                snapshot.running.append(WatchItem(kind: .agent, id: row.id, title: "\(row.name) is thinking", mono: "@\(row.slug)",
-                                                  since: since, state: row.state, link: link, serverId: fetch.serverId, serverName: fetch.serverName))
+                snapshot.running.append(item(title: row.name, statusLabel: row.state == "running" ? "thinking" : row.state))
             case "failed":
-                snapshot.needsYou.append(WatchItem(kind: .agent, id: row.id, title: row.name, mono: "@\(row.slug)",
-                                                   reason: row.lastFailureReason.map { String($0.prefix(80)) } ?? "Turn failed — resume?",
-                                                   since: since, state: row.state, link: link, serverId: fetch.serverId, serverName: fetch.serverName))
+                snapshot.needsYou.append(item(title: row.name, reason: row.lastFailureReason.map { String($0.prefix(80)) } ?? "Turn failed — resume?", statusLabel: "failed"))
             default: break
             }
         }
@@ -301,7 +307,7 @@ final class LiveActivityManager {
         let refreshStale = now.timeIntervalSince(lastUpdateAt) >= Self.refreshAfter
         guard hash != lastHash || refreshStale else { return }
         let alert: AlertConfiguration? = (state.phase == .waiting && lastHashPhase != .waiting)
-            ? AlertConfiguration(title: "Needs you", body: LocalizedStringResource(stringLiteral: alertBody(state)), sound: .default) : nil
+            ? AlertConfiguration(title: "A session needs you", body: LocalizedStringResource(stringLiteral: alertBody(state)), sound: .default) : nil
         await activity.update(content(state, at: now), alertConfiguration: alert)
         log.notice("updated \(activity.id, privacy: .public) phase=\(state.phase.rawValue, privacy: .public) needsYou=\(state.needsYouCount) running=\(state.runningCount) alert=\(alert != nil)")
         lastHash = hash
@@ -344,7 +350,7 @@ final class LiveActivityManager {
     }
 
     private func endWithSummary(_ activity: Activity<WatchAttributes>, at now: Date) async {
-        let summary = "Quiet. \(answered) answered, \(merged) PR\(merged == 1 ? "" : "s") merged."
+        let summary = "Sessions ended. \(answered) answered, \(merged) PR\(merged == 1 ? "" : "s") merged."
         let done = WatchState(phase: .done, summary: summary, asOf: now)
         await activity.end(ActivityContent(state: done, staleDate: nil, relevanceScore: 0),
                            dismissalPolicy: .after(now.addingTimeInterval(Self.dismissAfter)))
@@ -364,8 +370,8 @@ final class LiveActivityManager {
     }
 
     private func alertBody(_ state: WatchState) -> String {
-        guard let head = state.head else { return "Something needs you" }
-        return "\(head.mono) · \(head.reason ?? "needs you")"
+        guard let head = state.head else { return "A session needs you" }
+        return "\(head.title) · \(head.reason ?? head.statusText)"
     }
 
     /// Hash of everything that changes what the user sees (not `asOf`).
