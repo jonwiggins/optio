@@ -12,6 +12,7 @@ import {
   unique,
   index,
   uniqueIndex,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -1719,6 +1720,32 @@ export const localTerminalSnapshots = pgTable("local_terminal_snapshots", {
   rows: integer("rows").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * The conversation behind an agent session (Optio Local), distilled by the
+ * daemon from the agent CLI's transcript. One row per entry, keyed by the
+ * daemon's per-terminal `seq` so re-sent batches are idempotent. Own table:
+ * a long session is thousands of rows that no list endpoint should carry.
+ */
+export const localTerminalTranscripts = pgTable(
+  "local_terminal_transcripts",
+  {
+    terminalId: uuid("terminal_id")
+      .notNull()
+      .references(() => localTerminals.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    role: text("role").notNull(), // user | assistant | tool
+    kind: text("kind").notNull(), // text | thinking | tool_use | tool_result
+    text: text("text").notNull(),
+    detail: text("detail"),
+    toolName: text("tool_name"),
+    toolUseId: text("tool_use_id"),
+    isError: boolean("is_error").notNull().default(false),
+    at: timestamp("at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.terminalId, table.seq] })],
+);
 
 export const localBlueprints = pgTable(
   "local_blueprints",

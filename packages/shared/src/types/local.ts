@@ -158,6 +158,42 @@ export interface RunLocation {
   localSessionMode: LocalAgentSessionMode | null;
 }
 
+/**
+ * One entry of an agent session's conversation, distilled by the daemon from
+ * the agent CLI's own transcript (Claude Code's JSONL at the hooks'
+ * `transcript_path`). Unlike the terminal's screen — which for a full-screen
+ * TUI holds only the last redraw — this is the whole exchange: every prompt,
+ * every reply, every tool call and its result, as plain text that reflows to
+ * any screen. `seq` is the daemon's per-terminal counter, 1-based and
+ * monotonic; the server stores entries keyed by it so a re-sent batch is
+ * idempotent.
+ */
+export type LocalTranscriptRole = "user" | "assistant" | "tool";
+export type LocalTranscriptKind = "text" | "thinking" | "tool_use" | "tool_result";
+
+export interface LocalTranscriptEntry {
+  seq: number;
+  role: LocalTranscriptRole;
+  kind: LocalTranscriptKind;
+  /** The prompt / reply / thinking text, a tool call's one-line summary, or the tool's result. */
+  text: string;
+  /** `tool_use`: the full input (JSON, bounded); `tool_result`: unused. */
+  detail: string | null;
+  toolName: string | null;
+  /** Pairs a `tool_use` with its `tool_result`. */
+  toolUseId: string | null;
+  isError: boolean;
+  /** The transcript line's timestamp, when it carried one. */
+  at: string | null;
+}
+
+/** Longest `text` the server keeps per entry (a reply is rarely near this; tool results are cut). */
+export const LOCAL_TRANSCRIPT_TEXT_MAX = 16 * 1024;
+/** Longest `detail` (a tool call's full input) kept per entry. */
+export const LOCAL_TRANSCRIPT_DETAIL_MAX = 8 * 1024;
+/** Entries kept per terminal; later ones are dropped (the daemon stops sending past it). */
+export const LOCAL_TRANSCRIPT_MAX_ENTRIES = 20_000;
+
 export interface LocalTerminal {
   id: string;
   hostId: string;
@@ -401,6 +437,12 @@ export type LocalDaemonMessage =
   | { type: "preview"; terminalId: string; preview: string; lastActivityAt: string }
   | { type: "links"; terminalId: string; links: WorkLink[] }
   | { type: "usage"; terminalId: string; usage: LocalTerminalUsage }
+  /**
+   * New conversation entries read from the agent's transcript since the last
+   * frame (in `seq` order). Sent as turns complete while the terminal runs
+   * and flushed once more right before `exit`.
+   */
+  | { type: "transcript"; terminalId: string; entries: LocalTranscriptEntry[] }
   /** The agent CLI's own session id, once its hooks report it (sent once). */
   | { type: "session"; terminalId: string; agentSessionId: string }
   | { type: "agent-limits"; limits: LocalHostAgentLimits }

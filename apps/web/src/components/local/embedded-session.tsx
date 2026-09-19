@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { ExternalLink, Laptop, Loader2, RotateCcw, XCircle } from "lucide-react";
@@ -13,6 +13,10 @@ import { StatusDot, attentionLabel, dirTail, localStateLabel } from "./terminal-
 import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import { SessionUsageChip } from "./usage-chips";
 import type { ConnState } from "./conn-state";
+import { useLocalTranscript } from "./use-transcript";
+import { TranscriptView } from "./transcript-view";
+import { SessionViewToggle } from "./session-view-toggle";
+import { resolveSessionView, type SessionView } from "./session-view";
 
 const LocalTerminal = dynamic(() => import("./local-terminal").then((m) => m.LocalTerminal), {
   ssr: false,
@@ -48,6 +52,17 @@ export function EmbeddedLocalSession({
   const [streamedOutput, setStreamedOutput] = useState(false);
   const handleOutput = useCallback(() => setStreamedOutput(true), []);
   const onTerminalRef = useRefLatest(onTerminal);
+  // Same rule as the Local pane: a finished run opens on its conversation,
+  // a live one on its screen, and a run you watched end stays on the screen.
+  const [viewChoice, setViewChoice] = useState<SessionView | null>(null);
+  const terminalAlive =
+    terminal != null && terminal.state !== "exited" && terminal.state !== "error";
+  const transcript = useLocalTranscript(terminalId, terminalAlive);
+  const wasAlive = useRef(false);
+  useEffect(() => {
+    if (terminalAlive) wasAlive.current = true;
+    else if (wasAlive.current) setViewChoice((c) => c ?? "screen");
+  }, [terminalAlive]);
 
   const fetchTerminal = useCallback(async () => {
     try {
@@ -140,13 +155,19 @@ export function EmbeddedLocalSession({
     (terminal.spec.agent === "claude-code" || terminal.spec.agent === "codex") &&
     !!terminal.agentSessionId;
   const links = collectWorkLinks(terminal);
+  const hasTranscript = transcript.entries.length > 0;
+  const view = resolveSessionView(viewChoice, {
+    isDead,
+    hasTranscript,
+    loaded: transcript.loaded,
+  });
   const button =
     "inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors";
 
   return (
     <div className={cn("h-full flex flex-col min-h-0", className)}>
       <div className="shrink-0 flex items-center gap-2 px-3 h-10 border-b border-border bg-bg text-xs">
-        <StatusDot terminal={terminal} conn={conn} />
+        <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
         <span className="font-medium">{localStateLabel(terminal)}</span>
         {terminal.attentionState === "needs_you" && (
           <span className="text-warning truncate">{attentionLabel(terminal.attentionReason)}</span>
@@ -179,6 +200,7 @@ export function EmbeddedLocalSession({
             <WorkLinkBadges links={links} size="xs" max={3} />
           </span>
           <SessionUsageChip usage={terminal.usage} collapsible className="hidden sm:inline-flex" />
+          {hasTranscript && view && <SessionViewToggle view={view} onChange={setViewChoice} />}
           {canResume && (
             <button
               onClick={handleResume}
@@ -209,7 +231,16 @@ export function EmbeddedLocalSession({
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col">
-        {isDead && !streamedOutput && terminal.preview ? (
+        {view === null ? (
+          <div className="flex-1 min-h-0 bg-[#09090b] flex items-center justify-center text-text-muted text-sm">
+            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            Loading session…
+          </div>
+        ) : view === "transcript" ? (
+          <div className="flex-1 min-h-0">
+            <TranscriptView entries={transcript.entries} live={!isDead} />
+          </div>
+        ) : isDead && !streamedOutput && terminal.preview ? (
           <div className="flex-1 min-h-0 flex flex-col bg-[#09090b] px-4 py-3">
             <div className="shrink-0 text-[10px] uppercase tracking-wide text-text-muted mb-1.5">
               Last output

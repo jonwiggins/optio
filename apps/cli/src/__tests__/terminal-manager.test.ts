@@ -125,6 +125,31 @@ describe("output subscription", () => {
     }
   });
 
+  it("keeps the real user ZDOTDIR when the daemon itself runs inside an Optio terminal", () => {
+    const prev = {
+      SHELL: process.env.SHELL,
+      ZDOTDIR: process.env.ZDOTDIR,
+      U: process.env.OPTIO_USER_ZDOTDIR,
+    };
+    process.env.SHELL = "/bin/zsh";
+    // What an outer daemon's wrapper leaves in the environment.
+    process.env.ZDOTDIR = "/Users/me/.config/optio/local/zsh";
+    process.env.OPTIO_USER_ZDOTDIR = "/Users/me";
+    try {
+      const { manager } = setup({ shimDir: "/opt/optio/bin", zdotDir: "/opt/optio/zsh" });
+      spawnTerminal(manager, "t-1");
+      const env = h.spawned[0].spawnOpts.env;
+      expect(env.ZDOTDIR).toBe("/opt/optio/zsh");
+      expect(env.OPTIO_USER_ZDOTDIR).toBe("/Users/me");
+    } finally {
+      process.env.SHELL = prev.SHELL;
+      if (prev.ZDOTDIR === undefined) delete process.env.ZDOTDIR;
+      else process.env.ZDOTDIR = prev.ZDOTDIR;
+      if (prev.U === undefined) delete process.env.OPTIO_USER_ZDOTDIR;
+      else process.env.OPTIO_USER_ZDOTDIR = prev.U;
+    }
+  });
+
   it("announces the PTY grid on spawn, after a resize, and to each new attach", () => {
     const { sent, manager } = setup();
     spawnTerminal(manager, "t-1");

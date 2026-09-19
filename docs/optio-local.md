@@ -222,6 +222,20 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   an exited terminal replays it into the xterm at the recorded grid, so a finished session
   reads the way it ran instead of as a text preview; the preview is the fallback for rows
   recorded before snapshots existed.
+- **The conversation** (`local_terminal_transcripts`). A screen is not a record of an agent
+  session: Claude Code draws a full-screen TUI, so the bytes that survive its exit are one
+  redraw of the last screen — the last message, not the exchange. For Claude Code spawns
+  the daemon also distills the agent's own transcript (the JSONL at the hooks'
+  `transcript_path`, the same file the usage chip is summed from,
+  `cli/src/local/transcript-tracker.ts`) into plain entries — every prompt, reply, tool
+  call (name + one-line summary + full input, bounded) with its result (bounded), and
+  thinking — and streams them as `transcript` frames: on every hook, every 3 s while the
+  session runs, and once more right before `exit`. Rows are keyed by the daemon's
+  per-terminal `seq`, so a re-sent batch is a no-op; sidechain (subagent) lines and Claude
+  Code's bookkeeping lines (slash-command echoes, meta) are skipped. `GET
+/api/local/terminals/:id/transcript` serves it; the session page opens a finished agent
+  session on this **Transcript** view (the **Screen** toggle brings the recorded grid
+  back), which reflows to any width — a session run on a 132×40 grid reads on a phone.
 - Live UI updates: content-free nudges `{type:"local:changed", terminalId, hostId, userId}`
   on the shared `/ws/events` stream (that stream is visible to all authenticated users, so
   no terminal content may ever be published there); clients refetch via REST.
@@ -242,6 +256,9 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   linked to the issue, and a "working on this" comment is posted. Dir must be inside the
   host allowlist.
 - `GET /api/local/terminals/:id`
+- `GET /api/local/terminals/:id/transcript?after=&limit=` — the agent session's
+  conversation as `{entries, complete}` (see "The conversation" above); `after` is a seq,
+  for live polling
 - `POST /api/local/terminals/:id/start` — spawn a `pending` terminal
 - `POST /api/local/terminals/:id/resume` — new interactive terminal resuming the agent's
   own session (`agentSessionId`); 409 when the session never reported one
@@ -293,6 +310,12 @@ Daemon → server:
   resolve to the dir's GitHub/GitLab remote as kind `ref`). Rides the preview throttle, sent only when the set changes; the server
   sanitizes (https only, known kinds/providers, ≤50) and stores it in
   `local_terminals.links`
+- `{type:"transcript", terminalId, entries:[{seq, role, kind, text, detail, toolName,
+toolUseId, isError, at}]}` — new conversation entries distilled from the agent's transcript
+  (Claude Code), batched (40 per frame), in `seq` order; sent on hooks, every 3 s while the
+  session runs, and flushed once more just before `exit`. Accepted only from the owning host
+  while the row is live; the server bounds text (16 KB) / detail (8 KB) and caps a terminal
+  at 20 000 entries
 - `{type:"snapshot", terminalId, dataB64, cols, rows}` — the final screen (ring tail +
   grid), sent right before `exit`; its own frame so an oversize one the server drops
   (>1 MB) can never swallow the exit. Accepted only from the owning host while the row
@@ -335,7 +358,13 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   New Terminal dialog, Blueprints section, empty-state onboarding (`optio login` →
   `optio local up`).
 - `/local/[id]` — focus view: full xterm.js terminal + header (title, host, dir, state,
-  attention, PR / ticket badges, Kill / Start / Delete). Inside a terminal the app sidebar
+  attention, PR / ticket badges, Kill / Start / Delete). Agent sessions with a recorded
+  conversation get a **Transcript / Screen** toggle (`components/local/session-view-toggle.tsx`,
+  rule in `session-view.ts`): a session opened after it finished lands on the transcript
+  (`components/local/transcript-view.tsx` — prompts, markdown replies, tool calls with
+  results folded underneath, thinking collapsed, sticks to the bottom while live); a live
+  session opens on its screen, and one you watched end stays on the screen. The Job run /
+  Task pages' embedded session does the same. Inside a terminal the app sidebar
   is replaced by the **session rail** (`components/local/terminal-rail.tsx`): every
   terminal grouped as Needs you (oldest wait first) / Working / Idle / Finished, searchable
   by title, dir, host, or PR / ticket, with badges per row. Keyboard, captured before
@@ -371,6 +400,10 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   that sources your real `.zshenv`/`.zprofile`/`.zshrc`/`.zlogin` and then moves the shim
   back to the front of PATH — otherwise an rc file that prepends `~/.local/bin` or asdf
   shims buries the shim behind the real `claude` and that terminal silently loses hooks.
+  A daemon started from _inside_ an Optio terminal inherits the outer daemon's shim and
+  wrapper: the shim skips any other Optio shim on PATH (else the two exec each other
+  forever) and the spawn keeps the recorded `OPTIO_USER_ZDOTDIR` rather than the
+  inherited wrapper (else the wrapper sources itself until zsh's recursion limit).
   Bash keeps the plain prepend: an rc that _resets_ PATH drops the shim there, and the
   terminal falls back to the silence heuristic.
 - **One status dot per header** (`StatusDot`, `statusDescriptor` in `terminal-card.tsx`):

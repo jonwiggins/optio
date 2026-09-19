@@ -4,6 +4,8 @@
  * Bearer token to the real API — the session token never touches client-side JS.
  */
 
+import type { LocalTranscriptEntry } from "@optio/shared";
+
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
@@ -1844,6 +1846,17 @@ export const api = {
   },
 
   getLocalTerminal: (id: string) => request<{ terminal: any }>(`/api/local/terminals/${id}`),
+
+  /** The session's conversation (prompts, replies, tool calls); `after` = only entries past that seq. */
+  getLocalTerminalTranscript: (id: string, params?: { after?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.after) qs.set("after", String(params.after));
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return request<{ entries: LocalTranscriptEntry[]; complete: boolean }>(
+      `/api/local/terminals/${id}/transcript${query ? `?${query}` : ""}`,
+    );
+  },
 
   listRecentRuns: (limit = 12) =>
     request<{

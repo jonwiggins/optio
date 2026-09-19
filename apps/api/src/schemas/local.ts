@@ -72,6 +72,20 @@ export const LocalTerminalSpecSchema = z
   ])
   .describe("What the daemon runs in the PTY");
 
+export const LocalTranscriptEntrySchema = z
+  .object({
+    seq: z.number().int(),
+    role: z.enum(["user", "assistant", "tool"]),
+    kind: z.enum(["text", "thinking", "tool_use", "tool_result"]),
+    text: z.string(),
+    detail: z.string().nullable().describe("tool_use: the full input as JSON (bounded)"),
+    toolName: z.string().nullable(),
+    toolUseId: z.string().nullable().describe("Pairs a tool_use with its tool_result"),
+    isError: z.boolean(),
+    at: z.string().nullable(),
+  })
+  .describe("One entry of an agent session's conversation, distilled from the agent's transcript");
+
 export const LocalTerminalSchema = z
   .object({
     id: z.string(),

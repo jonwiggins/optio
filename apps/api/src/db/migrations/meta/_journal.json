@@ -652,6 +652,13 @@
       "when": 1790300000000,
       "tag": "1790300000_local_terminal_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1790400000000,
+      "tag": "1790400000_local_terminal_transcripts",
+      "breakpoints": true
     }
   ]
 }

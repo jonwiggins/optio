@@ -1,17 +1,17 @@
-import { openSync, readSync, closeSync, fstatSync } from "node:fs";
 import {
   costForTokens,
   priceForModel,
   type LocalTerminalUsage,
   type TokenCounts,
 } from "@optio/shared";
+import { JsonlTail } from "./jsonl-tail.js";
 
 /**
  * Sums a Claude Code transcript (the JSONL at the Stop hook's
  * `transcript_path`) into per-terminal token / cost totals.
  *
- * Reads are incremental: each terminal remembers the byte offset it has
- * consumed, so a long session is not re-parsed on every turn. Assistant
+ * Reads are incremental (JsonlTail remembers the byte offset consumed per
+ * terminal), so a long session is not re-parsed on every turn. Assistant
  * turns are keyed by (message.id, requestId) because Claude Code writes one
  * JSONL line per content block and repeats the same `usage` on each — the
  * first line wins. Subagent (sidechain) lines count: they were billed.
@@ -19,9 +19,7 @@ import {
 
 interface TerminalUsageState {
   transcriptPath: string;
-  offset: number;
-  /** Trailing partial line carried to the next read. */
-  carry: string;
+  tail: JsonlTail;
   seen: Set<string>;
   totals: TokenCounts;
   turns: number;
@@ -31,13 +29,10 @@ interface TerminalUsageState {
   modelCounts: Map<string, number>;
 }
 
-const READ_CHUNK = 1 << 20;
-
 function emptyState(transcriptPath: string): TerminalUsageState {
   return {
     transcriptPath,
-    offset: 0,
-    carry: "",
+    tail: new JsonlTail(transcriptPath),
     seen: new Set(),
     totals: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
     turns: 0,
@@ -112,32 +107,7 @@ export class UsageTracker {
   }
 
   private consume(state: TerminalUsageState): void {
-    let fd: number;
-    try {
-      fd = openSync(state.transcriptPath, "r");
-    } catch {
-      return; // transcript not there (yet) — the next hook retries
-    }
-    try {
-      const size = fstatSync(fd).size;
-      if (size < state.offset) {
-        // Truncated / rewritten: re-read from the top, dedupe protects totals.
-        state.offset = 0;
-        state.carry = "";
-      }
-      const buf = Buffer.allocUnsafe(READ_CHUNK);
-      while (state.offset < size) {
-        const n = readSync(fd, buf, 0, READ_CHUNK, state.offset);
-        if (n <= 0) break;
-        state.offset += n;
-        const text = state.carry + buf.toString("utf-8", 0, n);
-        const lines = text.split("\n");
-        state.carry = lines.pop() ?? "";
-        for (const line of lines) this.fold(state, line);
-      }
-    } finally {
-      closeSync(fd);
-    }
+    state.tail.readNew((line) => this.fold(state, line));
   }
 
   private fold(state: TerminalUsageState, line: string): void {

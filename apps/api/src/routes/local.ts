@@ -24,6 +24,7 @@ import {
   LocalHostSchema,
   LocalTerminalSchema,
   LocalTerminalSpecSchema,
+  LocalTranscriptEntrySchema,
   LocalTriggerSchema,
 } from "../schemas/local.js";
 import * as hostService from "../services/local-host-service.js";
@@ -416,6 +417,44 @@ export async function localRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Terminal not found" });
       }
       reply.send({ terminal });
+    },
+  );
+
+  app.get(
+    "/api/local/terminals/:id/transcript",
+    {
+      schema: {
+        operationId: "getLocalTerminalTranscript",
+        summary: "The conversation of an agent session (prompts, replies, tool calls)",
+        description:
+          "Distilled by the daemon from the agent CLI's own transcript, so it covers the whole session — not just the last screen — and reads on any device. Grows while the session runs; `after` fetches only entries past a seq.",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        querystring: z.object({
+          after: z.coerce.number().int().min(0).default(0),
+          limit: z.coerce.number().int().min(1).max(5000).default(2000),
+        }),
+        response: {
+          200: z.object({
+            entries: z.array(LocalTranscriptEntrySchema),
+            /** True when fewer than `limit` entries came back, i.e. the caller has everything stored. */
+            complete: z.boolean(),
+          }),
+          404: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const terminal = await terminalService.getTerminal(req.params.id);
+      if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
+        return reply.status(404).send({ error: "Terminal not found" });
+      }
+      const entries = await terminalService.getTranscript(
+        terminal.id,
+        req.query.after,
+        req.query.limit,
+      );
+      reply.send({ entries, complete: entries.length < req.query.limit });
     },
   );
 
