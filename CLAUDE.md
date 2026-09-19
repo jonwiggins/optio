@@ -291,6 +291,8 @@ Key `values.yaml` settings:
 
 **Repo init timeout**: large repos may exceed 120s default. Increase `OPTIO_REPO_INIT_TIMEOUT_MS`.
 
+**429 Too Many Requests in the UI / iOS app**: the API has a per-IP global limiter (`OPTIO_RATE_LIMIT_MAX`, default 600/min; auth routes have their own stricter limits). The web proxies through the Next server, but the iOS app talks to the API directly and polls several endpoints, so a low limit shows up there first.
+
 ## Production Deployment Checklist
 
 1. Generate encryption key: `openssl rand -hex 32`
