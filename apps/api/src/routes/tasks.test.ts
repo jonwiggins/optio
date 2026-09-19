@@ -105,6 +105,15 @@ vi.mock("../services/task-config-service.js", () => ({
   deleteTaskConfigTrigger: vi.fn(),
 }));
 
+// Run-location validation reaches into the local host tables; the routes
+// only need its verdict. Cluster is the default, so the stub says "ok".
+vi.mock("../services/local-run-service.js", () => ({
+  validateRunLocation: vi.fn().mockResolvedValue({
+    ok: true,
+    location: { runTarget: "cluster", localHostId: null, localDir: null, localSessionMode: null },
+  }),
+}));
+
 import { taskRoutes } from "./tasks.js";
 
 // ─── Helpers ───
@@ -152,6 +161,11 @@ const mockTaskData = {
   worktreeState: null,
   lastPodId: null,
   workflowRunId: null,
+  runTarget: "cluster",
+  localHostId: null,
+  localDir: null,
+  localSessionMode: null,
+  localTerminalId: null,
   createdBy: null,
   ignoreOffPeak: false,
   lastActivityAt: null,

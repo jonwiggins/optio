@@ -2,8 +2,15 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { TaskState, isTaskStalled, getSilentDuration, parseIntEnv } from "@optio/shared";
+import {
+  TaskState,
+  isTaskStalled,
+  getSilentDuration,
+  parseIntEnv,
+  toLocalAgentKind,
+} from "@optio/shared";
 import * as taskService from "../services/task-service.js";
+import { validateRunLocation } from "../services/local-run-service.js";
 import * as dependencyService from "../services/dependency-service.js";
 import * as unifiedTaskService from "../services/unified-task-service.js";
 import * as taskConfigService from "../services/task-config-service.js";
@@ -116,6 +123,26 @@ const createTaskSchema = z
     dependsOn: z.array(z.string().uuid()).optional(),
     // Repo-blueprint-only fields
     enabled: z.boolean().optional(),
+    // Run location (all kinds): an Optio pod (`cluster`, default) or the
+    // caller's own machine (`local`) in an allowlisted directory, via the
+    // Optio Local daemon.
+    runTarget: z
+      .enum(["cluster", "local"])
+      .optional()
+      .describe("Where the agent runs: `cluster` (default) or `local` (your paired machine)"),
+    localHostId: z.string().uuid().optional().describe("Local runs: your paired host id"),
+    localDir: z
+      .string()
+      .min(1)
+      .max(1000)
+      .optional()
+      .describe("Local runs: absolute directory on the host (must be in its allowlist)"),
+    localSessionMode: z
+      .enum(["interactive", "headless"])
+      .optional()
+      .describe(
+        "Local runs: `headless` (default) exits when the agent's turn is done; `interactive` keeps the session open for chat",
+      ),
   })
   .describe("Body for creating a task (polymorphic via `type`)");
 
@@ -426,6 +453,23 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       const input = req.body;
       const type = input.type ?? "repo-task";
 
+      // Run location is shared by every kind. A local location must name a
+      // host the caller owns, an allowlisted dir, and (repo kinds) a
+      // checkout of the task's repo.
+      const locationCheck = await validateRunLocation(
+        {
+          runTarget: input.runTarget,
+          localHostId: input.localHostId,
+          localDir: input.localDir,
+          localSessionMode: input.localSessionMode,
+          agentType: input.agentType,
+          repoUrl: type === "standalone" ? null : input.repoUrl,
+        },
+        req.user?.id,
+      );
+      if (!locationCheck.ok) return reply.status(400).send({ error: locationCheck.error });
+      const location = locationCheck.location;
+
       // ── Standalone: create a workflow row ─────────────────────────────
       if (type === "standalone") {
         const name = input.name ?? input.title;
@@ -442,6 +486,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             enabled: input.enabled ?? true,
             createdBy: req.user?.id,
             workspaceId: req.user?.workspaceId ?? undefined,
+            ...location,
           });
           logAction({
             workspaceId: req.user?.workspaceId ?? null,
@@ -482,6 +527,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             enabled: input.enabled ?? true,
             workspaceId: req.user?.workspaceId ?? null,
             createdBy: req.user?.id ?? null,
+            ...location,
           });
           logAction({
             workspaceId: req.user?.workspaceId ?? null,
@@ -506,7 +552,18 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       if (!input.title) {
         return reply.status(400).send({ error: "repo-task requires `title`" });
       }
-      const { dependsOn, type: _t, name: _n, description: _d, enabled: _e, ...taskInput } = input;
+      const {
+        dependsOn,
+        type: _t,
+        name: _n,
+        description: _d,
+        enabled: _e,
+        runTarget: _rt,
+        localHostId: _lh,
+        localDir: _ld,
+        localSessionMode: _lm,
+        ...taskInput
+      } = input;
 
       let resolvedAgentType: string = taskInput.agentType ?? "";
       if (!resolvedAgentType) {
@@ -514,6 +571,11 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           m.getRepoByUrl(taskInput.repoUrl!, req.user?.workspaceId ?? null),
         );
         resolvedAgentType = repoConfig?.defaultAgentType ?? "claude-code";
+      }
+      if (location.runTarget === "local" && !toLocalAgentKind(resolvedAgentType)) {
+        return reply.status(400).send({
+          error: `${resolvedAgentType} can't run on your machine — pick Claude Code, Codex, Cursor, Gemini, or OpenCode`,
+        });
       }
 
       const task = await taskService.createTask({
@@ -529,6 +591,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         priority: taskInput.priority,
         createdBy: req.user?.id,
         workspaceId: req.user?.workspaceId ?? null,
+        ...location,
       });
       logAction({
         workspaceId: req.user?.workspaceId ?? null,

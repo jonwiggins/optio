@@ -13,7 +13,7 @@ import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
 import { parseGeminiEvent } from "../services/gemini-event-parser.js";
 import { parseCursorEvent } from "../services/cursor-event-parser.js";
 import { db } from "../db/client.js";
-import { workflowRuns } from "../db/schema.js";
+import { workflowRuns, workflows } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import * as workflowService from "../services/workflow-service.js";
 import * as workflowPool from "../services/workflow-pool-service.js";
@@ -308,14 +308,37 @@ export function startWorkflowWorker() {
           return;
         }
 
+        // ── Local run: hand off to the owner's machine ─────────────────
+        // No pod, no cluster concurrency. The Optio Local daemon runs the
+        // agent in the job's directory; the terminal's lifecycle drives the
+        // run's state from here on (services/local-run-service.ts). The
+        // run stays queued while the host is offline (terminal parked) and
+        // a re-enqueue for an already-dispatched run is a no-op.
+        if (workflow.runTarget === "local") {
+          const renderedPrompt = renderWorkflowPrompt(
+            workflow.promptTemplate,
+            run.params as Record<string, unknown> | null,
+          );
+          const { dispatchLocalWorkflowRun } = await import("../services/local-run-service.js");
+          const terminal = await dispatchLocalWorkflowRun(run, workflow, renderedPrompt);
+          log.info(
+            { terminalId: terminal?.id ?? null, terminalState: terminal?.state ?? null },
+            "Workflow run dispatched to a local host",
+          );
+          return;
+        }
+
         // ── Concurrency check ─────────────────────────────────────────
         const claimed = await withClaimLock(async () => {
-          // Global workflow concurrency
+          // Global workflow concurrency — cluster runs only; local runs
+          // don't occupy pods.
           const globalMax = parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5);
-          const allRuns = await db
-            .select()
+          const runningRows = await db
+            .select({ workflowId: workflowRuns.workflowId, runTarget: workflows.runTarget })
             .from(workflowRuns)
+            .innerJoin(workflows, eq(workflows.id, workflowRuns.workflowId))
             .where(eq(workflowRuns.state, WorkflowRunState.RUNNING));
+          const allRuns = runningRows.filter((r) => r.runTarget !== "local");
           if (allRuns.length >= globalMax) {
             log.info(
               { activeCount: allRuns.length, globalMax },

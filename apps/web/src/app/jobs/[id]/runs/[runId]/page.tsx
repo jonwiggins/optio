@@ -9,6 +9,7 @@ import { TokenRefreshBanner, GitHubTokenBanner } from "@/components/token-refres
 import { DetailHeader } from "@/components/detail-header";
 import { PrStatusBar } from "@/components/pr-status-bar";
 import { WorkflowRunPipelineTimeline } from "@/components/workflow-run-pipeline-timeline";
+import { EmbeddedLocalSession } from "@/components/local/embedded-session";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { api } from "@/lib/api-client";
 import { classifyError } from "@optio/shared";
@@ -28,6 +29,7 @@ import {
   ChevronRight,
   AlertCircle,
   Braces,
+  Laptop,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -46,6 +48,8 @@ interface WorkflowRun {
   errorMessage: string | null;
   sessionId: string | null;
   podName: string | null;
+  /** Local runs: the terminal on the owner's machine executing this attempt. */
+  localTerminalId: string | null;
   retryCount: number;
   startedAt: string | null;
   finishedAt: string | null;
@@ -107,7 +111,16 @@ export default function WorkflowRunDetailPage({
   }, [isActive, refresh]);
 
   // Live log streaming via WebSocket — same hook contract as task/review pages.
-  const externalLogs = useWorkflowRunLogs(runId, isActive ?? false);
+  // Local runs have no pod log stream; their terminal is embedded instead.
+  const isLocalRun = !!run?.localTerminalId;
+  const externalLogs = useWorkflowRunLogs(runId, (isActive ?? false) && !isLocalRun);
+  // A local terminal exiting flips the run state server-side moments later.
+  const onTerminalChange = useCallback(
+    (t: any) => {
+      if ((t.state === "exited" || t.state === "error") && isActive) refresh();
+    },
+    [isActive, refresh],
+  );
 
   const handleRetry = async () => {
     setActionLoading(true);
@@ -187,6 +200,12 @@ export default function WorkflowRunDetailPage({
         state={run.state}
         metaItems={
           [
+            isLocalRun ? (
+              <>
+                <Laptop className="w-3 h-3" />
+                your machine
+              </>
+            ) : null,
             run.modelUsed ? (
               <>
                 <Bot className="w-3 h-3" />
@@ -415,11 +434,20 @@ export default function WorkflowRunDetailPage({
             </div>
           )}
 
-          {/* Logs */}
+          {/* Logs — or, for a run on the owner's machine, the live session itself */}
           <div className="flex-1 overflow-hidden">
-            <ErrorBoundary label="Workflow run log viewer">
-              <LogViewer externalLogs={externalLogs} />
-            </ErrorBoundary>
+            {run.localTerminalId ? (
+              <ErrorBoundary label="Local session">
+                <EmbeddedLocalSession
+                  terminalId={run.localTerminalId}
+                  onTerminal={onTerminalChange}
+                />
+              </ErrorBoundary>
+            ) : (
+              <ErrorBoundary label="Workflow run log viewer">
+                <LogViewer externalLogs={externalLogs} />
+              </ErrorBoundary>
+            )}
           </div>
         </div>
 

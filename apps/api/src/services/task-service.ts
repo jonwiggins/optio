@@ -50,6 +50,11 @@ export async function createTask(input: CreateTaskInput & { workspaceId?: string
       priority: input.priority ?? 100,
       createdBy: input.createdBy ?? undefined,
       workspaceId: input.workspaceId ?? undefined,
+      // Run location (validated upstream by local-run-service.validateRunLocation).
+      runTarget: input.runTarget ?? "cluster",
+      localHostId: input.runTarget === "local" ? (input.localHostId ?? null) : null,
+      localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
+      localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
     })
     .returning();
 
@@ -386,6 +391,17 @@ export async function transitionTask(
       );
   }
 
+  // Local tasks run in a terminal on the owner's machine: a cancel or a
+  // server-side failure (dependency cascade, reconciler) must stop that
+  // process too. No-op when the terminal already exited — which is how a
+  // local task normally reaches failed in the first place.
+  if ((toState === TaskState.CANCELLED || toState === TaskState.FAILED) && task.localTerminalId) {
+    const terminalId = task.localTerminalId;
+    import("./local-run-service.js")
+      .then(({ killLinkedTerminal }) => killLinkedTerminal(terminalId, `task_${toState}`))
+      .catch((err) => logger.warn({ err, taskId: id }, "Failed to kill local terminal for task"));
+  }
+
   // Wake the reconciler. Every state change is a signal it may want to act
   // (capacity opened up, PR-related state changed, dependency cascade, etc).
   import("./reconcile-queue.js")
@@ -553,6 +569,14 @@ export async function forceRedoTask(id: string) {
   const task = await getTask(id);
   if (!task) throw new Error(`Task not found: ${id}`);
 
+  // A local task's previous attempt may still be running in its terminal.
+  if (task.localTerminalId) {
+    const terminalId = task.localTerminalId;
+    import("./local-run-service.js")
+      .then(({ killLinkedTerminal }) => killLinkedTerminal(terminalId, "force_redo"))
+      .catch((err) => logger.warn({ err, taskId: id }, "Failed to kill local terminal for redo"));
+  }
+
   // Clear all execution data and reset to queued
   await db
     .update(tasks)
@@ -560,6 +584,7 @@ export async function forceRedoTask(id: string) {
       state: TaskState.QUEUED,
       sessionId: null,
       containerId: null,
+      localTerminalId: null,
       prUrl: null,
       prNumber: null,
       prState: null,

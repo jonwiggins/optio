@@ -70,15 +70,45 @@ describe("buildAgentCommand session modes", () => {
     );
   });
 
-  it("resume passes the session id as a quoted argv element and is always interactive", () => {
+  it("resume passes the session id as a quoted argv element and is interactive by default", () => {
     expect(
-      buildAgentCommand("claude-code", undefined, SETTINGS, {
-        mode: "headless",
-        resumeSessionId: "abc-123",
-      }),
+      buildAgentCommand("claude-code", undefined, SETTINGS, { resumeSessionId: "abc-123" }),
     ).toBe(`claude --settings '${SETTINGS}' --resume 'abc-123'`);
     expect(buildAgentCommand("codex", undefined, SETTINGS, { resumeSessionId: "x'y" })).toBe(
       `codex resume 'x'\\''y'`,
+    );
+  });
+
+  it("headless resume is one-shot for Claude Code and interactive for every other CLI", () => {
+    // A local Repo Task resuming after review feedback: run the turn, then exit.
+    expect(
+      buildAgentCommand("claude-code", "fix CI", SETTINGS, {
+        mode: "headless",
+        resumeSessionId: "abc-123",
+      }),
+    ).toBe(`claude --settings '${SETTINGS}' -p --resume 'abc-123' 'fix CI'`);
+    // Codex has no `exec resume`; fall back to the interactive resume.
+    expect(
+      buildAgentCommand("codex", "fix CI", SETTINGS, { mode: "headless", resumeSessionId: "s1" }),
+    ).toBe(`codex resume 's1' 'fix CI'`);
+  });
+
+  it("passes a model override as a quoted flag per CLI", () => {
+    const o = { model: "opus" };
+    expect(buildAgentCommand("claude-code", "p", SETTINGS, o)).toBe(
+      `claude --settings '${SETTINGS}' --model 'opus' 'p'`,
+    );
+    expect(buildAgentCommand("codex", "p", SETTINGS, { ...o, mode: "headless" })).toBe(
+      `codex exec -m 'opus' 'p'`,
+    );
+    expect(buildAgentCommand("cursor", "p", SETTINGS, o)).toBe(`cursor-agent --model 'opus' 'p'`);
+    expect(buildAgentCommand("gemini", "p", SETTINGS, o)).toBe(`gemini -m 'opus' -i 'p'`);
+    expect(buildAgentCommand("opencode", "p", SETTINGS, o)).toBe(
+      `opencode --model 'opus' --prompt 'p'`,
+    );
+    // Model names are shell-quoted like every other untrusted value.
+    expect(buildAgentCommand("claude-code", undefined, SETTINGS, { model: "x; rm -rf /" })).toBe(
+      `claude --settings '${SETTINGS}' --model 'x; rm -rf /'`,
     );
   });
 });

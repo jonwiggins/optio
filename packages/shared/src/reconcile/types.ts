@@ -14,6 +14,7 @@ import {
   PersistentAgentControlIntent,
   PersistentAgentPodLifecycle,
 } from "../types/persistent-agent.js";
+import type { RunTarget } from "../types/local.js";
 
 // ── Identity ────────────────────────────────────────────────────────────────
 
@@ -57,6 +58,12 @@ export interface RepoRunSpec {
   blocksParent: boolean;
   workspaceId: string | null;
   workflowRunId: string | null;
+  /**
+   * `local` runs execute on the owner's machine via the Optio Local daemon:
+   * no pod, no cluster capacity, and liveness comes from the daemon (the
+   * heartbeat/stall machinery does not apply).
+   */
+  runTarget: RunTarget;
 }
 
 export interface RepoRunStatus {
@@ -92,6 +99,8 @@ export interface StandaloneRunSpec {
   maxConcurrent: number;
   maxRetries: number;
   workspaceId: string | null;
+  /** See RepoRunSpec.runTarget. */
+  runTarget: RunTarget;
 }
 
 export interface StandaloneRunStatus {

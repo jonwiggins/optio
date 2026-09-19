@@ -3075,6 +3075,10 @@ public enum LocalAttentionState: String, Codable, Hashable, Sendable, CaseIterab
     }
 }
 
+/// What created a terminal. `job` / `task` terminals back a Job run
+/// (`workflow_runs`) or a Repo Task (`tasks`) whose run location is a local
+/// host — their lifecycle drives the run's state (see
+/// `services/local-run-service.ts`).
 public enum LocalSpawnSource: String, Codable, Hashable, Sendable, CaseIterable {
     case manual = "manual"
     case ticket = "ticket"
@@ -3082,10 +3086,12 @@ public enum LocalSpawnSource: String, Codable, Hashable, Sendable, CaseIterable 
     case blueprint = "blueprint"
     case api = "api"
     case resume = "resume"
+    case job = "job"
+    case task = "task"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [LocalSpawnSource] = [.manual, .ticket, .trigger, .blueprint, .api, .resume]
+    public static let allCases: [LocalSpawnSource] = [.manual, .ticket, .trigger, .blueprint, .api, .resume, .job, .task]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -3139,26 +3145,32 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
         /// Default `interactive`.
         public let mode: LocalAgentSessionMode?
         /// Resume a previous agent session (its id as reported by the agent's
-        /// hooks) instead of starting a fresh one. Always interactive.
+        /// hooks) instead of starting a fresh one. Interactive unless the agent
+        /// supports a headless resume (Claude Code: `claude -p --resume`).
         public let resumeSessionId: String?
+        /// Model override passed to the agent CLI (`--model` / `-m`), when set.
+        public let model: String?
 
         private enum CodingKeys: String, CodingKey {
             case agent = "agent"
             case prompt = "prompt"
             case mode = "mode"
             case resumeSessionId = "resumeSessionId"
+            case model = "model"
         }
 
         public init(
             agent: LocalAgentKind,
             prompt: String? = nil,
             mode: LocalAgentSessionMode? = nil,
-            resumeSessionId: String? = nil
+            resumeSessionId: String? = nil,
+            model: String? = nil
         ) {
             self.agent = agent
             self.prompt = prompt
             self.mode = mode
             self.resumeSessionId = resumeSessionId
+            self.model = model
         }
     }
 
@@ -3214,6 +3226,55 @@ public enum LocalAgentKind: String, Codable, Hashable, Sendable, CaseIterable {
     }
 }
 
+/// `cluster` — an Optio-managed Kubernetes pod (the default).
+/// `local` — the owner's own machine, in an allowlisted directory, through the
+/// Optio Local daemon. The run is backed by a `local_terminals` row and uses
+/// the machine's own agent CLI + auth (no server secrets leave the cluster).
+public enum RunTarget: String, Codable, Hashable, Sendable, CaseIterable {
+    case cluster = "cluster"
+    case local = "local"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [RunTarget] = [.cluster, .local]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = RunTarget(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct RunLocation: Codable, Hashable, Sendable {
+    public let runTarget: RunTarget
+    /// Local runs: the paired host (`local_hosts.id`).
+    public let localHostId: String?
+    /// Local runs: absolute directory on the host, inside its allowlist.
+    public let localDir: String?
+    /// Local agent runs: `headless` (default) runs the agent's one-shot entry
+    /// point and exits when the turn is done; `interactive` keeps the session
+    /// open at the agent's prompt so you can keep chatting.
+    public let localSessionMode: LocalAgentSessionMode?
+
+    private enum CodingKeys: String, CodingKey {
+        case runTarget = "runTarget"
+        case localHostId = "localHostId"
+        case localDir = "localDir"
+        case localSessionMode = "localSessionMode"
+    }
+
+    public init(
+        runTarget: RunTarget,
+        localHostId: String? = nil,
+        localDir: String? = nil,
+        localSessionMode: LocalAgentSessionMode? = nil
+    ) {
+        self.runTarget = runTarget
+        self.localHostId = localHostId
+        self.localDir = localDir
+        self.localSessionMode = localSessionMode
+    }
+}
+
 public struct LocalTerminal: Codable, Hashable, Sendable {
     public let id: String
     public let hostId: String
@@ -3240,6 +3301,10 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
     /// The agent CLI's own session id (Claude Code `session_id` from hooks).
     /// Lets an exited run be resumed as an interactive chat.
     public let agentSessionId: String?
+    /// The Job run (`workflow_runs.id`) this terminal executes, for `spawnedBy: "job"`.
+    public let workflowRunId: String?
+    /// The Repo Task (`tasks.id`) this terminal executes, for `spawnedBy: "task"`.
+    public let taskId: String?
     public let preview: String?
     /// PR / ticket links the daemon spotted in the output (first-seen order).
     public let links: [WorkLink]
@@ -3277,6 +3342,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         case ticketExternalId = "ticketExternalId"
         case ticketUrl = "ticketUrl"
         case agentSessionId = "agentSessionId"
+        case workflowRunId = "workflowRunId"
+        case taskId = "taskId"
         case preview = "preview"
         case links = "links"
         case usage = "usage"
@@ -3311,6 +3378,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         ticketExternalId: String? = nil,
         ticketUrl: String? = nil,
         agentSessionId: String? = nil,
+        workflowRunId: String? = nil,
+        taskId: String? = nil,
         preview: String? = nil,
         links: [WorkLink],
         usage: AnyCodable? = nil,
@@ -3343,6 +3412,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         self.ticketExternalId = ticketExternalId
         self.ticketUrl = ticketUrl
         self.agentSessionId = agentSessionId
+        self.workflowRunId = workflowRunId
+        self.taskId = taskId
         self.preview = preview
         self.links = links
         self.usage = usage
@@ -6395,6 +6466,13 @@ public struct OptioTask: Codable, Hashable, Sendable {
     public let maxRetries: Double
     public let lastActivityAt: Date?
     public let activitySubstate: TaskActivitySubstate?
+    /// Where the agent runs: an Optio pod (`cluster`, default) or the owner's machine (`local`).
+    public let runTarget: RunTarget?
+    public let localHostId: String?
+    public let localDir: String?
+    public let localSessionMode: LocalAgentSessionMode?
+    /// Local runs: the `local_terminals` row executing this task.
+    public let localTerminalId: String?
     public let createdAt: Date
     public let updatedAt: Date
     public let startedAt: Date?
@@ -6419,6 +6497,11 @@ public struct OptioTask: Codable, Hashable, Sendable {
         case maxRetries = "maxRetries"
         case lastActivityAt = "lastActivityAt"
         case activitySubstate = "activitySubstate"
+        case runTarget = "runTarget"
+        case localHostId = "localHostId"
+        case localDir = "localDir"
+        case localSessionMode = "localSessionMode"
+        case localTerminalId = "localTerminalId"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
         case startedAt = "startedAt"
@@ -6444,6 +6527,11 @@ public struct OptioTask: Codable, Hashable, Sendable {
         maxRetries: Double,
         lastActivityAt: Date? = nil,
         activitySubstate: TaskActivitySubstate? = nil,
+        runTarget: RunTarget? = nil,
+        localHostId: String? = nil,
+        localDir: String? = nil,
+        localSessionMode: LocalAgentSessionMode? = nil,
+        localTerminalId: String? = nil,
         createdAt: Date,
         updatedAt: Date,
         startedAt: Date? = nil,
@@ -6467,6 +6555,11 @@ public struct OptioTask: Codable, Hashable, Sendable {
         self.maxRetries = maxRetries
         self.lastActivityAt = lastActivityAt
         self.activitySubstate = activitySubstate
+        self.runTarget = runTarget
+        self.localHostId = localHostId
+        self.localDir = localDir
+        self.localSessionMode = localSessionMode
+        self.localTerminalId = localTerminalId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.startedAt = startedAt
@@ -6697,6 +6790,11 @@ public struct CreateTaskInput: Codable, Hashable, Sendable {
     public let priority: Double?
     public let dependsOn: [String]?
     public let createdBy: String?
+    /// Run location; defaults to `cluster`. Local runs need `localHostId` + `localDir`.
+    public let runTarget: RunTarget?
+    public let localHostId: String?
+    public let localDir: String?
+    public let localSessionMode: LocalAgentSessionMode?
 
     private enum CodingKeys: String, CodingKey {
         case title = "title"
@@ -6711,6 +6809,10 @@ public struct CreateTaskInput: Codable, Hashable, Sendable {
         case priority = "priority"
         case dependsOn = "dependsOn"
         case createdBy = "createdBy"
+        case runTarget = "runTarget"
+        case localHostId = "localHostId"
+        case localDir = "localDir"
+        case localSessionMode = "localSessionMode"
     }
 
     public init(
@@ -6725,7 +6827,11 @@ public struct CreateTaskInput: Codable, Hashable, Sendable {
         maxRetries: Double? = nil,
         priority: Double? = nil,
         dependsOn: [String]? = nil,
-        createdBy: String? = nil
+        createdBy: String? = nil,
+        runTarget: RunTarget? = nil,
+        localHostId: String? = nil,
+        localDir: String? = nil,
+        localSessionMode: LocalAgentSessionMode? = nil
     ) {
         self.title = title
         self.prompt = prompt
@@ -6739,6 +6845,10 @@ public struct CreateTaskInput: Codable, Hashable, Sendable {
         self.priority = priority
         self.dependsOn = dependsOn
         self.createdBy = createdBy
+        self.runTarget = runTarget
+        self.localHostId = localHostId
+        self.localDir = localDir
+        self.localSessionMode = localSessionMode
     }
 }
 
@@ -7019,6 +7129,11 @@ public struct Workflow: Codable, Hashable, Sendable {
     public let maxConcurrent: Double
     public let maxRetries: Double
     public let warmPoolSize: Double
+    /// Where runs execute: an Optio pod (`cluster`, default) or the owner's machine (`local`).
+    public let runTarget: RunTarget
+    public let localHostId: String?
+    public let localDir: String?
+    public let localSessionMode: LocalAgentSessionMode?
     public let enabled: Bool
     public let createdBy: String?
     public let createdAt: Date
@@ -7039,6 +7154,10 @@ public struct Workflow: Codable, Hashable, Sendable {
         case maxConcurrent = "maxConcurrent"
         case maxRetries = "maxRetries"
         case warmPoolSize = "warmPoolSize"
+        case runTarget = "runTarget"
+        case localHostId = "localHostId"
+        case localDir = "localDir"
+        case localSessionMode = "localSessionMode"
         case enabled = "enabled"
         case createdBy = "createdBy"
         case createdAt = "createdAt"
@@ -7060,6 +7179,10 @@ public struct Workflow: Codable, Hashable, Sendable {
         maxConcurrent: Double,
         maxRetries: Double,
         warmPoolSize: Double,
+        runTarget: RunTarget,
+        localHostId: String? = nil,
+        localDir: String? = nil,
+        localSessionMode: LocalAgentSessionMode? = nil,
         enabled: Bool,
         createdBy: String? = nil,
         createdAt: Date,
@@ -7079,6 +7202,10 @@ public struct Workflow: Codable, Hashable, Sendable {
         self.maxConcurrent = maxConcurrent
         self.maxRetries = maxRetries
         self.warmPoolSize = warmPoolSize
+        self.runTarget = runTarget
+        self.localHostId = localHostId
+        self.localDir = localDir
+        self.localSessionMode = localSessionMode
         self.enabled = enabled
         self.createdBy = createdBy
         self.createdAt = createdAt
@@ -7150,6 +7277,8 @@ public struct WorkflowRun: Codable, Hashable, Sendable {
     public let errorMessage: String?
     public let sessionId: String?
     public let podName: String?
+    /// Local runs: the `local_terminals` row executing this run.
+    public let localTerminalId: String?
     public let retryCount: Double
     public let startedAt: Date?
     public let finishedAt: Date?
@@ -7170,6 +7299,7 @@ public struct WorkflowRun: Codable, Hashable, Sendable {
         case errorMessage = "errorMessage"
         case sessionId = "sessionId"
         case podName = "podName"
+        case localTerminalId = "localTerminalId"
         case retryCount = "retryCount"
         case startedAt = "startedAt"
         case finishedAt = "finishedAt"
@@ -7191,6 +7321,7 @@ public struct WorkflowRun: Codable, Hashable, Sendable {
         errorMessage: String? = nil,
         sessionId: String? = nil,
         podName: String? = nil,
+        localTerminalId: String? = nil,
         retryCount: Double,
         startedAt: Date? = nil,
         finishedAt: Date? = nil,
@@ -7210,6 +7341,7 @@ public struct WorkflowRun: Codable, Hashable, Sendable {
         self.errorMessage = errorMessage
         self.sessionId = sessionId
         self.podName = podName
+        self.localTerminalId = localTerminalId
         self.retryCount = retryCount
         self.startedAt = startedAt
         self.finishedAt = finishedAt

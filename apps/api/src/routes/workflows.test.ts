@@ -40,6 +40,15 @@ vi.mock("../services/workflow-service.js", () => ({
   getWorkflowRunLogs: (...args: unknown[]) => mockGetWorkflowRunLogs(...args),
 }));
 
+// Run-location validation reaches into the local host tables; the routes
+// only need its verdict. Cluster is the default, so the stub says "ok".
+vi.mock("../services/local-run-service.js", () => ({
+  validateRunLocation: vi.fn().mockResolvedValue({
+    ok: true,
+    location: { runTarget: "cluster", localHostId: null, localDir: null, localSessionMode: null },
+  }),
+}));
+
 import { workflowRoutes } from "./workflows.js";
 
 // ─── Helpers ───

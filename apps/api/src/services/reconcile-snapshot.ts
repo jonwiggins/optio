@@ -127,9 +127,10 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
   ]);
 
   const stallThresholdMs = parseIntEnv("OPTIO_STALL_THRESHOLD_MS", DEFAULT_STALL_THRESHOLD_MS);
+  // Local tasks have no server-side activity feed; the daemon owns liveness.
   const heartbeat = computeHeartbeat(
     row.lastActivityAt ?? null,
-    row.state === TaskState.RUNNING,
+    row.state === TaskState.RUNNING && row.runTarget !== "local",
     stallThresholdMs,
     now,
   );
@@ -210,6 +211,7 @@ function loadRepoRun(row: typeof tasks.$inferSelect, ref: RunRef): Run {
     blocksParent: row.blocksParent,
     workspaceId: row.workspaceId ?? null,
     workflowRunId: row.workflowRunId ?? null,
+    runTarget: row.runTarget === "local" ? "local" : "cluster",
   };
   const status: RepoRunStatus = {
     state: row.state as TaskState,
@@ -276,12 +278,14 @@ async function loadBlockingSubtasks(parentTaskId: string): Promise<DependencyObs
   }));
 }
 
+// Capacity counts cover cluster runs only: local runs execute on their
+// owner's machine and hold no pod slot.
 async function loadGlobalRepoCapacity() {
   const max = parseIntEnv("OPTIO_MAX_CONCURRENT", 5);
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(tasks)
-    .where(sql`${tasks.state} IN ('running', 'provisioning')`);
+    .where(sql`${tasks.state} IN ('running', 'provisioning') AND ${tasks.runTarget} <> 'local'`);
   return { running: Number(count), max };
 }
 
@@ -289,7 +293,9 @@ async function loadPerRepoCapacity(repoUrl: string, workspaceId: string | null) 
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(tasks)
-    .where(sql`${tasks.state} IN ('running', 'provisioning') AND ${tasks.repoUrl} = ${repoUrl}`);
+    .where(
+      sql`${tasks.state} IN ('running', 'provisioning') AND ${tasks.repoUrl} = ${repoUrl} AND ${tasks.runTarget} <> 'local'`,
+    );
   const repoRow = await loadRepoSettings(repoUrl, workspaceId);
   const max = repoRow?.maxConcurrentTasks ?? 2;
   return { running: Number(count), max };
@@ -453,13 +459,14 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
 
   const stallThresholdMs = parseIntEnv("OPTIO_STALL_THRESHOLD_MS", DEFAULT_STALL_THRESHOLD_MS);
   // workflow_runs doesn't have lastActivityAt — use startedAt for
-  // coarse stall detection until a richer signal exists.
+  // coarse stall detection until a richer signal exists. Local runs are
+  // exempt: the daemon owns liveness and interactive sessions idle by design.
   if (run.kind !== "standalone") {
     throw new Error("expected standalone run for standalone snapshot");
   }
   const heartbeat = computeHeartbeat(
     run.status.startedAt,
-    run.status.state === WorkflowRunState.RUNNING,
+    run.status.state === WorkflowRunState.RUNNING && workflowRow.runTarget !== "local",
     stallThresholdMs,
     now,
   );
@@ -512,6 +519,7 @@ function loadStandaloneRun(
     maxConcurrent: workflowRow.maxConcurrent,
     maxRetries: workflowRow.maxRetries,
     workspaceId: workflowRow.workspaceId ?? null,
+    runTarget: workflowRow.runTarget === "local" ? "local" : "cluster",
   };
   const status: StandaloneRunStatus = {
     state: row.state as WorkflowRunState,
@@ -538,10 +546,14 @@ function loadStandaloneRun(
 
 async function loadGlobalWorkflowCapacity() {
   const max = parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5);
+  // Cluster runs only — local runs don't occupy job pods.
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(workflowRuns)
-    .where(eq(workflowRuns.state, WorkflowRunState.RUNNING));
+    .innerJoin(workflows, eq(workflows.id, workflowRuns.workflowId))
+    .where(
+      sql`${workflowRuns.state} = ${WorkflowRunState.RUNNING} AND ${workflows.runTarget} <> 'local'`,
+    );
   return { running: Number(count), max };
 }
 

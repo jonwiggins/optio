@@ -1295,6 +1295,10 @@ export const api = {
     enabled?: boolean;
     environmentSpec?: Record<string, unknown>;
     paramsSchema?: Record<string, unknown>;
+    runTarget?: "cluster" | "local";
+    localHostId?: string | null;
+    localDir?: string | null;
+    localSessionMode?: "headless" | "interactive" | null;
   }) =>
     request<{ workflow: any }>("/api/jobs", {
       method: "POST",
@@ -1531,6 +1535,11 @@ export const api = {
     metadata?: Record<string, unknown>;
     dependsOn?: string[];
     enabled?: boolean;
+    // Run location: an Optio pod (default) or the caller's own machine.
+    runTarget?: "cluster" | "local";
+    localHostId?: string | null;
+    localDir?: string | null;
+    localSessionMode?: "headless" | "interactive" | null;
   }) =>
     request<{ task: any }>("/api/tasks", {
       method: "POST",
@@ -1635,6 +1644,10 @@ export const api = {
       maxRetries: number;
       priority: number;
       enabled: boolean;
+      runTarget: "cluster" | "local";
+      localHostId: string | null;
+      localDir: string | null;
+      localSessionMode: "headless" | "interactive" | null;
     }>,
   ) =>
     request<{ taskConfig: any }>(`/api/task-configs/${id}`, {

@@ -21,6 +21,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { TriggerSelector, type TriggerConfig, cronIsValid } from "@/components/trigger-selector";
+import {
+  RunLocationPicker,
+  agentRunsLocally,
+  runLocationFromRow,
+  runLocationPayload,
+  type RunLocationValue,
+} from "@/components/run-location-picker";
 
 type Tab = "config" | "triggers" | "runs";
 
@@ -35,6 +42,10 @@ interface TaskConfig {
   agentType: string | null;
   maxRetries: number;
   priority: number;
+  runTarget?: "cluster" | "local";
+  localHostId?: string | null;
+  localDir?: string | null;
+  localSessionMode?: "headless" | "interactive" | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -87,6 +98,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
     cronExpression: "0 9 * * *",
   });
   const [form, setForm] = useState<TaskConfig | null>(null);
+  const [location, setLocation] = useState<RunLocationValue>(runLocationFromRow(null));
 
   usePageTitle(config?.name ?? "Scheduled Task");
 
@@ -96,6 +108,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
       const [cfg, trg] = await Promise.all([api.getTaskConfig(id), api.listTaskConfigTriggers(id)]);
       setConfig(cfg.taskConfig);
       setForm(cfg.taskConfig);
+      setLocation(runLocationFromRow(cfg.taskConfig));
       setTriggers(trg.triggers);
     } catch (err) {
       toast.error("Failed to load", {
@@ -137,6 +150,14 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
 
   const saveConfig = async () => {
     if (!form) return;
+    if (location.runTarget === "local" && (!location.localHostId || !location.localDir)) {
+      toast.error("Pick the machine and directory this task runs in");
+      return;
+    }
+    if (location.runTarget === "local" && form.agentType && !agentRunsLocally(form.agentType)) {
+      toast.error(`${form.agentType} can't run on your machine`);
+      return;
+    }
     setSaving(true);
     try {
       await api.updateTaskConfig(id, {
@@ -149,6 +170,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
         agentType: form.agentType,
         maxRetries: form.maxRetries,
         priority: form.priority,
+        ...runLocationPayload(location),
       });
       toast.success("Saved");
       await load();
@@ -346,7 +368,9 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
                 <option value="">Default</option>
                 <option value="claude-code">Claude Code</option>
                 <option value="codex">OpenAI Codex</option>
-                <option value="copilot">GitHub Copilot</option>
+                <option value="copilot" disabled={location.runTarget === "local"}>
+                  GitHub Copilot{location.runTarget === "local" ? " — pods only" : ""}
+                </option>
                 <option value="opencode">OpenCode</option>
                 <option value="gemini">Google Gemini</option>
                 <option value="cursor">Cursor</option>
@@ -379,6 +403,15 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
               />
             </Field>
           </div>
+          <Field label="Run location">
+            <RunLocationPicker
+              value={location}
+              onChange={setLocation}
+              kind="task"
+              agentType={form.agentType ?? undefined}
+              repoUrl={form.repoUrl}
+            />
+          </Field>
           <Field label="Task title template">
             <input
               type="text"

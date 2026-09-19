@@ -154,6 +154,22 @@ export function startTaskWorker() {
           }
         }
 
+        // ── Local task: hand off to the owner's machine ───────────────
+        // No repo pod, no worktree, no cluster concurrency: the Optio Local
+        // daemon runs the agent in the task's directory and the terminal's
+        // lifecycle drives the task's state (services/local-run-service.ts).
+        // Resume jobs (CI failure / review feedback) carry the same
+        // resumePrompt / resumeSessionId the pod path uses.
+        if (currentTask.runTarget === "local") {
+          const { dispatchLocalTask } = await import("../services/local-run-service.js");
+          const terminal = await dispatchLocalTask(currentTask, { resumePrompt, resumeSessionId });
+          log.info(
+            { terminalId: terminal?.id ?? null, terminalState: terminal?.state ?? null },
+            "Task dispatched to a local host",
+          );
+          return;
+        }
+
         // ── Off-peak hold check ────────────────────────────────────
         // If the repo has offPeakOnly enabled and we're in peak hours,
         // re-queue the task with a delay until off-peak starts.

@@ -53,6 +53,15 @@ vi.mock("../workers/task-worker.js", () => ({
   },
 }));
 
+// Run-location validation reaches into the local host tables; the routes
+// only need its verdict. Cluster is the default, so the stub says "ok".
+vi.mock("../services/local-run-service.js", () => ({
+  validateRunLocation: vi.fn().mockResolvedValue({
+    ok: true,
+    location: { runTarget: "cluster", localHostId: null, localDir: null, localSessionMode: null },
+  }),
+}));
+
 vi.mock("../db/schema.js", () => ({
   tasks: {},
   repoPods: {},

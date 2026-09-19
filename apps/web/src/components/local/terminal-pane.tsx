@@ -11,7 +11,9 @@ import {
   ArrowLeft,
   Bell,
   BellRing,
+  Briefcase,
   Columns2,
+  GitPullRequest,
   Loader2,
   Maximize2,
   PanelLeftOpen,
@@ -149,6 +151,35 @@ export function TerminalPane({
   }, [fetchTerminal]);
 
   const host = terminal ? hosts.find((h) => h.id === terminal.hostId) : null;
+
+  // A terminal that executes a Job run / Repo Task links back to that run's
+  // page. Job runs live under their job, so resolve the workflow id once.
+  const [runHref, setRunHref] = useState<{ href: string; label: string } | null>(null);
+  useEffect(() => {
+    if (!terminal) return;
+    if (terminal.taskId) {
+      setRunHref({ href: `/tasks/${terminal.taskId}`, label: "Open task" });
+      return;
+    }
+    if (terminal.workflowRunId) {
+      let cancelled = false;
+      api
+        .getWorkflowRun(terminal.workflowRunId)
+        .then((res) => {
+          if (!cancelled) {
+            setRunHref({
+              href: `/jobs/${res.run.workflowId}/runs/${res.run.id}`,
+              label: "Open run",
+            });
+          }
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }
+    setRunHref(null);
+  }, [terminal?.taskId, terminal?.workflowRunId]);
 
   const handleStart = async () => {
     setBusy(true);
@@ -300,6 +331,21 @@ export function TerminalPane({
 
   const actions = (
     <>
+      {runHref && (
+        <Link
+          href={runHref.href}
+          className={iconButton}
+          title={runHref.label}
+          aria-label={runHref.label}
+        >
+          {terminal.taskId ? (
+            <GitPullRequest className="w-3.5 h-3.5" />
+          ) : (
+            <Briefcase className="w-3.5 h-3.5" />
+          )}
+          <span className="hidden sm:inline">{runHref.label}</span>
+        </Link>
+      )}
       {canStart && (
         <button
           onClick={handleStart}

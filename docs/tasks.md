@@ -34,6 +34,30 @@ A Standalone Task runs an agent in an isolated pod with no repo checkout. It pro
 
 Use a Standalone Task when the work is not code: scheduled reports, cron-driven triage, webhook responses, on-demand operational scripts.
 
+## Run location: an Optio pod or your own machine
+
+Both flavors (and the scheduled Task blueprints) carry a **run location** — the "Where" in
+the New Task form, the Job editor, and the scheduled-Task editor:
+
+| `runTarget` | Where the agent runs                                                           | Credentials                           |
+| ----------- | ------------------------------------------------------------------------------ | ------------------------------------- |
+| `cluster`   | An Optio-managed Kubernetes pod (repo pod + worktree, or a pooled job pod)     | Server-side secrets (API key / OAuth) |
+| `local`     | A directory on one of your machines paired with Optio Local (`optio local up`) | The machine's own agent CLI and login |
+
+A local run is the same `tasks` / `workflow_runs` row, executed by a `local_terminals` row
+through the Optio Local daemon: the workers dispatch it there instead of provisioning a
+pod, and the terminal's lifecycle drives the run (Job `queued → running → completed/failed`;
+Task `queued → provisioning → running → pr_opened | completed | failed`, with the PR
+detected from the agent's output so CI / review / merge tracking work unchanged). Local
+Tasks require a directory that is a checkout of the task's repo; local runs need an agent
+the daemon can launch (Claude Code, Codex, Cursor, Gemini, OpenCode). Columns:
+`run_target`, `local_host_id`, `local_dir`, `local_session_mode` (`headless` = exit when
+the turn is done, `interactive` = keep the session open) on `tasks`, `task_configs`, and
+`workflows`; `local_terminal_id` on `tasks` and `workflow_runs`. The API accepts
+`runTarget` / `localHostId` / `localDir` / `localSessionMode` on `POST /api/tasks` (every
+kind), `POST/PATCH /api/jobs`, and `POST/PATCH /api/task-configs`. The full pipeline is in
+[optio-local.md](optio-local.md#local-runs-tasks-and-jobs-on-your-machine).
+
 ## Three task types in the data model
 
 The user-facing flavors are backed by three internal types. The distinction is whether the row is a _blueprint_ (definition that spawns runs) or a _one-off run_:

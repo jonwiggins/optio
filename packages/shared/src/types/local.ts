@@ -62,7 +62,21 @@ export type LocalTerminalPendingReason = "hold" | "host_offline";
 
 export type LocalAttentionState = "working" | "needs_you" | "idle";
 
-export type LocalSpawnSource = "manual" | "ticket" | "trigger" | "blueprint" | "api" | "resume";
+/**
+ * What created a terminal. `job` / `task` terminals back a Job run
+ * (`workflow_runs`) or a Repo Task (`tasks`) whose run location is a local
+ * host — their lifecycle drives the run's state (see
+ * `services/local-run-service.ts`).
+ */
+export type LocalSpawnSource =
+  | "manual"
+  | "ticket"
+  | "trigger"
+  | "blueprint"
+  | "api"
+  | "resume"
+  | "job"
+  | "task";
 
 /**
  * What happens once an agent finishes its first turn.
@@ -86,13 +100,63 @@ export type LocalTerminalSpec =
       mode?: LocalAgentSessionMode;
       /**
        * Resume a previous agent session (its id as reported by the agent's
-       * hooks) instead of starting a fresh one. Always interactive.
+       * hooks) instead of starting a fresh one. Interactive unless the agent
+       * supports a headless resume (Claude Code: `claude -p --resume`).
        */
       resumeSessionId?: string;
+      /** Model override passed to the agent CLI (`--model` / `-m`), when set. */
+      model?: string;
     };
 
 /** Agent CLIs the daemon knows how to launch (and, for claude-code, hook). */
 export type LocalAgentKind = "claude-code" | "codex" | "cursor" | "gemini" | "opencode";
+
+export const LOCAL_AGENT_KINDS: readonly LocalAgentKind[] = [
+  "claude-code",
+  "codex",
+  "cursor",
+  "gemini",
+  "opencode",
+];
+
+/**
+ * Map a Task / Job agent runtime (`agentType` / `agentRuntime`) onto the
+ * agent CLI the local daemon launches. Null for cluster-only runtimes
+ * (copilot, openclaw) — a run pinned to a local host can't use those.
+ */
+export function toLocalAgentKind(agentType: string | null | undefined): LocalAgentKind | null {
+  return agentType && (LOCAL_AGENT_KINDS as readonly string[]).includes(agentType)
+    ? (agentType as LocalAgentKind)
+    : null;
+}
+
+// ── Run location ────────────────────────────────────────────────────────────
+// Shared by Repo Tasks (`tasks`), their blueprints (`task_configs`), and Jobs
+// (`workflows`): where the agent executes.
+
+/**
+ * `cluster` — an Optio-managed Kubernetes pod (the default).
+ * `local` — the owner's own machine, in an allowlisted directory, through the
+ * Optio Local daemon. The run is backed by a `local_terminals` row and uses
+ * the machine's own agent CLI + auth (no server secrets leave the cluster).
+ */
+export type RunTarget = "cluster" | "local";
+
+export const RUN_TARGETS: readonly RunTarget[] = ["cluster", "local"];
+
+export interface RunLocation {
+  runTarget: RunTarget;
+  /** Local runs: the paired host (`local_hosts.id`). */
+  localHostId: string | null;
+  /** Local runs: absolute directory on the host, inside its allowlist. */
+  localDir: string | null;
+  /**
+   * Local agent runs: `headless` (default) runs the agent's one-shot entry
+   * point and exits when the turn is done; `interactive` keeps the session
+   * open at the agent's prompt so you can keep chatting.
+   */
+  localSessionMode: LocalAgentSessionMode | null;
+}
 
 export interface LocalTerminal {
   id: string;
@@ -122,6 +186,10 @@ export interface LocalTerminal {
    * Lets an exited run be resumed as an interactive chat.
    */
   agentSessionId: string | null;
+  /** The Job run (`workflow_runs.id`) this terminal executes, for `spawnedBy: "job"`. */
+  workflowRunId: string | null;
+  /** The Repo Task (`tasks.id`) this terminal executes, for `spawnedBy: "task"`. */
+  taskId: string | null;
   preview: string | null;
   /** PR / ticket links the daemon spotted in the output (first-seen order). */
   links: WorkLink[];

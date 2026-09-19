@@ -36,6 +36,21 @@ export const WorkflowSchema = z
       .int()
       .describe("Pod replicas; extra pods spin up as demand exceeds single-pod capacity"),
     maxAgentsPerPod: z.number().int().describe("Max concurrent runs (agents) in a single pod"),
+    runTarget: z
+      .enum(["cluster", "local"])
+      .default("cluster")
+      .describe("Where runs execute: an Optio pod (`cluster`) or the owner's machine (`local`)"),
+    localHostId: z.string().nullable().optional().describe("Local runs: the paired host"),
+    localDir: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Local runs: directory on the host (allowlisted)"),
+    localSessionMode: z
+      .enum(["interactive", "headless"])
+      .nullable()
+      .optional()
+      .describe("Local runs: `headless` exits when the turn is done; `interactive` stays open"),
     enabled: z.boolean().describe("If false, new runs are blocked"),
     environmentSpec: z.unknown().describe("Optional Kubernetes env overrides (arbitrary JSON)"),
     paramsSchema: z.unknown().describe("Optional JSON Schema describing allowed run params"),
@@ -64,6 +79,11 @@ export const WorkflowRunSchema = z
     errorMessage: z.string().nullable(),
     sessionId: z.string().nullable(),
     podName: z.string().nullable().describe("Kubernetes pod that ran (or will run) this"),
+    localTerminalId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Local runs: the local terminal executing this attempt"),
     retryCount: z.number().int(),
     startedAt: z.date().nullable(),
     finishedAt: z.date().nullable().describe("Terminal timestamp — success or failure"),

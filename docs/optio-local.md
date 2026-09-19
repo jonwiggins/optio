@@ -20,7 +20,9 @@ secrets to your machine.
   with an auto-detected git remote. Online/offline tracked via daemon heartbeat.
 - **Terminal** (`local_terminals`) — one PTY on a host: state machine
   `pending → launching → running → exited | error`, plus an **attention state**
-  (`working` / `needs_you` / `idle`) that drives the UI's "needs you" queue.
+  (`working` / `needs_you` / `idle`) that drives the UI's "needs you" queue. A terminal
+  may execute a Job run or a Repo Task whose run location is this host
+  (`spawned_by = "job" | "task"`, see "Local runs" below).
 - **Automation** (`local_blueprints`; "blueprint" in the API and code) — "when X happens,
   run this agent on my machine". Who (`agent`: `claude-code` / `codex` / `cursor` /
   `gemini` / `opencode`, or null for a plain shell command), What (`commandTemplate`,
@@ -48,6 +50,56 @@ secrets to your machine.
   exited agent session) opens a fresh interactive terminal in the same dir with
   `claude --resume <id>` (or `codex resume <id>`), inheriting the ticket / automation
   badges; `spawnedBy = "resume"`, so exiting it later goes quiet like a manual shell.
+
+## Local runs: Tasks and Jobs on your machine
+
+Run location is a first-class attribute of every **Task**, **Job**, and scheduled Task
+blueprint (`run_target` on `tasks`, `workflows`, `task_configs`): `cluster` (an Optio pod,
+the default) or `local` — a directory on one of your paired hosts. The "Where" section of
+the New Task form, the Job editor, and the scheduled-Task editor all use the same picker
+(`components/run-location-picker.tsx`): choose **Optio pod** or **My machine**, then the
+host, the directory (a Task preselects the checkout whose git remote is the task's repo
+and refuses other checkouts), and **Then** — `headless` (default: `claude -p` etc., the run
+finishes when the agent exits) or `interactive` (the agent stays at its prompt; the run
+keeps going until you close the session).
+
+A local run is an ordinary run row plus a `local_terminals` row that executes it
+(`spawned_by = "job" | "task"`, back-links `workflow_run_id` / `task_id`; the run points
+back via `local_terminal_id`). The pipeline, in `services/local-run-service.ts`:
+
+1. The run is created and queued exactly as before (REST, trigger, schedule, webhook,
+   retry). The workflow / task worker picks it up and, seeing `run_target = "local"`,
+   calls `dispatchLocalWorkflowRun` / `dispatchLocalTask` instead of provisioning a pod.
+   No cluster concurrency or off-peak gating applies; the reconciler skips capacity,
+   stall, and pod-death checks for local runs (`spec.runTarget`).
+2. Dispatch re-checks the location (host still paired, dir still allowlisted, agent one the
+   daemon can launch — Claude Code / Codex / Cursor / Gemini / OpenCode), claims a terminal
+   id on the run under CAS (so a worker + reconciler race can't spawn twice), and
+   `createTerminal`s an `{kind: "agent"}` spec: the rendered prompt, the session mode, and
+   the Job's `model` (`--model` / `-m`). A Task's prompt is wrapped with "work on
+   `optio/task-<id>` off `<base>`, push, open a PR, print its URL"; a resume (CI failure /
+   review feedback) carries the resume prompt and, for Claude Code, `-p --resume <session>`.
+   Host offline → the terminal parks and the run stays `queued` until the daemon's next
+   hello flushes it.
+3. Daemon frames drive the run (`syncLinkedRun`, called from every terminal update):
+   `launching`/`running` → Job `running` (Task `provisioning` → `running`); `usage` → live
+   cost / tokens / model on the run; `session` → `tasks.session_id` (resume handle); a
+   `links` frame with a PR of the task's repo → Task `pr_opened` (the PR watcher and
+   auto-review / auto-merge take over from there); `exit 0` → Job `completed` (Task
+   `completed`, or `pr_opened` when a PR exists — even on a non-zero exit); `exit ≠ 0` /
+   `spawn-error` → `failed`. The last preview lines, session id, and links are stored in
+   the Job run's `output`.
+4. Cancel / server-side failure (cancel button, reconciler intent, dependency cascade,
+   force redo) kills the terminal; the daemon's trailing `exit` then changes nothing.
+
+Local runs use the machine's own agent CLI and login — no server secrets ship to laptops —
+and follow the same attention rules as automations: a finished run lands in **Needs you**
+(`done` / `exit`). The Job run page and the Task page embed the session
+(`components/local/embedded-session.tsx`) in place of the pod log viewer; the Local cockpit
+shows the same terminal with a `job` / `task` badge and an "Open run" / "Open task" link.
+The REST bodies: `runTarget`, `localHostId`, `localDir`, `localSessionMode` on
+`POST /api/tasks` (all kinds), `POST/PATCH /api/jobs`, and `POST/PATCH /api/task-configs`
+(validated by `validateRunLocation`: the host must be the caller's own).
 
 ## Automations: event triggers
 
@@ -250,7 +302,9 @@ Daemon → server:
 
 Server → daemon:
 
-- `{type:"spawn", terminalId, dir, cols, rows, spec}` (spec as in REST)
+- `{type:"spawn", terminalId, dir, cols, rows, spec}` (spec as in REST; agent specs may
+  carry `model`, passed to the CLI as `--model` / `-m`, and `mode: "headless"` combined with
+  `resumeSessionId` runs `claude -p --resume` for Claude Code)
 - `{type:"input", terminalId, dataB64}` / `{type:"resize", terminalId, cols, rows}`
 - `{type:"kill", terminalId, signal}`
 - `{type:"attach", terminalId, attachId}` / `{type:"detach", terminalId}` — daemon

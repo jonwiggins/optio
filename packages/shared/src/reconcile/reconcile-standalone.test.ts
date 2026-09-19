@@ -17,6 +17,7 @@ function makeSpec(overrides: Partial<StandaloneRunSpec> = {}): StandaloneRunSpec
     maxConcurrent: 5,
     maxRetries: 3,
     workspaceId: "ws-1",
+    runTarget: "cluster",
     ...overrides,
   };
 }
@@ -472,5 +473,65 @@ describe("reconcileStandalone — auto-retry on FAILED", () => {
     expect(backoff3.getTime() - s3.now.getTime()).toBeGreaterThan(
       (backoff0.getTime() - s0.now.getTime()) * 4,
     );
+  });
+});
+
+// ── Local runs (owner's machine via the Optio Local daemon) ─────────────────
+
+describe("reconcileStandalone — local runs", () => {
+  it("enqueues a queued local run even when cluster capacity is saturated", () => {
+    const action = reconcileStandalone(
+      snapshot(
+        { runTarget: "local" },
+        { state: WorkflowRunState.QUEUED },
+        { capacity: { global: { running: 5, max: 5 }, repo: { running: 2, max: 2 } } },
+      ),
+    );
+    expect(action.kind).toBe("enqueueAgent");
+    expect(action.reason).toBe("queued_local_run");
+  });
+
+  it("still fails a queued local run whose workflow is disabled", () => {
+    const action = reconcileStandalone(
+      snapshot({ runTarget: "local", workflowEnabled: false }, { state: WorkflowRunState.QUEUED }),
+    );
+    expect(action).toMatchObject({ kind: "transition", to: WorkflowRunState.FAILED });
+  });
+
+  it("never stall-fails a running local run (the daemon owns liveness)", () => {
+    const action = reconcileStandalone(
+      snapshot(
+        { runTarget: "local" },
+        { state: WorkflowRunState.RUNNING, startedAt: new Date(NOW.getTime() - 3_600_000) },
+        {
+          heartbeat: {
+            lastActivityAt: new Date(NOW.getTime() - 3_600_000),
+            isStale: true,
+            silentForMs: 3_600_000,
+          },
+        },
+      ),
+    );
+    expect(action).toEqual({ kind: "noop", reason: "running_local" });
+  });
+
+  it("still closes out a running local run once finishedAt is stamped", () => {
+    const action = reconcileStandalone(
+      snapshot(
+        { runTarget: "local" },
+        { state: WorkflowRunState.RUNNING, startedAt: NOW, finishedAt: NOW },
+      ),
+    );
+    expect(action).toMatchObject({ kind: "transition", to: WorkflowRunState.COMPLETED });
+  });
+
+  it("honours cancel intent on a local run like any other", () => {
+    const action = reconcileStandalone(
+      snapshot(
+        { runTarget: "local" },
+        { state: WorkflowRunState.RUNNING, controlIntent: "cancel" },
+      ),
+    );
+    expect(action).toMatchObject({ kind: "transition", to: WorkflowRunState.FAILED });
   });
 });

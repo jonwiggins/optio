@@ -104,6 +104,7 @@ export class TerminalManager {
             buildAgentCommand(msg.spec.agent, msg.spec.prompt, this.opts.hookSettingsPath, {
               mode: msg.spec.mode,
               resumeSessionId: msg.spec.resumeSessionId,
+              model: msg.spec.model,
             }),
           ];
           break;

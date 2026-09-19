@@ -27,6 +27,8 @@ import {
   Pencil,
   Copy,
   CopyPlus,
+  Laptop,
+  Server,
 } from "lucide-react";
 import { RunWorkflowDialog } from "@/components/run-workflow-dialog";
 import { StateBadge } from "@/components/state-badge";
@@ -50,6 +52,10 @@ interface WorkflowDetail {
   warmPoolSize: number;
   maxPodInstances: number;
   maxAgentsPerPod: number;
+  runTarget?: "cluster" | "local";
+  localHostId?: string | null;
+  localDir?: string | null;
+  localSessionMode?: "headless" | "interactive" | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -72,6 +78,7 @@ interface WorkflowRun {
   errorMessage: string | null;
   sessionId: string | null;
   podName: string | null;
+  localTerminalId?: string | null;
   retryCount: number;
   startedAt: string | null;
   finishedAt: string | null;
@@ -493,8 +500,17 @@ function RunsTable({
                   onClick={() => router.push(`/jobs/${workflowId}/runs/${run.id}`)}
                 >
                   <td className="px-4 py-2.5">
-                    <Link href={`/jobs/${workflowId}/runs/${run.id}`}>
+                    <Link
+                      href={`/jobs/${workflowId}/runs/${run.id}`}
+                      className="inline-flex items-center gap-1.5"
+                    >
                       <StateBadge state={run.state} />
+                      {run.localTerminalId && (
+                        <Laptop
+                          className="w-3 h-3 text-text-muted"
+                          aria-label="Ran on your machine"
+                        />
+                      )}
                     </Link>
                   </td>
                   <td className="px-4 py-2.5 text-text-muted text-xs">
@@ -662,6 +678,31 @@ function ConfigPanel({
           Task Configuration
         </h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+          <div className="col-span-2 sm:col-span-3">
+            <span className="text-text-muted text-xs block mb-0.5">Runs on</span>
+            {workflow.runTarget === "local" ? (
+              <span className="font-medium inline-flex items-center gap-1.5 min-w-0">
+                <Laptop className="w-3.5 h-3.5 text-primary shrink-0" />
+                <span>Your machine</span>
+                <span
+                  className="font-mono text-xs text-text-muted truncate"
+                  title={workflow.localDir ?? ""}
+                >
+                  {workflow.localDir}
+                </span>
+                <span className="text-xs text-text-muted">
+                  ·{" "}
+                  {workflow.localSessionMode === "interactive"
+                    ? "keeps the session open"
+                    : "exits when done"}
+                </span>
+              </span>
+            ) : (
+              <span className="font-medium inline-flex items-center gap-1.5">
+                <Server className="w-3.5 h-3.5 text-text-muted" /> Optio pod
+              </span>
+            )}
+          </div>
           <div>
             <span className="text-text-muted text-xs block mb-0.5">Agent Runtime</span>
             <span className="font-medium">{workflow.agentRuntime}</span>

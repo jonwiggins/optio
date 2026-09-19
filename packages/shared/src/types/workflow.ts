@@ -1,5 +1,7 @@
 // ── Workflow types (new Workflows data model) ────────────────────────────────
 
+import type { LocalAgentSessionMode, RunTarget } from "./local.js";
+
 export enum WorkflowRunState {
   QUEUED = "queued",
   RUNNING = "running",
@@ -28,6 +30,11 @@ export interface Workflow {
   maxConcurrent: number;
   maxRetries: number;
   warmPoolSize: number;
+  /** Where runs execute: an Optio pod (`cluster`, default) or the owner's machine (`local`). */
+  runTarget: RunTarget;
+  localHostId?: string | null;
+  localDir?: string | null;
+  localSessionMode?: LocalAgentSessionMode | null;
   enabled: boolean;
   createdBy?: string | null;
   createdAt: Date;
@@ -61,6 +68,8 @@ export interface WorkflowRun {
   errorMessage?: string | null;
   sessionId?: string | null;
   podName?: string | null;
+  /** Local runs: the `local_terminals` row executing this run. */
+  localTerminalId?: string | null;
   retryCount: number;
   startedAt?: Date | null;
   finishedAt?: Date | null;

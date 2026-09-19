@@ -19,6 +19,13 @@ import {
   Copy,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  RunLocationPicker,
+  agentRunsLocally,
+  runLocationFromRow,
+  runLocationPayload,
+  type RunLocationValue,
+} from "@/components/run-location-picker";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -314,6 +321,9 @@ export function WorkflowForm({
   const [saving, setSaving] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showEnvSpec, setShowEnvSpec] = useState(false);
+  // Where runs execute: an Optio pod, or a directory on one of the user's machines.
+  const [location, setLocation] = useState<RunLocationValue>(() => runLocationFromRow(initialData));
+  const isLocal = location.runTarget === "local";
 
   const [form, setForm] = useState<WorkflowFormData>(() => {
     if (initialData) {
@@ -419,6 +429,16 @@ export function WorkflowForm({
       toast.error("Fix JSON errors before saving");
       return;
     }
+    if (isLocal && (!location.localHostId || !location.localDir)) {
+      toast.error("Pick the machine and directory this job runs in");
+      return;
+    }
+    if (isLocal && !agentRunsLocally(form.agentRuntime)) {
+      toast.error(`${form.agentRuntime} can't run on your machine`, {
+        description: "Choose Claude Code, Codex, Cursor, Gemini, or OpenCode — or run in a pod.",
+      });
+      return;
+    }
 
     setSaving(true);
     try {
@@ -438,6 +458,7 @@ export function WorkflowForm({
         maxAgentsPerPod: form.maxAgentsPerPod,
         environmentSpec: tryParseJson(form.environmentSpec) ?? undefined,
         paramsSchema: tryParseJson(form.paramsSchema) ?? undefined,
+        ...runLocationPayload(location),
       };
 
       let savedWorkflowId = workflowId;
@@ -529,40 +550,64 @@ export function WorkflowForm({
         </label>
       </section>
 
-      {/* ── Environment ─────────────────────────────────────────────────── */}
+      {/* ── Where ────────────────────────────────────────────────────────── */}
       <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
         <div>
-          <button
-            type="button"
-            onClick={() => setShowEnvSpec(!showEnvSpec)}
-            className="flex items-center gap-1.5 text-sm font-medium"
-          >
-            {showEnvSpec ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            Environment
-          </button>
-          <p className="text-xs text-text-muted mt-0.5">
-            Image preset, setup commands, secrets, and network configuration (JSON).
+          <h2 className="text-sm font-medium mb-1">Where</h2>
+          <p className="text-xs text-text-muted">
+            Every run of this job executes here — in an Optio pod, or on one of your machines.
           </p>
         </div>
-
-        {showEnvSpec && (
-          <div>
-            <label className="block text-sm text-text-muted mb-1.5">Environment Spec (JSON)</label>
-            <textarea
-              rows={6}
-              value={form.environmentSpec}
-              onChange={(e) => setForm((f) => ({ ...f, environmentSpec: e.target.value }))}
-              placeholder={`{\n  "image": "node",\n  "setupCommands": ["npm install"],\n  "secrets": ["DEPLOY_KEY"],\n  "networkAccess": true\n}`}
-              className={`${INPUT_CLASS} font-mono text-xs resize-y ${envSpecError ? "border-error" : ""}`}
-            />
-            {envSpecError && (
-              <p className="text-xs text-error mt-1 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" /> {envSpecError}
-              </p>
-            )}
-          </div>
-        )}
+        <RunLocationPicker
+          value={location}
+          onChange={setLocation}
+          kind="job"
+          agentType={form.agentRuntime}
+        />
       </section>
+
+      {/* ── Environment (pods only) ──────────────────────────────────────── */}
+      {!isLocal && (
+        <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowEnvSpec(!showEnvSpec)}
+              className="flex items-center gap-1.5 text-sm font-medium"
+            >
+              {showEnvSpec ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+              Environment
+            </button>
+            <p className="text-xs text-text-muted mt-0.5">
+              Image preset, setup commands, secrets, and network configuration (JSON).
+            </p>
+          </div>
+
+          {showEnvSpec && (
+            <div>
+              <label className="block text-sm text-text-muted mb-1.5">
+                Environment Spec (JSON)
+              </label>
+              <textarea
+                rows={6}
+                value={form.environmentSpec}
+                onChange={(e) => setForm((f) => ({ ...f, environmentSpec: e.target.value }))}
+                placeholder={`{\n  "image": "node",\n  "setupCommands": ["npm install"],\n  "secrets": ["DEPLOY_KEY"],\n  "networkAccess": true\n}`}
+                className={`${INPUT_CLASS} font-mono text-xs resize-y ${envSpecError ? "border-error" : ""}`}
+              />
+              {envSpecError && (
+                <p className="text-xs text-error mt-1 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> {envSpecError}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── Agent Settings ──────────────────────────────────────────────── */}
       <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
@@ -580,8 +625,13 @@ export function WorkflowForm({
               className={INPUT_CLASS}
             >
               {AGENT_RUNTIMES.map((r) => (
-                <option key={r.value} value={r.value}>
+                <option
+                  key={r.value}
+                  value={r.value}
+                  disabled={isLocal && !agentRunsLocally(r.value)}
+                >
                   {r.label}
+                  {isLocal && !agentRunsLocally(r.value) ? " — pods only" : ""}
                 </option>
               ))}
             </select>
@@ -675,45 +725,53 @@ export function WorkflowForm({
               </div>
             </div>
 
-            <div className="pt-2">
-              <h3 className="text-xs font-medium text-text-muted">Pod Scaling</h3>
-              <p className="text-[10px] text-text-muted/60">
-                Control how many pod replicas are created for this task and how many runs share a
-                single pod. Runs within the same workflow share pods; new pods spin up only when
-                demand exceeds single-pod capacity.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-text-muted mb-1.5">Max pod instances</label>
-                <NumberInput
-                  min={1}
-                  max={20}
-                  value={form.maxPodInstances}
-                  onChange={(v) => setForm((f) => ({ ...f, maxPodInstances: v }))}
-                  fallback={1}
-                  className={INPUT_CLASS}
-                />
-                <p className="text-[10px] text-text-muted/60 mt-1">
-                  Pod replicas for this task. Extra pods are created when demand exceeds single-pod
-                  capacity.
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm text-text-muted mb-1.5">Max agents per pod</label>
-                <NumberInput
-                  min={1}
-                  max={50}
-                  value={form.maxAgentsPerPod}
-                  onChange={(v) => setForm((f) => ({ ...f, maxAgentsPerPod: v }))}
-                  fallback={2}
-                  className={INPUT_CLASS}
-                />
-                <p className="text-[10px] text-text-muted/60 mt-1">
-                  Max concurrent runs (agents) in a single pod.
-                </p>
-              </div>
-            </div>
+            {!isLocal && (
+              <>
+                <div className="pt-2">
+                  <h3 className="text-xs font-medium text-text-muted">Pod Scaling</h3>
+                  <p className="text-[10px] text-text-muted/60">
+                    Control how many pod replicas are created for this task and how many runs share
+                    a single pod. Runs within the same workflow share pods; new pods spin up only
+                    when demand exceeds single-pod capacity.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-text-muted mb-1.5">
+                      Max pod instances
+                    </label>
+                    <NumberInput
+                      min={1}
+                      max={20}
+                      value={form.maxPodInstances}
+                      onChange={(v) => setForm((f) => ({ ...f, maxPodInstances: v }))}
+                      fallback={1}
+                      className={INPUT_CLASS}
+                    />
+                    <p className="text-[10px] text-text-muted/60 mt-1">
+                      Pod replicas for this task. Extra pods are created when demand exceeds
+                      single-pod capacity.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-text-muted mb-1.5">
+                      Max agents per pod
+                    </label>
+                    <NumberInput
+                      min={1}
+                      max={50}
+                      value={form.maxAgentsPerPod}
+                      onChange={(v) => setForm((f) => ({ ...f, maxAgentsPerPod: v }))}
+                      fallback={2}
+                      className={INPUT_CLASS}
+                    />
+                    <p className="text-[10px] text-text-muted/60 mt-1">
+                      Max concurrent runs (agents) in a single pod.
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </section>

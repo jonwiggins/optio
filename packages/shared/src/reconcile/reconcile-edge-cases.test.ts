@@ -40,6 +40,7 @@ function repoSnapshot(
       blocksParent: false,
       workspaceId: "ws-1",
       workflowRunId: null,
+      runTarget: "cluster",
       ...spec,
     },
     status: {
@@ -114,6 +115,7 @@ function standaloneSnapshot(
       maxConcurrent: 5,
       maxRetries: 3,
       workspaceId: "ws-1",
+      runTarget: "cluster",
       ...spec,
     },
     status: {

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as workflowService from "../services/workflow-service.js";
+import { validateRunLocation } from "../services/local-run-service.js";
 import { workflowRunQueue } from "../workers/workflow-worker.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
@@ -58,6 +59,21 @@ const createWorkflowSchema = z
       .record(z.unknown())
       .optional()
       .describe("JSON Schema describing allowed run params"),
+    runTarget: z
+      .enum(["cluster", "local"])
+      .optional()
+      .describe("Where runs execute: `cluster` (default) or `local` (the caller's paired machine)"),
+    localHostId: z.string().uuid().optional().describe("Local runs: your paired host id"),
+    localDir: z
+      .string()
+      .min(1)
+      .max(1000)
+      .optional()
+      .describe("Local runs: absolute directory on the host (must be in its allowlist)"),
+    localSessionMode: z
+      .enum(["interactive", "headless"])
+      .optional()
+      .describe("Local runs: `headless` (default) exits when done; `interactive` stays open"),
   })
   .describe("Body for creating a new workflow template");
 
@@ -78,6 +94,10 @@ const updateWorkflowSchema = z
     enabled: z.boolean().optional(),
     environmentSpec: z.record(z.unknown()).nullable().optional(),
     paramsSchema: z.record(z.unknown()).nullable().optional(),
+    runTarget: z.enum(["cluster", "local"]).optional(),
+    localHostId: z.string().uuid().nullable().optional(),
+    localDir: z.string().min(1).max(1000).nullable().optional(),
+    localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
   })
   .describe("Partial update to a workflow template");
 
@@ -243,9 +263,21 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const input = req.body;
+      const location = await validateRunLocation(
+        {
+          runTarget: input.runTarget,
+          localHostId: input.localHostId,
+          localDir: input.localDir,
+          localSessionMode: input.localSessionMode,
+          agentType: input.agentRuntime ?? "claude-code",
+        },
+        req.user?.id,
+      );
+      if (!location.ok) return reply.status(400).send({ error: location.error });
       try {
         const workflow = await workflowService.createWorkflow({
           ...input,
+          ...location.location,
           workspaceId: req.user?.workspaceId ?? undefined,
           createdBy: req.user?.id,
         });
@@ -313,8 +345,36 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const input = req.body;
       const existing = await requireWorkflowInWorkspace(req, id);
       if (!existing) return reply.status(404).send({ error: "Workflow not found" });
+
+      // Re-validate the run location whenever anything that feeds it changes,
+      // merging the patch over the stored row (a partial PATCH may only move
+      // the dir, or only switch the agent runtime).
+      const touchesLocation =
+        input.runTarget !== undefined ||
+        input.localHostId !== undefined ||
+        input.localDir !== undefined ||
+        input.localSessionMode !== undefined ||
+        input.agentRuntime !== undefined;
+      let patch: Parameters<typeof workflowService.updateWorkflow>[1] = input;
+      if (touchesLocation) {
+        const location = await validateRunLocation(
+          {
+            runTarget: input.runTarget ?? existing.runTarget,
+            localHostId: input.localHostId !== undefined ? input.localHostId : existing.localHostId,
+            localDir: input.localDir !== undefined ? input.localDir : existing.localDir,
+            localSessionMode:
+              input.localSessionMode !== undefined
+                ? input.localSessionMode
+                : existing.localSessionMode,
+            agentType: input.agentRuntime ?? existing.agentRuntime,
+          },
+          req.user?.id,
+        );
+        if (!location.ok) return reply.status(400).send({ error: location.error });
+        patch = { ...input, ...location.location };
+      }
       try {
-        const workflow = await workflowService.updateWorkflow(id, input);
+        const workflow = await workflowService.updateWorkflow(id, patch);
         if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
         logAction({
           userId: req.user?.id,

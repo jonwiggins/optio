@@ -1,3 +1,5 @@
+import type { LocalAgentSessionMode, RunTarget } from "./local.js";
+
 export enum TaskState {
   PENDING = "pending",
   WAITING_ON_DEPS = "waiting_on_deps",
@@ -32,6 +34,13 @@ export interface Task {
   maxRetries: number;
   lastActivityAt?: Date;
   activitySubstate?: TaskActivitySubstate;
+  /** Where the agent runs: an Optio pod (`cluster`, default) or the owner's machine (`local`). */
+  runTarget?: RunTarget;
+  localHostId?: string | null;
+  localDir?: string | null;
+  localSessionMode?: LocalAgentSessionMode | null;
+  /** Local runs: the `local_terminals` row executing this task. */
+  localTerminalId?: string | null;
   createdAt: Date;
   updatedAt: Date;
   startedAt?: Date;
@@ -103,6 +112,11 @@ export interface CreateTaskInput {
   priority?: number;
   dependsOn?: string[];
   createdBy?: string;
+  /** Run location; defaults to `cluster`. Local runs need `localHostId` + `localDir`. */
+  runTarget?: RunTarget;
+  localHostId?: string | null;
+  localDir?: string | null;
+  localSessionMode?: LocalAgentSessionMode | null;
 }
 
 // ── Review Draft types (PR Review Assistant) ────────────────────────────────

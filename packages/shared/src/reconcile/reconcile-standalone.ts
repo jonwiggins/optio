@@ -175,6 +175,17 @@ function decideQueued(snapshot: WorldSnapshot): StandaloneAction {
     };
   }
 
+  // Local runs execute on the owner's machine: they consume no pod capacity,
+  // so cluster saturation must never hold them back. The worker dispatches
+  // them to the Optio Local daemon (parking while the host is offline).
+  if (spec.runTarget === "local") {
+    return {
+      kind: "enqueueAgent",
+      trigger: "reconcile_queued",
+      reason: "queued_local_run",
+    };
+  }
+
   const { global } = snapshot.capacity;
   if (global.running >= global.max) {
     return {
@@ -206,7 +217,7 @@ function decideRunning(snapshot: WorldSnapshot): StandaloneAction {
   if (snapshot.run.kind !== "standalone") {
     return { kind: "noop", reason: "wrong_kind" };
   }
-  const { status } = snapshot.run;
+  const { spec, status } = snapshot.run;
 
   // Agent already finished (worker set finishedAt while the reconciler
   // hadn't transitioned yet). Close out based on whether an error was recorded.
@@ -227,6 +238,14 @@ function decideRunning(snapshot: WorldSnapshot): StandaloneAction {
       trigger: "agent_finished",
       reason: "finishedAt_set",
     };
+  }
+
+  // Local runs have no pod and no server-side heartbeat: the daemon is the
+  // authority on liveness (its exit / spawn-error / restart frames close the
+  // run through local-run-service), and an interactive session legitimately
+  // sits idle while it waits for its owner.
+  if (spec.runTarget === "local") {
+    return { kind: "noop", reason: "running_local" };
   }
 
   // Stall detection.

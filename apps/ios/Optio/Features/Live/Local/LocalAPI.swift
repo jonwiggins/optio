@@ -296,6 +296,8 @@ enum LocalPresentation {
         case .trigger: return "antenna.radiowaves.left.and.right"
         case .blueprint: return "square.stack.3d.up"
         case .api: return "cpu"
+        case .job: return "briefcase"
+        case .task: return "arrow.triangle.pull"
         case .unknown: return "questionmark"
         }
     }

@@ -1,7 +1,7 @@
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { taskConfigs, workflowTriggers } from "../db/schema.js";
-import { TaskState } from "@optio/shared";
+import { TaskState, type LocalAgentSessionMode, type RunTarget } from "@optio/shared";
 import * as taskService from "./task-service.js";
 import { getPromptTemplateById, renderTemplateString } from "./prompt-template-service.js";
 import { logger } from "../logger.js";
@@ -20,6 +20,11 @@ export interface CreateTaskConfigInput {
   enabled?: boolean;
   workspaceId?: string | null;
   createdBy?: string | null;
+  // Run location inherited by spawned tasks (validate with validateRunLocation first).
+  runTarget?: RunTarget;
+  localHostId?: string | null;
+  localDir?: string | null;
+  localSessionMode?: LocalAgentSessionMode | null;
 }
 
 export interface UpdateTaskConfigInput {
@@ -34,6 +39,10 @@ export interface UpdateTaskConfigInput {
   maxRetries?: number;
   priority?: number;
   enabled?: boolean;
+  runTarget?: RunTarget;
+  localHostId?: string | null;
+  localDir?: string | null;
+  localSessionMode?: LocalAgentSessionMode | null;
 }
 
 export async function createTaskConfig(input: CreateTaskConfigInput) {
@@ -50,6 +59,10 @@ export async function createTaskConfig(input: CreateTaskConfigInput) {
       agentType: input.agentType ?? null,
       maxRetries: input.maxRetries ?? 3,
       priority: input.priority ?? 100,
+      runTarget: input.runTarget ?? "cluster",
+      localHostId: input.runTarget === "local" ? (input.localHostId ?? null) : null,
+      localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
+      localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
       enabled: input.enabled ?? true,
       workspaceId: input.workspaceId ?? null,
       createdBy: input.createdBy ?? null,
@@ -110,6 +123,10 @@ export async function updateTaskConfig(id: string, input: UpdateTaskConfigInput)
   if (input.maxRetries !== undefined) updates.maxRetries = input.maxRetries;
   if (input.priority !== undefined) updates.priority = input.priority;
   if (input.enabled !== undefined) updates.enabled = input.enabled;
+  if (input.runTarget !== undefined) updates.runTarget = input.runTarget;
+  if (input.localHostId !== undefined) updates.localHostId = input.localHostId;
+  if (input.localDir !== undefined) updates.localDir = input.localDir;
+  if (input.localSessionMode !== undefined) updates.localSessionMode = input.localSessionMode;
 
   const [row] = await db.update(taskConfigs).set(updates).where(eq(taskConfigs.id, id)).returning();
   return row ?? null;
@@ -180,6 +197,10 @@ export async function instantiateTask(
     priority: config.priority,
     createdBy: config.createdBy ?? undefined,
     workspaceId,
+    runTarget: config.runTarget,
+    localHostId: config.localHostId,
+    localDir: config.localDir,
+    localSessionMode: config.localSessionMode,
     metadata: {
       taskConfigId: config.id,
       taskConfigName: config.name,

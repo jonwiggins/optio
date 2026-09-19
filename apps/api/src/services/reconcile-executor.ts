@@ -249,6 +249,18 @@ async function applyStandaloneTransition(
     return { status: "stale", reason: "cas_failed_standalone_transition" };
   }
 
+  // A local run failed from the server side (cancel intent, disabled
+  // workflow): its agent is still alive in a terminal on the owner's
+  // machine — stop it. No-op when the terminal already exited.
+  if (action.to === WorkflowRunState.FAILED && rows[0].localTerminalId) {
+    const terminalId = rows[0].localTerminalId;
+    import("./local-run-service.js")
+      .then(({ killLinkedTerminal }) =>
+        killLinkedTerminal(terminalId, `reconcile:${action.trigger}`),
+      )
+      .catch((err) => logger.warn({ err, runId: id }, "failed to kill local terminal for run"));
+  }
+
   // Publish state-change event + outbound webhook so subscribers see the
   // transition. Mirrors workflow-worker's transitionRun helper.
   await publishStandaloneStateChange(id, workflowId, fromState, action.to).catch((err) =>

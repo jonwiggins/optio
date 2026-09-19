@@ -63,6 +63,11 @@ export const LocalTerminalSpecSchema = z
         .max(128)
         .optional()
         .describe("Resume this agent session (its own session id) instead of starting fresh"),
+      model: z
+        .string()
+        .max(100)
+        .optional()
+        .describe("Model override passed to the agent CLI (--model / -m)"),
     }),
   ])
   .describe("What the daemon runs in the PTY");
@@ -93,6 +98,16 @@ export const LocalTerminalSchema = z
       .string()
       .nullable()
       .describe("The agent CLI's own session id, once its hooks reported it (resumable)"),
+    workflowRunId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Job run this terminal executes (spawnedBy = job), if any"),
+    taskId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Repo Task this terminal executes (spawnedBy = task), if any"),
     preview: z.string().nullable(),
     links: z
       .array(

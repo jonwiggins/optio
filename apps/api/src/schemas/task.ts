@@ -125,6 +125,22 @@ export const TaskSchema = z
       .nullable()
       .describe("Most recent pod ID this task ran on (used for retry affinity)"),
     workflowRunId: z.string().nullable().describe("Workflow run ID if spawned by a workflow"),
+    runTarget: z
+      .enum(["cluster", "local"])
+      .default("cluster")
+      .describe("Where the agent runs: an Optio pod (`cluster`) or the owner's machine (`local`)"),
+    localHostId: z.string().nullable().optional().describe("Local runs: the paired host"),
+    localDir: z.string().nullable().optional().describe("Local runs: directory on the host"),
+    localSessionMode: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Local runs: `headless` (exit when done) or `interactive` (stay open)"),
+    localTerminalId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Local runs: the local terminal executing this task"),
     createdBy: z.string().nullable().describe("User ID of the creator (null if auth disabled)"),
     ignoreOffPeak: z.boolean().describe("If true, the task runs immediately even off-peak"),
     lastActivityAt: z

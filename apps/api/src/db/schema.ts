@@ -129,6 +129,16 @@ export const tasks = pgTable(
     worktreeState: text("worktree_state"), // "active" | "dirty" | "reset" | "preserved" | "removed"
     lastPodId: uuid("last_pod_id"), // last pod this task ran on (for same-pod retry affinity)
     workflowRunId: uuid("workflow_run_id"), // nullable FK to workflow_runs
+    // Run location: "cluster" (repo pod + worktree, default) or "local" — the
+    // owner's own machine via the Optio Local daemon. Local tasks are backed
+    // by a local_terminals row whose lifecycle drives the task's state
+    // (services/local-run-service.ts). local_terminal_id is a soft pointer
+    // (not an FK) so the two tables don't reference each other.
+    runTarget: text("run_target").$type<"cluster" | "local">().notNull().default("cluster"),
+    localHostId: uuid("local_host_id").references(() => localHosts.id, { onDelete: "set null" }),
+    localDir: text("local_dir"),
+    localSessionMode: text("local_session_mode").$type<"interactive" | "headless">(),
+    localTerminalId: uuid("local_terminal_id"),
     createdBy: uuid("created_by"), // nullable FK to users (null when auth is disabled)
     ignoreOffPeak: boolean("ignore_off_peak").notNull().default(false),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }), // stall detection: last parsed agent event
@@ -585,6 +595,11 @@ export const taskConfigs = pgTable(
     agentType: text("agent_type"),
     maxRetries: integer("max_retries").notNull().default(3),
     priority: integer("priority").notNull().default(100),
+    // Run location inherited by every spawned task — see tasks.run_target.
+    runTarget: text("run_target").$type<"cluster" | "local">().notNull().default("cluster"),
+    localHostId: uuid("local_host_id").references(() => localHosts.id, { onDelete: "set null" }),
+    localDir: text("local_dir"),
+    localSessionMode: text("local_session_mode").$type<"interactive" | "headless">(),
     enabled: boolean("enabled").notNull().default(true),
     createdBy: uuid("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -620,6 +635,16 @@ export const workflows = pgTable(
     // pods within a workflow, scaling out to maxPodInstances replicas.
     maxPodInstances: integer("max_pod_instances").notNull().default(1),
     maxAgentsPerPod: integer("max_agents_per_pod").notNull().default(2),
+    // Run location: "cluster" (pooled job pods, default) or "local" — every
+    // run of this job executes on the owner's machine in local_dir via the
+    // Optio Local daemon. See tasks.run_target.
+    runTarget: text("run_target").$type<"cluster" | "local">().notNull().default("cluster"),
+    localHostId: uuid("local_host_id").references(() => localHosts.id, { onDelete: "set null" }),
+    localDir: text("local_dir"),
+    localSessionMode: text("local_session_mode")
+      .$type<"interactive" | "headless">()
+      .notNull()
+      .default("headless"),
     enabled: boolean("enabled").notNull().default(true),
     createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -684,6 +709,9 @@ export const workflowRuns = pgTable(
     // prefer same-pod retries (mirrors tasks.lastPodId). Not a hard FK so pod
     // cleanup doesn't require nulling out historical references.
     lastPodId: uuid("last_pod_id"),
+    // Local runs (workflows.run_target = "local"): the local_terminals row
+    // executing this attempt. Soft pointer, replaced on retry.
+    localTerminalId: uuid("local_terminal_id"),
     retryCount: integer("retry_count").notNull().default(0),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -1619,11 +1647,16 @@ export const localTerminals = pgTable(
     attentionState: localAttentionStateEnum("attention_state").notNull().default("idle"),
     attentionReason: text("attention_reason"),
     spawnedBy: text("spawned_by")
-      .$type<"manual" | "ticket" | "trigger" | "blueprint" | "api" | "resume">()
+      .$type<"manual" | "ticket" | "trigger" | "blueprint" | "api" | "resume" | "job" | "task">()
       .notNull()
       .default("manual"),
     blueprintId: uuid("blueprint_id"),
     triggerId: uuid("trigger_id"),
+    // Back-links for terminals that execute a Job run / Repo Task whose run
+    // location is this host (spawned_by = "job" | "task"). Soft pointers —
+    // tasks / workflow_runs point back via local_terminal_id.
+    workflowRunId: uuid("workflow_run_id"),
+    taskId: uuid("task_id"),
     ticketSource: text("ticket_source"),
     ticketExternalId: text("ticket_external_id"),
     ticketUrl: text("ticket_url"),
@@ -1667,6 +1700,8 @@ export const localTerminals = pgTable(
     index("local_terminals_host_id_idx").on(table.hostId),
     index("local_terminals_user_state_idx").on(table.userId, table.state),
     index("local_terminals_created_at_idx").on(table.createdAt.desc()),
+    index("local_terminals_workflow_run_id_idx").on(table.workflowRunId),
+    index("local_terminals_task_id_idx").on(table.taskId),
   ],
 );
 

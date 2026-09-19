@@ -18,9 +18,26 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TriggerSelector, type TriggerConfig, cronIsValid } from "@/components/trigger-selector";
+import {
+  CLUSTER_RUN_LOCATION,
+  RunLocationPicker,
+  agentRunsLocally,
+  runLocationPayload,
+  type RunLocationValue,
+} from "@/components/run-location-picker";
 
 type RunMode = "now" | "schedule";
 type TaskMode = "repo" | "standalone";
+
+const AGENTS: Array<{ value: string; label: string }> = [
+  { value: "claude-code", label: "Claude Code" },
+  { value: "codex", label: "OpenAI Codex" },
+  { value: "copilot", label: "GitHub Copilot" },
+  { value: "opencode", label: "OpenCode (Experimental)" },
+  { value: "gemini", label: "Google Gemini" },
+  { value: "openclaw", label: "OpenClaw (Experimental)" },
+  { value: "cursor", label: "Cursor" },
+];
 
 export default function NewTaskPage() {
   usePageTitle("New Task");
@@ -58,6 +75,12 @@ export default function NewTaskPage() {
     priority: 100,
     maxRetries: 3,
   });
+
+  // Where: an Optio pod, or a directory on one of the user's paired machines.
+  const [location, setLocation] = useState<RunLocationValue>(CLUSTER_RUN_LOCATION);
+  const isLocal = location.runTarget === "local";
+  const localReady = !isLocal || (!!location.localHostId && !!location.localDir);
+  const agentOk = !isLocal || agentRunsLocally(form.agentType);
 
   useEffect(() => {
     api
@@ -142,6 +165,7 @@ export default function NewTaskPage() {
         priority: mode === "repo" ? form.priority : undefined,
         ...(selectedDeps.length > 0 && apiType === "repo-task" ? { dependsOn: selectedDeps } : {}),
         enabled: true,
+        ...runLocationPayload(location),
       });
       const createdId = created.task.id as string;
 
@@ -193,7 +217,13 @@ export default function NewTaskPage() {
     }
   };
 
-  const canSubmit = !loading && form.title && form.prompt && (mode !== "repo" || form.repoUrl);
+  const canSubmit =
+    !loading &&
+    form.title &&
+    form.prompt &&
+    (mode !== "repo" || form.repoUrl) &&
+    localReady &&
+    agentOk;
 
   const submitLabel =
     runMode === "schedule"
@@ -264,8 +294,12 @@ export default function NewTaskPage() {
           )}
           <span>
             {mode === "repo"
-              ? "When this task runs, the agent will clone the selected repo, make changes on a branch, and open a PR — ready for CI and review."
-              : "When this task runs, the agent will execute in an isolated pod with no repo checkout. Results land in the run logs; side effects happen through Connections."}
+              ? isLocal
+                ? "When this task runs, the agent works in your own checkout on your machine, makes changes on a branch, and opens a PR — ready for CI and review. The session also shows up under Local."
+                : "When this task runs, the agent will clone the selected repo, make changes on a branch, and open a PR — ready for CI and review."
+              : isLocal
+                ? "When this task runs, the agent executes in a directory on your machine with your local CLI and login. The session shows up under Local; the run records its outcome and cost."
+                : "When this task runs, the agent will execute in an isolated pod with no repo checkout. Results land in the run logs; side effects happen through Connections."}
           </span>
         </div>
 
@@ -363,115 +397,137 @@ export default function NewTaskPage() {
             onChange={(e) => setForm((f) => ({ ...f, agentType: e.target.value }))}
             className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
           >
-            <option value="claude-code">Claude Code</option>
-            <option value="codex">OpenAI Codex</option>
-            <option value="copilot">GitHub Copilot</option>
-            <option value="opencode">OpenCode (Experimental)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="openclaw">OpenClaw (Experimental)</option>
-            <option value="cursor">Cursor</option>
+            {AGENTS.map((a) => (
+              <option
+                key={a.value}
+                value={a.value}
+                disabled={isLocal && !agentRunsLocally(a.value)}
+              >
+                {a.label}
+                {isLocal && !agentRunsLocally(a.value) ? " — pods only" : ""}
+              </option>
+            ))}
           </select>
+          {!agentOk && (
+            <p className="text-xs text-error mt-1">
+              {form.agentType} can't run on your machine — pick another agent or switch back to an
+              Optio pod.
+            </p>
+          )}
         </div>
 
-        {/* ── Where (repo — only for Repo Tasks) ──────────────────────── */}
-        {mode === "repo" && (
-          <div>
-            <div className="text-xs uppercase tracking-wider text-text-muted/60 mb-2">Where</div>
-            <div className="p-4 rounded-lg border border-border bg-bg-card/60 space-y-3">
-              {reposLoading ? (
-                <div className="flex items-center gap-2 text-text-muted text-sm py-2">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Loading repos...
-                </div>
-              ) : repos.length > 0 ? (
-                <>
-                  <div>
-                    <label className="block text-sm text-text-muted mb-1.5">Repository</label>
-                    <select
-                      required
-                      value={form.repoId}
-                      onChange={(e) => handleRepoChange(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
-                    >
-                      {repos.map((repo: any) => (
-                        <option key={repo.id} value={repo.id}>
-                          {repo.fullName} ({repo.defaultBranch})
-                        </option>
-                      ))}
-                    </select>
+        {/* ── Where ────────────────────────────────────────────────────── */}
+        <div>
+          <div className="text-xs uppercase tracking-wider text-text-muted/60 mb-2">Where</div>
+          <div className="space-y-3">
+            {mode === "repo" && (
+              <div className="p-4 rounded-lg border border-border bg-bg-card/60 space-y-3">
+                {reposLoading ? (
+                  <div className="flex items-center gap-2 text-text-muted text-sm py-2">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Loading repos...
                   </div>
-                  <div>
-                    <label className="block text-sm text-text-muted mb-1.5">Branch</label>
-                    <div className="flex items-center gap-2">
-                      <GitBranchIcon className="w-3.5 h-3.5 text-text-muted" />
-                      <input
-                        type="text"
-                        value={form.repoBranch}
-                        onChange={(e) => setForm((f) => ({ ...f, repoBranch: e.target.value }))}
-                        className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
-                      />
+                ) : repos.length > 0 ? (
+                  <>
+                    <div>
+                      <label className="block text-sm text-text-muted mb-1.5">Repository</label>
+                      <select
+                        required
+                        value={form.repoId}
+                        onChange={(e) => handleRepoChange(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
+                      >
+                        {repos.map((repo: any) => (
+                          <option key={repo.id} value={repo.id}>
+                            {repo.fullName} ({repo.defaultBranch})
+                          </option>
+                        ))}
+                      </select>
                     </div>
+                    <div>
+                      <label className="block text-sm text-text-muted mb-1.5">Branch</label>
+                      <div className="flex items-center gap-2">
+                        <GitBranchIcon className="w-3.5 h-3.5 text-text-muted" />
+                        <input
+                          type="text"
+                          value={form.repoBranch}
+                          onChange={(e) => setForm((f) => ({ ...f, repoBranch: e.target.value }))}
+                          className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-text-muted py-2">
+                    No repos configured.{" "}
+                    <a href="/repos" className="text-primary hover:underline">
+                      Add a repo
+                    </a>{" "}
+                    first, or switch to Job above.
                   </div>
-                </>
-              ) : (
-                <div className="text-sm text-text-muted py-2">
-                  No repos configured.{" "}
-                  <a href="/repos" className="text-primary hover:underline">
-                    Add a repo
-                  </a>{" "}
-                  first, or switch to Job above.
-                </div>
-              )}
+                )}
 
-              {runMode === "now" && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowDeps(!showDeps)}
-                    className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors"
-                  >
-                    <Link2 className="w-3.5 h-3.5" />
-                    Dependencies {selectedDeps.length > 0 && `(${selectedDeps.length})`}
-                  </button>
-                  {showDeps && (
-                    <div className="mt-2 p-3 rounded-lg bg-bg border border-border">
-                      <p className="text-xs text-text-muted/60 mb-2">
-                        Wait for these tasks to complete first.
-                      </p>
-                      {existingTasks.length === 0 ? (
-                        <p className="text-xs text-text-muted">No existing tasks.</p>
-                      ) : (
-                        <div className="max-h-40 overflow-y-auto space-y-1">
-                          {existingTasks
-                            .filter((t) => !["completed", "cancelled"].includes(t.state))
-                            .map((t) => (
-                              <label
-                                key={t.id}
-                                className="flex items-center gap-2 text-xs py-0.5 cursor-pointer hover:bg-bg-hover rounded px-1"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedDeps.includes(t.id)}
-                                  onChange={(e) =>
-                                    setSelectedDeps((prev) =>
-                                      e.target.checked
-                                        ? [...prev, t.id]
-                                        : prev.filter((id) => id !== t.id),
-                                    )
-                                  }
-                                />
-                                <span className="truncate flex-1">{t.title}</span>
-                                <span className="text-text-muted shrink-0">{t.state}</span>
-                              </label>
-                            ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+                {runMode === "now" && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowDeps(!showDeps)}
+                      className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors"
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                      Dependencies {selectedDeps.length > 0 && `(${selectedDeps.length})`}
+                    </button>
+                    {showDeps && (
+                      <div className="mt-2 p-3 rounded-lg bg-bg border border-border">
+                        <p className="text-xs text-text-muted/60 mb-2">
+                          Wait for these tasks to complete first.
+                        </p>
+                        {existingTasks.length === 0 ? (
+                          <p className="text-xs text-text-muted">No existing tasks.</p>
+                        ) : (
+                          <div className="max-h-40 overflow-y-auto space-y-1">
+                            {existingTasks
+                              .filter((t) => !["completed", "cancelled"].includes(t.state))
+                              .map((t) => (
+                                <label
+                                  key={t.id}
+                                  className="flex items-center gap-2 text-xs py-0.5 cursor-pointer hover:bg-bg-hover rounded px-1"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedDeps.includes(t.id)}
+                                    onChange={(e) =>
+                                      setSelectedDeps((prev) =>
+                                        e.target.checked
+                                          ? [...prev, t.id]
+                                          : prev.filter((id) => id !== t.id),
+                                      )
+                                    }
+                                  />
+                                  <span className="truncate flex-1">{t.title}</span>
+                                  <span className="text-text-muted shrink-0">{t.state}</span>
+                                </label>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm text-text-muted mb-1.5">Run location</label>
+              <RunLocationPicker
+                value={location}
+                onChange={setLocation}
+                kind={mode === "repo" ? "task" : "job"}
+                agentType={form.agentType}
+                repoUrl={mode === "repo" ? form.repoUrl : null}
+              />
             </div>
           </div>
-        )}
+        </div>
 
         {/* ── Why ──────────────────────────────────── */}
         <div>

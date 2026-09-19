@@ -127,6 +127,7 @@ function repoSnapshot(overrides: Partial<WorldSnapshot> = {}): WorldSnapshot {
       blocksParent: false,
       workspaceId: "ws-1",
       workflowRunId: null,
+      runTarget: "cluster",
     },
     status: {
       state: TaskState.QUEUED,
@@ -192,6 +193,7 @@ function standaloneSnapshot(overrides: Partial<WorldSnapshot> = {}): WorldSnapsh
       maxConcurrent: 5,
       maxRetries: 3,
       workspaceId: "ws-1",
+      runTarget: "cluster",
     },
     status: {
       state: WorkflowRunState.QUEUED,

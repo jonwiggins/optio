@@ -217,6 +217,17 @@ function decideQueued(snapshot: WorldSnapshot): RepoAction {
   if (snapshot.run.kind !== "repo") return { kind: "noop", reason: "wrong_kind" };
   const { spec } = snapshot.run;
 
+  // Local tasks run on the owner's machine: no pod capacity to wait for and
+  // no off-peak window to respect (off-peak exists to spare cluster load).
+  // The worker hands them to the Optio Local daemon.
+  if (spec.runTarget === "local") {
+    return {
+      kind: "requeueForAgent",
+      trigger: "reconcile_queued",
+      reason: "queued_local_run",
+    };
+  }
+
   if (snapshot.settings.offPeakOnly && !spec.ignoreOffPeak && !snapshot.settings.offPeakActive) {
     return {
       kind: "requeueSoon",
@@ -281,6 +292,13 @@ function decideRunning(snapshot: WorldSnapshot): RepoAction {
       trigger: "pr_detected",
       reason: "pr_url_set_while_running",
     };
+  }
+
+  // Local tasks: no pod, and liveness belongs to the Optio Local daemon (an
+  // interactive session idles while it waits for its owner) — see
+  // reconcile-standalone's decideRunning for the same rule.
+  if (spec.runTarget === "local") {
+    return { kind: "noop", reason: "running_local" };
   }
 
   // Pod died.

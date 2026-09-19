@@ -29,6 +29,7 @@ function makeSpec(overrides: Partial<RepoRunSpec> = {}): RepoRunSpec {
     blocksParent: false,
     workspaceId: "ws-1",
     workflowRunId: null,
+    runTarget: "cluster",
     ...overrides,
   };
 }
@@ -941,5 +942,63 @@ describe("reconcileRepo — non-coding task types", () => {
       },
     );
     expect(reconcileRepo(s).kind).not.toBe("autoMergePr");
+  });
+});
+
+// ── Local tasks (owner's machine via the Optio Local daemon) ────────────────
+
+describe("reconcileRepo — local tasks", () => {
+  it("requeues a queued local task for the worker regardless of capacity or off-peak", () => {
+    const action = reconcileRepo(
+      snapshot(
+        { runTarget: "local" },
+        { state: TaskState.QUEUED },
+        {
+          capacity: { global: { running: 5, max: 5 }, repo: { running: 2, max: 2 } },
+          settings: {
+            stallThresholdMs: 300_000,
+            autoMerge: false,
+            cautiousMode: false,
+            autoResume: false,
+            reviewEnabled: false,
+            reviewTrigger: null,
+            offPeakOnly: true,
+            offPeakActive: false,
+            hasReviewSubtask: false,
+            maxAutoResumes: 10,
+            recentAutoResumeCount: 0,
+          },
+        },
+      ),
+    );
+    expect(action.kind).toBe("requeueForAgent");
+    expect(action.reason).toBe("queued_local_run");
+  });
+
+  it("never stall-fails a running local task", () => {
+    const action = reconcileRepo(
+      snapshot(
+        { runTarget: "local" },
+        { state: TaskState.RUNNING },
+        {
+          heartbeat: {
+            lastActivityAt: new Date(NOW.getTime() - 3_600_000),
+            isStale: true,
+            silentForMs: 3_600_000,
+          },
+        },
+      ),
+    );
+    expect(action).toEqual({ kind: "noop", reason: "running_local" });
+  });
+
+  it("still promotes a running local task to pr_opened once a PR URL lands", () => {
+    const action = reconcileRepo(
+      snapshot(
+        { runTarget: "local" },
+        { state: TaskState.RUNNING, prUrl: "https://github.com/acme/repo/pull/7" },
+      ),
+    );
+    expect(action).toMatchObject({ kind: "transition", to: TaskState.PR_OPENED });
   });
 });

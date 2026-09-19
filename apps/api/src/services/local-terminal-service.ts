@@ -79,6 +79,15 @@ async function notifyChanged(row: LocalTerminalRow): Promise<void> {
     hostId: row.hostId,
     userId: row.userId,
   }).catch((err) => logger.warn({ err }, "local: failed to publish change event"));
+  // A terminal that executes a Job run / Repo Task drives that run's state
+  // (queued → running → completed/failed, PR detection, cost). Awaited so the
+  // daemon's frame order (started, then exit) is the run's transition order.
+  // Dynamic import: local-run-service imports this module.
+  if (row.workflowRunId || row.taskId) {
+    await import("./local-run-service.js")
+      .then(({ syncLinkedRun }) => syncLinkedRun(row))
+      .catch((err) => logger.warn({ err, terminalId: row.id }, "local: run sync failed"));
+  }
   // iOS: Watch Live Activity + needs-you alerts (no-op unless APNs is configured).
   import("./glance-service.js")
     .then(({ onLocalTerminalChanged }) => onLocalTerminalChanged(row))
@@ -169,6 +178,16 @@ export interface CreateTerminalInput {
   ticket?: { source: string; externalId: string; url?: string };
   /** "hold" keeps the terminal pending until a human starts it. */
   hold?: boolean;
+  /**
+   * Pre-assigned row id. local-run-service claims the id on the run row
+   * (CAS) before the terminal exists, so two concurrent dispatches can never
+   * spawn two terminals for one run.
+   */
+  id?: string;
+  /** Job run this terminal executes (spawnedBy = "job"). */
+  workflowRunId?: string;
+  /** Repo Task this terminal executes (spawnedBy = "task"). */
+  taskId?: string;
 }
 
 /**
@@ -196,6 +215,7 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
   const [row] = await db
     .insert(localTerminals)
     .values({
+      ...(input.id ? { id: input.id } : {}),
       hostId: input.host.id,
       userId: input.userId,
       workspaceId: input.workspaceId,
@@ -209,6 +229,8 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
       spawnedBy: input.spawnedBy ?? "manual",
       blueprintId: input.blueprintId,
       triggerId: input.triggerId,
+      workflowRunId: input.workflowRunId,
+      taskId: input.taskId,
       ticketSource: input.ticket?.source,
       ticketExternalId: input.ticket?.externalId,
       ticketUrl: input.ticket?.url,

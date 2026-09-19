@@ -13,6 +13,7 @@ import { PrStatusBar } from "@/components/pr-status-bar";
 import { ChatComposer } from "@/components/chat-box";
 import { StateBadge } from "@/components/state-badge";
 import { TokenRefreshBanner, GitHubTokenBanner } from "@/components/token-refresh-banner";
+import { EmbeddedLocalSession } from "@/components/local/embedded-session";
 import { api } from "@/lib/api-client";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { classifyError } from "@optio/shared";
@@ -35,6 +36,7 @@ import {
   Plus,
   X,
   CheckCircle,
+  Laptop,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
@@ -253,6 +255,10 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   const repoName = task.repoUrl.replace(/.*\/\/[^/]+\//, "").replace(/\.git$/, "");
+  // Local tasks run in a terminal on the owner's machine: the session is
+  // embedded in place of the pod log viewer, and the chat composer (which
+  // writes to the pod agent's stdin) gives way to typing in the terminal.
+  const isLocalTask = task.runTarget === "local";
   const isActive = ["running", "provisioning", "queued"].includes(task.state);
   const isTerminal = ["completed", "failed", "cancelled"].includes(task.state);
   const canCancel = ["running", "queued", "provisioning", "needs_attention"].includes(task.state);
@@ -265,7 +271,8 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
   // - running + claude-code (mid-turn delivery via stream-json stdin), or
   // - stopped-but-resumable (needs_attention / pr_opened / failed / cancelled)
   //   — the message becomes the resume prompt for any agent type.
-  const canMessageRunning = task.state === "running" && task.agentType === "claude-code";
+  const canMessageRunning =
+    task.state === "running" && task.agentType === "claude-code" && !isLocalTask;
   const canMessageStopped = ["needs_attention", "pr_opened", "failed", "cancelled"].includes(
     task.state,
   );
@@ -295,6 +302,20 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
             <Bot className="w-3 h-3" />
             {task.agentType.replace("-", " ")}
           </span>,
+          ...(isLocalTask
+            ? [
+                <span
+                  className="flex items-center gap-1 min-w-0"
+                  title={task.localDir ?? "Runs on your machine"}
+                >
+                  <Laptop className="w-3 h-3" />
+                  <span className="font-mono truncate max-w-[14rem]">
+                    {task.localDir?.split("/").filter(Boolean).slice(-2).join("/") ??
+                      "your machine"}
+                  </span>
+                </span>,
+              ]
+            : []),
           <>
             <Clock className="w-3 h-3" />
             {formatRelativeTime(task.createdAt)}
@@ -877,11 +898,38 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       <div className="flex-1 flex overflow-hidden">
         {/* Log panel */}
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* Log content via LogViewer */}
+          {/* Log content via LogViewer — or the live local session for a
+              task running on the owner's machine */}
           <div className="flex-1 overflow-hidden">
-            <ErrorBoundary label="Log viewer">
-              <LogViewer taskId={id} userMessages={userMessages} />
-            </ErrorBoundary>
+            {isLocalTask && task.localTerminalId ? (
+              <ErrorBoundary label="Local session">
+                <EmbeddedLocalSession
+                  terminalId={task.localTerminalId}
+                  onTerminal={(t) => {
+                    if ((t.state === "exited" || t.state === "error") && isActive) refresh();
+                  }}
+                />
+              </ErrorBoundary>
+            ) : isLocalTask ? (
+              <div className="h-full flex items-center justify-center text-sm text-text-muted px-6 text-center">
+                <span>
+                  <Laptop className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />
+                  This task runs on your machine. Its session appears here once the daemon picks it
+                  up
+                  {task.localDir ? (
+                    <>
+                      {" "}
+                      (<span className="font-mono">{task.localDir}</span>)
+                    </>
+                  ) : null}
+                  .
+                </span>
+              </div>
+            ) : (
+              <ErrorBoundary label="Log viewer">
+                <LogViewer taskId={id} userMessages={userMessages} />
+              </ErrorBoundary>
+            )}
           </div>
 
           {/* Message / Resume bar */}

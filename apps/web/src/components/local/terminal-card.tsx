@@ -9,6 +9,8 @@ import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
 import { SESSION_DOT, sessionTone } from "./attention";
 import {
   Bot,
+  Briefcase,
+  GitPullRequest,
   Layers,
   Loader2,
   Play,
@@ -184,6 +186,9 @@ const SPAWN_SOURCE: Record<string, { label: string; icon: any }> = {
   blueprint: { label: "blueprint", icon: Layers },
   api: { label: "api", icon: Bot },
   resume: { label: "resumed", icon: User },
+  // Terminals that execute a Job run / Repo Task whose run location is this machine.
+  job: { label: "job", icon: Briefcase },
+  task: { label: "task", icon: GitPullRequest },
 };
 
 export function SpawnSourceBadge({ spawnedBy }: { spawnedBy: string }) {

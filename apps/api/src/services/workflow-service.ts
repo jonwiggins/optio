@@ -1,4 +1,5 @@
 import { eq, desc, sql, and, lte } from "drizzle-orm";
+import type { LocalAgentSessionMode, RunTarget } from "@optio/shared";
 import { db } from "../db/client.js";
 import {
   workflows,
@@ -48,6 +49,11 @@ export async function createWorkflow(input: {
   paramsSchema?: Record<string, unknown>;
   workspaceId?: string;
   createdBy?: string;
+  // Run location — validate with local-run-service.validateRunLocation first.
+  runTarget?: RunTarget;
+  localHostId?: string | null;
+  localDir?: string | null;
+  localSessionMode?: LocalAgentSessionMode | null;
 }) {
   const [workflow] = await db
     .insert(workflows)
@@ -64,6 +70,10 @@ export async function createWorkflow(input: {
       warmPoolSize: input.warmPoolSize ?? 0,
       maxPodInstances: input.maxPodInstances ?? 1,
       maxAgentsPerPod: input.maxAgentsPerPod ?? 2,
+      runTarget: input.runTarget ?? "cluster",
+      localHostId: input.runTarget === "local" ? (input.localHostId ?? null) : null,
+      localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
+      localSessionMode: input.localSessionMode ?? "headless",
       enabled: input.enabled ?? true,
       environmentSpec: input.environmentSpec,
       paramsSchema: input.paramsSchema,
@@ -92,11 +102,23 @@ export async function updateWorkflow(
     enabled?: boolean;
     environmentSpec?: Record<string, unknown> | null;
     paramsSchema?: Record<string, unknown> | null;
+    runTarget?: RunTarget;
+    localHostId?: string | null;
+    localDir?: string | null;
+    localSessionMode?: LocalAgentSessionMode | null;
   },
 ) {
+  const { localSessionMode, ...rest } = input;
   const [workflow] = await db
     .update(workflows)
-    .set({ ...input, updatedAt: new Date() })
+    .set({
+      ...rest,
+      // The column is NOT NULL; a null from a "cluster" location means "back to the default".
+      ...(localSessionMode !== undefined
+        ? { localSessionMode: localSessionMode ?? "headless" }
+        : {}),
+      updatedAt: new Date(),
+    })
     .where(eq(workflows.id, id))
     .returning();
   return workflow ?? null;
@@ -127,6 +149,10 @@ export async function cloneWorkflow(
     warmPoolSize: source.warmPoolSize ?? undefined,
     maxPodInstances: source.maxPodInstances ?? undefined,
     maxAgentsPerPod: source.maxAgentsPerPod ?? undefined,
+    runTarget: source.runTarget,
+    localHostId: source.localHostId,
+    localDir: source.localDir,
+    localSessionMode: source.localSessionMode,
     enabled: false, // clones start disabled
     environmentSpec: (source.environmentSpec as Record<string, unknown>) ?? undefined,
     paramsSchema: (source.paramsSchema as Record<string, unknown>) ?? undefined,
@@ -215,6 +241,10 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     warm_pool_size: number;
     max_pod_instances: number;
     max_agents_per_pod: number;
+    run_target: "cluster" | "local";
+    local_host_id: string | null;
+    local_dir: string | null;
+    local_session_mode: "interactive" | "headless";
     enabled: boolean;
     environment_spec: unknown;
     created_by: string | null;
@@ -244,6 +274,10 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
       w.warm_pool_size,
       w.max_pod_instances,
       w.max_agents_per_pod,
+      w.run_target,
+      w.local_host_id,
+      w.local_dir,
+      w.local_session_mode,
       w.enabled,
       w.environment_spec,
       w.created_by,
@@ -309,6 +343,10 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     warmPoolSize: r.warm_pool_size,
     maxPodInstances: r.max_pod_instances,
     maxAgentsPerPod: r.max_agents_per_pod,
+    runTarget: r.run_target,
+    localHostId: r.local_host_id,
+    localDir: r.local_dir,
+    localSessionMode: r.local_session_mode,
     enabled: r.enabled,
     environmentSpec: r.environment_spec,
     createdBy: r.created_by,
@@ -489,7 +527,100 @@ export async function cancelWorkflowRun(id: string) {
     .returning();
 
   logger.info({ workflowRunId: id }, "Workflow run cancelled");
+
+  // A local run has a live agent on the owner's machine: stop it. Dynamic
+  // import — local-run-service imports this module.
+  if (updated?.localTerminalId) {
+    import("./local-run-service.js")
+      .then(({ killLinkedTerminal }) =>
+        killLinkedTerminal(updated.localTerminalId, "run_cancelled"),
+      )
+      .catch((err) => logger.warn({ err, runId: id }, "Failed to kill local terminal for run"));
+  }
   return updated;
+}
+
+/**
+ * Compare-and-swap state transition for a workflow run: lands only while the
+ * row is still in `from`, so concurrent writers (daemon frames for local
+ * runs, the reconciler, the worker) can't clobber each other. Publishes the
+ * WS state-change event, the outbound webhook, and wakes the reconciler —
+ * the same fan-out as the worker's own transitions. Returns the updated row,
+ * or null when the transition is invalid or someone else moved the run.
+ */
+export async function transitionWorkflowRunCas(
+  runId: string,
+  from: WorkflowRunState,
+  to: WorkflowRunState,
+  fields: Partial<typeof workflowRuns.$inferInsert> = {},
+) {
+  if (!canTransitionWorkflowRun(from, to)) return null;
+  const [row] = await db
+    .update(workflowRuns)
+    .set({ ...fields, state: to, updatedAt: new Date() })
+    .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.state, from)))
+    .returning();
+  if (!row) return null;
+
+  await publishWorkflowRunEvent({
+    type: "workflow_run:state_changed",
+    workflowRunId: runId,
+    workflowId: row.workflowId,
+    fromState: from,
+    toState: to,
+    timestamp: new Date().toISOString(),
+    costUsd: row.costUsd ?? undefined,
+    inputTokens: row.inputTokens ?? undefined,
+    outputTokens: row.outputTokens ?? undefined,
+    modelUsed: row.modelUsed ?? undefined,
+    errorMessage: row.errorMessage ?? undefined,
+  }).catch((err) => logger.warn({ err, runId }, "Failed to publish workflow run event"));
+
+  const webhookEvent = (
+    {
+      [WorkflowRunState.RUNNING]: "workflow_run.started",
+      [WorkflowRunState.COMPLETED]: "workflow_run.completed",
+      [WorkflowRunState.FAILED]: "workflow_run.failed",
+    } as Partial<Record<WorkflowRunState, string>>
+  )[to];
+  if (webhookEvent) {
+    const workflow = await getWorkflow(row.workflowId).catch(() => null);
+    if (workflow) {
+      import("../workers/webhook-worker.js")
+        .then(({ enqueueWebhookEvent }) =>
+          enqueueWebhookEvent(webhookEvent as never, {
+            runId: row.id,
+            workflowId: workflow.id,
+            workflowName: workflow.name,
+            state: row.state,
+            fromState: from,
+            params: row.params ?? null,
+            output: row.output ?? null,
+            costUsd: row.costUsd ?? undefined,
+            inputTokens: row.inputTokens ?? undefined,
+            outputTokens: row.outputTokens ?? undefined,
+            modelUsed: row.modelUsed ?? undefined,
+            errorMessage: row.errorMessage ?? undefined,
+            retryCount: row.retryCount,
+            durationMs:
+              row.startedAt && row.finishedAt
+                ? row.finishedAt.getTime() - row.startedAt.getTime()
+                : undefined,
+            startedAt: row.startedAt?.toISOString() ?? null,
+            finishedAt: row.finishedAt?.toISOString() ?? null,
+          }),
+        )
+        .catch((err) => logger.warn({ err, runId }, "Failed to enqueue workflow run webhook"));
+    }
+  }
+
+  import("./reconcile-queue.js")
+    .then(({ enqueueReconcile }) =>
+      enqueueReconcile({ kind: "standalone", id: runId }, { reason: `transition:${from}->${to}` }),
+    )
+    .catch((err) => logger.warn({ err, runId }, "Failed to enqueue reconcile"));
+
+  return row;
 }
 
 // ── Workflow Run Logs ────────────────────────────────────────────────────────

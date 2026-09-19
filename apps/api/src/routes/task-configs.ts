@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as taskConfigService from "../services/task-config-service.js";
+import { validateRunLocation } from "../services/local-run-service.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
@@ -22,6 +23,15 @@ const TaskConfigSchema = z
     agentType: z.string().nullable(),
     maxRetries: z.number().int(),
     priority: z.number().int(),
+    runTarget: z
+      .enum(["cluster", "local"])
+      .default("cluster")
+      .describe(
+        "Where spawned tasks run: an Optio pod (`cluster`) or the owner's machine (`local`)",
+      ),
+    localHostId: z.string().nullable().optional(),
+    localDir: z.string().nullable().optional(),
+    localSessionMode: z.string().nullable().optional(),
     enabled: z.boolean(),
     createdBy: z.string().nullable(),
     createdAt: flexibleTimestamp,
@@ -45,6 +55,13 @@ const createTaskConfigSchema = z.object({
   maxRetries: z.number().int().min(0).optional(),
   priority: z.number().int().optional(),
   enabled: z.boolean().optional(),
+  runTarget: z
+    .enum(["cluster", "local"])
+    .optional()
+    .describe("Where spawned tasks run: `cluster` (default) or `local` (your paired machine)"),
+  localHostId: z.string().uuid().optional(),
+  localDir: z.string().min(1).max(1000).optional(),
+  localSessionMode: z.enum(["interactive", "headless"]).optional(),
 });
 
 const updateTaskConfigSchema = z.object({
@@ -59,6 +76,10 @@ const updateTaskConfigSchema = z.object({
   maxRetries: z.number().int().min(0).optional(),
   priority: z.number().int().optional(),
   enabled: z.boolean().optional(),
+  runTarget: z.enum(["cluster", "local"]).optional(),
+  localHostId: z.string().uuid().nullable().optional(),
+  localDir: z.string().min(1).max(1000).nullable().optional(),
+  localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
 });
 
 export async function taskConfigRoutes(rawApp: FastifyInstance) {
@@ -102,9 +123,22 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const input = req.body;
+      const location = await validateRunLocation(
+        {
+          runTarget: input.runTarget,
+          localHostId: input.localHostId,
+          localDir: input.localDir,
+          localSessionMode: input.localSessionMode,
+          agentType: input.agentType,
+          repoUrl: input.repoUrl,
+        },
+        req.user?.id,
+      );
+      if (!location.ok) return reply.status(400).send({ error: location.error });
       try {
         const taskConfig = await taskConfigService.createTaskConfig({
           ...input,
+          ...location.location,
           workspaceId: req.user?.workspaceId ?? null,
           createdBy: req.user?.id ?? null,
         });
@@ -175,8 +209,38 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Task config not found" });
       }
 
+      // Re-validate the run location when anything feeding it changes,
+      // merged over the stored row (partial PATCH).
+      const input = req.body;
+      const touchesLocation =
+        input.runTarget !== undefined ||
+        input.localHostId !== undefined ||
+        input.localDir !== undefined ||
+        input.localSessionMode !== undefined ||
+        input.agentType !== undefined ||
+        input.repoUrl !== undefined;
+      let patch: typeof input = input;
+      if (touchesLocation) {
+        const location = await validateRunLocation(
+          {
+            runTarget: input.runTarget ?? existing.runTarget,
+            localHostId: input.localHostId !== undefined ? input.localHostId : existing.localHostId,
+            localDir: input.localDir !== undefined ? input.localDir : existing.localDir,
+            localSessionMode:
+              input.localSessionMode !== undefined
+                ? input.localSessionMode
+                : existing.localSessionMode,
+            agentType: input.agentType !== undefined ? input.agentType : existing.agentType,
+            repoUrl: input.repoUrl ?? existing.repoUrl,
+          },
+          req.user?.id,
+        );
+        if (!location.ok) return reply.status(400).send({ error: location.error });
+        patch = { ...input, ...location.location };
+      }
+
       try {
-        const taskConfig = await taskConfigService.updateTaskConfig(id, req.body);
+        const taskConfig = await taskConfigService.updateTaskConfig(id, patch);
         if (!taskConfig) return reply.status(404).send({ error: "Task config not found" });
         logAction({
           workspaceId: req.user?.workspaceId ?? null,
