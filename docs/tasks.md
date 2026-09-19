@@ -48,9 +48,12 @@ A local run is the same `tasks` / `workflow_runs` row, executed by a `local_term
 through the Optio Local daemon: the workers dispatch it there instead of provisioning a
 pod, and the terminal's lifecycle drives the run (Job `queued → running → completed/failed`;
 Task `queued → provisioning → running → pr_opened | completed | failed`, with the PR
-detected from the agent's output so CI / review / merge tracking work unchanged). Local
-Tasks require a directory that is a checkout of the task's repo; local runs need an agent
-the daemon can launch (Claude Code, Codex, Cursor, Gemini, OpenCode). Columns:
+detected from the agent's output so CI / review / merge tracking work unchanged). The
+location is picked first and decides the rest of "Where": a pod Task picks one of the
+registered repos, while a local Task picks a git checkout on the machine and that checkout's
+remote becomes the task's `repoUrl` (no registered repo needed; the server rejects a
+directory whose detected remote is a different repo). Local runs need an agent the daemon
+can launch (Claude Code, Codex, Cursor, Gemini, OpenCode). Columns:
 `run_target`, `local_host_id`, `local_dir`, `local_session_mode` (`headless` = exit when
 the turn is done, `interactive` = keep the session open) on `tasks`, `task_configs`, and
 `workflows`; `local_terminal_id` on `tasks` and `workflow_runs`. The API accepts

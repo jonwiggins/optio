@@ -99,6 +99,9 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
   });
   const [form, setForm] = useState<TaskConfig | null>(null);
   const [location, setLocation] = useState<RunLocationValue>(runLocationFromRow(null));
+  // On a machine the checkout's git remote is the repo; the picker reports it.
+  const [localRepoUrl, setLocalRepoUrl] = useState<string | null>(null);
+  const isLocal = location.runTarget === "local";
 
   usePageTitle(config?.name ?? "Scheduled Task");
 
@@ -151,7 +154,12 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
   const saveConfig = async () => {
     if (!form) return;
     if (location.runTarget === "local" && (!location.localHostId || !location.localDir)) {
-      toast.error("Pick the machine and directory this task runs in");
+      toast.error("Pick the machine and checkout this task runs in");
+      return;
+    }
+    const repoUrl = isLocal ? localRepoUrl : form.repoUrl;
+    if (!repoUrl) {
+      toast.error(isLocal ? "The chosen directory is not a git checkout" : "Repo URL is required");
       return;
     }
     if (location.runTarget === "local" && form.agentType && !agentRunsLocally(form.agentType)) {
@@ -165,7 +173,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
         description: form.description,
         title: form.title,
         prompt: form.prompt,
-        repoUrl: form.repoUrl,
+        repoUrl,
         repoBranch: form.repoBranch,
         agentType: form.agentType,
         maxRetries: form.maxRetries,
@@ -385,16 +393,27 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
               className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
             />
           </Field>
+          <Field label="Run location">
+            <RunLocationPicker
+              value={location}
+              onChange={setLocation}
+              kind="task"
+              agentType={form.agentType ?? undefined}
+              onRepoUrlChange={setLocalRepoUrl}
+            />
+          </Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Repo URL">
-              <input
-                type="text"
-                value={form.repoUrl}
-                onChange={(e) => setForm({ ...form, repoUrl: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm font-mono"
-              />
-            </Field>
-            <Field label="Branch">
+            {!isLocal && (
+              <Field label="Repo URL">
+                <input
+                  type="text"
+                  value={form.repoUrl}
+                  onChange={(e) => setForm({ ...form, repoUrl: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm font-mono"
+                />
+              </Field>
+            )}
+            <Field label={isLocal ? "Base branch" : "Branch"}>
               <input
                 type="text"
                 value={form.repoBranch}
@@ -403,15 +422,6 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
               />
             </Field>
           </div>
-          <Field label="Run location">
-            <RunLocationPicker
-              value={location}
-              onChange={setLocation}
-              kind="task"
-              agentType={form.agentType ?? undefined}
-              repoUrl={form.repoUrl}
-            />
-          </Field>
           <Field label="Task title template">
             <input
               type="text"

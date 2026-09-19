@@ -4,6 +4,10 @@ import {
   agentRunsLocally,
   runLocationFromRow,
   runLocationPayload,
+  defaultDir,
+  repoUrlFromRemote,
+  shortRepo,
+  usableDir,
 } from "./run-location-picker";
 
 describe("runLocationFromRow", () => {
@@ -71,5 +75,39 @@ describe("agentRunsLocally", () => {
     expect(agentRunsLocally("copilot")).toBe(false);
     expect(agentRunsLocally("openclaw")).toBe(false);
     expect(agentRunsLocally(undefined)).toBe(false);
+  });
+});
+
+describe("local directories", () => {
+  const dirs = [
+    { path: "/home/dev/notes" },
+    { path: "/home/dev/app", repoUrl: "https://github.com/acme/app" },
+  ];
+
+  it("lets a Job use any directory but a Task only a git checkout", () => {
+    expect(usableDir("job", dirs[0])).toBe(true);
+    expect(usableDir("task", dirs[0])).toBe(false);
+    expect(usableDir("task", dirs[1])).toBe(true);
+  });
+
+  it("defaults to the first usable directory, keeping a still-valid choice", () => {
+    expect(defaultDir("job", dirs, "")).toBe("/home/dev/notes");
+    expect(defaultDir("task", dirs, "")).toBe("/home/dev/app");
+    expect(defaultDir("task", dirs, "/home/dev/notes")).toBe("/home/dev/app");
+    expect(defaultDir("job", dirs, "/home/dev/app")).toBe("/home/dev/app");
+    expect(defaultDir("task", [dirs[0]], "")).toBe("");
+  });
+
+  it("turns the daemon's remote into the https repo URL the API accepts", () => {
+    expect(repoUrlFromRemote("git@github.com:acme/app.git")).toBe("https://github.com/acme/app");
+    expect(repoUrlFromRemote("https://github.com/acme/app.git")).toBe(
+      "https://github.com/acme/app",
+    );
+    expect(repoUrlFromRemote(undefined)).toBeNull();
+  });
+
+  it("shortens a remote for display", () => {
+    expect(shortRepo("https://github.com/acme/app.git")).toBe("github.com/acme/app");
+    expect(shortRepo("git@gitlab.com:acme/app.git")).toBe("gitlab.com/acme/app");
   });
 });

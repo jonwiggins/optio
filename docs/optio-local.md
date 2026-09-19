@@ -57,9 +57,11 @@ Run location is a first-class attribute of every **Task**, **Job**, and schedule
 blueprint (`run_target` on `tasks`, `workflows`, `task_configs`): `cluster` (an Optio pod,
 the default) or `local` — a directory on one of your paired hosts. The "Where" section of
 the New Task form, the Job editor, and the scheduled-Task editor all use the same picker
-(`components/run-location-picker.tsx`): choose **Optio pod** or **My machine**, then the
-host, the directory (a Task preselects the checkout whose git remote is the task's repo
-and refuses other checkouts), and **Then** — `headless` (default: `claude -p` etc., the run
+(`components/run-location-picker.tsx`): choose **Optio pod** or **My machine** first — a
+pod Task then picks a registered repo, while on a machine you pick the host and a
+directory (for a Task only git checkouts are offered, and the checkout's detected remote
+becomes the task's repo — there is no separate repo choice) — and **Then** — `headless`
+(default: `claude -p` etc., the run
 finishes when the agent exits) or `interactive` (the agent stays at its prompt; the run
 keeps going until you close the session).
 

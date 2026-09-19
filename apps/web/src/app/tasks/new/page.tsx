@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TriggerSelector, type TriggerConfig, cronIsValid } from "@/components/trigger-selector";
+import { useLocalHosts } from "@/hooks/use-local-hosts";
 import {
   CLUSTER_RUN_LOCATION,
   RunLocationPicker,
@@ -77,10 +78,16 @@ export default function NewTaskPage() {
   });
 
   // Where: an Optio pod, or a directory on one of the user's paired machines.
+  // On a machine the picked checkout decides the repo (its git remote), so a
+  // Task there needs no registered repo at all.
   const [location, setLocation] = useState<RunLocationValue>(CLUSTER_RUN_LOCATION);
+  const [localRepoUrl, setLocalRepoUrl] = useState<string | null>(null);
+  const { hosts: localHosts } = useLocalHosts();
   const isLocal = location.runTarget === "local";
   const localReady = !isLocal || (!!location.localHostId && !!location.localDir);
   const agentOk = !isLocal || agentRunsLocally(form.agentType);
+  const effectiveRepoUrl = isLocal ? localRepoUrl : form.repoUrl;
+  const canRunTask = repos.length > 0 || localHosts.length > 0;
 
   useEffect(() => {
     api
@@ -97,6 +104,14 @@ export default function NewTaskPage() {
       .then((res) => setExistingTasks(res.tasks))
       .catch(() => {});
   }, []);
+
+  // A Task with no registered repos can still run in a checkout on a paired
+  // machine — start there instead of on an empty repo list.
+  useEffect(() => {
+    if (mode === "repo" && !reposLoading && repos.length === 0 && localHosts.length > 0) {
+      setLocation((l) => (l.runTarget === "local" ? l : { ...l, runTarget: "local" }));
+    }
+  }, [mode, reposLoading, repos.length, localHosts.length]);
 
   // When switching into repo mode or loading repos, pre-select the first.
   useEffect(() => {
@@ -160,7 +175,7 @@ export default function NewTaskPage() {
         description: form.description || undefined,
         agentType: form.agentType,
         maxRetries: form.maxRetries,
-        repoUrl: mode === "repo" ? form.repoUrl : undefined,
+        repoUrl: mode === "repo" ? (effectiveRepoUrl ?? undefined) : undefined,
         repoBranch: mode === "repo" ? form.repoBranch : undefined,
         priority: mode === "repo" ? form.priority : undefined,
         ...(selectedDeps.length > 0 && apiType === "repo-task" ? { dependsOn: selectedDeps } : {}),
@@ -221,7 +236,7 @@ export default function NewTaskPage() {
     !loading &&
     form.title &&
     form.prompt &&
-    (mode !== "repo" || form.repoUrl) &&
+    (mode !== "repo" || !!effectiveRepoUrl) &&
     localReady &&
     agentOk;
 
@@ -254,15 +269,15 @@ export default function NewTaskPage() {
               title="Task"
               subtitle="Opens a PR against your repo"
               description="Agent clones a repo, modifies code on a branch, and opens a pull request. Full CI + review pipeline."
-              disabled={repos.length === 0}
+              disabled={!canRunTask}
               disabledHint={
-                repos.length === 0 ? (
+                !canRunTask ? (
                   <>
                     No repos yet —{" "}
                     <a href="/repos" className="text-primary hover:underline">
                       add one
-                    </a>
-                    .
+                    </a>{" "}
+                    or pair a machine with <code className="font-mono">optio local up</code>.
                   </>
                 ) : null
               }
@@ -388,41 +403,37 @@ export default function NewTaskPage() {
           </div>
         )}
 
-        {/* ── Who (agent) ──────────────────────────────────── */}
-        <div>
-          <div className="text-xs uppercase tracking-wider text-text-muted/60 mb-2">Who</div>
-          <label className="block text-sm text-text-muted mb-1.5">Agent</label>
-          <select
-            value={form.agentType}
-            onChange={(e) => setForm((f) => ({ ...f, agentType: e.target.value }))}
-            className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
-          >
-            {AGENTS.map((a) => (
-              <option
-                key={a.value}
-                value={a.value}
-                disabled={isLocal && !agentRunsLocally(a.value)}
-              >
-                {a.label}
-                {isLocal && !agentRunsLocally(a.value) ? " — pods only" : ""}
-              </option>
-            ))}
-          </select>
-          {!agentOk && (
-            <p className="text-xs text-error mt-1">
-              {form.agentType} can't run on your machine — pick another agent or switch back to an
-              Optio pod.
-            </p>
-          )}
-        </div>
-
         {/* ── Where ────────────────────────────────────────────────────── */}
         <div>
           <div className="text-xs uppercase tracking-wider text-text-muted/60 mb-2">Where</div>
           <div className="space-y-3">
+            <RunLocationPicker
+              value={location}
+              onChange={setLocation}
+              kind={mode === "repo" ? "task" : "job"}
+              agentType={form.agentType}
+              onRepoUrlChange={setLocalRepoUrl}
+            />
+
             {mode === "repo" && (
               <div className="p-4 rounded-lg border border-border bg-bg-card/60 space-y-3">
-                {reposLoading ? (
+                {isLocal ? (
+                  <div>
+                    <label className="block text-sm text-text-muted mb-1.5">Base branch</label>
+                    <div className="flex items-center gap-2">
+                      <GitBranchIcon className="w-3.5 h-3.5 text-text-muted" />
+                      <input
+                        type="text"
+                        value={form.repoBranch}
+                        onChange={(e) => setForm((f) => ({ ...f, repoBranch: e.target.value }))}
+                        className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
+                      />
+                    </div>
+                    <p className="text-xs text-text-muted/60 mt-1">
+                      The agent branches off this in your checkout and opens the PR against it.
+                    </p>
+                  </div>
+                ) : reposLoading ? (
                   <div className="flex items-center gap-2 text-text-muted text-sm py-2">
                     <Loader2 className="w-4 h-4 animate-spin" /> Loading repos...
                   </div>
@@ -462,7 +473,7 @@ export default function NewTaskPage() {
                     <a href="/repos" className="text-primary hover:underline">
                       Add a repo
                     </a>{" "}
-                    first, or switch to Job above.
+                    first, pick My machine above, or switch to Job.
                   </div>
                 )}
 
@@ -515,18 +526,35 @@ export default function NewTaskPage() {
                 )}
               </div>
             )}
-
-            <div>
-              <label className="block text-sm text-text-muted mb-1.5">Run location</label>
-              <RunLocationPicker
-                value={location}
-                onChange={setLocation}
-                kind={mode === "repo" ? "task" : "job"}
-                agentType={form.agentType}
-                repoUrl={mode === "repo" ? form.repoUrl : null}
-              />
-            </div>
           </div>
+        </div>
+
+        {/* ── Who (agent) ──────────────────────────────────── */}
+        <div>
+          <div className="text-xs uppercase tracking-wider text-text-muted/60 mb-2">Who</div>
+          <label className="block text-sm text-text-muted mb-1.5">Agent</label>
+          <select
+            value={form.agentType}
+            onChange={(e) => setForm((f) => ({ ...f, agentType: e.target.value }))}
+            className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors"
+          >
+            {AGENTS.map((a) => (
+              <option
+                key={a.value}
+                value={a.value}
+                disabled={isLocal && !agentRunsLocally(a.value)}
+              >
+                {a.label}
+                {isLocal && !agentRunsLocally(a.value) ? " — pods only" : ""}
+              </option>
+            ))}
+          </select>
+          {!agentOk && (
+            <p className="text-xs text-error mt-1">
+              {form.agentType} can't run on your machine — pick another agent or switch back to an
+              Optio pod.
+            </p>
+          )}
         </div>
 
         {/* ── Why ──────────────────────────────────── */}
