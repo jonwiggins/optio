@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { Laptop, Loader2, MessageSquare, Server, Square } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
+import { GitBranch, Laptop, Loader2, MessageSquare, Server, Square } from "lucide-react";
 import { normalizeRepoUrl, toLocalAgentKind } from "@optio/shared";
 import { cn } from "@/lib/utils";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
@@ -11,6 +11,11 @@ import { useLocalHosts } from "@/hooks/use-local-hosts";
  * user's own machines (Optio Local). The same picker backs the New Task
  * form, the Job editor, and the scheduled Task editor, so "run location" is
  * one concept everywhere. Local runs need a paired host (`optio local up`).
+ *
+ * The location decides what else the form asks for. A pod needs a registered
+ * repo (Tasks) or nothing (Jobs); a machine needs a directory — and for a
+ * Task that directory *is* the repo: its git remote, as the daemon detected
+ * it, becomes the task's `repoUrl` (reported through `onRepoUrlChange`).
  */
 
 export type RunTarget = "cluster" | "local";
@@ -77,13 +82,40 @@ export function agentRunsLocally(agentType: string | null | undefined): boolean 
   return toLocalAgentKind(agentType) !== null;
 }
 
-function sameRepo(a: string | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false;
+interface HostDir {
+  path: string;
+  repoUrl?: string;
+}
+
+/** Which of a host's directories a run of this kind can use: Tasks need a git checkout. */
+export function usableDir(kind: "task" | "job", dir: HostDir): boolean {
+  return kind === "job" || !!dir.repoUrl;
+}
+
+/** Pick the directory a freshly selected host should start on, or "" when none fits. */
+export function defaultDir(kind: "task" | "job", dirs: HostDir[], current: string): string {
+  const keep = dirs.find((d) => d.path === current);
+  if (keep && usableDir(kind, keep)) return keep.path;
+  return dirs.find((d) => usableDir(kind, d))?.path ?? "";
+}
+
+/**
+ * The repo a checkout's detected remote names, as the API wants it: the
+ * daemon reports remotes verbatim (often `git@host:owner/repo.git`) and
+ * `POST /api/tasks` validates `repoUrl` as an https URL.
+ */
+export function repoUrlFromRemote(remote: string | undefined): string | null {
+  if (!remote) return null;
   try {
-    return normalizeRepoUrl(a) === normalizeRepoUrl(b);
+    return normalizeRepoUrl(remote);
   } catch {
-    return a === b;
+    return null;
   }
+}
+
+/** `github.com/owner/repo` for display. */
+export function shortRepo(repoUrl: string): string {
+  return (repoUrlFromRemote(repoUrl) ?? repoUrl).replace(/^https:\/\//, "");
 }
 
 export function RunLocationPicker({
@@ -91,17 +123,20 @@ export function RunLocationPicker({
   onChange,
   kind,
   agentType,
-  repoUrl,
+  onRepoUrlChange,
   className,
 }: {
   value: RunLocationValue;
   onChange: (next: RunLocationValue) => void;
-  /** Copy: a Task opens a PR from a checkout; a Job just runs. */
+  /** Copy + directory rules: a Task opens a PR from a checkout; a Job just runs. */
   kind: "task" | "job";
   /** The agent picked elsewhere in the form, to warn when it can't run locally. */
   agentType?: string;
-  /** Tasks: preselect the checkout of this repo and flag other checkouts. */
-  repoUrl?: string | null;
+  /**
+   * Tasks: the git remote of the selected local directory (null on a pod or
+   * when no directory is picked). The parent sends it as the task's repo.
+   */
+  onRepoUrlChange?: (repoUrl: string | null) => void;
   className?: string;
 }) {
   const { hosts, loading } = useLocalHosts();
@@ -109,41 +144,36 @@ export function RunLocationPicker({
     () => hosts.find((h) => h.id === value.localHostId),
     [hosts, value.localHostId],
   );
-  const dirs: Array<{ path: string; repoUrl?: string }> = host?.dirs ?? [];
+  const dirs: HostDir[] = host?.dirs ?? [];
   const isLocal = value.runTarget === "local";
   const noHosts = !loading && hosts.length === 0;
+  const selectedDir = dirs.find((d) => d.path === value.localDir);
+  const localRepoUrl = isLocal ? repoUrlFromRemote(selectedDir?.repoUrl) : null;
 
-  // Adopt a host / directory once the list is known: the first online host,
-  // and for a Task the directory whose git remote is the task's repo.
+  // Adopt a host / directory once the list is known: the first online host
+  // and its first usable directory (a git checkout, for a Task).
   useEffect(() => {
     if (!isLocal || hosts.length === 0) return;
     const pickedHost = hosts.find((h) => h.id === value.localHostId)
       ? value.localHostId
       : (hosts.find((h) => h.state === "online") ?? hosts[0]).id;
-    const hostRow = hosts.find((h) => h.id === pickedHost);
-    const hostDirs: Array<{ path: string; repoUrl?: string }> = hostRow?.dirs ?? [];
-    let pickedDir = hostDirs.some((d) => d.path === value.localDir) ? value.localDir : "";
-    if (
-      !pickedDir ||
-      (repoUrl && !sameRepo(repoUrl, hostDirs.find((d) => d.path === pickedDir)?.repoUrl))
-    ) {
-      const match = repoUrl ? hostDirs.find((d) => sameRepo(repoUrl, d.repoUrl)) : undefined;
-      pickedDir = match?.path ?? (repoUrl ? pickedDir : "") ?? "";
-      if (!pickedDir && !repoUrl) pickedDir = hostDirs[0]?.path ?? "";
-    }
+    const hostDirs: HostDir[] = hosts.find((h) => h.id === pickedHost)?.dirs ?? [];
+    const pickedDir = defaultDir(kind, hostDirs, value.localDir);
     if (pickedHost !== value.localHostId || pickedDir !== value.localDir) {
       onChange({ ...value, localHostId: pickedHost, localDir: pickedDir });
     }
-  }, [isLocal, hosts, repoUrl, value.localHostId, value.localDir]);
+  }, [isLocal, hosts, kind, value.localHostId, value.localDir]);
+
+  // Tell the parent which repo the chosen directory is a checkout of. Kept
+  // behind a ref so an inline callback doesn't re-fire the effect every render.
+  const repoCb = useRef(onRepoUrlChange);
+  repoCb.current = onRepoUrlChange;
+  useEffect(() => {
+    repoCb.current?.(localRepoUrl);
+  }, [localRepoUrl]);
 
   const agentBlocked = isLocal && !!agentType && !agentRunsLocally(agentType);
-  const dirMismatch =
-    isLocal && !!repoUrl && !!value.localDir
-      ? (() => {
-          const d = dirs.find((x) => x.path === value.localDir);
-          return d?.repoUrl && !sameRepo(repoUrl, d.repoUrl) ? d.repoUrl : null;
-        })()
-      : null;
+  const noCheckout = kind === "task" && !!host && dirs.length > 0 && !dirs.some((d) => d.repoUrl);
 
   return (
     <div className={cn("space-y-3", className)}>
@@ -155,7 +185,7 @@ export function RunLocationPicker({
           title="Optio pod"
           description={
             kind === "task"
-              ? "An isolated Kubernetes pod clones the repo into a fresh worktree. Uses the server's agent credentials."
+              ? "An isolated Kubernetes pod clones one of your registered repos into a fresh worktree. Uses the server's agent credentials."
               : "An isolated Kubernetes pod with no repo checkout. Uses the server's agent credentials and Connections."
           }
         />
@@ -166,7 +196,7 @@ export function RunLocationPicker({
           title="My machine"
           description={
             kind === "task"
-              ? "Your own checkout on a paired machine, with your local agent CLI and its login. The agent works on a branch and opens the PR from there."
+              ? "A git checkout on a paired machine, with your local agent CLI and its login. The agent works on a branch there and opens the PR."
               : "A directory on a paired machine, with your local agent CLI and its login. The session shows up under Local too."
           }
           disabled={noHosts}
@@ -209,22 +239,25 @@ export function RunLocationPicker({
               )}
             </div>
             <div>
-              <label className="block text-sm text-text-muted mb-1.5">Directory</label>
+              <label className="block text-sm text-text-muted mb-1.5">
+                {kind === "task" ? "Checkout" : "Directory"}
+              </label>
               <select
                 value={value.localDir}
                 onChange={(e) => onChange({ ...value, localDir: e.target.value })}
                 className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary"
               >
-                {!value.localDir && <option value="">Pick a directory…</option>}
-                {dirs.map((d) => {
-                  const other = !!repoUrl && !!d.repoUrl && !sameRepo(repoUrl, d.repoUrl);
-                  return (
-                    <option key={d.path} value={d.path} disabled={other}>
-                      {d.path}
-                      {other ? " (another repo)" : ""}
-                    </option>
-                  );
-                })}
+                {!value.localDir && (
+                  <option value="">
+                    {kind === "task" ? "Pick a checkout…" : "Pick a directory…"}
+                  </option>
+                )}
+                {dirs.map((d) => (
+                  <option key={d.path} value={d.path} disabled={!usableDir(kind, d)}>
+                    {d.path}
+                    {usableDir(kind, d) ? "" : " (not a git checkout)"}
+                  </option>
+                ))}
               </select>
               {host && dirs.length === 0 && (
                 <p className="text-[11px] text-text-muted/80 mt-1">
@@ -232,18 +265,24 @@ export function RunLocationPicker({
                   <code className="font-mono">optio local add &lt;dir&gt;</code> there.
                 </p>
               )}
-              {kind === "task" && host && dirs.length > 0 && !value.localDir && (
+              {noCheckout && (
                 <p className="text-[11px] text-warning mt-1">
-                  None of this machine's directories is a checkout of the selected repo.
-                </p>
-              )}
-              {dirMismatch && (
-                <p className="text-[11px] text-error mt-1">
-                  This directory is a checkout of {dirMismatch}, not the selected repo.
+                  None of this machine's directories is a git checkout — add one with{" "}
+                  <code className="font-mono">optio local add &lt;repo-dir&gt;</code>.
                 </p>
               )}
             </div>
           </div>
+
+          {kind === "task" && localRepoUrl && (
+            <div className="flex items-center gap-2 text-xs text-text-muted">
+              <GitBranch className="w-3.5 h-3.5 shrink-0 text-primary" />
+              <span>
+                Repository <span className="font-mono text-text">{shortRepo(localRepoUrl)}</span>
+                <span className="text-text-muted/70"> — from the checkout's git remote</span>
+              </span>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm text-text-muted mb-1.5">Then</label>
