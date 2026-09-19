@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -37,6 +37,10 @@ import { type ConnState } from "./conn-state";
 import { TitleEditor } from "./title-editor";
 import { AccountUsagePill, SessionUsageChip } from "./usage-chips";
 import { useTitleFit } from "./use-title-fit";
+import { useLocalTranscript } from "./use-transcript";
+import { TranscriptView } from "./transcript-view";
+import { SessionViewToggle } from "./session-view-toggle";
+import { resolveSessionView, type SessionView } from "./session-view";
 
 const LocalTerminal = dynamic(() => import("./local-terminal").then((m) => m.LocalTerminal), {
   ssr: false,
@@ -102,6 +106,20 @@ export function TerminalPane({
       setStreamSettled(false);
     }
   }, [terminal?.state]);
+  // The conversation behind an agent session (empty for shells and rows
+  // from before transcripts were recorded). A finished session opens on it;
+  // the toggle switches to the recorded screen and back.
+  const [viewChoice, setViewChoice] = useState<SessionView | null>(null);
+  const terminalAlive =
+    terminal != null && terminal.state !== "exited" && terminal.state !== "error";
+  const transcript = useLocalTranscript(terminalId, terminalAlive);
+  // Watching a session end keeps the screen you were watching; only a
+  // session opened after it finished lands on the conversation.
+  const wasAlive = useRef(false);
+  useEffect(() => {
+    if (terminalAlive) wasAlive.current = true;
+    else if (wasAlive.current) setViewChoice((c) => c ?? "screen");
+  }, [terminalAlive]);
   const fit = useTitleFit(!loading && terminal != null);
   const railCollapsed = useRailStore((s) => s.collapsed);
   const bellArmed = useBellStore((s) => s.armed.includes(terminalId));
@@ -293,6 +311,15 @@ export function TerminalPane({
     (terminal.spec.agent === "claude-code" || terminal.spec.agent === "codex") &&
     !!terminal.agentSessionId;
   const links = collectWorkLinks(terminal);
+  const hasTranscript = transcript.entries.length > 0;
+  const view = resolveSessionView(viewChoice, {
+    isDead,
+    hasTranscript,
+    loaded: transcript.loaded,
+  });
+  const viewToggle = hasTranscript && view && (
+    <SessionViewToggle view={view} onChange={setViewChoice} />
+  );
 
   const layoutToggle = chrome.paneCount > 1 && (
     <div
@@ -517,7 +544,7 @@ export function TerminalPane({
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>
-        <StatusDot terminal={terminal} conn={conn} />
+        <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
         <div
           ref={fit.rowRef}
           className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
@@ -552,6 +579,7 @@ export function TerminalPane({
           <span className="hidden @4xl:inline-flex">
             <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
           </span>
+          {viewToggle}
           {bellButton}
           {layoutToggle}
           {actions}
@@ -559,7 +587,7 @@ export function TerminalPane({
       </div>
     ) : (
       <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-border bg-bg">
-        <StatusDot terminal={terminal} conn={conn} />
+        <StatusDot terminal={terminal} conn={view === "screen" ? conn : undefined} />
         <div
           ref={fit.rowRef}
           className="relative flex items-center gap-2 min-w-0 flex-1 overflow-hidden"
@@ -585,6 +613,7 @@ export function TerminalPane({
           className="ml-auto flex items-center gap-1 shrink-0"
           onClick={(e) => e.stopPropagation()}
         >
+          {viewToggle}
           {bellButton}
           {canKill && (
             <button
@@ -629,14 +658,25 @@ export function TerminalPane({
         </div>
       )}
       <div className="flex-1 min-h-0 flex flex-col">
-        {/* A finished terminal replays the screen the daemon recorded at exit
+        {/* A finished agent session opens on its conversation (see
+            resolveSessionView); the branches below are the screen view.
+            A finished terminal replays the screen the daemon recorded at exit
             into the xterm, at the grid it ran at, so it reads the way it did
             live. Only when the stream has ended without a byte — a row from
             before screens were recorded — does the persisted text preview
             (the last lines of output) take the terminal's place, full height,
             so "review the result" still has a result. Never stack the two:
             that squeezes the xterm into a few unreadable rows. */}
-        {isDead && streamSettled && !streamedOutput && terminal.preview ? (
+        {view === null ? (
+          <div className="flex-1 min-h-0 bg-[#09090b] flex items-center justify-center text-text-muted text-sm">
+            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            Loading session…
+          </div>
+        ) : view === "transcript" ? (
+          <div className="flex-1 min-h-0">
+            <TranscriptView entries={transcript.entries} live={!isDead} />
+          </div>
+        ) : isDead && streamSettled && !streamedOutput && terminal.preview ? (
           <div className="flex-1 min-h-0 flex flex-col bg-[#09090b] px-4 py-3">
             <div className="shrink-0 text-[10px] uppercase tracking-wide text-text-muted mb-1.5">
               Last output

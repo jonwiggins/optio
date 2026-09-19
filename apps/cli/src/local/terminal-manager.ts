@@ -122,7 +122,13 @@ export class TerminalManager {
         // zsh: route dotfiles through the wrapper so rc files that prepend
         // their own bins (~/.local/bin, asdf shims) can't bury the shim.
         if (this.opts.zdotDir && basename(shell) === "zsh") {
-          env.OPTIO_USER_ZDOTDIR = env.ZDOTDIR || env.HOME || os.homedir();
+          // A daemon started from inside an Optio terminal inherits that
+          // terminal's wrapper as ZDOTDIR; handing it on as the "user"
+          // dotdir would make the wrapper source itself forever ("job table
+          // full or recursion limit exceeded"). The wrapper records the real
+          // one in OPTIO_USER_ZDOTDIR, so that wins when present.
+          env.OPTIO_USER_ZDOTDIR =
+            env.OPTIO_USER_ZDOTDIR || env.ZDOTDIR || env.HOME || os.homedir();
           env.ZDOTDIR = this.opts.zdotDir;
         }
       }

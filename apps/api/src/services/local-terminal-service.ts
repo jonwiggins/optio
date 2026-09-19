@@ -7,13 +7,19 @@
  * for the DB row and publishes content-free nudges + browser status frames on
  * every transition.
  */
-import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
   LOCAL_DEFAULT_COLS,
   LOCAL_DEFAULT_ROWS,
   LOCAL_LAUNCH_TIMEOUT_MS,
+  LOCAL_TRANSCRIPT_DETAIL_MAX,
+  LOCAL_TRANSCRIPT_MAX_ENTRIES,
+  LOCAL_TRANSCRIPT_TEXT_MAX,
   MAX_WORK_LINKS,
   type WorkLink,
+  type LocalTranscriptEntry,
+  type LocalTranscriptKind,
+  type LocalTranscriptRole,
   type LocalAttentionState,
   type LocalDaemonTerminalSync,
   type LocalSpawnSource,
@@ -21,7 +27,7 @@ import {
   type LocalTerminalUsage,
 } from "@optio/shared";
 import { db } from "../db/client.js";
-import { localTerminalSnapshots, localTerminals } from "../db/schema.js";
+import { localTerminalSnapshots, localTerminalTranscripts, localTerminals } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { publishLocalChanged } from "./event-bus.js";
 import { isAuthDisabled } from "./oauth/index.js";
@@ -584,6 +590,130 @@ export async function getSnapshot(terminalId: string): Promise<LocalTerminalSnap
     .from(localTerminalSnapshots)
     .where(eq(localTerminalSnapshots.terminalId, terminalId));
   return row ?? null;
+}
+
+const TRANSCRIPT_ROLES = new Set<LocalTranscriptRole>(["user", "assistant", "tool"]);
+const TRANSCRIPT_KINDS = new Set<LocalTranscriptKind>([
+  "text",
+  "thinking",
+  "tool_use",
+  "tool_result",
+]);
+/** Largest batch accepted in one `transcript` frame (the daemon sends 40). */
+const MAX_TRANSCRIPT_BATCH = 500;
+
+/** Validate a daemon-supplied transcript batch: known roles / kinds, bounded text, integer seqs. */
+export function sanitizeTranscriptEntries(input: unknown): LocalTranscriptEntry[] {
+  if (!Array.isArray(input)) return [];
+  const out: LocalTranscriptEntry[] = [];
+  const seen = new Set<number>();
+  for (const raw of input) {
+    if (!raw || typeof raw !== "object") continue;
+    const e = raw as Record<string, unknown>;
+    if (
+      !Number.isInteger(e.seq) ||
+      (e.seq as number) < 1 ||
+      (e.seq as number) > LOCAL_TRANSCRIPT_MAX_ENTRIES ||
+      seen.has(e.seq as number) ||
+      !TRANSCRIPT_ROLES.has(e.role as LocalTranscriptRole) ||
+      !TRANSCRIPT_KINDS.has(e.kind as LocalTranscriptKind) ||
+      typeof e.text !== "string"
+    ) {
+      continue;
+    }
+    seen.add(e.seq as number);
+    const at = typeof e.at === "string" ? new Date(e.at) : null;
+    out.push({
+      seq: e.seq as number,
+      role: e.role as LocalTranscriptRole,
+      kind: e.kind as LocalTranscriptKind,
+      text: e.text.slice(0, LOCAL_TRANSCRIPT_TEXT_MAX),
+      detail: typeof e.detail === "string" ? e.detail.slice(0, LOCAL_TRANSCRIPT_DETAIL_MAX) : null,
+      toolName: typeof e.toolName === "string" ? e.toolName.slice(0, 100) : null,
+      toolUseId: typeof e.toolUseId === "string" ? e.toolUseId.slice(0, 200) : null,
+      isError: e.isError === true,
+      at: at && !isNaN(at.getTime()) ? at.toISOString() : null,
+    });
+    if (out.length >= MAX_TRANSCRIPT_BATCH) break;
+  }
+  return out;
+}
+
+/**
+ * The daemon read new conversation entries from the agent's transcript.
+ * Only the owning host may write, and only while the row is live (or in
+ * the same breath as its exit — the final flush precedes `exit` on the
+ * socket, so the row is still running when it lands). Keyed by seq, so a
+ * batch the daemon re-sends after a reconnect is a no-op.
+ */
+export async function handleTranscript(
+  hostId: string,
+  terminalId: string,
+  entries: unknown,
+): Promise<number> {
+  const clean = sanitizeTranscriptEntries(entries);
+  if (clean.length === 0) return 0;
+  const row = await getTerminal(terminalId);
+  if (!row || row.hostId !== hostId) return 0;
+  if (row.state !== "running" && row.state !== "launching") return 0;
+  const inserted = await db
+    .insert(localTerminalTranscripts)
+    .values(
+      clean.map((e) => ({
+        terminalId,
+        seq: e.seq,
+        role: e.role,
+        kind: e.kind,
+        text: e.text,
+        detail: e.detail,
+        toolName: e.toolName,
+        toolUseId: e.toolUseId,
+        isError: e.isError,
+        at: e.at ? new Date(e.at) : null,
+      })),
+    )
+    .onConflictDoNothing()
+    .returning({ seq: localTerminalTranscripts.seq });
+  return inserted.length;
+}
+
+/** The stored conversation of a terminal, in order, optionally only entries after `afterSeq`. */
+export async function getTranscript(
+  terminalId: string,
+  afterSeq = 0,
+  limit = 2000,
+): Promise<LocalTranscriptEntry[]> {
+  const rows = await db
+    .select()
+    .from(localTerminalTranscripts)
+    .where(
+      and(
+        eq(localTerminalTranscripts.terminalId, terminalId),
+        gt(localTerminalTranscripts.seq, afterSeq),
+      ),
+    )
+    .orderBy(asc(localTerminalTranscripts.seq))
+    .limit(limit);
+  return rows.map((r) => ({
+    seq: r.seq,
+    role: r.role as LocalTranscriptRole,
+    kind: r.kind as LocalTranscriptKind,
+    text: r.text,
+    detail: r.detail,
+    toolName: r.toolName,
+    toolUseId: r.toolUseId,
+    isError: r.isError,
+    at: r.at ? r.at.toISOString() : null,
+  }));
+}
+
+/** How many transcript entries a terminal has (0 = no conversation recorded). */
+export async function countTranscript(terminalId: string): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(localTerminalTranscripts)
+    .where(eq(localTerminalTranscripts.terminalId, terminalId));
+  return row?.n ?? 0;
 }
 
 const LINK_KINDS = new Set(["pr", "issue", "ref"]);

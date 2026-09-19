@@ -4,6 +4,7 @@ import WebSocket from "ws";
 import type {
   LocalAttentionState,
   LocalDaemonMessage,
+  LocalTranscriptEntry,
   LocalHost,
   LocalHostAgentLimits,
   LocalHostDir,
@@ -23,6 +24,7 @@ import {
   writeZshDotDir,
 } from "./hook-server.js";
 import { UsageTracker } from "./usage-tracker.js";
+import { TranscriptTracker } from "./transcript-tracker.js";
 import { readAgentLimits } from "./codex-limits.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
 
@@ -39,6 +41,13 @@ const PING_INTERVAL_MS = 30_000;
 const AGENT_LIMITS_INTERVAL_MS = 3 * 60_000;
 const BACKOFF_INITIAL_MS = 1000;
 const BACKOFF_MAX_MS = 30_000;
+// How often a running agent's transcript is re-read between hook events, so
+// the conversation view keeps up mid-turn (a turn can be many tool calls
+// long; hooks only fire at its edges). A size check when nothing changed.
+const TRANSCRIPT_POLL_MS = 3000;
+// Entries per `transcript` frame — keeps each frame far under the server's
+// 1 MB limit even when every entry is at its text cap.
+const TRANSCRIPT_BATCH = 40;
 const SHUTDOWN_FLUSH_MS = 200;
 
 interface RememberedAttention {
@@ -85,6 +94,31 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
   };
 
   const usage = new UsageTracker();
+  const transcript = new TranscriptTracker();
+
+  const sendRaw = (msg: LocalDaemonMessage): boolean => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    try {
+      ws.send(JSON.stringify(msg));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** Ship a terminal's new transcript entries, batched. */
+  const sendTranscript = (terminalId: string, entries: LocalTranscriptEntry[]): void => {
+    for (let i = 0; i < entries.length; i += TRANSCRIPT_BATCH) {
+      sendRaw({ type: "transcript", terminalId, entries: entries.slice(i, i + TRANSCRIPT_BATCH) });
+    }
+  };
+
+  /** Re-read a terminal's transcript (when known) and ship what's new. */
+  const flushTranscript = (terminalId: string): void => {
+    const path = transcript.paths().find(([id]) => id === terminalId)?.[1];
+    if (!path) return;
+    sendTranscript(terminalId, transcript.update(terminalId, path));
+  };
 
   // One outbound path: drop while disconnected (don't queue), EXCEPT
   // attention state, which is remembered and re-sent after the next hello.
@@ -98,13 +132,13 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
     } else if (msg.type === "exit") {
       attentionByTerminal.delete(msg.terminalId);
       usage.remove(msg.terminalId);
+      // The last turn's lines land in the transcript right before the
+      // process exits; read them once more so the stored conversation is
+      // complete, ahead of the `exit` on the same socket.
+      flushTranscript(msg.terminalId);
+      transcript.remove(msg.terminalId);
     }
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    try {
-      ws.send(JSON.stringify(msg));
-    } catch {
-      return;
-    }
+    if (!sendRaw(msg)) return;
     if (msg.type === "attention") {
       const entry = attentionByTerminal.get(msg.terminalId);
       if (entry) entry.acked = true;
@@ -154,8 +188,21 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
     if (payload.transcriptPath) {
       const next = usage.update(terminalId, payload.transcriptPath);
       if (next) send({ type: "usage", terminalId, usage: next });
+      sendTranscript(terminalId, transcript.update(terminalId, payload.transcriptPath));
     }
   });
+
+  // Between hooks, keep the conversation view current for live sessions.
+  const transcriptTimer = setInterval(() => {
+    for (const [terminalId, path] of transcript.paths()) {
+      if (!manager.has(terminalId)) {
+        transcript.remove(terminalId);
+        continue;
+      }
+      sendTranscript(terminalId, transcript.update(terminalId, path));
+    }
+  }, TRANSCRIPT_POLL_MS);
+  transcriptTimer.unref();
 
   function handleServerMessage(msg: LocalServerMessage): void {
     switch (msg.type) {
@@ -290,6 +337,7 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
   const shutdown = (): void => {
     if (shuttingDown) return;
     shuttingDown = true;
+    clearInterval(transcriptTimer);
     status(yellow("shutting down — killing terminals"));
     manager.killAll();
     try {

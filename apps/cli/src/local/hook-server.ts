@@ -130,7 +130,13 @@ real=""
 old_ifs=$IFS; IFS=:
 for d in $PATH; do
   [ "$d" = "$shim_dir" ] && continue
-  if [ -x "$d/claude" ] && [ ! -d "$d/claude" ]; then real="$d/claude"; break; fi
+  if [ -x "$d/claude" ] && [ ! -d "$d/claude" ]; then
+    # Another daemon's shim (a daemon started inside an Optio terminal
+    # inherits the outer one on PATH): two shims would exec each other
+    # forever. Skip anything carrying the marker line above.
+    if head -n 3 "$d/claude" 2>/dev/null | grep -q "Optio Local shim"; then continue; fi
+    real="$d/claude"; break
+  fi
 done
 IFS=$old_ifs
 if [ -z "$real" ]; then
