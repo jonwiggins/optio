@@ -1212,3 +1212,72 @@ describe("secret-service", () => {
     });
   });
 });
+
+// ── substituteSecretPlaceholders ────────────────────────────────────────────
+
+describe("substituteSecretPlaceholders", () => {
+  let substituteSecretPlaceholders: typeof import("./secret-service.js").substituteSecretPlaceholders;
+
+  beforeEach(async () => {
+    const mod = await import("./secret-service.js");
+    substituteSecretPlaceholders = mod.substituteSecretPlaceholders;
+  });
+
+  it("substitutes {env:NAME} placeholders in setup file content with literal values", () => {
+    const files = [
+      {
+        path: "/home/agent/.config/opencode/opencode.json",
+        content: JSON.stringify({
+          provider: { litellm: { options: { apiKey: "{env:OPENAI_API_KEY}" } } },
+        }),
+      },
+    ];
+    substituteSecretPlaceholders(files, { OPENAI_API_KEY: "sk-test-1234" });
+    expect(files[0].content).toContain("sk-test-1234");
+    expect(files[0].content).not.toContain("{env:OPENAI_API_KEY}");
+  });
+
+  it("replaces every occurrence of the same placeholder", () => {
+    const files = [
+      {
+        path: "config.json",
+        content: '{"a":"{env:FOO}","b":"{env:FOO}","c":"{env:BAR}"}',
+      },
+    ];
+    substituteSecretPlaceholders(files, { FOO: "v1", BAR: "v2" });
+    expect(files[0].content).toBe('{"a":"v1","b":"v1","c":"v2"}');
+  });
+
+  it("leaves placeholders for unknown names untouched", () => {
+    const files = [
+      { path: "config.json", content: '{"apiKey":"{env:UNKNOWN_KEY}","x":"{env:FOO}"}' },
+    ];
+    substituteSecretPlaceholders(files, { FOO: "v1" });
+    expect(files[0].content).toBe('{"apiKey":"{env:UNKNOWN_KEY}","x":"v1"}');
+  });
+
+  it("leaves placeholders untouched when the resolved value is empty (fail-visible)", () => {
+    const files = [{ path: "config.json", content: '{"apiKey":"{env:EMPTY_KEY}"}' }];
+    substituteSecretPlaceholders(files, { EMPTY_KEY: "" });
+    expect(files[0].content).toBe('{"apiKey":"{env:EMPTY_KEY}"}');
+  });
+
+  it("does not touch contentBase64-only files", () => {
+    const files = [{ path: "binary.bin", contentBase64: "aGVsbG8=", executable: true } as any];
+    substituteSecretPlaceholders(files, { OPENAI_API_KEY: "sk-x" });
+    expect(files[0].contentBase64).toBe("aGVsbG8=");
+    expect((files[0] as any).content).toBeUndefined();
+  });
+
+  it("is a no-op for files without content", () => {
+    const files = [{ path: "dir" } as any];
+    substituteSecretPlaceholders(files, { OPENAI_API_KEY: "sk-x" });
+    expect((files[0] as any).content).toBeUndefined();
+  });
+
+  it("handles empty secretValues map (no-op)", () => {
+    const files = [{ path: "c.json", content: '{"apiKey":"{env:OPENAI_API_KEY}"}' }];
+    substituteSecretPlaceholders(files, {});
+    expect(files[0].content).toBe('{"apiKey":"{env:OPENAI_API_KEY}"}');
+  });
+});

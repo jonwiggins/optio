@@ -161,7 +161,7 @@ function buildAgentCommand(
         : "";
       return [
         `echo "[optio] Running persistent agent turn (OpenCode)..."`,
-        `opencode run --format json${modelFlag} "$OPTIO_PROMPT"`,
+        `opencode run --format json${modelFlag} "$OPTIO_PROMPT" < /dev/null`,
       ];
     }
     case "gemini": {

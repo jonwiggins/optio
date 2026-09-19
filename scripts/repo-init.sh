@@ -109,6 +109,33 @@ if [ -n "${OPTIO_EXTRA_PACKAGES:-}" ]; then
   sudo apt-get update -qq 2>/dev/null && sudo apt-get install -y -qq ${PACKAGES} 2>&1 | tail -3 || echo "[optio] Warning: package install failed"
 fi
 
+# Pre-install npm packages (e.g. opencode provider plugins) into
+# ~/.config/opencode before the first task; best-effort, warns on failure.
+if [ -n "${OPTIO_NPM_PREINSTALL:-}" ]; then
+  echo "[optio] Pre-installing npm packages: ${OPTIO_NPM_PREINSTALL}"
+  mkdir -p ~/.config/opencode
+  cd ~/.config/opencode
+  if [ ! -f package.json ]; then
+    printf '{"name":"optio-agent","private":true}\n' > package.json
+  fi
+  # npm cache on local disk — only node_modules writes hit the home volume.
+  export npm_config_cache=/tmp/npm-cache
+  PREINSTALL_OK=0
+  for attempt in 1 2 3; do
+    if npm install --no-audit --no-fund $(echo "${OPTIO_NPM_PREINSTALL}" | tr ',' ' '); then
+      PREINSTALL_OK=1
+      break
+    fi
+    echo "[optio] npm preinstall failed (attempt ${attempt}/3), retrying in 5s..." >&2
+    sleep 5
+  done
+  if [ "${PREINSTALL_OK}" -eq 0 ]; then
+    echo "[optio] Warning: npm preinstall failed after 3 attempts — agent may install plugins at runtime" >&2
+  else
+    echo "[optio] npm preinstall complete"
+  fi
+fi
+
 # Clone repo (--recurse-submodules handles repos with submodules)
 cd /workspace
 echo "[optio] Cloning..."

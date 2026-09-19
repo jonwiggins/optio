@@ -141,6 +141,10 @@ agent:
       repository: envoyproxy/envoy
       tag: v1.31-latest
       pullPolicy: IfNotPresent
+  # npm packages pre-installed by repo-init.sh into ~/.config/opencode before
+  # the first task (e.g. opencode provider plugins). Comma-joined into OPTIO_NPM_PREINSTALL.
+  preinstallNpmPackages:
+    - "@ai-sdk/openai-compatible"
   # PVC template for repo pod home directories.
   # These PVCs are created dynamically by the API server (one per repo pod
   # instance), but this template controls the storage class and default size.

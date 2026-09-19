@@ -2,6 +2,94 @@ import type { AgentTaskInput, AgentContainerConfig, AgentResult } from "@optio/s
 import { TASK_BRANCH_PREFIX } from "@optio/shared";
 import type { AgentAdapter } from "./types.js";
 
+interface OpenCodeConfig {
+  $schema: string;
+  model?: string;
+  provider?: {
+    litellm?: {
+      npm: string;
+      name: string;
+      options: {
+        baseURL: string;
+        apiKey: string;
+      };
+      models: Record<string, { name: string }>;
+    };
+  };
+  permission?: Record<string, string | Record<string, string>>;
+}
+
+export const OPENCODE_WORKSPACE_GUARD_PLUGIN = `export const OptioWorkspaceGuard = async ({ directory, worktree }) => {
+  const workspace = directory || worktree || process.cwd();
+  const home = process.env.HOME || "/home/agent";
+  const roots = [
+    workspace.endsWith("/") ? workspace : workspace + "/",
+    home + "/.local/share/opencode/",
+    "/dev/",
+  ];
+  const HINT =
+    "Blocked: path outside the workspace. Stay inside the workspace (Im Workspace bleiben) — write temp files, caches and venvs inside the worktree (e.g. ./.tmp/) instead of /tmp or $HOME.";
+  const HOME_RE = /^(~|\\$HOME)(?=\\/|$)/;
+  const ABS_RE = /(^|[\\s'"(=])(\\/(?:[^\\s'"\\x60\\\\:,;)]|\\*|\\?)+)/g;
+
+  const expand = (p) => p.replace(HOME_RE, home);
+  const isAllowed = (p) => roots.some((r) => p.startsWith(r));
+
+  const offendingPath = (tool, args) => {
+    if (!args || typeof args !== "object") return null;
+    if (["webfetch", "websearch", "task", "skill", "lsp", "question"].includes(tool)) return null;
+    const values = Object.values(args).filter((v) => typeof v === "string");
+    for (const value of values) {
+      const candidates =
+        tool === "bash"
+          ? value.split(/[\\s;|&><()]+/).filter(Boolean)
+          : [value.trim()];
+      for (const token of candidates) {
+        const expanded = expand(token);
+        if (expanded.startsWith("/") && !roots.some((r) => expanded.startsWith(r))) return token;
+        const matches = [...expanded.matchAll(ABS_RE)].map((m) => m[2]);
+        const bad = matches.find((p) => !roots.some((r) => expand(p).startsWith(r)));
+        if (bad) return bad;
+      }
+    }
+    return null;
+  };
+
+  return {
+    "tool.execute.before": async (input, output) => {
+      const bad = offendingPath(input.tool, output.args);
+      if (bad) {
+        throw new Error(HINT + " (tool: " + input.tool + ", path: " + bad + ")");
+      }
+    },
+  };
+};
+`;
+
+export const OPENCODE_GLOBAL_AGENTS_MD = `# Optio Runtime Rules (headless, mandatory)
+
+You are a coding agent launched headless by the Optio orchestrator inside an isolated Kubernetes pod. Your current working directory is your workspace (the git worktree for this task).
+
+## Workspace confinement — absolute rules
+
+- Stay inside the workspace. Never read, write, create, or execute anything outside it.
+- Never use /tmp, /var, /usr, /opt, /etc or \$HOME paths for any file or tool call.
+- Create temporary files, caches, and virtual environments INSIDE the workspace (e.g. \`./.tmp/\`), and clean them up before finishing.
+- No sudo, no system package installs (apt-get), no global pip/npm installs. If tooling is missing, work with what is available inside the workspace.
+- When a tool call is blocked with a workspace-boundary error, do NOT retry the same external path — switch to an in-workspace path.
+
+## Headless mode
+
+- You run non-interactively (opencode run). Asking the user questions is impossible — never attempt it.
+- If something is ambiguous, state your assumption and proceed.
+- Never wait for interactive input; there is none.
+
+## Focus
+
+- Work only on the task described in the task file (.optio/task.md).
+- Commit your work to the task branch and open a PR as described in the task instructions.
+`;
+
 /**
  * OpenCode CLI (opencode run --format json) outputs NDJSON events.
  * Each line is a JSON object. The exact schema is not fully documented,
@@ -54,15 +142,70 @@ export class OpenCodeAdapter implements AgentAdapter {
     // When using a custom base URL, provider API keys are optional — the adapter
     // sets a placeholder OPENAI_API_KEY in env that will be overridden if a real
     // secret exists. Without a custom base URL, require standard provider keys.
-    if (!input.opencodeBaseUrl) {
-      requiredSecrets.push("ANTHROPIC_API_KEY", "OPENAI_API_KEY");
-    }
+    // Full "litellm/<model>" name routes to the provider; only the models map key uses the bare name.
+    const isLitellm =
+      input.opencodeModel?.startsWith("litellm/") === true ||
+      input.opencodeDefaultModel?.startsWith("litellm/") === true;
+
+    const fullModel = input.opencodeModel ?? input.opencodeDefaultModel;
+    const proxyModel = isLitellm ? fullModel?.replace(/^litellm\//, "") : undefined;
+
+    const config: OpenCodeConfig = {
+      $schema: "https://opencode.ai/config.json",
+      permission: {
+        "*": "allow",
+        question: "deny",
+        bash: {
+          "sudo *": "deny",
+          "apt *": "deny",
+          "apt-get *": "deny",
+          "dpkg *": "deny",
+        },
+        external_directory: {
+          "*": "deny",
+          "/home/agent/.local/share/opencode/**": "allow",
+        },
+      },
+    };
 
     const setupFiles: AgentContainerConfig["setupFiles"] = [];
 
-    // Set model if configured (e.g. "anthropic/claude-sonnet-4")
-    if (input.opencodeModel) {
-      env.OPTIO_OPENCODE_MODEL = input.opencodeModel;
+    if (isLitellm) {
+      requiredSecrets.push("OPENAI_API_KEY");
+      env.OPENAI_API_KEY = "sk-no-key-required";
+      if (input.opencodeBaseUrl) {
+        if (fullModel) {
+          config.model = fullModel;
+          env.OPENCODE_MODEL = fullModel;
+        }
+        config.provider = {
+          litellm: {
+            npm: "@ai-sdk/openai-compatible",
+            name: "LiteLLM Proxy",
+            options: {
+              baseURL: input.opencodeBaseUrl,
+              // Rendered to the literal value by the API workers — opencode
+              // does not resolve {env:VAR} in provider options (#27853).
+              apiKey: "{env:OPENAI_API_KEY}",
+            },
+            models: proxyModel
+              ? {
+                  [proxyModel]: {
+                    name: proxyModel,
+                  },
+                }
+              : {},
+          },
+        };
+      }
+    } else if (!input.opencodeBaseUrl) {
+      requiredSecrets.push("ANTHROPIC_API_KEY", "OPENAI_API_KEY");
+    }
+
+    // opencodeModel (repo-specific) always wins over opencodeDefaultModel (global secret)
+    if (fullModel) {
+      env.OPENCODE_MODEL = fullModel;
+      env.OPTIO_OPENCODE_MODEL = fullModel;
     }
     // Set named agent if configured (e.g. "build", "plan")
     if (input.opencodeAgent) {
@@ -70,7 +213,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
 
     // Custom OpenAI-compatible endpoint (e.g. vLLM, lightllm, Ollama)
-    if (input.opencodeBaseUrl) {
+    if (input.opencodeBaseUrl && !isLitellm) {
       env.OPENAI_BASE_URL = input.opencodeBaseUrl;
       // Local endpoints typically don't require a real API key — set a
       // placeholder that gets overridden if a real secret is configured.
@@ -80,7 +223,17 @@ export class OpenCodeAdapter implements AgentAdapter {
     // Pre-seed a minimal opencode config so the CLI doesn't hit first-run setup
     setupFiles.push({
       path: "/home/agent/.config/opencode/opencode.json",
-      content: JSON.stringify({ $schema: "https://opencode.ai/config.json" }),
+      content: JSON.stringify(config),
+    });
+
+    setupFiles.push({
+      path: "/home/agent/.config/opencode/plugins/optio-workspace-guard.js",
+      content: OPENCODE_WORKSPACE_GUARD_PLUGIN,
+    });
+
+    setupFiles.push({
+      path: "/home/agent/.config/opencode/AGENTS.md",
+      content: OPENCODE_GLOBAL_AGENTS_MD,
     });
 
     // Write the task file into the worktree

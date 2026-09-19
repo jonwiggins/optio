@@ -274,4 +274,98 @@ describe("parseOpenCodeEvent", () => {
       expect(costEntry?.metadata?.cost).toBe(0.0231);
     });
   });
+
+  describe("opencode 1.14.20 run --format json events (real captured shapes)", () => {
+    // Shapes captured verbatim from opencode 1.14.20 run --format json in a repo pod.
+    const sessionId = "ses_f75374e09ffepLY1K38ctZscdd";
+
+    it("captures sessionId from the camelCase sessionID field on step_start", () => {
+      const line = JSON.stringify({
+        type: "step_start",
+        timestamp: 1789035522262,
+        sessionID: sessionId,
+        part: { id: "prt_1", messageID: "msg_1", sessionID: sessionId, type: "step-start" },
+      });
+      const result = parseOpenCodeEvent(line, TASK_ID);
+      expect(result.sessionId).toBe(sessionId);
+    });
+
+    it("parses a text event (part.text) into a text entry", () => {
+      const line = JSON.stringify({
+        type: "text",
+        timestamp: 1789035522709,
+        sessionID: sessionId,
+        part: {
+          id: "prt_2",
+          messageID: "msg_1",
+          sessionID: sessionId,
+          type: "text",
+          text: "PR created: https://github.com/ulbi/helm-iot/pull/771",
+        },
+      });
+      const result = parseOpenCodeEvent(line, TASK_ID);
+      const textEntry = result.entries.find((e) => e.type === "text");
+      expect(textEntry).toBeDefined();
+      expect(textEntry?.content).toContain("PR created");
+      expect(result.sessionId).toBe(sessionId);
+    });
+
+    it("parses a step_finish event with tokens and cost into an info entry", () => {
+      const line = JSON.stringify({
+        type: "step_finish",
+        timestamp: 1789035522720,
+        sessionID: sessionId,
+        part: {
+          id: "prt_3",
+          type: "step-finish",
+          reason: "stop",
+          tokens: {
+            total: 14866,
+            input: 14856,
+            output: 10,
+            reasoning: 0,
+            cache: { write: 0, read: 0 },
+          },
+          cost: 0,
+        },
+      });
+      const result = parseOpenCodeEvent(line, TASK_ID);
+      const infoEntry = result.entries.find((e) => e.type === "info");
+      expect(infoEntry).toBeDefined();
+      expect(infoEntry?.metadata?.inputTokens).toBe(14856);
+      expect(infoEntry?.metadata?.outputTokens).toBe(10);
+      expect(infoEntry?.metadata?.totalTokens).toBe(14866);
+      expect(result.sessionId).toBe(sessionId);
+    });
+
+    it("parses a reasoning event into a thinking entry", () => {
+      const line = JSON.stringify({
+        type: "reasoning",
+        sessionID: sessionId,
+        part: { type: "reasoning", text: "Plan: read the repo layout first" },
+      });
+      const result = parseOpenCodeEvent(line, TASK_ID);
+      const thinkEntry = result.entries.find((e) => e.type === "thinking");
+      expect(thinkEntry).toBeDefined();
+      expect(thinkEntry?.content).toContain("repo layout");
+      expect(result.sessionId).toBe(sessionId);
+    });
+
+    it("parses a tool event (part.tool with state.input) into a tool_use entry", () => {
+      const line = JSON.stringify({
+        type: "tool",
+        sessionID: sessionId,
+        part: {
+          type: "tool",
+          tool: "bash",
+          state: { status: "pending", input: { command: "git add README.md" } },
+        },
+      });
+      const result = parseOpenCodeEvent(line, TASK_ID);
+      const toolEntry = result.entries.find((e) => e.type === "tool_use");
+      expect(toolEntry).toBeDefined();
+      expect(toolEntry?.metadata?.toolName).toBe("bash");
+      expect(result.sessionId).toBe(sessionId);
+    });
+  });
 });

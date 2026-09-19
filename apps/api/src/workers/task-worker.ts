@@ -41,6 +41,7 @@ import {
   resolveSecretsForTask,
   resolveSecretsForSetup,
   retrieveSecretWithFallback,
+  substituteSecretPlaceholders,
 } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
@@ -605,13 +606,6 @@ export function startTaskWorker() {
           }
         }
 
-        // Encode setup files
-        if (agentConfig.setupFiles && agentConfig.setupFiles.length > 0) {
-          agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(
-            JSON.stringify(agentConfig.setupFiles),
-          ).toString("base64");
-        }
-
         // Resolve secrets (workspace → repo-scoped → global fallback)
         // Only require GITHUB_TOKEN when GitHub App auth is not configured
         const secretNames = [
@@ -627,6 +621,15 @@ export function startTaskWorker() {
           taskWorkspaceId,
           taskUserId,
         );
+
+        // Substitute secret placeholders BEFORE base64-encoding (order matters).
+        if (agentConfig.setupFiles && agentConfig.setupFiles.length > 0) {
+          substituteSecretPlaceholders(agentConfig.setupFiles, resolvedSecrets);
+          agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(
+            JSON.stringify(agentConfig.setupFiles),
+          ).toString("base64");
+        }
+
         const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
 
         // Resolve git platform tokens (not part of adapter requiredSecrets since they're infra-level)
@@ -744,6 +747,10 @@ export function startTaskWorker() {
             : {}),
           ...(allEnv.OPTIO_SETUP_COMMANDS
             ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
+            : {}),
+          // Pre-installed by repo-init.sh (helm: agent.preinstallNpmPackages).
+          ...(process.env.OPTIO_NPM_PREINSTALL
+            ? { OPTIO_NPM_PREINSTALL: process.env.OPTIO_NPM_PREINSTALL }
             : {}),
         };
 
@@ -1887,7 +1894,7 @@ export function buildAgentCommand(
         : "";
       return [
         `echo "[optio] Running OpenCode (experimental)..."`,
-        `opencode run --format json${modelFlag}${agentFlag}${resumeFlag} "$OPTIO_PROMPT"`,
+        `opencode run --format json --dangerously-skip-permissions${modelFlag}${agentFlag}${resumeFlag} "$OPTIO_PROMPT" < /dev/null`,
       ];
     }
     case "gemini": {

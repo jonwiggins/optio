@@ -204,6 +204,20 @@ describe("buildAgentCommand", () => {
       expect(cmds.some((c) => c.includes("--format json"))).toBe(true);
     });
 
+    it("runs with --dangerously-skip-permissions so permission asks never hang the run", () => {
+      const env = { OPTIO_PROMPT: "Fix the bug" };
+      const cmds = buildAgentCommand("opencode", env);
+      const cmd = cmds.find((c) => c.includes("opencode run"));
+      expect(cmd).toContain("--dangerously-skip-permissions");
+    });
+
+    it("redirects opencode stdin from /dev/null so run-mode stdin reads get EOF", () => {
+      const env = { OPTIO_PROMPT: "Fix the bug" };
+      const cmds = buildAgentCommand("opencode", env);
+      const cmd = cmds.find((c) => c.includes("opencode run"));
+      expect(cmd).toContain("< /dev/null");
+    });
+
     it("includes experimental label in echo", () => {
       const env = { OPTIO_PROMPT: "Fix the bug" };
       const cmds = buildAgentCommand("opencode", env);

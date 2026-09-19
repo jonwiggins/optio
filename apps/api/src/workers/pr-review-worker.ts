@@ -41,6 +41,7 @@ import {
   resolveSecretsForTask,
   resolveSecretsForSetup,
   retrieveSecretWithFallback,
+  substituteSecretPlaceholders,
 } from "../services/secret-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
@@ -420,12 +421,6 @@ export function startPrReviewWorker() {
           }
         }
 
-        if (agentConfig.setupFiles && agentConfig.setupFiles.length > 0) {
-          agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(
-            JSON.stringify(agentConfig.setupFiles),
-          ).toString("base64");
-        }
-
         // ── Secrets ───────────────────────────────────────────────
         const secretNames = [
           ...new Set([
@@ -439,6 +434,15 @@ export function startPrReviewWorker() {
           workspaceId,
           userId,
         );
+
+        // Substitute secret placeholders BEFORE base64-encoding (order matters).
+        if (agentConfig.setupFiles && agentConfig.setupFiles.length > 0) {
+          substituteSecretPlaceholders(agentConfig.setupFiles, resolvedSecrets);
+          agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(
+            JSON.stringify(agentConfig.setupFiles),
+          ).toString("base64");
+        }
+
         const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
 
         for (const secretName of ["GITHUB_TOKEN", "GITLAB_TOKEN", "GITLAB_HOST"]) {
@@ -496,6 +500,10 @@ export function startPrReviewWorker() {
             : {}),
           ...(allEnv.OPTIO_SETUP_COMMANDS
             ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
+            : {}),
+          // Pre-installed by repo-init.sh (helm: agent.preinstallNpmPackages).
+          ...(process.env.OPTIO_NPM_PREINSTALL
+            ? { OPTIO_NPM_PREINSTALL: process.env.OPTIO_NPM_PREINSTALL }
             : {}),
         };
         const setupSecrets = await resolveSecretsForSetup(review.repoUrl, workspaceId);

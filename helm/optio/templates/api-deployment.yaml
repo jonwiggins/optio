@@ -111,6 +111,8 @@ spec:
             {{- end }}
             - name: OPTIO_STATEFULSET_ENABLED
               value: {{ .Values.agent.statefulSet.enabled | quote }}
+            - name: OPTIO_NPM_PREINSTALL
+              value: {{ join "," .Values.agent.preinstallNpmPackages | quote }}
             - name: OPTIO_ROOTLESS
               value: {{ .Values.agent.rootless | default false | quote }}
             - name: OPTIO_TERMINATION_GRACE_PERIOD_SECONDS

@@ -39,8 +39,84 @@ export function parseOpenCodeEvent(
   const timestamp = new Date().toISOString();
   const entries: AgentLogEntry[] = [];
 
-  // Extract session/conversation ID if present
-  const sessionId = (event.session_id ?? event.id ?? event.conversation_id) as string | undefined;
+  // opencode >=1.14 uses camelCase sessionID; older builds snake_case session_id.
+  const sessionId = (event.sessionID ??
+    event.session_id ??
+    event.part?.sessionID ??
+    event.part?.session_id ??
+    event.id ??
+    event.conversation_id) as string | undefined;
+
+  // ── opencode >=1.14 stream-json events: payload lives in event.part ──
+  const part = event.part as Record<string, any> | undefined;
+  if (part) {
+    const partType = part.type as string | undefined;
+
+    if (partType === "step-start") {
+      // Bookkeeping only — nothing user-visible to log.
+      return { entries, sessionId };
+    }
+
+    if (partType === "text") {
+      const content = typeof part.text === "string" ? part.text : "";
+      if (content.trim()) {
+        entries.push({ taskId, timestamp, sessionId, type: "text", content });
+      }
+      return { entries, sessionId };
+    }
+
+    if (partType === "reasoning") {
+      const content = typeof part.text === "string" ? part.text : "";
+      if (content.trim()) {
+        entries.push({ taskId, timestamp, sessionId, type: "thinking", content });
+      }
+      return { entries, sessionId };
+    }
+
+    if (partType === "tool") {
+      const args = parseArgs(part.state?.input);
+      const formatted = formatToolUse(part.tool, args);
+      entries.push({
+        taskId,
+        timestamp,
+        sessionId,
+        type: "tool_use",
+        content: formatted,
+        metadata: { toolName: part.tool, toolInput: args, toolUseId: part.callID ?? part.call_id },
+      });
+      return { entries, sessionId };
+    }
+
+    if (partType === "step-finish") {
+      const tokens = part.tokens as { total?: number; input?: number; output?: number } | undefined;
+      const cost = part.cost;
+      const meta: string[] = [];
+      if (tokens?.input) meta.push(`${tokens.input} input tokens`);
+      if (tokens?.output) meta.push(`${tokens.output} output tokens`);
+      if (typeof cost === "number") meta.push(`$${cost.toFixed(4)}`);
+      if (meta.length) {
+        entries.push({
+          taskId,
+          timestamp,
+          sessionId,
+          type: "info",
+          content: `Usage: ${meta.join(" · ")}`,
+          metadata: {
+            inputTokens: tokens?.input ?? 0,
+            outputTokens: tokens?.output ?? 0,
+            totalTokens: tokens?.total,
+            cost: typeof cost === "number" ? cost : undefined,
+          },
+        });
+      }
+      return { entries, sessionId };
+    }
+
+    // Unknown part type — skip but keep the sessionId.
+    return { entries, sessionId };
+  }
+
+  // Legacy (pre-1.14) shape.
 
   // System message or init
   if (event.type === "message" && event.role === "system") {

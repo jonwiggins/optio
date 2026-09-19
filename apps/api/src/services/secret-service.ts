@@ -484,3 +484,32 @@ export async function resolveSecretsForSetup(
   // Resolve with repo→global fallback (no userId — setup is pod-level, not user-level)
   return resolveSecretsForTask(safeNames, repoUrl, workspaceId);
 }
+
+/**
+ * Substitute `{env:NAME}` placeholders inside agent setup file contents with
+ * literal secret values, mutating the files in place.
+ *
+ * Needed because opencode does not resolve `{env:VAR}` in provider options
+ * (anomalyco/opencode#27853): requests went out without an Authorization
+ * header and were rejected with 401.
+ *
+ * SECURITY trade-off: decrypted secret values end up in OPTIO_SETUP_FILES
+ * pod env and in plaintext on the pod volume.
+ *
+ * Empty values are never substituted so a misconfigured secret fails visibly
+ * (placeholder remains) instead of silently producing an empty API key.
+ * Files that carry `contentBase64` (binary payloads) are left untouched.
+ */
+export function substituteSecretPlaceholders(
+  setupFiles: NonNullable<import("@optio/shared").AgentContainerConfig["setupFiles"]>,
+  secretValues: Record<string, string>,
+): void {
+  if (!setupFiles?.length || !secretValues) return;
+  for (const file of setupFiles) {
+    if (typeof file.content !== "string") continue;
+    for (const [name, value] of Object.entries(secretValues)) {
+      if (!value) continue;
+      file.content = file.content.replaceAll(`{env:${name}}`, value);
+    }
+  }
+}
