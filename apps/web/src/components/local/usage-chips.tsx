@@ -22,6 +22,8 @@ interface AccountUsage {
   available: boolean;
   fiveHour?: Bucket;
   sevenDay?: Bucket;
+  /** Per-model 7-day limits (Fable, …): separate caps from the account-wide 7-day. */
+  sevenDayModels?: Array<Bucket & { model: string }>;
   error?: string;
   /** Last good numbers, served because the latest upstream read failed. */
   stale?: boolean;
@@ -111,6 +113,21 @@ export function resetsIn(resetsAt: string | null, now = Date.now()): string | nu
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+/**
+ * The limits worth a header slot, labelled: 5h, 7d, then one "7d <Model>"
+ * per model-scoped weekly cap (Fable) — those are the ones that lock a
+ * model while the account-wide numbers still look fine.
+ */
+export function accountBuckets(usage: AccountUsage): Array<[string, Bucket]> {
+  const buckets: Array<[string, Bucket]> = [];
+  if (usage.fiveHour?.utilization != null) buckets.push(["5h", usage.fiveHour]);
+  if (usage.sevenDay?.utilization != null) buckets.push(["7d", usage.sevenDay]);
+  for (const m of usage.sevenDayModels ?? []) {
+    if (m.utilization != null) buckets.push([`7d ${m.model}`, m]);
+  }
+  return buckets;
+}
+
 function Meter({ label, bucket }: { label: string; bucket: Bucket }) {
   const pct = Math.max(0, Math.min(100, Math.round(bucket.utilization ?? 0)));
   return (
@@ -135,9 +152,7 @@ export function AccountUsagePill({
   const usage = useAccountUsage();
   const [refreshing, setRefreshing] = useState(false);
   if (!usage || !usage.available) return null;
-  const buckets: Array<[string, Bucket]> = [];
-  if (usage.fiveHour?.utilization != null) buckets.push(["5h", usage.fiveHour]);
-  if (usage.sevenDay?.utilization != null) buckets.push(["7d", usage.sevenDay]);
+  const buckets = accountBuckets(usage);
   if (buckets.length === 0) return null;
   const worst = Math.max(...buckets.map(([, b]) => b.utilization ?? 0));
   const onRefresh = async () => {
@@ -171,7 +186,13 @@ export function AccountUsagePill({
         return (
           <span key={l} className="block">
             <HoverRow
-              label={l === "5h" ? "5-hour window" : "7-day window"}
+              label={
+                l === "5h"
+                  ? "5-hour window"
+                  : l === "7d"
+                    ? "7-day window"
+                    : `7-day ${l.slice(3)} window`
+              }
               value={<span className={pctTone(pct)}>{pct}%</span>}
             />
             {r && (

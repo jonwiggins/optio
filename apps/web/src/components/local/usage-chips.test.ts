@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pctTone, resetsIn } from "./usage-chips";
+import { accountBuckets, pctTone, resetsIn } from "./usage-chips";
 import { formatTokens, formatUsd, priceForModel, costForTokens } from "@optio/shared";
 
 describe("usage chips", () => {
@@ -39,5 +39,19 @@ describe("usage chips", () => {
         p,
       ),
     ).toBe(2);
+  });
+
+  it("lists 5h, 7d, then each per-model weekly cap", () => {
+    expect(
+      accountBuckets({
+        available: true,
+        fiveHour: { utilization: 26, resetsAt: null },
+        sevenDay: { utilization: 50, resetsAt: null },
+        sevenDayModels: [
+          { model: "Fable", utilization: 98, resetsAt: null },
+          { model: "Nimbus", utilization: null, resetsAt: null },
+        ],
+      }).map(([label, b]) => `${label}=${b.utilization}`),
+    ).toEqual(["5h=26", "7d=50", "7d Fable=98"]);
   });
 });
