@@ -3828,6 +3828,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case session(SessionPayload)
     case agentLimits(AgentLimitsPayload)
     case size(SizePayload)
+    case snapshot(SnapshotPayload)
     case exit(ExitPayload)
     case ping
     /// Fallback for discriminator values this client does not know about yet.
@@ -4048,6 +4049,27 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct SnapshotPayload: Codable, Hashable, Sendable {
+        public let terminalId: String
+        public let dataB64: String
+        public let cols: Double
+        public let rows: Double
+
+        private enum CodingKeys: String, CodingKey {
+            case terminalId = "terminalId"
+            case dataB64 = "dataB64"
+            case cols = "cols"
+            case rows = "rows"
+        }
+
+        public init(terminalId: String, dataB64: String, cols: Double, rows: Double) {
+            self.terminalId = terminalId
+            self.dataB64 = dataB64
+            self.cols = cols
+            self.rows = rows
+        }
+    }
+
     public struct ExitPayload: Codable, Hashable, Sendable {
         public let terminalId: String
         public let exitCode: Double?
@@ -4084,6 +4106,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case "session": self = .session(try SessionPayload(from: decoder))
         case "agent-limits": self = .agentLimits(try AgentLimitsPayload(from: decoder))
         case "size": self = .size(try SizePayload(from: decoder))
+        case "snapshot": self = .snapshot(try SnapshotPayload(from: decoder))
         case "exit": self = .exit(try ExitPayload(from: decoder))
         case "ping": self = .ping
         default: self = .unknown(try AnyCodable(from: decoder))
@@ -4143,6 +4166,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case .size(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("size", forKey: .type)
+            try payload.encode(to: encoder)
+        case .snapshot(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("snapshot", forKey: .type)
             try payload.encode(to: encoder)
         case .exit(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)

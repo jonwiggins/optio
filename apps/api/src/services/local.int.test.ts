@@ -23,9 +23,11 @@ import {
   createTerminal,
   deleteTerminal,
   flushParkedTerminals,
+  getSnapshot,
   getTerminal,
   handleAttention,
   handleExit,
+  handleSnapshot,
   handleLinks,
   handleSession,
   handleUsage,
@@ -46,6 +48,8 @@ import {
   spawnFromBlueprint,
 } from "./local-blueprint-service.js";
 import { fireLocalEventTriggers, normalizeGitHubEvent } from "./local-event-service.js";
+import { createNamedTemplate } from "./prompt-template-service.js";
+import { insertRepo, insertWorkspace } from "../test-utils/integration/fixtures.js";
 
 class FakeDaemonSocket implements relay.RelaySocket {
   readyState = 1;
@@ -357,6 +361,75 @@ describe("local terminals", () => {
   });
 });
 
+describe("local terminal snapshots", () => {
+  async function runningTerminal(host: Awaited<ReturnType<typeof makeHost>>) {
+    relay.registerDaemon(host.id, null, new FakeDaemonSocket());
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "command", command: "make test" },
+    });
+    await handleStarted(host.id, t.id);
+    return t;
+  }
+
+  it("records the final screen from the owning host while the terminal is live", async () => {
+    const host = await makeHost();
+    const t = await runningTerminal(host);
+    const screen = Buffer.from("\x1b[2J\x1b[H$ make test\r\nok\r\n");
+
+    expect(await handleSnapshot(host.id, t.id, screen.toString("base64"), 132, 40)).toBe(true);
+    await handleExit(host.id, t.id, 0);
+
+    const snap = await getSnapshot(t.id);
+    expect(snap?.cols).toBe(132);
+    expect(snap?.rows).toBe(40);
+    expect(Buffer.from(snap!.data).equals(screen)).toBe(true);
+    // The terminal row itself stays lean — no screen bytes ride on it.
+    expect(Object.keys((await getTerminal(t.id))!)).not.toContain("data");
+  });
+
+  it("ignores snapshots from another host, after exit, or with bad input", async () => {
+    const host = await makeHost();
+    const other = await makeHost();
+    const t = await runningTerminal(host);
+    const b64 = Buffer.from("hello").toString("base64");
+
+    expect(await handleSnapshot(other.id, t.id, b64, 80, 24)).toBe(false);
+    expect(await handleSnapshot(host.id, t.id, "", 80, 24)).toBe(false);
+    expect(await handleSnapshot(host.id, t.id, b64, 0, 24)).toBe(false);
+    expect(await handleSnapshot(host.id, t.id, b64, 80, 1.5)).toBe(false);
+    expect(await getSnapshot(t.id)).toBeNull();
+
+    await handleExit(host.id, t.id, 0);
+    // A late frame from a stale daemon can't rewrite a finished row's screen.
+    expect(await handleSnapshot(host.id, t.id, b64, 80, 24)).toBe(false);
+    expect(await getSnapshot(t.id)).toBeNull();
+  });
+
+  it("clamps oversize grids and drops screens over the byte cap", async () => {
+    const host = await makeHost();
+    const t = await runningTerminal(host);
+    const big = Buffer.alloc(1024 * 1024 + 1, 0x41).toString("base64");
+    expect(await handleSnapshot(host.id, t.id, big, 80, 24)).toBe(false);
+
+    const b64 = Buffer.from("x").toString("base64");
+    expect(await handleSnapshot(host.id, t.id, b64, 5000, 5000)).toBe(true);
+    expect(await getSnapshot(t.id)).toMatchObject({ cols: 1000, rows: 1000 });
+  });
+
+  it("goes away with the terminal", async () => {
+    const host = await makeHost();
+    const t = await runningTerminal(host);
+    await handleSnapshot(host.id, t.id, Buffer.from("bye").toString("base64"), 80, 24);
+    await handleExit(host.id, t.id, 0);
+    await deleteTerminal((await getTerminal(t.id))!);
+    expect(await getSnapshot(t.id)).toBeNull();
+  });
+});
+
 describe("local terminal links", () => {
   it("persists sanitized daemon links, scoped to the owning host", async () => {
     const host = await makeHost();
@@ -584,9 +657,13 @@ describe("local automations (event triggers + session modes)", () => {
     expect(
       resolveBlueprintDir({ dir: null, repoUrl: null }, host, "https://github.com/acme/optio"),
     ).toBe("/home/dev/optio");
-    expect(resolveBlueprintDir({ dir: null, repoUrl: null }, host, "https://github.com/x/y")).toBe(
-      "/home/dev/optio",
-    );
+    // An event about a repo the host doesn't have must not run in some other
+    // checkout — null is an error, not a fallback.
+    expect(
+      resolveBlueprintDir({ dir: null, repoUrl: null }, host, "https://github.com/x/y"),
+    ).toBeNull();
+    // Only repo-less spawns (Slack, manual) fall back to the first folder.
+    expect(resolveBlueprintDir({ dir: null, repoUrl: null }, host)).toBe("/home/dev/optio");
     // A pinned repo the host doesn't have is an error, not a silent fallback.
     expect(resolveBlueprintDir({ dir: null, repoUrl: "https://github.com/x/y" }, host)).toBeNull();
   });
@@ -651,6 +728,135 @@ describe("local automations (event triggers + session modes)", () => {
       "Review https://github.com/acme/optio/pull/7 (acme/optio #7) on feat/x",
     );
     expect(terminal?.command).toContain("claude -p");
+  });
+
+  it("renders a linked saved prompt instead of the inline template", async () => {
+    const host = await makeHost();
+    relay.registerDaemon(host.id, null, new FakeDaemonSocket());
+    const saved = await createNamedTemplate({
+      name: `it-prompt-${Math.random().toString(36).slice(2, 8)}`,
+      template: "Saved: implement {{identifier}}{{#if commentBody}} — note: {{commentBody}}{{/if}}",
+    });
+    const blueprint = await createBlueprint({
+      userId: null,
+      workspaceId: null,
+      name: `auto-saved-${Math.random().toString(36).slice(2, 8)}`,
+      hostId: host.id,
+      agent: "claude-code",
+      commandTemplate: "",
+      promptTemplateId: saved.id,
+    });
+    const terminal = await spawnFromBlueprint(blueprint, {
+      params: { identifier: "ENG-1", commentBody: "" },
+    });
+    expect((terminal.spec as { prompt: string }).prompt).toBe("Saved: implement ENG-1");
+  });
+
+  it("decides {{#if}} on raw values in command mode, so an empty param drops the block", async () => {
+    const host = await makeHost();
+    relay.registerDaemon(host.id, null, new FakeDaemonSocket());
+    const blueprint = await createBlueprint({
+      userId: null,
+      workspaceId: null,
+      name: `auto-if-${Math.random().toString(36).slice(2, 8)}`,
+      hostId: host.id,
+      commandTemplate: "run {{a}}{{#if b}} --with {{b}}{{/if}}",
+    });
+    const empty = await spawnFromBlueprint(blueprint, { params: { a: "x", b: "" } });
+    expect((empty.spec as { command: string }).command).toBe("run 'x'");
+    const full = await spawnFromBlueprint(blueprint, { params: { a: "x", b: "y z" } });
+    expect((full.spec as { command: string }).command).toBe("run 'x' --with 'y z'");
+  });
+
+  it("refuses to spawn on a host that belongs to another user", async () => {
+    const [owner, other] = await db
+      .insert(users)
+      .values(
+        ["owner", "other"].map((n) => ({
+          provider: "github",
+          externalId: `it-${n}-${Math.random()}`,
+          email: `${n}@example.com`,
+          displayName: n,
+        })),
+      )
+      .returning();
+    const host = await registerHost({
+      userId: owner.id,
+      workspaceId: null,
+      hostname: `it-host-${Math.random().toString(36).slice(2, 8)}`,
+      platform: "darwin",
+      arch: "arm64",
+      daemonVersion: "0.1.0",
+      dirs: DIRS,
+    });
+    relay.registerDaemon(host.id, owner.id, new FakeDaemonSocket());
+    const blueprint = await createBlueprint({
+      userId: other.id,
+      workspaceId: null,
+      name: `auto-steal-${Math.random().toString(36).slice(2, 8)}`,
+      hostId: host.id,
+      commandTemplate: "id",
+    });
+    await expect(spawnFromBlueprint(blueprint)).rejects.toThrow(/another user/);
+  });
+
+  it("does not fire a registered repo's events into another workspace's automations", async () => {
+    const wsA = await insertWorkspace();
+    const wsB = await insertWorkspace();
+    const repoUrl = `https://github.com/acme/scoped-${Math.random().toString(36).slice(2, 8)}`;
+    await insertRepo({
+      repoUrl,
+      fullName: repoUrl.replace("https://github.com/", ""),
+      workspaceId: wsA.id,
+    });
+    const host = await registerHost({
+      userId: null,
+      workspaceId: null,
+      hostname: `it-host-${Math.random().toString(36).slice(2, 8)}`,
+      platform: "darwin",
+      arch: "arm64",
+      daemonVersion: "0.1.0",
+      dirs: [{ path: "/home/dev/scoped", repoUrl }],
+    });
+    relay.registerDaemon(host.id, null, new FakeDaemonSocket());
+    // wsA owns the repo, wsB must not hear about it, and a workspace-less
+    // (auth-disabled) blueprint is unscoped and still fires.
+    for (const ws of [wsA, wsB, null]) {
+      const bp = await createBlueprint({
+        userId: null,
+        workspaceId: ws?.id ?? null,
+        name: `auto-ws-${ws?.id.slice(0, 8) ?? "unscoped"}-${Math.random().toString(36).slice(2, 6)}`,
+        hostId: host.id,
+        agent: "claude-code",
+        commandTemplate: "Review {{url}}",
+      });
+      await createBlueprintTrigger({
+        blueprintId: bp.id,
+        type: "github",
+        config: { events: ["pr_opened"] },
+      });
+    }
+    const fired = await fireLocalEventTriggers(
+      "github",
+      normalizeGitHubEvent("pull_request", {
+        action: "opened",
+        repository: { full_name: repoUrl.replace("https://github.com/", ""), html_url: repoUrl },
+        pull_request: {
+          number: 1,
+          title: "t",
+          body: "",
+          html_url: `${repoUrl}/pull/1`,
+          user: { login: "alice" },
+          head: { ref: "f" },
+          base: { ref: "main" },
+        },
+      })!,
+    );
+    expect(fired).toHaveLength(2);
+    const workspaces = await Promise.all(
+      fired.map(async (f) => (await getTerminal(f.terminalId))?.workspaceId ?? null),
+    );
+    expect(workspaces.sort()).toEqual([wsA.id, null].sort());
   });
 
   it("records the agent session id, lands headless exits as done, and resumes as a new terminal", async () => {

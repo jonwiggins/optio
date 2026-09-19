@@ -3,7 +3,9 @@
  * (/ws/local/terminals/:id/stream).
  *
  * Server → client: binary frames are raw terminal bytes (scrollback replay
- * first, then live); JSON text frames are control (status / exit / error).
+ * first, then live); JSON text frames are control (status / size / exit /
+ * error). An exited terminal gets its recorded final screen instead of a
+ * live attach: `size` (the grid it ran at), the screen bytes, then `exit`.
  * Client → server: JSON only — {type:"input",data} | {type:"resize",cols,rows}.
  * JSON-only input eliminates the "pasted JSON swallowed as control" bug the
  * legacy session terminal protocol has.
@@ -23,7 +25,7 @@ import {
   WS_CLOSE_MESSAGE_TOO_LARGE,
 } from "./ws-limits.js";
 import * as relay from "../services/local-relay.js";
-import { canAccessTerminal, getTerminal } from "../services/local-terminal-service.js";
+import { canAccessTerminal, getSnapshot, getTerminal } from "../services/local-terminal-service.js";
 
 export async function localTerminalStreamWs(app: FastifyInstance) {
   app.get("/ws/local/terminals/:terminalId/stream", { websocket: true }, async (socket, req) => {
@@ -76,6 +78,15 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
         socket.send(JSON.stringify({ type: "error", message: "Host is offline" }));
       }
     } else if (terminal.state === "exited" || terminal.state === "error") {
+      // Scrollback died with the PTY; replay the screen the daemon recorded
+      // at exit, announcing its grid first so the viewer lays it out at the
+      // size it was drawn for. Older rows have no snapshot and get only the
+      // exit frame (the pane shows its text preview instead).
+      const snapshot = await getSnapshot(terminal.id);
+      if (snapshot) {
+        socket.send(JSON.stringify({ type: "size", cols: snapshot.cols, rows: snapshot.rows }));
+        socket.send(snapshot.data, { binary: true });
+      }
       socket.send(JSON.stringify({ type: "exit", exitCode: terminal.exitCode }));
     }
 

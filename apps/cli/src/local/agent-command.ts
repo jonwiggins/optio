@@ -25,7 +25,10 @@ export function buildAgentCommand(
 ): string {
   const headless = opts.mode === "headless" && !opts.resumeSessionId;
   const resume = opts.resumeSessionId ? shellQuote(opts.resumeSessionId) : null;
-  const p = prompt ? shellQuote(prompt) : null;
+  // A prompt that starts with "-" (a template that opens with an event param,
+  // and a PR comment reading "--dangerously-skip-permissions …") would parse as
+  // a CLI flag. A leading space keeps it a positional for every CLI here.
+  const p = prompt ? shellQuote(prompt.startsWith("-") ? ` ${prompt}` : prompt) : null;
   switch (agent) {
     case "claude-code": {
       const base = `claude --settings ${shellQuote(hookSettingsPath)}`;

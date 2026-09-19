@@ -24,7 +24,9 @@ secrets to your machine.
 - **Automation** (`local_blueprints`; "blueprint" in the API and code) — "when X happens,
   run this agent on my machine". Who (`agent`: `claude-code` / `codex` / `cursor` /
   `gemini` / `opencode`, or null for a plain shell command), What (`commandTemplate`,
-  rendered with `{{param}}` substitution — the agent's prompt, or the shell command), Where
+  rendered with `{{param}}` substitution — the agent's prompt, or the shell command; or
+  `promptTemplateId`, a saved prompt from the Prompts library that replaces it, so one
+  reviewed "review this PR" prompt can back many automations), Where
   (`hostId` / `dir` / `repoUrl`, all optional — see dir resolution below), When (triggers)
   and Then (`sessionMode`). Triggers are rows in `workflow_triggers` with
   `target_type = "local_blueprint"`: the generic `manual` / `schedule` / `webhook` / `ticket`
@@ -79,9 +81,19 @@ issue (`ticket_*` columns) so the session shows the badge.
 
 **Dir resolution** (`resolveBlueprintDir`): the automation's `dir` → the host dir whose git
 remote matches its `repoUrl` → the dir matching the _event's_ repo (a GitHub PR's
-repository) → the host's first allowlisted dir. A pinned `repoUrl` the host doesn't have
-is an error, not a fallback. So "Where: the event's repo" makes one PR-review automation
-cover every repo you have checked out.
+repository) → the host's first allowlisted dir, but only when the spawn names no repo at
+all (Slack, manual). A repo the host doesn't have — pinned or from the event — is an error,
+not a fallback: "review acme/api#12" must never run inside an unrelated checkout. So
+"Where: the event's repo" makes one PR-review automation cover every repo you have
+checked out, and skips the ones you don't.
+
+**Scoping and replay**: a GitHub event about a repo registered in Optio only reaches
+automations in that repo's workspace (or workspace-less ones, i.e. auth-disabled dev),
+whatever `login` they claim. Deliveries are
+de-duplicated in-process by id (`X-GitHub-Delivery`, Slack `event_id`, Linear
+type+action+entity+timestamp) so provider retries don't fire twice. An automation's
+pinned `hostId` must be the caller's own host — checked on create/update and again at
+spawn.
 
 Slack notes: subscribe the app to `message.channels` (plain messages) and/or
 `app_mention` (`mentionOnly` triggers listen to the latter only, so an @-mention never
@@ -151,7 +163,13 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   `terminalId`. Browsers never connect to the daemon; the daemon never accepts inbound
   connections (its hook server binds 127.0.0.1 only).
 - Scrollback lives in the daemon (512 KB ring per terminal). The DB stores only metadata
-  plus a throttled ANSI-stripped `preview` (last ~12 lines) for the wall view.
+  plus a throttled ANSI-stripped `preview` (last ~12 lines) for the wall view — and, once
+  a terminal exits, its **final screen**: the daemon sends the ring's tail (≤384 KB, raw
+  bytes) plus the PTY grid right before `exit`, stored in `local_terminal_snapshots`
+  (own table, so terminal rows and list responses stay lean; cascades on delete). Opening
+  an exited terminal replays it into the xterm at the recorded grid, so a finished session
+  reads the way it ran instead of as a text preview; the preview is the fallback for rows
+  recorded before snapshots existed.
 - Live UI updates: content-free nudges `{type:"local:changed", terminalId, hostId, userId}`
   on the shared `/ws/events` stream (that stream is visible to all authenticated users, so
   no terminal content may ever be published there); clients refetch via REST.
@@ -193,8 +211,10 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
 
 **Command safety**: webhook/trigger payloads never carry commands. Params substitute into
 the blueprint's user-authored `commandTemplate` via `renderTemplateString`, and every
-substituted value is shell-single-quoted before insertion. Agent prompts are passed as a
-single quoted argv element, never interpolated into shell syntax.
+substituted value is shell-single-quoted before insertion (`{{#if}}` blocks are decided on
+the raw values first, so an empty param drops its block). Agent prompts are passed as a
+single quoted argv element, never interpolated into shell syntax; a prompt that starts with
+`-` gets a leading space so an event payload can't smuggle in a CLI flag.
 
 ## Daemon WebSocket protocol (`/ws/local/daemon`, JSON text frames)
 
@@ -221,6 +241,10 @@ Daemon → server:
   resolve to the dir's GitHub/GitLab remote as kind `ref`). Rides the preview throttle, sent only when the set changes; the server
   sanitizes (https only, known kinds/providers, ≤50) and stores it in
   `local_terminals.links`
+- `{type:"snapshot", terminalId, dataB64, cols, rows}` — the final screen (ring tail +
+  grid), sent right before `exit`; its own frame so an oversize one the server drops
+  (>1 MB) can never swallow the exit. Accepted only from the owning host while the row
+  is still live.
 - `{type:"exit", terminalId, exitCode}`
 - `{type:"ping"}` every 30 s (server updates `lastSeenAt`, replies `{type:"pong"}`)
 
@@ -241,8 +265,12 @@ Host liveness: sweeper marks hosts offline after 90 s without a ping and fails
 
 Auth: standard WS auth + `requireWsRole(member)` + terminal ownership. Server → client:
 **binary frames are raw terminal bytes** (scrollback replay first, then live); JSON text
-frames are control: `{type:"status", state, attentionState}` | `{type:"exit", exitCode}` |
-`{type:"error", message}`. Client → server (JSON only — no raw-keystroke frames, which
+frames are control: `{type:"status", state, attentionState}` | `{type:"size", cols, rows}` |
+`{type:"exit", exitCode}` | `{type:"error", message}`. An exited terminal is not attached:
+the server sends `size` (the grid the final screen was recorded at), the screen bytes, then
+`exit` — in that order, so the viewer lays the grid out before painting. The web pane pins
+that grid ("Recorded screen 132×40" strip, no "use this screen"), so a click to select text or
+a window resize can never reflow the replay. Client → server (JSON only — no raw-keystroke frames, which
 eliminates the classic "pasted JSON swallowed as control" bug):
 `{type:"input", data}` | `{type:"resize", cols, rows}`.
 

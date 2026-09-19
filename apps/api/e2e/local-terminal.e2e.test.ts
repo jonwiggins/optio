@@ -103,6 +103,8 @@ class FakeViewer {
   ws!: WebSocket;
   binary: Buffer[] = [];
   control: Json[] = [];
+  /** Every frame in arrival order — "control:<type>" or "binary". */
+  order: string[] = [];
 
   async connect(terminalId: string): Promise<void> {
     this.ws = new WebSocket(`${wsBase}/ws/local/terminals/${terminalId}/stream`);
@@ -112,8 +114,14 @@ class FakeViewer {
       this.ws.onerror = () => reject(new Error("viewer ws failed"));
     });
     this.ws.onmessage = (ev) => {
-      if (typeof ev.data === "string") this.control.push(JSON.parse(ev.data) as Json);
-      else this.binary.push(Buffer.from(ev.data as ArrayBuffer));
+      if (typeof ev.data === "string") {
+        const msg = JSON.parse(ev.data) as Json;
+        this.control.push(msg);
+        this.order.push(`control:${String(msg.type)}`);
+      } else {
+        this.binary.push(Buffer.from(ev.data as ArrayBuffer));
+        this.order.push("binary");
+      }
     };
   }
 
@@ -247,6 +255,50 @@ describe("optio local e2e", () => {
     await waitFor(async () =>
       viewer.control.some((m) => m.type === "exit" && m.exitCode === 0) ? true : null,
     );
+  });
+
+  it("replays the recorded final screen, at its grid, to a viewer opening an exited terminal", async () => {
+    const hostId = await registerHost("e2e-snapshot");
+    const daemon = new FakeDaemon();
+    cleanups.push(() => daemon.close());
+    await daemon.connect(hostId, DIRS);
+
+    const { body } = await api<TerminalBody>("/api/local/terminals", {
+      method: "POST",
+      body: JSON.stringify({
+        hostId,
+        dir: "/tmp/e2e-repo",
+        spec: { kind: "command", command: "make test" },
+      }),
+    });
+    const terminalId = body.terminal.id;
+    await daemon.next((m) => m.type === "spawn");
+    daemon.send({ type: "started", terminalId });
+    await waitFor(async () => ((await getTerminal(terminalId)).state === "running" ? true : null));
+
+    // The daemon's final screen (a TUI drawn for 132×40) precedes its exit.
+    const screen = "\x1b[2J\x1b[H┌ make test ┐\r\n│ 12 passed │\r\n└───────────┘\r\n";
+    daemon.send({
+      type: "snapshot",
+      terminalId,
+      dataB64: Buffer.from(screen).toString("base64"),
+      cols: 132,
+      rows: 40,
+    });
+    daemon.send({ type: "exit", terminalId, exitCode: 0 });
+    await waitFor(async () => ((await getTerminal(terminalId)).state === "exited" ? true : null));
+
+    // A viewer arriving after the fact gets: status, the recorded grid, the
+    // screen bytes, then exit — in that order, so it lays out before painting.
+    const viewer = new FakeViewer();
+    cleanups.push(() => viewer.close());
+    await viewer.connect(terminalId);
+    await waitFor(async () => (viewer.control.some((m) => m.type === "exit") ? true : null));
+    expect(viewer.order).toEqual(["control:status", "control:size", "binary", "control:exit"]);
+    expect(viewer.control[1]).toMatchObject({ type: "size", cols: 132, rows: 40 });
+    expect(viewer.text()).toBe(screen);
+    // No live attach for a dead terminal.
+    expect(daemon.inbox.some((m) => m.type === "attach")).toBe(false);
   });
 
   it("accepts a bodiless kill (curl / CLI callers send no JSON body)", async () => {

@@ -1670,6 +1670,21 @@ export const localTerminals = pgTable(
   ],
 );
 
+// The final screen of an exited terminal: the tail of the daemon's output
+// ring as raw bytes plus the PTY grid it was laid out for, so opening a
+// finished session replays what was on screen at the size it ran at
+// (scrollback otherwise dies with the PTY). Its own table keeps the
+// terminal row — and every list response — free of a few hundred KB.
+export const localTerminalSnapshots = pgTable("local_terminal_snapshots", {
+  terminalId: uuid("terminal_id")
+    .primaryKey()
+    .references(() => localTerminals.id, { onDelete: "cascade" }),
+  data: bytea("data").notNull(),
+  cols: integer("cols").notNull(),
+  rows: integer("rows").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const localBlueprints = pgTable(
   "local_blueprints",
   {
@@ -1683,6 +1698,12 @@ export const localBlueprints = pgTable(
     dir: text("dir"),
     repoUrl: text("repo_url"),
     commandTemplate: text("command_template").notNull(),
+    // A saved prompt from the Prompts library. When set, its text is the
+    // agent's prompt (rendered with the trigger params) and commandTemplate
+    // is ignored — so one reviewed prompt can back many automations.
+    promptTemplateId: uuid("prompt_template_id").references(() => promptTemplates.id, {
+      onDelete: "set null",
+    }),
     // When set, the rendered template is the agent's prompt (a single quoted
     // argv element, so params are NOT shell-quoted) and the spawn runs through
     // the daemon's agent path — so automation-spawned agents get attention

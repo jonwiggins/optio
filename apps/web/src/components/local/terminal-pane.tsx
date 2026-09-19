@@ -81,6 +81,25 @@ export function TerminalPane({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
+  // True once the stream has painted real bytes into the xterm: live output,
+  // or the final screen the daemon recorded at exit. `streamSettled` marks
+  // the stream's end (exit frame, or a stop with nothing more to come) — only
+  // then do we know a dead terminal has no screen to show. See the render.
+  const [streamedOutput, setStreamedOutput] = useState(false);
+  const [streamSettled, setStreamSettled] = useState(false);
+  const handleOutput = useCallback(() => setStreamedOutput(true), []);
+  const handleConn = useCallback((next: ConnState) => {
+    setConn(next);
+    if (next === "disconnected") setStreamSettled(true);
+  }, []);
+  // Resume/restart parks the terminal in `pending` and remounts the xterm
+  // fresh — forget the old screen so a second exit falls back to the preview.
+  useEffect(() => {
+    if (terminal?.state === "pending") {
+      setStreamedOutput(false);
+      setStreamSettled(false);
+    }
+  }, [terminal?.state]);
   const fit = useTitleFit(!loading && terminal != null);
   const railCollapsed = useRailStore((s) => s.collapsed);
   const bellArmed = useBellStore((s) => s.armed.includes(terminalId));
@@ -189,6 +208,9 @@ export function TerminalPane({
 
   const handleExit = useCallback(
     (exitCode: number | null) => {
+      // The exit frame is the last thing the stream sends (after any
+      // recorded screen), so from here `streamedOutput` is final.
+      setStreamSettled(true);
       setTerminal((prev: any) =>
         prev && prev.state !== "exited" && prev.state !== "error"
           ? { ...prev, state: "exited", exitCode }
@@ -561,32 +583,38 @@ export function TerminalPane({
         </div>
       )}
       <div className="flex-1 min-h-0 flex flex-col">
-        {/* Scrollback lives in the daemon and dies with the PTY, so a finished
-            terminal has nothing to stream — show the persisted preview (the
-            last lines of output) so "review the result" has a result. */}
-        {isDead && terminal.preview && (
-          <div className="shrink-0 border-b border-border/50 bg-[#09090b] px-4 py-3">
-            <div className="text-[10px] uppercase tracking-wide text-text-muted mb-1.5">
+        {/* A finished terminal replays the screen the daemon recorded at exit
+            into the xterm, at the grid it ran at, so it reads the way it did
+            live. Only when the stream has ended without a byte — a row from
+            before screens were recorded — does the persisted text preview
+            (the last lines of output) take the terminal's place, full height,
+            so "review the result" still has a result. Never stack the two:
+            that squeezes the xterm into a few unreadable rows. */}
+        {isDead && streamSettled && !streamedOutput && terminal.preview ? (
+          <div className="flex-1 min-h-0 flex flex-col bg-[#09090b] px-4 py-3">
+            <div className="shrink-0 text-[10px] uppercase tracking-wide text-text-muted mb-1.5">
               Last output
             </div>
-            <pre className="font-mono text-xs leading-5 whitespace-pre-wrap break-all text-[#d4d4d8] max-h-72 overflow-auto">
+            <pre className="flex-1 min-h-0 font-mono text-xs leading-5 whitespace-pre-wrap break-all text-[#d4d4d8] overflow-auto">
               {terminal.preview}
             </pre>
           </div>
+        ) : (
+          <div className="flex-1 min-h-0">
+            <ErrorBoundary label="Local terminal">
+              {/* Remount on leaving `pending` — the stream WS only attaches to a
+                  terminal that is already launching/running when it connects. */}
+              <LocalTerminal
+                key={terminal.state === "pending" ? "held" : "live"}
+                terminalId={terminalId}
+                onStatus={handleStatus}
+                onExit={handleExit}
+                onConn={handleConn}
+                onOutput={handleOutput}
+              />
+            </ErrorBoundary>
+          </div>
         )}
-        <div className="flex-1 min-h-0">
-          <ErrorBoundary label="Local terminal">
-            {/* Remount on leaving `pending` — the stream WS only attaches to a
-                terminal that is already launching/running when it connects. */}
-            <LocalTerminal
-              key={terminal.state === "pending" ? "held" : "live"}
-              terminalId={terminalId}
-              onStatus={handleStatus}
-              onExit={handleExit}
-              onConn={setConn}
-            />
-          </ErrorBoundary>
-        </div>
       </div>
     </div>
   );

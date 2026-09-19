@@ -134,6 +134,18 @@ export async function localDaemonWs(app: FastifyInstance) {
         case "spawn-error":
           await terminalService.handleSpawnError(hostId, msg.terminalId, msg.message);
           return;
+        case "snapshot":
+          // Ordered ahead of the daemon's `exit` on this socket (see the
+          // queue above), so a viewer that finds the row exited finds the
+          // screen too.
+          await terminalService.handleSnapshot(
+            hostId,
+            msg.terminalId,
+            msg.dataB64,
+            msg.cols,
+            msg.rows,
+          );
+          return;
         case "exit":
           await terminalService.handleExit(hostId, msg.terminalId, msg.exitCode);
           return;

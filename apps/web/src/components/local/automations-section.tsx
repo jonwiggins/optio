@@ -15,6 +15,7 @@ import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
+  BookOpen,
   Bot,
   ChevronDown,
   ChevronRight,
@@ -190,7 +191,7 @@ const PRESETS: Preset[] = [
   {
     id: "linear-triage",
     title: "Triage Linear tickets assigned to me",
-    blurb: "A Linear issue is assigned to me → an agent triages it and opens a PR.",
+    blurb: "A Linear issue is assigned to me → an agent triages it and opens a draft PR.",
     icon: Zap,
     form: {
       name: "Linear ticket triage",
@@ -200,8 +201,9 @@ const PRESETS: Preset[] = [
       commandTemplate:
         "Triage Linear issue {{identifier}}: {{title}}\n{{url}}\n\n{{description}}\n\n" +
         "Reproduce or locate the problem in this repo, implement a fix on a new branch named " +
-        "`{{identifier}}-fix`, add or update tests, and open a pull request with `gh pr create` " +
-        "that references {{identifier}}. If the issue isn't actionable from this repo, explain why.",
+        "`{{identifier}}-fix`, add or update tests, and open a draft pull request with " +
+        "`gh pr create --draft` that references {{identifier}}. If the issue isn't actionable from " +
+        "this repo, explain why.",
     },
     trigger: { type: "linear", config: { events: ["assigned", "mentioned"], user: "" } },
   },
@@ -216,6 +218,8 @@ interface FormState {
   repoUrl: string;
   agent: "" | Agent;
   commandTemplate: string;
+  /** Saved prompt from the Prompts library used as the agent prompt instead of commandTemplate. */
+  promptTemplateId: string | null;
   sessionMode: SessionMode;
   spawnMode: "auto" | "hold";
 }
@@ -229,11 +233,12 @@ const EMPTY_FORM: FormState = {
   repoUrl: "",
   agent: "claude-code",
   commandTemplate: "",
+  promptTemplateId: null,
   sessionMode: "interactive",
   spawnMode: "auto",
 };
 
-function formFromBlueprint(bp: any): FormState {
+export function formFromBlueprint(bp: any): FormState {
   return {
     name: bp.name ?? "",
     description: bp.description ?? "",
@@ -243,9 +248,16 @@ function formFromBlueprint(bp: any): FormState {
     repoUrl: bp.repoUrl ?? "",
     agent: bp.agent ?? "",
     commandTemplate: bp.commandTemplate ?? "",
+    promptTemplateId: bp.agent ? (bp.promptTemplateId ?? null) : null,
     sessionMode: bp.sessionMode ?? "interactive",
     spawnMode: bp.spawnMode ?? "auto",
   };
+}
+
+/** First few lines of a saved prompt for the read-only preview. */
+export function previewLines(text: string, max = 6): string {
+  const lines = text.split("\n");
+  return lines.length > max ? `${lines.slice(0, max).join("\n")}\n…` : text;
 }
 
 const input =
@@ -257,6 +269,7 @@ export function AutomationsSection({ hosts }: { hosts: any[] }) {
   const [open, setOpen] = useState(false);
   const [blueprints, setBlueprints] = useState<any[]>([]);
   const [triggersById, setTriggersById] = useState<Record<string, any[]>>({});
+  const [templates, setTemplates] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [editor, setEditor] = useState<
     { mode: "create"; preset?: Preset } | { mode: "edit"; blueprint: any } | null
@@ -284,7 +297,13 @@ export function AutomationsSection({ hosts }: { hosts: any[] }) {
 
   useEffect(() => {
     if (!open || loaded) return;
-    refetch().then(() => setLoaded(true));
+    // Saved prompts are loaded once alongside the blueprints; a failure just
+    // leaves the picker empty.
+    const loadTemplates = api
+      .listTemplates()
+      .then((res) => setTemplates(res.templates ?? []))
+      .catch(() => {});
+    Promise.all([refetch(), loadTemplates]).then(() => setLoaded(true));
   }, [open, loaded]);
 
   const handleDelete = async (bp: any) => {
@@ -292,6 +311,12 @@ export function AutomationsSection({ hosts }: { hosts: any[] }) {
     try {
       await api.deleteLocalBlueprint(bp.id);
       setBlueprints((prev) => prev.filter((b) => b.id !== bp.id));
+      setTriggersById((prev) => {
+        const { [bp.id]: _gone, ...rest } = prev;
+        return rest;
+      });
+      // Don't leave the editor open on a blueprint that no longer exists.
+      setEditor((cur) => (cur?.mode === "edit" && cur.blueprint.id === bp.id ? null : cur));
       toast.success("Automation deleted");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete automation");
@@ -352,6 +377,7 @@ export function AutomationsSection({ hosts }: { hosts: any[] }) {
                   key={bp.id}
                   blueprint={bp}
                   hosts={hosts}
+                  templates={templates}
                   triggers={triggersById[bp.id] ?? []}
                   onTriggers={(next) => setTriggersById((prev) => ({ ...prev, [bp.id]: next }))}
                   onDelete={() => handleDelete(bp)}
@@ -367,12 +393,16 @@ export function AutomationsSection({ hosts }: { hosts: any[] }) {
                     editor.mode === "edit" ? editor.blueprint.id : `new-${editor.preset?.id ?? ""}`
                   }
                   hosts={hosts}
+                  templates={templates}
                   initial={
                     editor.mode === "edit"
                       ? formFromBlueprint(editor.blueprint)
                       : { ...EMPTY_FORM, ...(editor.preset?.form ?? {}) }
                   }
                   pendingTrigger={editor.mode === "create" ? editor.preset?.trigger : undefined}
+                  existingTriggers={
+                    editor.mode === "edit" ? (triggersById[editor.blueprint.id] ?? []) : []
+                  }
                   blueprintId={editor.mode === "edit" ? editor.blueprint.id : undefined}
                   onCancel={() => setEditor(null)}
                   onSaved={(bp, trigger) => {
@@ -432,6 +462,7 @@ export function AutomationsSection({ hosts }: { hosts: any[] }) {
 function AutomationRow({
   blueprint,
   hosts,
+  templates,
   triggers,
   onTriggers,
   onDelete,
@@ -441,6 +472,7 @@ function AutomationRow({
 }: {
   blueprint: any;
   hosts: any[];
+  templates: any[];
   triggers: any[];
   onTriggers: (next: any[]) => void;
   onDelete: () => void;
@@ -451,6 +483,10 @@ function AutomationRow({
   const [expanded, setExpanded] = useState(false);
   const [running, setRunning] = useState(false);
   const host = hosts.find((h) => h.id === blueprint.hostId);
+  const promptTemplate =
+    blueprint.agent && blueprint.promptTemplateId
+      ? templates.find((t) => t.id === blueprint.promptTemplateId)
+      : undefined;
 
   const run = async () => {
     setRunning(true);
@@ -514,7 +550,14 @@ function AutomationRow({
             <span className="font-mono">{where}</span>
             {host ? ` on ${host.name}` : ""}
             {" · "}
-            {blueprint.commandTemplate.split("\n")[0]}
+            {blueprint.agent && blueprint.promptTemplateId ? (
+              <span className="inline-flex items-center gap-1" title="Saved prompt">
+                <BookOpen className="w-3 h-3 shrink-0" />
+                {promptTemplate?.name ?? "saved prompt"}
+              </span>
+            ) : (
+              String(blueprint.commandTemplate ?? "").split("\n")[0]
+            )}
           </div>
           {triggers.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
@@ -905,7 +948,12 @@ function AddTriggerForm({
               value={ghLogin}
               onChange={(e) => setGhLogin(e.target.value)}
               placeholder="your GitHub username"
-              className={cn(smallInput, "flex-1 font-mono")}
+              required={ghEvents.some((e) => GITHUB_KINDS.find((k) => k.value === e)?.personal)}
+              aria-invalid={
+                ghEvents.some((e) => GITHUB_KINDS.find((k) => k.value === e)?.personal) &&
+                !ghLogin.trim()
+              }
+              className={cn(smallInput, "flex-1 font-mono aria-[invalid=true]:border-error/60")}
             />
             <input
               type="text"
@@ -932,7 +980,9 @@ function AddTriggerForm({
               value={channelId}
               onChange={(e) => setChannelId(e.target.value)}
               placeholder="channel id, e.g. C0123ABCD"
-              className={cn(smallInput, "flex-1 font-mono")}
+              required
+              aria-invalid={!channelId.trim()}
+              className={cn(smallInput, "flex-1 font-mono aria-[invalid=true]:border-error/60")}
             />
             <input
               type="text"
@@ -981,7 +1031,12 @@ function AddTriggerForm({
               value={lnUser}
               onChange={(e) => setLnUser(e.target.value)}
               placeholder="your Linear name, @handle, or user id"
-              className={cn(smallInput, "flex-1")}
+              required={lnEvents.some((e) => LINEAR_KINDS.find((k) => k.value === e)?.personal)}
+              aria-invalid={
+                lnEvents.some((e) => LINEAR_KINDS.find((k) => k.value === e)?.personal) &&
+                !lnUser.trim()
+              }
+              className={cn(smallInput, "flex-1 aria-[invalid=true]:border-error/60")}
             />
             <input
               type="text"
@@ -1039,16 +1094,22 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 
 function AutomationEditor({
   hosts,
+  templates,
   initial,
   pendingTrigger,
+  existingTriggers = [],
   blueprintId,
   onCancel,
   onSaved,
 }: {
   hosts: any[];
+  /** Saved prompts from the Prompts library (all kinds). */
+  templates: any[];
   initial: FormState;
   /** Create mode: a trigger to attach right after the automation is created. */
   pendingTrigger?: { type: TriggerType; config: Record<string, unknown> };
+  /** Edit mode: the blueprint's already-saved triggers (drives the param hints). */
+  existingTriggers?: any[];
   blueprintId?: string;
   onCancel: () => void;
   onSaved: (blueprint: any, trigger?: any) => void;
@@ -1058,16 +1119,26 @@ function AutomationEditor({
     { type: TriggerType; config: Record<string, unknown> } | null | undefined
   >(pendingTrigger);
   const [editingTrigger, setEditingTrigger] = useState(!!pendingTrigger);
+  // A preset seeds a trigger with blank required fields (login / user /
+  // channelId). Until the user confirms it through the trigger form it is only
+  // a suggestion — cancelling the form drops it instead of persisting a
+  // trigger that can never fire.
+  const [triggerConfirmed, setTriggerConfirmed] = useState(false);
   const [saving, setSaving] = useState(false);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
   const host = hosts.find((h) => h.id === form.hostId);
-  const hintSource = trigger?.type ?? "github";
+  const hintSource: string =
+    trigger?.type ?? (existingTriggers[0]?.type as string | undefined) ?? "github";
   const hints = useMemo(() => PARAM_HINTS[hintSource] ?? [], [hintSource]);
+  const usingTemplate = !!form.agent && !!form.promptTemplateId;
+  const selectedTemplate = usingTemplate
+    ? templates.find((t) => t.id === form.promptTemplateId)
+    : undefined;
 
   const save = async () => {
-    if (!form.name.trim() || !form.commandTemplate.trim()) {
+    if (!form.name.trim() || (!usingTemplate && !form.commandTemplate.trim())) {
       toast.error(form.agent ? "Name and prompt are required" : "Name and command are required");
       return;
     }
@@ -1088,6 +1159,7 @@ function AutomationEditor({
         dir: form.locationKind === "dir" ? form.dir.trim() : null,
         repoUrl: form.locationKind === "repoUrl" ? form.repoUrl.trim() : null,
         commandTemplate: form.commandTemplate.trim(),
+        promptTemplateId: usingTemplate ? form.promptTemplateId : null,
         agent: form.agent || null,
         spawnMode: form.spawnMode,
         sessionMode: form.sessionMode,
@@ -1169,7 +1241,7 @@ function AutomationEditor({
           ))}
           <button
             type="button"
-            onClick={() => set("agent", "")}
+            onClick={() => setForm((f) => ({ ...f, agent: "", promptTemplateId: null }))}
             className={cn(
               "px-2.5 py-1 rounded-md text-xs border transition-colors",
               form.agent === ""
@@ -1183,18 +1255,50 @@ function AutomationEditor({
       </Section>
 
       <Section label="What">
-        <textarea
-          value={form.commandTemplate}
-          onChange={(e) => set("commandTemplate", e.target.value)}
-          rows={form.agent ? 6 : 2}
-          placeholder={
-            form.agent
-              ? "Review {{url}} and post your findings as a PR comment…"
-              : "claude {{prompt}}"
-          }
-          className={cn(input, "font-mono resize-y")}
-        />
-        {hints.length > 0 && (
+        {form.agent && (
+          <select
+            value={form.promptTemplateId ?? ""}
+            onChange={(e) => set("promptTemplateId", e.target.value || null)}
+            aria-label="Use a saved prompt"
+            className={input}
+          >
+            <option value="">Write it here</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {t.kind ? ` (${t.kind})` : ""}
+              </option>
+            ))}
+          </select>
+        )}
+        {usingTemplate ? (
+          <div className="rounded-lg border border-border bg-bg px-3 py-2">
+            <pre className="font-mono text-xs text-text-muted whitespace-pre-wrap break-words max-h-32 overflow-hidden">
+              {selectedTemplate
+                ? previewLines(String(selectedTemplate.template ?? ""))
+                : "This saved prompt is no longer in the library."}
+            </pre>
+            <p className="text-[11px] text-text-muted/70 mt-1.5">
+              Rendered from the saved prompt; trigger params still substitute.{" "}
+              <a href="/templates" className="text-primary hover:underline">
+                Edit it in Prompts
+              </a>
+            </p>
+          </div>
+        ) : (
+          <textarea
+            value={form.commandTemplate}
+            onChange={(e) => set("commandTemplate", e.target.value)}
+            rows={form.agent ? 6 : 2}
+            placeholder={
+              form.agent
+                ? "Review {{url}} and post your findings as a PR comment…"
+                : "claude {{prompt}}"
+            }
+            className={cn(input, "font-mono resize-y")}
+          />
+        )}
+        {!usingTemplate && hints.length > 0 && (
           <div className="flex flex-wrap gap-1 items-center">
             <span className="text-[10px] text-text-muted/70 mr-1">
               {TRIGGER_META[hintSource as TriggerType]?.label ?? hintSource} params:
@@ -1212,11 +1316,13 @@ function AutomationEditor({
             ))}
           </div>
         )}
-        <p className="text-[11px] text-text-muted/70">
-          {form.agent
-            ? "Rendered as the agent's prompt. Params are substituted as-is."
-            : 'Runs as a shell command. Params are shell-quoted before substitution — write claude {{prompt}}, not claude "{{prompt}}".'}
-        </p>
+        {!usingTemplate && (
+          <p className="text-[11px] text-text-muted/70">
+            {form.agent
+              ? "Rendered as the agent's prompt. Params are substituted as-is."
+              : 'Runs as a shell command. Params are shell-quoted before substitution — write claude {{prompt}}, not claude "{{prompt}}".'}
+          </p>
+        )}
       </Section>
 
       <Section label="Where">
@@ -1368,7 +1474,10 @@ function AutomationEditor({
               </button>
               <button
                 type="button"
-                onClick={() => setTrigger(null)}
+                onClick={() => {
+                  setTrigger(null);
+                  setTriggerConfirmed(false);
+                }}
                 className="text-[11px] text-text-muted hover:text-error"
               >
                 remove
@@ -1381,10 +1490,11 @@ function AutomationEditor({
               submitLabel="Use this trigger"
               onCancel={() => {
                 setEditingTrigger(false);
-                if (!trigger?.config || Object.keys(trigger.config).length === 0) setTrigger(null);
+                if (!triggerConfirmed) setTrigger(null);
               }}
               onSubmit={async (type, config) => {
                 setTrigger({ type, config });
+                setTriggerConfirmed(true);
                 setEditingTrigger(false);
               }}
             />

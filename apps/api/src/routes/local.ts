@@ -31,6 +31,7 @@ import * as terminalService from "../services/local-terminal-service.js";
 import * as blueprintService from "../services/local-blueprint-service.js";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import { buildTicketPrompt } from "../services/ticket-context.js";
+import { getPromptTemplateById } from "../services/prompt-template-service.js";
 
 const registerHostSchema = z
   .object({
@@ -69,7 +70,17 @@ const blueprintBodySchema = z
     hostId: z.string().uuid().optional(),
     dir: z.string().max(1000).optional(),
     repoUrl: z.string().max(500).optional(),
-    commandTemplate: z.string().min(1).max(4000),
+    commandTemplate: z
+      .string()
+      .max(4000)
+      .describe("Inline prompt / command template; may be empty when promptTemplateId is set"),
+    promptTemplateId: z
+      .string()
+      .uuid()
+      .nullish()
+      .describe(
+        "Saved prompt (Prompts library) used as the agent prompt instead of commandTemplate",
+      ),
     agent: z
       .enum(["claude-code", "codex", "cursor", "gemini", "opencode"])
       .nullish()
@@ -100,6 +111,34 @@ const BlueprintsResponse = z.object({ blueprints: z.array(LocalBlueprintSchema) 
 const TriggerResponse = z.object({ trigger: LocalTriggerSchema });
 const TriggersResponse = z.object({ triggers: z.array(LocalTriggerSchema) });
 
+/**
+ * Cross-field checks the Zod body can't express: a prompt must come from
+ * somewhere, a linked saved prompt must exist, and a pinned host must be the
+ * caller's own machine (a member could otherwise run commands on a
+ * teammate's laptop by guessing its host id).
+ */
+async function checkBlueprintBody(
+  body: {
+    commandTemplate?: string;
+    promptTemplateId?: string | null;
+    hostId?: string | null;
+  },
+  userId: string | null | undefined,
+): Promise<string | null> {
+  if (!body.commandTemplate?.trim() && !body.promptTemplateId) {
+    return "Give the automation a prompt / command, or pick a saved prompt";
+  }
+  if (body.promptTemplateId) {
+    const saved = await getPromptTemplateById(body.promptTemplateId);
+    if (!saved) return "Saved prompt not found";
+  }
+  if (body.hostId) {
+    const host = await hostService.getHost(body.hostId);
+    if (!host || !hostService.canAccessHost(host, userId)) return "Host not found";
+  }
+  return null;
+}
+
 function validateTriggerConfig(
   type: string,
   config: Record<string, unknown> | undefined,
@@ -119,10 +158,16 @@ function validateTriggerConfig(
     const personal = (config?.events as string[] | undefined)?.some((e) =>
       ["review_requested", "mentioned", "assigned"].includes(e),
     );
-    if ((personal || !config?.events) && typeof config?.login !== "string") {
+    if (
+      (personal || !config?.events) &&
+      (typeof config?.login !== "string" || !config.login.trim())
+    ) {
       return "GitHub triggers need config.login (your GitHub username) for review / mention / assign events";
     }
-    if (config?.repos !== undefined && !Array.isArray(config.repos)) {
+    if (
+      config?.repos !== undefined &&
+      (!Array.isArray(config.repos) || config.repos.some((r) => typeof r !== "string"))
+    ) {
       return "github.repos must be an array of owner/name";
     }
   }
@@ -140,7 +185,10 @@ function validateTriggerConfig(
     const personal = (config?.events as string[] | undefined)?.some((e) =>
       ["assigned", "mentioned"].includes(e),
     );
-    if ((personal || !config?.events) && typeof config?.user !== "string") {
+    if (
+      (personal || !config?.events) &&
+      (typeof config?.user !== "string" || !config.user.trim())
+    ) {
       return "Linear triggers need config.user (your Linear name, handle, or user id) for assign / mention events";
     }
   }
@@ -620,6 +668,8 @@ export async function localRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
+      const problem = await checkBlueprintBody(req.body, req.user?.id);
+      if (problem) return reply.status(400).send({ error: problem });
       try {
         const blueprint = await blueprintService.createBlueprint({
           userId: req.user?.id ?? null,
@@ -669,7 +719,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
           dir: z.string().max(1000).nullable().optional(),
           repoUrl: z.string().max(500).nullable().optional(),
         }),
-        response: { 200: BlueprintResponse, 404: ErrorResponseSchema },
+        response: { 200: BlueprintResponse, 400: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
@@ -677,6 +727,18 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
+      const problem = await checkBlueprintBody(
+        {
+          commandTemplate: req.body.commandTemplate ?? blueprint.commandTemplate,
+          promptTemplateId:
+            req.body.promptTemplateId === undefined
+              ? blueprint.promptTemplateId
+              : req.body.promptTemplateId,
+          hostId: req.body.hostId === undefined ? blueprint.hostId : req.body.hostId,
+        },
+        req.user?.id,
+      );
+      if (problem) return reply.status(400).send({ error: problem });
       const updated = await blueprintService.updateBlueprint(blueprint.id, req.body);
       reply.send({ blueprint: updated! });
     },
@@ -810,7 +872,12 @@ export async function localRoutes(rawApp: FastifyInstance) {
         tags: ["Local"],
         params: z.object({ id: z.string().uuid(), triggerId: z.string().uuid() }),
         body: triggerBodySchema.omit({ type: true }).partial(),
-        response: { 200: TriggerResponse, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
+        response: {
+          200: TriggerResponse,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
@@ -819,8 +886,13 @@ export async function localRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
       const triggers = await blueprintService.listBlueprintTriggers(blueprint.id);
-      if (!triggers.some((t) => t.id === req.params.triggerId)) {
+      const existing = triggers.find((t) => t.id === req.params.triggerId);
+      if (!existing) {
         return reply.status(404).send({ error: "Trigger not found" });
+      }
+      if (req.body.config !== undefined) {
+        const problem = validateTriggerConfig(existing.type, req.body.config);
+        if (problem) return reply.status(400).send({ error: problem });
       }
       try {
         const updated = await blueprintService.updateBlueprintTrigger(

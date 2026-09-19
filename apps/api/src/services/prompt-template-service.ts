@@ -156,16 +156,27 @@ export async function getPromptTemplateById(id: string) {
  * from the params bag. Unknown placeholders are left intact so callers can
  * detect missing params. Supports simple {{#if param}}...{{/if}} blocks too.
  */
-export function renderTemplateString(template: string, params: Record<string, unknown>): string {
-  // Handle {{#if param}}...{{/if}} blocks first — keep the body if the param
-  // is truthy, drop it otherwise.
-  let rendered = template.replace(
+/**
+ * Resolve `{{#if param}}...{{/if}}` blocks only — keep the body if the param
+ * is truthy, drop it otherwise — leaving `{{param}}` placeholders in place.
+ * Exposed so callers that transform param values before substitution (e.g.
+ * shell-quoting, which turns "" into the truthy `''`) can test the raw ones.
+ */
+export function resolveTemplateConditionals(
+  template: string,
+  params: Record<string, unknown>,
+): string {
+  return template.replace(
     /\{\{#if\s+(\w+)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g,
     (_match, key: string, body: string) => {
       const value = params[key];
       return value ? body : "";
     },
   );
+}
+
+export function renderTemplateString(template: string, params: Record<string, unknown>): string {
+  let rendered = resolveTemplateConditionals(template, params);
 
   // Simple {{param}} substitution.
   rendered = rendered.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) => {
