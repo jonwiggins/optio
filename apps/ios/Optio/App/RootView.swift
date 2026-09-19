@@ -6,6 +6,8 @@ import SwiftUI
 /// Activity host sits outside that key and follows the switch instead of restarting.
 struct RootView: View {
     @Environment(SessionStore.self) private var session
+    /// One usage poller for the whole shell; `observesUsage()` views bind it to the active client.
+    @State private var usage = UsageStore()
 
     var body: some View {
         Group {
@@ -20,6 +22,7 @@ struct RootView: View {
                     .modifier(LiveActivityHost())
                     .environment(session.api)
                     .environment(session.events)
+                    .environment(usage)
             }
         }
         .animation(.default, value: session.phase)

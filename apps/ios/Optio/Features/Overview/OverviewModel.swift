@@ -13,8 +13,8 @@ struct MetricsSample: Identifiable, Hashable, Sendable {
 
 /// Screen state for the Overview tab. Mirrors `apps/web/src/hooks/use-dashboard-data.ts`:
 /// task stats, recent tasks, repos, hosts + terminals and the cluster fanned out
-/// every 10 seconds, plus usage/auth every 5 minutes. The sessions board has its
-/// own `SessionsFeedModel`.
+/// every 10 seconds. Usage limits come from the shared `UsageStore`; the sessions
+/// board has its own `SessionsFeedModel`.
 @Observable
 @MainActor
 final class OverviewModel {
@@ -26,13 +26,10 @@ final class OverviewModel {
     var cluster: ClusterOverview?
     /// True when `/api/cluster/overview` answered 403 (viewer/member role).
     var clusterForbidden = false
-    var usage: ClaudeUsageData?
     var metricsHistory: [MetricsSample] = []
     var loading = true
     var error: Error?
     var lastRefreshed: Date?
-
-    private var lastUsageRefresh: Date?
 
     /// Optio Local: paired hosts and their terminals (`local-stats.tsx`, `needs-you.tsx`).
     var localHosts: [LocalHost] = []
@@ -108,32 +105,8 @@ final class OverviewModel {
             }
         }
 
-        if lastUsageRefresh == nil || Date.now.timeIntervalSince(lastUsageRefresh!) > 5 * 60 {
-            await refreshUsage(api: api)
-        }
         loading = false
         lastRefreshed = .now
-    }
-
-    /// Mirrors `refreshUsage` in the web hook: an unavailable-without-error usage
-    /// response (or a failed usage call) is cross-checked against `/api/auth/status`
-    /// so an expired OAuth token surfaces as a banner.
-    func refreshUsage(api: APIClient) async {
-        lastUsageRefresh = .now
-        do {
-            let u = try await api.dashUsage()
-            if !u.available, u.error == nil {
-                if let status = try? await api.dashAuthStatus(), status.subscription?.expired == true {
-                    usage = ClaudeUsageData(available: false, error: "OAuth token has expired")
-                    return
-                }
-            }
-            usage = u
-        } catch {
-            if let status = try? await api.dashAuthStatus(), status.subscription?.expired == true {
-                usage = ClaudeUsageData(available: false, error: "OAuth token has expired")
-            }
-        }
     }
 
     private static func quiet<T: Sendable>(_ op: @Sendable () async throws -> T) async -> T? {

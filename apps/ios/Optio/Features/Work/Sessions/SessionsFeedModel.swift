@@ -83,7 +83,7 @@ final class SessionsFeedModel {
     }
 
     /// Polls every `interval` seconds while started. Idempotent.
-    func start(every interval: Double = 15) {
+    func start(every interval: Double = 30) {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {

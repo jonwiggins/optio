@@ -123,7 +123,7 @@ final class LocalHubModel {
         }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
+                try? await Task.sleep(for: .seconds(30))
                 if Task.isCancelled { return }
                 await self?.refresh()
             }

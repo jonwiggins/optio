@@ -107,7 +107,8 @@ struct SessionDetailView: View {
                 prs.isEmpty ? nil : Text("\(prs.count) PR\(prs.count == 1 ? "" : "s")"),
                 chatState.map { Text($0) },
             ]),
-            secondary: s.branch.isEmpty ? nil : Text.mono(s.branch)
+            secondary: s.branch.isEmpty ? nil : Text.mono(s.branch),
+            showsUsage: true
         )
     }
 

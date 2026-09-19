@@ -169,7 +169,8 @@ struct LocalTerminalScreen: View {
             tone: LocalPresentation.stateTone(t) == .accent ? .working : LocalPresentation.stateTone(t),
             line: detailLine,
             secondary: secondary,
-            needsYou: needsYou ? LocalPresentation.waitingLabel(t).capitalizedFirst : nil
+            needsYou: needsYou ? LocalPresentation.waitingLabel(t).capitalizedFirst : nil,
+            showsUsage: true
         ) {
             WorkLinkBadges(links: links, max: 2)
         }

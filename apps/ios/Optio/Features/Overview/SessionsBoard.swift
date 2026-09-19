@@ -43,8 +43,6 @@ struct SessionsBoardSections: View {
                 ErrorRow(error: error, what: "sessions") { Task { await feed.refresh() } }
                     .listRowBackground(Color.clear)
             }
-        } header: {
-            SectionHeader(title: "Sessions") { router.openSessions(.active) }.textCase(nil)
         }
 
         Section {
@@ -60,19 +58,23 @@ struct SessionsBoardSections: View {
                     NavigationLink(value: row.destination) { SessionRowView(row: row) }
                 }
             }
-            Button(action: onNewSession) {
-                Label("New session", systemImage: "plus")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(AppTheme.accent)
-            }
         } header: {
-            SectionHeader(title: "Active sessions", detail: active.isEmpty ? nil : "\(feed.count(in: .active))") { router.openSessions(.active) }.textCase(nil)
+            // "Active sessions · N          All ›  + New session" (active-sessions.tsx header).
+            HStack(spacing: Spacing.m) {
+                SectionHeader(title: "Active sessions", detail: active.isEmpty ? nil : "\(feed.count(in: .active))") { router.openSessions(.active) }
+                Button(action: onNewSession) {
+                    Label("New session", systemImage: "plus")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+                .buttonStyle(.plain)
+            }
+            .textCase(nil)
         }
 
-        if !recurring.isEmpty || !agents.isEmpty {
-            miniList("Recurring", rows: recurring, view: .recurring, empty: "No schedules or event triggers yet.")
-            miniList("Persistent agents", rows: agents, view: .agents, empty: "No persistent agents yet.")
-        }
+        // Recurring and persistent agents sit side by side on the web; stacked here.
+        miniList("Recurring", rows: recurring, view: .recurring, empty: "No schedules or event triggers yet.")
+        miniList("Persistent agents", rows: agents, view: .agents, empty: "No persistent agents yet.")
     }
 
     private func miniList(_ title: String, rows: [SessionRow], view: SessionView, empty: String) -> some View {
