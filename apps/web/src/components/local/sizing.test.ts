@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { onGridAnnounced, passiveFontPx, sameGrid } from "./sizing";
+import { ackSentGrid, onGridAnnounced, passiveFontPx, pushSentGrid, sameGrid } from "./sizing";
 
 describe("passiveFontPx", () => {
   it("shrinks the font so an oversize grid fits the width", () => {
@@ -27,31 +27,57 @@ describe("onGridAnnounced", () => {
   const phone = { cols: 45, rows: 30 };
 
   it("stays unclaimed when the PTY already matches our natural fit", () => {
-    expect(onGridAnnounced({ kind: "unclaimed" }, laptop, laptop, null)).toEqual({
+    expect(onGridAnnounced({ kind: "unclaimed" }, laptop, laptop, [])).toEqual({
       kind: "unclaimed",
     });
   });
 
   it("goes passive when another viewer's grid arrives", () => {
-    expect(onGridAnnounced({ kind: "unclaimed" }, phone, laptop, null)).toEqual({
+    expect(onGridAnnounced({ kind: "unclaimed" }, phone, laptop, [])).toEqual({
       kind: "passive",
       grid: phone,
     });
   });
 
   it("keeps ownership when its own request echoes back", () => {
-    expect(onGridAnnounced({ kind: "owner" }, laptop, laptop, laptop)).toEqual({ kind: "owner" });
+    expect(onGridAnnounced({ kind: "owner" }, laptop, laptop, [laptop])).toEqual({
+      kind: "owner",
+    });
+  });
+
+  it("keeps ownership on a stale echo of an earlier request", () => {
+    // A claim fits twice in quick succession (the strip leaves, the pane
+    // grows, the observer refits): the echo of the first request arrives
+    // after the second was sent. Both are ours.
+    const first = { cols: 143, rows: 54 };
+    const second = { cols: 143, rows: 56 };
+    let sent = pushSentGrid([], first);
+    sent = pushSentGrid(sent, second);
+    expect(onGridAnnounced({ kind: "owner" }, first, second, sent)).toEqual({ kind: "owner" });
+    sent = ackSentGrid(sent, first)!;
+    expect(sent).toEqual([second]);
+    expect(onGridAnnounced({ kind: "owner" }, second, second, sent)).toEqual({ kind: "owner" });
+    expect(ackSentGrid(sent, second)).toEqual([]);
+    // A grid we never asked for matches nothing.
+    expect(ackSentGrid(sent, phone)).toBeNull();
+  });
+
+  it("caps the pending queue when a daemon never echoes", () => {
+    let sent: ReturnType<typeof pushSentGrid> = [];
+    for (let i = 0; i < 100; i++) sent = pushSentGrid(sent, { cols: 80 + i, rows: 24 });
+    expect(sent.length).toBe(32);
+    expect(sent[0]).toEqual({ cols: 148, rows: 24 });
   });
 
   it("loses ownership when someone else resizes the PTY", () => {
-    expect(onGridAnnounced({ kind: "owner" }, phone, laptop, laptop)).toEqual({
+    expect(onGridAnnounced({ kind: "owner" }, phone, laptop, [laptop])).toEqual({
       kind: "passive",
       grid: phone,
     });
   });
 
   it("returns to unclaimed when the PTY comes back to our natural fit", () => {
-    expect(onGridAnnounced({ kind: "passive", grid: phone }, laptop, laptop, null)).toEqual({
+    expect(onGridAnnounced({ kind: "passive", grid: phone }, laptop, laptop, [])).toEqual({
       kind: "unclaimed",
     });
   });
@@ -64,11 +90,11 @@ describe("onGridAnnounced", () => {
   it("pins a recorded grid even when it matches our natural fit", () => {
     // An exited terminal's final screen was drawn for `laptop`; there is no
     // PTY to size, so the grid stays passive rather than following resizes.
-    expect(onGridAnnounced({ kind: "unclaimed" }, laptop, laptop, null, true)).toEqual({
+    expect(onGridAnnounced({ kind: "unclaimed" }, laptop, laptop, [], true)).toEqual({
       kind: "passive",
       grid: laptop,
     });
-    expect(onGridAnnounced({ kind: "owner" }, laptop, laptop, laptop, true)).toEqual({
+    expect(onGridAnnounced({ kind: "owner" }, laptop, laptop, [laptop], true)).toEqual({
       kind: "passive",
       grid: laptop,
     });
