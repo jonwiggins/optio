@@ -81,6 +81,16 @@ export function TerminalPane({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [conn, setConn] = useState<ConnState>("connecting");
+  // True once the stream has painted real bytes into the xterm. A terminal
+  // that exits while we're attached keeps its screen; one we open after it
+  // exited gets nothing (scrollback dies with the PTY) — see the render.
+  const [streamedOutput, setStreamedOutput] = useState(false);
+  const handleOutput = useCallback(() => setStreamedOutput(true), []);
+  // Resume/restart parks the terminal in `pending` and remounts the xterm
+  // fresh — forget the old screen so a second exit falls back to the preview.
+  useEffect(() => {
+    if (terminal?.state === "pending") setStreamedOutput(false);
+  }, [terminal?.state]);
   const fit = useTitleFit(!loading && terminal != null);
   const railCollapsed = useRailStore((s) => s.collapsed);
   const bellArmed = useBellStore((s) => s.armed.includes(terminalId));
@@ -561,32 +571,37 @@ export function TerminalPane({
         </div>
       )}
       <div className="flex-1 min-h-0 flex flex-col">
-        {/* Scrollback lives in the daemon and dies with the PTY, so a finished
-            terminal has nothing to stream — show the persisted preview (the
-            last lines of output) so "review the result" has a result. */}
-        {isDead && terminal.preview && (
-          <div className="shrink-0 border-b border-border/50 bg-[#09090b] px-4 py-3">
-            <div className="text-[10px] uppercase tracking-wide text-text-muted mb-1.5">
+        {/* Scrollback lives in the daemon and dies with the PTY, so a terminal
+            opened after it finished has nothing to stream — show the persisted
+            preview (the last lines of output) in the terminal's place so
+            "review the result" has a result. A terminal that finishes while
+            we're watching keeps its own screen instead: stacking the preview
+            above it would squeeze the xterm into a few unreadable rows. */}
+        {isDead && !streamedOutput && terminal.preview ? (
+          <div className="flex-1 min-h-0 flex flex-col bg-[#09090b] px-4 py-3">
+            <div className="shrink-0 text-[10px] uppercase tracking-wide text-text-muted mb-1.5">
               Last output
             </div>
-            <pre className="font-mono text-xs leading-5 whitespace-pre-wrap break-all text-[#d4d4d8] max-h-72 overflow-auto">
+            <pre className="flex-1 min-h-0 font-mono text-xs leading-5 whitespace-pre-wrap break-all text-[#d4d4d8] overflow-auto">
               {terminal.preview}
             </pre>
           </div>
+        ) : (
+          <div className="flex-1 min-h-0">
+            <ErrorBoundary label="Local terminal">
+              {/* Remount on leaving `pending` — the stream WS only attaches to a
+                  terminal that is already launching/running when it connects. */}
+              <LocalTerminal
+                key={terminal.state === "pending" ? "held" : "live"}
+                terminalId={terminalId}
+                onStatus={handleStatus}
+                onExit={handleExit}
+                onConn={setConn}
+                onOutput={handleOutput}
+              />
+            </ErrorBoundary>
+          </div>
         )}
-        <div className="flex-1 min-h-0">
-          <ErrorBoundary label="Local terminal">
-            {/* Remount on leaving `pending` — the stream WS only attaches to a
-                terminal that is already launching/running when it connects. */}
-            <LocalTerminal
-              key={terminal.state === "pending" ? "held" : "live"}
-              terminalId={terminalId}
-              onStatus={handleStatus}
-              onExit={handleExit}
-              onConn={setConn}
-            />
-          </ErrorBoundary>
-        </div>
       </div>
     </div>
   );

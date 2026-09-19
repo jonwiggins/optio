@@ -34,20 +34,25 @@ export function LocalTerminal({
   onStatus,
   onExit,
   onConn,
+  onOutput,
 }: {
   terminalId: string;
   onStatus?: (state: LocalTerminalState, attentionState: LocalAttentionState) => void;
   onExit?: (exitCode: number | null) => void;
   /** Stream connection state, for chrome that wants to show it. */
   onConn?: (conn: ConnState) => void;
+  /** Fired once, on the first terminal bytes — the screen holds real output. */
+  onOutput?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onStatusRef = useRef(onStatus);
   const onExitRef = useRef(onExit);
   const onConnRef = useRef(onConn);
+  const onOutputRef = useRef(onOutput);
   onStatusRef.current = onStatus;
   onExitRef.current = onExit;
   onConnRef.current = onConn;
+  onOutputRef.current = onOutput;
 
   const [connState, setConnStateRaw] = useState<ConnState>("connecting");
   // Set while another viewer owns the PTY grid and we're rendering it
@@ -211,6 +216,7 @@ export function LocalTerminal({
     // Retryable errors ("Host is offline") repeat on every 2 s reconnect
     // while the daemon is down — print each distinct message once.
     let lastErrorShown: string | null = null;
+    let outputSeen = false;
 
     const connect = async () => {
       // Tokens go in the Sec-WebSocket-Protocol header (never the URL), same
@@ -279,6 +285,10 @@ export function LocalTerminal({
             term.reset();
           }
           lastErrorShown = null;
+          if (!outputSeen) {
+            outputSeen = true;
+            onOutputRef.current?.();
+          }
           term.write(new Uint8Array(msg.data));
         }
       };
