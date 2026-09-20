@@ -291,6 +291,8 @@ Web UI ...... http://localhost:30310
 API ......... http://localhost:30400
 ```
 
+On Docker Desktop Kubernetes these are NodePorts reached via `kubectl port-forward` — the web UI listens on **30310** and the API on **30400**.
+
 Open the web UI and the setup wizard will walk you through configuring GitHub access, agent credentials (API key, OAuth token, Vertex AI, or a Max/Pro subscription), and adding your first repository. Then hit **New session** and pick a preset — _Open a PR_, _Interactive chat_, _Scheduled run_, or _Persistent agent_ — or compose your own from the five attributes.
 
 ### Pair your own machine (optional)
