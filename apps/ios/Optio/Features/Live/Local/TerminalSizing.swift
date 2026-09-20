@@ -17,6 +17,9 @@ enum TerminalSizing {
     static let baseFontPt: CGFloat = 12
     /// Below this the text is a texture, not a terminal — stop shrinking.
     static let minPassiveFontPt: CGFloat = 5
+    /// A watched grid may grow past the base size to fill a wide screen (an
+    /// iPad, or iPhone Duo unfolded), but not into a poster.
+    static let maxPassiveFontPt: CGFloat = 20
     /// Resize requests we've sent that the daemon hasn't echoed yet (oldest first).
     static let maxPendingGrids = 32
 
@@ -31,19 +34,21 @@ enum TerminalSizing {
 
     /// Font size that fits `cols` columns into `availableWidth`, given the
     /// font's cell width as a fraction of its point size (≈0.6 for typical
-    /// monospace; measured from the renderer when available). Never larger than
-    /// the base size — a passive phone showing a 60-column laptop grid still
-    /// gets the normal font, only oversize grids shrink.
+    /// monospace; measured from the renderer when available). Oversize grids
+    /// shrink (down to `min`); a small grid on a wide screen grows past the base
+    /// so a laptop's 53 columns fill an unfolded Duo instead of a third of it
+    /// (up to `max`). On a phone a laptop grid lands at the base size either way.
     static func passiveFontPt(
         availableWidth: CGFloat,
         cols: Int,
         cellWidthPerPt: CGFloat,
         base: CGFloat = baseFontPt,
-        min minPt: CGFloat = minPassiveFontPt
+        min minPt: CGFloat = minPassiveFontPt,
+        max maxPt: CGFloat = maxPassiveFontPt
     ) -> CGFloat {
         guard availableWidth > 0, cols > 0, cellWidthPerPt > 0 else { return base }
         let fits = (availableWidth / (CGFloat(cols) * cellWidthPerPt)).rounded(.down)
-        return Swift.max(minPt, Swift.min(base, fits))
+        return Swift.max(minPt, Swift.min(maxPt, fits))
     }
 
     /// Record a grid we just asked the daemon for.

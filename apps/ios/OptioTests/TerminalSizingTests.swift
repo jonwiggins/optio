@@ -12,16 +12,22 @@ final class TerminalSizingTests: XCTestCase {
     func testShrinksFontSoOversizeGridFitsWidth() {
         // 390pt phone, 160-col laptop grid, 0.6 cell ratio → 4.06 → floored 4 → clamped to 5
         XCTAssertEqual(S.passiveFontPt(availableWidth: 390, cols: 160, cellWidthPerPt: 0.6), 5)
-        // 1000pt, 120 cols → 13.8 → capped at the base (12 on iOS)
-        XCTAssertEqual(S.passiveFontPt(availableWidth: 1000, cols: 120, cellWidthPerPt: 0.6), 12)
+        // 1000pt, 120 cols → 13.8 → 13 (may grow past the 12pt base on a wide screen)
+        XCTAssertEqual(S.passiveFontPt(availableWidth: 1000, cols: 120, cellWidthPerPt: 0.6), 13)
         // 600pt, 120 cols → 8.3 → 8
         XCTAssertEqual(S.passiveFontPt(availableWidth: 600, cols: 120, cellWidthPerPt: 0.6), 8)
         // Same arithmetic as the web at its 13px base.
         XCTAssertEqual(S.passiveFontPt(availableWidth: 1000, cols: 120, cellWidthPerPt: 0.6, base: 13), 13)
     }
 
-    func testNeverGrowsPastBaseForSmallGrid() {
-        XCTAssertEqual(S.passiveFontPt(availableWidth: 1600, cols: 40, cellWidthPerPt: 0.6), 12)
+    func testGrowsToFillAWideScreenButNotPastTheCap() {
+        // 393pt phone, 53-col laptop grid → 12.3 → the base size, as before.
+        XCTAssertEqual(S.passiveFontPt(availableWidth: 393, cols: 53, cellWidthPerPt: 0.6), 12)
+        // 669pt (iPhone Duo open), 53 cols → 21.0 → capped at 20.
+        XCTAssertEqual(S.passiveFontPt(availableWidth: 669, cols: 53, cellWidthPerPt: 0.6), 20)
+        // 669pt, 80 cols → 13.9 → 13: fills the width instead of a third of it.
+        XCTAssertEqual(S.passiveFontPt(availableWidth: 669, cols: 80, cellWidthPerPt: 0.6), 13)
+        XCTAssertEqual(S.passiveFontPt(availableWidth: 1600, cols: 40, cellWidthPerPt: 0.6), 20)
     }
 
     func testFallsBackToBaseOnDegenerateInput() {
