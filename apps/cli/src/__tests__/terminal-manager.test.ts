@@ -284,3 +284,70 @@ describe("scrubSpawnEnv", () => {
     });
   });
 });
+
+describe("links and preview from the screen model", () => {
+  const flush = () => new Promise((r) => setTimeout(r, 30));
+  const linkFrames = (sent: LocalDaemonMessage[]) =>
+    sent.filter((m): m is Extract<LocalDaemonMessage, { type: "links" }> => m.type === "links");
+
+  it("reports links as they read on screen, not fragments from cell-diffed repaints", async () => {
+    vi.useFakeTimers();
+    try {
+      const { sent, manager } = setup({
+        getRepoUrlForDir: () => "https://github.com/jonwiggins/optio",
+      });
+      spawnTerminal(manager, "t-1");
+      // The URL is painted once; later frames repaint a few changed cells on
+      // other rows. Flattened to text the stream reads "…/jonwi" + "ns/optio/
+      // pull/607" and "#6" + "07"; on screen those cells were never adjacent.
+      h.spawned[0].dataCb?.(
+        "I was tagged on https://github.com/jonwi\x1b[3;1Hns/optio/pull/607\x1b[1;41Hggins/optio/pull/607 (#6\x1b[4;1H07\x1b[1;65H07)",
+      );
+      await vi.advanceTimersByTimeAsync(2100);
+      vi.useRealTimers();
+      await flush();
+      const frames = linkFrames(sent);
+      expect(frames).toHaveLength(1);
+      expect(frames[0].links.map((l) => l.url)).toEqual([
+        "https://github.com/jonwiggins/optio/pull/607",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("remembers a link after the screen that showed it is gone", async () => {
+    vi.useFakeTimers();
+    try {
+      const { sent, manager } = setup();
+      spawnTerminal(manager, "t-1");
+      h.spawned[0].dataCb?.("\x1b[?1049h\x1b[Hsee https://github.com/jonwiggins/optio/pull/1\r\n");
+      await vi.advanceTimersByTimeAsync(2100);
+      h.spawned[0].dataCb?.("\x1b[2J\x1b[Hnothing here\r\n");
+      await vi.advanceTimersByTimeAsync(2100);
+      vi.useRealTimers();
+      await flush();
+      const frames = linkFrames(sent);
+      expect(frames).toHaveLength(1);
+      expect(frames[0].links.map((l) => l.url)).toEqual([
+        "https://github.com/jonwiggins/optio/pull/1",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends the final preview and snapshot before the exit frame", async () => {
+    const { sent, manager } = setup();
+    spawnTerminal(manager, "t-1");
+    h.spawned[0].dataCb?.("last words\r\n");
+    h.spawned[0].exitCb?.({ exitCode: 0 });
+    await flush();
+    const types = sent.map((m) => m.type);
+    expect(types.indexOf("preview")).toBeGreaterThan(-1);
+    expect(types.indexOf("preview")).toBeLessThan(types.indexOf("exit"));
+    expect(types.indexOf("snapshot")).toBeLessThan(types.indexOf("exit"));
+    const preview = sent.find((m) => m.type === "preview") as { preview: string };
+    expect(preview.preview).toBe("last words");
+  });
+});
