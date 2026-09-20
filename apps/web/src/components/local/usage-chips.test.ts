@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { accountBuckets, pctTone, resetsIn } from "./usage-chips";
+import { accountBuckets, pctTone, resetsIn, usageUnavailableReason } from "./usage-chips";
 import { formatTokens, formatUsd, priceForModel, costForTokens } from "@optio/shared";
 
 describe("usage chips", () => {
@@ -53,5 +53,37 @@ describe("usage chips", () => {
         ],
       }).map(([label, b]) => `${label}=${b.utilization}`),
     ).toEqual(["5h=26", "7d=50", "7d Fable=98"]);
+  });
+});
+
+describe("usageUnavailableReason", () => {
+  const bucket = { utilization: 10, resetsAt: null };
+  it("is null when limits are present", () => {
+    expect(usageUnavailableReason({ available: true, fiveHour: bucket })).toBeNull();
+  });
+  it("hides the pill only when there is no subscription token to read", () => {
+    expect(
+      usageUnavailableReason({ available: false, error: "No OAuth token available" }),
+    ).toBeNull();
+    expect(
+      usageUnavailableReason({
+        available: false,
+        error: "No Claude subscription credentials found on this host",
+      }),
+    ).toBeNull();
+  });
+  it("keeps the pill on screen for a failed read", () => {
+    expect(usageUnavailableReason({ available: false, error: "Usage API returned 429" })).toBe(
+      "Usage API returned 429",
+    );
+    expect(
+      usageUnavailableReason({
+        available: false,
+        error: "Claude subscription token is expired and could not be refreshed",
+      }),
+    ).toMatch(/expired/);
+    expect(usageUnavailableReason({ available: false, error: "unreachable" })).toBe("unreachable");
+    expect(usageUnavailableReason({ available: false })).toBe("usage unavailable");
+    expect(usageUnavailableReason({ available: true })).toBe("no usage limits reported");
   });
 });
