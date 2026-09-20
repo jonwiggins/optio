@@ -3,25 +3,38 @@ import Observation
 import SwiftTerm
 import UIKit
 
-/// Holds the SwiftTerm view for a screen so the stream model can feed bytes
+/// Holds the SwiftTerm host for a screen so the stream model can feed bytes
 /// before/after the `UIViewRepresentable` attaches, and so the extra-keys bar
 /// can inject key sequences and toggle the keyboard.
+///
+/// Bytes are held until the host has laid out under its sizing mode: SwiftTerm
+/// does not reflow, so a replay fed at the wrong grid would stay sheared.
 @MainActor
 final class TerminalBridge {
-    weak var view: TerminalView?
+    private(set) weak var host: LocalTerminalHostView?
     private var pending = Data()
+    /// The host has laid out for the first time: its natural grid is known.
+    var onSettled: (() -> Void)?
 
-    func attach(_ v: TerminalView) {
-        view = v
-        if !pending.isEmpty {
-            v.feed(byteArray: ArraySlice([UInt8](pending)))
-            pending.removeAll()
+    var view: TerminalView? { host?.terminal }
+
+    func attach(_ h: LocalTerminalHostView, mode: TerminalSizing.Mode) {
+        host = h
+        h.mode = mode
+        h.onLayoutSettled = { [weak self] in
+            self?.onSettled?()
+            self?.flush()
         }
+        if h.settled { onSettled?(); flush() }
+    }
+
+    func setMode(_ mode: TerminalSizing.Mode) {
+        host?.mode = mode
     }
 
     func feed(_ data: Data) {
-        if let view {
-            view.feed(byteArray: ArraySlice([UInt8](data)))
+        if let host, host.settled {
+            host.terminal.feed(byteArray: ArraySlice([UInt8](data)))
         } else {
             pending.append(data)
         }
@@ -31,13 +44,23 @@ final class TerminalBridge {
         feed(Data(text.utf8))
     }
 
+    private func flush() {
+        guard let host, host.settled, !pending.isEmpty else { return }
+        let data = pending
+        pending.removeAll()
+        host.terminal.feed(byteArray: ArraySlice([UInt8](data)))
+    }
+
     func reset() {
         pending.removeAll()
         view?.getTerminal().resetToInitialState()
     }
 
-    var cols: Int { view?.getTerminal().cols ?? 80 }
-    var rows: Int { view?.getTerminal().rows ?? 24 }
+    var grid: TerminalGrid? {
+        guard let t = view?.getTerminal() else { return nil }
+        return TerminalGrid(cols: t.cols, rows: t.rows)
+    }
+    var naturalGrid: TerminalGrid? { host?.naturalGrid() }
     var applicationCursor: Bool { view?.getTerminal().applicationCursor ?? false }
 
     func focus() { _ = view?.becomeFirstResponder() }
@@ -45,11 +68,17 @@ final class TerminalBridge {
     var isFocused: Bool { view?.isFirstResponder ?? false }
 }
 
-/// Viewer for `/ws/local/terminals/:id/stream`. Mirrors `local-terminal.tsx`
-/// and `stream-policy.ts`:
+/// Viewer for `/ws/local/terminals/:id/stream`. Mirrors `local-terminal.tsx`,
+/// `stream-policy.ts` and `sizing.ts`:
 /// - server → client: binary = raw terminal bytes (scrollback replay then live),
-///   JSON = `status` / `exit` / `error`
+///   JSON = `status` / `size` / `exit` / `error`
 /// - client → server: JSON only — `input` and `resize`
+///
+/// One PTY, one grid. Attaching never resizes it; only an explicit interaction
+/// (focusing the terminal, typing, "Use this screen") claims it for this phone.
+/// A viewer that hasn't claimed it renders the announced grid shrunk to fit, so
+/// glancing at a laptop session from the phone never forces the laptop's TUI
+/// down to phone width.
 @MainActor
 @Observable
 final class LocalTerminalStream {
@@ -66,7 +95,22 @@ final class LocalTerminalStream {
     private(set) var errorMessage: String?
     /// Whether the error is being retried (host offline) vs. terminal.
     private(set) var retrying = false
-    private(set) var lastSentSize: (cols: Int, rows: Int)?
+    /// Set once the first terminal bytes arrived — the screen holds real output.
+    private(set) var outputSeen = false
+    /// The stream has said all it will (exit frame or a final close).
+    private(set) var settled = false
+
+    private(set) var mode: TerminalSizing.Mode = .unclaimed
+    /// Another viewer owns the PTY grid (or it's the recorded grid of an exited
+    /// terminal) and we're rendering it scaled to fit. Drives the strip.
+    var foreignGrid: TerminalGrid? {
+        if case .passive(let g) = mode { return g }
+        return nil
+    }
+    /// The terminal has exited: `foreignGrid` is the grid its final screen was
+    /// recorded at, pinned so it reads the way it ran (no "use this screen").
+    private(set) var recorded = false
+    var ownsGrid: Bool { mode == .owner }
 
     var onStatus: ((LocalTerminalState, LocalAttentionState) -> Void)?
     var onExit: ((Int?) -> Void)?
@@ -78,21 +122,30 @@ final class LocalTerminalStream {
     private var terminalDead = false
     private var pendingReset = false
     private var liveOnThisConnection = false
-    /// `.opened` fires before the handshake completes, so the resize sent there may be
-    /// dropped; the server's first `status` frame is the earliest guaranteed-open moment.
-    private var resizedOnThisConnection = false
+    private var retryRequested = false
     private var disposed = false
+    /// Grids we've asked for and not yet heard echoed, oldest first.
+    private var sent: [TerminalGrid] = []
+    /// The PTY grid last announced by the daemon.
+    private var announcedGrid: TerminalGrid?
+    /// Bytes that arrived before this connection's `size` frame. The daemon
+    /// announces the grid right after the scrollback replay; holding the replay
+    /// until then lets it land on the right grid (SwiftTerm can't reflow later).
+    private var heldBytes: Data?
+    private var holdTask: Task<Void, Never>?
 
     private static let reconnectDelay: Duration = .seconds(2)
-    private static let permanentClose: [Int: String] = [
-        4401: "Authentication failed — sign in again.",
-        4403: "You don't have permission to view this terminal.",
-        4429: "Too many connections — close other Optio clients.",
-    ]
+    private static let sizeHold: Duration = .milliseconds(1500)
 
     init(api: APIClient, terminalId: String) {
         self.api = api
         self.terminalId = terminalId
+        // A grid announced while the Screen face was hidden was judged without
+        // knowing our natural fit; judge it again once the host has laid out.
+        bridge.onSettled = { [weak self] in
+            guard let self, let grid = announcedGrid else { return }
+            gridAnnounced(grid)
+        }
     }
 
     func connect() {
@@ -102,7 +155,7 @@ final class LocalTerminalStream {
         let client = WebSocketClient(api: api, path: "/ws/local/terminals/\(terminalId)/stream", autoReconnect: false)
         ws = client
         liveOnThisConnection = false
-        resizedOnThisConnection = false
+        beginHold()
         if connState != .reconnecting { connState = .connecting }
         client.connect()
         readTask = Task { [weak self] in
@@ -127,24 +180,34 @@ final class LocalTerminalStream {
     func disconnect() {
         disposed = true
         reconnectTask?.cancel()
+        holdTask?.cancel()
         readTask?.cancel()
         ws?.disconnect()
         ws = nil
     }
+
+    // MARK: Server → client
 
     private func handle(_ frame: WebSocketClient.Frame, from client: WebSocketClient) async {
         guard client === ws else { return }
         switch frame {
         case .opened:
             connState = .connected
-            sendResize(cols: bridge.cols, rows: bridge.rows, force: true)
+            // Attaching never resizes the PTY. If we already own it (reconnect
+            // after a blip), re-assert our grid; otherwise wait for `size`.
+            if mode == .owner, let grid = bridge.grid { sendResize(grid) }
         case .binary(let data):
             if pendingReset {
                 pendingReset = false
                 bridge.reset()
             }
             if errorMessage != nil, retrying { errorMessage = nil; retrying = false }
-            bridge.feed(data)
+            outputSeen = true
+            if heldBytes != nil {
+                heldBytes?.append(data)
+            } else {
+                bridge.feed(data)
+            }
         case .text(let s):
             // Non-JSON text is unexpected on this stream; render it so nothing is lost.
             bridge.feed(text: s)
@@ -153,57 +216,54 @@ final class LocalTerminalStream {
                   let msg = try? api.decoder.decode(LocalStreamServerMessage.self, from: data) else { return }
             switch msg {
             case .status(let p):
-                if !resizedOnThisConnection {
-                    resizedOnThisConnection = true
-                    sendResize(cols: bridge.cols, rows: bridge.rows, force: true)
-                }
-                if p.state == .exited || p.state == .error { terminalDead = true } else { liveOnThisConnection = true }
+                if StreamPolicy.isTerminalStateDead(p.state) { terminalDead = true } else { liveOnThisConnection = true }
                 state = p.state
                 attentionState = p.attentionState
                 onStatus?(p.state, p.attentionState)
+            case .size(let p):
+                let cols = Int(p.cols), rows = Int(p.rows)
+                if cols > 0, rows > 0 { gridAnnounced(TerminalGrid(cols: cols, rows: rows)) }
+                releaseHold()
             case .exit(let p):
                 terminalDead = true
+                settled = true
+                releaseHold()
                 let code = p.exitCode.map { Int($0) }
                 exitCode = code
                 bridge.feed(text: "\r\n\u{1b}[2m[process exited\(code.map { " (code \($0))" } ?? "")]\u{1b}[0m\r\n")
                 onExit?(code)
             case .error(let p):
                 errorMessage = p.message
+                releaseHold()
                 // An error on a live terminal (e.g. "Host is offline") leaves the socket
                 // attached to nothing — close and retry until the daemon is back.
                 if liveOnThisConnection, !terminalDead {
                     retrying = true
+                    retryRequested = true
                     client.disconnect() // finishes the frame stream — no `.closed` follows
                     scheduleReconnect()
                 } else {
                     retrying = false
                 }
-            case .size:
-                // The recorded grid of an exited terminal. The web resizes xterm to it before
-                // the replay; SwiftTerm follows the view's own size, so the replay reflows.
-                break
             case .unknown:
                 break
             }
         case .closed(let code, _):
             if disposed { return }
-            if let permanent = Self.permanentClose[code] {
+            releaseHold()
+            let action = StreamPolicy.closeAction(code: code, terminalDead: terminalDead, retryRequested: retryRequested)
+            retryRequested = false
+            switch action {
+            case .stop(let message):
                 connState = .disconnected
-                errorMessage = permanent
-                retrying = false
-                return
+                settled = true
+                if let message {
+                    errorMessage = message
+                    retrying = false
+                }
+            case .reconnect:
+                scheduleReconnect()
             }
-            if terminalDead {
-                connState = .disconnected
-                return
-            }
-            // Deliberate closes (ours on dispose, or the server's after a fatal error
-            // frame like "Terminal not found") don't loop.
-            if code == 1000 || code == 1005 {
-                connState = .disconnected
-                return
-            }
-            scheduleReconnect()
         }
     }
 
@@ -219,6 +279,56 @@ final class LocalTerminalStream {
         }
     }
 
+    private func beginHold() {
+        heldBytes = Data()
+        holdTask?.cancel()
+        holdTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.sizeHold)
+            guard let self, !Task.isCancelled else { return }
+            self.releaseHold()
+        }
+    }
+
+    private func releaseHold() {
+        holdTask?.cancel()
+        holdTask = nil
+        guard let held = heldBytes else { return }
+        heldBytes = nil
+        if !held.isEmpty { bridge.feed(held) }
+    }
+
+    // MARK: Grid ownership
+
+    private func gridAnnounced(_ grid: TerminalGrid) {
+        announcedGrid = grid
+        // Until SwiftTerm is mounted our natural fit is unknown, so the grid can't
+        // be ours: render it as announced (passive) rather than at phone width.
+        let natural = bridge.naturalGrid ?? TerminalGrid(cols: 0, rows: 0)
+        mode = TerminalSizing.onGridAnnounced(mode, grid, natural: natural, sent: sent, recorded: terminalDead)
+        if let rest = TerminalSizing.ackSentGrid(sent, grid) { sent = rest }
+        if terminalDead { recorded = true }
+        bridge.setMode(mode)
+    }
+
+    /// This screen is being used: size the PTY to it. Nothing left to size once
+    /// the process is gone — and a tap to select text must not reflow a replayed
+    /// screen out of its recorded grid.
+    func claim() {
+        guard !terminalDead, !disposed else { return }
+        mode = .owner
+        bridge.setMode(.owner)
+        // Always tell the daemon, even if our grid is what we last sent: another
+        // viewer may have resized the PTY in between.
+        if let grid = bridge.grid { sendResize(grid) }
+    }
+
+    /// The SwiftTerm view's grid changed (rotation, keyboard, our own claim).
+    /// Passive renders resize the view too; only the owner tells the PTY.
+    func viewGridChanged(_ grid: TerminalGrid) {
+        guard mode == .owner else { return }
+        sendResize(grid)
+    }
+
     // MARK: Client → server
 
     func sendInput(_ text: String) {
@@ -230,50 +340,18 @@ final class LocalTerminalStream {
         sendInput(String(decoding: bytes, as: UTF8.self))
     }
 
-    func sendResize(cols: Int, rows: Int, force: Bool = false) {
-        guard cols > 0, rows > 0 else { return }
-        if !force, let last = lastSentSize, last.cols == cols, last.rows == rows { return }
-        lastSentSize = (cols, rows)
+    /// An explicit key press (the extra-keys bar) means this is the screen in use
+    /// — take the grid first so the program lays out for it before it processes
+    /// the keystroke. Keyboard typing is covered by the focus claim.
+    func typed(bytes: [UInt8]) {
+        if mode != .owner { claim() }
+        sendInput(bytes: bytes)
+    }
+
+    private func sendResize(_ grid: TerminalGrid) {
+        guard grid.cols > 0, grid.rows > 0 else { return }
+        sent = TerminalSizing.pushSentGrid(sent, grid)
         guard connState == .connected, let ws else { return }
-        Task { try? await ws.send(LocalStreamClientMessage.resize(.init(cols: Double(cols), rows: Double(rows)))) }
-    }
-
-    // MARK: Extra keys
-
-    enum ExtraKey: String, CaseIterable, Identifiable {
-        case esc, tab, ctrlC, ctrlD, up, down, left, right, slash, dash
-        var id: String { rawValue }
-
-        var label: String {
-            switch self {
-            case .esc: return "esc"
-            case .tab: return "tab"
-            case .ctrlC: return "^C"
-            case .ctrlD: return "^D"
-            case .up: return "↑"
-            case .down: return "↓"
-            case .left: return "←"
-            case .right: return "→"
-            case .slash: return "/"
-            case .dash: return "-"
-            }
-        }
-    }
-
-    func send(_ key: ExtraKey) {
-        let app = bridge.applicationCursor
-        let arrow: (String) -> [UInt8] = { letter in Array("\u{1b}\(app ? "O" : "[")\(letter)".utf8) }
-        switch key {
-        case .esc: sendInput(bytes: [0x1b])
-        case .tab: sendInput(bytes: [0x09])
-        case .ctrlC: sendInput(bytes: [0x03])
-        case .ctrlD: sendInput(bytes: [0x04])
-        case .up: sendInput(bytes: arrow("A"))
-        case .down: sendInput(bytes: arrow("B"))
-        case .right: sendInput(bytes: arrow("C"))
-        case .left: sendInput(bytes: arrow("D"))
-        case .slash: sendInput("/")
-        case .dash: sendInput("-")
-        }
+        Task { try? await ws.send(LocalStreamClientMessage.resize(.init(cols: Double(grid.cols), rows: Double(grid.rows)))) }
     }
 }
