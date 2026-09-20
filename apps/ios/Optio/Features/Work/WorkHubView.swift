@@ -39,7 +39,16 @@ struct WorkHubView: View {
             .onAppear(perform: consumeRoute)
             .onChange(of: router.pendingSection) { _, _ in consumeRoute() }
             .onChange(of: router.pendingDetail) { _, _ in consumeRoute() }
+            .onChange(of: router.createdSession) { _, _ in consumeCreated() }
+            .toast(router.createdToast, tone: .success) { router.createdToast = nil }
         }
+    }
+
+    /// The New session form just made something: push its detail screen.
+    private func consumeCreated() {
+        guard let destination = router.createdSession else { return }
+        router.createdSession = nil
+        path.append(destination)
     }
 
     /// Cross-tab deep link from `AppRouter.open(_:)`.
@@ -55,6 +64,7 @@ struct WorkHubView: View {
         section = mapped
         router.pendingSection = nil
         consumeDetail()
+        consumeCreated()
     }
 
     /// `optio://tasks/<id>`, `optio://local/<id>?compose=1`, `optio://agents/<id>?compose=1`,

@@ -26,6 +26,10 @@ final class AppRouter {
     /// A detail to open once the owning hub is on screen: (kind, id, compose). Hubs
     /// consume it (set nil) after pushing the detail view.
     var pendingDetail: PendingDetail?
+    /// A session the New session form just created: the Work hub pushes its detail
+    /// and shows `createdToast`, then clears both.
+    var createdSession: SessionDestination?
+    var createdToast: String?
 
     struct PendingDetail: Hashable {
         enum Kind: Hashable { case task, local, agent, session }
@@ -87,6 +91,13 @@ final class AppRouter {
         pendingSection = section
         if section == .sessions, let view { pendingSessionView = view }
         selectedTab = tab(for: section)
+    }
+
+    /// After the New session form submits: land on the session's detail screen.
+    func showCreatedSession(_ destination: SessionDestination, toast: String) {
+        createdSession = destination
+        createdToast = toast
+        open(.sessions)
     }
 
     /// Straight to the Sessions list in a given view (Overview tiles).
