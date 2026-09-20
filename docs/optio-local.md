@@ -502,3 +502,5 @@ eliminates the classic "pasted JSON swallowed as control" bug):
 - Multi-replica API relay (daemon sockets are in-process, matching exec-based sessions).
 - Terminal survival across daemon restarts (PTYs are daemon children; `claude --continue`
   in the same dir is the recovery path).
+
+<!-- test: PR-triage automation trigger check (2026-09-19); safe to delete -->
