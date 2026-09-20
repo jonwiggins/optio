@@ -94,6 +94,16 @@ const logsQuerySchema = z
   })
   .describe("Query parameters for paginated task logs");
 
+/** Postgres unique-constraint failure (names are unique per workspace). */
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string }; message?: string } | null;
+  return (
+    e?.code === "23505" ||
+    e?.cause?.code === "23505" ||
+    /unique|23505|duplicate key/i.test(e?.message ?? "")
+  );
+}
+
 const createTaskSchema = z
   .object({
     type: z
@@ -176,6 +186,11 @@ const TaskListResponseSchema = z
       .describe("Page of tasks"),
     limit: z.number().int(),
     offset: z.number().int(),
+    total: z
+      .number()
+      .int()
+      .optional()
+      .describe("Rows across the listed kind(s) in the workspace (polymorphic lists only)"),
   })
   .describe("Paginated task list response");
 
@@ -298,7 +313,11 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         limit,
       });
       const tasksOut = resolved.map((r) => ({ type: r.type, ...r.data }));
-      return reply.send({ tasks: tasksOut, limit, offset });
+      const total = await unifiedTaskService.countUnifiedTasks({
+        type: type === "all" ? undefined : type,
+        workspaceId,
+      });
+      return reply.send({ tasks: tasksOut, limit, offset, total });
     },
   );
 
@@ -461,6 +480,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         response: {
           201: TaskResponseSchema,
           400: ErrorResponseSchema,
+          409: ErrorResponseSchema,
         },
       },
     },
@@ -515,6 +535,9 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           }).catch(() => {});
           return reply.status(201).send({ task: { type: "standalone", ...workflow } });
         } catch (err) {
+          if (isUniqueViolation(err)) {
+            return reply.status(409).send({ error: `A Job named "${name}" already exists` });
+          }
           return reply
             .status(400)
             .send({ error: err instanceof Error ? err.message : String(err) });
@@ -557,6 +580,11 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           }).catch(() => {});
           return reply.status(201).send({ task: { type: "repo-blueprint", ...row } });
         } catch (err) {
+          if (isUniqueViolation(err)) {
+            return reply
+              .status(409)
+              .send({ error: `A scheduled Task named "${name}" already exists` });
+          }
           return reply
             .status(400)
             .send({ error: err instanceof Error ? err.message : String(err) });

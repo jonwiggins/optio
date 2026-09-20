@@ -26,6 +26,7 @@ import {
   type LocalTerminalSpec,
   type LocalTerminalUsage,
 } from "@optio/shared";
+import { randomUUID } from "node:crypto";
 import { db } from "../db/client.js";
 import { localTerminalSnapshots, localTerminalTranscripts, localTerminals } from "../db/schema.js";
 import { logger } from "../logger.js";
@@ -57,6 +58,30 @@ export function canAccessTerminal(
 }
 
 /** Human-readable rendering of a spec for list views. Never re-executed. */
+/** Branch prefix for "new branch" sessions opened from the New session form. */
+export const LOCAL_SESSION_BRANCH_PREFIX = "optio/session-";
+
+/**
+ * Wrap an agent prompt with "work on a branch, open a PR" instructions — the
+ * local counterpart of the cluster pipeline's branch + PR wrapper, for a
+ * session that runs in the owner's own checkout. A blank prompt becomes just
+ * the instructions, so an interactive session opened on a new branch starts
+ * by branching.
+ */
+export function withBranchInstructions(
+  prompt: string,
+  opts: { baseBranch: string; branch: string; dir: string },
+): string {
+  const base = opts.baseBranch.trim() || "main";
+  const lines = [
+    `You are working in the local checkout at ${opts.dir}.`,
+    `Work on a branch, never directly on \`${base}\`: create \`${opts.branch}\` from an up-to-date \`${base}\`, commit your changes there, push it, and open a pull request against \`${base}\` (for example with \`gh pr create\`) with a clear title and description.`,
+    "Print the pull request URL when you are done.",
+  ];
+  const body = prompt.trim();
+  return body ? `${body}\n\n---\n${lines.join("\n")}` : lines.join("\n");
+}
+
 export function describeSpec(spec: LocalTerminalSpec): string | null {
   switch (spec.kind) {
     case "shell":
@@ -205,9 +230,22 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
   if (!isDirAllowed(input.host, input.dir)) {
     throw new Error(`Directory not in the host's allowlist: ${input.dir}`);
   }
-  const spec = input.spec;
+  let spec = input.spec;
   if (spec.kind === "agent" && !AGENT_BINS[spec.agent]) {
     throw new Error(`Unknown agent kind: ${spec.agent}`);
+  }
+  // "New branch that becomes a PR": the id is fixed up front so the branch
+  // name in the instructions matches the row.
+  const id = input.id ?? randomUUID();
+  if (spec.kind === "agent" && spec.baseBranch && !spec.resumeSessionId) {
+    spec = {
+      ...spec,
+      prompt: withBranchInstructions(spec.prompt ?? "", {
+        baseBranch: spec.baseBranch,
+        branch: `${LOCAL_SESSION_BRANCH_PREFIX}${id.slice(0, 8)}`,
+        dir: input.dir,
+      }),
+    };
   }
 
   const title =
@@ -221,7 +259,7 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
   const [row] = await db
     .insert(localTerminals)
     .values({
-      ...(input.id ? { id: input.id } : {}),
+      id,
       hostId: input.host.id,
       userId: input.userId,
       workspaceId: input.workspaceId,

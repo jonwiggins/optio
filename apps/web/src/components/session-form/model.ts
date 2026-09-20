@@ -35,6 +35,35 @@ export interface EventTrigger {
   config: Record<string, unknown>;
 }
 
+/** GitHub / Linear event kinds that are "about you" and need a login to match. */
+export const PERSONAL_EVENT_KINDS: Record<EventTriggerType, readonly string[]> = {
+  github: ["review_requested", "mentioned", "assigned"],
+  slack: [],
+  linear: ["assigned", "mentioned"],
+};
+
+/** Slack channel ids look like C0123ABCD (the API rejects anything else). */
+export const SLACK_CHANNEL_ID = /^[A-Z][A-Z0-9]{5,}$/;
+
+/**
+ * What an event trigger still needs before the API would accept it — the
+ * same rules `/api/local/blueprints/:id/triggers` enforces, checked up front
+ * so a rejected trigger never strands a half-created session.
+ */
+export function eventGaps(e: EventTrigger): SentenceField[] {
+  const c = e.config;
+  const events = Array.isArray(c.events) ? (c.events as string[]) : [];
+  if (e.type === "slack") {
+    return SLACK_CHANNEL_ID.test(String(c.channelId ?? "")) ? [] : ["channel"];
+  }
+  // No kinds checked would mean "every kind" to the matcher — make it a choice.
+  if (events.length === 0) return ["events"];
+  const personal = events.some((k) => PERSONAL_EVENT_KINDS[e.type].includes(k));
+  const identity = String((e.type === "github" ? c.login : c.user) ?? "").trim();
+  if (personal && !identity) return ["identity"];
+  return [];
+}
+
 export interface SessionDraft {
   when: WhenType;
   trigger: TriggerConfig;
@@ -211,6 +240,7 @@ export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
     "baseBranch",
     "commentBody",
     "commentUrl",
+    "action",
   ],
   slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink"],
   linear: [
@@ -275,10 +305,10 @@ export function runtimeOptions(d: SessionDraft): Choice<string>[] {
   const local = isLocal(d);
   const terminal: Choice<string> = {
     value: TERMINAL,
-    ...(!local && !d.withRepo
-      ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
-      : !local && isTriggered(d)
-        ? { disabled: "A pod terminal is opened by hand — pick Now above." }
+    ...(isTriggered(d)
+      ? { disabled: "A trigger starts an agent — a terminal is opened by hand, pick Now above." }
+      : !local && !d.withRepo
+        ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
         : {}),
   };
   const agents: Choice<string>[] = RUNTIMES.map((r) => ({
@@ -305,7 +335,12 @@ export function thenOptions(d: SessionDraft): Choice<Then>[] {
           ? {
               disabled: "A pod terminal is opened by hand. On your machine, triggers can open one.",
             }
-          : {}),
+          : !local && !terminal && d.runtime !== "claude-code"
+            ? {
+                disabled:
+                  "A pod session chats with Claude Code — pick Terminal or Claude Code above.",
+              }
+            : {}),
     },
     {
       value: "waits-for-messages",
@@ -418,7 +453,16 @@ export function deriveKind(d: SessionDraft): SessionKind {
 
 export type SentencePart = { text: string } | { missing: string; field: SentenceField };
 
-export type SentenceField = "checkout" | "repo" | "machine" | "prompt" | "cron" | "webhook";
+export type SentenceField =
+  | "checkout"
+  | "repo"
+  | "machine"
+  | "prompt"
+  | "cron"
+  | "webhook"
+  | "identity"
+  | "channel"
+  | "events";
 
 const CRON_WORDS: Record<string, string> = {
   "0 * * * *": "every hour",
@@ -447,11 +491,23 @@ function whenPhrase(d: SessionDraft): SentencePart[] {
     case "ticket":
       return [{ text: `Started by ${d.trigger.ticketSource ?? "github"} tickets,` }];
     case "github":
-      return [{ text: "Started by GitHub events," }];
     case "slack":
-      return [{ text: "Started by Slack messages," }];
-    case "linear":
-      return [{ text: "Started by Linear events," }];
+    case "linear": {
+      const source = { github: "GitHub events", slack: "Slack messages", linear: "Linear events" }[
+        d.when
+      ];
+      const gaps = eventGaps(d.event);
+      if (gaps.length === 0) return [{ text: `Started by ${source},` }];
+      return [
+        { text: `Started by ${source}` },
+        gaps[0] === "channel"
+          ? { missing: "in a channel", field: "channel" }
+          : gaps[0] === "events"
+            ? { missing: "of some kind", field: "events" }
+            : { missing: "about you", field: "identity" },
+        { text: "," },
+      ];
+    }
   }
 }
 
@@ -483,7 +539,9 @@ export function describe(
     );
     parts.push(
       d.location.localDir
-        ? { text: `${d.withRepo ? "on a new branch in" : "in"} ${shortDir(d.location.localDir)}` }
+        ? {
+            text: `${d.withRepo && d.runtime !== TERMINAL ? "on a new branch in" : "in"} ${shortDir(d.location.localDir)}`,
+          }
         : { missing: d.withRepo ? "a checkout" : "a directory", field: "checkout" },
     );
   } else {

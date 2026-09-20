@@ -144,6 +144,7 @@ export class GenericOIDCProvider implements OAuthProvider {
       externalId: String(data.sub),
       email: data.email ?? "",
       displayName: data.name ?? data.preferred_username ?? "",
+      username: data.preferred_username ?? undefined,
       avatarUrl: data.picture,
     };
   }

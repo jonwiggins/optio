@@ -73,6 +73,7 @@ export async function authenticateWs(
       provider: "local",
       email: "dev@localhost",
       displayName: "Local Dev",
+      username: null,
       avatarUrl: null,
       workspaceId: null,
       workspaceRole: null,

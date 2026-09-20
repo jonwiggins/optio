@@ -113,6 +113,8 @@ The `workflow-trigger-worker` polls due schedule triggers every 60 seconds (`OPT
 - `target_type="job"` → `workflowService.createWorkflowRun()` → spawns a `workflow_runs` row.
 - `target_type="task_config"` → `taskConfigService.instantiateTask()` → renders the blueprint's prompt with trigger params, creates a `tasks` row, transitions it to `queued`, and enqueues the BullMQ job.
 
+Ticket triggers fire from the ticket-sync sweep (`ticket-sync-service.ts`) rather than the poller: every new actionable ticket is offered to the enabled `ticket` triggers of each target type — `task_config` (`fireTicketTriggers`), `job` (`workflowService.fireJobTicketTriggers`), and `local_blueprint` (`fireLocalTicketTriggers`) — filtered by `config.source` and any-match `config.labels`, with the same six params (`ticketSource`, `ticketExternalId`, `ticketTitle`, `ticketBody`, `ticketUrl`, `ticketLabels`).
+
 ## Templates and parameters
 
 Both blueprint types use the same template engine: `{{param}}` substitution and `{{#if param}}...{{/if}}` blocks. Templates render lazily at trigger-firing time, so values from the trigger payload (cron-formatted timestamps, webhook bodies, ticket fields) substitute into the prompt before the agent ever sees it.

@@ -623,6 +623,7 @@ export async function authRoutes(rawApp: FastifyInstance) {
             provider: "local",
             email: "dev@localhost",
             displayName: "Local Dev",
+            username: null,
             avatarUrl: null,
           },
           authDisabled: true,

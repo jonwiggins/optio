@@ -6,6 +6,7 @@ import {
   TRIGGER_PARAMS,
   describe,
   deriveKind,
+  eventGaps,
   missingFields,
   normalize,
   runtimeOptions,
@@ -82,6 +83,18 @@ suite("constraints flow downstream", () => {
     expect(enabled(runtimeOptions(EMPTY_DRAFT))).toContain(TERMINAL);
   });
 
+  it("a trigger never starts a bare terminal, on a pod or a machine", () => {
+    expect(enabled(runtimeOptions(local({ ...EMPTY_DRAFT, when: "schedule" })))).not.toContain(
+      TERMINAL,
+    );
+    expect(enabled(runtimeOptions(local({ ...EMPTY_DRAFT, when: "slack" })))).not.toContain(
+      TERMINAL,
+    );
+    expect(normalize(local({ ...EMPTY_DRAFT, when: "schedule", runtime: TERMINAL })).runtime).toBe(
+      "claude-code",
+    );
+  });
+
   it("a terminal with no agent waits for you", () => {
     const d = normalize(local({ ...EMPTY_DRAFT, withRepo: false, runtime: TERMINAL }));
     expect(enabled(thenOptions(d))).toEqual(["waits-for-me"]);
@@ -99,6 +112,20 @@ suite("constraints flow downstream", () => {
       local({ ...EMPTY_DRAFT, withRepo: false, then: "waits-for-messages" }),
     );
     expect(flipped.then).toBe("exits");
+  });
+
+  it("a pod session chats with Claude Code, so other runtimes can't wait for you there", () => {
+    expect(enabled(thenOptions({ ...EMPTY_DRAFT, runtime: "codex" }))).not.toContain(
+      "waits-for-me",
+    );
+    expect(enabled(thenOptions({ ...EMPTY_DRAFT, runtime: "claude-code" }))).toContain(
+      "waits-for-me",
+    );
+    expect(enabled(thenOptions({ ...EMPTY_DRAFT, runtime: TERMINAL }))).toContain("waits-for-me");
+    // On a machine any launchable CLI can wait for you.
+    expect(enabled(thenOptions(local({ ...EMPTY_DRAFT, runtime: "codex" })))).toContain(
+      "waits-for-me",
+    );
   });
 
   it("switching runtimes clears the previous runtime's options", () => {
@@ -141,6 +168,37 @@ suite("the sentence", () => {
     expect(missingFields(d)).toEqual(["prompt"]);
     const bad = { ...d, trigger: { type: "schedule" as const, cronExpression: "nope" } };
     expect(text(bad)).toContain("[on a schedule]");
+  });
+
+  it("an event trigger about you needs your login, a Slack one a channel id", () => {
+    const gh = (config: Record<string, unknown>) =>
+      eventGaps({ type: "github", config: { events: ["review_requested"], ...config } });
+    expect(gh({ login: "" })).toEqual(["identity"]);
+    expect(gh({ login: "octocat" })).toEqual([]);
+    expect(eventGaps({ type: "github", config: { events: ["pr_opened"], login: "" } })).toEqual([]);
+    expect(eventGaps({ type: "linear", config: { events: ["assigned"], user: "" } })).toEqual([
+      "identity",
+    ]);
+    expect(eventGaps({ type: "github", config: { events: [], login: "octocat" } })).toEqual([
+      "events",
+    ]);
+    expect(eventGaps({ type: "slack", config: { channelId: "general" } })).toEqual(["channel"]);
+    expect(eventGaps({ type: "slack", config: { channelId: "C0123ABCD" } })).toEqual([]);
+    // The sentence carries the gap, so the form can't submit.
+    const d = normalize({
+      ...EMPTY_DRAFT,
+      when: "github",
+      prompt: "p",
+      event: { type: "github", config: { events: ["mentioned"], login: "" } },
+    });
+    expect(text(local(d))).toContain("[about you]");
+    expect(missingFields(local(d))).toContain("identity");
+  });
+
+  it("a shell terminal on a machine never claims a new branch", () => {
+    const d = normalize(local({ ...EMPTY_DRAFT, withRepo: true, runtime: TERMINAL }));
+    expect(text(d)).toContain("a terminal on my machine in ~/repos/app");
+    expect(text(d)).not.toContain("new branch");
   });
 
   it("does not demand a prompt for a terminal you open by hand", () => {

@@ -61,6 +61,7 @@ export class GitLabOAuthProvider implements OAuthProvider {
       externalId: String(data.id),
       email: data.email ?? "",
       displayName: data.name ?? data.username ?? "",
+      username: data.username ?? undefined,
       avatarUrl: data.avatar_url,
     };
   }

@@ -27,7 +27,9 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `API error: ${res.status}`);
+    throw Object.assign(new Error(body.error ?? `API error: ${res.status}`), {
+      status: res.status,
+    });
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -786,6 +788,8 @@ export const api = {
         provider: string;
         email: string;
         displayName: string;
+        /** Provider handle (GitHub login / GitLab username); null when unknown. */
+        username?: string | null;
         avatarUrl: string | null;
         workspaceId: string | null;
         workspaceRole: string | null;
@@ -826,7 +830,7 @@ export const api = {
 
   getSession: (id: string) => request<{ session: any }>(`/api/sessions/${id}`),
 
-  createSession: (data: { repoUrl: string }) =>
+  createSession: (data: { repoUrl: string; title?: string }) =>
     request<{ session: any }>("/api/sessions", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1525,7 +1529,7 @@ export const api = {
     if (opts?.limit) qs.set("limit", String(opts.limit));
     if (opts?.offset) qs.set("offset", String(opts.offset));
     const query = qs.toString();
-    return request<{ tasks: any[]; limit: number; offset: number }>(
+    return request<{ tasks: any[]; limit: number; offset: number; total?: number }>(
       `/api/tasks${query ? `?${query}` : ""}`,
     );
   },
@@ -1923,7 +1927,7 @@ export const api = {
     spec?:
       | { kind: "shell" }
       | { kind: "command"; command: string }
-      | { kind: "agent"; agent: string; prompt?: string; model?: string };
+      | { kind: "agent"; agent: string; prompt?: string; model?: string; baseBranch?: string };
     ticket?: {
       repoId: string;
       issueNumber: number;
@@ -1964,6 +1968,8 @@ export const api = {
     hostId?: string;
     dir?: string;
     repoUrl?: string;
+    /** Agent spawns work on a new branch off this base and open a PR; unset = the dir as it is. */
+    baseBranch?: string | null;
     commandTemplate: string;
     /** Saved prompt (Prompts library) rendered as the agent prompt instead of commandTemplate. */
     promptTemplateId?: string | null;

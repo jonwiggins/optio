@@ -18,6 +18,7 @@ export const InteractiveSessionSchema = z
     userId: z.string().nullable(),
     worktreePath: z.string().nullable(),
     branch: z.string().describe("Branch the session has checked out"),
+    title: z.string().nullable().optional().describe("The name given to the session"),
     state: z.string().describe("`active` | `ended`"),
     podId: z.string().nullable().describe("Pod ID backing this session"),
     costUsd: z.string().nullable().describe("Aggregate cost in USD (decimal string)"),

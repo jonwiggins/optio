@@ -72,6 +72,11 @@ const blueprintBodySchema = z
     hostId: z.string().uuid().optional(),
     dir: z.string().max(1000).optional(),
     repoUrl: z.string().max(500).optional(),
+    baseBranch: z
+      .string()
+      .max(200)
+      .nullish()
+      .describe("Agent spawns work on a new branch off this base and open a PR; null = as-is"),
     commandTemplate: z
       .string()
       .max(4000)

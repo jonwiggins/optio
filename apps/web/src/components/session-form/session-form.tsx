@@ -37,6 +37,7 @@ import { useLocalHosts } from "@/hooks/use-local-hosts";
 import {
   EMPTY_DRAFT,
   PRESETS,
+  SLACK_CHANNEL_ID,
   TERMINAL,
   TRIGGER_PARAMS,
   WHEN_TYPES,
@@ -84,6 +85,9 @@ const FIELD_IDS: Record<SentenceField, string> = {
   prompt: "session-prompt",
   cron: "session-when",
   webhook: "session-when",
+  identity: "session-when",
+  channel: "session-when",
+  events: "session-when",
 };
 
 const PRESET_ICONS: Record<string, ReactNode> = {
@@ -151,6 +155,9 @@ export function SessionForm() {
   const [templates, setTemplates] = useState<any[]>([]);
   const [existingTasks, setExistingTasks] = useState<any[]>([]);
   const [sessionCount, setSessionCount] = useState<number | null>(null);
+  // The signed-in account's provider handle (GitHub login), to prefill
+  // "about you" event triggers.
+  const [me, setMe] = useState<{ provider: string; username: string | null } | null>(null);
   const { hosts } = useLocalHosts();
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
@@ -181,9 +188,23 @@ export function SessionForm() {
       .catch(() => {});
     api
       .listTasksUnified({ type: "all", limit: 1 })
-      .then((res) => setSessionCount((res as any).total ?? res.tasks.length))
+      .then((res) => setSessionCount(res.total ?? null))
       .catch(() => setSessionCount(null));
+    api
+      .getCurrentUser()
+      .then((res) => setMe({ provider: res.user.provider, username: res.user.username ?? null }))
+      .catch(() => setMe(null));
   }, []);
+
+  // If GitHub was picked before the account loaded, fill the login in now.
+  useEffect(() => {
+    if (!me?.username || me.provider !== "github") return;
+    setDraftRaw((d) =>
+      d.when === "github" && !String(d.event.config.login ?? "").trim()
+        ? { ...d, event: { ...d.event, config: { ...d.event.config, login: me.username } } }
+        : d,
+    );
+  }, [me]);
 
   // Pre-select the first repo once the list is known, like the Task form did.
   useEffect(() => {
@@ -228,7 +249,13 @@ export function SessionForm() {
   const gaps = missingFields(draft, sentenceCtx);
   const wantsRepoUrl = draft.withRepo && draft.then !== "waits-for-messages";
   const canSubmit = !submitting && gaps.length === 0 && (!wantsRepoUrl || !!effectiveRepoUrl);
-  const autoName = `Session ${(sessionCount ?? 0) + 1}`;
+  // Numbered after everything the unified list counts; while the count is
+  // unknown (or the API predates `total`) fall back to a timestamp so two
+  // unnamed sessions never collide on "Session 1".
+  const autoName =
+    sessionCount == null
+      ? `Session ${new Date().toISOString().slice(0, 16).replace("T", " ")}`
+      : `Session ${sessionCount + 1}`;
   const params = TRIGGER_PARAMS[draft.when];
   const isTerminal = draft.runtime === TERMINAL;
 
@@ -254,11 +281,14 @@ export function SessionForm() {
   const setWhen = (w: WhenType) => {
     setDraft((d) => {
       if (isEventWhen(w)) {
+        // Prefill "you" from the signed-in account when the provider matches.
+        const config = { ...DEFAULT_EVENT_CONFIG[w] };
+        if (w === "github" && me?.provider === "github" && me.username) config.login = me.username;
         return {
           ...d,
           when: w,
           trigger: { type: "manual" },
-          event: d.event.type === w ? d.event : { type: w, config: DEFAULT_EVENT_CONFIG[w] },
+          event: d.event.type === w ? d.event : { type: w, config },
         };
       }
       return { ...d, when: w };
@@ -642,9 +672,11 @@ export function SessionForm() {
             <p className="text-[11px] text-text-muted/80">
               {isTerminal
                 ? "Just you at a shell prompt — no agent, no prompt."
-                : local
-                  ? "Uses the CLI and login already on the machine."
-                  : "Runs with the server's agent credentials."}
+                : kind === "pod-session"
+                  ? "A pod session opens a terminal and a Claude Code chat side by side — you type the first message there."
+                  : local
+                    ? "Uses the CLI and login already on the machine."
+                    : "Runs with the server's agent credentials."}
               {disabledRuntimes.length > 0 &&
                 ` ${disabledRuntimes
                   .map((r) => (r.value === TERMINAL ? "Terminal" : runtimeLabel(r.value)))
@@ -679,7 +711,7 @@ export function SessionForm() {
         </Section>
 
         {/* ── What ────────────────────────────────────────────────────── */}
-        {!isTerminal && (
+        {!isTerminal && kind !== "pod-session" && (
           <Section step={4} label="What" hint="The prompt" id="session-prompt">
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -732,8 +764,9 @@ export function SessionForm() {
                       <>From the {WHEN_META[draft.when].label} trigger — click to insert:</>
                     ) : draft.when === "webhook" ? (
                       <>
-                        Any top-level field of the POSTed JSON is available as{" "}
-                        <code className="font-mono">{"{{field}}"}</code>.
+                        Each top-level field of the POSTed JSON is available as{" "}
+                        <code className="font-mono">{"{{field}}"}</code> (nested values arrive as
+                        JSON text).
                       </>
                     ) : (
                       "A schedule carries no parameters."
@@ -1112,10 +1145,22 @@ function Disclosure({
   );
 }
 
+/** Comma-separated list ⇄ string[] for the filter fields. */
+function listValue(v: unknown): string {
+  return Array.isArray(v) ? (v as string[]).join(", ") : "";
+}
+function parseList(text: string): string[] {
+  return text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /**
  * The event-trigger config for a Local automation, in the shape the
- * `/api/local/blueprints/:id/triggers` route stores (mirrors the editor in
- * `local/automations-section.tsx`, trimmed to the fields that matter here).
+ * `/api/local/blueprints/:id/triggers` route stores — the same fields the
+ * editor in `local/automations-section.tsx` offers, with the identity
+ * prefilled from the signed-in account where the provider matches.
  */
 function EventConfig({
   type,
@@ -1134,29 +1179,73 @@ function EventConfig({
     });
   const kinds = type === "github" ? GITHUB_KINDS : type === "linear" ? LINEAR_KINDS : [];
   const personal = kinds.some((k) => k.personal && events.includes(k.value));
+  const identityKey = type === "github" ? "login" : "user";
+  const identity = String(config[identityKey] ?? "");
+  const listField = (key: string, label: string, placeholder: string) => (
+    <div>
+      <label className="block text-xs text-text-muted mb-1">
+        {label} <span className="text-text-muted/60">(optional)</span>
+      </label>
+      <input
+        type="text"
+        value={listValue(config[key])}
+        onChange={(e) => onChange({ ...config, [key]: parseList(e.target.value) })}
+        placeholder={placeholder}
+        className={INPUT_INNER}
+      />
+    </div>
+  );
 
   return (
     <div className="mt-3 pt-3 border-t border-border space-y-3">
       {type === "slack" ? (
         <>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Channel id</label>
-            <input
-              type="text"
-              value={String(config.channelId ?? "")}
-              onChange={(e) => onChange({ ...config, channelId: e.target.value.trim() })}
-              placeholder="C0123ABCD"
-              className={cn(INPUT_INNER, "font-mono")}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Channel id</label>
+              <input
+                type="text"
+                value={String(config.channelId ?? "")}
+                onChange={(e) => onChange({ ...config, channelId: e.target.value.trim() })}
+                placeholder="C0123ABCD"
+                aria-invalid={!SLACK_CHANNEL_ID.test(String(config.channelId ?? ""))}
+                className={cn(INPUT_INNER, "font-mono")}
+              />
+              <p className="text-[11px] text-text-muted/60 mt-1">
+                From the channel's details in Slack — the id, not the name.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs text-text-muted mb-1">
+                Keyword <span className="text-text-muted/60">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={String(config.keyword ?? "")}
+                onChange={(e) => onChange({ ...config, keyword: e.target.value })}
+                placeholder="Only messages containing this"
+                className={INPUT_INNER}
+              />
+            </div>
           </div>
-          <label className="flex items-center gap-1.5 text-xs text-text-muted">
-            <input
-              type="checkbox"
-              checked={!!config.mentionOnly}
-              onChange={(e) => onChange({ ...config, mentionOnly: e.target.checked })}
-            />
-            Only when the bot is @-mentioned
-          </label>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+            <label className="flex items-center gap-1.5 text-xs text-text-muted">
+              <input
+                type="checkbox"
+                checked={!!config.mentionOnly}
+                onChange={(e) => onChange({ ...config, mentionOnly: e.target.checked })}
+              />
+              Only when the app is @-mentioned
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-text-muted">
+              <input
+                type="checkbox"
+                checked={!!config.includeThreads}
+                onChange={(e) => onChange({ ...config, includeThreads: e.target.checked })}
+              />
+              Include thread replies
+            </label>
+          </div>
         </>
       ) : (
         <>
@@ -1172,24 +1261,32 @@ function EventConfig({
               </label>
             ))}
           </div>
-          {personal && (
-            <div>
-              <label className="block text-xs text-text-muted mb-1">
-                {type === "github" ? "Your GitHub username" : "Your Linear name or user id"}
-              </label>
-              <input
-                type="text"
-                value={String((type === "github" ? config.login : config.user) ?? "")}
-                onChange={(e) =>
-                  onChange({
-                    ...config,
-                    [type === "github" ? "login" : "user"]: e.target.value.replace(/^@/, ""),
-                  })
-                }
-                className={INPUT_INNER}
-              />
-            </div>
-          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {personal && (
+              <div>
+                <label className="block text-xs text-text-muted mb-1">
+                  {type === "github" ? "GitHub username" : "Linear name or user id"}
+                </label>
+                <input
+                  type="text"
+                  value={identity}
+                  onChange={(e) =>
+                    onChange({ ...config, [identityKey]: e.target.value.replace(/^@/, "") })
+                  }
+                  placeholder={type === "github" ? "octocat" : "Ada Lovelace"}
+                  aria-invalid={!identity.trim()}
+                  className={INPUT_INNER}
+                />
+                <p className="text-[11px] text-text-muted/60 mt-1">
+                  Whose review requests, assignments, and mentions count as “about you”.
+                </p>
+              </div>
+            )}
+            {type === "github"
+              ? listField("repos", "Only these repos", "owner/name, owner/other")
+              : listField("teams", "Only these teams", "ENG, OPS")}
+            {type === "linear" && listField("labels", "Only with a label", "bug, triage")}
+          </div>
         </>
       )}
       <p className="text-[11px] text-text-muted/80">

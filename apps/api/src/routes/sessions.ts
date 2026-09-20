@@ -39,6 +39,7 @@ const listSessionsQuerySchema = z
 const createSessionSchema = z
   .object({
     repoUrl: z.string().url().describe("Repository URL for the session to check out"),
+    title: z.string().max(200).optional().describe("A name for the session"),
   })
   .describe("Body for creating a new interactive session");
 
@@ -265,6 +266,7 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
         repoUrl: input.repoUrl,
         userId,
         workspaceId: req.user?.workspaceId ?? null,
+        title: input.title,
       });
       logAction({
         workspaceId: req.user?.workspaceId ?? null,

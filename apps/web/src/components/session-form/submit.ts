@@ -46,6 +46,38 @@ export function pickedModel(d: SessionDraft): string | undefined {
 }
 
 /**
+ * Create the blueprint row, then its trigger. A rejected trigger (the API
+ * validates event configs) deletes the row again so nothing half-made is
+ * left behind, and the error surfaces to the form.
+ */
+async function withTrigger<T>(
+  create: () => Promise<T>,
+  attach: (row: T) => Promise<unknown>,
+  discard: (row: T) => Promise<unknown>,
+): Promise<T> {
+  const row = await create();
+  try {
+    await attach(row);
+  } catch (err) {
+    await discard(row).catch(() => {});
+    // The row was made; a rejected trigger is never a name clash.
+    throw markNotNameClash(err);
+  }
+  return row;
+}
+
+/** Only the row's own create can 409 on its name; anything after it must not be retried as one. */
+const NOT_NAME_CLASH = Symbol("notNameClash");
+function markNotNameClash(err: unknown): unknown {
+  if (err && typeof err === "object") (err as Record<symbol, boolean>)[NOT_NAME_CLASH] = true;
+  return err;
+}
+function isNameClash(err: unknown): boolean {
+  const e = err as { status?: number; [NOT_NAME_CLASH]?: boolean } | null;
+  return e?.status === 409 && !e?.[NOT_NAME_CLASH];
+}
+
+/**
  * Turn a draft into the row(s) its kind needs. Each branch calls the same
  * service the dedicated form for that kind calls today, so nothing about how
  * a Task, Job, automation, terminal, or agent runs changes — only where you
@@ -55,8 +87,27 @@ export async function createSession(
   d: SessionDraft,
   ctx: { repoUrl: string; autoName: string },
 ): Promise<Created> {
+  // Jobs, scheduled Tasks, and agents have unique names per workspace, and
+  // "Session N" is only a count: on a name clash keep the user's own name
+  // as an error, but bump an automatic one and try again.
+  const auto = !d.name.trim();
+  for (let attempt = 1; ; attempt++) {
+    const name =
+      auto && attempt > 1 ? `${ctx.autoName} (${attempt})` : d.name.trim() || ctx.autoName;
+    try {
+      return await createOnce(d, { ...ctx, name });
+    } catch (err) {
+      if (!auto || !isNameClash(err) || attempt >= 5) throw err;
+    }
+  }
+}
+
+async function createOnce(
+  d: SessionDraft,
+  ctx: { repoUrl: string; name: string },
+): Promise<Created> {
   const kind = deriveKind(d);
-  const name = d.name.trim() || ctx.autoName;
+  const { name } = ctx;
   const prompt = d.prompt.trim();
   const trigger = genericTrigger(d);
   const location = runLocationPayload(d.location);
@@ -84,68 +135,85 @@ export async function createSession(
     }
 
     case "repo-blueprint": {
-      const { task } = await api.createTaskUnified({
-        type: "repo-blueprint",
-        title: name,
-        name,
-        prompt,
-        description: d.description || undefined,
-        agentType: d.runtime,
-        agentOptions: options,
-        maxRetries: d.maxRetries,
-        priority: d.priority,
-        repoUrl,
-        repoBranch: d.repoBranch,
-        enabled: true,
-        ...location,
-      });
-      if (trigger) await api.createTaskTrigger(task.id, trigger);
+      const task = await withTrigger(
+        async () =>
+          (
+            await api.createTaskUnified({
+              type: "repo-blueprint",
+              title: name,
+              name,
+              prompt,
+              description: d.description || undefined,
+              agentType: d.runtime,
+              agentOptions: options,
+              maxRetries: d.maxRetries,
+              priority: d.priority,
+              repoUrl,
+              repoBranch: d.repoBranch,
+              enabled: true,
+              ...location,
+            })
+          ).task,
+        (t) => (trigger ? api.createTaskTrigger(t.id, trigger) : Promise.resolve()),
+        (t) => api.deleteTaskConfig(t.id),
+      );
       return { kind, href: `/tasks/scheduled/${task.id}`, toast: `${name} saved` };
     }
 
     case "standalone": {
-      const { task } = await api.createTaskUnified({
-        type: "standalone",
-        title: name,
-        name,
-        prompt,
-        description: d.description || undefined,
-        agentType: d.runtime,
-        ...(model ? { model } : {}),
-        agentOptions: options,
-        maxRetries: d.maxRetries,
-        enabled: true,
-        ...location,
+      const task = await withTrigger(
+        async () =>
+          (
+            await api.createTaskUnified({
+              type: "standalone",
+              title: name,
+              name,
+              prompt,
+              description: d.description || undefined,
+              agentType: d.runtime,
+              ...(model ? { model } : {}),
+              agentOptions: options,
+              maxRetries: d.maxRetries,
+              enabled: true,
+              ...location,
+            })
+          ).task,
+        (t) => (trigger ? api.createTaskTrigger(t.id, trigger) : Promise.resolve()),
+        (t) => api.deleteWorkflow(t.id),
+      );
+      if (trigger) return { kind, href: `/jobs/${task.id}`, toast: `${name} saved` };
+      const run = await api.createTaskRun(task.id).catch((err) => {
+        throw markNotNameClash(err);
       });
-      if (trigger) {
-        await api.createTaskTrigger(task.id, trigger);
-        return { kind, href: `/jobs/${task.id}`, toast: `${name} saved` };
-      }
-      const run = await api.createTaskRun(task.id);
       return { kind, href: `/jobs/${task.id}/runs/${run.runId}`, toast: `${name} started` };
     }
 
     case "local-blueprint": {
-      const { blueprint } = await api.createLocalBlueprint({
-        name,
-        description: d.description || undefined,
-        hostId: d.location.localHostId,
-        dir: d.location.localDir,
-        ...(d.withRepo && repoUrl ? { repoUrl } : {}),
-        commandTemplate: prompt,
-        agent: d.runtime === TERMINAL ? null : (d.runtime as "claude-code"),
-        spawnMode: "auto",
-        sessionMode: d.then === "waits-for-me" ? "interactive" : "headless",
-      });
-      if (isEventWhen(d.when)) {
-        await api.createLocalBlueprintTrigger(blueprint.id, {
-          type: d.when,
-          config: d.event.config,
-          enabled: true,
-        });
-      } else if (trigger) {
-        await api.createLocalBlueprintTrigger(blueprint.id, trigger);
-      }
+      const eventTrigger = isEventWhen(d.when)
+        ? { type: d.when, config: d.event.config, enabled: true as const }
+        : trigger;
+      const blueprint = await withTrigger(
+        async () =>
+          (
+            await api.createLocalBlueprint({
+              name,
+              description: d.description || undefined,
+              hostId: d.location.localHostId,
+              dir: d.location.localDir,
+              ...(d.withRepo && repoUrl ? { repoUrl } : {}),
+              // "New branch": the spawn wraps the prompt with branch + PR
+              // instructions off this base.
+              ...(d.withRepo ? { baseBranch: d.repoBranch || "main" } : {}),
+              commandTemplate: prompt,
+              agent: d.runtime === TERMINAL ? null : (d.runtime as "claude-code"),
+              spawnMode: "auto",
+              sessionMode: d.then === "waits-for-me" ? "interactive" : "headless",
+            })
+          ).blueprint,
+        (b) =>
+          eventTrigger ? api.createLocalBlueprintTrigger(b.id, eventTrigger) : Promise.resolve(),
+        (b) => api.deleteLocalBlueprint(b.id),
+      );
       return { kind, href: "/local", toast: `${name} saved` };
     }
 
@@ -162,30 +230,42 @@ export async function createSession(
                 agent: d.runtime,
                 ...(prompt ? { prompt } : {}),
                 ...(model ? { model } : {}),
+                // "New branch": the server wraps the prompt with branch + PR
+                // instructions off this base.
+                ...(d.withRepo ? { baseBranch: d.repoBranch || "main" } : {}),
               },
       });
       return { kind, href: `/local/${terminal.id}`, toast: `${name} opened` };
     }
 
     case "pod-session": {
-      const { session } = await api.createSession({ repoUrl });
+      // A pod session is a terminal plus a Claude Code chat in a repo pod; the
+      // runtime is fixed and the first message is typed in the session, so
+      // only the repo and the name travel.
+      const { session } = await api.createSession({ repoUrl, title: name });
       return { kind, href: `/sessions/${session.id}`, toast: `${name} opened` };
     }
 
     case "persistent-agent": {
-      const { agent } = await api.createPersistentAgent({
-        slug: d.agent.slug.trim() || slugify(name),
-        name,
-        description: d.description || undefined,
-        agentRuntime: d.runtime,
-        model: model ?? null,
-        agentOptions: options,
-        systemPrompt: d.agent.systemPrompt || null,
-        agentsMd: d.agent.agentsMd || defaultAgentsMd(),
-        initialPrompt: prompt,
-        podLifecycle: d.agent.podLifecycle,
-      });
-      if (trigger) await api.createPersistentAgentTrigger(agent.id, trigger);
+      const agent = await withTrigger(
+        async () =>
+          (
+            await api.createPersistentAgent({
+              slug: d.agent.slug.trim() || slugify(name),
+              name,
+              description: d.description || undefined,
+              agentRuntime: d.runtime,
+              model: model ?? null,
+              agentOptions: options,
+              systemPrompt: d.agent.systemPrompt || null,
+              agentsMd: d.agent.agentsMd || defaultAgentsMd(),
+              initialPrompt: prompt,
+              podLifecycle: d.agent.podLifecycle,
+            })
+          ).agent,
+        (a) => (trigger ? api.createPersistentAgentTrigger(a.id, trigger) : Promise.resolve()),
+        (a) => api.deletePersistentAgent(a.id),
+      );
       return { kind, href: `/agents/${agent.id}`, toast: `${name} created` };
     }
   }

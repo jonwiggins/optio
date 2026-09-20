@@ -68,9 +68,10 @@ const createTaskConfigSchema = z.object({
     .enum(["cluster", "local"])
     .optional()
     .describe("Where spawned tasks run: `cluster` (default) or `local` (your paired machine)"),
-  localHostId: z.string().uuid().optional(),
-  localDir: z.string().min(1).max(1000).optional(),
-  localSessionMode: z.enum(["interactive", "headless"]).optional(),
+  // Null = not a local run (what the web run-location picker sends for a pod).
+  localHostId: z.string().uuid().nullable().optional(),
+  localDir: z.string().min(1).max(1000).nullable().optional(),
+  localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
 });
 
 const updateTaskConfigSchema = z.object({

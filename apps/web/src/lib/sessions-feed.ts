@@ -290,7 +290,7 @@ export function collectSessions(src: SessionSources): SessionRow[] {
       key: `session-${s.id}`,
       source: "pod-session",
       href: `/sessions/${s.id}`,
-      name: s.branch ?? `Session ${String(s.id).slice(0, 8)}`,
+      name: s.title || s.branch || `Session ${String(s.id).slice(0, 8)}`,
       when: "now",
       where: { target: "pod", detail: shortRepo(s.repoUrl) },
       who: "terminal",

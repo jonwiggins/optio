@@ -16,7 +16,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { tasks, workflowRuns } from "../db/schema.js";
+import { tasks, workflowRuns, workflowTriggers } from "../db/schema.js";
 import * as triggerService from "./workflow-trigger-service.js";
 import {
   startWorkflowTriggerWorker,
@@ -432,5 +432,131 @@ describe("trigger CRUD (workflow-trigger-service)", () => {
 
     // Remove it so it can't become due for any later check in this file.
     expect(await triggerService.deleteTrigger(trigger.id)).toBe(true);
+  });
+});
+
+describe("ticket triggers on Jobs (workflow-service.fireJobTicketTriggers)", () => {
+  it("spawns a run with the ticket's fields as params for each matching enabled trigger", async () => {
+    const { fireJobTicketTriggers } = await import("./workflow-service.js");
+    const job = await insertWorkflow({ promptTemplate: "Triage {{ticketUrl}}: {{ticketTitle}}" });
+    const matching = await insertWorkflowTrigger(job.id, {
+      workflowId: job.id,
+      targetType: "job",
+      type: "ticket",
+      config: { source: "linear", labels: ["triage"] },
+    });
+    const otherSource = await insertWorkflow();
+    await insertWorkflowTrigger(otherSource.id, {
+      workflowId: otherSource.id,
+      targetType: "job",
+      type: "ticket",
+      config: { source: "github" },
+    });
+    const disabledJob = await insertWorkflow({ enabled: false });
+    await insertWorkflowTrigger(disabledJob.id, {
+      workflowId: disabledJob.id,
+      targetType: "job",
+      type: "ticket",
+      config: { source: "linear" },
+    });
+
+    const fired = await fireJobTicketTriggers({
+      source: "linear",
+      externalId: "ENG-42",
+      title: "Login is broken",
+      body: "Steps to reproduce…",
+      labels: ["triage", "bug"],
+      url: "https://linear.app/acme/issue/ENG-42",
+    });
+
+    expect(fired).toEqual([{ triggerId: matching.id, runId: expect.any(String) }]);
+    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, fired[0].runId));
+    expect(run.workflowId).toBe(job.id);
+    expect(run.triggerId).toBe(matching.id);
+    expect(run.params).toMatchObject({
+      ticketSource: "linear",
+      ticketExternalId: "ENG-42",
+      ticketTitle: "Login is broken",
+      ticketUrl: "https://linear.app/acme/issue/ENG-42",
+      ticketLabels: "triage,bug",
+    });
+    const [after] = await db
+      .select()
+      .from(workflowTriggers)
+      .where(eq(workflowTriggers.id, matching.id));
+    expect(after.lastFiredAt).not.toBeNull();
+    // The run the worker picks up is removed so it can't run in a later test.
+    await db.delete(workflowRuns).where(eq(workflowRuns.id, run.id));
+  });
+
+  it("does not fire when none of the trigger's labels are on the ticket", async () => {
+    const { fireJobTicketTriggers } = await import("./workflow-service.js");
+    const job = await insertWorkflow();
+    const labeled = await insertWorkflowTrigger(job.id, {
+      workflowId: job.id,
+      targetType: "job",
+      type: "ticket",
+      config: { source: "github", labels: ["cve"] },
+    });
+    const fired = await fireJobTicketTriggers({
+      source: "github",
+      externalId: "acme/app#7",
+      title: "Typo",
+      labels: ["docs"],
+    });
+    // Other tests in this file leave unlabeled triggers behind that do match;
+    // only the labeled one is under test here.
+    expect(fired.map((f) => f.triggerId)).not.toContain(labeled.id);
+    for (const f of fired) await db.delete(workflowRuns).where(eq(workflowRuns.id, f.runId));
+  });
+});
+
+describe("ticket triggers on persistent agents (fireAgentTicketTriggers)", () => {
+  it("wakes a matching enabled agent with the ticket as a system message and structured payload", async () => {
+    const { createPersistentAgent, fireAgentTicketTriggers } =
+      await import("./persistent-agent-service.js");
+    const { persistentAgentMessages } = await import("../db/schema.js");
+    const agent = await createPersistentAgent({
+      slug: `it-ticket-agent-${Date.now().toString(36)}`,
+      name: "Ticket agent",
+      initialPrompt: "You triage tickets.",
+    });
+    const trigger = await insertWorkflowTrigger(agent.id, {
+      targetType: "persistent_agent",
+      type: "ticket",
+      config: { source: "jira" },
+    });
+
+    const fired = await fireAgentTicketTriggers({
+      source: "jira",
+      externalId: "OPS-9",
+      title: "Disk full",
+      body: "The box is out of space.",
+      labels: [],
+      url: "https://acme.atlassian.net/browse/OPS-9",
+    });
+    expect(fired).toEqual([{ triggerId: trigger.id, agentId: agent.id }]);
+
+    const messages = await db
+      .select()
+      .from(persistentAgentMessages)
+      .where(eq(persistentAgentMessages.agentId, agent.id));
+    const ticketMsg = messages.find((m) => m.body.includes("OPS-9"));
+    expect(ticketMsg).toBeTruthy();
+    expect(ticketMsg!.senderType).toBe("system");
+    expect(ticketMsg!.structuredPayload).toMatchObject({
+      ticketSource: "jira",
+      ticketExternalId: "OPS-9",
+      ticketUrl: "https://acme.atlassian.net/browse/OPS-9",
+    });
+    const [after] = await db
+      .select()
+      .from(workflowTriggers)
+      .where(eq(workflowTriggers.id, trigger.id));
+    expect(after.lastFiredAt).not.toBeNull();
+
+    // Another source leaves this agent alone.
+    const none = await fireAgentTicketTriggers({ source: "github", externalId: "x#1", title: "t" });
+    expect(none.map((f) => f.agentId)).not.toContain(agent.id);
   });
 });

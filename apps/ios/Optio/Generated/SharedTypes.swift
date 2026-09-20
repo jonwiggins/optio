@@ -3157,6 +3157,9 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
         public let resumeSessionId: String?
         /// Model override passed to the agent CLI (`--model` / `-m`), when set.
         public let model: String?
+        /// "Work on a new branch that becomes a PR": the server wraps the prompt
+        /// with branch-and-PR instructions off this base before the spawn.
+        public let baseBranch: String?
 
         private enum CodingKeys: String, CodingKey {
             case agent = "agent"
@@ -3164,6 +3167,7 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
             case mode = "mode"
             case resumeSessionId = "resumeSessionId"
             case model = "model"
+            case baseBranch = "baseBranch"
         }
 
         public init(
@@ -3171,13 +3175,15 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
             prompt: String? = nil,
             mode: LocalAgentSessionMode? = nil,
             resumeSessionId: String? = nil,
-            model: String? = nil
+            model: String? = nil,
+            baseBranch: String? = nil
         ) {
             self.agent = agent
             self.prompt = prompt
             self.mode = mode
             self.resumeSessionId = resumeSessionId
             self.model = model
+            self.baseBranch = baseBranch
         }
     }
 
@@ -6237,6 +6243,8 @@ public struct InteractiveSession: Codable, Hashable, Sendable {
     public let userId: String?
     public let worktreePath: String?
     public let branch: String
+    /// The name given to the session; null = unnamed.
+    public let title: String?
     public let state: InteractiveSessionState
     public let podId: String?
     public let costUsd: String?
@@ -6249,6 +6257,7 @@ public struct InteractiveSession: Codable, Hashable, Sendable {
         case userId = "userId"
         case worktreePath = "worktreePath"
         case branch = "branch"
+        case title = "title"
         case state = "state"
         case podId = "podId"
         case costUsd = "costUsd"
@@ -6262,6 +6271,7 @@ public struct InteractiveSession: Codable, Hashable, Sendable {
         userId: String? = nil,
         worktreePath: String? = nil,
         branch: String,
+        title: String? = nil,
         state: InteractiveSessionState,
         podId: String? = nil,
         costUsd: String? = nil,
@@ -6273,6 +6283,7 @@ public struct InteractiveSession: Codable, Hashable, Sendable {
         self.userId = userId
         self.worktreePath = worktreePath
         self.branch = branch
+        self.title = title
         self.state = state
         self.podId = podId
         self.costUsd = costUsd
@@ -7275,10 +7286,11 @@ public enum WorkflowTriggerType: String, Codable, Hashable, Sendable, CaseIterab
     case manual = "manual"
     case schedule = "schedule"
     case webhook = "webhook"
+    case ticket = "ticket"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook]
+    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

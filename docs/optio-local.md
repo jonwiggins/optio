@@ -29,8 +29,11 @@ secrets to your machine.
   rendered with `{{param}}` substitution — the agent's prompt, or the shell command; or
   `promptTemplateId`, a saved prompt from the Prompts library that replaces it, so one
   reviewed "review this PR" prompt can back many automations), Where
-  (`hostId` / `dir` / `repoUrl`, all optional — see dir resolution below), When (triggers)
-  and Then (`sessionMode`). Triggers are rows in `workflow_triggers` with
+  (`hostId` / `dir` / `repoUrl`, all optional — see dir resolution below; plus
+  `baseBranch`: when set, an agent spawn's prompt is wrapped with "create a branch off
+  this base, commit, push, open a PR" instructions — the "new branch that becomes a PR"
+  choice in the New session form; the same wrapper applies to a hand-opened agent
+  terminal whose spec carries `baseBranch`), When (triggers) and Then (`sessionMode`). Triggers are rows in `workflow_triggers` with
   `target_type = "local_blueprint"`: the generic `manual` / `schedule` / `webhook` / `ticket`
   ones shared with Jobs and Task Configs, plus the **event triggers** `github` / `slack` /
   `linear` fed by the signed ingress endpoints (see "Automations" below).

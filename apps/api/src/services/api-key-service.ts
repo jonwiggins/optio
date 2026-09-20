@@ -92,6 +92,7 @@ export async function validateApiKey(token: string): Promise<SessionUser | null>
       provider: users.provider,
       email: users.email,
       displayName: users.displayName,
+      username: users.username,
       avatarUrl: users.avatarUrl,
       defaultWorkspaceId: users.defaultWorkspaceId,
     })
@@ -124,6 +125,7 @@ export async function validateApiKey(token: string): Promise<SessionUser | null>
     provider: row.provider,
     email: row.email,
     displayName: row.displayName,
+    username: row.username,
     avatarUrl: row.avatarUrl,
     workspaceId: row.defaultWorkspaceId,
     workspaceRole: null,

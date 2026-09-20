@@ -83,6 +83,34 @@ export async function resolveAnyTaskById(
  * type="standalone"      — workflows only
  * type=undefined         — all three merged; individual rows tagged with `type`
  */
+/**
+ * How many rows the polymorphic list spans (the same tables
+ * `listUnifiedTasks` reads, optionally one kind) in a workspace — the `total` for
+ * `GET /api/tasks?type=…`, which the New session form uses to number
+ * unnamed sessions.
+ */
+export async function countUnifiedTasks(opts: {
+  type?: UnifiedTaskType;
+  workspaceId?: string | null;
+}): Promise<number> {
+  const wsId = opts.workspaceId ?? null;
+  const countRows = async (
+    table: typeof tasks | typeof taskConfigs | typeof workflows | typeof prReviews,
+  ): Promise<number> => {
+    const [row] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(table)
+      .where(wsId ? eq(table.workspaceId, wsId) : undefined);
+    return row?.n ?? 0;
+  };
+  let total = 0;
+  if (!opts.type || opts.type === "repo-task") total += await countRows(tasks);
+  if (!opts.type || opts.type === "repo-blueprint") total += await countRows(taskConfigs);
+  if (!opts.type || opts.type === "standalone") total += await countRows(workflows);
+  if (!opts.type || opts.type === "pr-review") total += await countRows(prReviews);
+  return total;
+}
+
 export async function listUnifiedTasks(opts: {
   type?: UnifiedTaskType;
   workspaceId?: string | null;

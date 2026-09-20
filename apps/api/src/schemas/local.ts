@@ -74,6 +74,13 @@ export const LocalTerminalSpecSchema = z
         .max(100)
         .optional()
         .describe("Model override passed to the agent CLI (--model / -m)"),
+      baseBranch: z
+        .string()
+        .max(200)
+        .optional()
+        .describe(
+          "Work on a new branch off this base and open a PR: the prompt is wrapped with the instructions",
+        ),
     }),
   ])
   .describe("What the daemon runs in the PTY");
@@ -175,6 +182,10 @@ export const LocalBlueprintSchema = z
     hostId: z.string().nullable(),
     dir: z.string().nullable(),
     repoUrl: z.string().nullable(),
+    baseBranch: z
+      .string()
+      .nullable()
+      .describe("Agent spawns work on a new branch off this base and open a PR; null = as-is"),
     commandTemplate: z.string(),
     promptTemplateId: z
       .string()

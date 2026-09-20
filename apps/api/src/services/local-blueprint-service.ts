@@ -57,6 +57,8 @@ export interface CreateBlueprintInput {
   hostId?: string;
   dir?: string;
   repoUrl?: string;
+  /** Agent spawns work on a new branch off this base and open a PR; unset = the dir as it is. */
+  baseBranch?: string | null;
   commandTemplate: string;
   /** Saved prompt (Prompts library) that replaces commandTemplate as the agent prompt. */
   promptTemplateId?: string | null;
@@ -82,6 +84,7 @@ export async function createBlueprint(input: CreateBlueprintInput): Promise<Loca
       hostId: input.hostId,
       dir: input.dir,
       repoUrl: input.repoUrl,
+      baseBranch: input.baseBranch ?? null,
       commandTemplate: input.commandTemplate,
       promptTemplateId: input.promptTemplateId ?? null,
       agent: input.agent ?? null,
@@ -112,7 +115,13 @@ export async function updateBlueprint(
   updates: Partial<
     Pick<
       CreateBlueprintInput,
-      "name" | "commandTemplate" | "promptTemplateId" | "agent" | "spawnMode" | "sessionMode"
+      | "name"
+      | "commandTemplate"
+      | "promptTemplateId"
+      | "agent"
+      | "spawnMode"
+      | "sessionMode"
+      | "baseBranch"
     > & {
       description: string | null;
       hostId: string | null;
@@ -248,6 +257,7 @@ export async function spawnFromBlueprint(
       agent: blueprint.agent,
       prompt: prompt || undefined,
       mode: blueprint.sessionMode ?? "interactive",
+      ...(blueprint.baseBranch ? { baseBranch: blueprint.baseBranch } : {}),
     };
   } else {
     // Command mode: params are shell-single-quoted before substitution so a
