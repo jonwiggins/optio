@@ -45,6 +45,7 @@ struct SessionsView: View {
         .onDisappear { model?.stop() }
         .onChange(of: router.pendingSessionView) { _, _ in consumeView() }
         .onChange(of: router.pendingNewSession) { _, _ in consumeView() }
+        .onReceive(NotificationCenter.default.publisher(for: .optioSessionCreated)) { _ in Task { await model?.refresh() } }
     }
 
     /// `optio://section/sessions?view=recurring` and the Overview tiles land on a view;

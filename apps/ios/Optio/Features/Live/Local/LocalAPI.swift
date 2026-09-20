@@ -76,10 +76,12 @@ struct LocalBlueprintBody: Encodable {
     /// Distinguishes "leave agent alone" (nil) from "explicitly shell" (true → null).
     var clearAgent = false
     var spawnMode: LocalBlueprintSpawnMode?
+    /// Agent spawns: stay open for chat (`interactive`, the default) or exit when the turn is done.
+    var sessionMode: LocalAgentSessionMode?
     var enabled: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case name, description, hostId, dir, repoUrl, commandTemplate, agent, spawnMode, enabled
+        case name, description, hostId, dir, repoUrl, commandTemplate, agent, spawnMode, sessionMode, enabled
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -96,6 +98,7 @@ struct LocalBlueprintBody: Encodable {
             try c.encodeNil(forKey: .agent)
         }
         try c.encodeIfPresent(spawnMode, forKey: .spawnMode)
+        try c.encodeIfPresent(sessionMode, forKey: .sessionMode)
         try c.encodeIfPresent(enabled, forKey: .enabled)
     }
 }

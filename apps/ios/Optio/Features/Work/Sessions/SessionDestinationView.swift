@@ -10,6 +10,7 @@ struct SessionDestinationView: View {
         case .task(let id): TaskDetailView(taskId: id)
         case .blueprint(let id): ScheduledDetailView(configId: id)
         case .job(let id): JobDetailView(jobId: id)
+        case .jobRun(let jobId, let runId): JobRunDetailView(jobId: jobId, runId: runId)
         case .localTerminal(let id): LocalTerminalScreen(terminalId: id)
         case .localBlueprint(let id): LocalBlueprintDestination(blueprintId: id)
         case .podSession(let id): SessionDetailView(sessionId: id)

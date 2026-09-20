@@ -111,6 +111,8 @@ enum SessionDestination: Hashable, Sendable {
     case task(String)
     case blueprint(String)
     case job(String)
+    /// One run under a job (`/jobs/:id/runs/:runId`) — where a just-started job lands.
+    case jobRun(jobId: String, runId: String)
     case localTerminal(String)
     case localBlueprint(String)
     case podSession(String)

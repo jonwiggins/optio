@@ -163,6 +163,10 @@ final class PushRegistrar {
 
     /// First `needs_you` seen while the app is open: the moment the prompt makes sense.
     func noteNeedsYouObserved() {
+        #if DEBUG
+        // CLI screenshot runs: `SIMCTL_CHILD_OPTIO_DEV_NO_PUSH_PROMPT=1` keeps the system sheet away.
+        if ProcessInfo.processInfo.environment["OPTIO_DEV_NO_PUSH_PROMPT"] != nil { return }
+        #endif
         guard authorization == .notDetermined, !promptedForNeedsYou,
               !UserDefaults.standard.bool(forKey: Keys.promptedOnce) else { return }
         promptedForNeedsYou = true
