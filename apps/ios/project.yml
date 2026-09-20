@@ -68,6 +68,11 @@ targets:
           NSAllowsLocalNetworking: true
         NSFaceIDUsageDescription: Unlock the stored Optio access token.
         NSSupportsLiveActivities: true
+        # Two Optio windows side by side (iPad, and iPhone Duo's inner display —
+        # Apple: "apps supporting multiple scenes on iPad automatically support
+        # them on iPhone Duo"). SwiftUI WindowGroup does the rest.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
         NSSupportsLiveActivitiesFrequentUpdates: true
         UIBackgroundModes: [fetch, remote-notification]
         BGTaskSchedulerPermittedIdentifiers: [dev.optio.ios.refresh]
