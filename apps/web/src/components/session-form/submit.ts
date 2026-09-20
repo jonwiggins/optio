@@ -60,9 +60,21 @@ async function withTrigger<T>(
     await attach(row);
   } catch (err) {
     await discard(row).catch(() => {});
-    throw err;
+    // The row was made; a rejected trigger is never a name clash.
+    throw markNotNameClash(err);
   }
   return row;
+}
+
+/** Only the row's own create can 409 on its name; anything after it must not be retried as one. */
+const NOT_NAME_CLASH = Symbol("notNameClash");
+function markNotNameClash(err: unknown): unknown {
+  if (err && typeof err === "object") (err as Record<symbol, boolean>)[NOT_NAME_CLASH] = true;
+  return err;
+}
+function isNameClash(err: unknown): boolean {
+  const e = err as { status?: number; [NOT_NAME_CLASH]?: boolean } | null;
+  return e?.status === 409 && !e?.[NOT_NAME_CLASH];
 }
 
 /**
@@ -75,8 +87,27 @@ export async function createSession(
   d: SessionDraft,
   ctx: { repoUrl: string; autoName: string },
 ): Promise<Created> {
+  // Jobs, scheduled Tasks, and agents have unique names per workspace, and
+  // "Session N" is only a count: on a name clash keep the user's own name
+  // as an error, but bump an automatic one and try again.
+  const auto = !d.name.trim();
+  for (let attempt = 1; ; attempt++) {
+    const name =
+      auto && attempt > 1 ? `${ctx.autoName} (${attempt})` : d.name.trim() || ctx.autoName;
+    try {
+      return await createOnce(d, { ...ctx, name });
+    } catch (err) {
+      if (!auto || !isNameClash(err) || attempt >= 5) throw err;
+    }
+  }
+}
+
+async function createOnce(
+  d: SessionDraft,
+  ctx: { repoUrl: string; name: string },
+): Promise<Created> {
   const kind = deriveKind(d);
-  const name = d.name.trim() || ctx.autoName;
+  const { name } = ctx;
   const prompt = d.prompt.trim();
   const trigger = genericTrigger(d);
   const location = runLocationPayload(d.location);
@@ -151,7 +182,9 @@ export async function createSession(
         (t) => api.deleteWorkflow(t.id),
       );
       if (trigger) return { kind, href: `/jobs/${task.id}`, toast: `${name} saved` };
-      const run = await api.createTaskRun(task.id);
+      const run = await api.createTaskRun(task.id).catch((err) => {
+        throw markNotNameClash(err);
+      });
       return { kind, href: `/jobs/${task.id}/runs/${run.runId}`, toast: `${name} started` };
     }
 
@@ -214,19 +247,25 @@ export async function createSession(
     }
 
     case "persistent-agent": {
-      const { agent } = await api.createPersistentAgent({
-        slug: d.agent.slug.trim() || slugify(name),
-        name,
-        description: d.description || undefined,
-        agentRuntime: d.runtime,
-        model: model ?? null,
-        agentOptions: options,
-        systemPrompt: d.agent.systemPrompt || null,
-        agentsMd: d.agent.agentsMd || defaultAgentsMd(),
-        initialPrompt: prompt,
-        podLifecycle: d.agent.podLifecycle,
-      });
-      if (trigger) await api.createPersistentAgentTrigger(agent.id, trigger);
+      const agent = await withTrigger(
+        async () =>
+          (
+            await api.createPersistentAgent({
+              slug: d.agent.slug.trim() || slugify(name),
+              name,
+              description: d.description || undefined,
+              agentRuntime: d.runtime,
+              model: model ?? null,
+              agentOptions: options,
+              systemPrompt: d.agent.systemPrompt || null,
+              agentsMd: d.agent.agentsMd || defaultAgentsMd(),
+              initialPrompt: prompt,
+              podLifecycle: d.agent.podLifecycle,
+            })
+          ).agent,
+        (a) => (trigger ? api.createPersistentAgentTrigger(a.id, trigger) : Promise.resolve()),
+        (a) => api.deletePersistentAgent(a.id),
+      );
       return { kind, href: `/agents/${agent.id}`, toast: `${name} created` };
     }
   }

@@ -149,7 +149,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
               <Terminal className="w-5 h-5 text-primary" />
               <div>
                 <h1 className="text-lg font-semibold tracking-tight">
-                  {session.branch ?? `Session ${session.id.slice(0, 8)}`}
+                  {session.title || session.branch || `Session ${session.id.slice(0, 8)}`}
                 </h1>
                 <div className="flex items-center gap-3 text-xs text-text-muted">
                   <span className="flex items-center gap-1">

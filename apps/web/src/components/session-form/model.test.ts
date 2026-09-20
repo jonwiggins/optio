@@ -83,6 +83,18 @@ suite("constraints flow downstream", () => {
     expect(enabled(runtimeOptions(EMPTY_DRAFT))).toContain(TERMINAL);
   });
 
+  it("a trigger never starts a bare terminal, on a pod or a machine", () => {
+    expect(enabled(runtimeOptions(local({ ...EMPTY_DRAFT, when: "schedule" })))).not.toContain(
+      TERMINAL,
+    );
+    expect(enabled(runtimeOptions(local({ ...EMPTY_DRAFT, when: "slack" })))).not.toContain(
+      TERMINAL,
+    );
+    expect(normalize(local({ ...EMPTY_DRAFT, when: "schedule", runtime: TERMINAL })).runtime).toBe(
+      "claude-code",
+    );
+  });
+
   it("a terminal with no agent waits for you", () => {
     const d = normalize(local({ ...EMPTY_DRAFT, withRepo: false, runtime: TERMINAL }));
     expect(enabled(thenOptions(d))).toEqual(["waits-for-me"]);
@@ -166,6 +178,9 @@ suite("the sentence", () => {
     expect(eventGaps({ type: "github", config: { events: ["pr_opened"], login: "" } })).toEqual([]);
     expect(eventGaps({ type: "linear", config: { events: ["assigned"], user: "" } })).toEqual([
       "identity",
+    ]);
+    expect(eventGaps({ type: "github", config: { events: [], login: "octocat" } })).toEqual([
+      "events",
     ]);
     expect(eventGaps({ type: "slack", config: { channelId: "general" } })).toEqual(["channel"]);
     expect(eventGaps({ type: "slack", config: { channelId: "C0123ABCD" } })).toEqual([]);

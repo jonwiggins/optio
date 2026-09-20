@@ -56,6 +56,8 @@ export function eventGaps(e: EventTrigger): SentenceField[] {
   if (e.type === "slack") {
     return SLACK_CHANNEL_ID.test(String(c.channelId ?? "")) ? [] : ["channel"];
   }
+  // No kinds checked would mean "every kind" to the matcher — make it a choice.
+  if (events.length === 0) return ["events"];
   const personal = events.some((k) => PERSONAL_EVENT_KINDS[e.type].includes(k));
   const identity = String((e.type === "github" ? c.login : c.user) ?? "").trim();
   if (personal && !identity) return ["identity"];
@@ -303,10 +305,10 @@ export function runtimeOptions(d: SessionDraft): Choice<string>[] {
   const local = isLocal(d);
   const terminal: Choice<string> = {
     value: TERMINAL,
-    ...(!local && !d.withRepo
-      ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
-      : !local && isTriggered(d)
-        ? { disabled: "A pod terminal is opened by hand — pick Now above." }
+    ...(isTriggered(d)
+      ? { disabled: "A trigger starts an agent — a terminal is opened by hand, pick Now above." }
+      : !local && !d.withRepo
+        ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
         : {}),
   };
   const agents: Choice<string>[] = RUNTIMES.map((r) => ({
@@ -459,7 +461,8 @@ export type SentenceField =
   | "cron"
   | "webhook"
   | "identity"
-  | "channel";
+  | "channel"
+  | "events";
 
 const CRON_WORDS: Record<string, string> = {
   "0 * * * *": "every hour",
@@ -499,7 +502,9 @@ function whenPhrase(d: SessionDraft): SentencePart[] {
         { text: `Started by ${source}` },
         gaps[0] === "channel"
           ? { missing: "in a channel", field: "channel" }
-          : { missing: "about you", field: "identity" },
+          : gaps[0] === "events"
+            ? { missing: "of some kind", field: "events" }
+            : { missing: "about you", field: "identity" },
         { text: "," },
       ];
     }

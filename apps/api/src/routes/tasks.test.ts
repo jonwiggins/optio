@@ -373,6 +373,22 @@ describe("POST /api/tasks", () => {
     );
   });
 
+  it("turns a unique-name violation on a standalone Job into a 409", async () => {
+    const { createWorkflow } = await import("../services/workflow-service.js");
+    vi.mocked(createWorkflow).mockRejectedValueOnce(
+      Object.assign(new Error("duplicate key value violates unique constraint"), {
+        code: "23505",
+      }),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { type: "standalone", name: "Session 3", prompt: "hi" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toMatch(/already exists/);
+  });
+
   it("creates a task with dependencies", async () => {
     mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "pending" });
     mockTransitionTask.mockResolvedValue({

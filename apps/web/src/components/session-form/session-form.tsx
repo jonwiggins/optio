@@ -87,6 +87,7 @@ const FIELD_IDS: Record<SentenceField, string> = {
   webhook: "session-when",
   identity: "session-when",
   channel: "session-when",
+  events: "session-when",
 };
 
 const PRESET_ICONS: Record<string, ReactNode> = {
@@ -194,6 +195,16 @@ export function SessionForm() {
       .then((res) => setMe({ provider: res.user.provider, username: res.user.username ?? null }))
       .catch(() => setMe(null));
   }, []);
+
+  // If GitHub was picked before the account loaded, fill the login in now.
+  useEffect(() => {
+    if (!me?.username || me.provider !== "github") return;
+    setDraftRaw((d) =>
+      d.when === "github" && !String(d.event.config.login ?? "").trim()
+        ? { ...d, event: { ...d.event, config: { ...d.event.config, login: me.username } } }
+        : d,
+    );
+  }, [me]);
 
   // Pre-select the first repo once the list is known, like the Task form did.
   useEffect(() => {

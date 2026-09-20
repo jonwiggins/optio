@@ -14,11 +14,13 @@ import { expect, test, type Page } from "@playwright/test";
 const API = "http://127.0.0.1:4931";
 
 async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
+  // No content-type on a bodiless request — Fastify 400s an empty JSON body.
   const res = await fetch(`${API}${path}`, {
-    headers: { "content-type": "application/json" },
     ...init,
+    headers: init?.body ? { "content-type": "application/json" } : undefined,
   });
   if (!res.ok) throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status}`);
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 

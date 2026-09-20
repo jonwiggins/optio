@@ -243,6 +243,24 @@ export async function syncAllTickets(): Promise<number> {
           );
         }
 
+        // Wake any persistent agents with a matching ticket trigger.
+        try {
+          const { fireAgentTicketTriggers } = await import("./persistent-agent-service.js");
+          await fireAgentTicketTriggers({
+            source: ticket.source,
+            externalId: ticket.externalId,
+            title: ticket.title,
+            body: ticket.body,
+            labels: ticket.labels,
+            url: ticket.url,
+          });
+        } catch (triggerErr) {
+          logger.warn(
+            { err: triggerErr, ticketId: ticket.externalId },
+            "Failed to fire ticket triggers for persistent agents",
+          );
+        }
+
         // Fire any local blueprint ticket triggers (Optio Local terminals).
         try {
           const { fireLocalTicketTriggers } = await import("./local-blueprint-service.js");
