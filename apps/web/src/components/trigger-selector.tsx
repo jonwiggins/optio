@@ -57,6 +57,8 @@ interface Props {
   hideConfig?: boolean;
   /** Label for the manual pill (e.g. "Messages" for a persistent agent). */
   manualLabel?: string;
+  /** Rendered inside a card: panels sit on the page background so they read as recessed. */
+  inset?: boolean;
 }
 
 export function TriggerSelector({
@@ -68,7 +70,9 @@ export function TriggerSelector({
   extraActive = false,
   hideConfig = false,
   manualLabel = "Manual",
+  inset = false,
 }: Props) {
+  const panelBg = inset ? "bg-bg" : "bg-bg-card";
   const hint = useMemo(() => {
     if (value.type !== "schedule") return null;
     if (!cronIsValid(value.cronExpression)) return "Expected five space-separated fields.";
@@ -91,7 +95,9 @@ export function TriggerSelector({
   return (
     <div className="space-y-3">
       {label && <label className="block text-sm text-text-muted">{label}</label>}
-      <div className="flex flex-wrap gap-1.5 p-1 rounded-lg bg-bg-card border border-border w-fit max-w-full">
+      <div
+        className={`flex flex-wrap gap-1.5 p-1 rounded-lg ${panelBg} border border-border w-fit max-w-full`}
+      >
         {!hideManual && (
           <TriggerTypeButton
             icon={<Play className="w-3.5 h-3.5" />}
@@ -122,7 +128,7 @@ export function TriggerSelector({
       </div>
 
       {!hideConfig && !extraActive && value.type === "schedule" && (
-        <div className="p-3 rounded-lg bg-bg-card border border-border space-y-2">
+        <div className={`p-3 rounded-lg ${panelBg} border border-border space-y-2`}>
           <label className="block text-xs text-text-muted">Cron expression</label>
           <input
             type="text"
@@ -147,7 +153,7 @@ export function TriggerSelector({
       )}
 
       {!hideConfig && !extraActive && value.type === "webhook" && (
-        <div className="p-3 rounded-lg bg-bg-card border border-border space-y-2">
+        <div className={`p-3 rounded-lg ${panelBg} border border-border space-y-2`}>
           <label className="block text-xs text-text-muted">Webhook path</label>
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-muted font-mono">/api/hooks/</span>
@@ -166,6 +172,7 @@ export function TriggerSelector({
 
       {!hideConfig && !extraActive && value.type === "ticket" && (
         <TicketConfigPanel
+          panelBg={panelBg}
           source={value.ticketSource ?? "github"}
           labels={value.ticketLabels ?? []}
           onSourceChange={(source) => onChange({ ...value, ticketSource: source })}
@@ -177,11 +184,13 @@ export function TriggerSelector({
 }
 
 function TicketConfigPanel({
+  panelBg,
   source,
   labels,
   onSourceChange,
   onLabelsChange,
 }: {
+  panelBg: string;
   source: TicketSource;
   labels: string[];
   onSourceChange: (source: TicketSource) => void;
@@ -202,7 +211,7 @@ function TicketConfigPanel({
   };
 
   return (
-    <div className="p-3 rounded-lg bg-bg-card border border-border space-y-3">
+    <div className={`p-3 rounded-lg ${panelBg} border border-border space-y-3`}>
       <div>
         <label htmlFor="ticket-source" className="block text-xs text-text-muted mb-1">
           Source

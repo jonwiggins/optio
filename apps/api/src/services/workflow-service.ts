@@ -37,6 +37,8 @@ export async function createWorkflow(input: {
   promptTemplate: string;
   agentRuntime?: string;
   model?: string;
+  /** Per-run agent parameters keyed like the provider catalog; null = defaults. */
+  agentOptions?: Record<string, string | boolean> | null;
   maxTurns?: number;
   budgetUsd?: string;
   maxConcurrent?: number;
@@ -63,6 +65,7 @@ export async function createWorkflow(input: {
       promptTemplate: input.promptTemplate,
       agentRuntime: input.agentRuntime ?? "claude-code",
       model: input.model,
+      agentOptions: input.agentOptions ?? null,
       maxTurns: input.maxTurns,
       budgetUsd: input.budgetUsd,
       maxConcurrent: input.maxConcurrent ?? 2,
@@ -92,6 +95,7 @@ export async function updateWorkflow(
     promptTemplate?: string;
     agentRuntime?: string;
     model?: string | null;
+    agentOptions?: Record<string, string | boolean> | null;
     maxTurns?: number | null;
     budgetUsd?: string | null;
     maxConcurrent?: number;
@@ -142,6 +146,7 @@ export async function cloneWorkflow(
     promptTemplate: source.promptTemplate,
     agentRuntime: source.agentRuntime ?? undefined,
     model: source.model ?? undefined,
+    agentOptions: source.agentOptions ?? undefined,
     maxTurns: source.maxTurns ?? undefined,
     budgetUsd: source.budgetUsd ?? undefined,
     maxConcurrent: source.maxConcurrent ?? undefined,
@@ -234,6 +239,7 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     params_schema: unknown;
     agent_runtime: string;
     model: string | null;
+    agent_options: Record<string, string | boolean> | null;
     max_turns: number | null;
     budget_usd: string | null;
     max_concurrent: number;
@@ -267,6 +273,7 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
       w.params_schema,
       w.agent_runtime,
       w.model,
+      w.agent_options,
       w.max_turns,
       w.budget_usd,
       w.max_concurrent,
@@ -336,6 +343,7 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     paramsSchema: r.params_schema,
     agentRuntime: r.agent_runtime,
     model: r.model,
+    agentOptions: r.agent_options,
     maxTurns: r.max_turns,
     budgetUsd: r.budget_usd,
     maxConcurrent: r.max_concurrent,

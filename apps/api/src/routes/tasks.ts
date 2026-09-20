@@ -136,15 +136,24 @@ const createTaskSchema = z
       .enum(["cluster", "local"])
       .optional()
       .describe("Where the agent runs: `cluster` (default) or `local` (your paired machine)"),
-    localHostId: z.string().uuid().optional().describe("Local runs: your paired host id"),
+    // Null is how a pod location spells "none" (the web form always sends all
+    // three); validateRunLocation ignores them unless runTarget is `local`.
+    localHostId: z
+      .string()
+      .uuid()
+      .nullable()
+      .optional()
+      .describe("Local runs: your paired host id"),
     localDir: z
       .string()
       .min(1)
       .max(1000)
+      .nullable()
       .optional()
       .describe("Local runs: absolute directory on the host (must be in its allowlist)"),
     localSessionMode: z
       .enum(["interactive", "headless"])
+      .nullable()
       .optional()
       .describe(
         "Local runs: `headless` (default) exits when the agent's turn is done; `interactive` keeps the session open for chat",
@@ -489,6 +498,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             promptTemplate: input.prompt,
             agentRuntime: input.agentType,
             model: input.model,
+            agentOptions: input.agentOptions ?? undefined,
             maxRetries: input.maxRetries,
             enabled: input.enabled ?? true,
             createdBy: req.user?.id,

@@ -48,6 +48,10 @@ const createSchema = z.object({
   description: z.string().optional(),
   agentRuntime: z.string().optional(),
   model: z.string().nullable().optional(),
+  agentOptions: z
+    .record(z.union([z.string(), z.boolean()]))
+    .nullable()
+    .optional(),
   systemPrompt: z.string().nullable().optional(),
   agentsMd: z.string().nullable().optional(),
   initialPrompt: z.string().min(1),
@@ -67,6 +71,10 @@ const updateSchema = z.object({
   description: z.string().nullable().optional(),
   agentRuntime: z.string().optional(),
   model: z.string().nullable().optional(),
+  agentOptions: z
+    .record(z.union([z.string(), z.boolean()]))
+    .nullable()
+    .optional(),
   systemPrompt: z.string().nullable().optional(),
   agentsMd: z.string().nullable().optional(),
   initialPrompt: z.string().min(1).optional(),

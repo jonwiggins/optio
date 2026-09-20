@@ -22,6 +22,8 @@ import { enqueueWebhookEvent } from "./webhook-worker.js";
 import type { WebhookEvent } from "../services/webhook-service.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
+import { agentOptionsEnv } from "../services/agent-options-env.js";
+import { buildPooledAgentCommand } from "../services/pooled-agent-command.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
@@ -57,84 +59,10 @@ export function buildWorkflowAgentCommand(
   env: Record<string, string>,
   opts?: { maxTurns?: number },
 ): string[] {
-  const maxTurns = opts?.maxTurns ?? DEFAULT_MAX_TURNS_CODING;
-
-  switch (agentType) {
-    case "claude-code": {
-      const authSetup =
-        env.OPTIO_AUTH_MODE === "max-subscription"
-          ? [
-              `if curl -sf "${env.OPTIO_API_URL}/api/auth/claude-token" > /dev/null 2>&1; then echo "[optio] Token proxy OK"; fi`,
-              `unset ANTHROPIC_API_KEY 2>/dev/null || true`,
-            ]
-          : [];
-
-      const modelName = env.OPTIO_CLAUDE_MODEL;
-      const ctxWindow = env.OPTIO_CLAUDE_CONTEXT_WINDOW;
-      let modelFlag = "";
-      if (modelName) {
-        const ctx = ctxWindow === "1m" ? "[1m]" : "";
-        modelFlag = `--model ${modelName}${ctx}`;
-      }
-
-      return [
-        ...authSetup,
-        `echo "[optio] Running workflow agent (Claude Code)..."`,
-        `claude --print \\`,
-        `  --dangerously-skip-permissions \\`,
-        `  --input-format stream-json \\`,
-        `  --output-format stream-json \\`,
-        `  --verbose \\`,
-        `  --max-turns ${maxTurns} \\`,
-        `  ${modelFlag}`.trim(),
-      ];
-    }
-    case "codex": {
-      return [
-        `echo "[optio] Running workflow agent (Codex)..."`,
-        `codex exec --full-auto "$OPTIO_PROMPT" --json`,
-      ];
-    }
-    case "copilot": {
-      const modelFlag = env.COPILOT_MODEL ? ` --model ${JSON.stringify(env.COPILOT_MODEL)}` : "";
-      return [
-        `echo "[optio] Running workflow agent (Copilot)..."`,
-        `copilot --autopilot --yolo --max-autopilot-continues ${maxTurns} \\`,
-        `  --output-format json --no-ask-user${modelFlag} \\`,
-        `  -p "$OPTIO_PROMPT"`,
-      ];
-    }
-    case "opencode": {
-      const modelFlag = env.OPTIO_OPENCODE_MODEL
-        ? ` --model ${JSON.stringify(env.OPTIO_OPENCODE_MODEL)}`
-        : "";
-      return [
-        `echo "[optio] Running workflow agent (OpenCode)..."`,
-        `opencode run --format json${modelFlag} "$OPTIO_PROMPT"`,
-      ];
-    }
-    case "gemini": {
-      const geminiModelFlag = env.OPTIO_GEMINI_MODEL
-        ? ` -m ${JSON.stringify(env.OPTIO_GEMINI_MODEL)}`
-        : "";
-      return [
-        `echo "[optio] Running workflow agent (Gemini)..."`,
-        `gemini ${geminiModelFlag} -p "$OPTIO_PROMPT"`,
-      ];
-    }
-    case "cursor": {
-      const cursorModelFlag = env.OPTIO_CURSOR_MODEL
-        ? ` --model ${JSON.stringify(env.OPTIO_CURSOR_MODEL)}`
-        : "";
-      return [
-        `echo "[optio] Running workflow agent (Cursor)..."`,
-        `cursor-agent --print --trust --force \\`,
-        `  --output-format stream-json${cursorModelFlag} "$OPTIO_PROMPT"`,
-      ];
-    }
-    default:
-      return [`echo "Unknown agent type: ${agentType}"`, `exit 1`];
-  }
+  return buildPooledAgentCommand(agentType, env, {
+    maxTurns: opts?.maxTurns ?? DEFAULT_MAX_TURNS_CODING,
+    label: "workflow agent",
+  });
 }
 
 /**
@@ -411,10 +339,12 @@ export function startWorkflowWorker() {
           OPTIO_AUTH_MODE: claudeAuthMode,
         };
 
-        // Inject model config
-        if (workflow.model) {
-          env.OPTIO_CLAUDE_MODEL = workflow.model;
-        }
+        // The job's agent parameters (model, effort, approval mode, …) as the
+        // env the command builder turns into flags. `model` is the legacy field.
+        Object.assign(
+          env,
+          agentOptionsEnv(workflow.agentRuntime, workflow.agentOptions, workflow.model),
+        );
 
         // For api-key mode, resolve the API key
         if (claudeAuthMode === "api-key") {

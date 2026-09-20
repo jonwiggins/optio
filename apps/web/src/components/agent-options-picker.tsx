@@ -115,7 +115,10 @@ export function AgentOptionsPicker({
   }
 
   const catalog = live?.catalog ?? baseline;
-  const modelValue = String(values[catalog.modelField] ?? "");
+  // A stored alias ("opus") shows as the model it resolves to, so the select
+  // matches an option instead of silently displaying the first one.
+  const rawModel = String(values[catalog.modelField] ?? "");
+  const modelValue = catalog.aliases[rawModel] ?? rawModel;
   const canRefresh = catalog.liveRefreshSupported && !hideRefresh;
 
   const setField = (key: string, value: string | boolean) => {

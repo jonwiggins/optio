@@ -115,6 +115,7 @@ vi.mock("../services/local-run-service.js", () => ({
 }));
 
 import { taskRoutes } from "./tasks.js";
+import * as workflowServiceMock from "../services/workflow-service.js";
 
 // ─── Helpers ───
 
@@ -318,6 +319,58 @@ describe("POST /api/tasks", () => {
     expect(mockTransitionTask).toHaveBeenCalled();
     expect(mockQueueAdd).toHaveBeenCalled();
     expect(res.json().task.state).toBe("queued");
+  });
+
+  it("accepts a pod location spelled with nulls (what the web form sends)", async () => {
+    mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "pending" });
+    mockTransitionTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "queued" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: {
+        title: "Fix bug",
+        prompt: "Fix the bug",
+        repoUrl: "https://github.com/org/repo",
+        agentType: "claude-code",
+        runTarget: "cluster",
+        localHostId: null,
+        localDir: null,
+        localSessionMode: null,
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("creates a standalone task with per-run agent options", async () => {
+    vi.mocked(workflowServiceMock.createWorkflow).mockResolvedValue({
+      id: "wf-1",
+      name: "Nightly",
+    } as any);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: {
+        type: "standalone",
+        name: "Nightly",
+        prompt: "Report",
+        agentType: "claude-code",
+        agentOptions: { claudeModel: "claude-sonnet-4-6", claudeThinking: false },
+        runTarget: "cluster",
+        localHostId: null,
+        localDir: null,
+        localSessionMode: null,
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(workflowServiceMock.createWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentOptions: { claudeModel: "claude-sonnet-4-6", claudeThinking: false },
+      }),
+    );
   });
 
   it("creates a task with dependencies", async () => {

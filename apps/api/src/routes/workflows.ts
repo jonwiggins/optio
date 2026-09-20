@@ -24,6 +24,13 @@ const createWorkflowSchema = z
       .describe("Handlebars-style prompt template with {{param}} placeholders"),
     agentRuntime: z.string().optional().describe("Agent runtime (defaults to `claude-code`)"),
     model: z.string().optional().describe("Optional model override"),
+    agentOptions: z
+      .record(z.union([z.string(), z.boolean()]))
+      .nullable()
+      .optional()
+      .describe(
+        "Per-run agent parameters keyed like the provider catalog (claudeModel, claudeEffort, geminiApprovalMode, …). Null = the runtime's defaults.",
+      ),
     maxTurns: z.number().int().positive().optional().describe("Optional hard turn limit per run"),
     budgetUsd: z.string().optional().describe("Optional per-run budget in USD (decimal string)"),
     maxConcurrent: z.number().int().positive().optional().describe("Max concurrent runs allowed"),
@@ -63,15 +70,24 @@ const createWorkflowSchema = z
       .enum(["cluster", "local"])
       .optional()
       .describe("Where runs execute: `cluster` (default) or `local` (the caller's paired machine)"),
-    localHostId: z.string().uuid().optional().describe("Local runs: your paired host id"),
+    // Null is how a pod location spells "none" (the web forms always send all
+    // three); validateRunLocation ignores them unless runTarget is `local`.
+    localHostId: z
+      .string()
+      .uuid()
+      .nullable()
+      .optional()
+      .describe("Local runs: your paired host id"),
     localDir: z
       .string()
       .min(1)
       .max(1000)
+      .nullable()
       .optional()
       .describe("Local runs: absolute directory on the host (must be in its allowlist)"),
     localSessionMode: z
       .enum(["interactive", "headless"])
+      .nullable()
       .optional()
       .describe("Local runs: `headless` (default) exits when done; `interactive` stays open"),
   })
@@ -84,6 +100,10 @@ const updateWorkflowSchema = z
     promptTemplate: z.string().min(1).optional(),
     agentRuntime: z.string().optional(),
     model: z.string().nullable().optional(),
+    agentOptions: z
+      .record(z.union([z.string(), z.boolean()]))
+      .nullable()
+      .optional(),
     maxTurns: z.number().int().positive().nullable().optional(),
     budgetUsd: z.string().nullable().optional(),
     maxConcurrent: z.number().int().positive().optional(),

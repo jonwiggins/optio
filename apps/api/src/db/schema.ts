@@ -630,6 +630,10 @@ export const workflows = pgTable(
     paramsSchema: jsonb("params_schema").$type<Record<string, unknown>>(),
     agentRuntime: text("agent_runtime").notNull().default("claude-code"),
     model: text("model"),
+    // Per-run agent parameters for the runtime (model, effort, thinking,
+    // approval mode, …) keyed like the provider catalog / repos columns.
+    // Null = the runtime's defaults. `model` stays as the legacy single field.
+    agentOptions: jsonb("agent_options").$type<Record<string, string | boolean>>(),
     maxTurns: integer("max_turns"),
     budgetUsd: text("budget_usd"),
     maxConcurrent: integer("max_concurrent").notNull().default(2),
@@ -1393,6 +1397,8 @@ export const persistentAgents = pgTable(
     description: text("description"),
     agentRuntime: text("agent_runtime").notNull().default("claude-code"),
     model: text("model"),
+    // Per-turn agent parameters (see workflows.agentOptions). Null = defaults.
+    agentOptions: jsonb("agent_options").$type<Record<string, string | boolean>>(),
     systemPrompt: text("system_prompt"),
     // Operator manual: "how to use the optio agent CLI/MCP". Injected into the
     // prompt at turn-start. Mirrors Scion's per-template agents.md.

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { providerForAgentType } from "@optio/shared";
+import { getProviderCatalog, providerForAgentType } from "@optio/shared";
 import {
   Bot,
   ChevronDown,
@@ -63,7 +63,7 @@ import { createSession } from "./submit";
 
 /**
  * The one creation form. Six groups in dependency order — When, Where, Who,
- * What, Exit conditions, Name — each narrowing the next, and a sentence up
+ * What, Then, Name — each narrowing the next, and a sentence up
  * top that says what you're about to make. There is no "type" to pick: the
  * row it becomes is derived from the answers (`deriveKind`).
  *
@@ -73,8 +73,9 @@ import { createSession } from "./submit";
  */
 
 const INPUT =
-  "w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors";
-const INPUT_INNER = INPUT.replace("bg-bg-card", "bg-bg");
+  "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors";
+// Every control sits inside a card now, so inputs use the page background throughout.
+const INPUT_INNER = INPUT;
 
 const FIELD_IDS: Record<SentenceField, string> = {
   checkout: "session-where",
@@ -204,9 +205,10 @@ export function SessionForm() {
 
   // A pod Task starts from the repo's configured parameters for the picked
   // runtime, so the picker shows what will actually run.
-  const seedKey = `${draft.runtime}|${draft.repoId}|${fullOptionsApply(draft)}`;
+  const seedFromRepo = fullOptionsApply(draft) && draft.withRepo;
+  const seedKey = `${draft.runtime}|${draft.repoId}|${seedFromRepo}`;
   useEffect(() => {
-    if (!fullOptionsApply(draft)) return;
+    if (!seedFromRepo) return;
     const repo = repos.find((r: any) => r.id === draft.repoId);
     if (!repo) return;
     setDraftRaw((d) =>
@@ -269,8 +271,13 @@ export function SessionForm() {
       ...d,
       location: { ...d.location, runTarget },
       withRepo: runTarget === "cluster",
+      agentOptions: {},
     }));
   };
+
+  // The picker starts from the repo's defaults only while there is a repo;
+  // switching it off (or on) starts the parameters over.
+  const setWithRepo = (withRepo: boolean) => setDraft({ withRepo, agentOptions: {} });
 
   const insertParam = (name: string) => {
     const token = `{{${name}}}`;
@@ -335,6 +342,25 @@ export function SessionForm() {
   const podDisabled = wheres.find((w) => w.value === "cluster")?.disabled;
   const disabledRuntimes = runtimes.filter((r) => r.disabled);
 
+  // One line per card header — the answer so far, readable when scrolled past.
+  const catalog = isTerminal ? null : getProviderCatalog(providerForAgentType(draft.runtime));
+  const rawModel = catalog ? String(draft.agentOptions[catalog.modelField] ?? "") : "";
+  const modelId = catalog?.aliases[rawModel] ?? rawModel; // "opus" → the latest Opus
+  const modelLabel = modelId
+    ? (catalog?.models.find((m) => m.id === modelId)?.label ?? modelId)
+    : "";
+  const summaries = {
+    when: WHEN_META[draft.when].label,
+    where: local
+      ? `${machine?.name ?? "My machine"}${draft.withRepo ? " · new branch" : ""}`
+      : `Optio pod · ${draft.withRepo ? (repoRow?.fullName ?? "a repo") : "no repo"}`,
+    who: isTerminal
+      ? "Terminal"
+      : `${runtimeLabel(draft.runtime)}${modelLabel ? ` · ${modelLabel}` : ""}`,
+    then: THEN_CARDS[draft.then].title,
+    name: draft.name.trim() || autoName,
+  };
+
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <h1 className="text-2xl font-semibold tracking-tight mb-2">New session</h1>
@@ -343,31 +369,31 @@ export function SessionForm() {
         it does, and what happens when a turn ends.
       </p>
 
-      {/* ── Presets ─────────────────────────────────────────────────────── */}
-      <div className="mb-5">
-        <div className="text-xs uppercase tracking-wider text-text-muted/60 mb-2">
-          Start from an example
-        </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 p-1 rounded-lg bg-bg-card border border-border">
-          {PRESETS.map((p) => (
+      {/* ── Examples: shortcuts that fill the form in, not a setting ─────── */}
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5 mb-5 text-xs text-text-muted">
+        <span className="mr-1">Examples:</span>
+        {PRESETS.map((p, i) => (
+          <span key={p.id} className="flex items-center">
+            {i > 0 && <span className="mx-1 text-text-muted/40">·</span>}
             <button
-              key={p.id}
               type="button"
               title={p.hint}
               onClick={() => applyPreset(p.id)}
               className={cn(
-                "flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-sm transition-colors",
-                preset === p.id ? "bg-primary text-white" : "text-text-muted hover:text-text",
+                "inline-flex items-center gap-1 rounded px-1 -mx-1 underline decoration-dotted underline-offset-4 transition-colors",
+                preset === p.id
+                  ? "text-primary decoration-primary/60"
+                  : "decoration-text-muted/40 hover:text-text hover:decoration-text-muted",
               )}
             >
               {PRESET_ICONS[p.id]}
-              <span className="whitespace-nowrap">{p.label}</span>
+              {p.label}
             </button>
-          ))}
-        </div>
+          </span>
+        ))}
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="space-y-4">
         {/* ── The sentence ────────────────────────────────────────────── */}
         <div
           className={cn(
@@ -404,11 +430,18 @@ export function SessionForm() {
         </div>
 
         {/* ── When ────────────────────────────────────────────────────── */}
-        <Section label="When" hint="What starts it?" id="session-when">
+        <Section
+          step={1}
+          label="When"
+          hint="What starts it?"
+          summary={summaries.when}
+          id="session-when"
+        >
           <TriggerSelector
             value={draft.trigger}
             onChange={(trigger) => setDraft({ trigger, when: trigger.type })}
             manualLabel="Now"
+            inset
             extraActive={isEventWhen(draft.when)}
             extra={WHEN_TYPES.filter(isEventWhen).map((w) => (
               <TriggerTypeButton
@@ -432,7 +465,13 @@ export function SessionForm() {
         </Section>
 
         {/* ── Where ───────────────────────────────────────────────────── */}
-        <Section label="Where" id="session-where">
+        <Section
+          step={2}
+          label="Where"
+          hint="A pod, or your machine?"
+          summary={summaries.where}
+          id="session-where"
+        >
           <div className="space-y-3">
             <RunLocationPicker
               value={draft.location}
@@ -445,15 +484,16 @@ export function SessionForm() {
               agentType={draft.runtime || undefined}
               onRepoUrlChange={setLocalRepoUrl}
               hideSessionMode
+              inset
               clusterDisabled={podDisabled}
             />
 
-            <div className="p-4 rounded-lg border border-border bg-bg-card/60 space-y-3">
+            <div className="pt-3 border-t border-border space-y-3">
               {local ? (
                 <>
                   <Segmented
                     value={draft.withRepo ? "branch" : "current"}
-                    onChange={(v) => setDraft({ withRepo: v === "branch" })}
+                    onChange={(v) => setWithRepo(v === "branch")}
                     options={[
                       {
                         value: "current",
@@ -496,7 +536,7 @@ export function SessionForm() {
                 <>
                   <Segmented
                     value={draft.withRepo ? "repo" : "none"}
-                    onChange={(v) => setDraft({ withRepo: v === "repo" })}
+                    onChange={(v) => setWithRepo(v === "repo")}
                     options={[
                       {
                         value: "repo",
@@ -561,9 +601,15 @@ export function SessionForm() {
         </Section>
 
         {/* ── Who ─────────────────────────────────────────────────────── */}
-        <Section label="Who" hint="A terminal, or an agent?" id="session-who">
+        <Section
+          step={3}
+          label="Who"
+          hint="A terminal, or an agent?"
+          summary={summaries.who}
+          id="session-who"
+        >
           <div className="space-y-3">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-lg bg-bg-card border border-border">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-lg bg-bg border border-border">
               {runtimes.map((r) => (
                 <button
                   key={r.value || "terminal"}
@@ -602,11 +648,23 @@ export function SessionForm() {
               {disabledRuntimes.length > 0 &&
                 ` ${disabledRuntimes
                   .map((r) => (r.value === TERMINAL ? "Terminal" : runtimeLabel(r.value)))
-                  .join(", ")} — ${disabledRuntimes[0].disabled}.`}
+                  .join(", ")} — ${disabledRuntimes[0].disabled!.replace(/\.$/, "")}.`}
             </p>
 
             {!isTerminal && (
-              <div className="p-4 rounded-lg border border-border bg-bg-card/60">
+              <div className="pt-3 border-t border-border">
+                <div className="flex items-baseline justify-between mb-2">
+                  <span className="text-sm text-text-muted">
+                    {runtimeLabel(draft.runtime)} parameters
+                  </span>
+                  <span className="text-[11px] text-text-muted/70">
+                    {local
+                      ? "Only the model — the rest comes from the machine's own config"
+                      : draft.withRepo
+                        ? "Starts from the repo's defaults; applies to this session only"
+                        : "Blank means the runtime's default"}
+                  </span>
+                </div>
                 <AgentOptionsPicker
                   key={draft.runtime}
                   provider={providerForAgentType(draft.runtime)}
@@ -615,13 +673,6 @@ export function SessionForm() {
                   modelOnly={!fullOptionsApply(draft)}
                   hideRefresh
                 />
-                <p className="text-[11px] text-text-muted/80 mt-3">
-                  {local
-                    ? "On your machine the CLI takes a model; its other settings come from the machine's own config."
-                    : fullOptionsApply(draft)
-                      ? "Starts from the repo's configured parameters; changes apply to this session only."
-                      : "Blank means the runtime's default."}
-                </p>
               </div>
             )}
           </div>
@@ -629,7 +680,7 @@ export function SessionForm() {
 
         {/* ── What ────────────────────────────────────────────────────── */}
         {!isTerminal && (
-          <Section label="What" id="session-prompt">
+          <Section step={4} label="What" hint="The prompt" id="session-prompt">
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-sm text-text-muted">
@@ -645,7 +696,7 @@ export function SessionForm() {
                       const t = templates.find((x) => x.id === e.target.value);
                       if (t) setDraft({ prompt: t.template ?? "" });
                     }}
-                    className="px-2 py-1 rounded-md bg-bg-card border border-border text-xs text-text-muted"
+                    className="px-2 py-1 rounded-md bg-bg border border-border text-xs text-text-muted"
                   >
                     <option value="">Use a saved prompt…</option>
                     {templates.map((t) => (
@@ -695,7 +746,7 @@ export function SessionForm() {
                           key={name}
                           type="button"
                           onClick={() => insertParam(name)}
-                          className="px-1.5 py-0.5 rounded bg-bg-card border border-border font-mono text-[11px] text-text-muted hover:text-text hover:border-primary/50 transition-colors"
+                          className="px-1.5 py-0.5 rounded bg-bg border border-border font-mono text-[11px] text-text-muted hover:text-text hover:border-primary/50 transition-colors"
                         >
                           {`{{${name}}}`}
                         </button>
@@ -708,8 +759,13 @@ export function SessionForm() {
           </Section>
         )}
 
-        {/* ── Exit conditions ─────────────────────────────────────────── */}
-        <Section label="Exit conditions" hint="What happens when a turn ends?">
+        {/* ── Then ─────────────────────────────────────────── */}
+        <Section
+          step={isTerminal ? 4 : 5}
+          label="Then"
+          hint="What happens when a turn ends?"
+          summary={summaries.then}
+        >
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {thens.map((c) => (
               <ModeCard
@@ -727,7 +783,7 @@ export function SessionForm() {
           </div>
 
           {draft.then === "waits-for-messages" && (
-            <div className="mt-3 p-4 rounded-lg border border-border bg-bg-card/60 space-y-3">
+            <div className="mt-3 pt-3 border-t border-border space-y-3">
               <div>
                 <label className="block text-sm text-text-muted mb-1.5">Pod lifecycle</label>
                 <Segmented
@@ -787,7 +843,7 @@ export function SessionForm() {
         </Section>
 
         {/* ── Name ────────────────────────────────────────────────────── */}
-        <Section label="Name">
+        <Section step={isTerminal ? 5 : 6} label="Name" summary={summaries.name}>
           <div className="space-y-3">
             <div
               className={cn("grid gap-3", draft.then === "waits-for-messages" && "sm:grid-cols-2")}
@@ -854,7 +910,7 @@ export function SessionForm() {
                           value={draft.priority}
                           onChange={(v) => setDraft({ priority: v })}
                           fallback={100}
-                          className="w-24 px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
+                          className="w-24 px-3 py-2 rounded-lg bg-bg border border-border text-sm"
                         />
                         <p className="text-xs text-text-muted/60 mt-1">
                           Lower = sooner. Default 100.
@@ -869,7 +925,7 @@ export function SessionForm() {
                         value={draft.maxRetries}
                         onChange={(v) => setDraft({ maxRetries: v })}
                         fallback={3}
-                        className="w-24 px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
+                        className="w-24 px-3 py-2 rounded-lg bg-bg border border-border text-sm"
                       />
                     </div>
                   </div>
@@ -959,25 +1015,44 @@ export function SessionForm() {
   );
 }
 
+/**
+ * One card per attribute: a numbered header strip that names the question
+ * and echoes the current answer, and one body holding every control for it.
+ * Controls inside separate with dividers, never with boxes of their own.
+ */
 function Section({
+  step,
   label,
   hint,
+  summary,
   id,
   children,
 }: {
+  step: number;
   label: string;
   hint?: string;
+  summary?: string;
   id?: string;
   children: ReactNode;
 }) {
   return (
-    <div id={id}>
-      <div className="flex items-baseline gap-2 mb-2">
-        <div className="text-xs uppercase tracking-wider text-text-muted/60">{label}</div>
-        {hint && <span className="text-xs text-text-muted/60">{hint}</span>}
-      </div>
-      {children}
-    </div>
+    <section id={id} className="rounded-xl border border-border bg-bg-card overflow-hidden">
+      <header className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-bg-subtle/70">
+        <span className="flex items-center justify-center w-5 h-5 shrink-0 rounded-full bg-primary/15 text-primary text-[10px] font-semibold tabular-nums">
+          {step}
+        </span>
+        <div className="flex items-baseline gap-2 min-w-0">
+          <h2 className="text-sm font-semibold tracking-tight text-text-heading">{label}</h2>
+          {hint && <span className="text-xs text-text-muted truncate">{hint}</span>}
+        </div>
+        {summary && (
+          <span className="ml-auto pl-3 text-xs text-text-muted truncate text-right max-w-[45%]">
+            {summary}
+          </span>
+        )}
+      </header>
+      <div className="p-4">{children}</div>
+    </section>
   );
 }
 
@@ -1061,7 +1136,7 @@ function EventConfig({
   const personal = kinds.some((k) => k.personal && events.includes(k.value));
 
   return (
-    <div className="mt-3 p-3 rounded-lg bg-bg-card border border-border space-y-3">
+    <div className="mt-3 pt-3 border-t border-border space-y-3">
       {type === "slack" ? (
         <>
           <div>
