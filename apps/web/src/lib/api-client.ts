@@ -1542,9 +1542,9 @@ export const api = {
     prompt: string;
     description?: string;
     agentType?: string;
-    /** Standalone: model override for the agent CLI. */
+    /** Standalone: model override for the agent CLI (legacy single field). */
     model?: string;
-    /** Repo blueprints: per-run agent parameters copied to every spawned task. */
+    /** Repo blueprints + standalone: per-run agent parameters (model, effort, …). */
     agentOptions?: Record<string, string | boolean> | null;
     maxRetries?: number;
     repoUrl?: string;
@@ -1796,6 +1796,8 @@ export const api = {
     description?: string;
     agentRuntime?: string;
     model?: string | null;
+    /** Per-turn agent parameters keyed like the provider catalog; null = defaults. */
+    agentOptions?: Record<string, string | boolean> | null;
     systemPrompt?: string | null;
     agentsMd?: string | null;
     initialPrompt: string;

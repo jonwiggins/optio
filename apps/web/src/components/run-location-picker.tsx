@@ -127,6 +127,7 @@ export function RunLocationPicker({
   hideSessionMode = false,
   clusterDisabled,
   className,
+  inset = false,
 }: {
   value: RunLocationValue;
   onChange: (next: RunLocationValue) => void;
@@ -144,6 +145,8 @@ export function RunLocationPicker({
   /** Why the pod can't be picked right now (e.g. an event trigger runs on your machine). */
   clusterDisabled?: string;
   className?: string;
+  /** Rendered inside a card: the machine panel sits on the page background. */
+  inset?: boolean;
 }) {
   const { hosts, loading } = useLocalHosts();
   const host = useMemo(
@@ -224,7 +227,12 @@ export function RunLocationPicker({
       </div>
 
       {isLocal && (
-        <div className="p-4 rounded-lg border border-border bg-bg-card/60 space-y-3">
+        <div
+          className={cn(
+            "p-4 rounded-lg border border-border space-y-3",
+            inset ? "bg-bg" : "bg-bg-card/60",
+          )}
+        >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm text-text-muted mb-1.5">Machine</label>

@@ -99,6 +99,8 @@ export interface CreatePersistentAgentInput {
   workspaceId?: string | null;
   agentRuntime?: string;
   model?: string | null;
+  /** Per-turn agent parameters keyed like the provider catalog; null = defaults. */
+  agentOptions?: Record<string, string | boolean> | null;
   systemPrompt?: string | null;
   agentsMd?: string | null;
   initialPrompt: string;
@@ -124,6 +126,7 @@ export async function createPersistentAgent(input: CreatePersistentAgentInput) {
       workspaceId: input.workspaceId ?? null,
       agentRuntime: input.agentRuntime ?? "claude-code",
       model: input.model ?? null,
+      agentOptions: input.agentOptions ?? null,
       systemPrompt: input.systemPrompt ?? null,
       agentsMd: input.agentsMd ?? null,
       initialPrompt: input.initialPrompt,
@@ -147,6 +150,7 @@ export interface UpdatePersistentAgentInput {
   description?: string | null;
   agentRuntime?: string;
   model?: string | null;
+  agentOptions?: Record<string, string | boolean> | null;
   systemPrompt?: string | null;
   agentsMd?: string | null;
   initialPrompt?: string;

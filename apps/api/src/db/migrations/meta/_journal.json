@@ -666,6 +666,13 @@
       "when": 1790500000000,
       "tag": "1790500000_task_config_agent_options",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1790600000000,
+      "tag": "1790600000_job_and_agent_agent_options",
+      "breakpoints": true
     }
   ]
 }

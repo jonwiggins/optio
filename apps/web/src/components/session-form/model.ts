@@ -128,6 +128,7 @@ export const PRESETS: Preset[] = [
       location: { ...d.location, runTarget: "cluster" },
       withRepo: true,
       runtime: d.runtime || "claude-code",
+      agentOptions: {},
       then: "exits",
     }),
   },
@@ -142,6 +143,7 @@ export const PRESETS: Preset[] = [
       location: { ...d.location, runTarget: "local", localSessionMode: "interactive" },
       withRepo: false,
       runtime: d.runtime || "claude-code",
+      agentOptions: {},
       then: "waits-for-me",
     }),
   },
@@ -156,6 +158,7 @@ export const PRESETS: Preset[] = [
       location: { ...d.location, runTarget: "cluster" },
       withRepo: false,
       runtime: d.runtime || "claude-code",
+      agentOptions: {},
       then: "exits",
     }),
   },
@@ -170,6 +173,7 @@ export const PRESETS: Preset[] = [
       location: { ...d.location, runTarget: "cluster" },
       withRepo: false,
       runtime: d.runtime || "claude-code",
+      agentOptions: {},
       then: "waits-for-messages",
     }),
   },
@@ -353,12 +357,13 @@ export function normalize(d: SessionDraft): SessionDraft {
 }
 
 /**
- * Which agent parameters the run will honor. A pod Task reads the full
- * provider option set (per-run over the repo's defaults); a Job, a
- * persistent agent, and anything on your machine take just a model.
+ * Which agent parameters the run will honor. Every pod run — a Task (over
+ * the repo's defaults), a Job, a persistent agent — reads the runtime's full
+ * provider option set. On your machine the daemon passes the CLI just a
+ * model; its other settings come from the machine's own config.
  */
 export function fullOptionsApply(d: SessionDraft): boolean {
-  return !isLocal(d) && d.withRepo && d.then === "exits";
+  return !isLocal(d) && d.runtime !== TERMINAL;
 }
 
 /** The repo's configured values for this runtime's options, to seed the picker. */

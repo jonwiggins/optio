@@ -122,6 +122,32 @@ describe("POST /api/jobs", () => {
     );
   });
 
+  it("accepts a pod location spelled with nulls, plus agent options", async () => {
+    // The web forms always send all three local fields; null means "none".
+    mockCreateWorkflow.mockResolvedValue({ ...mockWorkflow });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      payload: {
+        name: "Nightly",
+        promptTemplate: "Report",
+        runTarget: "cluster",
+        localHostId: null,
+        localDir: null,
+        localSessionMode: null,
+        agentOptions: { claudeModel: "claude-sonnet-4-6", claudeEffort: "low" },
+      },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(mockCreateWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentOptions: { claudeModel: "claude-sonnet-4-6", claudeEffort: "low" },
+      }),
+    );
+  });
+
   it("returns 400 on service error", async () => {
     mockCreateWorkflow.mockRejectedValue(new Error("Duplicate name"));
 
