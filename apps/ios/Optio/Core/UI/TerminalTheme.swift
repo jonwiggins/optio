@@ -17,6 +17,16 @@ import UIKit
 /// terminal does with the wheel. When mouse mode goes off again the native
 /// scroll view takes back over and history scrolls as before.
 final class ScrollableTerminalView: TerminalView {
+    /// Fired when the terminal takes the keyboard — the explicit "I'm using this
+    /// screen" signal that lets a Local viewer claim the PTY grid.
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { onFocus?() }
+        return became
+    }
+
     private var wheelPan: UIPanGestureRecognizer?
     private var wheelRemainder: CGFloat = 0
     private var flingTimer: Timer?

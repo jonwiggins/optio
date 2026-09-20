@@ -63,6 +63,14 @@ struct LocalTerminalInputBody: Encodable {
     var data: String
 }
 
+/// `GET /api/local/terminals/:id/transcript` — one page of the stored conversation.
+/// `complete` is true when fewer than `limit` entries came back, i.e. the caller
+/// has everything stored.
+struct LocalTranscriptPage: Decodable {
+    let entries: [LocalTranscriptEntry]
+    let complete: Bool
+}
+
 /// Shared by create (POST) and update (PATCH). Nil fields are omitted, matching
 /// `blueprintBodySchema` (which has no nullable fields besides `agent`).
 struct LocalBlueprintBody: Encodable {
@@ -159,6 +167,17 @@ extension APIClient {
 
     func deleteLocalTerminal(_ id: String) async throws {
         try await delete("/api/local/terminals/\(id)")
+    }
+
+    /// The conversation of an agent session (prompts, replies, tool calls),
+    /// distilled by the daemon from the agent CLI's own transcript. `after`
+    /// fetches only entries past a seq.
+    func getLocalTerminalTranscript(_ id: String, after: Int = 0, limit: Int = 2000) async throws -> LocalTranscriptPage {
+        try await get(
+            "/api/local/terminals/\(id)/transcript",
+            query: ["after": after > 0 ? String(after) : nil, "limit": String(limit)],
+            as: LocalTranscriptPage.self
+        )
     }
 
     func listLocalBlueprints() async throws -> [LocalBlueprint] {

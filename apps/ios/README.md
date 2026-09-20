@@ -61,6 +61,22 @@ Plain-HTTP tailnet addresses are allowed by the app's ATS configuration
 (`NSAllowsArbitraryLoads` in `project.yml`). Tighten that to an exception domain
 once the API is behind TLS.
 
+## Local sessions on the phone
+
+A Local (on-your-machine) session opens on its **Transcript** — the agent's
+conversation distilled by the daemon, reflowed for the phone, with a composer
+that writes your message plus Enter to the PTY — whenever one exists, live or
+finished; a plain shell falls back to the **Screen** (SwiftTerm). The toggle in
+the header switches between them (`Features/Live/Local/SessionView.swift`).
+
+One PTY, one grid: attaching from the phone never resizes the session. The
+Screen face renders the grid the daemon announces shrunk to fit ("Sized for
+another device"), and only an explicit interaction — focusing the terminal, a
+key from the extra-keys bar, or "Use this screen" — claims the grid for the
+phone (`TerminalSizing.swift`, `LocalTerminalHostView.swift`; ports of the web's
+`sizing.ts` / `stream-policy.ts`). SwiftTerm does not reflow, so the stream
+holds replayed bytes until the `size` frame lands.
+
 ## Multiple servers
 
 The phone can be paired with several Optio instances at once (two laptops, a

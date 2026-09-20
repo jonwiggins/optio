@@ -32,6 +32,8 @@ struct AgentLogRow: View {
 
     var body: some View {
         switch entry.type {
+        case .text where isUser:
+            userBubble
         case .text:
             Text(LocalizedStringKey(entry.content))
                 .font(.body)
@@ -62,29 +64,108 @@ struct AgentLogRow: View {
         entry.metadata?["toolName"]?.stringValue ?? (entry.type == .toolUse ? "tool" : "result")
     }
 
-    private var toolBlock: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            Text(entry.content)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-                .background(.fill.tertiary, in: Radius.smallShape)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: entry.type == .toolUse ? "wrench.and.screwdriver" : "arrow.turn.down.left")
-                Text(toolName).font(.caption.weight(.semibold).monospaced())
-                if let exit = entry.metadata?["exitCode"]?.intValue, exit != 0 {
-                    Text("exit \(exit)").font(.caption2).foregroundStyle(.red)
+    // Optional metadata a producer may attach (see `LocalTranscriptLog`):
+    // `role: "user"` marks a prompt typed by the human; `summary` is a tool call's
+    // one-line summary shown in the header (the body is then the full input);
+    // `result` / `resultIsError` fold the tool's result under its call.
+    private var isUser: Bool { entry.metadata?["role"]?.stringValue == "user" }
+    private var summary: String? { entry.metadata?["summary"]?.stringValue }
+    private var pairedResult: String? { entry.metadata?["result"]?.stringValue }
+    private var isError: Bool {
+        entry.metadata?["resultIsError"]?.boolValue == true || (entry.metadata?["exitCode"]?.intValue ?? 0) != 0
+    }
+    private var hasBody: Bool { !entry.content.isEmpty || pairedResult != nil }
+
+    private var userBubble: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "person.fill")
+                .font(.caption2)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 22, height: 22)
+                .background(AppTheme.accent.opacity(0.15), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text("You").font(.caption.weight(.semibold)).foregroundStyle(AppTheme.accent)
+                    if let time = Self.shortTime(entry.timestamp) {
+                        Text(time).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
+                    }
                 }
-                Spacer()
-                Text(entry.content.prefix(60).replacingOccurrences(of: "\n", with: " "))
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                Text(entry.content)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.fill.tertiary, in: Radius.cardShape)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+
+    private static func shortTime(_ iso: String) -> String? {
+        guard !iso.isEmpty else { return nil }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = parser.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        return date.map { timeFormatter.string(from: $0) }
+    }
+
+    @ViewBuilder
+    private var toolBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !entry.content.isEmpty {
+                Text(entry.content)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(.fill.tertiary, in: Radius.smallShape)
+            }
+            if let pairedResult {
+                Text(pairedResult.isEmpty ? "(no output)" : pairedResult)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(isError ? Tone.danger.textStyle : AnyShapeStyle(.secondary))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(.fill.quaternary, in: Radius.smallShape)
             }
         }
-        .tint(.secondary)
+    }
+
+    private var toolLabel: some View {
+        HStack(spacing: 6) {
+            Image(systemName: isError ? "exclamationmark.circle" : entry.type == .toolUse ? "wrench.and.screwdriver" : "arrow.turn.down.left")
+                .foregroundStyle(isError ? Tone.danger.textStyle : AnyShapeStyle(.secondary))
+            Text(toolName)
+                .font(.caption.weight(.semibold).monospaced())
+                .foregroundStyle(isError ? Tone.danger.textStyle : AnyShapeStyle(.primary))
+            if let exit = entry.metadata?["exitCode"]?.intValue, exit != 0 {
+                Text("exit \(exit)").font(.caption2).foregroundStyle(.red)
+            }
+            Spacer(minLength: 4)
+            Text((summary ?? entry.content).prefix(80).replacingOccurrences(of: "\n", with: " "))
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var toolBlock: some View {
+        if hasBody {
+            DisclosureGroup(isExpanded: $expanded) { toolBody } label: { toolLabel }
+                .tint(.secondary)
+        } else {
+            toolLabel.padding(.leading, 2)
+        }
     }
 }
 
