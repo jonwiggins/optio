@@ -164,7 +164,12 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <QuickLink icon={ListTodo} label="Tasks" description="View all tasks" href="/tasks" />
+        <QuickLink
+          icon={ListTodo}
+          label="Sessions"
+          description="View all sessions"
+          href="/sessions"
+        />
         <QuickLink
           icon={FolderGit2}
           label="Repos"

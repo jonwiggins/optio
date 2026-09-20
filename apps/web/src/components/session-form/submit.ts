@@ -214,7 +214,7 @@ async function createOnce(
           eventTrigger ? api.createLocalBlueprintTrigger(b.id, eventTrigger) : Promise.resolve(),
         (b) => api.deleteLocalBlueprint(b.id),
       );
-      return { kind, href: "/local", toast: `${name} saved` };
+      return { kind, href: "/machines#automations", toast: `${name} saved` };
     }
 
     case "local-terminal": {

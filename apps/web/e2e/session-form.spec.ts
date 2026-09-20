@@ -222,7 +222,7 @@ test.describe("New session form creates every kind", () => {
     await page.getByPlaceholder("ENG, OPS").fill("ENG, ops");
     await expect(submit(page)).toBeEnabled();
     await submit(page).click();
-    await expect(page).toHaveURL(/\/local$/, { timeout: 30_000 });
+    await expect(page).toHaveURL(/\/machines#automations$/, { timeout: 30_000 });
 
     const { blueprints } = await api("/api/local/blueprints");
     const bp = blueprints.find((b: any) => b.name === named("linear automation"));

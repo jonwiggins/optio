@@ -63,7 +63,7 @@ export function RecentRuns({ runs }: { runs: RecentRun[] }) {
           >
             <Plus className="w-3 h-3" /> New task
           </Link>
-          <Link href="/tasks" className="text-xs text-primary hover:underline">
+          <Link href="/sessions?view=history" className="text-xs text-primary hover:underline">
             All &rarr;
           </Link>
         </div>

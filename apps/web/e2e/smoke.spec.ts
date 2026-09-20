@@ -32,32 +32,56 @@ test("overview dashboard renders with seeded stats", async ({ page }) => {
   await expect(page.getByText("Create your first task")).not.toBeVisible();
 });
 
-test("tasks list shows the seeded tasks", async ({ page }) => {
-  await page.goto("/tasks");
+test("sessions list shows the seeded tasks, job, and agent", async ({ page }) => {
+  await page.goto("/sessions?view=all");
   await expectNoAuthOrSetupRedirect(page);
   await expect(page.getByText("E2E: opens a PR").first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("E2E: fails").first()).toBeVisible();
+  await expect(page.getByText("E2E seed job").first()).toBeVisible();
+  await expect(page.getByText("e2e-seed-agent").first()).toBeVisible();
 });
 
-test("task detail shows mock agent logs", async ({ page }) => {
-  await page.goto("/tasks");
+test("task detail shows mock agent logs and links back to Sessions", async ({ page }) => {
+  await page.goto("/sessions?view=all");
   await page.getByText("E2E: opens a PR").first().click();
   await expect(page).toHaveURL(/\/tasks\//);
   await expect(page.getByText("Mock agent handled").first()).toBeVisible({ timeout: 20_000 });
+  await page.locator("main").getByRole("link", { name: "Sessions" }).first().click();
+  await expect(page).toHaveURL(/\/sessions/);
 });
 
-test("jobs page shows the seeded job", async ({ page }) => {
-  await page.goto("/jobs");
-  await expectNoAuthOrSetupRedirect(page);
-  await expect(page.getByText("E2E seed job").first()).toBeVisible({ timeout: 30_000 });
+test("job detail links back to the recurring view", async ({ page }) => {
+  await page.goto("/sessions?view=recurring");
+  await page.getByText("E2E seed job").first().click();
+  await expect(page).toHaveURL(/\/jobs\//);
+  await page.locator("main").getByRole("link", { name: "Sessions" }).first().click();
+  await expect(page).toHaveURL(/\/sessions\?view=recurring/);
 });
 
-test("agents page shows the seeded persistent agent", async ({ page }) => {
-  await page.goto("/agents");
-  await expectNoAuthOrSetupRedirect(page);
-  // First visit compiles the page in next dev — allow for that.
-  await expect(page.getByText("e2e-seed-agent").first()).toBeVisible({ timeout: 30_000 });
+test("agent detail links back to the agents view", async ({ page }) => {
+  await page.goto("/sessions?view=agents");
+  await page.getByText("e2e-seed-agent").first().click();
+  await expect(page).toHaveURL(/\/agents\//);
+  await page.locator("main").getByRole("link", { name: "Sessions" }).first().click();
+  await expect(page).toHaveURL(/\/sessions\?view=agents/);
 });
+
+// The per-kind lists are gone; their URLs land on the matching Sessions view.
+for (const { from, to } of [
+  { from: "/tasks", to: /\/sessions\?view=active$/ },
+  { from: "/tasks?tab=standalone", to: /\/sessions\?view=recurring$/ },
+  { from: "/tasks?tab=prs", to: /\/reviews$/ },
+  { from: "/jobs", to: /\/sessions\?view=recurring$/ },
+  { from: "/tasks/scheduled", to: /\/sessions\?view=recurring$/ },
+  { from: "/agents", to: /\/sessions\?view=agents$/ },
+  { from: "/local", to: /\/sessions$/ },
+  { from: "/local?new=1", to: /\/sessions\/new$/ },
+]) {
+  test(`legacy ${from} redirects to ${to}`, async ({ page }) => {
+    await page.goto(from);
+    await expect(page).toHaveURL(to, { timeout: 30_000 });
+  });
+}
 
 test("templates page shows the seeded prompt", async ({ page }) => {
   await page.goto("/templates");
@@ -68,14 +92,12 @@ test("templates page shows the seeded prompt", async ({ page }) => {
 });
 
 for (const { path, marker } of [
-  { path: "/tasks/scheduled", marker: /No scheduled tasks yet|Scheduled/i },
   { path: "/reviews", marker: /No open pull requests found|pull request/i },
   { path: "/issues", marker: /No open issues found|issues/i },
   { path: "/sessions", marker: /E2E: opens a PR|Sessions/i },
   { path: "/sessions?view=all", marker: /E2E: opens a PR/ },
   { path: "/sessions/new", marker: /New session/ },
   { path: "/machines", marker: /No machines paired|Machines/i },
-  { path: "/local", marker: /No machines paired yet|Local/i },
   { path: "/costs", marker: /cost/i },
   { path: "/repos", marker: /e2e-org\/e2e-repo/ },
   { path: "/connections", marker: /connection/i },

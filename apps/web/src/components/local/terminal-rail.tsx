@@ -165,16 +165,16 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
       <div className="px-3 pt-3 pb-2 border-b border-border/50">
         <div className="flex items-center justify-between gap-2">
           <Link
-            href="/local"
+            href="/sessions"
             onClick={onNavigate}
             className="flex items-center gap-1.5 text-[13px] font-medium text-text-muted hover:text-text transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            Local
+            Sessions
           </Link>
           <div className="flex items-center gap-1">
             <Link
-              href="/local?new=1"
+              href="/sessions/new"
               onClick={onNavigate}
               title="New terminal"
               className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"

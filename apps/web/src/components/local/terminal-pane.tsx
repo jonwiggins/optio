@@ -285,8 +285,8 @@ export function TerminalPane({
         <Terminal className="w-8 h-8 opacity-30" />
         <p className="text-sm">Terminal not found</p>
         {variant === "primary" ? (
-          <Link href="/local" className="text-xs text-primary hover:underline">
-            Back to Local
+          <Link href="/sessions" className="text-xs text-primary hover:underline">
+            Back to Sessions
           </Link>
         ) : (
           <button onClick={chrome.onClose} className="text-xs text-primary hover:underline">
@@ -532,15 +532,15 @@ export function TerminalPane({
             <PanelLeftOpen className="w-4 h-4" />
           </button>
         )}
-        {/* The rail already has "← Local" on wide screens; the arrow only
+        {/* The rail already has "← Sessions" on wide screens; the arrow only
             shows when there's no rail (phones, or collapsed). */}
         <Link
-          href="/local"
+          href="/sessions"
           className={cn(
             "p-1.5 rounded-md text-text-muted hover:text-text hover:bg-bg-hover/70 transition-colors",
             !railCollapsed && "md:hidden",
           )}
-          aria-label="Back to Local"
+          aria-label="Back to Sessions"
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>

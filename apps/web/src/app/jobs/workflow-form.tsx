@@ -945,7 +945,11 @@ export function WorkflowForm({
         </button>
         <button
           type="button"
-          onClick={() => router.push("/jobs")}
+          onClick={() =>
+            router.push(
+              mode === "edit" && workflowId ? `/jobs/${workflowId}` : "/sessions?view=recurring",
+            )
+          }
           className="px-4 py-2.5 rounded-md bg-bg-card border border-border text-text-muted text-sm font-medium hover:text-text hover:bg-bg-hover transition-colors"
         >
           Cancel

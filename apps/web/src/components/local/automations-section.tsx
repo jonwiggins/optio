@@ -265,8 +265,14 @@ const input =
 const smallInput =
   "px-2 py-1.5 rounded bg-bg-card border border-border text-xs focus:outline-none focus:border-primary";
 
-export function AutomationsSection({ hosts }: { hosts: any[] }) {
-  const [open, setOpen] = useState(false);
+export function AutomationsSection({
+  hosts,
+  defaultOpen = false,
+}: {
+  hosts: any[];
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const [blueprints, setBlueprints] = useState<any[]>([]);
   const [triggersById, setTriggersById] = useState<Record<string, any[]>>({});
   const [templates, setTemplates] = useState<any[]>([]);
@@ -342,7 +348,7 @@ export function AutomationsSection({ hosts }: { hosts: any[] }) {
   };
 
   return (
-    <section className="mt-8">
+    <section id="automations" className="mt-8 scroll-mt-6">
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 text-sm font-medium text-text-muted hover:text-text transition-colors"

@@ -86,7 +86,7 @@ function Panes({ primary }: { primary: string }) {
             terminalId={id}
             variant={i === 0 ? "primary" : "split"}
             hosts={hosts}
-            onDeleted={() => router.push("/local")}
+            onDeleted={() => router.push("/sessions")}
             onTitle={i === 0 ? onPrimaryTitle : undefined}
             chrome={{
               paneCount: paneIds.length,

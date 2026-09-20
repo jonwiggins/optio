@@ -204,7 +204,7 @@ double-fire. The endpoint acks before dispatching (Slack retries anything slower
   `{{identifier}}` / `{{title}}` / `{{description}}` / `{{url}}`; trigger `linear` with
   `events: ["assigned"]` and your `user`.
 
-The Automations section on `/local` ships these three as one-click presets.
+The Automations section on `/machines` ships these three as one-click presets.
 
 ## Attention detection (daemon-side)
 
@@ -391,10 +391,9 @@ eliminates the classic "pasted JSON swallowed as control" bug):
 
 ## Web UI
 
-- `/local` — the cockpit: hosts status bar, "Needs you" queue strip (sorted by wait time),
-  filterable grid of terminal cards (preview, attention-colored border, dir, source badge),
-  New Terminal dialog, Blueprints section, empty-state onboarding (`optio login` →
-  `optio local up`).
+- `/sessions` — local terminals are rows in the unified sessions list (the old `/local`
+  cockpit redirects here; `/local?new=1` redirects to `/sessions/new`). Paired hosts, their
+  directories, and the **Automations** (blueprints) editor live on `/machines`.
 - `/local/[id]` — focus view: full xterm.js terminal + header (title, host, dir, state,
   attention, PR / ticket badges, Kill / Start / Delete). Agent sessions with a recorded
   conversation get a **Transcript / Screen** toggle (`components/local/session-view-toggle.tsx`,
@@ -448,7 +447,7 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   lifecycle + attention folded into a single color — purple working, yellow pulse needs
   you, green completed (exit 0), grey idle/pending/killed/error (`sessionTone` in
   `attention.ts`, shared by card, row, rail and favicon) — with the description on
-  hover. Inside `/local/:id` the favicon shows _that_ session's dot; on `/local` it shows the
+  hover. Inside `/local/:id` the favicon shows _that_ session's dot; on `/sessions` it shows the
   fleet's (yellow beats green beats grey). The `(N)` title badge is always the fleet's
   needs-you count.
 - **Rename in place**: the title in the terminal header is a text box (Enter / blur saves,

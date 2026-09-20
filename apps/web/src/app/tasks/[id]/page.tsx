@@ -29,6 +29,7 @@ import {
   Clock,
   Moon,
   Bot,
+  ArrowLeft,
   Send,
   AlertCircle,
   AlertTriangle,
@@ -291,6 +292,12 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
     <div className="flex flex-col h-full">
       <DetailHeader
         title={task.title}
+        subtitle={
+          <Link href="/sessions" className="inline-flex items-center gap-1 hover:text-primary">
+            <ArrowLeft className="w-3 h-3" />
+            Sessions
+          </Link>
+        }
         state={task.state}
         isStalled={stallInfo?.isStalled}
         metaItems={[

@@ -3,7 +3,9 @@
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Plus, RefreshCw, Search, Terminal } from "lucide-react";
+import { Plus, RefreshCw, RotateCcw, Search, Terminal, XCircle } from "lucide-react";
+import { toast } from "sonner";
+import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useSessionsFeed } from "@/hooks/use-sessions-feed";
@@ -44,6 +46,32 @@ function SessionsList() {
   const [q, setQ] = useState("");
   const { rows, loading, error, refetch } = useSessionsFeed();
 
+  // Bulk actions inherited from the retired /tasks list. They only touch
+  // repo tasks, so they're offered on the views where those rows sit.
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const runBulk = async (confirmText: string, fn: () => Promise<string>) => {
+    if (!confirm(confirmText)) return;
+    setBulkLoading(true);
+    try {
+      toast.success(await fn());
+      refetch();
+    } catch {
+      toast.error("Bulk action failed");
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+  const retryFailed = () =>
+    runBulk("Retry all failed tasks?", async () => {
+      const res = await api.bulkRetryFailed();
+      return `Retried ${res.retried} of ${res.total} failed tasks`;
+    });
+  const cancelActive = () =>
+    runBulk("Cancel all running and queued tasks?", async () => {
+      const res = await api.bulkCancelActive();
+      return `Cancelled ${res.cancelled} of ${res.total} active tasks`;
+    });
+
   const counts = useMemo(() => countSessions(rows), [rows]);
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -57,6 +85,10 @@ function SessionsList() {
     );
   }, [rows, view, q]);
   const viewCount = (id: SessionView) => rows.filter((r) => inView(r, id)).length;
+  const failedTasks = rows.some((r) => r.source === "repo-task" && r.status === "failed");
+  const activeTasks = rows.some(
+    (r) => r.source === "repo-task" && (r.status === "running" || r.status === "queued"),
+  );
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -66,6 +98,24 @@ function SessionsList() {
         description="Everything Optio is running, waiting on, or will run — one list, filtered by what matters now."
         actions={
           <div className="flex items-center gap-2">
+            {view === "history" && failedTasks && (
+              <button
+                onClick={retryFailed}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-text hover:bg-bg-hover disabled:opacity-50 transition-colors"
+              >
+                <RotateCcw className="w-3 h-3" /> Retry failed
+              </button>
+            )}
+            {view === "active" && activeTasks && (
+              <button
+                onClick={cancelActive}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-error hover:bg-error/5 disabled:opacity-50 transition-colors"
+              >
+                <XCircle className="w-3 h-3" /> Cancel active
+              </button>
+            )}
             <button
               onClick={refetch}
               className="p-2 rounded-lg hover:bg-bg-hover text-text-muted transition-all btn-press hover:text-text"

@@ -22,7 +22,10 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   // Inside a local terminal the sidebar becomes the session rail, so jumping
   // between many terminals never leaves the terminal view.
   const inLocalTerminal = /^\/local\/[^/]+$/.test(pathname);
-  const inLocal = pathname === "/local" || pathname.startsWith("/local/");
+  // The attention watcher (favicon dot, tab badge, notifications for local
+  // terminals) runs wherever those terminals are listed or open: the
+  // sessions list and the terminal view itself.
+  const inLocal = pathname.startsWith("/local/") || pathname === "/sessions";
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Wide screens only — collapsing hands the rail's width to the terminal.
   // The phone drawer ignores it. Persisted; hydrated after mount so SSR and

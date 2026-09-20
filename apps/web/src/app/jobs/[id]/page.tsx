@@ -193,7 +193,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     try {
       await api.deleteWorkflow(id);
       toast.success("Task deleted");
-      router.push("/jobs");
+      router.push("/sessions?view=recurring");
     } catch {
       toast.error("Failed to delete job");
     } finally {
@@ -216,11 +216,11 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     return (
       <div className="p-6 max-w-4xl mx-auto">
         <Link
-          href="/jobs"
+          href="/sessions?view=recurring"
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Jobs
+          Back to Sessions
         </Link>
         <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
           <XCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -242,9 +242,12 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
       <DetailHeader
         title={workflow.name}
         subtitle={
-          <Link href="/jobs" className="inline-flex items-center gap-1 hover:text-primary">
+          <Link
+            href="/sessions?view=recurring"
+            className="inline-flex items-center gap-1 hover:text-primary"
+          >
             <ArrowLeft className="w-3 h-3" />
-            Jobs
+            Sessions
           </Link>
         }
         state={workflow.enabled ? "enabled" : "disabled"}

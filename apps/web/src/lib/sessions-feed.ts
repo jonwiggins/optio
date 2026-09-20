@@ -268,7 +268,7 @@ export function collectSessions(src: SessionSources): SessionRow[] {
     rows.push({
       key: `automation-${b.id}`,
       source: "local-blueprint",
-      href: "/local",
+      href: "/machines#automations",
       name: b.name,
       when: "on an event",
       where: machine(b.hostId, b.dir),

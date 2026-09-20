@@ -76,8 +76,9 @@ Sidebar (v0.5): **Overview** · **Work** — Sessions, Reviews, Inbox · **Libra
 - **`/reviews`**, **`/reviews/:id`** — code-review subtasks plus external PR reviews, with CI / review / merge tracking.
 - **`/issues`** (Inbox) — GitHub / GitLab Issues across connected repos. "Assign to Optio" creates a `repo-task`.
 - **`/machines`** — paired Optio Local hosts and their directory allowlists.
-- Detail / management pages per kind still exist but are no longer in the nav: `/tasks`, `/tasks/:id`, `/tasks/scheduled`, `/jobs`, `/jobs/:id`, `/jobs/:id/runs/:runId`, `/agents`, `/agents/:id`, `/local`, `/sessions/:id` (pod sessions).
-- Legacy `/tasks?tab=standalone|issues|prs` URLs redirect to `/jobs`, `/issues`, `/reviews`.
+- Detail pages per kind still exist and link back to `/sessions`: `/tasks/:id`, `/tasks/scheduled/:id`, `/jobs/:id`, `/jobs/:id/runs/:runId`, `/agents/:id`, `/local/:id`, `/sessions/:id` (pod sessions).
+- The per-kind list pages are retired: `/tasks`, `/jobs`, `/tasks/scheduled`, `/agents`, and `/local` redirect to the matching `/sessions?view=…`. Local Automations are edited on `/machines#automations`.
+- Legacy `/tasks?tab=standalone|issues|prs` URLs redirect to `/sessions?view=recurring`, `/issues`, `/reviews`.
 
 ## The PR pipeline (`repo-task`)
 

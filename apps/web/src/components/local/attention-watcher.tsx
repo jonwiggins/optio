@@ -40,7 +40,7 @@ function setFavicon(href: string | null) {
 }
 
 /**
- * Mounted on every /local route. Turns the terminal feed into the things
+ * Mounted on /sessions and every /local/:id route. Turns the terminal feed into the things
  * you can see from another tab:
  *
  *   - favicon dot: yellow = something needs you, green = agents working,

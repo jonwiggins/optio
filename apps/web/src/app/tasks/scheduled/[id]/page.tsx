@@ -195,7 +195,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
     if (!confirm(`Delete "${config?.name}"? This removes all triggers.`)) return;
     try {
       await api.deleteTaskConfig(id);
-      router.push("/tasks/scheduled");
+      router.push("/sessions?view=recurring");
     } catch (err) {
       toast.error("Delete failed", {
         description: err instanceof Error ? err.message : "Unknown error",
@@ -268,7 +268,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
     return (
       <div className="p-6 max-w-4xl mx-auto">
         <Link
-          href="/tasks/scheduled"
+          href="/sessions?view=recurring"
           className="text-sm text-text-muted hover:text-text flex items-center gap-1"
         >
           <ArrowLeft className="w-3.5 h-3.5" /> Back
@@ -281,10 +281,10 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <Link
-        href="/tasks/scheduled"
+        href="/sessions?view=recurring"
         className="text-sm text-text-muted hover:text-text flex items-center gap-1 mb-4"
       >
-        <ArrowLeft className="w-3.5 h-3.5" /> Back to Scheduled
+        <ArrowLeft className="w-3.5 h-3.5" /> Back to Sessions
       </Link>
 
       <div className="flex items-start justify-between mb-2 gap-4">

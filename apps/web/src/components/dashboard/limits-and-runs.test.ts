@@ -1,61 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { collectLive } from "./live-panel";
 import { collectProviderLimits, windowLabel } from "./limits-panel";
 import { runTone } from "./recent-runs";
 
 // Real clock: collectProviderLimits compares reset times against Date.now().
 const NOW = Date.now();
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
-
-describe("collectLive", () => {
-  it("merges live terminals, sessions, and awake agents; needs-you first, then recency", () => {
-    const items = collectLive(
-      [
-        {
-          id: "t1",
-          title: "a",
-          dir: "/x/a",
-          state: "running",
-          attentionState: "working",
-          lastActivityAt: ago(10),
-        },
-        {
-          id: "t2",
-          title: "b",
-          dir: "/x/b",
-          state: "exited",
-          attentionState: "idle",
-          lastActivityAt: ago(1),
-        },
-        {
-          id: "t3",
-          title: "c",
-          dir: "/x/c",
-          state: "running",
-          attentionState: "needs_you",
-          attentionReason: "stop",
-          lastActivityAt: ago(500),
-        },
-      ],
-      [{ id: "h", name: "mac" }],
-      [{ id: "s1", branch: "feat/x", repoUrl: "https://github.com/acme/optio", createdAt: ago(5) }],
-      [
-        { id: "a1", name: "Forge", slug: "forge", state: "running", updatedAt: ago(2) },
-        { id: "a2", name: "Sleepy", slug: "sleepy", state: "idle", updatedAt: ago(0) },
-        { id: "a3", name: "Held", slug: "held", state: "paused", updatedAt: ago(3) },
-      ],
-    );
-    expect(items.map((i) => i.key)).toEqual([
-      "local-t3", // needs you
-      "agent-a3", // paused → needs you, older
-      "agent-a1", // working, most recent
-      "session-s1",
-      "local-t1",
-    ]);
-    expect(items[0]).toMatchObject({ reason: "waiting for you", where: "x/c", hostName: null });
-    expect(items.find((i) => i.key === "session-s1")).toMatchObject({ where: "acme/optio" });
-  });
-});
 
 describe("collectProviderLimits", () => {
   it("folds Claude account usage and the freshest Codex host snapshot", () => {

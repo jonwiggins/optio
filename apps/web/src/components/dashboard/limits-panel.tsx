@@ -261,7 +261,10 @@ export function LimitsPanel({
             {p.observedAt && (
               <div className="text-[10px] text-text-muted/50 mt-1">
                 {p.source} — updates when Codex runs;{" "}
-                <Link href="/local" className="hover:text-text underline-offset-2 hover:underline">
+                <Link
+                  href="/machines"
+                  className="hover:text-text underline-offset-2 hover:underline"
+                >
                   daemon must be online
                 </Link>
               </div>
