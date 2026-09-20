@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@optio/shared": "workspace:*",
+    "@xterm/headless": "^5.5.0",
     "commander": "^12.1.0",
     "node-pty": "^1.0.0",
     "open": "^10.1.0",

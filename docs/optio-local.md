@@ -249,8 +249,13 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   (single API replica assumption, same as pod exec sessions) and routes frames by
   `terminalId`. Browsers never connect to the daemon; the daemon never accepts inbound
   connections (its hook server binds 127.0.0.1 only).
-- Scrollback lives in the daemon (512 KB ring per terminal). The DB stores only metadata
-  plus a throttled ANSI-stripped `preview` (last ~12 lines) for the wall view — and, once
+- Scrollback lives in the daemon (512 KB ring per terminal), alongside a **screen model**
+  (`@xterm/headless`, 2000 lines of scrollback) fed the same bytes. Previews and links are
+  read off the screen model, never off the flattened byte stream: TUIs paint cells, and
+  Claude Code repaints only the cells that changed with absolute cursor moves, so
+  stripping ANSI from the stream glues fragments of different repaints into text that was
+  never on screen (`…/jonwi` + jump + `ns/optio/pull/607`, or `#6` + jump + `07`). The DB
+  stores only metadata plus a throttled `preview` (last ~12 lines) for the wall view — and, once
   a terminal exits, its **final screen**: the daemon sends the ring's tail (≤384 KB, raw
   bytes) plus the PTY grid right before `exit`, stored in `local_terminal_snapshots`
   (own table, so terminal rows and list responses stay lean; cascades on delete). Opening
@@ -338,11 +343,15 @@ claudeCredentials?}` — first frame; server reconciles DB rows against `termina
   hooks report it (sent once per terminal); stored on `local_terminals.agent_session_id`
   and what `POST /api/local/terminals/:id/resume` hands back to `claude --resume`
 - `{type:"links", terminalId, links:[{url, kind:"pr"|"issue"|"ref", provider, label}]}` — PR /
-  ticket links found anywhere in the scrollback ring (`extractWorkLinks` in
-  `@optio/shared`: GitHub PRs/issues, GitLab MRs/issues, Linear, Jira; hard-wrapped URLs
-  are healed; URLs inside OSC 8 hyperlinks are harvested before ANSI stripping since
-  Claude Code / gh print `#581` with the URL only in the escape; bare `#N` mentions
-  resolve to the dir's GitHub/GitLab remote as kind `ref`). Rides the preview throttle, sent only when the set changes; the server
+  ticket links found anywhere on the screen model (normal buffer + scrollback, plus the
+  alternate screen while a full-screen program is up), merged into every link seen
+  before — a full-screen agent scrolls its own history off the screen, but a PR printed
+  ten minutes ago still identifies the session (`extractWorkLinks` in `@optio/shared`:
+  GitHub PRs/issues, GitLab MRs/issues, Linear, Jira; soft wraps are healed by the
+  emulator, hard-wrapped URLs by the scanner; URLs inside OSC 8 hyperlinks are harvested
+  from the raw bytes since Claude Code / gh print `#581` with the URL only in the escape;
+  bare `#N` mentions resolve to the dir's GitHub/GitLab remote as kind `ref`). Rides the
+  preview throttle, sent only when the set changes; the server
   sanitizes (https only, known kinds/providers, ≤50) and stores it in
   `local_terminals.links`
 - `{type:"transcript", terminalId, entries:[{seq, role, kind, text, detail, toolName,

@@ -8,16 +8,19 @@ import {
   LOCAL_DEFAULT_ROWS,
   extractHyperlinkUrls,
   extractWorkLinks,
+  MAX_WORK_LINKS,
   normalizeRepoUrl,
   workLinksKey,
   type LocalDaemonMessage,
   type LocalDaemonTerminalSync,
   type LocalServerMessage,
+  type WorkLink,
 } from "@optio/shared";
 import type { AttentionTracker } from "./attention.js";
 import { buildAgentCommand } from "./agent-command.js";
-import { buildPreview, stripAnsi } from "./preview.js";
+import { buildPreview } from "./preview.js";
 import { RingBuffer } from "./ring-buffer.js";
+import { ScreenModel } from "./screen.js";
 
 /**
  * Owns the node-pty processes for one daemon, keyed by terminalId. Emits
@@ -30,7 +33,9 @@ const RING_CAPACITY = 512 * 1024;
 // Kept under the server's 1 MB frame limit with base64 overhead to spare.
 const SNAPSHOT_BYTES = 384 * 1024;
 const PREVIEW_THROTTLE_MS = 2000;
-const PREVIEW_SOURCE_BYTES = 16 * 1024;
+// The final preview / links wait for the screen model to catch up before the
+// exit frame goes out, but never longer than this.
+const EXIT_FLUSH_MS = 1500;
 const KILL_ESCALATION_MS = 5000;
 const MAX_DIMENSION = 1000;
 
@@ -40,9 +45,16 @@ interface ManagedTerminal {
   terminalId: string;
   pty: IPty;
   ring: RingBuffer;
+  /** What is on screen (see ScreenModel): the source for previews and links. */
+  screen: ScreenModel;
   subscribed: boolean;
   previewTimer: NodeJS.Timeout | null;
   lastPreviewAt: number;
+  /**
+   * Every PR / ticket link seen so far, first-seen order. A link stays once
+   * seen: a full-screen agent scrolls its own history off the screen model.
+   */
+  seenLinks: Map<string, WorkLink>;
   /** workLinksKey() of the last `links` frame sent, to emit only on change. */
   lastLinksKey: string;
   /** Normalized git remote of the dir (for bare `#N` refs), when known. */
@@ -149,9 +161,11 @@ export class TerminalManager {
         terminalId: msg.terminalId,
         pty,
         ring: new RingBuffer(RING_CAPACITY),
+        screen: new ScreenModel(pty.cols, pty.rows),
         subscribed: false,
         previewTimer: null,
         lastPreviewAt: 0,
+        seenLinks: new Map(),
         lastLinksKey: "",
         repoUrl: normalizeOptional(this.opts.getRepoUrlForDir?.(dir)),
         killTimer: null,
@@ -191,6 +205,7 @@ export class TerminalManager {
     } catch {
       // resizing a just-exited pty throws — ignore
     }
+    term.screen.resize(term.pty.cols, term.pty.rows);
     // Every viewer hears the new grid, including the one that asked: the
     // others switch to rendering this size scaled-to-fit.
     this.sendSize(term);
@@ -306,6 +321,7 @@ export class TerminalManager {
       } catch {
         // already dead
       }
+      term.screen.dispose();
     }
     this.terminals.clear();
   }
@@ -313,6 +329,7 @@ export class TerminalManager {
   private handleData(term: ManagedTerminal, data: string): void {
     const chunk = Buffer.from(data, "utf-8");
     term.ring.append(chunk);
+    term.screen.write(chunk);
     this.opts.attention.feed(term.terminalId, chunk);
     this.schedulePreview(term);
     if (term.subscribed) {
@@ -334,14 +351,18 @@ export class TerminalManager {
       clearTimeout(term.killTimer);
       term.killTimer = null;
     }
-    // Final preview so the wall shows the last output, and the final screen
-    // so the pane can replay it.
-    this.emitPreview(term);
-    this.sendSnapshot(term);
-    this.opts.send({ type: "exit", terminalId: term.terminalId, exitCode: exitCode ?? null });
     this.opts.attention.remove(term.terminalId);
     this.terminals.delete(term.terminalId);
-    this.opts.onStatus?.(`terminal ${term.terminalId} exited (code ${exitCode ?? "unknown"})`);
+    // Final preview so the wall shows the last output, and the final screen
+    // so the pane can replay it — then the exit, so the server sees the
+    // session's last words before it marks the row exited.
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, EXIT_FLUSH_MS));
+    void Promise.race([this.emitPreview(term), timeout]).then(() => {
+      this.sendSnapshot(term);
+      this.opts.send({ type: "exit", terminalId: term.terminalId, exitCode: exitCode ?? null });
+      this.opts.onStatus?.(`terminal ${term.terminalId} exited (code ${exitCode ?? "unknown"})`);
+      term.screen.dispose();
+    });
   }
 
   /** Throttled (≥2 s) preview emission. */
@@ -350,13 +371,15 @@ export class TerminalManager {
     const delay = Math.max(0, PREVIEW_THROTTLE_MS - (Date.now() - term.lastPreviewAt));
     term.previewTimer = setTimeout(() => {
       term.previewTimer = null;
-      this.emitPreview(term);
+      void this.emitPreview(term);
     }, delay);
   }
 
-  private emitPreview(term: ManagedTerminal): void {
+  /** Waits for the screen model to parse everything written so far. */
+  private async emitPreview(term: ManagedTerminal): Promise<void> {
     term.lastPreviewAt = Date.now();
-    const preview = buildPreview(term.ring.tail(PREVIEW_SOURCE_BYTES).toString("utf-8"));
+    await term.screen.flush();
+    const preview = buildPreview(term.screen.lines().join("\n"));
     this.opts.send({
       type: "preview",
       terminalId: term.terminalId,
@@ -367,16 +390,22 @@ export class TerminalManager {
   }
 
   /**
-   * PR / ticket links seen anywhere in the scrollback ring (not just the
-   * preview tail — a PR URL printed ten minutes ago still identifies this
-   * session). Rides the preview throttle; sent only when the set changes.
+   * PR / ticket links seen anywhere on screen or in scrollback, merged into
+   * everything seen before (a PR URL printed ten minutes ago still identifies
+   * this session). Rides the preview throttle; sent only when the set changes.
    */
   private emitLinks(term: ManagedTerminal): void {
-    const raw = term.ring.toBuffer().toString("utf-8");
     // OSC 8 hyperlink URLs live only inside the escape sequence (the visible
-    // text is just "#581"); harvest them before the stripper discards them.
-    const text = `${extractHyperlinkUrls(raw).join("\n")}\n${stripAnsi(raw)}`;
-    const links = extractWorkLinks(text, { repoUrl: term.repoUrl });
+    // text is just "#581"); the screen model keeps the text, so harvest the
+    // URLs from the raw bytes. The sequence is atomic, so unlike visible text
+    // it cannot be corrupted by cursor moves.
+    const hyperlinks = extractHyperlinkUrls(term.ring.toBuffer().toString("utf-8"));
+    const text = `${hyperlinks.join("\n")}\n${term.screen.allText()}`;
+    for (const link of extractWorkLinks(text, { repoUrl: term.repoUrl })) {
+      if (term.seenLinks.size >= MAX_WORK_LINKS) break;
+      if (!term.seenLinks.has(link.url)) term.seenLinks.set(link.url, link);
+    }
+    const links = [...term.seenLinks.values()];
     const key = workLinksKey(links);
     if (key === term.lastLinksKey) return;
     term.lastLinksKey = key;

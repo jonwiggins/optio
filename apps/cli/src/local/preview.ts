@@ -1,6 +1,8 @@
 /**
- * Preview builder for the wall view: ANSI-stripped tail of a terminal's
- * output, kept small enough to store in the DB (see docs/optio-local.md).
+ * Preview builder for the wall view: the tail of a terminal's output, kept
+ * small enough to store in the DB (see docs/optio-local.md). The daemon feeds
+ * it text read off the screen model (already plain), so the ANSI stripping is
+ * a safety net for callers that pass raw bytes.
  */
 
 export const PREVIEW_MAX_LINES = 12;
