@@ -10,7 +10,10 @@ agents — into one list (`Features/Work/Sessions/SessionsFeed.swift`, a port of
 web's `lib/sessions-feed.ts`) with Active / Recurring / Agents / History / All
 views; rows open the per-kind detail screens (there are no per-kind lists, on
 web or here). Local Automations are edited under Library › Machines. "New session" opens
-the web's five-attribute form (`<web UI>/sessions/new`) in an in-app Safari view.
+the native five-attribute form (`Features/Work/Sessions/New/`, a port of the web's
+`components/session-form/`): a grouped Form — When · Where · Who · What · Then ·
+Name — with example presets up top and a pinned bar that describes what the answers
+make and holds the one button that makes it.
 Designed to be used over a Tailscale network: your phone and the machine (or
 cluster) running Optio join the same tailnet, and the app talks to the API at its
 MagicDNS address.
