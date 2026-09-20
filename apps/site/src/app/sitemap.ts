@@ -24,6 +24,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/docs/getting-started",
     "/docs/installation",
     "/docs/configuration",
+    "/docs/sessions",
     "/docs/architecture",
     "/docs/task-lifecycle",
     "/docs/guides/creating-tasks",

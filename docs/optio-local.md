@@ -8,10 +8,13 @@ raw commands, or agent CLIs like `claude`), switch between many of them, and see
 glance which ones **need you**. Tickets, webhooks, and schedules can spawn terminals
 automatically via **Local Blueprints** wired into the existing polymorphic trigger system.
 
-Contrast with the cluster plane: cluster Tasks are unattended (dispatch → PR comes back);
-Local terminals are attended (you converse with the agent in your own checkout). Local
-runs use your locally-installed CLIs and their local auth — the server never ships
-secrets to your machine.
+In the [session model](tasks.md), Optio Local is the **Where = your machine** answer.
+Every kind of session that can run in a pod can run in a directory on a paired machine
+instead — a one-shot PR session on a new branch, a scheduled or webhook job, an
+interactive agent you chat with, or an automation woken by GitHub / Slack / Linear events
+(those only run on a machine) — picked from the same New Session form and shown in the
+same Sessions feed. Local runs use your locally-installed CLIs and their local auth — the
+server never ships secrets to your machine.
 
 ## Concepts
 

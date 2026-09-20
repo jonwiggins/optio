@@ -20,6 +20,7 @@ export const docsNav: DocSection[] = [
   {
     title: "Core Concepts",
     pages: [
+      { title: "Sessions", href: "/docs/sessions" },
       { title: "Architecture", href: "/docs/architecture" },
       { title: "Task Lifecycle", href: "/docs/task-lifecycle" },
     ],

@@ -7,7 +7,7 @@ const jsonLd = {
   applicationCategory: "DeveloperApplication",
   operatingSystem: "Kubernetes",
   description:
-    "Workflow orchestration system for AI coding agents. Turn tickets into merged pull requests, run reusable agent workflows, and connect external services — all with autonomous feedback loops.",
+    "Self-hosted AI agent swarm and workflow orchestration platform. Run Claude Code, Codex, Copilot, Gemini, Cursor, OpenCode, and OpenClaw as sessions on your Kubernetes cluster or your own machines: ticket-to-merged-PR pipelines, scheduled and webhook-driven jobs, event automations, interactive terminals, and persistent multi-agent systems.",
   url: "https://optio.host",
   license: "https://opensource.org/licenses/MIT",
   offers: {
@@ -24,53 +24,113 @@ const jsonLd = {
 
 const features = [
   {
-    title: "Autonomous Feedback Loop",
+    title: "One Session Model",
     description:
-      "CI fails? Agent resumes with failure context. Reviewer requests changes? Agent picks up the comments and pushes a fix. It keeps going until the PR merges.",
+      "Every kind of agent work is a session with five attributes — When, Where, Who, What, Then. One form creates a PR task, a cron job, a laptop automation, an interactive terminal, or a persistent agent; one feed shows them all with one status scale.",
     color: "#6d28d9",
   },
   {
-    title: "Agent Workflows",
+    title: "Agent Swarms",
     description:
-      "Reusable, parameterized agent jobs that run standalone. Define prompt templates with variables, trigger manually, on a cron schedule, or via webhook. Auto-retry, cost tracking, and real-time log streaming included.",
-    color: "#60a5fa",
-  },
-  {
-    title: "Connections",
-    description:
-      "Give your agents access to external services at runtime. Built-in providers for Notion, Slack, Linear, GitHub, PostgreSQL, and Sentry, plus custom MCP servers and HTTP APIs with fine-grained access control.",
-    color: "#34d399",
-  },
-  {
-    title: "Multi-Agent Support",
-    description:
-      "Run Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, OpenCode, or Cursor. Configure model, prompt template, and settings per repository. Launch review agents as subtasks with separate prompts.",
-    color: "#f0a040",
-  },
-  {
-    title: "Pod-per-Repo Isolation",
-    description:
-      "One long-lived Kubernetes pod per repo with git worktree isolation. Multiple tasks run concurrently in separate worktrees. Multi-pod scaling and idle cleanup built in.",
+      "Persistent agents with a stable name, an inbox, and a turn loop. They wake on messages, webhooks, cron ticks, or tickets and message each other over an inter-agent API — dispatcher, specialists, reviewer — with per-agent pod lifecycle.",
     color: "#a78bfa",
   },
   {
-    title: "GitHub, GitLab, Linear, Jira & Notion Intake",
+    title: "Your Cluster or Your Laptop",
     description:
-      "Pull tasks from GitHub Issues, GitLab Issues, Linear, Jira, or Notion, or create them manually. One-click assign from the web UI kicks off the full pipeline.",
+      "Sessions run in isolated pods on your Kubernetes cluster or in a directory on a paired machine using its own CLI login. Same triggers, same prompts, same feed — and no server secrets ever ship to laptops.",
+    color: "#60a5fa",
+  },
+  {
+    title: "Autonomous PR Feedback Loop",
+    description:
+      "When a session opens a PR, Optio watches CI and review. CI fails? The agent resumes with the failure. Reviewer requests changes? It picks up the comments. Green and approved? Squash-merge and close the issue.",
+    color: "#34d399",
+  },
+  {
+    title: "Seven Agent Runtimes",
+    description:
+      "Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, Cursor, OpenCode, and OpenClaw behind one interface, with live model discovery. Pick per session or per repo; run a review agent on a different vendor than the author.",
+    color: "#f0a040",
+  },
+  {
+    title: "Triggers Everywhere",
+    description:
+      "Start sessions now, on a cron, from a webhook, from GitHub / GitLab / Linear / Jira / Notion tickets, or from signed GitHub, Slack, and Linear events. Trigger payloads render into prompts as {{params}}.",
     color: "#f06060",
   },
   {
-    title: "Real-time Dashboard",
+    title: "Connections via MCP",
     description:
-      "Live log streaming, pipeline progress visualization, cost analytics, and cluster health monitoring. Watch your agents work in real time.",
+      "Give any session tools at runtime: Notion, Slack, Linear, GitHub, PostgreSQL, Sentry, Filesystem, custom MCP servers, and HTTP APIs, with fine-grained per-repo and per-runtime access control.",
     color: "#818cf8",
   },
   {
-    title: "Self-Healing Pipeline",
+    title: "Knows When It Needs You",
     description:
-      "Auto-resume on CI failures, merge conflicts, and stale tasks. Auto-merge when CI passes and review is approved. Close linked issues on completion.",
+      "Layered attention detection for interactive sessions — Claude Code hooks, terminal bell, silence — surfaced as a favicon, a tab count, a browser notification, iOS push, widgets, and a Live Activity. Plus live logs, costs, and usage limits.",
     color: "#fb923c",
   },
+];
+
+const attributes = [
+  {
+    name: "When",
+    question: "What starts it?",
+    color: "#6d28d9",
+    options: [
+      "Now",
+      "A cron schedule",
+      "A webhook",
+      "A ticket: GitHub, GitLab, Linear, Jira, Notion",
+      "A GitHub, Slack, or Linear event",
+      "A message from a person or another agent",
+    ],
+  },
+  {
+    name: "Where",
+    question: "Where does it run?",
+    color: "#60a5fa",
+    options: [
+      "An Optio pod with one of your repos",
+      "An Optio pod with no repo",
+      "A directory on your own machine",
+      "A new branch on your machine that becomes a PR",
+    ],
+  },
+  {
+    name: "Who",
+    question: "What does the work?",
+    color: "#f0a040",
+    options: [
+      "A bare terminal",
+      "Claude Code, Codex, Copilot, Gemini",
+      "Cursor, OpenCode, OpenClaw",
+      "With the model and options you choose",
+    ],
+  },
+  {
+    name: "What",
+    question: "What is it asked to do?",
+    color: "#34d399",
+    options: ["A prompt", "A saved prompt template", "{{params}} filled from the trigger payload"],
+  },
+  {
+    name: "Then",
+    question: "What happens after?",
+    color: "#a78bfa",
+    options: [
+      "Exits when done — opens a PR or produces side effects",
+      "Waits for you — an interactive session between turns",
+      "Persistent agent — keeps memory, wakes on messages",
+    ],
+  },
+];
+
+const sentences = [
+  "Started by Linear events, a Claude Code session on my laptop on a new branch in ~/src/app that opens a PR and exits when done.",
+  "Running weekdays at 09:00 UTC, an OpenAI Codex session in an Optio pod that exits when done.",
+  "Woken by messages, a Claude Code agent in an Optio pod that keeps its memory between turns.",
 ];
 
 const stages = [
@@ -111,17 +171,18 @@ export default function Home() {
             className="mt-8 text-5xl font-bold tracking-tight text-text-heading sm:text-7xl animate-reveal"
             style={{ animationDelay: "100ms" }}
           >
-            From ticket to
+            Orchestrate your
             <br />
-            <span className="text-primary-light">merged PR.</span>
+            <span className="text-primary-light">agent swarm.</span>
           </h1>
           <p
             className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-text-muted animate-reveal"
             style={{ animationDelay: "200ms" }}
           >
-            Optio orchestrates AI coding agents across three modes: tasks that drive tickets to
-            merged PRs, reusable agent workflows triggered on schedule or by webhook, and
-            connections that give agents access to external tools &mdash; all automatically.
+            Optio is a self-hosted platform for running AI agents as durable, triggerable sessions
+            &mdash; on your Kubernetes cluster or your own machines. Ticket-to-merged-PR pipelines,
+            scheduled and webhook-driven jobs, event automations, interactive terminals, and
+            long-lived agents that message each other, all in one feed.
           </p>
           <div
             className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row animate-reveal"
@@ -191,16 +252,74 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Sessions */}
+      <section className="border-t border-border px-6 py-24">
+        <div className="mx-auto max-w-6xl">
+          <div className="text-center">
+            <h2 className="text-3xl font-bold tracking-tight text-text-heading sm:text-4xl">
+              One noun. Five attributes.
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-text-muted">
+              Every kind of work Optio runs is a{" "}
+              <strong className="text-text-heading">session</strong>. Answer five questions and
+              Optio derives the runtime &mdash; a repo worktree that opens a PR, a pooled job pod, a
+              terminal on your laptop, a recurring blueprint, or a persistent agent.
+            </p>
+          </div>
+          <div className="stagger mt-16 grid gap-4 md:grid-cols-5">
+            {attributes.map((a) => (
+              <div
+                key={a.name}
+                className="card-hover rounded-xl border border-border border-t-2 bg-bg-card p-5"
+                style={{ borderTopColor: a.color }}
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  {a.question}
+                </p>
+                <h3 className="mt-1 text-[17px] font-bold text-text-heading">{a.name}</h3>
+                <ul className="mt-3 space-y-1.5">
+                  {a.options.map((o) => (
+                    <li
+                      key={o}
+                      className="flex items-start gap-2 text-[12px] leading-snug text-text-muted"
+                    >
+                      <span
+                        className="mt-1.5 h-1 w-1 shrink-0 rounded-full"
+                        style={{ backgroundColor: a.color }}
+                      />
+                      {o}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div className="mx-auto mt-10 max-w-3xl space-y-2 text-center font-mono text-[13px] text-text-muted">
+            {sentences.map((line) => (
+              <p key={line} className="rounded-lg border border-border bg-bg-card px-4 py-2.5">
+                {line}
+              </p>
+            ))}
+          </div>
+          <p className="mt-4 text-center text-[13px] text-text-muted">
+            The New Session form reads your draft back as a sentence like these.{" "}
+            <Link href="/docs/sessions" className="text-primary-light hover:underline">
+              Read about the session model &rarr;
+            </Link>
+          </p>
+        </div>
+      </section>
+
       {/* Pipeline */}
       <section className="border-t border-border px-6 py-24">
         <div className="mx-auto max-w-6xl">
           <div className="text-center">
             <h2 className="text-3xl font-bold tracking-tight text-text-heading sm:text-4xl">
-              The complete task lifecycle
+              When a session opens a PR, Optio drives it to merge
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-text-muted">
-              Every task flows through a seven-stage pipeline. Optio monitors each stage and
-              automatically drives the task forward.
+              PR sessions flow through a seven-stage pipeline. Optio monitors each stage &mdash; in
+              a pod or on your machine &mdash; and automatically drives the work forward.
             </p>
           </div>
           <div className="mt-16 relative">
@@ -266,7 +385,9 @@ export default function Home() {
               </h2>
               <p className="mt-4 leading-relaxed text-text-muted">
                 Optio doesn&apos;t just run an agent and walk away. It watches the PR, feeds
-                failures back to the agent, and keeps going until the work is done.
+                failures back to the agent, and keeps going until the work is done &mdash; and the
+                same reconciler that drives PRs keeps jobs, terminals, and persistent agents from
+                ever getting stuck.
               </p>
               <div className="mt-8 space-y-4">
                 {[
@@ -376,11 +497,11 @@ export default function Home() {
         <div className="mx-auto max-w-6xl">
           <div className="text-center">
             <h2 className="text-3xl font-bold tracking-tight text-text-heading sm:text-4xl">
-              Everything you need to orchestrate AI agents
+              Everything you need to run an agent swarm
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-text-muted">
-              Built for teams that want to scale AI-assisted development without the manual
-              overhead.
+              Built for teams that want many agents doing many kinds of work, on infrastructure they
+              control, without losing track of any of it.
             </p>
           </div>
           <div className="stagger mt-16 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -422,17 +543,20 @@ export default function Home() {
                 </div>
                 <p className="text-[11px] text-text-muted mb-3">Next.js &middot; :3100</p>
                 <div className="space-y-1.5">
-                  {["Dashboard", "Tasks", "Workflows", "Connections", "Repos", "Costs"].map(
-                    (item) => (
-                      <div
-                        key={item}
-                        className="flex items-center gap-2 text-[12px] text-text-muted"
-                      >
-                        <div className="h-1 w-1 rounded-full bg-border-strong" />
-                        {item}
-                      </div>
-                    ),
-                  )}
+                  {[
+                    "Overview",
+                    "Sessions",
+                    "Reviews",
+                    "Inbox",
+                    "Prompts",
+                    "Machines",
+                    "Connections",
+                  ].map((item) => (
+                    <div key={item} className="flex items-center gap-2 text-[12px] text-text-muted">
+                      <div className="h-1 w-1 rounded-full bg-border-strong" />
+                      {item}
+                    </div>
+                  ))}
                 </div>
               </div>
               <div className="hidden md:flex flex-col items-center justify-center w-12 shrink-0 text-text-muted">
@@ -460,9 +584,11 @@ export default function Home() {
                     </p>
                     {[
                       "Task Queue",
-                      "Workflow Queue",
+                      "Job Queue",
+                      "Trigger Worker",
                       "PR Watcher",
-                      "Health Mon",
+                      "PA Worker",
+                      "Reconciler",
                       "Ticket Sync",
                     ].map((item) => (
                       <div
@@ -478,7 +604,13 @@ export default function Home() {
                     <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">
                       Services
                     </p>
-                    {["Repo Pool", "Connections", "Review Agent", "Auth / Secrets"].map((item) => (
+                    {[
+                      "Repo / Job / PA Pools",
+                      "Local Relay",
+                      "Connections",
+                      "Review Agent",
+                      "Auth / Secrets",
+                    ].map((item) => (
                       <div
                         key={item}
                         className="flex items-center gap-2 text-[12px] text-text-muted mb-1"
@@ -524,15 +656,35 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
-                <div className="rounded-md border border-border/60 bg-bg-card p-3">
-                  <p className="text-[11px] font-medium text-text-muted mb-2">Workflow Pod</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-md border border-border/60 bg-bg-card p-3">
+                    <p className="text-[11px] font-medium text-text-muted mb-2">Job Pod</p>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-text-muted">pooled runs</span>
+                      <span className="text-primary-light">{"\u26A1"}</span>
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-border/60 bg-bg-card p-3">
+                    <p className="text-[11px] font-medium text-text-muted mb-2">Persistent Agent</p>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-text-muted">turns on wake</span>
+                      <span className="text-primary-light">{"\u26A1"}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 rounded-md border border-dashed border-border/60 bg-bg-card p-3">
+                  <p className="text-[11px] font-medium text-text-muted mb-2">
+                    Your machine &middot; optio local up
+                  </p>
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-text-muted">isolated agent</span>
+                    <span className="text-text-muted">
+                      terminals &middot; automations &middot; local runs
+                    </span>
                     <span className="text-primary-light">{"\u26A1"}</span>
                   </div>
                 </div>
                 <p className="mt-3 text-[10px] text-text-muted">
-                  {"\u26A1"} = Claude Code / Codex / Copilot / Gemini
+                  {"\u26A1"} = Claude Code / Codex / Copilot / Gemini / Cursor / OpenCode / OpenClaw
                 </p>
               </div>
             </div>
@@ -581,7 +733,8 @@ export default function Home() {
           </h2>
           <p className="mx-auto mt-4 max-w-2xl leading-relaxed text-text-muted">
             Optio is fully open source under the MIT license. Deploy on your own Kubernetes cluster
-            with the Helm chart and start orchestrating AI agents in minutes.
+            with the Helm chart, pair your laptop, and start orchestrating your agent swarm in
+            minutes.
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link

@@ -20,32 +20,32 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://optio.host"),
   title: {
-    default: "Optio — Workflow Orchestration for AI Coding Agents",
+    default: "Optio — Self-Hosted AI Agent Swarm & Workflow Orchestration",
     template: "%s | Optio",
   },
   description:
-    "Turn tickets into merged pull requests with AI coding agents. Optio handles the full lifecycle — intake, execution, CI monitoring, code review, and merge.",
+    "Run AI agents as sessions on your Kubernetes cluster or your own machines: ticket-to-merged-PR pipelines, scheduled and webhook-driven jobs, event automations, interactive terminals, and persistent multi-agent systems. Open source, self-hosted, multi-vendor.",
   openGraph: {
     type: "website",
     locale: "en_US",
     siteName: "Optio",
-    title: "Optio — Workflow Orchestration for AI Coding Agents",
+    title: "Optio — Self-Hosted AI Agent Swarm & Workflow Orchestration",
     description:
-      "Turn tickets into merged pull requests with AI coding agents. Autonomous feedback loops drive every task to completion.",
+      "Self-hosted orchestration for AI agent sessions and swarms — PR pipelines, jobs, automations, terminals, and persistent agents on your cluster or your laptop.",
     images: [
       {
         url: "/og-image.png",
         width: 1200,
         height: 630,
-        alt: "Optio — Workflow Orchestration for AI Coding Agents",
+        alt: "Optio — Self-Hosted AI Agent Swarm & Workflow Orchestration",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Optio — Workflow Orchestration for AI Coding Agents",
+    title: "Optio — Self-Hosted AI Agent Swarm & Workflow Orchestration",
     description:
-      "Turn tickets into merged pull requests with AI coding agents. Autonomous feedback loops drive every task to completion.",
+      "Self-hosted orchestration for AI agent sessions and swarms — PR pipelines, jobs, automations, terminals, and persistent agents on your cluster or your laptop.",
     images: ["/og-image.png"],
   },
   robots: {

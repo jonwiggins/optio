@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **One noun: Sessions.** Tasks, Jobs, scheduled blueprints, Local automations, interactive terminals, and Persistent Agents are now presented as one kind of thing — a **session** with five attributes: **When** (now / schedule / webhook / ticket / GitHub · Slack · Linear event / messages), **Where** (an Optio pod with or without a repo, or a directory on your own machine), **Who** (a terminal or an agent runtime + its parameters), **What** (the prompt), and **Then** (exits when done / waits for me / persistent agent). `/sessions` is the unified feed (Active · Recurring · Agents · History) with one status scale; `/sessions/new` is the single creation form, which reads the draft back as a sentence and derives the storage kind from the attributes (`deriveKind`). `/tasks/new`, `/jobs/new`, and `/agents/new` redirect there. The sidebar is now **Work** (Sessions · Reviews · Inbox) and **Library** (Prompts · Repos · Machines · Connections); per-kind pages remain as detail surfaces (#594).
+- **Overview** opens with a sessions board built from the same feed (needs you · live · recurring · agents), then usage limits, recent runs, and activity (#594).
+- **Machines** is a Library page for paired Optio Local hosts (#594).
+- **iOS**: Sessions-first navigation on the unified feed, Machines, an overview board, session widgets, a Live Activity, and Dynamic Island on the session model; usage limits on the Overview and in session headers (#594, #597, #598).
+- **Docs** rewritten around the session model: README, `docs/tasks.md`, `docs/persistent-agents.md`, `docs/optio-local.md`, `examples/`, and the marketing site.
+
+### Added
+
+- **Run location on every Task and Job** — `runTarget = cluster | local` with a host, directory, and session mode; local runs are dispatched to the daemon as agent terminals and the terminal's frames drive the run state (#589, #590).
+- **Local automations** with GitHub / Slack / Linear event triggers (signed ingress), interactive vs headless session modes, resume of an exited agent session, saved prompts as the command, and hardened event fan-out (#591 and preceding).
+- **Per-model 7-day usage limits** (Claude Fable) in the usage widgets (#592); the Claude OAuth token can be refreshed from a paired machine's daemon (#593).
+- A finished local agent session can be read back as its full conversation (#591).
+
+### Fixed
+
+- Local session and Job run spend now count in Insights costs (#595).
+- The per-IP API rate limit is configurable (`OPTIO_RATE_LIMIT_MAX`, default 600/min) so the iOS app's direct polling no longer trips 429s (#596).
+
 ## [0.5.0] - 2026-09-18
 
 ### Added
