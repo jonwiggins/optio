@@ -175,6 +175,17 @@ export async function endSession(id: string) {
   return updated;
 }
 
+/**
+ * Store (or clear, with `null`) the Claude Code session id the chat resumes
+ * from. Cleared when a `--resume` fails so the next turn starts fresh.
+ */
+export async function updateSessionAgentSessionId(id: string, agentSessionId: string | null) {
+  await db
+    .update(interactiveSessions)
+    .set({ agentSessionId })
+    .where(eq(interactiveSessions.id, id));
+}
+
 export async function getSessionPrs(sessionId: string) {
   return db
     .select()

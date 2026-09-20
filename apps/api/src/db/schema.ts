@@ -470,6 +470,9 @@ export const interactiveSessions = pgTable(
     podId: uuid("pod_id"),
     costUsd: text("cost_usd"),
     workspaceId: uuid("workspace_id"),
+    // Claude Code session id captured from the first chat turn; later turns
+    // pass `--resume <id>` so the chat is one conversation across WS connects.
+    agentSessionId: text("agent_session_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp("ended_at", { withTimezone: true }),
   },

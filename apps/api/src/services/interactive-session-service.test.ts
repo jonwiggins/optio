@@ -74,6 +74,7 @@ import {
   getActiveSessionCount,
   appendSessionChatEvent,
   listSessionChatEvents,
+  updateSessionAgentSessionId,
 } from "./interactive-session-service.js";
 
 describe("interactive-session-service", () => {
@@ -343,6 +344,24 @@ describe("interactive-session-service", () => {
       }));
 
       await expect(endSession("session-1")).rejects.toThrow("Session already ended");
+    });
+  });
+
+  describe("updateSessionAgentSessionId", () => {
+    it("stores the captured Claude session id", async () => {
+      const set = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+      (db.update as any) = vi.fn().mockReturnValue({ set });
+
+      await updateSessionAgentSessionId("session-1", "claude-sess-1");
+      expect(set).toHaveBeenCalledWith({ agentSessionId: "claude-sess-1" });
+    });
+
+    it("clears the id with null when a resume fails", async () => {
+      const set = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+      (db.update as any) = vi.fn().mockReturnValue({ set });
+
+      await updateSessionAgentSessionId("session-1", null);
+      expect(set).toHaveBeenCalledWith({ agentSessionId: null });
     });
   });
 
