@@ -14,11 +14,21 @@ export default function GettingStartedPage() {
     <>
       <h1 className="text-3xl font-bold text-text-heading">Getting Started</h1>
       <p className="mt-4 text-text-muted leading-relaxed">
-        Optio is a workflow orchestration system for AI coding agents. Think of it as &quot;CI/CD
-        where the build step is an AI agent.&quot; You submit tasks — from GitHub Issues, Linear,
-        Jira, Notion, or manually — and Optio handles the full lifecycle: provisioning an isolated
-        environment, running the agent, opening a PR, monitoring CI, handling code review, and
-        merging when everything passes.
+        Optio is a self-hosted platform for running AI agents as{" "}
+        <Link href="/docs/sessions" className="text-primary-light hover:underline">
+          sessions
+        </Link>{" "}
+        — on your Kubernetes cluster or on your own machines — and wiring them into workflows and
+        swarms. A session is one noun with five attributes:{" "}
+        <strong className="text-text-heading">When</strong> it starts,{" "}
+        <strong className="text-text-heading">Where</strong> it runs,{" "}
+        <strong className="text-text-heading">Who</strong> does the work,{" "}
+        <strong className="text-text-heading">What</strong> it is asked to do, and{" "}
+        <strong className="text-text-heading">Then</strong> what happens after. The classic shape —
+        a ticket becomes a merged PR, with Optio provisioning an isolated environment, running the
+        agent, watching CI, handling review, and merging — is one point in that space. Scheduled
+        jobs, webhook responders, laptop automations, interactive terminals, and persistent
+        multi-agent systems are the others.
       </p>
 
       <h2 className="mt-10 text-2xl font-bold text-text-heading">Quick Start</h2>
@@ -70,9 +80,9 @@ cd optio
         </li>
       </ul>
 
-      <h2 className="mt-10 text-2xl font-bold text-text-heading">First Task</h2>
+      <h2 className="mt-10 text-2xl font-bold text-text-heading">First Session</h2>
       <p className="mt-3 text-text-muted leading-relaxed">
-        From the dashboard, connect a GitHub repository, then create a task:
+        From the dashboard, connect a GitHub repository, then create a session that opens a PR:
       </p>
       <ol className="mt-3 list-decimal pl-5 space-y-2 text-[14px] text-text-muted">
         <li>
@@ -83,13 +93,20 @@ cd optio
           (Anthropic API key or Claude OAuth token)
         </li>
         <li>
-          Go to <strong className="text-text-heading">Tasks &rarr; New Task</strong>
+          Go to <strong className="text-text-heading">Sessions &rarr; New session</strong> and pick
+          the <strong className="text-text-heading">Open a PR</strong> preset
         </li>
-        <li>Select your repo, write a prompt, and submit</li>
+        <li>
+          Answer When (now), Where (an Optio pod with your repo), Who (Claude Code), What (your
+          prompt), Then (exits when done) — the form reads it back as a sentence — and submit
+        </li>
       </ol>
       <p className="mt-3 text-text-muted leading-relaxed">
         Optio will provision a pod, create a worktree, run the agent, and open a PR. You can watch
-        the live logs in the task detail view.
+        the live logs in the session detail view, and it shows up under{" "}
+        <strong className="text-text-heading">Active</strong> in the Sessions feed. Try the other
+        presets next: <em>Interactive chat</em>, <em>Scheduled run</em>, and{" "}
+        <em>Persistent agent</em>.
       </p>
 
       <h2 className="mt-10 text-2xl font-bold text-text-heading">What Happens Next</h2>
@@ -118,6 +135,11 @@ cd optio
             title: "Installation",
             href: "/docs/installation",
             description: "Full installation guide for local and production",
+          },
+          {
+            title: "Sessions",
+            href: "/docs/sessions",
+            description: "The five attributes and the kinds they derive",
           },
           {
             title: "Architecture",

@@ -1,10 +1,10 @@
 # Persistent Agents
 
-A third tier of Task in Optio, alongside Repo Tasks and Standalone Tasks.
+The **Then = persistent agent** kind of [session](tasks.md): a session that keeps its memory between turns and is woken by messages instead of exiting. In the New Session form it is the third exit condition, next to _exits when done_ and _waits for me_; in the Sessions feed it is the **Agents** view.
 
-> **Repo Task** — agent runs in a repo worktree, opens a PR, terminates.
-> **Standalone Task** — agent runs once with no repo, produces side effects, terminates.
-> **Persistent Agent** — long-lived, named, message-driven. _Doesn't terminate._
+> **Exits when done** — the agent runs in a repo worktree (opens a PR) or a pooled pod (side effects), then terminates.
+> **Waits for me** — an interactive terminal; the agent halts at its prompt between turns.
+> **Persistent agent** — long-lived, named, message-driven. _Doesn't terminate._ Other agents can message it, which is how a set of agents becomes a swarm.
 
 A Persistent Agent (PA) executes one **turn** of work, halts, and waits to be
 re-woken by a user message, an agent message, a webhook, a cron tick, or a
@@ -17,13 +17,13 @@ model" rather than the "job model" — turns are the inputs, not the unit.
 
 ## Mental model
 
-|            | Job model (Repo / Standalone Tasks) | Service model (Persistent Agents)    |
-| ---------- | ----------------------------------- | ------------------------------------ |
-| Identity   | The run                             | The agent itself                     |
-| Lifecycle  | One-shot                            | Cyclic — turns until paused/archived |
-| Inputs     | Params                              | Messages                             |
-| Outputs    | Logs + PR or side effects           | Messages + side effects              |
-| Addressing | Run ID                              | `agent:<workspace>/<slug>`           |
+|            | Job model (sessions that exit) | Service model (Persistent Agents)    |
+| ---------- | ------------------------------ | ------------------------------------ |
+| Identity   | The run                        | The agent itself                     |
+| Lifecycle  | One-shot                       | Cyclic — turns until paused/archived |
+| Inputs     | Params                         | Messages                             |
+| Outputs    | Logs + PR or side effects      | Messages + side effects              |
+| Addressing | Run ID                         | `agent:<workspace>/<slug>`           |
 
 ## Lifecycle
 
@@ -142,8 +142,8 @@ A four-agent engineering team:
 - **Sentinel** — reviewer
 - **Chronicler** — scribe (maintains team journal)
 
-See [`demos/the-forge/README.md`](../demos/the-forge/README.md). A self-contained,
-runnable copy lives at [`examples/persistent-agents/forge/`](../examples/persistent-agents/forge/).
+A self-contained, runnable copy lives at
+[`examples/persistent-agents/forge/`](../examples/persistent-agents/forge/).
 
 For more runnable examples (including the seven-agent
 [Mars Mission Control](../examples/persistent-agents/mars-mission-control/)

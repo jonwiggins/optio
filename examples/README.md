@@ -1,6 +1,7 @@
 # Optio examples
 
-Working configurations and setup scripts for the three Task tiers in Optio.
+Working configurations and setup scripts for the kinds of [session](../docs/tasks.md)
+Optio runs — one-shot PR sessions, no-repo jobs, and persistent multi-agent swarms.
 Each example is **self-contained**, **runnable** against a local Optio cluster,
 and **idempotent** (re-running setup scripts is safe).
 
@@ -18,19 +19,20 @@ your use case, re-run `setup.sh`. Every example follows the same shape:
 
 ```
 examples/
-├── repo-tasks/         # Repo Tasks — agents that run in a worktree, open a PR
-├── standalone-tasks/   # Standalone Tasks — single-shot agents, no repo
-└── persistent-agents/  # Persistent Agents — long-lived, message-driven
+├── repo-tasks/         # Where = pod + repo, Then = exits — agents that open a PR
+├── standalone-tasks/   # Where = pod, no repo, Then = exits — single-shot jobs
+└── persistent-agents/  # Then = persistent agent — long-lived, message-driven swarms
 ```
 
-Pick by what shape of work you have:
+Pick by what shape of work you have (the folder names are the pre-v0.5 kind names; in
+the UI all of these are sessions):
 
-| You want…                                             | Tier             |
-| ----------------------------------------------------- | ---------------- |
-| An agent that opens a PR and is done                  | Repo Task        |
-| A scheduled or webhook-triggered single-shot job      | Standalone Task  |
-| A long-lived service that wakes on messages or events | Persistent Agent |
-| Multiple coordinating agents with dispatch + handoff  | Persistent Agent |
+| You want…                                             | Session shape                                  | Folder               |
+| ----------------------------------------------------- | ---------------------------------------------- | -------------------- |
+| An agent that opens a PR and is done                  | pod + repo, exits when done                    | `repo-tasks/`        |
+| A scheduled or webhook-triggered single-shot job      | pod, no repo, exits when done, cron / webhook  | `standalone-tasks/`  |
+| A long-lived service that wakes on messages or events | persistent agent                               | `persistent-agents/` |
+| Multiple coordinating agents with dispatch + handoff  | several persistent agents messaging each other | `persistent-agents/` |
 
 ## Available examples
 
@@ -66,15 +68,17 @@ OPTIO_API_TOKEN=$(cat ~/.optio-token) \
   ./examples/persistent-agents/forge/setup.sh
 ```
 
-After provisioning, open the corresponding UI surface:
+After provisioning, everything shows up in the unified **Sessions** feed at `/sessions`
+(persistent agents under the **Agents** view, triggered definitions under **Recurring**,
+runs under **Active** / **History**). The per-kind detail pages still exist:
 
-| Tier                       | UI                               |
-| -------------------------- | -------------------------------- |
-| Persistent Agents (Agents) | `/agents` (list) → `/agents/:id` |
-| Repo Tasks (Tasks)         | `/tasks` (list) → `/tasks/:id`   |
-| Standalone Tasks (Jobs)    | `/jobs` (list) → `/jobs/:id`     |
+| Example folder       | Sessions view | Detail page                           |
+| -------------------- | ------------- | ------------------------------------- |
+| `persistent-agents/` | Agents        | `/agents/:id`                         |
+| `repo-tasks/`        | Active        | `/tasks/:id`                          |
+| `standalone-tasks/`  | Recurring     | `/jobs/:id` → `/jobs/:id/runs/:runId` |
 
-> The v0.4 sidebar split each tier into its own top-level route under **Run** (Tasks · Jobs · Reviews · Issues · Scheduled) and **Live** (Agents · Sessions). The legacy `/tasks?tab=…` URLs redirect to the dedicated pages.
+> As of v0.5 the sidebar is **Work** (Sessions · Reviews · Inbox) and **Library** (Prompts · Repos · Machines · Connections). `/tasks/new`, `/jobs/new`, `/agents/new`, and the legacy `/tasks?tab=…` URLs all redirect.
 
 ## Cleanup
 
