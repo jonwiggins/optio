@@ -496,7 +496,7 @@ enum SessionsFeed {
             let id = b.id ?? ""
             let paused = b.enabled == false
             rows.append(SessionRow(
-                key: "automation-\(id)", source: .localBlueprint, sourceId: id, href: "/local",
+                key: "automation-\(id)", source: .localBlueprint, sourceId: id, href: "/machines#automations",
                 name: b.name ?? "",
                 when: "on an event",
                 where: machine(b.hostId, b.dir),

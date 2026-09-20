@@ -26,6 +26,12 @@ struct JobDetailView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .navigationDestination(for: JobRoute.self) { route in
+            switch route {
+            case .detail(let id): JobDetailView(jobId: id)
+            case .run(let jobId, let runId): JobRunDetailView(jobId: jobId, runId: runId)
+            }
+        }
         .navigationTitle(model.job?.name ?? "Job")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
@@ -368,4 +374,9 @@ final class JobDetailModel {
         busy = true; defer { busy = false }
         do { try await api.deleteJob(id); return true } catch { actionError = error; return false }
     }
+}
+
+enum JobRoute: Hashable {
+    case detail(String)
+    case run(jobId: String, runId: String)
 }

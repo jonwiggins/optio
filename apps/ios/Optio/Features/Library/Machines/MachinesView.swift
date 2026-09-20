@@ -3,7 +3,9 @@ import SwiftUI
 /// Paired Optio Local hosts (`GET /api/local/hosts`): name, online state,
 /// platform / arch / daemon version, last seen, and the directory allowlist
 /// with detected checkouts marked. Sessions that run on a machine are in the
-/// Sessions list; this is the machine itself.
+/// Sessions list; this is the machine itself — plus the Local Automations that
+/// fire on one of its directories (per-machine configuration, like the web's
+/// `/machines#automations`).
 struct MachinesView: View {
     @Environment(APIClient.self) private var api
     @State private var hosts: [LocalHost] = []
@@ -43,9 +45,27 @@ struct MachinesView: View {
                             }
                     }
                 }
+                Section {
+                    NavigationLink(value: MachinesRoute.automations) {
+                        Label("Automations", systemImage: "square.stack.3d.up")
+                    }
+                } footer: {
+                    Text("Agents and terminals that start on one of these machines when something happens — a schedule, a webhook, a ticket, or a GitHub / Slack / Linear event.")
+                }
             }
         }
         .listStyle(.plain)
+        .navigationDestination(for: MachinesRoute.self) { route in
+            switch route {
+            case .automations: LocalBlueprintsView(hosts: hosts)
+            }
+        }
+        .navigationDestination(for: LocalRoute.self) { route in
+            switch route {
+            case .blueprint(let id): LocalBlueprintDetailView(blueprintId: id, hosts: hosts)
+            case .terminal(let id): LocalTerminalScreen(terminalId: id, hosts: hosts)
+            }
+        }
         .task {
             await refresh()
             while !Task.isCancelled {
@@ -83,6 +103,11 @@ struct MachinesView: View {
             actionError = error.localizedDescription
         }
     }
+}
+
+/// Pushed from the Machines list.
+enum MachinesRoute: Hashable {
+    case automations
 }
 
 /// One machine: identity line, facts, then its directories.

@@ -25,15 +25,6 @@ struct SessionsView: View {
                 Button { showNew = true } label: { Image(systemName: "plus") }
                     .accessibilityLabel("New session")
             }
-            ToolbarItem(placement: .secondaryAction) {
-                Menu {
-                    ForEach(SessionBrowseRoute.allCases, id: \.self) { route in
-                        NavigationLink(value: route) { Label(route.label, systemImage: route.systemImage) }
-                    }
-                } label: {
-                    Label("Browse by kind", systemImage: "square.grid.2x2")
-                }
-            }
         }
         .sheet(isPresented: $showNew) { NewSessionSheet() }
         .task {

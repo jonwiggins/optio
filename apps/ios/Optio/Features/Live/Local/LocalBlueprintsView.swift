@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Blueprint list (`BlueprintsSection` in the web UI): reusable terminal specs
-/// plus the schedule / webhook / ticket triggers that spawn them.
+/// Local Automations (`AutomationsSection` on the web's Machines page): reusable
+/// agent / terminal specs plus the schedule / webhook / ticket / event triggers
+/// that spawn them on one of your machines.
 struct LocalBlueprintsView: View {
     var hosts: [LocalHost]
 
@@ -18,8 +19,8 @@ struct LocalBlueprintsView: View {
             if let blueprints {
                 if blueprints.isEmpty {
                     ScrollView {
-                        EmptyState(title: "No blueprints yet", systemImage: "square.stack.3d.up",
-                                   message: "A blueprint is a reusable terminal spec — wire schedule, webhook, or ticket triggers to it to spawn terminals automatically.")
+                        EmptyState(title: "No automations yet", systemImage: "square.stack.3d.up",
+                                   message: "An automation runs an agent on your machine when something happens — a schedule, a webhook, a ticket, or a GitHub / Slack / Linear event.")
                             .frame(minHeight: 400)
                     }
                     .refreshable { await load() }
@@ -46,7 +47,7 @@ struct LocalBlueprintsView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle("Blueprints")
+        .navigationTitle("Automations")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { showNew = true } label: { Image(systemName: "plus") }
@@ -58,7 +59,7 @@ struct LocalBlueprintsView: View {
                 blueprints?.insert(bp, at: 0)
             }
         }
-        .confirmationDialog("Delete blueprint \"\(pendingDelete?.name ?? "")\" and its triggers?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible) {
+        .confirmationDialog("Delete automation \"\(pendingDelete?.name ?? "")\" and its triggers?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 if let bp = pendingDelete { Task { await delete(bp) } }
                 pendingDelete = nil

@@ -8,8 +8,8 @@ Account). The Sessions screen merges every kind of work — PR tasks, jobs,
 scheduled blueprints, Local automations and terminals, pod sessions, persistent
 agents — into one list (`Features/Work/Sessions/SessionsFeed.swift`, a port of the
 web's `lib/sessions-feed.ts`) with Active / Recurring / Agents / History / All
-views; rows open the per-kind detail screens, and the per-kind lists remain
-reachable from the Sessions toolbar's "Browse by kind" menu. "New session" opens
+views; rows open the per-kind detail screens (there are no per-kind lists, on
+web or here). Local Automations are edited under Library › Machines. "New session" opens
 the web's five-attribute form (`<web UI>/sessions/new`) in an in-app Safari view.
 Designed to be used over a Tailscale network: your phone and the machine (or
 cluster) running Optio join the same tailnet, and the app talks to the API at its
