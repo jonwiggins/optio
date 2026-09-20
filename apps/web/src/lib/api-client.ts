@@ -35,6 +35,15 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/** A repo / ticket provider whose issues could not be fetched (GET /api/issues). */
+export interface IssueSourceError {
+  source: string;
+  name: string;
+  repoId: string | null;
+  status: number | null;
+  message: string;
+}
+
 export interface ApiKeySummary {
   id: string;
   name: string;
@@ -546,7 +555,9 @@ export const api = {
     if (params?.repoId) qs.set("repoId", params.repoId);
     if (params?.state) qs.set("state", params.state);
     const query = qs.toString();
-    return request<{ issues: any[] }>(`/api/issues${query ? `?${query}` : ""}`);
+    return request<{ issues: any[]; errors?: IssueSourceError[] }>(
+      `/api/issues${query ? `?${query}` : ""}`,
+    );
   },
 
   launchReview: (taskId: string) =>
