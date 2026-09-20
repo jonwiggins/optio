@@ -1190,3 +1190,30 @@ describe("workflow-service", () => {
     });
   });
 });
+
+describe("ticket trigger helpers", () => {
+  it("ticketTriggerMatches filters by source and any-match labels", async () => {
+    const { ticketTriggerMatches } = await import("./workflow-service.js");
+    const ticket = { source: "linear", labels: ["bug", "triage"] };
+    expect(ticketTriggerMatches({}, ticket)).toBe(true);
+    expect(ticketTriggerMatches({ source: "linear" }, ticket)).toBe(true);
+    expect(ticketTriggerMatches({ source: "github" }, ticket)).toBe(false);
+    expect(ticketTriggerMatches({ labels: ["triage", "cve"] }, ticket)).toBe(true);
+    expect(ticketTriggerMatches({ labels: ["cve"] }, ticket)).toBe(false);
+    expect(ticketTriggerMatches({ labels: [] }, ticket)).toBe(true);
+  });
+
+  it("ticketTriggerParams emits the same six ticket params as task_config triggers", async () => {
+    const { ticketTriggerParams } = await import("./workflow-service.js");
+    expect(
+      ticketTriggerParams({ source: "jira", externalId: "OPS-1", title: "T", labels: ["a", "b"] }),
+    ).toEqual({
+      ticketSource: "jira",
+      ticketExternalId: "OPS-1",
+      ticketTitle: "T",
+      ticketBody: "",
+      ticketUrl: "",
+      ticketLabels: "a,b",
+    });
+  });
+});

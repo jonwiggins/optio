@@ -8,6 +8,8 @@ export interface OAuthUser {
   externalId: string;
   email: string;
   displayName: string;
+  /** The provider's handle (GitHub login, GitLab username), when it has one. */
+  username?: string;
   avatarUrl?: string;
 }
 

@@ -17,6 +17,8 @@ export async function createSession(input: {
   repoUrl: string;
   userId?: string;
   workspaceId?: string | null;
+  /** The name the user gave the session (New session form). */
+  title?: string | null;
 }) {
   const repoUrl = normalizeRepoUrl(input.repoUrl);
 
@@ -76,6 +78,7 @@ export async function createSession(input: {
       userId: input.userId ?? null,
       worktreePath,
       branch,
+      title: input.title?.trim() || null,
       state: "active",
       podId: pod.id,
       workspaceId: input.workspaceId ?? null,

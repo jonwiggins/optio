@@ -13,6 +13,7 @@ export enum WorkflowTriggerType {
   MANUAL = "manual",
   SCHEDULE = "schedule",
   WEBHOOK = "webhook",
+  TICKET = "ticket",
 }
 
 export interface Workflow {

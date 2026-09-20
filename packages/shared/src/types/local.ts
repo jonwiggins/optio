@@ -112,6 +112,11 @@ export type LocalTerminalSpec =
       resumeSessionId?: string;
       /** Model override passed to the agent CLI (`--model` / `-m`), when set. */
       model?: string;
+      /**
+       * "Work on a new branch that becomes a PR": the server wraps the prompt
+       * with branch-and-PR instructions off this base before the spawn.
+       */
+      baseBranch?: string;
     };
 
 /** Agent CLIs the daemon knows how to launch (and, for claude-code, hook). */

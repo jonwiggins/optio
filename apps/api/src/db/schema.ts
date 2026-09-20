@@ -28,6 +28,10 @@ export const users = pgTable("users", {
   externalId: text("external_id").notNull(),
   email: text("email").notNull(),
   displayName: text("display_name").notNull(),
+  // The provider's handle (GitHub login, GitLab username) — what "@-mention
+  // me" / "assigned to me" event triggers match on. Null for providers
+  // without one (Google, generic OIDC) and for rows from before the column.
+  username: text("username"),
   avatarUrl: text("avatar_url"),
   defaultWorkspaceId: uuid("default_workspace_id"), // last-used workspace
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }).notNull().defaultNow(),
@@ -460,6 +464,8 @@ export const interactiveSessions = pgTable(
     userId: uuid("user_id"),
     worktreePath: text("worktree_path"),
     branch: text("branch").notNull(),
+    // The name given to the session (New session form); null = unnamed.
+    title: text("title"),
     state: interactiveSessionStateEnum("state").notNull().default("active"),
     podId: uuid("pod_id"),
     costUsd: text("cost_usd"),
@@ -1768,6 +1774,10 @@ export const localBlueprints = pgTable(
     hostId: uuid("host_id").references(() => localHosts.id, { onDelete: "set null" }),
     dir: text("dir"),
     repoUrl: text("repo_url"),
+    // "Work on a new branch that becomes a PR": agent spawns get their prompt
+    // wrapped with branch-and-PR instructions off this base. Null = the
+    // directory as it is.
+    baseBranch: text("base_branch"),
     commandTemplate: text("command_template").notNull(),
     // A saved prompt from the Prompts library. When set, its text is the
     // agent's prompt (rendered with the trigger params) and commandTemplate

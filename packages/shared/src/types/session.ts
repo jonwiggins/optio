@@ -9,6 +9,8 @@ export interface InteractiveSession {
   userId: string | null;
   worktreePath: string | null;
   branch: string;
+  /** The name given to the session; null = unnamed. */
+  title: string | null;
   state: InteractiveSessionState;
   podId: string | null;
   costUsd: string | null;

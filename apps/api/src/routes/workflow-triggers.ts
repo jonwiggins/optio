@@ -11,7 +11,7 @@ import { WorkflowTriggerSchema } from "../schemas/workflow.js";
 import { requireRole } from "../plugins/auth.js";
 
 const triggerTypeEnum = z
-  .enum(["manual", "schedule", "webhook"])
+  .enum(["manual", "schedule", "webhook", "ticket"])
   .describe("Trigger classification");
 
 const configSchema = z.record(z.unknown()).default({}).describe("Trigger-specific config");
@@ -71,6 +71,9 @@ function validateConfigForType(type: string, config: Record<string, unknown>): s
     if (!config.path || typeof config.path !== "string") {
       return "Webhook triggers require a path in config";
     }
+  }
+  if (type === "ticket" && typeof config.source !== "string") {
+    return "Ticket triggers require a `source` in config";
   }
   return null;
 }

@@ -16,6 +16,8 @@ export interface SessionUser {
   provider: string;
   email: string;
   displayName: string;
+  /** Provider handle (GitHub login / GitLab username); null when unknown. */
+  username: string | null;
   avatarUrl: string | null;
   workspaceId: string | null;
   workspaceRole: string | null;
@@ -42,6 +44,7 @@ export async function createSession(
       .set({
         email: profile.email,
         displayName: profile.displayName,
+        username: profile.username ?? null,
         avatarUrl: profile.avatarUrl ?? null,
         lastLoginAt: new Date(),
         updatedAt: new Date(),
@@ -57,6 +60,7 @@ export async function createSession(
         externalId: profile.externalId,
         email: profile.email,
         displayName: profile.displayName,
+        username: profile.username ?? null,
         avatarUrl: profile.avatarUrl ?? null,
       })
       .returning();
@@ -81,6 +85,7 @@ export async function createSession(
       provider: user.provider,
       email: user.email,
       displayName: user.displayName,
+      username: user.username,
       avatarUrl: user.avatarUrl,
       workspaceId: user.defaultWorkspaceId,
       workspaceRole: null,
@@ -103,6 +108,7 @@ export async function validateSession(token: string): Promise<SessionUser | null
       provider: users.provider,
       email: users.email,
       displayName: users.displayName,
+      username: users.username,
       avatarUrl: users.avatarUrl,
       defaultWorkspaceId: users.defaultWorkspaceId,
     })
@@ -134,6 +140,7 @@ export async function validateSession(token: string): Promise<SessionUser | null
     provider: row.provider,
     email: row.email,
     displayName: row.displayName,
+    username: row.username,
     avatarUrl: row.avatarUrl,
     workspaceId: row.defaultWorkspaceId,
     workspaceRole: null, // resolved by auth middleware from header/cookie
@@ -230,6 +237,7 @@ export async function validateWsToken(token: string): Promise<SessionUser | null
       provider: users.provider,
       email: users.email,
       displayName: users.displayName,
+      username: users.username,
       avatarUrl: users.avatarUrl,
       defaultWorkspaceId: users.defaultWorkspaceId,
     })
@@ -245,6 +253,7 @@ export async function validateWsToken(token: string): Promise<SessionUser | null
     provider: row.provider,
     email: row.email,
     displayName: row.displayName,
+    username: row.username,
     avatarUrl: row.avatarUrl,
     workspaceId: row.defaultWorkspaceId,
     workspaceRole: null,

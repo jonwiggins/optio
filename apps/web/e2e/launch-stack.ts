@@ -142,6 +142,19 @@ async function seed(): Promise<void> {
     agentRuntime: "claude-code",
     initialPrompt: "You are the e2e seed agent. Wait for instructions.",
   });
+
+  // A paired (offline) machine with one checkout of the seeded repo, so the
+  // New session form can create Local kinds — terminals park in
+  // pending/host_offline without a daemon, which is all the form needs.
+  await api("/api/local/hosts/register", {
+    name: "E2E laptop",
+    hostname: "e2e-laptop",
+    platform: "darwin",
+    dirs: [
+      { path: "/Users/e2e/repos/e2e-repo", repoUrl: "https://github.com/e2e-org/e2e-repo" },
+      { path: "/Users/e2e/notes" },
+    ],
+  });
 }
 
 async function main(): Promise<void> {

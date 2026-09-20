@@ -225,6 +225,24 @@ export async function syncAllTickets(): Promise<number> {
           );
         }
 
+        // Fire any Job (standalone) ticket triggers.
+        try {
+          const { fireJobTicketTriggers } = await import("./workflow-service.js");
+          await fireJobTicketTriggers({
+            source: ticket.source,
+            externalId: ticket.externalId,
+            title: ticket.title,
+            body: ticket.body,
+            labels: ticket.labels,
+            url: ticket.url,
+          });
+        } catch (triggerErr) {
+          logger.warn(
+            { err: triggerErr, ticketId: ticket.externalId },
+            "Failed to fire ticket triggers for jobs",
+          );
+        }
+
         // Fire any local blueprint ticket triggers (Optio Local terminals).
         try {
           const { fireLocalTicketTriggers } = await import("./local-blueprint-service.js");

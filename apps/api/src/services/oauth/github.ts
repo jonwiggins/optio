@@ -86,6 +86,7 @@ export class GitHubOAuthProvider implements OAuthProvider {
       externalId: String(user.id),
       email,
       displayName: user.name || user.login || "",
+      username: user.login || undefined,
       avatarUrl: user.avatar_url,
     };
   }

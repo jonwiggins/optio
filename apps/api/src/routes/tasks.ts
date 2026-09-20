@@ -176,6 +176,11 @@ const TaskListResponseSchema = z
       .describe("Page of tasks"),
     limit: z.number().int(),
     offset: z.number().int(),
+    total: z
+      .number()
+      .int()
+      .optional()
+      .describe("Rows across the listed kind(s) in the workspace (polymorphic lists only)"),
   })
   .describe("Paginated task list response");
 
@@ -298,7 +303,11 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         limit,
       });
       const tasksOut = resolved.map((r) => ({ type: r.type, ...r.data }));
-      return reply.send({ tasks: tasksOut, limit, offset });
+      const total = await unifiedTaskService.countUnifiedTasks({
+        type: type === "all" ? undefined : type,
+        workspaceId,
+      });
+      return reply.send({ tasks: tasksOut, limit, offset, total });
     },
   );
 

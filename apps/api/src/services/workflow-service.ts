@@ -739,6 +739,95 @@ export async function createWorkflowTrigger(input: {
   return trigger;
 }
 
+/** The params a ticket trigger hands its target, shared by every target type. */
+export function ticketTriggerParams(ticket: {
+  source: string;
+  externalId: string;
+  title: string;
+  body?: string;
+  labels?: string[];
+  url?: string;
+}): Record<string, string> {
+  return {
+    ticketSource: ticket.source,
+    ticketExternalId: ticket.externalId,
+    ticketTitle: ticket.title,
+    ticketBody: ticket.body ?? "",
+    ticketUrl: ticket.url ?? "",
+    ticketLabels: (ticket.labels ?? []).join(","),
+  };
+}
+
+/** True when a ticket trigger's config (`source`, any-match `labels`) matches the ticket. */
+export function ticketTriggerMatches(
+  config: Record<string, unknown>,
+  ticket: { source: string; labels?: string[] },
+): boolean {
+  if (config.source && config.source !== ticket.source) return false;
+  const requiredLabels = Array.isArray(config.labels) ? (config.labels as string[]) : null;
+  if (requiredLabels && requiredLabels.length > 0) {
+    if (!requiredLabels.some((l) => ticket.labels?.includes(l))) return false;
+  }
+  return true;
+}
+
+/**
+ * Fire every enabled Job ticket trigger that matches the ticket: each spawns
+ * a run with the ticket's fields as params (the Job counterpart of
+ * task-config-service.fireTicketTriggers). Failures are per-trigger.
+ */
+export async function fireJobTicketTriggers(ticket: {
+  source: string;
+  externalId: string;
+  title: string;
+  body?: string;
+  labels?: string[];
+  url?: string;
+}): Promise<Array<{ triggerId: string; runId: string }>> {
+  const candidates = await db
+    .select()
+    .from(workflowTriggers)
+    .where(
+      and(
+        eq(workflowTriggers.targetType, "job"),
+        eq(workflowTriggers.type, "ticket"),
+        eq(workflowTriggers.enabled, true),
+      ),
+    );
+  const results: Array<{ triggerId: string; runId: string }> = [];
+  for (const trigger of candidates) {
+    if (!ticketTriggerMatches((trigger.config ?? {}) as Record<string, unknown>, ticket)) continue;
+    try {
+      const workflow = await getWorkflow(trigger.targetId);
+      if (!workflow || !workflow.enabled) continue;
+      const run = await createWorkflowRun(workflow.id, {
+        triggerId: trigger.id,
+        params: ticketTriggerParams(ticket),
+      });
+      await db
+        .update(workflowTriggers)
+        .set({ lastFiredAt: new Date() })
+        .where(eq(workflowTriggers.id, trigger.id));
+      results.push({ triggerId: trigger.id, runId: run.id });
+      logger.info(
+        {
+          triggerId: trigger.id,
+          workflowId: workflow.id,
+          runId: run.id,
+          ticket: ticket.externalId,
+        },
+        "Fired ticket trigger for job",
+      );
+    } catch (err) {
+      logger.error(
+        { err, triggerId: trigger.id, ticketExternalId: ticket.externalId },
+        "Failed to fire job ticket trigger",
+      );
+    }
+  }
+  return results;
+}
+
 export async function updateWorkflowTrigger(
   id: string,
   input: {
