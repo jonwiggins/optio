@@ -128,6 +128,20 @@ export function accountBuckets(usage: AccountUsage): Array<[string, Bucket]> {
   return buckets;
 }
 
+/**
+ * Why the account pill has nothing to show, or null when it should simply
+ * not exist: an API-key / Vertex deployment has no subscription limits to
+ * read, but a failed read (expired token, upstream 429, API unreachable)
+ * must stay on screen so the pill can't silently vanish.
+ */
+export function usageUnavailableReason(usage: AccountUsage): string | null {
+  if (usage.available && accountBuckets(usage).length > 0) return null;
+  const err = usage.error ?? "";
+  if (/no (claude subscription|oauth token)/i.test(err)) return null;
+  if (usage.available) return "no usage limits reported";
+  return err || "usage unavailable";
+}
+
 function Meter({ label, bucket }: { label: string; bucket: Bucket }) {
   const pct = Math.max(0, Math.min(100, Math.round(bucket.utilization ?? 0)));
   return (
@@ -151,10 +165,12 @@ export function AccountUsagePill({
 }) {
   const usage = useAccountUsage();
   const [refreshing, setRefreshing] = useState(false);
-  if (!usage || !usage.available) return null;
+  if (!usage) return null;
   const buckets = accountBuckets(usage);
-  if (buckets.length === 0) return null;
-  const worst = Math.max(...buckets.map(([, b]) => b.utilization ?? 0));
+  const ready = usage.available && buckets.length > 0;
+  const unavailable = ready ? null : usageUnavailableReason(usage);
+  // Nothing to read on this deployment (API key / Vertex): no pill at all.
+  if (!ready && unavailable === null) return null;
   const onRefresh = async () => {
     setRefreshing(true);
     try {
@@ -164,21 +180,53 @@ export function AccountUsagePill({
       setRefreshing(false);
     }
   };
+  const refreshButton = (
+    <button
+      type="button"
+      onClick={onRefresh}
+      disabled={refreshing}
+      title="Re-read from Anthropic now"
+      aria-label="Refresh usage"
+      className="inline-flex items-center gap-1 -mr-1 px-1.5 py-0.5 rounded text-[10px] text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors"
+    >
+      <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
+      refresh
+    </button>
+  );
+  if (unavailable !== null) {
+    return (
+      <HoverCard
+        content={
+          <>
+            <span className="flex items-center justify-between gap-4 mb-1">
+              <span className="font-medium text-text">Claude usage limits</span>
+              {refreshButton}
+            </span>
+            <span className="block text-[10px] text-warning/90">
+              Couldn&apos;t read usage — {unavailable}; retrying automatically
+            </span>
+          </>
+        }
+        className={className}
+        interactive
+      >
+        <span
+          title={`Claude usage unavailable — ${unavailable}`}
+          data-usage-state="unavailable"
+          className="inline-flex items-center gap-1.5 h-6 px-1.5 @2xl:px-2 rounded-md border border-dashed border-border/70 bg-bg-card/60 text-[11px] font-mono text-text-muted/70 shrink-0"
+        >
+          <Gauge className="w-3 h-3 shrink-0" />
+          <span>—</span>
+        </span>
+      </HoverCard>
+    );
+  }
+  const worst = Math.max(...buckets.map(([, b]) => b.utilization ?? 0));
   const card = (
     <>
       <span className="flex items-center justify-between gap-4 mb-1">
         <span className="font-medium text-text">Claude usage limits</span>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={refreshing}
-          title="Re-read from Anthropic now"
-          aria-label="Refresh usage"
-          className="inline-flex items-center gap-1 -mr-1 px-1.5 py-0.5 rounded text-[10px] text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors"
-        >
-          <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
-          refresh
-        </button>
+        {refreshButton}
       </span>
       {buckets.map(([l, b]) => {
         const pct = Math.round(b.utilization ?? 0);
