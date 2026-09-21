@@ -394,8 +394,8 @@ export default function RepoDetailPage({ params }: { params: Promise<{ id: strin
                 </span>
               )}
             </h2>
-            <Link href="/sessions" className="text-xs text-primary hover:underline">
-              All sessions &rarr;
+            <Link href="/work" className="text-xs text-primary hover:underline">
+              All work &rarr;
             </Link>
           </div>
           <div className="space-y-1.5">

@@ -361,25 +361,26 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
       const rawPayload = req.body;
       const payload = rawPayload as Record<string, Record<string, unknown> | string | undefined>;
 
-      // Local automations: review requests, @-mentions, assignments, new
-      // PRs / issues → spawn terminals on the user's own machine.
+      // Event triggers: review requests, @-mentions, assignments, new PRs /
+      // issues → start whatever listens for them (a Job, a scheduled Task, a
+      // Local automation, a persistent agent).
       if (typeof event === "string") {
         try {
-          const { normalizeGitHubEvent, fireLocalEventTriggers } =
-            await import("../services/local-event-service.js");
-          const { rememberDelivery } = await import("./local-ingress.js");
+          const { normalizeGitHubEvent, fireEventTriggers } =
+            await import("../services/event-trigger-service.js");
+          const { rememberDelivery } = await import("./event-ingress.js");
           const delivery = req.headers["x-github-delivery"];
           const fresh = typeof delivery !== "string" || rememberDelivery("github", delivery);
           const normalized = fresh ? normalizeGitHubEvent(event, rawPayload) : null;
           // Fire-and-forget: GitHub gives us 10 s to answer, and a fan-out
-          // that spawns N terminals mustn't eat it.
+          // that spawns N runs mustn't eat it.
           if (normalized) {
-            fireLocalEventTriggers("github", normalized).catch((err) => {
-              logger.warn({ err, event }, "GitHub event → local automation dispatch failed");
+            fireEventTriggers("github", normalized).catch((err: unknown) => {
+              logger.warn({ err, event }, "GitHub event trigger dispatch failed");
             });
           }
         } catch (err) {
-          logger.warn({ err, event }, "GitHub event → local automation dispatch failed");
+          logger.warn({ err, event }, "GitHub event trigger dispatch failed");
         }
       }
 

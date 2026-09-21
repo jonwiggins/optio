@@ -26,7 +26,7 @@ vi.mock("@/components/dashboard", () => ({
   WelcomeHero: () => <div data-testid="welcome-hero" />,
   AgentComparison: () => null,
   RecentRuns: () => <div data-testid="recent-tasks" />,
-  SessionsBoard: ({ rows }: { rows: unknown[] }) => (
+  WorkBoard: ({ rows }: { rows: unknown[] }) => (
     <div data-testid="sessions-board">{rows.length}</div>
   ),
   LimitsPanel: ({ providers }: { providers: unknown[] }) =>
@@ -77,13 +77,13 @@ const feedRow = (key: string, status: string, extra: Record<string, unknown> = {
   ...extra,
 });
 
-vi.mock("@/hooks/use-sessions-feed", () => ({
-  useSessionsFeed: vi.fn(() => ({ rows: [], hosts: [], loading: false, refetch: vi.fn() })),
+vi.mock("@/hooks/use-work-feed", () => ({
+  useWorkFeed: vi.fn(() => ({ rows: [], hosts: [], loading: false, refetch: vi.fn() })),
 }));
 
 import OverviewPage from "./page";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
-import { useSessionsFeed } from "@/hooks/use-sessions-feed";
+import { useWorkFeed } from "@/hooks/use-work-feed";
 
 describe("OverviewPage — failed-tasks banner removed", () => {
   afterEach(() => cleanup());
@@ -101,15 +101,12 @@ describe("OverviewPage — failed-tasks banner removed", () => {
     expect(screen.queryByText(/Ask Optio to help investigate/i)).not.toBeInTheDocument();
   });
 
-  it("renders the Overview heading, the sessions board, and a New session button", () => {
+  it("renders the Overview heading, the work board, and a New work button", () => {
     render(<OverviewPage />);
 
     expect(screen.getByText("Overview")).toBeInTheDocument();
     expect(screen.getByTestId("sessions-board")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /New session/ })).toHaveAttribute(
-      "href",
-      "/sessions/new",
-    );
+    expect(screen.getByRole("link", { name: /New work/ })).toHaveAttribute("href", "/work/new");
   });
 });
 
@@ -133,7 +130,7 @@ describe("OverviewPage — the sessions feed drives the summary", () => {
   afterEach(() => cleanup());
 
   it("counts running / waiting / needs-you / recurring sessions in the subtitle", () => {
-    vi.mocked(useSessionsFeed).mockReturnValue({
+    vi.mocked(useWorkFeed).mockReturnValue({
       rows: [
         feedRow("a", "running"),
         feedRow("b", "needs_you"),

@@ -179,7 +179,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     try {
       const res = await api.cloneWorkflow(id);
       toast.success("Task duplicated");
-      router.push(`/jobs/${res.workflow.id}/edit`);
+      router.push(`/work/${res.workflow.id}/edit`);
     } catch {
       toast.error("Failed to duplicate job");
     } finally {
@@ -193,7 +193,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     try {
       await api.deleteWorkflow(id);
       toast.success("Task deleted");
-      router.push("/sessions?view=recurring");
+      router.push("/work?view=recurring");
     } catch {
       toast.error("Failed to delete job");
     } finally {
@@ -216,11 +216,11 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     return (
       <div className="p-6 max-w-4xl mx-auto">
         <Link
-          href="/sessions?view=recurring"
+          href="/work?view=recurring"
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Sessions
+          Back to Work
         </Link>
         <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
           <XCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -243,11 +243,11 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
         title={workflow.name}
         subtitle={
           <Link
-            href="/sessions?view=recurring"
+            href="/work?view=recurring"
             className="inline-flex items-center gap-1 hover:text-primary"
           >
             <ArrowLeft className="w-3 h-3" />
-            Sessions
+            Work
           </Link>
         }
         state={workflow.enabled ? "enabled" : "disabled"}
@@ -277,7 +277,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
               <Play className="w-3 h-3" /> Run
             </button>
             <Link
-              href={`/jobs/${id}/edit`}
+              href={`/work/${id}/edit`}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg text-text-muted text-xs hover:bg-bg-hover hover:text-text transition-colors"
             >
               <Pencil className="w-3 h-3" /> Edit
@@ -579,7 +579,7 @@ function TriggersList({
           Triggers define how this job is started (manually, on schedule, or via webhook).
         </p>
         <Link
-          href={`/jobs/${workflowId}/edit`}
+          href={`/work/${workflowId}/edit`}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg-hover text-text-muted text-xs font-medium hover:text-text transition-colors"
         >
           <Pencil className="w-3 h-3" /> Configure Triggers

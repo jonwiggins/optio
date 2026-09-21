@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 export default function LegacyRedirect() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/sessions?view=recurring");
+    router.replace("/work?view=recurring");
   }, [router]);
   return null;
 }

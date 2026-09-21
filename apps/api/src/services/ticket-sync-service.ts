@@ -5,7 +5,6 @@ import { getTicketProvider } from "@optio/ticket-providers";
 import type { TicketSource } from "@optio/shared";
 import { TaskState, normalizeRepoUrl } from "@optio/shared";
 import * as taskService from "./task-service.js";
-import * as taskConfigService from "./task-config-service.js";
 import { taskQueue } from "../workers/task-worker.js";
 import { retrieveSecret } from "./secret-service.js";
 import { getGitHubToken } from "./github-token-service.js";
@@ -205,12 +204,13 @@ export async function syncAllTickets(): Promise<number> {
 
         totalSynced++;
 
-        // Fire any task_config ticket triggers that match this ticket. These
-        // spawn additional tasks alongside the repo-scoped task above — e.g.
-        // a "security" workspace-wide task_config that runs on every ticket
-        // labeled cve.
+        // Fire every ticket trigger that matches this ticket, whatever it
+        // targets — a workspace-wide "security" scheduled Task that runs on
+        // every ticket labeled cve, a Job, a Local automation, a persistent
+        // agent. These spawn alongside the repo-scoped task above.
         try {
-          await taskConfigService.fireTicketTriggers({
+          const { fireTicketTriggers } = await import("./trigger-dispatch.js");
+          await fireTicketTriggers({
             source: ticket.source,
             externalId: ticket.externalId,
             title: ticket.title,
@@ -221,61 +221,7 @@ export async function syncAllTickets(): Promise<number> {
         } catch (triggerErr) {
           logger.warn(
             { err: triggerErr, ticketId: ticket.externalId },
-            "Failed to fire ticket triggers for task_configs",
-          );
-        }
-
-        // Fire any Job (standalone) ticket triggers.
-        try {
-          const { fireJobTicketTriggers } = await import("./workflow-service.js");
-          await fireJobTicketTriggers({
-            source: ticket.source,
-            externalId: ticket.externalId,
-            title: ticket.title,
-            body: ticket.body,
-            labels: ticket.labels,
-            url: ticket.url,
-          });
-        } catch (triggerErr) {
-          logger.warn(
-            { err: triggerErr, ticketId: ticket.externalId },
-            "Failed to fire ticket triggers for jobs",
-          );
-        }
-
-        // Wake any persistent agents with a matching ticket trigger.
-        try {
-          const { fireAgentTicketTriggers } = await import("./persistent-agent-service.js");
-          await fireAgentTicketTriggers({
-            source: ticket.source,
-            externalId: ticket.externalId,
-            title: ticket.title,
-            body: ticket.body,
-            labels: ticket.labels,
-            url: ticket.url,
-          });
-        } catch (triggerErr) {
-          logger.warn(
-            { err: triggerErr, ticketId: ticket.externalId },
-            "Failed to fire ticket triggers for persistent agents",
-          );
-        }
-
-        // Fire any local blueprint ticket triggers (Optio Local terminals).
-        try {
-          const { fireLocalTicketTriggers } = await import("./local-blueprint-service.js");
-          await fireLocalTicketTriggers({
-            source: ticket.source,
-            externalId: ticket.externalId,
-            title: ticket.title,
-            body: ticket.body,
-            labels: ticket.labels,
-            url: ticket.url,
-          });
-        } catch (triggerErr) {
-          logger.warn(
-            { err: triggerErr, ticketId: ticket.externalId },
-            "Failed to fire ticket triggers for local blueprints",
+            "Failed to fire ticket triggers",
           );
         }
       }

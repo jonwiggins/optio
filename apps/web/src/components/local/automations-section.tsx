@@ -11,6 +11,8 @@
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -272,6 +274,7 @@ export function AutomationsSection({
   hosts: any[];
   defaultOpen?: boolean;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(defaultOpen);
   const [blueprints, setBlueprints] = useState<any[]>([]);
   const [triggersById, setTriggersById] = useState<Record<string, any[]>>({});
@@ -389,7 +392,8 @@ export function AutomationsSection({
                   onDelete={() => handleDelete(bp)}
                   onToggle={() => handleToggle(bp)}
                   onRun={() => handleRun(bp)}
-                  onEdit={() => setEditor({ mode: "edit", blueprint: bp })}
+                  // Edited in the unified session form, like every recurring session.
+                  onEdit={() => router.push(`/work/${bp.id}/edit`)}
                 />
               ))}
 
@@ -522,7 +526,12 @@ function AutomationRow({
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium truncate">{blueprint.name}</span>
+            <Link
+              href={`/local/automations/${blueprint.id}`}
+              className="text-sm font-medium truncate hover:text-primary transition-colors"
+            >
+              {blueprint.name}
+            </Link>
             {blueprint.agent ? (
               <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-primary/30 bg-primary/10 text-primary">
                 <Bot className="w-3 h-3" />

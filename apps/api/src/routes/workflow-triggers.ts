@@ -4,37 +4,16 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workflows } from "../db/schema.js";
-import * as triggerService from "../services/workflow-trigger-service.js";
+import * as triggerService from "../services/trigger-service.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { WorkflowTriggerSchema } from "../schemas/workflow.js";
+import {
+  CreateTriggerBodySchema,
+  UpdateTriggerBodySchema,
+  replyTriggerError,
+} from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
-
-const triggerTypeEnum = z
-  .enum(["manual", "schedule", "webhook", "ticket"])
-  .describe("Trigger classification");
-
-const configSchema = z.record(z.unknown()).default({}).describe("Trigger-specific config");
-
-const createTriggerSchema = z
-  .object({
-    type: triggerTypeEnum,
-    config: configSchema,
-    paramMapping: z
-      .record(z.unknown())
-      .optional()
-      .describe("How to map incoming data to workflow params"),
-    enabled: z.boolean().optional(),
-  })
-  .describe("Body for creating a new workflow trigger");
-
-const updateTriggerSchema = z
-  .object({
-    config: configSchema.optional(),
-    paramMapping: z.record(z.unknown()).optional(),
-    enabled: z.boolean().optional(),
-  })
-  .describe("Partial update to a workflow trigger");
 
 const workflowParamsSchema = z
   .object({
@@ -60,23 +39,6 @@ const TriggerResponseSchema = z
     trigger: WorkflowTriggerSchema,
   })
   .describe("Single trigger envelope");
-
-function validateConfigForType(type: string, config: Record<string, unknown>): string | null {
-  if (type === "schedule") {
-    if (!config.cronExpression || typeof config.cronExpression !== "string") {
-      return "Schedule triggers require a cronExpression in config";
-    }
-  }
-  if (type === "webhook") {
-    if (!config.path || typeof config.path !== "string") {
-      return "Webhook triggers require a path in config";
-    }
-  }
-  if (type === "ticket" && typeof config.source !== "string") {
-    return "Ticket triggers require a `source` in config";
-  }
-  return null;
-}
 
 async function getWorkflow(id: string) {
   const [workflow] = await db.select().from(workflows).where(eq(workflows.id, id));
@@ -110,7 +72,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
 
-      const triggers = await triggerService.listTriggers(id);
+      const triggers = await triggerService.listTriggers("job", id);
       reply.send({ triggers });
     },
   );
@@ -123,13 +85,12 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         operationId: "createWorkflowTrigger",
         summary: "Create a workflow trigger",
         description:
-          "Create a manual, schedule, or webhook trigger for a workflow. " +
-          "Schedule triggers must supply `cronExpression`; webhook triggers " +
-          "must supply `path`. Fails with 409 if a duplicate trigger type or " +
-          "webhook path already exists.",
+          "Attach a trigger to a Job: manual, schedule (`cronExpression`), webhook " +
+          "(`path`), ticket (`source`), or a GitHub / Slack / Linear event. " +
+          "Fails with 409 if the webhook path is already in use.",
         tags: ["Workflows"],
         params: workflowParamsSchema,
-        body: createTriggerSchema,
+        body: CreateTriggerBodySchema,
         response: {
           201: TriggerResponseSchema,
           400: ErrorResponseSchema,
@@ -149,14 +110,15 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
 
-      const configError = validateConfigForType(input.type, input.config);
+      const configError = triggerService.validateTriggerConfig(input.type, input.config);
       if (configError) {
         return reply.status(400).send({ error: configError });
       }
 
       try {
         const trigger = await triggerService.createTrigger({
-          workflowId: id,
+          targetType: "job",
+          targetId: id,
           type: input.type,
           config: input.config,
           paramMapping: input.paramMapping,
@@ -172,18 +134,8 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         }).catch(() => {});
         reply.status(201).send({ trigger });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === "duplicate_type") {
-          return reply
-            .status(409)
-            .send({ error: `A trigger of type "${input.type}" already exists for this workflow` });
-        }
-        if (msg === "duplicate_webhook_path") {
-          return reply
-            .status(409)
-            .send({ error: `Webhook path "${input.config.path}" is already in use` });
-        }
-        reply.status(400).send({ error: msg });
+        if (replyTriggerError(reply, err, input)) return;
+        reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
     },
   );
@@ -198,7 +150,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         description: "Partial update to a workflow trigger's config, params, or enabled flag.",
         tags: ["Workflows"],
         params: triggerParamsSchema,
-        body: updateTriggerSchema,
+        body: UpdateTriggerBodySchema,
         response: {
           200: TriggerResponseSchema,
           400: ErrorResponseSchema,
@@ -218,13 +170,13 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
 
-      const existing = await triggerService.getTrigger(triggerId);
-      if (!existing || existing.workflowId !== id) {
+      const existing = await triggerService.getTriggerFor("job", id, triggerId);
+      if (!existing) {
         return reply.status(404).send({ error: "Trigger not found" });
       }
 
       if (input.config) {
-        const configError = validateConfigForType(existing.type, input.config);
+        const configError = triggerService.validateTriggerConfig(existing.type, input.config);
         if (configError) {
           return reply.status(400).send({ error: configError });
         }
@@ -243,11 +195,8 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         }).catch(() => {});
         reply.send({ trigger });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === "duplicate_webhook_path") {
-          return reply.status(409).send({ error: `Webhook path is already in use` });
-        }
-        reply.status(400).send({ error: msg });
+        if (replyTriggerError(reply, err, input)) return;
+        reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
     },
   );
@@ -278,8 +227,8 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Workflow not found" });
       }
 
-      const existing = await triggerService.getTrigger(triggerId);
-      if (!existing || existing.workflowId !== id) {
+      const existing = await triggerService.getTriggerFor("job", id, triggerId);
+      if (!existing) {
         return reply.status(404).send({ error: "Trigger not found" });
       }
 

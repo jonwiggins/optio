@@ -11,7 +11,7 @@ struct OverviewView: View {
     @Environment(AppRouter.self) private var router
     @Environment(UsageStore.self) private var usage
     @State private var model = OverviewModel()
-    @State private var feed: SessionsFeedModel?
+    @State private var feed: WorkFeedModel?
     @State private var showNew = false
 
     var body: some View {
@@ -42,19 +42,19 @@ struct OverviewView: View {
             .navigationDestination(for: LocalRoute.self) { route in
                 if case .terminal(let id) = route { LocalTerminalScreen(terminalId: id, hosts: model.localHosts) }
             }
-            .sessionDestinations()
+            .workDestinations()
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { Task { await refreshAll() } } label: { Image(systemName: "arrow.clockwise") }
                         .accessibilityLabel("Refresh")
                     Button { showNew = true } label: { Image(systemName: "plus") }
-                        .accessibilityLabel("New session")
+                        .accessibilityLabel("New work")
                 }
             }
-            .sheet(isPresented: $showNew) { NewSessionSheet() }
+            .sheet(isPresented: $showNew) { NewWorkSheet() }
             .observesUsage()
             .task {
-                if feed == nil { feed = SessionsFeedModel(api: api) }
+                if feed == nil { feed = WorkFeedModel(api: api) }
                 feed?.start()
                 while !Task.isCancelled {
                     await model.refresh(api: api)
@@ -130,7 +130,7 @@ struct OverviewView: View {
 
             Section {
                 if model.recentTasks.isEmpty {
-                    EmptyState(title: "No tasks yet", systemImage: "checklist", message: "Start a session that opens a PR in one of your repos.", actionTitle: "New session") { showNew = true }
+                    EmptyState(title: "No tasks yet", systemImage: "checklist", message: "Start work that opens a PR in one of your repos.", actionTitle: "New work") { showNew = true }
                         .listRowBackground(Color.clear)
                 } else {
                     ForEach(model.recentTasks) { task in
@@ -138,7 +138,7 @@ struct OverviewView: View {
                     }
                 }
             } header: {
-                SectionHeader(title: "Recent") { router.openSessions(.history) }.textCase(nil)
+                SectionHeader(title: "Recent") { router.openWork(.history) }.textCase(nil)
             }
 
             OtherServersSection()
@@ -176,15 +176,15 @@ struct OverviewView: View {
                     }
                 }
                 if terminals.count > 4 {
-                    Button("\(terminals.count - 4) more waiting in Sessions") { router.openSessions(.active) }.font(.footnote)
+                    Button("\(terminals.count - 4) more waiting in Work") { router.openWork(.active) }.font(.footnote)
                 }
             } header: {
-                SectionHeader(title: "Needs you", detail: "\(terminals.count + tasks.count)", tone: .accent) { router.openSessions(.active) }.textCase(nil)
+                SectionHeader(title: "Needs you", detail: "\(terminals.count + tasks.count)", tone: .accent) { router.openWork(.active) }.textCase(nil)
             }
         }
     }
 
-    private var counts: SessionCounts { feed?.counts ?? SessionCounts() }
+    private var counts: WorkCounts { feed?.counts ?? WorkCounts() }
 
     /// "N running · N waiting for you · N need you · N recurring" (the web's page subtitle).
     private var subtitleText: String {
@@ -230,11 +230,11 @@ struct OverviewView: View {
                     .foregroundStyle(.secondary)
                 Text("Welcome to Optio").font(.title2.weight(.semibold))
                 Text(model.repoCount == 0
-                     ? "Add a repository or pair a machine, then start your first session to get an AI agent working."
-                     : "\(model.repoCount ?? 0) \(model.repoCount == 1 ? "repo" : "repos") connected. Start your first session.")
+                     ? "Add a repository or pair a machine, then start your first work to get an AI agent going."
+                     : "\(model.repoCount ?? 0) \(model.repoCount == 1 ? "repo" : "repos") connected. Start something.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
-                Button("New session") { showNew = true }.buttonStyle(.borderedProminent).tint(.primary)
+                Button("New work") { showNew = true }.buttonStyle(.borderedProminent).tint(.primary)
                 UsageTokenBanners()
             }
             .padding()

@@ -1,9 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { usePageTitle } from "@/hooks/use-page-title";
-import { SessionForm } from "@/components/session-form/session-form";
-
-export default function NewSessionPage() {
-  usePageTitle("New session");
-  return <SessionForm />;
+/** The form moved from /sessions/new to /work/new (v0.6). */
+export default function Page() {
+  redirect("/work/new");
 }

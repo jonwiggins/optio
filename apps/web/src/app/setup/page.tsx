@@ -2634,7 +2634,7 @@ export default function SetupPage() {
 
               <div className="flex justify-center gap-3">
                 <button
-                  onClick={() => router.push("/sessions/new")}
+                  onClick={() => router.push("/work/new")}
                   className="flex items-center gap-2 px-6 py-2.5 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover"
                 >
                   Create Your First Task <ArrowRight className="w-4 h-4" />

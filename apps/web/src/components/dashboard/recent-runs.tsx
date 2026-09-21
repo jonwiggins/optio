@@ -58,12 +58,12 @@ export function RecentRuns({ runs }: { runs: RecentRun[] }) {
         <h2 className="text-sm font-medium text-text-heading">Recent</h2>
         <div className="flex items-center gap-2">
           <Link
-            href="/sessions/new"
+            href="/work/new"
             className="text-xs text-primary hover:underline flex items-center gap-1"
           >
             <Plus className="w-3 h-3" /> New task
           </Link>
-          <Link href="/sessions?view=history" className="text-xs text-primary hover:underline">
+          <Link href="/work?view=history" className="text-xs text-primary hover:underline">
             All &rarr;
           </Link>
         </div>
@@ -73,7 +73,7 @@ export function RecentRuns({ runs }: { runs: RecentRun[] }) {
           icon={ListTodo}
           title="Nothing has run yet"
           description="Tasks, job runs, and agent turns will show up here as they happen."
-          action={{ label: "Create a task", href: "/sessions/new" }}
+          action={{ label: "Create a task", href: "/work/new" }}
         />
       ) : (
         <div className="rounded-xl border border-border/50 bg-bg-card divide-y divide-border/40 overflow-hidden">

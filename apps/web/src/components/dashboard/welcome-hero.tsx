@@ -61,7 +61,7 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
       icon: Rocket,
       title: "Create your first task",
       description: "Describe what you want built. Optio spins up an agent and opens a PR.",
-      href: "/sessions/new",
+      href: "/work/new",
       done: false,
     },
   ];
@@ -166,9 +166,9 @@ export function WelcomeHero({ repoCount }: { repoCount: number }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <QuickLink
           icon={ListTodo}
-          label="Sessions"
-          description="View all sessions"
-          href="/sessions"
+          label="Work"
+          description="Everything running and recurring"
+          href="/work"
         />
         <QuickLink
           icon={FolderGit2}

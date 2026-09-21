@@ -15,11 +15,11 @@ import {
   RecentRuns,
   LimitsPanel,
   collectProviderLimits,
-  SessionsBoard,
+  WorkBoard,
 } from "@/components/dashboard";
 import Link from "next/link";
-import { useSessionsFeed } from "@/hooks/use-sessions-feed";
-import { countSessions } from "@/lib/sessions-feed";
+import { useWorkFeed } from "@/hooks/use-work-feed";
+import { countWork } from "@/lib/work-feed";
 import { UpdateBanner } from "@/components/update-banner";
 
 export default function OverviewPage() {
@@ -40,8 +40,8 @@ export default function OverviewPage() {
     refresh,
     refreshUsage,
   } = useDashboardData();
-  const feed = useSessionsFeed();
-  const counts = countSessions(feed.rows);
+  const feed = useWorkFeed();
+  const counts = countWork(feed.rows);
 
   if (loading) {
     return (
@@ -133,10 +133,10 @@ export default function OverviewPage() {
             <RefreshCw className="w-4 h-4" />
           </button>
           <Link
-            href="/sessions/new"
+            href="/work/new"
             className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
           >
-            <Plus className="w-4 h-4" /> New session
+            <Plus className="w-4 h-4" /> New work
           </Link>
         </div>
       </div>
@@ -151,7 +151,7 @@ export default function OverviewPage() {
         onRefreshHosts={refresh}
       />
 
-      <SessionsBoard rows={feed.rows} loading={feed.loading} />
+      <WorkBoard rows={feed.rows} loading={feed.loading} />
 
       <AgentComparison />
 

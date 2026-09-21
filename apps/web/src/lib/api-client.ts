@@ -4,7 +4,7 @@
  * Bearer token to the real API — the session token never touches client-side JS.
  */
 
-import type { LocalTranscriptEntry } from "@optio/shared";
+import type { LocalTranscriptEntry, TriggerType } from "@optio/shared";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
@@ -1375,7 +1375,7 @@ export const api = {
   createWorkflowTrigger: (
     workflowId: string,
     data: {
-      type: "manual" | "schedule" | "webhook";
+      type: TriggerType;
       config?: Record<string, unknown>;
       paramMapping?: Record<string, unknown>;
       enabled?: boolean;
@@ -1602,7 +1602,7 @@ export const api = {
   createTaskTrigger: (
     id: string,
     data: {
-      type: "manual" | "schedule" | "webhook" | "ticket";
+      type: TriggerType;
       config?: Record<string, unknown>;
       paramMapping?: Record<string, unknown>;
       enabled?: boolean;
@@ -1665,6 +1665,8 @@ export const api = {
       repoUrl: string;
       repoBranch: string;
       agentType: string | null;
+      /** Per-run agent parameters (model, effort, …); null = the repo's defaults. */
+      agentOptions: Record<string, string | boolean> | null;
       maxRetries: number;
       priority: number;
       enabled: boolean;
@@ -1690,7 +1692,7 @@ export const api = {
   createTaskConfigTrigger: (
     id: string,
     data: {
-      type: "manual" | "schedule" | "webhook" | "ticket";
+      type: TriggerType;
       config?: Record<string, unknown>;
       paramMapping?: Record<string, unknown>;
       enabled?: boolean;
@@ -1820,7 +1822,7 @@ export const api = {
   createPersistentAgentTrigger: (
     id: string,
     data: {
-      type: "manual" | "schedule" | "webhook" | "ticket";
+      type: TriggerType;
       config?: Record<string, unknown>;
       enabled?: boolean;
     },
@@ -1962,6 +1964,8 @@ export const api = {
 
   listLocalBlueprints: () => request<{ blueprints: any[] }>("/api/local/blueprints"),
 
+  getLocalBlueprint: (id: string) => request<{ blueprint: any }>(`/api/local/blueprints/${id}`),
+
   createLocalBlueprint: (data: {
     name: string;
     description?: string;
@@ -1992,6 +1996,8 @@ export const api = {
       hostId: string | null;
       dir: string | null;
       repoUrl: string | null;
+      /** Agent spawns work on a new branch off this base and open a PR; null = the dir as it is. */
+      baseBranch: string | null;
       commandTemplate: string;
       /** Saved prompt (Prompts library) rendered as the agent prompt instead of commandTemplate. */
       promptTemplateId: string | null;
@@ -2022,7 +2028,7 @@ export const api = {
   createLocalBlueprintTrigger: (
     id: string,
     data: {
-      type: "manual" | "schedule" | "webhook" | "ticket" | "github" | "slack" | "linear";
+      type: TriggerType;
       config?: Record<string, unknown>;
       paramMapping?: Record<string, unknown>;
       enabled?: boolean;

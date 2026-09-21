@@ -12,7 +12,7 @@ export default function LegacyLocalRedirect() {
   const router = useRouter();
   useEffect(() => {
     const wantsNew = new URLSearchParams(window.location.search).get("new") === "1";
-    router.replace(wantsNew ? "/sessions/new" : "/sessions");
+    router.replace(wantsNew ? "/work/new" : "/work");
   }, [router]);
   return null;
 }

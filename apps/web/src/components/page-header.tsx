@@ -3,7 +3,7 @@ import type { ComponentType, ReactNode } from "react";
 /**
  * Shared header for list / index pages — pairs with `DetailHeader` for detail
  * pages. Establishes the visual rhythm that ties /tasks, /jobs, /reviews,
- * /issues, /agents, /sessions together: same title scale, the page's sidebar
+ * /issues, /agents, /work together: same title scale, the page's sidebar
  * icon repeated as a glyph next to the title, a one-line muted description,
  * and a gradient-divider hairline anchoring the page.
  */

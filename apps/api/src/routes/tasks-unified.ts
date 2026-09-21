@@ -18,9 +18,15 @@ import { z } from "zod";
 import * as unifiedTaskService from "../services/unified-task-service.js";
 import * as workflowService from "../services/workflow-service.js";
 import * as taskConfigService from "../services/task-config-service.js";
+import * as triggerService from "../services/trigger-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import {
+  CreateTriggerBodySchema,
+  UpdateTriggerBodySchema,
+  replyTriggerError,
+} from "../schemas/trigger.js";
 
 const flexibleTimestamp = z.union([z.date(), z.string()]);
 
@@ -44,19 +50,6 @@ const TriggerSchema = z
   })
   .passthrough();
 
-const createTriggerSchema = z.object({
-  type: z.enum(["manual", "schedule", "webhook", "ticket"]),
-  config: z.record(z.unknown()).default({}),
-  paramMapping: z.record(z.unknown()).optional(),
-  enabled: z.boolean().optional(),
-});
-
-const updateTriggerSchema = z.object({
-  config: z.record(z.unknown()).optional(),
-  paramMapping: z.record(z.unknown()).optional(),
-  enabled: z.boolean().optional(),
-});
-
 const triggerParamsSchema = z.object({
   id: z.string().describe("Parent Task id"),
   triggerId: z.string().describe("Trigger id"),
@@ -73,19 +66,6 @@ const createRunSchema = z
   })
   .optional()
   .default({});
-
-function validateTriggerConfig(type: string, config: Record<string, unknown>): string | null {
-  if (type === "schedule" && typeof config.cronExpression !== "string") {
-    return "Schedule triggers require a cronExpression in config";
-  }
-  if (type === "webhook" && typeof config.path !== "string") {
-    return "Webhook triggers require a path in config";
-  }
-  if (type === "ticket" && typeof config.source !== "string") {
-    return "Ticket triggers require a `source` in config";
-  }
-  return null;
-}
 
 export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -249,7 +229,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         summary: "Attach a trigger to a Task",
         tags: ["Tasks"],
         params: IdParamsSchema,
-        body: createTriggerSchema,
+        body: CreateTriggerBodySchema,
         response: {
           201: z.object({ trigger: TriggerSchema }),
           400: ErrorResponseSchema,
@@ -268,42 +248,22 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       }
 
       const input = req.body;
-      const configError = validateTriggerConfig(input.type, input.config);
+      const configError = triggerService.validateTriggerConfig(input.type, input.config);
       if (configError) return reply.status(400).send({ error: configError });
 
       try {
-        if (parent.type === "repo-blueprint") {
-          const trigger = await taskConfigService.createTaskConfigTrigger({
-            taskConfigId: parent.data.id as string,
-            type: input.type,
-            config: input.config,
-            paramMapping: input.paramMapping,
-            enabled: input.enabled,
-          });
-          return reply.status(201).send({ trigger });
-        }
-        // standalone
-        const trigger = await workflowService.createWorkflowTrigger({
-          workflowId: parent.data.id as string,
+        const trigger = await triggerService.createTrigger({
+          targetType: unifiedTaskService.targetTypeFor(parent),
+          targetId: parent.data.id as string,
           type: input.type,
           config: input.config,
           paramMapping: input.paramMapping,
           enabled: input.enabled,
         });
-        // Ensure standalone triggers don't have nextFireAt out of sync with our
-        // computeNextFire in services — workflowService already handles this.
         return reply.status(201).send({ trigger });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === "duplicate_type") {
-          return reply
-            .status(409)
-            .send({ error: `A trigger of type "${input.type}" already exists` });
-        }
-        if (msg === "duplicate_webhook_path") {
-          return reply.status(409).send({ error: "Webhook path is already in use" });
-        }
-        return reply.status(400).send({ error: msg });
+        if (replyTriggerError(reply, err, input)) return;
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
     },
   );
@@ -318,7 +278,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         summary: "Update a trigger",
         tags: ["Tasks"],
         params: triggerParamsSchema,
-        body: updateTriggerSchema,
+        body: UpdateTriggerBodySchema,
         response: {
           200: z.object({ trigger: TriggerSchema }),
           400: ErrorResponseSchema,
@@ -340,26 +300,17 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       if (!existing) return reply.status(404).send({ error: "Trigger not found" });
 
       if (req.body.config) {
-        const err = validateTriggerConfig(existing.type, req.body.config);
+        const err = triggerService.validateTriggerConfig(existing.type, req.body.config);
         if (err) return reply.status(400).send({ error: err });
       }
 
       try {
-        if (parent.type === "repo-blueprint") {
-          const trigger = await taskConfigService.updateTaskConfigTrigger(triggerId, req.body);
-          if (!trigger) return reply.status(404).send({ error: "Trigger not found" });
-          return reply.send({ trigger });
-        }
-        // standalone
-        const trigger = await workflowService.updateWorkflowTrigger(triggerId, req.body);
+        const trigger = await triggerService.updateTrigger(triggerId, req.body);
         if (!trigger) return reply.status(404).send({ error: "Trigger not found" });
         return reply.send({ trigger });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === "duplicate_webhook_path") {
-          return reply.status(409).send({ error: "Webhook path is already in use" });
-        }
-        return reply.status(400).send({ error: msg });
+        if (replyTriggerError(reply, err, req.body)) return;
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
     },
   );
@@ -392,11 +343,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       const existing = await unifiedTaskService.getTriggerForParent(parent, triggerId);
       if (!existing) return reply.status(404).send({ error: "Trigger not found" });
 
-      if (parent.type === "repo-blueprint") {
-        await taskConfigService.deleteTaskConfigTrigger(triggerId);
-      } else {
-        await workflowService.deleteWorkflowTrigger(triggerId);
-      }
+      await triggerService.deleteTrigger(triggerId);
       reply.status(204).send(null);
     },
   );

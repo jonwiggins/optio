@@ -2,8 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { timingSafeEqual, createHmac } from "node:crypto";
 import { z } from "zod";
-import * as workflowService from "../services/workflow-service.js";
-import * as taskConfigService from "../services/task-config-service.js";
+import { getWebhookTriggerByPath } from "../services/trigger-service.js";
+import { fireTrigger } from "../services/trigger-dispatch.js";
 import { logger } from "../logger.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 
@@ -101,7 +101,7 @@ export async function hookRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { webhookPath } = req.params;
 
-      const trigger = await workflowService.getWebhookTriggerByPath(webhookPath);
+      const trigger = await getWebhookTriggerByPath(webhookPath);
       if (!trigger || !trigger.enabled) {
         return reply.status(404).send({ error: "Webhook trigger not found" });
       }
@@ -128,101 +128,46 @@ export async function hookRoutes(rawApp: FastifyInstance) {
       const paramMapping = trigger.paramMapping as Record<string, unknown> | null;
       const params = paramMapping ? applyParamMapping(body, paramMapping) : body;
 
-      if (trigger.targetType === "job") {
-        if (!trigger.workflowId) {
-          return reply.status(404).send({ error: "Webhook trigger has no workflow" });
-        }
-        const workflow = await workflowService.getWorkflow(trigger.workflowId);
-        if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
-        if (!workflow.enabled) return reply.status(404).send({ error: "Workflow is disabled" });
-        const run = await workflowService.createWorkflowRun(trigger.workflowId, {
-          triggerId: trigger.id,
-          params,
-        });
-        logger.info(
-          { runId: run.id, workflowId: trigger.workflowId, triggerId: trigger.id },
-          "Webhook trigger created workflow run",
-        );
-        return reply.status(202).send({ runId: run.id });
-      }
-
-      if (trigger.targetType === "task_config") {
-        const taskConfig = await taskConfigService.getTaskConfig(trigger.targetId);
-        if (!taskConfig || !taskConfig.enabled) {
-          return reply.status(404).send({ error: "Target task config not found or disabled" });
-        }
-        const task = await taskConfigService.instantiateTask(taskConfig.id, {
-          triggerId: trigger.id,
-          params,
-        });
-        logger.info(
-          { taskId: task.id, taskConfigId: taskConfig.id, triggerId: trigger.id },
-          "Webhook trigger created task from task_config",
-        );
-        return reply.status(202).send({ taskId: task.id });
-      }
-
-      if (trigger.targetType === "persistent_agent") {
-        const { getPersistentAgentUnscoped, wakeAgent, buildSenderId } =
-          await import("../services/persistent-agent-service.js");
-        const agent = await getPersistentAgentUnscoped(trigger.targetId);
-        if (!agent || !agent.enabled) {
-          return reply.status(404).send({ error: "Target persistent agent not found or disabled" });
-        }
-        const messageBody =
-          typeof body === "string"
-            ? body
-            : `Webhook payload:\n${JSON.stringify(params ?? body, null, 2)}`;
-        await wakeAgent({
-          agentId: agent.id,
+      // One dispatcher for every target: a Job run, a Task, a Local terminal,
+      // a persistent-agent message. A spawn that fails (no host, dir
+      // unresolved) is the caller's 404-ish outcome, not a 500 — the trigger
+      // itself was valid.
+      let fired;
+      try {
+        fired = await fireTrigger(trigger, {
           source: "webhook",
-          body: messageBody,
-          senderType: "external",
-          senderId: buildSenderId({ type: "external", label: `webhook:${webhookPath}` }),
-          senderName: `webhook:${webhookPath}`,
-          structuredPayload: (params as Record<string, unknown> | null) ?? undefined,
+          params,
+          message:
+            typeof body === "string"
+              ? body
+              : `Webhook payload:\n${JSON.stringify(params ?? body, null, 2)}`,
         });
-        logger.info(
-          { agentId: agent.id, slug: agent.slug, triggerId: trigger.id },
-          "Webhook trigger woke persistent agent",
+      } catch (err) {
+        logger.warn(
+          { err, triggerId: trigger.id, targetType: trigger.targetType },
+          "Webhook trigger failed to start its target",
         );
-        // Reuse the runId field for back-compat with the existing webhook
-        // response shape — the agent id serves the same caller purpose.
-        return reply.status(202).send({ runId: agent.id });
+        return reply
+          .status(404)
+          .send({ error: err instanceof Error ? err.message : "Trigger target failed to start" });
       }
-
-      if (trigger.targetType === "local_blueprint") {
-        const { getBlueprint, spawnFromBlueprint } =
-          await import("../services/local-blueprint-service.js");
-        const blueprint = await getBlueprint(trigger.targetId);
-        if (!blueprint || !blueprint.enabled) {
-          return reply.status(404).send({ error: "Target blueprint not found or disabled" });
-        }
-        try {
-          const terminal = await spawnFromBlueprint(blueprint, {
-            triggerId: trigger.id,
-            spawnedBy: "trigger",
-            params,
-          });
-          logger.info(
-            { terminalId: terminal.id, blueprintId: blueprint.id, triggerId: trigger.id },
-            "Webhook trigger spawned local terminal",
-          );
-          return reply.status(202).send({ terminalId: terminal.id });
-        } catch (err) {
-          // Spawn failures (no host, dir unresolved) are the caller's 404-ish
-          // outcome, not a 500 — the trigger itself was valid.
-          logger.warn(
-            { err, blueprintId: blueprint.id, triggerId: trigger.id },
-            "Webhook trigger failed to spawn local terminal",
-          );
-          return reply
-            .status(404)
-            .send({ error: err instanceof Error ? err.message : "Spawn failed" });
-        }
+      if (!fired) {
+        return reply.status(404).send({ error: "Trigger target not found or disabled" });
       }
-
-      return reply.status(404).send({ error: "Unknown trigger target type" });
+      switch (fired.kind) {
+        case "workflow_run":
+          return reply.status(202).send({ runId: fired.id });
+        case "task":
+          return reply.status(202).send({ taskId: fired.id });
+        case "local_terminal":
+          return reply.status(202).send({ terminalId: fired.id });
+        case "persistent_agent":
+          // The agent id rides in runId for back-compat with the original
+          // webhook response shape.
+          return reply.status(202).send({ runId: fired.id });
+        default:
+          return reply.status(202).send({});
+      }
     },
   );
 }

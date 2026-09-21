@@ -11,13 +11,24 @@ const mockCreateTrigger = vi.fn();
 const mockUpdateTrigger = vi.fn();
 const mockDeleteTrigger = vi.fn();
 
-vi.mock("../services/workflow-trigger-service.js", () => ({
-  listTriggers: (...args: unknown[]) => mockListTriggers(...args),
-  getTrigger: (...args: unknown[]) => mockGetTrigger(...args),
-  createTrigger: (...args: unknown[]) => mockCreateTrigger(...args),
-  updateTrigger: (...args: unknown[]) => mockUpdateTrigger(...args),
-  deleteTrigger: (...args: unknown[]) => mockDeleteTrigger(...args),
-}));
+vi.mock("../services/trigger-service.js", async () => {
+  const actual = await vi.importActual<typeof import("../services/trigger-service.js")>(
+    "../services/trigger-service.js",
+  );
+  return {
+    validateTriggerConfig: actual.validateTriggerConfig,
+    listTriggers: (...args: unknown[]) => mockListTriggers(...args),
+    // The real getTriggerFor is getTrigger plus an ownership check; keep that
+    // shape so the "wrong workflow" cases exercise it.
+    getTriggerFor: async (targetType: string, targetId: string, id: string) => {
+      const row = await mockGetTrigger(id);
+      return row && row.targetType === targetType && row.targetId === targetId ? row : null;
+    },
+    createTrigger: (...args: unknown[]) => mockCreateTrigger(...args),
+    updateTrigger: (...args: unknown[]) => mockUpdateTrigger(...args),
+    deleteTrigger: (...args: unknown[]) => mockDeleteTrigger(...args),
+  };
+});
 
 const mockDbSelect = vi.fn();
 vi.mock("../db/client.js", () => ({
@@ -79,7 +90,7 @@ describe("GET /api/jobs/:id/triggers", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().triggers).toHaveLength(1);
-    expect(mockListTriggers).toHaveBeenCalledWith("wf-1");
+    expect(mockListTriggers).toHaveBeenCalledWith("job", "wf-1");
   });
 
   it("returns 404 for nonexistent workflow", async () => {
@@ -143,7 +154,8 @@ describe("POST /api/jobs/:id/triggers", () => {
     expect(res.statusCode).toBe(201);
     expect(mockCreateTrigger).toHaveBeenCalledWith(
       expect.objectContaining({
-        workflowId: "wf-1",
+        targetType: "job",
+        targetId: "wf-1",
         type: "manual",
       }),
     );
@@ -255,9 +267,9 @@ describe("POST /api/jobs/:id/triggers", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("returns 409 when duplicate type exists", async () => {
+  it("returns 400 when the target can't take the type", async () => {
     mockGetWorkflowReturns(mockWorkflow);
-    mockCreateTrigger.mockRejectedValue(new Error("duplicate_type"));
+    mockCreateTrigger.mockRejectedValue(new Error("unsupported_type"));
 
     const res = await app.inject({
       method: "POST",
@@ -265,7 +277,41 @@ describe("POST /api/jobs/:id/triggers", () => {
       payload: { type: "manual", config: {} },
     });
 
-    expect(res.statusCode).toBe(409);
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("creates a GitHub event trigger", async () => {
+    mockGetWorkflowReturns(mockWorkflow);
+    mockCreateTrigger.mockResolvedValue({
+      ...mockTriggerData,
+      type: "github",
+      config: { events: ["pr_opened"] },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/jobs/wf-1/triggers",
+      payload: { type: "github", config: { events: ["pr_opened"] } },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(mockCreateTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({ targetType: "job", type: "github" }),
+    );
+  });
+
+  it("rejects a personal GitHub event trigger with no login", async () => {
+    mockGetWorkflowReturns(mockWorkflow);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/jobs/wf-1/triggers",
+      payload: { type: "github", config: { events: ["review_requested"] } },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/login/);
+    expect(mockCreateTrigger).not.toHaveBeenCalled();
   });
 
   it("returns 409 when webhook path already in use", async () => {
@@ -368,7 +414,7 @@ describe("PATCH /api/jobs/:id/triggers/:triggerId", () => {
 
   it("returns 404 when trigger belongs to different workflow", async () => {
     mockGetWorkflowReturns(mockWorkflow);
-    mockGetTrigger.mockResolvedValue({ ...mockTriggerData, workflowId: "wf-other" });
+    mockGetTrigger.mockResolvedValue({ ...mockTriggerData, targetId: "wf-other" });
 
     const res = await app.inject({
       method: "PATCH",
@@ -483,7 +529,7 @@ describe("DELETE /api/jobs/:id/triggers/:triggerId", () => {
 
   it("returns 404 when trigger belongs to different workflow", async () => {
     mockGetWorkflowReturns(mockWorkflow);
-    mockGetTrigger.mockResolvedValue({ ...mockTriggerData, workflowId: "wf-other" });
+    mockGetTrigger.mockResolvedValue({ ...mockTriggerData, targetId: "wf-other" });
 
     const res = await app.inject({
       method: "DELETE",

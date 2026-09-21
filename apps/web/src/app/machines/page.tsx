@@ -7,12 +7,12 @@ import { usePageTitle } from "@/hooks/use-page-title";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
-import { shortDir } from "@/lib/sessions-feed";
+import { shortDir } from "@/lib/work-feed";
 import { AutomationsSection } from "@/components/local/automations-section";
 
 /**
  * Your paired machines (Optio Local hosts) and the directories each one
- * offers as a place to run sessions. Pairing is setup, not daily work, so
+ * offers as a place to run work. Pairing is setup, not daily work, so
  * this lives in the Library next to Repos. Local Automations (agent /
  * terminal specs that fire on events in one of these directories) are
  * edited here too — they're per-machine configuration, not live work.
@@ -75,10 +75,10 @@ export default function MachinesPage() {
                   </p>
                 </div>
                 <Link
-                  href="/sessions"
+                  href="/work"
                   className="text-[11px] text-primary hover:underline inline-flex items-center gap-1 shrink-0"
                 >
-                  Sessions <ExternalLink className="w-3 h-3" />
+                  Work <ExternalLink className="w-3 h-3" />
                 </Link>
               </div>
               <ul className="mt-3 space-y-1">

@@ -31,10 +31,10 @@ final class WidgetContactSheetTests: XCTestCase {
             for (label, e) in entries { cell(label, size: CGSize(width: 170, height: 170)) { SessionsSmall(entry: e) } }
         }
         try sheet("sessions-medium", columns: 2) {
-            for (label, e) in entries { cell(label, size: CGSize(width: 364, height: 170)) { SessionsBoard(entry: e, budget: 2, expandedRows: false) } }
+            for (label, e) in entries { cell(label, size: CGSize(width: 364, height: 170)) { WorkBoard(entry: e, budget: 2, expandedRows: false) } }
         }
         try sheet("sessions-large", columns: 3) {
-            for (label, e) in entries.prefix(6) { cell(label, size: CGSize(width: 364, height: 382)) { SessionsBoard(entry: e, budget: 6, expandedRows: true) } }
+            for (label, e) in entries.prefix(6) { cell(label, size: CGSize(width: 364, height: 382)) { WorkBoard(entry: e, budget: 6, expandedRows: true) } }
         }
     }
 

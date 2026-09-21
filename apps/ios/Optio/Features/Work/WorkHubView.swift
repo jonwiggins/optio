@@ -1,23 +1,23 @@
 import SwiftUI
 
-/// The "Work" tab: Sessions · Reviews · Inbox, matching the web sidebar group.
-/// One large title; the section switcher lives under it and each section owns
-/// its own list → detail flow inside this stack. The per-kind detail screens
-/// (task, job run, agent, local terminal, pod session) are destinations of
-/// Sessions rows, not sections of their own.
+/// The "Work" tab: All · Reviews · Inbox, matching the web's top-level Work /
+/// Reviews / Inbox entries. One large title; the section switcher lives under
+/// it and each section owns its own list → detail flow inside this stack. The
+/// per-kind detail screens (task, job run, agent, local terminal, pod session)
+/// are destinations of Work rows, not sections of their own.
 struct WorkHubView: View {
-    enum Section: String, CaseIterable { case sessions, reviews, inbox }
-    @State private var section: Section = .sessions
+    enum Section: String, CaseIterable { case all, reviews, inbox }
+    @State private var section: Section = .all
     @State private var path = NavigationPath()
     @Environment(AppRouter.self) private var router
 
     var body: some View {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
-                HubSwitcher(options: [(Section.sessions, "Sessions"), (.reviews, "Reviews"), (.inbox, "Inbox")], selection: $section)
+                HubSwitcher(options: [(Section.all, "All"), (.reviews, "Reviews"), (.inbox, "Inbox")], selection: $section)
                 Group {
                     switch section {
-                    case .sessions: SessionsView()
+                    case .all: WorkListView()
                     case .reviews: ReviewsListView()
                     case .inbox: IssuesListView()
                     }
@@ -27,7 +27,7 @@ struct WorkHubView: View {
             .navigationTitle("Work")
             .hubChrome()
             .serverSwitcherToolbar()
-            .sessionDestinations()
+            .workDestinations()
             .navigationDestination(for: AppRouter.PendingDetail.self) { detail in
                 switch detail.kind {
                 case .task: TaskDetailView(taskId: detail.id, focusComposer: detail.compose)
@@ -39,15 +39,15 @@ struct WorkHubView: View {
             .onAppear(perform: consumeRoute)
             .onChange(of: router.pendingSection) { _, _ in consumeRoute() }
             .onChange(of: router.pendingDetail) { _, _ in consumeRoute() }
-            .onChange(of: router.createdSession) { _, _ in consumeCreated() }
+            .onChange(of: router.createdWork) { _, _ in consumeCreated() }
             .toast(router.createdToast, tone: .success) { router.createdToast = nil }
         }
     }
 
-    /// The New session form just made something: push its detail screen.
+    /// The New work form just made something: push its detail screen.
     private func consumeCreated() {
-        guard let destination = router.createdSession else { return }
-        router.createdSession = nil
+        guard let destination = router.createdWork else { return }
+        router.createdWork = nil
         path.append(destination)
     }
 
@@ -55,7 +55,7 @@ struct WorkHubView: View {
     private func consumeRoute() {
         guard let pending = router.pendingSection else { return }
         let mapped: Section? = switch pending {
-        case .sessions: .sessions
+        case .work: .all
         case .reviews: .reviews
         case .inbox: .inbox
         default: nil

@@ -144,7 +144,7 @@ async function seed(): Promise<void> {
   });
 
   // A paired (offline) machine with one checkout of the seeded repo, so the
-  // New session form can create Local kinds — terminals park in
+  // New work form can create Local kinds — terminals park in
   // pending/host_offline without a daemon, which is all the form needs.
   await api("/api/local/hosts/register", {
     name: "E2E laptop",

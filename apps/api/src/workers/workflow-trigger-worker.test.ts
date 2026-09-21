@@ -31,11 +31,17 @@ const mockMarkTriggerFired = vi.fn();
 const mockGetTaskConfig = vi.fn();
 const mockInstantiateTask = vi.fn();
 
+// The worker finds due schedules through the trigger service and fires them
+// through the dispatcher, which reaches the per-kind services mocked here.
+vi.mock("../services/trigger-service.js", () => ({
+  listDueScheduleTriggers: (...args: unknown[]) => mockGetDueScheduleTriggersAll(...args),
+  advanceSchedule: (...args: unknown[]) => mockMarkTriggerFired(...args),
+  markTriggerFired: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../services/workflow-service.js", () => ({
-  getDueScheduleTriggersAll: (...args: unknown[]) => mockGetDueScheduleTriggersAll(...args),
   getWorkflow: (...args: unknown[]) => mockGetWorkflow(...args),
   createWorkflowRun: (...args: unknown[]) => mockCreateWorkflowRun(...args),
-  markTriggerFired: (...args: unknown[]) => mockMarkTriggerFired(...args),
 }));
 
 vi.mock("../services/task-config-service.js", () => ({
@@ -123,6 +129,7 @@ describe("workflow-trigger-worker", () => {
     expect(mockInstantiateTask).toHaveBeenCalledWith("tc-1", {
       triggerId: "t-tc-1",
       params: undefined,
+      ticket: undefined,
     });
     expect(mockMarkTriggerFired).toHaveBeenCalledWith("t-tc-1", "0 0 * * *");
   });

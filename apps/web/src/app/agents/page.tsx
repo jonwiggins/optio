@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 export default function LegacyRedirect() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/sessions?view=agents");
+    router.replace("/work?view=agents");
   }, [router]);
   return null;
 }

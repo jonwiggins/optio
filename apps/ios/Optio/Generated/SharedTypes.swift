@@ -3622,356 +3622,6 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
     }
 }
 
-public enum LocalTriggerType: String, Codable, Hashable, Sendable, CaseIterable {
-    case manual = "manual"
-    case schedule = "schedule"
-    case webhook = "webhook"
-    case ticket = "ticket"
-    case github = "github"
-    case slack = "slack"
-    case linear = "linear"
-    /// Fallback for raw values this client does not know about yet.
-    case unknown = "__unknown__"
-
-    public static let allCases: [LocalTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear]
-
-    public init(from decoder: any Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
-        self = LocalTriggerType(rawValue: raw) ?? .unknown
-    }
-}
-
-/// Things that can happen to you on GitHub.
-public enum LocalGitHubEventKind: String, Codable, Hashable, Sendable, CaseIterable {
-    case reviewRequested = "review_requested"
-    case mentioned = "mentioned"
-    case assigned = "assigned"
-    case prOpened = "pr_opened"
-    case issueOpened = "issue_opened"
-    /// Fallback for raw values this client does not know about yet.
-    case unknown = "__unknown__"
-
-    public static let allCases: [LocalGitHubEventKind] = [.reviewRequested, .mentioned, .assigned, .prOpened, .issueOpened]
-
-    public init(from decoder: any Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
-        self = LocalGitHubEventKind(rawValue: raw) ?? .unknown
-    }
-}
-
-public struct LocalGitHubTriggerConfig: Codable, Hashable, Sendable {
-    /// Which kinds fire this trigger (empty / missing = any).
-    public let events: [LocalGitHubEventKind]?
-    /// Your GitHub login: `review_requested` / `mentioned` / `assigned` match against it.
-    public let login: String?
-    /// Restrict to these `owner/name` repos (empty = any).
-    public let repos: [String]?
-
-    private enum CodingKeys: String, CodingKey {
-        case events = "events"
-        case login = "login"
-        case repos = "repos"
-    }
-
-    public init(
-        events: [LocalGitHubEventKind]? = nil,
-        login: String? = nil,
-        repos: [String]? = nil
-    ) {
-        self.events = events
-        self.login = login
-        self.repos = repos
-    }
-}
-
-/// One normalized GitHub happening (from the webhook payload).
-public struct LocalGitHubEvent: Codable, Hashable, Sendable {
-    public enum Kind: String, Codable, Hashable, Sendable, CaseIterable {
-        case pr = "pr"
-        case issue = "issue"
-        /// Fallback for raw values this client does not know about yet.
-        case unknown = "__unknown__"
-
-        public static let allCases: [Kind] = [.pr, .issue]
-
-        public init(from decoder: any Decoder) throws {
-            let raw = try decoder.singleValueContainer().decode(String.self)
-            self = Kind(rawValue: raw) ?? .unknown
-        }
-    }
-
-    public let kinds: [LocalGitHubEventKind]
-    /// Logins the event concerns: requested reviewer, assignee,
-    public let targets: [String]
-    public let repo: String
-    public let repoUrl: String
-    public let kind: Kind
-    public let number: Double
-    public let title: String
-    public let body: String
-    public let url: String
-    public let author: String
-    public let headBranch: String?
-    public let baseBranch: String?
-    /// Comment / review body when the event is a comment or review.
-    public let commentBody: String?
-    public let commentUrl: String?
-    /// Raw `X-GitHub-Event` + `action`.
-    public let event: String
-    public let action: String
-
-    private enum CodingKeys: String, CodingKey {
-        case kinds = "kinds"
-        case targets = "targets"
-        case repo = "repo"
-        case repoUrl = "repoUrl"
-        case kind = "kind"
-        case number = "number"
-        case title = "title"
-        case body = "body"
-        case url = "url"
-        case author = "author"
-        case headBranch = "headBranch"
-        case baseBranch = "baseBranch"
-        case commentBody = "commentBody"
-        case commentUrl = "commentUrl"
-        case event = "event"
-        case action = "action"
-    }
-
-    public init(
-        kinds: [LocalGitHubEventKind],
-        targets: [String],
-        repo: String,
-        repoUrl: String,
-        kind: Kind,
-        number: Double,
-        title: String,
-        body: String,
-        url: String,
-        author: String,
-        headBranch: String? = nil,
-        baseBranch: String? = nil,
-        commentBody: String? = nil,
-        commentUrl: String? = nil,
-        event: String,
-        action: String
-    ) {
-        self.kinds = kinds
-        self.targets = targets
-        self.repo = repo
-        self.repoUrl = repoUrl
-        self.kind = kind
-        self.number = number
-        self.title = title
-        self.body = body
-        self.url = url
-        self.author = author
-        self.headBranch = headBranch
-        self.baseBranch = baseBranch
-        self.commentBody = commentBody
-        self.commentUrl = commentUrl
-        self.event = event
-        self.action = action
-    }
-}
-
-public struct LocalSlackTriggerConfig: Codable, Hashable, Sendable {
-    /// Channel id (C0123…) to listen on. Required.
-    public let channelId: String
-    /// Only fire when the message contains this text (case-insensitive).
-    public let keyword: String?
-    /// Only fire for messages that
-    public let mentionOnly: Bool?
-    /// Also fire for thread replies (default: top-level messages only).
-    public let includeThreads: Bool?
-
-    private enum CodingKeys: String, CodingKey {
-        case channelId = "channelId"
-        case keyword = "keyword"
-        case mentionOnly = "mentionOnly"
-        case includeThreads = "includeThreads"
-    }
-
-    public init(
-        channelId: String,
-        keyword: String? = nil,
-        mentionOnly: Bool? = nil,
-        includeThreads: Bool? = nil
-    ) {
-        self.channelId = channelId
-        self.keyword = keyword
-        self.mentionOnly = mentionOnly
-        self.includeThreads = includeThreads
-    }
-}
-
-public struct LocalSlackEvent: Codable, Hashable, Sendable {
-    /// `message` | `app_mention`.
-    public let event: String
-    public let channelId: String
-    public let userId: String
-    public let text: String
-    public let ts: String
-    public let threadTs: String?
-    public let teamId: String?
-    public let eventId: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case event = "event"
-        case channelId = "channelId"
-        case userId = "userId"
-        case text = "text"
-        case ts = "ts"
-        case threadTs = "threadTs"
-        case teamId = "teamId"
-        case eventId = "eventId"
-    }
-
-    public init(
-        event: String,
-        channelId: String,
-        userId: String,
-        text: String,
-        ts: String,
-        threadTs: String? = nil,
-        teamId: String? = nil,
-        eventId: String? = nil
-    ) {
-        self.event = event
-        self.channelId = channelId
-        self.userId = userId
-        self.text = text
-        self.ts = ts
-        self.threadTs = threadTs
-        self.teamId = teamId
-        self.eventId = eventId
-    }
-}
-
-public enum LocalLinearEventKind: String, Codable, Hashable, Sendable, CaseIterable {
-    case assigned = "assigned"
-    case mentioned = "mentioned"
-    case created = "created"
-    case labeled = "labeled"
-    /// Fallback for raw values this client does not know about yet.
-    case unknown = "__unknown__"
-
-    public static let allCases: [LocalLinearEventKind] = [.assigned, .mentioned, .created, .labeled]
-
-    public init(from decoder: any Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
-        self = LocalLinearEventKind(rawValue: raw) ?? .unknown
-    }
-}
-
-public struct LocalLinearTriggerConfig: Codable, Hashable, Sendable {
-    /// Which kinds fire this trigger (empty / missing = any).
-    public let events: [LocalLinearEventKind]?
-    /// Your Linear user id, or display name / `@handle` — `assigned` / `mentioned` match against it.
-    public let user: String?
-    /// Any-match label filter (empty = any).
-    public let labels: [String]?
-    /// Restrict to these team keys (empty = any).
-    public let teams: [String]?
-
-    private enum CodingKeys: String, CodingKey {
-        case events = "events"
-        case user = "user"
-        case labels = "labels"
-        case teams = "teams"
-    }
-
-    public init(
-        events: [LocalLinearEventKind]? = nil,
-        user: String? = nil,
-        labels: [String]? = nil,
-        teams: [String]? = nil
-    ) {
-        self.events = events
-        self.user = user
-        self.labels = labels
-        self.teams = teams
-    }
-}
-
-public struct LocalLinearEvent: Codable, Hashable, Sendable {
-    public let kinds: [LocalLinearEventKind]
-    /// User ids / names the event concerns: new assignee,
-    public let targets: [String]
-    /// e.g. ENG-123
-    public let identifier: String
-    public let title: String
-    public let description: String
-    public let url: String
-    public let labels: [String]
-    public let teamKey: String?
-    public let assignee: String?
-    public let priority: Double?
-    public let state: String?
-    public let commentBody: String?
-    public let commentUrl: String?
-    public let `actor`: String?
-    /// Raw `type` + `action`.
-    public let type: String
-    public let action: String
-
-    private enum CodingKeys: String, CodingKey {
-        case kinds = "kinds"
-        case targets = "targets"
-        case identifier = "identifier"
-        case title = "title"
-        case description = "description"
-        case url = "url"
-        case labels = "labels"
-        case teamKey = "teamKey"
-        case assignee = "assignee"
-        case priority = "priority"
-        case state = "state"
-        case commentBody = "commentBody"
-        case commentUrl = "commentUrl"
-        case `actor` = "actor"
-        case type = "type"
-        case action = "action"
-    }
-
-    public init(
-        kinds: [LocalLinearEventKind],
-        targets: [String],
-        identifier: String,
-        title: String,
-        description: String,
-        url: String,
-        labels: [String],
-        teamKey: String? = nil,
-        assignee: String? = nil,
-        priority: Double? = nil,
-        state: String? = nil,
-        commentBody: String? = nil,
-        commentUrl: String? = nil,
-        `actor`: String? = nil,
-        type: String,
-        action: String
-    ) {
-        self.kinds = kinds
-        self.targets = targets
-        self.identifier = identifier
-        self.title = title
-        self.description = description
-        self.url = url
-        self.labels = labels
-        self.teamKey = teamKey
-        self.assignee = assignee
-        self.priority = priority
-        self.state = state
-        self.commentBody = commentBody
-        self.commentUrl = commentUrl
-        self.`actor` = `actor`
-        self.type = type
-        self.action = action
-    }
-}
-
 public struct LocalDaemonTerminalSync: Codable, Hashable, Sendable {
     public let terminalId: String
     public let running: Bool
@@ -5565,12 +5215,15 @@ public enum PersistentAgentWakeSource: String, Codable, Hashable, Sendable, Case
     case webhook = "webhook"
     case schedule = "schedule"
     case ticket = "ticket"
+    case github = "github"
+    case slack = "slack"
+    case linear = "linear"
     case system = "system"
     case initial = "initial"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .system, .initial]
+    public static let allCases: [PersistentAgentWakeSource] = [.user, .agent, .webhook, .schedule, .ticket, .github, .slack, .linear, .system, .initial]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -7264,6 +6917,389 @@ public struct Ticket: Codable, Hashable, Sendable {
 
 public typealias TicketProviderConfig = [String: AnyCodable]
 
+// MARK: - triggers.ts
+
+/// What a trigger row points at (`workflow_triggers.target_type`).
+public enum TriggerTargetType: String, Codable, Hashable, Sendable, CaseIterable {
+    case job = "job"
+    case taskConfig = "task_config"
+    case localBlueprint = "local_blueprint"
+    case persistentAgent = "persistent_agent"
+    case prReview = "pr_review"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [TriggerTargetType] = [.job, .taskConfig, .localBlueprint, .persistentAgent, .prReview]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TriggerTargetType(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum TriggerType: String, Codable, Hashable, Sendable, CaseIterable {
+    case manual = "manual"
+    case schedule = "schedule"
+    case webhook = "webhook"
+    case ticket = "ticket"
+    case github = "github"
+    case slack = "slack"
+    case linear = "linear"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [TriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TriggerType(rawValue: raw) ?? .unknown
+    }
+}
+
+/// Triggers fed by a provider's signed event stream rather than a poll or a URL.
+public enum EventTriggerType: String, Codable, Hashable, Sendable, CaseIterable {
+    case github = "github"
+    case slack = "slack"
+    case linear = "linear"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [EventTriggerType] = [.github, .slack, .linear]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = EventTriggerType(rawValue: raw) ?? .unknown
+    }
+}
+
+/// Things that can happen on GitHub that a trigger listens for.
+public enum GitHubEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case reviewRequested = "review_requested"
+    case mentioned = "mentioned"
+    case assigned = "assigned"
+    case prOpened = "pr_opened"
+    case issueOpened = "issue_opened"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [GitHubEventKind] = [.reviewRequested, .mentioned, .assigned, .prOpened, .issueOpened]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = GitHubEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct GitHubTriggerConfig: Codable, Hashable, Sendable {
+    /// Which kinds fire this trigger (empty / missing = any).
+    public let events: [GitHubEventKind]?
+    /// A GitHub login: `review_requested` / `mentioned` / `assigned` match against it.
+    public let login: String?
+    /// Restrict to these `owner/name` repos (empty = any). A scheduled Task
+    /// with no filter listens to its own repo only.
+    public let repos: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case events = "events"
+        case login = "login"
+        case repos = "repos"
+    }
+
+    public init(events: [GitHubEventKind]? = nil, login: String? = nil, repos: [String]? = nil) {
+        self.events = events
+        self.login = login
+        self.repos = repos
+    }
+}
+
+/// One normalized GitHub happening (from the webhook payload).
+public struct GitHubEvent: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, Hashable, Sendable, CaseIterable {
+        case pr = "pr"
+        case issue = "issue"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Kind] = [.pr, .issue]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let kinds: [GitHubEventKind]
+    /// Logins the event concerns: requested reviewer, assignee,
+    public let targets: [String]
+    public let repo: String
+    public let repoUrl: String
+    public let kind: Kind
+    public let number: Double
+    public let title: String
+    public let body: String
+    public let url: String
+    public let author: String
+    public let headBranch: String?
+    public let baseBranch: String?
+    /// Comment / review body when the event is a comment or review.
+    public let commentBody: String?
+    public let commentUrl: String?
+    /// Raw `X-GitHub-Event` + `action`.
+    public let event: String
+    public let action: String
+
+    private enum CodingKeys: String, CodingKey {
+        case kinds = "kinds"
+        case targets = "targets"
+        case repo = "repo"
+        case repoUrl = "repoUrl"
+        case kind = "kind"
+        case number = "number"
+        case title = "title"
+        case body = "body"
+        case url = "url"
+        case author = "author"
+        case headBranch = "headBranch"
+        case baseBranch = "baseBranch"
+        case commentBody = "commentBody"
+        case commentUrl = "commentUrl"
+        case event = "event"
+        case action = "action"
+    }
+
+    public init(
+        kinds: [GitHubEventKind],
+        targets: [String],
+        repo: String,
+        repoUrl: String,
+        kind: Kind,
+        number: Double,
+        title: String,
+        body: String,
+        url: String,
+        author: String,
+        headBranch: String? = nil,
+        baseBranch: String? = nil,
+        commentBody: String? = nil,
+        commentUrl: String? = nil,
+        event: String,
+        action: String
+    ) {
+        self.kinds = kinds
+        self.targets = targets
+        self.repo = repo
+        self.repoUrl = repoUrl
+        self.kind = kind
+        self.number = number
+        self.title = title
+        self.body = body
+        self.url = url
+        self.author = author
+        self.headBranch = headBranch
+        self.baseBranch = baseBranch
+        self.commentBody = commentBody
+        self.commentUrl = commentUrl
+        self.event = event
+        self.action = action
+    }
+}
+
+public struct SlackTriggerConfig: Codable, Hashable, Sendable {
+    /// Channel id (C0123…) to listen on. Required.
+    public let channelId: String
+    /// Only fire when the message contains this text (case-insensitive).
+    public let keyword: String?
+    /// Only fire for messages that
+    public let mentionOnly: Bool?
+    /// Also fire for thread replies (default: top-level messages only).
+    public let includeThreads: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case channelId = "channelId"
+        case keyword = "keyword"
+        case mentionOnly = "mentionOnly"
+        case includeThreads = "includeThreads"
+    }
+
+    public init(
+        channelId: String,
+        keyword: String? = nil,
+        mentionOnly: Bool? = nil,
+        includeThreads: Bool? = nil
+    ) {
+        self.channelId = channelId
+        self.keyword = keyword
+        self.mentionOnly = mentionOnly
+        self.includeThreads = includeThreads
+    }
+}
+
+public struct SlackEvent: Codable, Hashable, Sendable {
+    /// `message` | `app_mention`.
+    public let event: String
+    public let channelId: String
+    public let userId: String
+    public let text: String
+    public let ts: String
+    public let threadTs: String?
+    public let teamId: String?
+    public let eventId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case event = "event"
+        case channelId = "channelId"
+        case userId = "userId"
+        case text = "text"
+        case ts = "ts"
+        case threadTs = "threadTs"
+        case teamId = "teamId"
+        case eventId = "eventId"
+    }
+
+    public init(
+        event: String,
+        channelId: String,
+        userId: String,
+        text: String,
+        ts: String,
+        threadTs: String? = nil,
+        teamId: String? = nil,
+        eventId: String? = nil
+    ) {
+        self.event = event
+        self.channelId = channelId
+        self.userId = userId
+        self.text = text
+        self.ts = ts
+        self.threadTs = threadTs
+        self.teamId = teamId
+        self.eventId = eventId
+    }
+}
+
+public enum LinearEventKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case assigned = "assigned"
+    case mentioned = "mentioned"
+    case created = "created"
+    case labeled = "labeled"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LinearEventKind] = [.assigned, .mentioned, .created, .labeled]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LinearEventKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct LinearTriggerConfig: Codable, Hashable, Sendable {
+    /// Which kinds fire this trigger (empty / missing = any).
+    public let events: [LinearEventKind]?
+    /// A Linear user id, or display name / `@handle` — `assigned` / `mentioned` match against it.
+    public let user: String?
+    /// Any-match label filter (empty = any).
+    public let labels: [String]?
+    /// Restrict to these team keys (empty = any).
+    public let teams: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case events = "events"
+        case user = "user"
+        case labels = "labels"
+        case teams = "teams"
+    }
+
+    public init(
+        events: [LinearEventKind]? = nil,
+        user: String? = nil,
+        labels: [String]? = nil,
+        teams: [String]? = nil
+    ) {
+        self.events = events
+        self.user = user
+        self.labels = labels
+        self.teams = teams
+    }
+}
+
+public struct LinearEvent: Codable, Hashable, Sendable {
+    public let kinds: [LinearEventKind]
+    /// User ids / names the event concerns: new assignee,
+    public let targets: [String]
+    /// e.g. ENG-123
+    public let identifier: String
+    public let title: String
+    public let description: String
+    public let url: String
+    public let labels: [String]
+    public let teamKey: String?
+    public let assignee: String?
+    public let priority: Double?
+    public let state: String?
+    public let commentBody: String?
+    public let commentUrl: String?
+    public let `actor`: String?
+    /// Raw `type` + `action`.
+    public let type: String
+    public let action: String
+
+    private enum CodingKeys: String, CodingKey {
+        case kinds = "kinds"
+        case targets = "targets"
+        case identifier = "identifier"
+        case title = "title"
+        case description = "description"
+        case url = "url"
+        case labels = "labels"
+        case teamKey = "teamKey"
+        case assignee = "assignee"
+        case priority = "priority"
+        case state = "state"
+        case commentBody = "commentBody"
+        case commentUrl = "commentUrl"
+        case `actor` = "actor"
+        case type = "type"
+        case action = "action"
+    }
+
+    public init(
+        kinds: [LinearEventKind],
+        targets: [String],
+        identifier: String,
+        title: String,
+        description: String,
+        url: String,
+        labels: [String],
+        teamKey: String? = nil,
+        assignee: String? = nil,
+        priority: Double? = nil,
+        state: String? = nil,
+        commentBody: String? = nil,
+        commentUrl: String? = nil,
+        `actor`: String? = nil,
+        type: String,
+        action: String
+    ) {
+        self.kinds = kinds
+        self.targets = targets
+        self.identifier = identifier
+        self.title = title
+        self.description = description
+        self.url = url
+        self.labels = labels
+        self.teamKey = teamKey
+        self.assignee = assignee
+        self.priority = priority
+        self.state = state
+        self.commentBody = commentBody
+        self.commentUrl = commentUrl
+        self.`actor` = `actor`
+        self.type = type
+        self.action = action
+    }
+}
+
 // MARK: - workflow.ts
 
 public enum WorkflowRunState: String, Codable, Hashable, Sendable, CaseIterable {
@@ -7287,10 +7323,13 @@ public enum WorkflowTriggerType: String, Codable, Hashable, Sendable, CaseIterab
     case schedule = "schedule"
     case webhook = "webhook"
     case ticket = "ticket"
+    case github = "github"
+    case slack = "slack"
+    case linear = "linear"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket]
+    public static let allCases: [WorkflowTriggerType] = [.manual, .schedule, .webhook, .ticket, .github, .slack, .linear]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

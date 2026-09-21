@@ -293,9 +293,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
       <DetailHeader
         title={task.title}
         subtitle={
-          <Link href="/sessions" className="inline-flex items-center gap-1 hover:text-primary">
+          <Link href="/work" className="inline-flex items-center gap-1 hover:text-primary">
             <ArrowLeft className="w-3 h-3" />
-            Sessions
+            Work
           </Link>
         }
         state={task.state}

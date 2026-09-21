@@ -62,7 +62,7 @@ import githubAppRoutes from "./routes/github-app.js";
 import { githubTokenRoutes } from "./routes/github-token.js";
 import { hookRoutes } from "./routes/hooks.js";
 import { localRoutes } from "./routes/local.js";
-import { localIngressRoutes } from "./routes/local-ingress.js";
+import { eventIngressRoutes } from "./routes/event-ingress.js";
 import { logStreamWs } from "./ws/log-stream.js";
 import { eventsWs } from "./ws/events.js";
 import { sessionTerminalWs } from "./ws/session-terminal.js";
@@ -315,7 +315,7 @@ export async function buildServer() {
   await app.register(githubTokenRoutes);
   await app.register(hookRoutes);
   await app.register(localRoutes);
-  await app.register(localIngressRoutes);
+  await app.register(eventIngressRoutes);
 
   // WebSocket routes
   await app.register(logStreamWs);

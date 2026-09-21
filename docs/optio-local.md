@@ -149,10 +149,11 @@ listens for, so several people's automations can share one ingress.
 | Slack  | `POST /api/webhooks/slack/events` (Events API; answers `url_verification`; `X-Slack-Signature` v0) | `SLACK_SIGNING_SECRET`  | `{ channelId, keyword?, mentionOnly?, includeThreads? }`                                                                            |
 | Linear | `POST /api/webhooks/linear` (`Linear-Signature` over the raw body + `webhookTimestamp` ≤ 60 s)     | `LINEAR_WEBHOOK_SECRET` | `{ events?: ("assigned" \| "mentioned" \| "created" \| "labeled")[], user?, labels?, teams? }`                                      |
 
-Matching lives in `services/local-event-service.ts` as pure functions
-(`normalize*` → one event; `match*` → the matched kind or null); `fireLocalEventTriggers`
-fans an event out to every enabled trigger of that type and spawns each match's automation
-with the event's fields as prompt params. Personal kinds (`review_requested`, `mentioned`,
+Matching lives in `services/event-trigger-service.ts` as pure functions
+(`normalize*` → one event; `match*` → the matched kind or null); `fireEventTriggers`
+fans an event out to every enabled trigger of that type — whatever it targets: a Local
+automation, a Job or scheduled Task in a pod, a persistent agent — and starts each match
+through the shared trigger dispatcher with the event's fields as prompt params. Personal kinds (`review_requested`, `mentioned`,
 `assigned`) only match when the trigger's `login` / `user` is among the event's targets
 (reviewer, assignee, `@`-mentions, case-insensitive; Linear matches user id, name, display
 name, or the `@handle` in a mention link); `pr_opened` / `issue_opened` / `created` /
@@ -312,11 +313,16 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
 - `POST /api/local/blueprints/:id/spawn` — `{params?}` manual run
 - `GET|POST /api/local/blueprints/:id/triggers`,
   `PATCH|DELETE /api/local/blueprints/:id/triggers/:triggerId` — trigger CRUD
-  (`manual` | `schedule` | `webhook` | `ticket` | `github` | `slack` | `linear`), rows in
-  `workflow_triggers` with `target_type = "local_blueprint"`. Generic webhook ingress
-  reuses `POST /api/hooks/:webhookPath`; event ingress is described under "Automations".
+  (`manual` | `schedule` | `webhook` | `ticket` | `github` | `slack` | `linear` — the same
+  seven every target takes, see docs/tasks.md "Triggers"), rows in `workflow_triggers`
+  with `target_type = "local_blueprint"`, served by the shared `services/trigger-service.ts`.
+  Generic webhook ingress reuses `POST /api/hooks/:webhookPath`; event ingress is described
+  under "Automations".
 - `POST /api/webhooks/slack/events`, `POST /api/webhooks/linear` — signed event ingress
-  (`routes/local-ingress.ts`); GitHub events ride the existing `POST /api/webhooks/github`.
+  (`routes/event-ingress.ts`); GitHub events ride the existing `POST /api/webhooks/github`.
+  Events fan out to every matching trigger whatever it targets (`fireEventTriggers` in
+  `services/event-trigger-service.ts`) — a Job or scheduled Task in a pod as well as a
+  Local automation.
 
 **Command safety**: webhook/trigger payloads never carry commands. Params substitute into
 the blueprint's user-authored `commandTemplate` via `renderTemplateString`, and every
