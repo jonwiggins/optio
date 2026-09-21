@@ -40,21 +40,24 @@ vi.mock("../services/optio-action-service.js", () => ({
   logAction: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Trigger routes reach into the DB directly via dynamic import. Mock the client
-// and schema so the same-workspace happy path can complete; the cross-workspace
-// tests short-circuit at the workspace guard and never touch these.
+// The trigger routes go through the shared trigger service; mock it so the
+// same-workspace happy paths can complete — the cross-workspace tests
+// short-circuit at the workspace guard and never touch it.
 const mockTriggerDeleteReturning = vi.fn();
-vi.mock("../db/client.js", () => ({
-  db: {
-    select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
-    insert: () => ({ values: () => ({ returning: () => Promise.resolve([{ id: "trigger-1" }]) }) }),
-    delete: () => ({ where: () => ({ returning: () => mockTriggerDeleteReturning() }) }),
-  },
-}));
-
-vi.mock("../db/schema.js", () => ({
-  workflowTriggers: { id: "id", targetType: "targetType", targetId: "targetId" },
-}));
+const mockCreateTrigger = vi.fn();
+vi.mock("../services/trigger-service.js", async () => {
+  const actual = await vi.importActual<typeof import("../services/trigger-service.js")>(
+    "../services/trigger-service.js",
+  );
+  return {
+    validateTriggerConfig: actual.validateTriggerConfig,
+    listTriggers: vi.fn().mockResolvedValue([]),
+    createTrigger: (...args: unknown[]) => mockCreateTrigger(...args),
+    getTriggerFor: vi.fn().mockResolvedValue({ id: "trigger-1" }),
+    deleteTrigger: () => mockTriggerDeleteReturning(),
+  };
+});
+vi.mock("../db/client.js", () => ({ db: {} }));
 
 vi.mock("../services/reconcile-queue.js", () => ({
   enqueueReconcile: vi.fn().mockResolvedValue(undefined),
@@ -327,13 +330,42 @@ describe("persistent-agent routes enforce workspace scoping", () => {
     });
 
     it("deletes the trigger for a same-workspace caller", async () => {
-      mockTriggerDeleteReturning.mockResolvedValue([{ id: TRIGGER_ID }]);
+      mockTriggerDeleteReturning.mockResolvedValue(true);
       const res = await sameWsApp.inject({
         method: "DELETE",
         url: `/api/persistent-agents/${AGENT_ID}/triggers/${TRIGGER_ID}`,
       });
       expect(res.statusCode).toBe(204);
       expect(mockTriggerDeleteReturning).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("POST /:id/triggers", () => {
+    it("attaches a Slack event trigger through the shared trigger service", async () => {
+      mockCreateTrigger.mockResolvedValue({ id: "trigger-2", type: "slack" });
+      const res = await sameWsApp.inject({
+        method: "POST",
+        url: `/api/persistent-agents/${AGENT_ID}/triggers`,
+        payload: { type: "slack", config: { channelId: "C0123ABCD", keyword: "deploy" } },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(mockCreateTrigger).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetType: "persistent_agent",
+          targetId: AGENT_ID,
+          type: "slack",
+        }),
+      );
+    });
+
+    it("rejects a schedule with no cron before touching the service", async () => {
+      const res = await sameWsApp.inject({
+        method: "POST",
+        url: `/api/persistent-agents/${AGENT_ID}/triggers`,
+        payload: { type: "schedule", config: {} },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(mockCreateTrigger).not.toHaveBeenCalled();
     });
   });
 
