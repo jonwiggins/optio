@@ -15,6 +15,8 @@ import {
   type PersistentAgentMessageSenderType,
 } from "@optio/shared";
 import { logAction } from "../services/optio-action-service.js";
+import * as triggerService from "../services/trigger-service.js";
+import { CreateTriggerBodySchema, replyTriggerError } from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
 
 /**
@@ -394,7 +396,9 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
   );
 
   // Control intent
-  // Triggers — list / create
+  // Triggers — list / create / delete. The same trigger service every other
+  // target uses: any of the seven types, incl. GitHub / Slack / Linear events
+  // (the dispatcher wakes the agent with the event as a system message).
   app.get(
     "/api/persistent-agents/:id/triggers",
     {
@@ -409,18 +413,7 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
-      const { db } = await import("../db/client.js");
-      const { workflowTriggers } = await import("../db/schema.js");
-      const { and, eq } = await import("drizzle-orm");
-      const triggers = await db
-        .select()
-        .from(workflowTriggers)
-        .where(
-          and(
-            eq(workflowTriggers.targetType, "persistent_agent"),
-            eq(workflowTriggers.targetId, id),
-          ),
-        );
+      const triggers = await triggerService.listTriggers("persistent_agent", id);
       reply.send({ triggers });
     },
   );
@@ -431,19 +424,14 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       preHandler: [requireRole("member")],
       schema: {
         operationId: "createPersistentAgentTrigger",
-        summary: "Attach a schedule/webhook/manual trigger to a persistent agent",
+        summary: "Attach a trigger to a persistent agent",
         description:
-          "Creates a row in workflow_triggers with target_type='persistent_agent'. " +
-          "The trigger worker dispatches by waking the agent (writing a system message " +
-          "into its inbox).",
+          "Creates a row in workflow_triggers with target_type='persistent_agent': a schedule, " +
+          "a webhook, a ticket filter, or a GitHub / Slack / Linear event. A firing wakes the " +
+          "agent by writing a system message into its inbox.",
         tags: ["Persistent Agents"],
         params: idParamsSchema,
-        body: z.object({
-          type: z.enum(["manual", "schedule", "webhook", "ticket"]),
-          config: z.record(z.unknown()),
-          paramMapping: z.record(z.unknown()).optional(),
-          enabled: z.boolean().optional(),
-        }),
+        body: CreateTriggerBodySchema,
       },
     },
     async (req, reply) => {
@@ -452,50 +440,22 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
 
-      // Validate config shape per trigger type — same rules as workflow triggers.
-      if (body.type === "schedule") {
-        const cron = body.config.cronExpression;
-        if (!cron || typeof cron !== "string") {
-          return reply.code(400).send({ error: "Schedule triggers require config.cronExpression" });
-        }
-      }
-      if (body.type === "webhook") {
-        const path = body.config.path;
-        if (!path || typeof path !== "string") {
-          return reply.code(400).send({ error: "Webhook triggers require config.path" });
-        }
-      }
-
-      const { db } = await import("../db/client.js");
-      const { workflowTriggers } = await import("../db/schema.js");
-      // For schedule triggers, compute next-fire so the trigger worker picks it up.
-      let nextFireAt: Date | null = null;
-      if (body.type === "schedule") {
-        try {
-          const { CronExpressionParser } = await import("cron-parser");
-          nextFireAt = CronExpressionParser.parse(body.config.cronExpression as string)
-            .next()
-            .toDate();
-        } catch (err) {
-          return reply
-            .code(400)
-            .send({ error: `Invalid cron expression: ${(err as Error).message}` });
-        }
-      }
-      const [trigger] = await db
-        .insert(workflowTriggers)
-        .values({
-          workflowId: null,
+      const configError = triggerService.validateTriggerConfig(body.type, body.config);
+      if (configError) return reply.code(400).send({ error: configError });
+      try {
+        const trigger = await triggerService.createTrigger({
           targetType: "persistent_agent",
           targetId: id,
           type: body.type,
           config: body.config,
-          paramMapping: body.paramMapping ?? null,
-          enabled: body.enabled ?? true,
-          nextFireAt,
-        })
-        .returning();
-      reply.code(201).send({ trigger });
+          paramMapping: body.paramMapping,
+          enabled: body.enabled,
+        });
+        reply.code(201).send({ trigger });
+      } catch (err) {
+        if (replyTriggerError(reply, err, body)) return;
+        reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
     },
   );
 
@@ -514,22 +474,11 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const { id, triggerId } = req.params;
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
-      const { db } = await import("../db/client.js");
-      const { workflowTriggers } = await import("../db/schema.js");
-      const { and, eq } = await import("drizzle-orm");
-      // Scope the delete to this agent's triggers so a trigger id from another
-      // agent (or another tenant) can't be removed via a valid-for-caller :id.
-      const deleted = await db
-        .delete(workflowTriggers)
-        .where(
-          and(
-            eq(workflowTriggers.id, triggerId),
-            eq(workflowTriggers.targetType, "persistent_agent"),
-            eq(workflowTriggers.targetId, id),
-          ),
-        )
-        .returning({ id: workflowTriggers.id });
-      if (deleted.length === 0) return reply.code(404).send({ error: "Not found" });
+      // Scoped to this agent's triggers so a trigger id from another agent
+      // (or another tenant) can't be removed via a valid-for-caller :id.
+      const existing = await triggerService.getTriggerFor("persistent_agent", id, triggerId);
+      if (!existing) return reply.code(404).send({ error: "Not found" });
+      await triggerService.deleteTrigger(triggerId);
       reply.code(204).send();
     },
   );
