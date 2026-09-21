@@ -131,7 +131,7 @@ struct WhoGlyph: View {
 
 // MARK: - Session vocabulary (When · Where · Who · Then)
 
-/// One attribute chip: `[icon] label`, the same icons as the app's `SessionRowView`.
+/// One attribute chip: `[icon] label`, the same icons as the app's `WorkRowView`.
 struct SessionChip: View {
     let systemImage: String
     let label: String
@@ -265,7 +265,7 @@ struct TileStrip: View {
     var body: some View {
         HStack(spacing: 6) {
             ForEach(tiles, id: \.id) { tile in
-                Link(destination: DeepLink.sessions(view: tile.view).url) {
+                Link(destination: DeepLink.work(view: tile.view).url) {
                     VStack(alignment: .leading, spacing: 0) {
                         Text("\(tile.count)")
                             .font(.system(compact ? .callout : .title3, design: .rounded).weight(.semibold))

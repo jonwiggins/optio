@@ -155,11 +155,11 @@ private struct MachineCard: View {
                                 .font(.caption)
                                 .foregroundStyle(dir.repoUrl == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(AppTheme.accent))
                                 .frame(width: 14)
-                            Text(SessionsFeed.shortDir(dir.path) ?? dir.path)
+                            Text(WorkFeed.shortDir(dir.path) ?? dir.path)
                                 .font(.caption.monospaced())
                                 .lineLimit(1)
                                 .truncationMode(.head)
-                            if let repo = SessionsFeed.shortRepo(dir.repoUrl) {
+                            if let repo = WorkFeed.shortRepo(dir.repoUrl) {
                                 Spacer(minLength: Spacing.s)
                                 Text(repo).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                             }

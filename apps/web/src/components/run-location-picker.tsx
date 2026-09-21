@@ -126,6 +126,7 @@ export function RunLocationPicker({
   onRepoUrlChange,
   hideSessionMode = false,
   clusterDisabled,
+  localDisabled,
   className,
   inset = false,
 }: {
@@ -144,6 +145,8 @@ export function RunLocationPicker({
   hideSessionMode?: boolean;
   /** Why the pod can't be picked right now (e.g. an event trigger runs on your machine). */
   clusterDisabled?: string;
+  /** Why your machine can't be picked right now (e.g. an edit that keeps the saved kind). */
+  localDisabled?: string;
   className?: string;
   /** Rendered inside a card: the machine panel sits on the page background. */
   inset?: boolean;
@@ -210,9 +213,11 @@ export function RunLocationPicker({
               ? "A git checkout on a paired machine, with your local agent CLI and its login. The agent works on a branch there and opens the PR."
               : "A directory on a paired machine, with your local agent CLI and its login. The session shows up under Local too."
           }
-          disabled={noHosts}
+          disabled={noHosts || !!localDisabled}
           hint={
-            noHosts ? (
+            localDisabled ? (
+              localDisabled
+            ) : noHosts ? (
               <>
                 No paired machines. Run <code className="font-mono">optio login</code> then{" "}
                 <code className="font-mono">optio local up</code> on your machine.

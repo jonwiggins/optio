@@ -9,12 +9,7 @@ import { z } from "zod";
 import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import {
-  LOCAL_GITHUB_EVENT_KINDS,
-  LOCAL_LINEAR_EVENT_KINDS,
-  parseRepoUrl,
-  type LocalTerminalSpec,
-} from "@optio/shared";
+import { parseRepoUrl, type LocalTerminalSpec } from "@optio/shared";
 import { logger } from "../logger.js";
 import { requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema, EmptyResponseSchema } from "../schemas/common.js";
@@ -31,6 +26,12 @@ import * as hostService from "../services/local-host-service.js";
 import * as relay from "../services/local-relay.js";
 import * as terminalService from "../services/local-terminal-service.js";
 import * as blueprintService from "../services/local-blueprint-service.js";
+import * as triggerService from "../services/trigger-service.js";
+import {
+  CreateTriggerBodySchema,
+  UpdateTriggerBodySchema,
+  replyTriggerError,
+} from "../schemas/trigger.js";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import { buildTicketPrompt } from "../services/ticket-context.js";
 import { getPromptTemplateById } from "../services/prompt-template-service.js";
@@ -100,15 +101,6 @@ const blueprintBodySchema = z
   })
   .describe("Local automation (blueprint) definition");
 
-const triggerBodySchema = z
-  .object({
-    type: z.enum(["manual", "schedule", "webhook", "ticket", "github", "slack", "linear"]),
-    config: z.record(z.unknown()).optional(),
-    paramMapping: z.record(z.unknown()).optional(),
-    enabled: z.boolean().optional(),
-  })
-  .describe("Trigger definition for a local blueprint");
-
 const HostResponse = z.object({ host: LocalHostSchema });
 const HostsResponse = z.object({ hosts: z.array(LocalHostSchema) });
 const TerminalResponse = z.object({ terminal: LocalTerminalSchema });
@@ -142,62 +134,6 @@ async function checkBlueprintBody(
   if (body.hostId) {
     const host = await hostService.getHost(body.hostId);
     if (!host || !hostService.canAccessHost(host, userId)) return "Host not found";
-  }
-  return null;
-}
-
-function validateTriggerConfig(
-  type: string,
-  config: Record<string, unknown> | undefined,
-): string | null {
-  if (type === "schedule" && typeof config?.cronExpression !== "string") {
-    return "Schedule triggers require config.cronExpression";
-  }
-  if (type === "webhook" && typeof config?.path !== "string") {
-    return "Webhook triggers require config.path";
-  }
-  if (type === "github") {
-    if (config?.events !== undefined) {
-      if (!Array.isArray(config.events)) return "github.events must be an array";
-      const bad = config.events.find((e) => !LOCAL_GITHUB_EVENT_KINDS.includes(e));
-      if (bad) return `Unknown GitHub event kind: ${String(bad)}`;
-    }
-    const personal = (config?.events as string[] | undefined)?.some((e) =>
-      ["review_requested", "mentioned", "assigned"].includes(e),
-    );
-    if (
-      (personal || !config?.events) &&
-      (typeof config?.login !== "string" || !config.login.trim())
-    ) {
-      return "GitHub triggers need config.login (your GitHub username) for review / mention / assign events";
-    }
-    if (
-      config?.repos !== undefined &&
-      (!Array.isArray(config.repos) || config.repos.some((r) => typeof r !== "string"))
-    ) {
-      return "github.repos must be an array of owner/name";
-    }
-  }
-  if (type === "slack") {
-    if (typeof config?.channelId !== "string" || !/^[A-Z][A-Z0-9]{5,}$/.test(config.channelId)) {
-      return "Slack triggers require config.channelId (e.g. C0123ABCD)";
-    }
-  }
-  if (type === "linear") {
-    if (config?.events !== undefined) {
-      if (!Array.isArray(config.events)) return "linear.events must be an array";
-      const bad = config.events.find((e) => !LOCAL_LINEAR_EVENT_KINDS.includes(e));
-      if (bad) return `Unknown Linear event kind: ${String(bad)}`;
-    }
-    const personal = (config?.events as string[] | undefined)?.some((e) =>
-      ["assigned", "mentioned"].includes(e),
-    );
-    if (
-      (personal || !config?.events) &&
-      (typeof config?.user !== "string" || !config.user.trim())
-    ) {
-      return "Linear triggers need config.user (your Linear name, handle, or user id) for assign / mention events";
-    }
   }
   return null;
 }
@@ -864,7 +800,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
-      const triggers = await blueprintService.listBlueprintTriggers(blueprint.id);
+      const triggers = await triggerService.listTriggers("local_blueprint", blueprint.id);
       reply.send({ triggers });
     },
   );
@@ -878,7 +814,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
         summary: "Attach a trigger to a blueprint",
         tags: ["Local"],
         params: z.object({ id: z.string().uuid() }),
-        body: triggerBodySchema,
+        body: CreateTriggerBodySchema,
         response: {
           201: TriggerResponse,
           400: ErrorResponseSchema,
@@ -892,21 +828,17 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
-      const configError = validateTriggerConfig(
-        req.body.type,
-        req.body.config as Record<string, unknown> | undefined,
-      );
+      const configError = triggerService.validateTriggerConfig(req.body.type, req.body.config);
       if (configError) return reply.status(400).send({ error: configError });
       try {
-        const trigger = await blueprintService.createBlueprintTrigger({
-          blueprintId: blueprint.id,
+        const trigger = await triggerService.createTrigger({
+          targetType: "local_blueprint",
+          targetId: blueprint.id,
           ...req.body,
         });
         reply.status(201).send({ trigger });
       } catch (err) {
-        if (err instanceof Error && err.message === "duplicate_webhook_path") {
-          return reply.status(409).send({ error: "Webhook path already in use" });
-        }
+        if (replyTriggerError(reply, err, req.body)) return;
         throw err;
       }
     },
@@ -921,7 +853,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
         summary: "Update a blueprint trigger",
         tags: ["Local"],
         params: z.object({ id: z.string().uuid(), triggerId: z.string().uuid() }),
-        body: triggerBodySchema.omit({ type: true }).partial(),
+        body: UpdateTriggerBodySchema,
         response: {
           200: TriggerResponse,
           400: ErrorResponseSchema,
@@ -935,26 +867,24 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
-      const triggers = await blueprintService.listBlueprintTriggers(blueprint.id);
-      const existing = triggers.find((t) => t.id === req.params.triggerId);
+      const existing = await triggerService.getTriggerFor(
+        "local_blueprint",
+        blueprint.id,
+        req.params.triggerId,
+      );
       if (!existing) {
         return reply.status(404).send({ error: "Trigger not found" });
       }
       if (req.body.config !== undefined) {
-        const problem = validateTriggerConfig(existing.type, req.body.config);
+        const problem = triggerService.validateTriggerConfig(existing.type, req.body.config);
         if (problem) return reply.status(400).send({ error: problem });
       }
       try {
-        const updated = await blueprintService.updateBlueprintTrigger(
-          req.params.triggerId,
-          req.body,
-        );
+        const updated = await triggerService.updateTrigger(req.params.triggerId, req.body);
         if (!updated) return reply.status(404).send({ error: "Trigger not found" });
         reply.send({ trigger: updated });
       } catch (err) {
-        if (err instanceof Error && err.message === "duplicate_webhook_path") {
-          return reply.status(409).send({ error: "Webhook path already in use" });
-        }
+        if (replyTriggerError(reply, err, req.body)) return;
         throw err;
       }
     },
@@ -977,11 +907,15 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
-      const triggers = await blueprintService.listBlueprintTriggers(blueprint.id);
-      if (!triggers.some((t) => t.id === req.params.triggerId)) {
+      const existing = await triggerService.getTriggerFor(
+        "local_blueprint",
+        blueprint.id,
+        req.params.triggerId,
+      );
+      if (!existing) {
         return reply.status(404).send({ error: "Trigger not found" });
       }
-      await blueprintService.deleteBlueprintTrigger(req.params.triggerId);
+      await triggerService.deleteTrigger(req.params.triggerId);
       reply.send({});
     },
   );

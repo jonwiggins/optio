@@ -2,9 +2,15 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as taskConfigService from "../services/task-config-service.js";
+import * as triggerService from "../services/trigger-service.js";
 import { validateRunLocation } from "../services/local-run-service.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
+import {
+  CreateTriggerBodySchema,
+  UpdateTriggerBodySchema,
+  replyTriggerError,
+} from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
 
 const flexibleTimestamp = z.union([z.date(), z.string()]);
@@ -320,19 +326,6 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
     triggerId: z.string(),
   });
 
-  const createTriggerSchema = z.object({
-    type: z.enum(["manual", "schedule", "webhook", "ticket"]),
-    config: z.record(z.unknown()).default({}),
-    paramMapping: z.record(z.unknown()).optional(),
-    enabled: z.boolean().optional(),
-  });
-
-  const updateTriggerSchema = z.object({
-    config: z.record(z.unknown()).optional(),
-    paramMapping: z.record(z.unknown()).optional(),
-    enabled: z.boolean().optional(),
-  });
-
   const TriggerSchema = z
     .object({
       id: z.string(),
@@ -348,27 +341,6 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       updatedAt: flexibleTimestamp,
     })
     .passthrough();
-
-  function validateTriggerConfig(type: string, config: Record<string, unknown>): string | null {
-    if (type === "schedule" && typeof config.cronExpression !== "string") {
-      return "Schedule triggers require a cronExpression in config";
-    }
-    if (type === "webhook" && typeof config.path !== "string") {
-      return "Webhook triggers require a path in config";
-    }
-    if (type === "ticket") {
-      if (typeof config.source !== "string") {
-        return "Ticket triggers require a `source` (github|linear|notion|jira) in config";
-      }
-      if (
-        config.labels !== undefined &&
-        (!Array.isArray(config.labels) || !config.labels.every((l) => typeof l === "string"))
-      ) {
-        return "Ticket trigger `labels` must be an array of strings";
-      }
-    }
-    return null;
-  }
 
   app.get(
     "/api/task-configs/:id/triggers",
@@ -392,7 +364,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task config not found" });
       }
-      const triggers = await taskConfigService.listTaskConfigTriggers(id);
+      const triggers = await triggerService.listTriggers("task_config", id);
       reply.send({ triggers });
     },
   );
@@ -405,10 +377,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         operationId: "createTaskConfigTrigger",
         summary: "Create a trigger for a task config",
         description:
-          "Attach a schedule, webhook, or manual trigger to a task config. Schedule triggers require `cronExpression`; webhook triggers require `path`.",
+          "Attach a trigger to a task config: manual, schedule (`cronExpression`), webhook (`path`), ticket (`source`), or a GitHub / Slack / Linear event.",
         tags: ["Task Configs"],
         params: IdParamsSchema,
-        body: createTriggerSchema,
+        body: CreateTriggerBodySchema,
         response: {
           201: z.object({ trigger: TriggerSchema }),
           400: ErrorResponseSchema,
@@ -427,12 +399,13 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Task config not found" });
       }
 
-      const configError = validateTriggerConfig(input.type, input.config);
+      const configError = triggerService.validateTriggerConfig(input.type, input.config);
       if (configError) return reply.status(400).send({ error: configError });
 
       try {
-        const trigger = await taskConfigService.createTaskConfigTrigger({
-          taskConfigId: id,
+        const trigger = await triggerService.createTrigger({
+          targetType: "task_config",
+          targetId: id,
           type: input.type,
           config: input.config,
           paramMapping: input.paramMapping,
@@ -448,16 +421,8 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         }).catch(() => {});
         reply.status(201).send({ trigger });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === "duplicate_type") {
-          return reply.status(409).send({
-            error: `A trigger of type "${input.type}" already exists for this task config`,
-          });
-        }
-        if (msg === "duplicate_webhook_path") {
-          return reply.status(409).send({ error: "Webhook path is already in use" });
-        }
-        reply.status(400).send({ error: msg });
+        if (replyTriggerError(reply, err, input)) return;
+        reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
     },
   );
@@ -471,7 +436,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         summary: "Update a trigger on a task config",
         tags: ["Task Configs"],
         params: triggerParamsSchema,
-        body: updateTriggerSchema,
+        body: UpdateTriggerBodySchema,
         response: {
           200: z.object({ trigger: TriggerSchema }),
           400: ErrorResponseSchema,
@@ -489,18 +454,18 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Task config not found" });
       }
 
-      const trigger = await taskConfigService.getTaskConfigTrigger(triggerId);
-      if (!trigger || trigger.targetType !== "task_config" || trigger.targetId !== id) {
+      const trigger = await triggerService.getTriggerFor("task_config", id, triggerId);
+      if (!trigger) {
         return reply.status(404).send({ error: "Trigger not found" });
       }
 
       if (req.body.config) {
-        const err = validateTriggerConfig(trigger.type, req.body.config);
+        const err = triggerService.validateTriggerConfig(trigger.type, req.body.config);
         if (err) return reply.status(400).send({ error: err });
       }
 
       try {
-        const updated = await taskConfigService.updateTaskConfigTrigger(triggerId, req.body);
+        const updated = await triggerService.updateTrigger(triggerId, req.body);
         if (!updated) return reply.status(404).send({ error: "Trigger not found" });
         logAction({
           workspaceId: req.user?.workspaceId ?? null,
@@ -512,11 +477,8 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         }).catch(() => {});
         reply.send({ trigger: updated });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === "duplicate_webhook_path") {
-          return reply.status(409).send({ error: "Webhook path is already in use" });
-        }
-        reply.status(400).send({ error: msg });
+        if (replyTriggerError(reply, err, req.body)) return;
+        reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
     },
   );
@@ -545,12 +507,12 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Task config not found" });
       }
 
-      const trigger = await taskConfigService.getTaskConfigTrigger(triggerId);
-      if (!trigger || trigger.targetType !== "task_config" || trigger.targetId !== id) {
+      const trigger = await triggerService.getTriggerFor("task_config", id, triggerId);
+      if (!trigger) {
         return reply.status(404).send({ error: "Trigger not found" });
       }
 
-      await taskConfigService.deleteTaskConfigTrigger(triggerId);
+      await triggerService.deleteTrigger(triggerId);
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,

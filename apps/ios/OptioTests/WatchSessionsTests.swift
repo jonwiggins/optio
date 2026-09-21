@@ -152,29 +152,32 @@ final class WatchSessionsTests: XCTestCase {
 
     // MARK: Deep links
 
-    func testNewSessionAndSessionsViewLinks() throws {
-        XCTAssertEqual(DeepLink.newSession.url.absoluteString, "optio://sessions/new")
-        XCTAssertEqual(DeepLink(url: try XCTUnwrap(URL(string: "optio://sessions/new"))), .newSession)
+    func testNewWorkAndWorkViewLinks() throws {
+        XCTAssertEqual(DeepLink.newWork.url.absoluteString, "optio://work/new")
+        XCTAssertEqual(DeepLink(url: try XCTUnwrap(URL(string: "optio://work/new"))), .newWork)
+        // The pre-v0.6 link still opens the sheet.
+        XCTAssertEqual(DeepLink(url: try XCTUnwrap(URL(string: "optio://sessions/new"))), .newWork)
         XCTAssertEqual(DeepLink(url: try XCTUnwrap(URL(string: "optio://sessions/abc"))), .session("abc"), "ids other than `new` still open a pod session")
 
-        let active = DeepLink.sessions(view: "active").url
-        XCTAssertEqual(active.absoluteString, "optio://section/sessions?view=active")
-        XCTAssertEqual(DeepLink(url: active), .sessions(view: "active"))
+        let active = DeepLink.work(view: "active").url
+        XCTAssertEqual(active.absoluteString, "optio://section/work?view=active")
+        XCTAssertEqual(DeepLink(url: active), .work(view: "active"))
+        XCTAssertEqual(DeepLink(url: try XCTUnwrap(URL(string: "optio://section/sessions?view=recurring"))), .work(view: "recurring"))
         XCTAssertEqual(DeepLink(url: try XCTUnwrap(URL(string: "optio://section/sessions"))), .section("sessions"))
-        XCTAssertEqual(DeepLink.serverId(in: DeepLink.sessions(view: "agents").url(server: "s1")), "s1")
+        XCTAssertEqual(DeepLink.serverId(in: DeepLink.work(view: "agents").url(server: "s1")), "s1")
     }
 
     @MainActor
-    func testRouterOpensNewSessionSheetAndViews() throws {
+    func testRouterOpensNewWorkSheetAndViews() throws {
         let router = AppRouter()
-        XCTAssertTrue(router.handle(url: try XCTUnwrap(URL(string: "optio://sessions/new"))))
-        XCTAssertTrue(router.pendingNewSession)
-        XCTAssertEqual(router.pendingSection, .sessions)
+        XCTAssertTrue(router.handle(url: try XCTUnwrap(URL(string: "optio://work/new"))))
+        XCTAssertTrue(router.pendingNewWork)
+        XCTAssertEqual(router.pendingSection, .work)
         XCTAssertEqual(router.selectedTab, .work)
 
         XCTAssertTrue(router.handle(url: try XCTUnwrap(URL(string: "optio://section/sessions?view=recurring"))))
-        XCTAssertEqual(router.pendingSessionView, .recurring)
+        XCTAssertEqual(router.pendingWorkView, .recurring)
         XCTAssertTrue(router.handle(url: try XCTUnwrap(URL(string: "optio://section/sessions?view=bogus"))))
-        XCTAssertEqual(router.pendingSessionView, .active, "unknown views fall back to Active")
+        XCTAssertEqual(router.pendingWorkView, .active, "unknown views fall back to Active")
     }
 }

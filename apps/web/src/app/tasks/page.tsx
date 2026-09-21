@@ -23,11 +23,11 @@ function Redirect() {
     const tab = searchParams.get("tab");
     if (tab === "issues") router.replace("/issues");
     else if (tab === "prs") router.replace("/reviews");
-    else if (tab === "standalone") router.replace("/sessions?view=recurring");
+    else if (tab === "standalone") router.replace("/work?view=recurring");
     else {
       const stage = searchParams.get("stage");
       const view = stage === "failed" || stage === "done" ? "history" : "active";
-      router.replace(`/sessions?view=${view}`);
+      router.replace(`/work?view=${view}`);
     }
   }, [searchParams, router]);
   return null;

@@ -24,8 +24,8 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const inLocalTerminal = /^\/local\/[^/]+$/.test(pathname);
   // The attention watcher (favicon dot, tab badge, notifications for local
   // terminals) runs wherever those terminals are listed or open: the
-  // sessions list and the terminal view itself.
-  const inLocal = pathname.startsWith("/local/") || pathname === "/sessions";
+  // work list and the terminal view itself.
+  const inLocal = pathname.startsWith("/local/") || pathname === "/work";
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Wide screens only — collapsing hands the rail's width to the terminal.
   // The phone drawer ignores it. Persisted; hydrated after mount so SSR and

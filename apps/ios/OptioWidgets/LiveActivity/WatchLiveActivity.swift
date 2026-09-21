@@ -7,7 +7,7 @@ import WidgetKit
 ///
 /// The head session renders as a session row — status dot · name · `status · reason`,
 /// then its four attribute chips (When / Where / Who / Then, the same icons as the
-/// app's `SessionRowView`) — with the "since" timer and a counts line underneath.
+/// app's `WorkRowView`) — with the "since" timer and a counts line underneath.
 /// Colour follows the status palette (Shared/StatusColor.swift): yellow while a
 /// session needs you, purple while sessions are working, grey when offline / ended.
 /// The only live elements are the system timers.

@@ -3,7 +3,7 @@ import type { ComponentType, ReactNode } from "react";
 /**
  * The one true empty-state for list pages. Same icon framing, same vertical
  * rhythm, same dashed border across Tasks / Jobs / Reviews / Issues / Agents
- * / Sessions. Pass `action` to render a primary CTA below the description.
+ * / Work. Pass `action` to render a primary CTA below the description.
  */
 export function EmptyState({
   icon: Icon,

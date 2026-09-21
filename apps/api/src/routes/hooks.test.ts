@@ -11,8 +11,14 @@ const mockCreateWorkflowRun = vi.fn();
 const mockGetTaskConfig = vi.fn();
 const mockInstantiateTask = vi.fn();
 
-vi.mock("../services/workflow-service.js", () => ({
+// The route finds the trigger through the trigger service and fires it
+// through the dispatcher, which reaches the per-kind services mocked here.
+vi.mock("../services/trigger-service.js", () => ({
   getWebhookTriggerByPath: (...args: unknown[]) => mockGetWebhookTriggerByPath(...args),
+  markTriggerFired: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../services/workflow-service.js", () => ({
   getWorkflow: (...args: unknown[]) => mockGetWorkflow(...args),
   createWorkflowRun: (...args: unknown[]) => mockCreateWorkflowRun(...args),
 }));
@@ -143,7 +149,7 @@ describe("POST /api/hooks/:webhookPath", () => {
     });
 
     expect(res.statusCode).toBe(404);
-    expect(res.json().error).toContain("Workflow not found");
+    expect(res.json().error).toContain("not found or disabled");
   });
 
   it("returns 404 when workflow is disabled", async () => {
@@ -308,6 +314,7 @@ describe("POST /api/hooks/:webhookPath", () => {
     expect(mockInstantiateTask).toHaveBeenCalledWith("tc-1", {
       triggerId: "trig-tc-1",
       params: { severity: "high" },
+      ticket: undefined,
     });
     expect(mockCreateWorkflowRun).not.toHaveBeenCalled();
   });

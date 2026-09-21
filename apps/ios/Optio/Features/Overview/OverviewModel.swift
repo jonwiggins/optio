@@ -14,7 +14,7 @@ struct MetricsSample: Identifiable, Hashable, Sendable {
 /// Screen state for the Overview tab. Mirrors `apps/web/src/hooks/use-dashboard-data.ts`:
 /// task stats, recent tasks, repos, hosts + terminals and the cluster fanned out
 /// every 10 seconds. Usage limits come from the shared `UsageStore`; the sessions
-/// board has its own `SessionsFeedModel`.
+/// board has its own `WorkFeedModel`.
 @Observable
 @MainActor
 final class OverviewModel {

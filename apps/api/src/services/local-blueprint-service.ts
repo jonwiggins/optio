@@ -1,7 +1,8 @@
 /**
- * Local Blueprints: reusable terminal specs spawned by triggers (webhook,
- * schedule, ticket, manual). Rows in `local_blueprints`; triggers live in the
- * generic `workflow_triggers` table with target_type = "local_blueprint".
+ * Local Blueprints: reusable terminal specs spawned by triggers. Rows in
+ * `local_blueprints`; triggers live in the generic `workflow_triggers` table
+ * with target_type = "local_blueprint" (CRUD in trigger-service, firing in
+ * trigger-dispatch).
  *
  * Command safety: trigger payloads never carry commands. Params substitute
  * into the user-authored commandTemplate via renderTemplateString, and every
@@ -14,12 +15,10 @@ import {
   type LocalAgentKind,
   type LocalAgentSessionMode,
   type LocalTerminalSpec,
-  type LocalTriggerType,
 } from "@optio/shared";
 import { db } from "../db/client.js";
 import { localBlueprints, workflowTriggers } from "../db/schema.js";
 import { logger } from "../logger.js";
-import { computeNextFire } from "../utils/cron.js";
 import {
   getPromptTemplateById,
   renderTemplateString,
@@ -289,183 +288,4 @@ export async function spawnFromBlueprint(
     ticket: opts.ticket,
     hold: blueprint.spawnMode === "hold",
   });
-}
-
-// ── Trigger CRUD (workflow_triggers with target_type = "local_blueprint") ──
-
-export async function listBlueprintTriggers(blueprintId: string) {
-  return db
-    .select()
-    .from(workflowTriggers)
-    .where(
-      and(
-        eq(workflowTriggers.targetType, "local_blueprint"),
-        eq(workflowTriggers.targetId, blueprintId),
-      ),
-    )
-    .orderBy(desc(workflowTriggers.createdAt));
-}
-
-export async function createBlueprintTrigger(input: {
-  blueprintId: string;
-  type: LocalTriggerType;
-  config?: Record<string, unknown>;
-  paramMapping?: Record<string, unknown>;
-  enabled?: boolean;
-}) {
-  if (input.type === "webhook" && typeof input.config?.path === "string") {
-    const conflicts = await db
-      .select()
-      .from(workflowTriggers)
-      .where(eq(workflowTriggers.type, "webhook"));
-    if (conflicts.some((t) => (t.config as Record<string, unknown>)?.path === input.config!.path)) {
-      throw new Error("duplicate_webhook_path");
-    }
-  }
-  const enabled = input.enabled ?? true;
-  let nextFireAt: Date | null = null;
-  if (input.type === "schedule" && enabled && typeof input.config?.cronExpression === "string") {
-    nextFireAt = computeNextFire(input.config.cronExpression);
-  }
-  const [trigger] = await db
-    .insert(workflowTriggers)
-    .values({
-      workflowId: null,
-      targetType: "local_blueprint",
-      targetId: input.blueprintId,
-      type: input.type,
-      config: input.config ?? {},
-      paramMapping: input.paramMapping,
-      enabled,
-      nextFireAt,
-    })
-    .returning();
-  return trigger;
-}
-
-export async function updateBlueprintTrigger(
-  id: string,
-  input: {
-    config?: Record<string, unknown>;
-    paramMapping?: Record<string, unknown>;
-    enabled?: boolean;
-  },
-) {
-  const [existing] = await db
-    .select()
-    .from(workflowTriggers)
-    .where(and(eq(workflowTriggers.id, id), eq(workflowTriggers.targetType, "local_blueprint")));
-  if (!existing) return null;
-
-  // Enforce webhook path uniqueness on update too (create already does).
-  if (input.config && typeof input.config.path === "string") {
-    const conflicts = await db
-      .select()
-      .from(workflowTriggers)
-      .where(eq(workflowTriggers.type, "webhook"));
-    if (
-      conflicts.some(
-        (t) => t.id !== id && (t.config as Record<string, unknown>)?.path === input.config!.path,
-      )
-    ) {
-      throw new Error("duplicate_webhook_path");
-    }
-  }
-
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (input.config !== undefined) updates.config = input.config;
-  if (input.paramMapping !== undefined) updates.paramMapping = input.paramMapping;
-  if (input.enabled !== undefined) updates.enabled = input.enabled;
-
-  if (existing.type === "schedule") {
-    const newConfig =
-      input.config !== undefined
-        ? input.config
-        : (existing.config as Record<string, unknown> | null);
-    const newEnabled = input.enabled ?? existing.enabled;
-    const cronExpression = newConfig?.cronExpression;
-    updates.nextFireAt =
-      newEnabled && typeof cronExpression === "string" ? computeNextFire(cronExpression) : null;
-  }
-
-  const [updated] = await db
-    .update(workflowTriggers)
-    .set(updates)
-    .where(eq(workflowTriggers.id, id))
-    .returning();
-  return updated ?? null;
-}
-
-export async function deleteBlueprintTrigger(id: string): Promise<boolean> {
-  const deleted = await db
-    .delete(workflowTriggers)
-    .where(and(eq(workflowTriggers.id, id), eq(workflowTriggers.targetType, "local_blueprint")))
-    .returning();
-  return deleted.length > 0;
-}
-
-/**
- * Fire enabled `ticket` triggers targeting local blueprints. Mirrors
- * taskConfigService.fireTicketTriggers: optional config.source equality and
- * config.labels any-match.
- */
-export async function fireLocalTicketTriggers(ticket: {
-  source: string;
-  externalId: string;
-  title: string;
-  body?: string;
-  labels?: string[];
-  url?: string;
-}): Promise<Array<{ triggerId: string; terminalId: string }>> {
-  const candidates = await db
-    .select()
-    .from(workflowTriggers)
-    .where(
-      and(
-        eq(workflowTriggers.targetType, "local_blueprint"),
-        eq(workflowTriggers.type, "ticket"),
-        eq(workflowTriggers.enabled, true),
-      ),
-    );
-
-  const results: Array<{ triggerId: string; terminalId: string }> = [];
-  for (const trigger of candidates) {
-    const config = (trigger.config ?? {}) as Record<string, unknown>;
-    if (config.source && config.source !== ticket.source) continue;
-    const requiredLabels = Array.isArray(config.labels) ? (config.labels as string[]) : null;
-    if (requiredLabels && requiredLabels.length > 0) {
-      if (!requiredLabels.some((l) => ticket.labels?.includes(l))) continue;
-    }
-
-    try {
-      const blueprint = await getBlueprint(trigger.targetId);
-      if (!blueprint || !blueprint.enabled) continue;
-      const terminal = await spawnFromBlueprint(blueprint, {
-        triggerId: trigger.id,
-        spawnedBy: "ticket",
-        // Link the terminal back to the ticket so the UI can show the ticket
-        // chip and the terminal appears in the ticket's context.
-        ticket: { source: ticket.source, externalId: ticket.externalId, url: ticket.url },
-        params: {
-          ticketSource: ticket.source,
-          ticketExternalId: ticket.externalId,
-          ticketTitle: ticket.title,
-          ticketBody: ticket.body ?? "",
-          ticketUrl: ticket.url ?? "",
-          ticketLabels: (ticket.labels ?? []).join(","),
-        },
-      });
-      results.push({ triggerId: trigger.id, terminalId: terminal.id });
-      logger.info(
-        { triggerId: trigger.id, blueprintId: trigger.targetId, terminalId: terminal.id },
-        "Fired ticket trigger for local blueprint",
-      );
-    } catch (err) {
-      logger.warn(
-        { err, triggerId: trigger.id, blueprintId: trigger.targetId },
-        "Failed to fire local blueprint ticket trigger",
-      );
-    }
-  }
-  return results;
 }

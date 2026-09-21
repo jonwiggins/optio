@@ -16,31 +16,39 @@ vi.mock("../services/unified-task-service.js", () => ({
   getUnifiedRun: (...args: unknown[]) => mockGetUnifiedRun(...args),
   listTriggersForParent: (...args: unknown[]) => mockListTriggersForParent(...args),
   getTriggerForParent: (...args: unknown[]) => mockGetTriggerForParent(...args),
+  targetTypeFor: (parent: { type: string }) =>
+    parent.type === "standalone"
+      ? "job"
+      : parent.type === "pr-review"
+        ? "pr_review"
+        : "task_config",
 }));
 
 const mockCreateWorkflowRun = vi.fn();
-const mockCreateWorkflowTrigger = vi.fn();
-const mockUpdateWorkflowTrigger = vi.fn();
-const mockDeleteWorkflowTrigger = vi.fn();
-
 vi.mock("../services/workflow-service.js", () => ({
   createWorkflowRun: (...args: unknown[]) => mockCreateWorkflowRun(...args),
-  createWorkflowTrigger: (...args: unknown[]) => mockCreateWorkflowTrigger(...args),
-  updateWorkflowTrigger: (...args: unknown[]) => mockUpdateWorkflowTrigger(...args),
-  deleteWorkflowTrigger: (...args: unknown[]) => mockDeleteWorkflowTrigger(...args),
 }));
 
 const mockInstantiateTask = vi.fn();
-const mockCreateTaskConfigTrigger = vi.fn();
-const mockUpdateTaskConfigTrigger = vi.fn();
-const mockDeleteTaskConfigTrigger = vi.fn();
-
 vi.mock("../services/task-config-service.js", () => ({
   instantiateTask: (...args: unknown[]) => mockInstantiateTask(...args),
-  createTaskConfigTrigger: (...args: unknown[]) => mockCreateTaskConfigTrigger(...args),
-  updateTaskConfigTrigger: (...args: unknown[]) => mockUpdateTaskConfigTrigger(...args),
-  deleteTaskConfigTrigger: (...args: unknown[]) => mockDeleteTaskConfigTrigger(...args),
 }));
+
+// One trigger service for every parent kind; the route only picks the target type.
+const mockCreateTrigger = vi.fn();
+const mockUpdateTrigger = vi.fn();
+const mockDeleteTrigger = vi.fn();
+vi.mock("../services/trigger-service.js", async () => {
+  const actual = await vi.importActual<typeof import("../services/trigger-service.js")>(
+    "../services/trigger-service.js",
+  );
+  return {
+    validateTriggerConfig: actual.validateTriggerConfig,
+    createTrigger: (...args: unknown[]) => mockCreateTrigger(...args),
+    updateTrigger: (...args: unknown[]) => mockUpdateTrigger(...args),
+    deleteTrigger: (...args: unknown[]) => mockDeleteTrigger(...args),
+  };
+});
 
 import { tasksUnifiedRoutes } from "./tasks-unified.js";
 
@@ -160,12 +168,12 @@ describe("POST /api/tasks/:id/triggers", () => {
     app = await buildApp();
   });
 
-  it("dispatches to task-config-service for repo-blueprint parents", async () => {
+  it("creates a task_config trigger for repo-blueprint parents", async () => {
     mockResolveAnyTaskById.mockResolvedValue({
       type: "repo-blueprint",
       data: { id: "tc-1" },
     });
-    mockCreateTaskConfigTrigger.mockResolvedValue({
+    mockCreateTrigger.mockResolvedValue({
       id: "trg-1",
       targetType: "task_config",
       targetId: "tc-1",
@@ -186,16 +194,17 @@ describe("POST /api/tasks/:id/triggers", () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    expect(mockCreateTaskConfigTrigger).toHaveBeenCalled();
-    expect(mockCreateWorkflowTrigger).not.toHaveBeenCalled();
+    expect(mockCreateTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({ targetType: "task_config", targetId: "tc-1", type: "schedule" }),
+    );
   });
 
-  it("dispatches to workflow-service for standalone parents", async () => {
+  it("creates a job trigger for standalone parents", async () => {
     mockResolveAnyTaskById.mockResolvedValue({
       type: "standalone",
       data: { id: "wf-1" },
     });
-    mockCreateWorkflowTrigger.mockResolvedValue({
+    mockCreateTrigger.mockResolvedValue({
       id: "trg-2",
       targetType: "job",
       targetId: "wf-1",
@@ -216,8 +225,52 @@ describe("POST /api/tasks/:id/triggers", () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    expect(mockCreateWorkflowTrigger).toHaveBeenCalled();
-    expect(mockCreateTaskConfigTrigger).not.toHaveBeenCalled();
+    expect(mockCreateTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({ targetType: "job", targetId: "wf-1", type: "schedule" }),
+    );
+  });
+
+  it("takes a Slack event trigger on a Job in a pod", async () => {
+    mockResolveAnyTaskById.mockResolvedValue({
+      type: "standalone",
+      data: { id: "wf-1" },
+    });
+    mockCreateTrigger.mockResolvedValue({
+      id: "trg-3",
+      targetType: "job",
+      targetId: "wf-1",
+      type: "slack",
+      config: { channelId: "C0123ABCD" },
+      paramMapping: null,
+      enabled: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks/wf-1/triggers",
+      payload: { type: "slack", config: { channelId: "C0123ABCD" } },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(mockCreateTrigger).toHaveBeenCalledWith(
+      expect.objectContaining({ targetType: "job", type: "slack" }),
+    );
+  });
+
+  it("rejects a Slack trigger with a malformed channel id", async () => {
+    mockResolveAnyTaskById.mockResolvedValue({
+      type: "standalone",
+      data: { id: "wf-1" },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks/wf-1/triggers",
+      payload: { type: "slack", config: { channelId: "general" } },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mockCreateTrigger).not.toHaveBeenCalled();
   });
 
   it("rejects trigger creation on ad-hoc repo-task with 405", async () => {

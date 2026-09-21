@@ -15,6 +15,7 @@
  *   - `standalone`      → rows in `workflow_runs`
  *   - `pr-review`       → rows in `pr_review_runs`
  */
+import type { TriggerTargetType } from "@optio/shared";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
@@ -237,11 +238,8 @@ export async function getUnifiedRun(
   return (row as unknown as Record<string, unknown>) ?? null;
 }
 
-/**
- * Look up a trigger by id for the polymorphic trigger routes. Scoped to a
- * parent Task so that triggers only appear under their owning Task.
- */
-function targetTypeFor(parent: ResolvedTask): string {
+/** The `workflow_triggers.target_type` a resolved Task's triggers carry. */
+export function targetTypeFor(parent: ResolvedTask): TriggerTargetType {
   switch (parent.type) {
     case "standalone":
       return "job";
@@ -251,6 +249,11 @@ function targetTypeFor(parent: ResolvedTask): string {
       return "task_config";
   }
 }
+
+/**
+ * Look up a trigger by id for the polymorphic trigger routes. Scoped to a
+ * parent Task so that triggers only appear under their owning Task.
+ */
 
 export async function getTriggerForParent(parent: ResolvedTask, triggerId: string) {
   const targetType = targetTypeFor(parent);

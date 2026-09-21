@@ -35,15 +35,13 @@ interface NavGroup {
 
 const NAV_GROUPS: NavGroup[] = [
   {
+    // One noun. Every Task, Job, automation, terminal, and agent is work
+    // with a When / Where / Who / What / Then; the list filters them.
+    // Reviews and the Inbox sit beside it at the top level.
     label: null,
-    items: [{ href: "/", label: "Overview", icon: LayoutDashboard }],
-  },
-  {
-    // One noun. Every Task, Job, automation, terminal, and agent is a
-    // session with a When / Where / Who / What / Then; the list filters them.
-    label: "Work",
     items: [
-      { href: "/sessions", label: "Sessions", icon: Terminal },
+      { href: "/", label: "Overview", icon: LayoutDashboard },
+      { href: "/work", label: "Work", icon: Terminal },
       { href: "/reviews", label: "Reviews", icon: GitPullRequest },
       { href: "/issues", label: "Inbox", icon: Inbox },
     ],

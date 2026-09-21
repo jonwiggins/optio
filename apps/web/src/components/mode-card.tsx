@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 
-/** A big either/or card: the first choice on the New Task / New session forms. */
+/** A big either/or card: the first choice on the New Task / New work forms. */
 export function ModeCard({
   active,
   onClick,

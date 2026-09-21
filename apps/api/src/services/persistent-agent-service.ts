@@ -629,72 +629,6 @@ export async function wakeAgent(input: WakeAgentInput) {
   await enqueueReconcileLazy(input.agentId, `wake_${input.source}`);
 }
 
-/**
- * Wake every enabled persistent agent whose `ticket` trigger matches the
- * ticket (source + any-match labels), with the ticket as a system message
- * and its fields as the structured payload — the agent counterpart of the
- * Job / Task-config / Local ticket trigger fan-out in the ticket-sync sweep.
- */
-export async function fireAgentTicketTriggers(ticket: {
-  source: string;
-  externalId: string;
-  title: string;
-  body?: string;
-  labels?: string[];
-  url?: string;
-}): Promise<Array<{ triggerId: string; agentId: string }>> {
-  const { ticketTriggerMatches, ticketTriggerParams } = await import("./workflow-service.js");
-  const candidates = await db
-    .select()
-    .from(workflowTriggers)
-    .where(
-      and(
-        eq(workflowTriggers.targetType, "persistent_agent"),
-        eq(workflowTriggers.type, "ticket"),
-        eq(workflowTriggers.enabled, true),
-      ),
-    );
-  const results: Array<{ triggerId: string; agentId: string }> = [];
-  for (const trigger of candidates) {
-    if (!ticketTriggerMatches((trigger.config ?? {}) as Record<string, unknown>, ticket)) continue;
-    try {
-      const agent = await getPersistentAgentUnscoped(trigger.targetId);
-      if (!agent || !agent.enabled) continue;
-      const params = ticketTriggerParams(ticket);
-      await wakeAgent({
-        agentId: agent.id,
-        source: "ticket",
-        body: [
-          `Ticket ${ticket.externalId} (${ticket.source}): ${ticket.title}`,
-          ticket.url ? ticket.url : null,
-          ticket.body ? `\n${ticket.body}` : null,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        senderType: "system",
-        senderId: buildSenderId({ type: "system", label: `ticket:${ticket.source}` }),
-        senderName: `Ticket ${ticket.externalId}`,
-        structuredPayload: params,
-      });
-      await db
-        .update(workflowTriggers)
-        .set({ lastFiredAt: new Date() })
-        .where(eq(workflowTriggers.id, trigger.id));
-      results.push({ triggerId: trigger.id, agentId: agent.id });
-      logger.info(
-        { triggerId: trigger.id, agentId: agent.id, ticket: ticket.externalId },
-        "Fired ticket trigger for persistent agent",
-      );
-    } catch (err) {
-      logger.error(
-        { err, triggerId: trigger.id, ticketExternalId: ticket.externalId },
-        "Failed to fire persistent agent ticket trigger",
-      );
-    }
-  }
-  return results;
-}
-
 function deriveSenderType(source: PersistentAgentWakeSource): PersistentAgentMessageSenderType {
   switch (source) {
     case "user":
@@ -704,6 +638,9 @@ function deriveSenderType(source: PersistentAgentWakeSource): PersistentAgentMes
     case "webhook":
     case "schedule":
     case "ticket":
+    case "github":
+    case "slack":
+    case "linear":
     case "system":
     case "initial":
       return "system";

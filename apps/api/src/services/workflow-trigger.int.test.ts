@@ -9,15 +9,16 @@
  *   - target_type="task_config" → instantiateTask → queued tasks row with
  *     rendered prompt/title
  *   - disabled / not-yet-due triggers are never selected
- * plus the workflow-trigger-service CRUD round-trip — including that its
- * create/update stamp nextFireAt for schedule triggers so they actually fire
- * (regression: it used to leave nextFireAt null and they never fired).
+ * plus the trigger-service CRUD round-trip — including that its create/update
+ * stamp nextFireAt for schedule triggers so they actually fire (regression:
+ * an earlier service left nextFireAt null and they never fired) — and the
+ * ticket / event fan-outs of trigger-dispatch across target types.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, workflowRuns, workflowTriggers } from "../db/schema.js";
-import * as triggerService from "./workflow-trigger-service.js";
+import * as triggerService from "./trigger-service.js";
 import {
   startWorkflowTriggerWorker,
   workflowTriggerQueue,
@@ -279,12 +280,13 @@ describe("schedule trigger dispatch (workflow-trigger-worker)", () => {
   });
 });
 
-describe("trigger CRUD (workflow-trigger-service)", () => {
+describe("trigger CRUD (trigger-service)", () => {
   it("create → list → get → update → delete round-trip", async () => {
     const workflow = await insertWorkflow();
 
     const created = await triggerService.createTrigger({
-      workflowId: workflow.id,
+      targetType: "job",
+      targetId: workflow.id,
       type: "manual",
       config: { note: "kick it off" },
       paramMapping: { PARAM: "x" },
@@ -298,12 +300,13 @@ describe("trigger CRUD (workflow-trigger-service)", () => {
     expect(created.paramMapping).toEqual({ PARAM: "x" });
 
     const webhook = await triggerService.createTrigger({
-      workflowId: workflow.id,
+      targetType: "job",
+      targetId: workflow.id,
       type: "webhook",
       config: { path: `it-hook-${workflow.id}` },
     });
 
-    const listed = await triggerService.listTriggers(workflow.id);
+    const listed = await triggerService.listTriggers("job", workflow.id);
     expect(listed.map((t) => t.id).sort()).toEqual([created.id, webhook.id].sort());
 
     const fetched = await triggerService.getTrigger(created.id);
@@ -326,32 +329,60 @@ describe("trigger CRUD (workflow-trigger-service)", () => {
     expect(await triggerService.getTrigger(created.id)).toBeNull();
     expect(await triggerService.deleteTrigger(created.id)).toBe(false);
     // The other trigger is untouched.
-    expect((await triggerService.listTriggers(workflow.id)).map((t) => t.id)).toEqual([webhook.id]);
+    expect((await triggerService.listTriggers("job", workflow.id)).map((t) => t.id)).toEqual([
+      webhook.id,
+    ]);
   });
 
-  it("rejects a second trigger of the same type per workflow", async () => {
+  it("allows several triggers of one type per target (two schedules), and refuses types the target can't take", async () => {
     const workflow = await insertWorkflow();
-    await triggerService.createTrigger({ workflowId: workflow.id, type: "manual" });
+    const nine = await triggerService.createTrigger({
+      targetType: "job",
+      targetId: workflow.id,
+      type: "schedule",
+      config: { cronExpression: "0 9 * * *" },
+    });
+    const five = await triggerService.createTrigger({
+      targetType: "job",
+      targetId: workflow.id,
+      type: "schedule",
+      config: { cronExpression: "0 17 * * *" },
+    });
+    expect((await triggerService.listTriggers("job", workflow.id)).map((t) => t.id).sort()).toEqual(
+      [nine.id, five.id].sort(),
+    );
     await expect(
-      triggerService.createTrigger({ workflowId: workflow.id, type: "manual" }),
-    ).rejects.toThrow("duplicate_type");
-    // A different type on the same workflow is fine.
-    const other = await triggerService.createTrigger({ workflowId: workflow.id, type: "webhook" });
-    expect(other.type).toBe("webhook");
+      triggerService.createTrigger({
+        targetType: "pr_review",
+        targetId: workflow.id,
+        type: "github",
+      }),
+    ).rejects.toThrow("unsupported_type");
   });
 
   it("rejects duplicate webhook paths across workflows, on create and update", async () => {
     const wfA = await insertWorkflow();
     const wfB = await insertWorkflow();
     const path = `it-shared-hook-${wfA.id}`;
-    await triggerService.createTrigger({ workflowId: wfA.id, type: "webhook", config: { path } });
+    await triggerService.createTrigger({
+      targetType: "job",
+      targetId: wfA.id,
+      type: "webhook",
+      config: { path },
+    });
 
     await expect(
-      triggerService.createTrigger({ workflowId: wfB.id, type: "webhook", config: { path } }),
+      triggerService.createTrigger({
+        targetType: "job",
+        targetId: wfB.id,
+        type: "webhook",
+        config: { path },
+      }),
     ).rejects.toThrow("duplicate_webhook_path");
 
     const bTrigger = await triggerService.createTrigger({
-      workflowId: wfB.id,
+      targetType: "job",
+      targetId: wfB.id,
       type: "webhook",
       config: { path: `it-other-hook-${wfB.id}` },
     });
@@ -376,7 +407,8 @@ describe("trigger CRUD (workflow-trigger-service)", () => {
     // Every-second cron (cron-parser 6-field): nextFireAt lands within ~1s,
     // so the trigger becomes due without waiting out a minute boundary.
     const trigger = await triggerService.createTrigger({
-      workflowId: workflow.id,
+      targetType: "job",
+      targetId: workflow.id,
       type: "schedule",
       config: { cronExpression: "* * * * * *" },
     });
@@ -407,7 +439,8 @@ describe("trigger CRUD (workflow-trigger-service)", () => {
   it("updateTrigger recomputes nextFireAt on re-enable and cron change, clears it on disable", async () => {
     const workflow = await insertWorkflow();
     const trigger = await triggerService.createTrigger({
-      workflowId: workflow.id,
+      targetType: "job",
+      targetId: workflow.id,
       type: "schedule",
       config: { cronExpression: DAILY_CRON },
     });
@@ -435,9 +468,9 @@ describe("trigger CRUD (workflow-trigger-service)", () => {
   });
 });
 
-describe("ticket triggers on Jobs (workflow-service.fireJobTicketTriggers)", () => {
+describe("ticket triggers on Jobs (trigger-dispatch.fireTicketTriggers)", () => {
   it("spawns a run with the ticket's fields as params for each matching enabled trigger", async () => {
-    const { fireJobTicketTriggers } = await import("./workflow-service.js");
+    const { fireTicketTriggers } = await import("./trigger-dispatch.js");
     const job = await insertWorkflow({ promptTemplate: "Triage {{ticketUrl}}: {{ticketTitle}}" });
     const matching = await insertWorkflowTrigger(job.id, {
       workflowId: job.id,
@@ -460,7 +493,7 @@ describe("ticket triggers on Jobs (workflow-service.fireJobTicketTriggers)", () 
       config: { source: "linear" },
     });
 
-    const fired = await fireJobTicketTriggers({
+    const fired = await fireTicketTriggers({
       source: "linear",
       externalId: "ENG-42",
       title: "Login is broken",
@@ -469,8 +502,16 @@ describe("ticket triggers on Jobs (workflow-service.fireJobTicketTriggers)", () 
       url: "https://linear.app/acme/issue/ENG-42",
     });
 
-    expect(fired).toEqual([{ triggerId: matching.id, runId: expect.any(String) }]);
-    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, fired[0].runId));
+    // Other tests in this file leave enabled ticket triggers behind on other
+    // sources; only this ticket's matches are under test.
+    const mine = fired.filter((f) => f.triggerId === matching.id);
+    expect(mine).toEqual([
+      { triggerId: matching.id, kind: "workflow_run", id: expect.any(String) },
+    ]);
+    expect(fired.map((f) => f.triggerId)).not.toContain(
+      (await triggerService.listTriggers("job", disabledJob.id))[0].id,
+    );
+    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, mine[0].id));
     expect(run.workflowId).toBe(job.id);
     expect(run.triggerId).toBe(matching.id);
     expect(run.params).toMatchObject({
@@ -490,7 +531,7 @@ describe("ticket triggers on Jobs (workflow-service.fireJobTicketTriggers)", () 
   });
 
   it("does not fire when none of the trigger's labels are on the ticket", async () => {
-    const { fireJobTicketTriggers } = await import("./workflow-service.js");
+    const { fireTicketTriggers } = await import("./trigger-dispatch.js");
     const job = await insertWorkflow();
     const labeled = await insertWorkflowTrigger(job.id, {
       workflowId: job.id,
@@ -498,7 +539,7 @@ describe("ticket triggers on Jobs (workflow-service.fireJobTicketTriggers)", () 
       type: "ticket",
       config: { source: "github", labels: ["cve"] },
     });
-    const fired = await fireJobTicketTriggers({
+    const fired = await fireTicketTriggers({
       source: "github",
       externalId: "acme/app#7",
       title: "Typo",
@@ -507,14 +548,16 @@ describe("ticket triggers on Jobs (workflow-service.fireJobTicketTriggers)", () 
     // Other tests in this file leave unlabeled triggers behind that do match;
     // only the labeled one is under test here.
     expect(fired.map((f) => f.triggerId)).not.toContain(labeled.id);
-    for (const f of fired) await db.delete(workflowRuns).where(eq(workflowRuns.id, f.runId));
+    for (const f of fired) {
+      if (f.kind === "workflow_run") await db.delete(workflowRuns).where(eq(workflowRuns.id, f.id));
+    }
   });
 });
 
-describe("ticket triggers on persistent agents (fireAgentTicketTriggers)", () => {
+describe("ticket triggers on persistent agents (trigger-dispatch)", () => {
   it("wakes a matching enabled agent with the ticket as a system message and structured payload", async () => {
-    const { createPersistentAgent, fireAgentTicketTriggers } =
-      await import("./persistent-agent-service.js");
+    const { createPersistentAgent } = await import("./persistent-agent-service.js");
+    const { fireTicketTriggers } = await import("./trigger-dispatch.js");
     const { persistentAgentMessages } = await import("../db/schema.js");
     const agent = await createPersistentAgent({
       slug: `it-ticket-agent-${Date.now().toString(36)}`,
@@ -527,7 +570,7 @@ describe("ticket triggers on persistent agents (fireAgentTicketTriggers)", () =>
       config: { source: "jira" },
     });
 
-    const fired = await fireAgentTicketTriggers({
+    const fired = await fireTicketTriggers({
       source: "jira",
       externalId: "OPS-9",
       title: "Disk full",
@@ -535,7 +578,9 @@ describe("ticket triggers on persistent agents (fireAgentTicketTriggers)", () =>
       labels: [],
       url: "https://acme.atlassian.net/browse/OPS-9",
     });
-    expect(fired).toEqual([{ triggerId: trigger.id, agentId: agent.id }]);
+    expect(fired.filter((f) => f.triggerId === trigger.id)).toEqual([
+      { triggerId: trigger.id, kind: "persistent_agent", id: agent.id },
+    ]);
 
     const messages = await db
       .select()
@@ -556,7 +601,163 @@ describe("ticket triggers on persistent agents (fireAgentTicketTriggers)", () =>
     expect(after.lastFiredAt).not.toBeNull();
 
     // Another source leaves this agent alone.
-    const none = await fireAgentTicketTriggers({ source: "github", externalId: "x#1", title: "t" });
-    expect(none.map((f) => f.agentId)).not.toContain(agent.id);
+    const none = await fireTicketTriggers({ source: "github", externalId: "x#1", title: "t" });
+    expect(none.map((f) => f.triggerId)).not.toContain(trigger.id);
+    for (const f of none) {
+      if (f.kind === "workflow_run") await db.delete(workflowRuns).where(eq(workflowRuns.id, f.id));
+    }
+  });
+});
+
+describe("event triggers on every target (event-trigger-service.fireEventTriggers)", () => {
+  const prOpened = (repo: string, number = 1) => ({
+    action: "opened",
+    repository: { full_name: repo, html_url: `https://github.com/${repo}` },
+    pull_request: {
+      number,
+      title: "feat: widgets",
+      body: "Adds widgets.",
+      html_url: `https://github.com/${repo}/pull/${number}`,
+      user: { login: "alice" },
+      head: { ref: "feat/widgets" },
+      base: { ref: "main" },
+    },
+  });
+
+  it("a GitHub PR event starts a Job run with the PR's fields as params", async () => {
+    const { fireEventTriggers, normalizeGitHubEvent } = await import("./event-trigger-service.js");
+    const job = await insertWorkflow({
+      promptTemplate: "Summarize {{url}} ({{repo}} #{{number}})",
+    });
+    const trigger = await triggerService.createTrigger({
+      targetType: "job",
+      targetId: job.id,
+      type: "github",
+      config: { events: ["pr_opened"], repos: ["acme/widgets"] },
+    });
+
+    const miss = await fireEventTriggers(
+      "github",
+      normalizeGitHubEvent("pull_request", prOpened("acme/other"))!,
+    );
+    expect(miss.map((f) => f.triggerId)).not.toContain(trigger.id);
+
+    const hit = await fireEventTriggers(
+      "github",
+      normalizeGitHubEvent("pull_request", prOpened("acme/widgets", 12))!,
+    );
+    const mine = hit.filter((f) => f.triggerId === trigger.id);
+    expect(mine).toEqual([
+      { triggerId: trigger.id, matched: "pr_opened", kind: "workflow_run", id: expect.any(String) },
+    ]);
+    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, mine[0].id));
+    expect(run.workflowId).toBe(job.id);
+    expect(run.params).toMatchObject({
+      source: "github",
+      event: "pr_opened",
+      repo: "acme/widgets",
+      number: "12",
+      url: "https://github.com/acme/widgets/pull/12",
+      headBranch: "feat/widgets",
+    });
+    for (const f of hit) {
+      if (f.kind === "workflow_run") await db.delete(workflowRuns).where(eq(workflowRuns.id, f.id));
+    }
+  });
+
+  it("a scheduled Task listens to its own repo by default and spawns a task without a ticket link", async () => {
+    const { fireEventTriggers, normalizeGitHubEvent } = await import("./event-trigger-service.js");
+    const config = await insertTaskConfig({
+      title: "Review PR #{{number}}",
+      prompt: "Review {{url}} and summarize it.",
+      repoUrl: "https://github.com/acme/reviewed",
+    });
+    const trigger = await triggerService.createTrigger({
+      targetType: "task_config",
+      targetId: config.id,
+      type: "github",
+      config: { events: ["pr_opened"] },
+    });
+
+    // A PR in some other repo: no filter named it, so the config's own repo wins.
+    const miss = await fireEventTriggers(
+      "github",
+      normalizeGitHubEvent("pull_request", prOpened("acme/elsewhere"))!,
+    );
+    expect(miss.map((f) => f.triggerId)).not.toContain(trigger.id);
+    expect(await tasksForRepo(config.repoUrl)).toHaveLength(0);
+
+    const hit = await fireEventTriggers(
+      "github",
+      normalizeGitHubEvent("pull_request", prOpened("acme/reviewed", 3))!,
+    );
+    expect(hit.filter((f) => f.triggerId === trigger.id)).toHaveLength(1);
+    const spawned = await tasksForRepo(config.repoUrl);
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].state).toBe("queued");
+    expect(spawned[0].title).toBe("Review PR #3");
+    expect(spawned[0].prompt).toBe(
+      "Review https://github.com/acme/reviewed/pull/3 and summarize it.",
+    );
+    // Reacting to a PR must not link the task to it as a ticket (that would
+    // close the PR when the task completes).
+    expect(spawned[0].ticketExternalId).toBeNull();
+    expect(spawned[0].metadata).toMatchObject({ triggerId: trigger.id });
+    for (const f of hit) {
+      if (f.kind === "workflow_run") await db.delete(workflowRuns).where(eq(workflowRuns.id, f.id));
+    }
+  });
+
+  it("a Slack message wakes a persistent agent with the message and its fields", async () => {
+    const { fireEventTriggers, normalizeSlackEvent } = await import("./event-trigger-service.js");
+    const { createPersistentAgent } = await import("./persistent-agent-service.js");
+    const { persistentAgentMessages } = await import("../db/schema.js");
+    const agent = await createPersistentAgent({
+      slug: `it-slack-agent-${Date.now().toString(36)}`,
+      name: "Slack agent",
+      initialPrompt: "You answer the team.",
+    });
+    const trigger = await triggerService.createTrigger({
+      targetType: "persistent_agent",
+      targetId: agent.id,
+      type: "slack",
+      config: { channelId: "C0IT12345", keyword: "deploy" },
+    });
+
+    const event = normalizeSlackEvent({
+      type: "event_callback",
+      team_id: "T1",
+      event_id: "Ev1",
+      event: {
+        type: "message",
+        channel: "C0IT12345",
+        user: "U42",
+        text: "can someone deploy staging?",
+        ts: "1700000000.000100",
+      },
+    })!;
+    const fired = await fireEventTriggers("slack", event);
+    expect(fired.filter((f) => f.triggerId === trigger.id)).toEqual([
+      { triggerId: trigger.id, matched: "message", kind: "persistent_agent", id: agent.id },
+    ]);
+
+    const messages = await db
+      .select()
+      .from(persistentAgentMessages)
+      .where(eq(persistentAgentMessages.agentId, agent.id));
+    const msg = messages.find((m) => m.body.includes("deploy staging"));
+    expect(msg).toBeTruthy();
+    expect(msg!.senderType).toBe("system");
+    expect(msg!.structuredPayload).toMatchObject({
+      source: "slack",
+      channelId: "C0IT12345",
+      userId: "U42",
+      text: "can someone deploy staging?",
+    });
+    const [after] = await db
+      .select()
+      .from(workflowTriggers)
+      .where(eq(workflowTriggers.id, trigger.id));
+    expect(after.lastFiredAt).not.toBeNull();
   });
 });

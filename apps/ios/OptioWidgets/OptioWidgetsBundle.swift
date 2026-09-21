@@ -4,12 +4,12 @@ import WidgetKit
 @main
 struct OptioWidgetsBundle: WidgetBundle {
     var body: some Widget {
-        SessionsWidget()
+        WorkWidget()
         RunWidget()
         WatchLiveActivity()
         if #available(iOS 18, *) {
             NeedsYouControl()
-            NewSessionControl()
+            NewWorkControl()
             RunTargetControl()
         }
     }

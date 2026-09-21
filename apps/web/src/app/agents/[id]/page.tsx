@@ -205,7 +205,7 @@ export default function AgentDetailPage() {
     try {
       await api.deletePersistentAgent(agentId);
       toast.success("Deleted");
-      window.location.href = "/sessions?view=agents";
+      window.location.href = "/work?view=agents";
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed");
     }
@@ -224,10 +224,10 @@ export default function AgentDetailPage() {
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <Link
-        href="/sessions?view=agents"
+        href="/work?view=agents"
         className="text-sm text-text-muted hover:text-text flex items-center gap-1 mb-4"
       >
-        <ArrowLeft className="w-4 h-4" /> Sessions
+        <ArrowLeft className="w-4 h-4" /> Work
       </Link>
 
       {/* Header */}

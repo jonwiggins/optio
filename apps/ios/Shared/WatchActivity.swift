@@ -68,7 +68,7 @@ public struct WatchState: Codable, Hashable, Sendable {
 
 // MARK: - Session attributes (v0.5 "one noun: Sessions")
 
-/// Which kind of session a Watch row is (`SessionSource` in the app / web feed).
+/// Which kind of session a Watch row is (`WorkSource` in the app / web feed).
 public enum WatchSessionSource: String, Codable, Hashable, Sendable {
     case repoTask = "repo-task"
     case repoBlueprint = "repo-blueprint"

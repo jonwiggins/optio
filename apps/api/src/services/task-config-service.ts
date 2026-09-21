@@ -152,7 +152,12 @@ export async function deleteTaskConfig(id: string): Promise<boolean> {
  */
 export async function instantiateTask(
   taskConfigId: string,
-  opts?: { triggerId?: string | null; params?: Record<string, unknown> | null },
+  opts?: {
+    triggerId?: string | null;
+    params?: Record<string, unknown> | null;
+    /** The ticket / PR / issue the firing was about, so the task links back to it. */
+    ticket?: { source: string; externalId: string; url?: string } | null;
+  },
 ) {
   const config = await getTaskConfig(taskConfigId);
   if (!config) throw new Error(`task_config ${taskConfigId} not found`);
@@ -205,12 +210,16 @@ export async function instantiateTask(
     localHostId: config.localHostId,
     localDir: config.localDir,
     localSessionMode: config.localSessionMode,
+    ...(opts?.ticket
+      ? { ticketSource: opts.ticket.source, ticketExternalId: opts.ticket.externalId }
+      : {}),
     metadata: {
       taskConfigId: config.id,
       taskConfigName: config.name,
       ...(config.agentOptions ? { agentOptions: config.agentOptions } : {}),
       ...(opts?.triggerId ? { triggerId: opts.triggerId } : {}),
       ...(opts?.params ? { triggerParams: opts.params } : {}),
+      ...(opts?.ticket?.url ? { ticketUrl: opts.ticket.url } : {}),
     },
   });
 
@@ -239,201 +248,4 @@ export async function instantiateTask(
 
 export async function setEnabled(id: string, enabled: boolean) {
   return updateTaskConfig(id, { enabled });
-}
-
-// ── Trigger CRUD for task_config targets ─────────────────────────────────────
-
-import { computeNextFire } from "../utils/cron.js";
-
-export async function listTaskConfigTriggers(taskConfigId: string) {
-  return db
-    .select()
-    .from(workflowTriggers)
-    .where(
-      and(
-        eq(workflowTriggers.targetType, "task_config"),
-        eq(workflowTriggers.targetId, taskConfigId),
-      ),
-    )
-    .orderBy(desc(workflowTriggers.createdAt));
-}
-
-export async function getTaskConfigTrigger(id: string) {
-  const [row] = await db.select().from(workflowTriggers).where(eq(workflowTriggers.id, id));
-  return row ?? null;
-}
-
-export async function createTaskConfigTrigger(input: {
-  taskConfigId: string;
-  type: string;
-  config?: Record<string, unknown>;
-  paramMapping?: Record<string, unknown>;
-  enabled?: boolean;
-}) {
-  const existingOfType = await db
-    .select()
-    .from(workflowTriggers)
-    .where(
-      and(
-        eq(workflowTriggers.targetType, "task_config"),
-        eq(workflowTriggers.targetId, input.taskConfigId),
-        eq(workflowTriggers.type, input.type),
-      ),
-    );
-  if (existingOfType.length > 0) throw new Error("duplicate_type");
-
-  if (input.type === "webhook" && input.config?.path) {
-    const path = input.config.path as string;
-    const webhookConflicts = await db
-      .select()
-      .from(workflowTriggers)
-      .where(eq(workflowTriggers.type, "webhook"));
-    const conflict = webhookConflicts.find(
-      (t) => (t.config as Record<string, unknown>)?.path === path,
-    );
-    if (conflict) throw new Error("duplicate_webhook_path");
-  }
-
-  const enabled = input.enabled ?? true;
-  let nextFireAt: Date | null = null;
-  if (input.type === "schedule" && enabled && input.config?.cronExpression) {
-    nextFireAt = computeNextFire(input.config.cronExpression as string);
-  }
-
-  const [row] = await db
-    .insert(workflowTriggers)
-    .values({
-      workflowId: null,
-      targetType: "task_config",
-      targetId: input.taskConfigId,
-      type: input.type,
-      config: input.config ?? {},
-      paramMapping: input.paramMapping ?? null,
-      enabled,
-      nextFireAt,
-    })
-    .returning();
-  return row;
-}
-
-export async function updateTaskConfigTrigger(
-  id: string,
-  input: {
-    config?: Record<string, unknown> | null;
-    paramMapping?: Record<string, unknown> | null;
-    enabled?: boolean;
-  },
-) {
-  const existing = await getTaskConfigTrigger(id);
-  if (!existing) return null;
-
-  if (input.config && typeof input.config.path === "string") {
-    const pathConflicts = await db
-      .select()
-      .from(workflowTriggers)
-      .where(eq(workflowTriggers.type, "webhook"));
-    const conflict = pathConflicts.find(
-      (t) => t.id !== id && (t.config as Record<string, unknown>)?.path === input.config!.path,
-    );
-    if (conflict) throw new Error("duplicate_webhook_path");
-  }
-
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (input.config !== undefined) updates.config = input.config;
-  if (input.paramMapping !== undefined) updates.paramMapping = input.paramMapping;
-  if (input.enabled !== undefined) updates.enabled = input.enabled;
-
-  if (existing.type === "schedule") {
-    const newConfig =
-      input.config !== undefined
-        ? input.config
-        : (existing.config as Record<string, unknown> | null);
-    const newEnabled = input.enabled ?? existing.enabled;
-    const cronExpression = newConfig?.cronExpression as string | undefined;
-    updates.nextFireAt = newEnabled && cronExpression ? computeNextFire(cronExpression) : null;
-  }
-
-  const [row] = await db
-    .update(workflowTriggers)
-    .set(updates)
-    .where(eq(workflowTriggers.id, id))
-    .returning();
-  return row ?? null;
-}
-
-export async function deleteTaskConfigTrigger(id: string): Promise<boolean> {
-  const deleted = await db.delete(workflowTriggers).where(eq(workflowTriggers.id, id)).returning();
-  return deleted.length > 0;
-}
-
-/**
- * Fire any enabled `ticket` triggers on task_configs whose config matches the
- * ticket's source (and optional label filter). Called by ticket-sync-service
- * when it discovers an actionable ticket. Returns the instantiated tasks.
- *
- * Trigger config shape:
- *   { source: "github" | "linear" | "notion" | "jira", labels?: string[] }
- *
- * When `labels` is set, the ticket must carry at least one matching label.
- */
-export async function fireTicketTriggers(ticket: {
-  source: string;
-  externalId: string;
-  title: string;
-  body?: string;
-  labels?: string[];
-  url?: string;
-}): Promise<Array<{ triggerId: string; taskId: string }>> {
-  const candidates = await db
-    .select()
-    .from(workflowTriggers)
-    .where(
-      and(
-        eq(workflowTriggers.targetType, "task_config"),
-        eq(workflowTriggers.type, "ticket"),
-        eq(workflowTriggers.enabled, true),
-      ),
-    );
-
-  const results: Array<{ triggerId: string; taskId: string }> = [];
-  for (const trigger of candidates) {
-    const config = (trigger.config ?? {}) as Record<string, unknown>;
-    if (config.source && config.source !== ticket.source) continue;
-    const requiredLabels = Array.isArray(config.labels) ? (config.labels as string[]) : null;
-    if (requiredLabels && requiredLabels.length > 0) {
-      const has = requiredLabels.some((l) => ticket.labels?.includes(l));
-      if (!has) continue;
-    }
-
-    try {
-      const task = await instantiateTask(trigger.targetId, {
-        triggerId: trigger.id,
-        params: {
-          ticketSource: ticket.source,
-          ticketExternalId: ticket.externalId,
-          ticketTitle: ticket.title,
-          ticketBody: ticket.body ?? "",
-          ticketUrl: ticket.url ?? "",
-          ticketLabels: (ticket.labels ?? []).join(","),
-        },
-      });
-      results.push({ triggerId: trigger.id, taskId: task.id });
-      logger.info(
-        {
-          triggerId: trigger.id,
-          taskConfigId: trigger.targetId,
-          taskId: task.id,
-          ticketSource: ticket.source,
-          ticketExternalId: ticket.externalId,
-        },
-        "Fired ticket trigger for task_config",
-      );
-    } catch (err) {
-      logger.error(
-        { err, triggerId: trigger.id, ticketExternalId: ticket.externalId },
-        "Failed to fire ticket trigger",
-      );
-    }
-  }
-  return results;
 }

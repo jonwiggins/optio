@@ -24,6 +24,9 @@ export type PersistentAgentWakeSource =
   | "webhook"
   | "schedule"
   | "ticket"
+  | "github"
+  | "slack"
+  | "linear"
   | "system"
   | "initial";
 

@@ -59,6 +59,8 @@ interface Props {
   manualLabel?: string;
   /** Rendered inside a card: panels sit on the page background so they read as recessed. */
   inset?: boolean;
+  /** Per type, why it can't be picked right now (e.g. an edit that keeps the saved kind). */
+  disabledTypes?: Partial<Record<TriggerType, string | undefined>>;
 }
 
 export function TriggerSelector({
@@ -71,6 +73,7 @@ export function TriggerSelector({
   hideConfig = false,
   manualLabel = "Manual",
   inset = false,
+  disabledTypes = {},
 }: Props) {
   const panelBg = inset ? "bg-bg" : "bg-bg-card";
   const hint = useMemo(() => {
@@ -104,6 +107,7 @@ export function TriggerSelector({
             label={manualLabel}
             active={!extraActive && value.type === "manual"}
             onClick={() => setType("manual")}
+            disabled={disabledTypes.manual}
           />
         )}
         <TriggerTypeButton
@@ -111,18 +115,21 @@ export function TriggerSelector({
           label="Schedule"
           active={!extraActive && value.type === "schedule"}
           onClick={() => setType("schedule")}
+          disabled={disabledTypes.schedule}
         />
         <TriggerTypeButton
           icon={<Webhook className="w-3.5 h-3.5" />}
           label="Webhook"
           active={!extraActive && value.type === "webhook"}
           onClick={() => setType("webhook")}
+          disabled={disabledTypes.webhook}
         />
         <TriggerTypeButton
           icon={<Ticket className="w-3.5 h-3.5" />}
           label="Ticket"
           active={!extraActive && value.type === "ticket"}
           onClick={() => setType("ticket")}
+          disabled={disabledTypes.ticket}
         />
         {extra}
       </div>
@@ -290,18 +297,28 @@ export function TriggerTypeButton({
   label,
   active,
   onClick,
+  disabled,
 }: {
   icon: React.ReactNode;
   label: string;
   active: boolean;
   onClick: () => void;
+  /** Why it can't be picked right now; the active pill is never disabled. */
+  disabled?: string;
 }) {
+  const blocked = !!disabled && !active;
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={blocked}
+      title={blocked ? disabled : undefined}
       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-        active ? "bg-primary text-white" : "text-text-muted hover:text-text"
+        active
+          ? "bg-primary text-white"
+          : blocked
+            ? "text-text-muted/40 cursor-not-allowed"
+            : "text-text-muted hover:text-text"
       }`}
     >
       {icon}

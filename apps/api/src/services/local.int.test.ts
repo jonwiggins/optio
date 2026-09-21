@@ -42,12 +42,12 @@ import {
 } from "./local-terminal-service.js";
 import {
   createBlueprint,
-  createBlueprintTrigger,
-  fireLocalTicketTriggers,
   resolveBlueprintDir,
   spawnFromBlueprint,
 } from "./local-blueprint-service.js";
-import { fireLocalEventTriggers, normalizeGitHubEvent } from "./local-event-service.js";
+import { createTrigger } from "./trigger-service.js";
+import { fireTicketTriggers } from "./trigger-dispatch.js";
+import { fireEventTriggers, normalizeGitHubEvent } from "./event-trigger-service.js";
 import { createNamedTemplate } from "./prompt-template-service.js";
 import { insertRepo, insertWorkspace } from "../test-utils/integration/fixtures.js";
 
@@ -583,13 +583,14 @@ describe("local blueprints", () => {
       dir: "/home/dev/optio",
       commandTemplate: "claude {{ticketTitle}}",
     });
-    await createBlueprintTrigger({
-      blueprintId: blueprint.id,
+    await createTrigger({
+      targetType: "local_blueprint",
+      targetId: blueprint.id,
       type: "ticket",
       config: { source: "github", labels: ["local"] },
     });
 
-    const miss = await fireLocalTicketTriggers({
+    const miss = await fireTicketTriggers({
       source: "github",
       externalId: "1",
       title: "no matching label",
@@ -597,7 +598,7 @@ describe("local blueprints", () => {
     });
     expect(miss).toHaveLength(0);
 
-    const hit = await fireLocalTicketTriggers({
+    const hit = await fireTicketTriggers({
       source: "github",
       externalId: "2",
       title: "fix the flaky test",
@@ -605,7 +606,7 @@ describe("local blueprints", () => {
     });
     expect(hit).toHaveLength(1);
 
-    const terminal = await getTerminal(hit[0].terminalId);
+    const terminal = await getTerminal(hit[0].id);
     expect(terminal?.spawnedBy).toBe("ticket");
     // Host offline → parked for the next hello.
     expect(terminal?.state).toBe("pending");
@@ -623,21 +624,28 @@ describe("local blueprints", () => {
       commandTemplate: "true",
     });
 
-    const schedule = await createBlueprintTrigger({
-      blueprintId: blueprint.id,
+    const schedule = await createTrigger({
+      targetType: "local_blueprint",
+      targetId: blueprint.id,
       type: "schedule",
       config: { cronExpression: "*/5 * * * *" },
     });
     expect(schedule.nextFireAt).toBeInstanceOf(Date);
 
     const path = `it-hook-${Math.random().toString(36).slice(2, 8)}`;
-    await createBlueprintTrigger({
-      blueprintId: blueprint.id,
+    await createTrigger({
+      targetType: "local_blueprint",
+      targetId: blueprint.id,
       type: "webhook",
       config: { path },
     });
     await expect(
-      createBlueprintTrigger({ blueprintId: blueprint.id, type: "webhook", config: { path } }),
+      createTrigger({
+        targetType: "local_blueprint",
+        targetId: blueprint.id,
+        type: "webhook",
+        config: { path },
+      }),
     ).rejects.toThrow("duplicate_webhook_path");
   });
 });
@@ -682,8 +690,9 @@ describe("local automations (event triggers + session modes)", () => {
       sessionMode: "headless",
       commandTemplate: "Review {{url}} ({{repo}} #{{number}}) on {{headBranch}}",
     });
-    await createBlueprintTrigger({
-      blueprintId: blueprint.id,
+    await createTrigger({
+      targetType: "local_blueprint",
+      targetId: blueprint.id,
       type: "github",
       config: { events: ["review_requested"], login: "Jon" },
     });
@@ -702,21 +711,15 @@ describe("local automations (event triggers + session modes)", () => {
       },
       requested_reviewer: { login: "someone-else" },
     };
-    const miss = await fireLocalEventTriggers(
-      "github",
-      normalizeGitHubEvent("pull_request", payload)!,
-    );
+    const miss = await fireEventTriggers("github", normalizeGitHubEvent("pull_request", payload)!);
     expect(miss).toHaveLength(0);
 
     payload.requested_reviewer = { login: "jon" };
-    const hit = await fireLocalEventTriggers(
-      "github",
-      normalizeGitHubEvent("pull_request", payload)!,
-    );
+    const hit = await fireEventTriggers("github", normalizeGitHubEvent("pull_request", payload)!);
     expect(hit).toHaveLength(1);
     expect(hit[0].matched).toBe("review_requested");
 
-    const terminal = await getTerminal(hit[0].terminalId);
+    const terminal = await getTerminal(hit[0].id);
     expect(terminal?.spawnedBy).toBe("trigger");
     expect(terminal?.dir).toBe("/home/dev/optio"); // resolved from the PR's repo
     expect(terminal?.ticketExternalId).toBe("acme/optio#7");
@@ -830,13 +833,14 @@ describe("local automations (event triggers + session modes)", () => {
         agent: "claude-code",
         commandTemplate: "Review {{url}}",
       });
-      await createBlueprintTrigger({
-        blueprintId: bp.id,
+      await createTrigger({
+        targetType: "local_blueprint",
+        targetId: bp.id,
         type: "github",
         config: { events: ["pr_opened"] },
       });
     }
-    const fired = await fireLocalEventTriggers(
+    const fired = await fireEventTriggers(
       "github",
       normalizeGitHubEvent("pull_request", {
         action: "opened",
@@ -854,7 +858,7 @@ describe("local automations (event triggers + session modes)", () => {
     );
     expect(fired).toHaveLength(2);
     const workspaces = await Promise.all(
-      fired.map(async (f) => (await getTerminal(f.terminalId))?.workspaceId ?? null),
+      fired.map(async (f) => (await getTerminal(f.id))?.workspaceId ?? null),
     );
     expect(workspaces.sort()).toEqual([wsA.id, null].sort());
   });

@@ -10,10 +10,10 @@ import {
   Clock,
   Loader2,
   Pause,
+  Pencil,
   Play,
   PlayCircle,
   Plus,
-  Save,
   Ticket,
   Trash2,
   Webhook,
@@ -21,15 +21,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { TriggerSelector, type TriggerConfig, cronIsValid } from "@/components/trigger-selector";
-import {
-  RunLocationPicker,
-  agentRunsLocally,
-  runLocationFromRow,
-  runLocationPayload,
-  type RunLocationValue,
-} from "@/components/run-location-picker";
 
-type Tab = "config" | "triggers" | "runs";
+/**
+ * A scheduled Task's runs and actions. Its five answers (when / where / who /
+ * what / then) are edited in the unified work form at /work/:id/edit;
+ * this page shows what it is and what it has done.
+ */
+
+type Tab = "runs" | "triggers";
 
 interface TaskConfig {
   id: string;
@@ -90,18 +89,12 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
   const [config, setConfig] = useState<TaskConfig | null>(null);
   const [triggers, setTriggers] = useState<Trigger[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>("config");
-  const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState<Tab>("runs");
   const [addingTrigger, setAddingTrigger] = useState(false);
   const [newTrigger, setNewTrigger] = useState<TriggerConfig>({
     type: "schedule",
     cronExpression: "0 9 * * *",
   });
-  const [form, setForm] = useState<TaskConfig | null>(null);
-  const [location, setLocation] = useState<RunLocationValue>(runLocationFromRow(null));
-  // On a machine the checkout's git remote is the repo; the picker reports it.
-  const [localRepoUrl, setLocalRepoUrl] = useState<string | null>(null);
-  const isLocal = location.runTarget === "local";
 
   usePageTitle(config?.name ?? "Scheduled Task");
 
@@ -110,8 +103,6 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
     try {
       const [cfg, trg] = await Promise.all([api.getTaskConfig(id), api.listTaskConfigTriggers(id)]);
       setConfig(cfg.taskConfig);
-      setForm(cfg.taskConfig);
-      setLocation(runLocationFromRow(cfg.taskConfig));
       setTriggers(trg.triggers);
     } catch (err) {
       toast.error("Failed to load", {
@@ -151,51 +142,11 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
     }
   };
 
-  const saveConfig = async () => {
-    if (!form) return;
-    if (location.runTarget === "local" && (!location.localHostId || !location.localDir)) {
-      toast.error("Pick the machine and checkout this task runs in");
-      return;
-    }
-    const repoUrl = isLocal ? localRepoUrl : form.repoUrl;
-    if (!repoUrl) {
-      toast.error(isLocal ? "The chosen directory is not a git checkout" : "Repo URL is required");
-      return;
-    }
-    if (location.runTarget === "local" && form.agentType && !agentRunsLocally(form.agentType)) {
-      toast.error(`${form.agentType} can't run on your machine`);
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.updateTaskConfig(id, {
-        name: form.name,
-        description: form.description,
-        title: form.title,
-        prompt: form.prompt,
-        repoUrl,
-        repoBranch: form.repoBranch,
-        agentType: form.agentType,
-        maxRetries: form.maxRetries,
-        priority: form.priority,
-        ...runLocationPayload(location),
-      });
-      toast.success("Saved");
-      await load();
-    } catch (err) {
-      toast.error("Save failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const deleteConfig = async () => {
     if (!confirm(`Delete "${config?.name}"? This removes all triggers.`)) return;
     try {
       await api.deleteTaskConfig(id);
-      router.push("/sessions?view=recurring");
+      router.push("/work?view=recurring");
     } catch (err) {
       toast.error("Delete failed", {
         description: err instanceof Error ? err.message : "Unknown error",
@@ -264,11 +215,11 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
       </div>
     );
   }
-  if (!config || !form) {
+  if (!config) {
     return (
       <div className="p-6 max-w-4xl mx-auto">
         <Link
-          href="/sessions?view=recurring"
+          href="/work?view=recurring"
           className="text-sm text-text-muted hover:text-text flex items-center gap-1"
         >
           <ArrowLeft className="w-3.5 h-3.5" /> Back
@@ -281,10 +232,10 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <Link
-        href="/sessions?view=recurring"
+        href="/work?view=recurring"
         className="text-sm text-text-muted hover:text-text flex items-center gap-1 mb-4"
       >
-        <ArrowLeft className="w-3.5 h-3.5" /> Back to Sessions
+        <ArrowLeft className="w-3.5 h-3.5" /> Back to Work
       </Link>
 
       <div className="flex items-start justify-between mb-2 gap-4">
@@ -296,8 +247,21 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
             <h1 className="text-2xl font-semibold tracking-tight">{config.name}</h1>
           </div>
           {config.description && <p className="text-sm text-text-muted">{config.description}</p>}
+          <p className="text-xs text-text-muted/80 mt-1">
+            {config.agentType ?? "claude-code"} ·{" "}
+            {config.runTarget === "local"
+              ? `on your machine · ${config.localDir ?? ""}`
+              : config.repoUrl.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "")}{" "}
+            · {config.repoBranch} · opens a PR each run
+          </p>
         </div>
         <div className="flex gap-2 shrink-0">
+          <Link
+            href={`/work/${id}/edit`}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover"
+          >
+            <Pencil className="w-4 h-4" /> Edit
+          </Link>
           <button
             onClick={runNow}
             className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-card border border-border text-sm text-text hover:bg-bg-hover"
@@ -340,7 +304,7 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
       )}
 
       <div className="flex gap-1 border-b border-border mb-6">
-        {(["config", "triggers", "runs"] as Tab[]).map((t) => (
+        {(["runs", "triggers"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -355,125 +319,6 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
           </button>
         ))}
       </div>
-
-      {tab === "config" && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Name">
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
-              />
-            </Field>
-            <Field label="Agent">
-              <select
-                value={form.agentType ?? ""}
-                onChange={(e) => setForm({ ...form, agentType: e.target.value || null })}
-                className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
-              >
-                <option value="">Default</option>
-                <option value="claude-code">Claude Code</option>
-                <option value="codex">OpenAI Codex</option>
-                <option value="copilot" disabled={location.runTarget === "local"}>
-                  GitHub Copilot{location.runTarget === "local" ? " — pods only" : ""}
-                </option>
-                <option value="opencode">OpenCode</option>
-                <option value="gemini">Google Gemini</option>
-                <option value="cursor">Cursor</option>
-              </select>
-            </Field>
-          </div>
-          <Field label="Description">
-            <input
-              type="text"
-              value={form.description ?? ""}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
-            />
-          </Field>
-          <Field label="Run location">
-            <RunLocationPicker
-              value={location}
-              onChange={setLocation}
-              kind="task"
-              agentType={form.agentType ?? undefined}
-              onRepoUrlChange={setLocalRepoUrl}
-            />
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            {!isLocal && (
-              <Field label="Repo URL">
-                <input
-                  type="text"
-                  value={form.repoUrl}
-                  onChange={(e) => setForm({ ...form, repoUrl: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm font-mono"
-                />
-              </Field>
-            )}
-            <Field label={isLocal ? "Base branch" : "Branch"}>
-              <input
-                type="text"
-                value={form.repoBranch}
-                onChange={(e) => setForm({ ...form, repoBranch: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
-              />
-            </Field>
-          </div>
-          <Field label="Task title template">
-            <input
-              type="text"
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
-            />
-          </Field>
-          <Field label="Prompt">
-            <textarea
-              rows={8}
-              value={form.prompt}
-              onChange={(e) => setForm({ ...form, prompt: e.target.value })}
-              className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm font-mono"
-            />
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Priority (lower = higher priority)">
-              <input
-                type="number"
-                min={1}
-                max={1000}
-                value={form.priority}
-                onChange={(e) =>
-                  setForm({ ...form, priority: parseInt(e.target.value, 10) || 100 })
-                }
-                className="w-32 px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
-              />
-            </Field>
-            <Field label="Max retries">
-              <input
-                type="number"
-                min={0}
-                max={10}
-                value={form.maxRetries}
-                onChange={(e) =>
-                  setForm({ ...form, maxRetries: parseInt(e.target.value, 10) || 3 })
-                }
-                className="w-32 px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
-              />
-            </Field>
-          </div>
-          <button
-            onClick={saveConfig}
-            disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Save changes
-          </button>
-        </div>
-      )}
 
       {tab === "triggers" && (
         <div className="space-y-3">
@@ -570,15 +415,6 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
       )}
 
       {tab === "runs" && <RunsTab taskConfigId={id} />}
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-sm text-text-muted mb-1.5">{label}</label>
-      {children}
     </div>
   );
 }

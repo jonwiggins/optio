@@ -20,4 +20,4 @@ export type {
   UsageData,
   MetricsHistoryPoint,
 } from "./types.js";
-export { SessionsBoard } from "./sessions-board.js";
+export { WorkBoard } from "./work-board.js";

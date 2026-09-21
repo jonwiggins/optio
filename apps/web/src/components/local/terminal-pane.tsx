@@ -285,8 +285,8 @@ export function TerminalPane({
         <Terminal className="w-8 h-8 opacity-30" />
         <p className="text-sm">Terminal not found</p>
         {variant === "primary" ? (
-          <Link href="/sessions" className="text-xs text-primary hover:underline">
-            Back to Sessions
+          <Link href="/work" className="text-xs text-primary hover:underline">
+            Back to Work
           </Link>
         ) : (
           <button onClick={chrome.onClose} className="text-xs text-primary hover:underline">
@@ -535,12 +535,12 @@ export function TerminalPane({
         {/* The rail already has "← Sessions" on wide screens; the arrow only
             shows when there's no rail (phones, or collapsed). */}
         <Link
-          href="/sessions"
+          href="/work"
           className={cn(
             "p-1.5 rounded-md text-text-muted hover:text-text hover:bg-bg-hover/70 transition-colors",
             !railCollapsed && "md:hidden",
           )}
-          aria-label="Back to Sessions"
+          aria-label="Back to Work"
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>
