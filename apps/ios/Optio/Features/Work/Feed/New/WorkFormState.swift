@@ -60,7 +60,7 @@ final class WorkFormState {
     var more = false
     var showDeps = false
     /// Where the form should scroll on the next layout (dev script only).
-    var scrollRequest: SessionFormAnchor?
+    var scrollRequest: WorkFormAnchor?
     /// Dev script asked for a submit once the form is filled in.
     var submitRequest = false
 

@@ -1,10 +1,27 @@
 import SwiftUI
 
-// The six sections of `session-form.tsx`, one view each. They read the
-// state's draft and derived facts and write through its mutators so every
-// change is normalized (upstream answers win).
+// The six sections of `work-form.tsx`, one Form `Section` each. They read
+// the state's draft and derived facts and write through its mutators so every
+// change is normalized (upstream answers win). Rows are the native kinds —
+// menu pickers, checkmark choices, fields, toggles — and the contextual copy
+// lives in each section's footer.
 
 private typealias F = WorkForm
+
+private extension F.WhenType {
+    /// The answer as a menu shows it: "Starts · On a schedule".
+    var menuLabel: String {
+        switch self {
+        case .manual: return "Now"
+        case .schedule: return "On a schedule"
+        case .webhook: return "By webhook"
+        case .ticket: return "From a ticket"
+        case .github: return "GitHub event"
+        case .slack: return "Slack message"
+        case .linear: return "Linear event"
+        }
+    }
+}
 
 // MARK: - When
 
@@ -12,107 +29,99 @@ struct WhenSection: View {
     @Bindable var state: WorkFormState
 
     var body: some View {
-        FormSection(step: 1, label: "When", hint: "What starts it?", summary: state.summaryWhen, id: .when) {
-            PillRow(
-                pills: F.WhenType.allCases.map { Pill(value: $0, label: $0.label, systemImage: $0.systemImage) },
-                selection: state.draft.when,
-                onSelect: state.setWhen
-            )
-            switch state.draft.when {
-            case .manual: EmptyView()
-            case .schedule: scheduleConfig
-            case .webhook: webhookConfig
-            case .ticket: ticketConfig
-            case .github, .slack, .linear: EventConfigView(state: state)
-            }
-        }
-    }
-
-    private var scheduleConfig: some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
-            FieldLabel(text: "Cron expression (UTC)")
-            CardTextField(placeholder: "0 9 * * *", text: Binding(
-                get: { state.draft.trigger.cronExpression ?? "" },
-                set: { v in state.edit { $0.trigger.cronExpression = v } }
-            ), mono: true)
-            FlowLayout(spacing: 6) {
-                ForEach(F.cronPresets, id: \.expr) { p in
-                    let on = state.draft.trigger.cronExpression == p.expr
-                    Button(p.label) { state.edit { $0.trigger.cronExpression = p.expr } }
-                        .font(.caption.weight(on ? .semibold : .regular))
-                        .foregroundStyle(on ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(.secondary))
-                        .padding(.horizontal, Spacing.s).padding(.vertical, 4)
-                        .background(.fill.tertiary, in: Capsule())
-                        .buttonStyle(.plain)
+        Section {
+            MenuRow(label: "Starts", value: state.draft.when.menuLabel) {
+                ForEach(F.WhenType.allCases, id: \.self) { w in
+                    Button { state.setWhen(w) } label: {
+                        Label(w.menuLabel, systemImage: w == state.draft.when ? "checkmark" : w.systemImage)
+                    }
                 }
             }
+            switch state.draft.when {
+            case .manual: EmptyView()
+            case .schedule: scheduleRows
+            case .webhook: webhookRows
+            case .ticket: TicketRows(state: state)
+            case .github, .slack, .linear: EventRows(state: state)
+            }
+        } header: {
+            FormSectionHeader("When", question: "What starts it?", anchor: .when)
+        } footer: {
+            if let footer { Text(footer) }
+        }
+    }
+
+    private var footer: String? {
+        switch state.draft.when {
+        case .manual: return nil
+        case .schedule:
             let cron = state.draft.trigger.cronExpression ?? ""
-            if !F.cronIsValid(cron) {
-                Hint(text: "Expected five space-separated fields.", tone: .accent)
-            } else if let words = F.cronWords[cron.trimmingCharacters(in: .whitespaces)] {
-                Hint(text: "Runs \(words).")
-            } else {
-                Hint(text: "Five-field cron expression (UTC).")
-            }
+            if !F.cronIsValid(cron) { return "Expected five space-separated fields." }
+            if let words = F.cronWords[cron.trimmingCharacters(in: .whitespaces)] { return "Runs \(words)." }
+            return "Five-field cron expression, in UTC."
+        case .webhook: return "POST to this path to start a run. The path must be unique across the workspace."
+        case .ticket: return "Only tickets with at least one matching label start a run. No labels matches every ticket from the source."
+        case .github, .slack, .linear: return "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s."
         }
     }
 
-    private var webhookConfig: some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
-            FieldLabel(text: "Webhook path")
-            HStack(spacing: 0) {
-                Text("/api/hooks/").font(.footnote.monospaced()).foregroundStyle(.tertiary)
-                TextField("hook-abc123", text: Binding(
-                    get: { state.draft.trigger.webhookPath ?? "" },
-                    set: { v in state.edit { $0.trigger.webhookPath = v.trimmingCharacters(in: .whitespaces) } }
-                ))
-                .font(.body.monospaced()).textInputAutocapitalization(.never).autocorrectionDisabled()
-            }
-            .padding(.horizontal, Spacing.m).padding(.vertical, 9)
-            .background(Color(.tertiarySystemGroupedBackground), in: Radius.smallShape)
-            Hint(text: "POST to this path to trigger a run. Path must be unique across the workspace.")
-        }
+    @ViewBuilder
+    private var scheduleRows: some View {
+        ValueField(label: "Cron", placeholder: "0 9 * * *", text: Binding(
+            get: { state.draft.trigger.cronExpression ?? "" },
+            set: { v in state.edit { $0.trigger.cronExpression = v } }
+        ))
+        ChipRow(
+            chips: F.cronPresets.map { Chip(value: $0.expr, label: $0.label) },
+            selection: state.draft.trigger.cronExpression
+        ) { expr in state.edit { $0.trigger.cronExpression = expr } }
     }
 
-    private var ticketConfig: some View {
-        TicketConfigView(state: state)
+    private var webhookRows: some View {
+        ValueField(label: "Path", placeholder: "hook-abc123", text: Binding(
+            get: { state.draft.trigger.webhookPath ?? "" },
+            set: { v in state.edit { $0.trigger.webhookPath = v.trimmingCharacters(in: .whitespaces) } }
+        ), prefix: "/api/hooks/")
     }
 }
 
-private struct TicketConfigView: View {
+private struct TicketRows: View {
     @Bindable var state: WorkFormState
     @State private var labelInput = ""
 
     private var labels: [String] { state.draft.trigger.ticketLabels ?? [] }
+    private var source: F.TicketSource { state.draft.trigger.ticketSource ?? .github }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
-            FieldLabel(text: "Source")
-            SegmentedChoice(options: F.TicketSource.allCases.map { ($0, $0.label) }, selection: state.draft.trigger.ticketSource ?? .github) { s in
-                state.edit { $0.trigger.ticketSource = s }
+        MenuRow(label: "Source", value: source.label) {
+            ForEach(F.TicketSource.allCases, id: \.self) { s in
+                MenuChoice(title: s.label, selected: s == source) { state.edit { $0.trigger.ticketSource = s } }
             }
-            FieldLabel(text: "Labels", optional: true)
-            HStack(spacing: Spacing.s) {
-                CardTextField(placeholder: "e.g. cve, bug", text: $labelInput)
-                    .onSubmit(addLabel)
-                Button("Add", action: addLabel).font(.subheadline.weight(.medium)).disabled(labelInput.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            if !labels.isEmpty {
-                FlowLayout(spacing: 6) {
-                    ForEach(labels, id: \.self) { l in
+        }
+        HStack(spacing: Spacing.s) {
+            TextField("Add a label", text: $labelInput)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .onSubmit(addLabel)
+            Button("Add", action: addLabel)
+                .font(.body.weight(.medium))
+                .disabled(labelInput.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        if !labels.isEmpty {
+            FlowLayout(spacing: Spacing.s) {
+                ForEach(labels, id: \.self) { l in
+                    Button { state.edit { $0.trigger.ticketLabels = labels.filter { $0 != l } } } label: {
                         HStack(spacing: 4) {
-                            Text(l).font(.caption)
-                            Button { state.edit { $0.trigger.ticketLabels = labels.filter { $0 != l } } } label: {
-                                Image(systemName: "xmark").font(.caption2.weight(.bold))
-                            }
-                            .buttonStyle(.plain).accessibilityLabel("Remove \(l)")
+                            Text(l).font(.footnote)
+                            Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
                         }
-                        .padding(.horizontal, Spacing.s).padding(.vertical, 4)
+                        .padding(.horizontal, Spacing.m).padding(.vertical, 6)
                         .background(.fill.tertiary, in: Capsule())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove \(l)")
                 }
             }
-            Hint(text: "Only tickets with at least one matching label fire this trigger. Leave empty to match all tickets from the source.")
+            .padding(.vertical, 2)
         }
     }
 
@@ -126,7 +135,7 @@ private struct TicketConfigView: View {
 
 /// Event-trigger config (GitHub events + login, Slack channel + mention-only,
 /// Linear events + user), in the shape `/api/local/blueprints/:id/triggers` stores.
-private struct EventConfigView: View {
+private struct EventRows: View {
     @Bindable var state: WorkFormState
 
     private var type: F.EventTriggerType { state.draft.event.type }
@@ -140,39 +149,37 @@ private struct EventConfigView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
-            if type == .slack {
-                FieldLabel(text: "Channel id")
-                CardTextField(placeholder: "C0123ABCD", text: Binding(
-                    get: { config["channelId"]?.stringValue ?? "" },
-                    set: { set("channelId", .string($0.trimmingCharacters(in: .whitespaces))) }
-                ), mono: true)
-                Toggle("Only when the bot is @-mentioned", isOn: Binding(
-                    get: { config["mentionOnly"]?.boolValue ?? false },
-                    set: { set("mentionOnly", .bool($0)) }
+        if type == .slack {
+            ValueField(label: "Channel", placeholder: "C0123ABCD", text: Binding(
+                get: { config["channelId"]?.stringValue ?? "" },
+                set: { set("channelId", .string($0.trimmingCharacters(in: .whitespaces))) }
+            ))
+            Toggle("Only when @-mentioned", isOn: Binding(
+                get: { config["mentionOnly"]?.boolValue ?? false },
+                set: { set("mentionOnly", .bool($0)) }
+            ))
+        } else {
+            ForEach(kinds, id: \.value) { k in
+                Toggle(k.label, isOn: Binding(
+                    get: { events.contains(k.value) },
+                    set: { on in
+                        let next = on ? events + [k.value] : events.filter { $0 != k.value }
+                        set("events", .array(next.map { .string($0) }))
+                    }
                 ))
-                .font(.subheadline).tint(AppTheme.accent)
-            } else {
-                ForEach(kinds, id: \.value) { k in
-                    Toggle(k.label, isOn: Binding(
-                        get: { events.contains(k.value) },
-                        set: { on in
-                            let next = on ? events + [k.value] : events.filter { $0 != k.value }
-                            set("events", .array(next.map { .string($0) }))
-                        }
-                    ))
-                    .font(.subheadline).tint(AppTheme.accent)
-                }
-                if personal {
-                    let key = type == .github ? "login" : "user"
-                    FieldLabel(text: type == .github ? "Your GitHub username" : "Your Linear name or user id")
-                    CardTextField(placeholder: type == .github ? "octocat" : "Jane Doe", text: Binding(
+            }
+            if personal {
+                let key = type == .github ? "login" : "user"
+                ValueField(
+                    label: type == .github ? "GitHub username" : "Linear user",
+                    placeholder: type == .github ? "octocat" : "Jane Doe",
+                    text: Binding(
                         get: { config[key]?.stringValue ?? "" },
                         set: { v in set(key, .string(v.hasPrefix("@") ? String(v.dropFirst()) : v)) }
-                    ))
-                }
+                    ),
+                    mono: type == .github
+                )
             }
-            Hint(text: "Each firing starts one run — in a pod or on your machine, whichever you pick below — with the event's fields available as {{param}}s.")
         }
     }
 }
@@ -183,134 +190,111 @@ struct WhereSection: View {
     @Bindable var state: WorkFormState
 
     private var noHosts: Bool { !state.hostsLoading && state.hosts.isEmpty }
+    private var dirs: [LocalHostDir] { state.host?.dirs ?? [] }
 
     var body: some View {
-        let wheres = F.whereOptions(state.draft)
-        let podDisabled = wheres.first { $0.value == .cluster }?.disabled
-        FormSection(step: 2, label: "Where", hint: "A pod, or your machine?", summary: state.summaryWhere, id: .where) {
-            ChoiceCard(
+        let podDisabled = F.whereOptions(state.draft).first { $0.value == .cluster }?.disabled
+        Section {
+            ChoiceRow(
                 systemImage: "server.rack",
                 title: "Optio pod",
-                description: state.draft.withRepo
-                    ? "An isolated pod clones one of your registered repos into a fresh worktree. Uses the server's agent credentials."
-                    : "An isolated pod with no repo checkout. Uses the server's agent credentials and Connections.",
-                active: !state.isLocal,
+                subtitle: state.draft.withRepo ? "Clones one of your repos into a fresh worktree" : "Isolated, no checkout, with the server's Connections",
+                selected: !state.isLocal,
                 disabled: podDisabled
-            ) { state.setWhere(.cluster) }
-            ChoiceCard(
+            ) { withAnimation(.snappy) { state.setWhere(.cluster) } }
+            ChoiceRow(
                 systemImage: "laptopcomputer",
                 title: "My machine",
-                description: state.draft.withRepo
-                    ? "A git checkout on a paired machine, with your local agent CLI and its login. The agent works on a branch there and opens the PR."
-                    : "A directory on a paired machine, with your local agent CLI and its login.",
-                active: state.isLocal,
-                disabled: noHosts ? "No paired machine — run `optio local up` on your computer first." : state.hostsLoading && state.hosts.isEmpty ? "Looking for paired machines…" : nil
-            ) { state.setWhere(.local) }
+                subtitle: "A paired machine, with your own agent CLI and login",
+                selected: state.isLocal,
+                disabled: noHosts ? "No paired machine — run `optio local up` on your computer first."
+                    : state.hostsLoading && state.hosts.isEmpty ? "Looking for paired machines…" : nil
+            ) { withAnimation(.snappy) { state.setWhere(.local) } }
 
-            Divider()
-
-            if state.isLocal { machineDetails } else { podDetails }
+            if state.isLocal { machineRows } else { podRows }
+        } header: {
+            FormSectionHeader("Where", question: "A pod, or your machine?", anchor: .where)
+        } footer: {
+            if let footer { Text(footer) }
         }
+    }
+
+    private var footer: String? {
+        if state.isLocal {
+            if state.host?.state == .offline { return "This machine is offline — runs wait in the queue until it reconnects." }
+            if !dirs.isEmpty, state.draft.withRepo, !dirs.contains(where: { $0.repoUrl != nil }) {
+                return "None of this machine's directories is a git checkout — add one with `optio local add <checkout>`, or work in the current directory."
+            }
+            if state.draft.withRepo {
+                if let repo = state.localRepoUrl { return "Branches off \(state.draft.repoBranch.isEmpty ? "the base branch" : state.draft.repoBranch) in \(F.shortRepo(repo)) and opens a PR against it." }
+                return "The agent branches off the base branch in the checkout and opens a PR against it."
+            }
+            return "Works in the directory as it is, on whatever branch is checked out. Nothing is pushed unless you or the agent do it."
+        }
+        if !state.draft.withRepo { return "No checkout — results are logs and side effects through Connections." }
+        if !state.reposLoading, state.repos.isEmpty { return "No repos configured. Add one under Library › Repos, or pick My machine." }
+        return nil
     }
 
     // A machine: host + directory, then "Current directory | New branch".
     @ViewBuilder
-    private var machineDetails: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            FieldLabel(text: "Machine")
-            Picker("Machine", selection: Binding(get: { state.draft.location.localHostId }, set: state.setHost)) {
-                ForEach(state.hosts, id: \.id) { h in
-                    Text(h.state == .offline ? "\(h.name) (offline)" : h.name).tag(h.id)
-                }
-            }
-            .pickerStyle(.menu).labelsHidden().tint(.primary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Spacing.s).padding(.vertical, 4)
-            .background(Color(.tertiarySystemGroupedBackground), in: Radius.smallShape)
-            if state.host?.state == .offline {
-                Hint(text: "Offline — runs wait in the queue until this machine reconnects.", tone: .accent)
+    private var machineRows: some View {
+        MenuRow(label: "Machine", value: state.host.map { $0.state == .offline ? "\($0.name) (offline)" : $0.name } ?? "Pick a machine…", placeholder: state.host == nil) {
+            ForEach(state.hosts, id: \.id) { h in
+                MenuChoice(title: h.name, subtitle: h.state == .offline ? "Offline" : nil, selected: h.id == state.draft.location.localHostId) { state.setHost(h.id) }
             }
         }
-
-        let dirs = state.host?.dirs ?? []
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            FieldLabel(text: state.draft.withRepo ? "Checkout" : "Directory")
+        MenuRow(
+            label: state.draft.withRepo ? "Checkout" : "Directory",
+            value: state.draft.location.localDir.isEmpty
+                ? (dirs.isEmpty ? "No directories" : state.draft.withRepo ? "Pick a checkout…" : "Pick a directory…")
+                : F.shortDir(state.draft.location.localDir),
+            placeholder: state.draft.location.localDir.isEmpty,
+            mono: true
+        ) {
             if dirs.isEmpty {
-                Hint(text: "No directories on this machine — run `optio local add <dir>` there.", tone: .accent)
-            } else {
-                Menu {
-                    ForEach(dirs, id: \.path) { d in
-                        Button {
-                            state.edit { $0.location.localDir = d.path }
-                        } label: {
-                            if d.path == state.draft.location.localDir { Label(d.path, systemImage: "checkmark") } else { Text(d.path) }
-                            if !state.usableDir(d) { Text("not a git checkout") }
-                        }
-                        .disabled(!state.usableDir(d))
-                    }
-                } label: {
-                    HStack {
-                        Text(state.draft.location.localDir.isEmpty ? (state.draft.withRepo ? "Pick a checkout…" : "Pick a directory…") : F.shortDir(state.draft.location.localDir))
-                            .font(state.draft.location.localDir.isEmpty ? .body : .body.monospaced())
-                            .foregroundStyle(state.draft.location.localDir.isEmpty ? .secondary : .primary)
-                            .lineLimit(1).truncationMode(.middle)
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, Spacing.m).padding(.vertical, 9)
-                    .background(Color(.tertiarySystemGroupedBackground), in: Radius.smallShape)
-                    .contentShape(Radius.smallShape)
+                Text("Run `optio local add <dir>` on this machine.")
+            }
+            ForEach(dirs, id: \.path) { d in
+                MenuChoice(title: F.shortDir(d.path), subtitle: state.usableDir(d) ? nil : "Not a git checkout", selected: d.path == state.draft.location.localDir) {
+                    state.edit { $0.location.localDir = d.path }
                 }
-                .buttonStyle(.plain)
-                if state.draft.withRepo, !dirs.contains(where: { $0.repoUrl != nil }) {
-                    Hint(text: "None of this machine's directories is a git checkout — add one with `optio local add <checkout>`, or pick Current directory below.", tone: .accent)
-                }
+                .disabled(!state.usableDir(d))
             }
         }
-
-        SegmentedChoice(options: [(false, "Current directory"), (true, "New branch")], selection: state.draft.withRepo, onSelect: state.setWithRepo)
+        Picker("Mode", selection: Binding(get: { state.draft.withRepo }, set: { v in withAnimation(.snappy) { state.setWithRepo(v) } })) {
+            Text("Current directory").tag(false)
+            Text("New branch").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .listRowInsets(EdgeInsets(top: Spacing.s, leading: Spacing.l, bottom: Spacing.s, trailing: Spacing.l))
         if state.draft.withRepo {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                FieldLabel(text: "Base branch")
-                CardTextField(placeholder: "main", text: Binding(get: { state.draft.repoBranch }, set: { v in state.edit { $0.repoBranch = v } }), mono: true)
-                if let repo = state.localRepoUrl {
-                    Hint(text: "Repo: \(F.shortRepo(repo)) — the agent branches off this in the checkout and opens a PR against it.")
-                } else {
-                    Hint(text: "The agent branches off this in the checkout and opens a PR against it.")
-                }
-            }
-        } else {
-            Hint(text: "Works in the directory as it is, on whatever branch is checked out. Nothing is pushed unless you or the agent do it.")
+            ValueField(label: "Base branch", placeholder: "main", text: Binding(get: { state.draft.repoBranch }, set: { v in state.edit { $0.repoBranch = v } }))
         }
     }
 
     // A pod: "A repository | No repo", then repo + branch.
     @ViewBuilder
-    private var podDetails: some View {
-        SegmentedChoice(options: [(true, "A repository"), (false, "No repo")], selection: state.draft.withRepo, onSelect: state.setWithRepo)
+    private var podRows: some View {
+        Picker("Repo", selection: Binding(get: { state.draft.withRepo }, set: { v in withAnimation(.snappy) { state.setWithRepo(v) } })) {
+            Text("A repository").tag(true)
+            Text("No repo").tag(false)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .listRowInsets(EdgeInsets(top: Spacing.s, leading: Spacing.l, bottom: Spacing.s, trailing: Spacing.l))
         if state.draft.withRepo {
-            if state.reposLoading {
-                HStack(spacing: Spacing.s) { ProgressView(); Text("Loading repos…").font(.footnote).foregroundStyle(.secondary) }
-            } else if state.repos.isEmpty {
-                Hint(text: "No repos configured. Add a repo under Library › Repos first, or pick My machine above.", tone: .accent)
-            } else {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    FieldLabel(text: "Repository")
-                    Picker("Repository", selection: Binding(get: { state.draft.repoId }, set: state.setRepo)) {
-                        ForEach(state.repos) { r in Text("\(r.fullName) (\(r.defaultBranch))").tag(r.id) }
-                    }
-                    .pickerStyle(.menu).labelsHidden().tint(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Spacing.s).padding(.vertical, 4)
-                    .background(Color(.tertiarySystemGroupedBackground), in: Radius.smallShape)
-                }
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    FieldLabel(text: "Branch")
-                    CardTextField(placeholder: "main", text: Binding(get: { state.draft.repoBranch }, set: { v in state.edit { $0.repoBranch = v } }), mono: true)
+            MenuRow(
+                label: "Repository",
+                value: state.reposLoading && state.repos.isEmpty ? "Loading…" : (state.repoRow?.fullName ?? (state.repos.isEmpty ? "None" : "Pick a repo…")),
+                placeholder: state.repoRow == nil
+            ) {
+                ForEach(state.repos) { r in
+                    MenuChoice(title: r.fullName, subtitle: r.defaultBranch, selected: r.id == state.draft.repoId) { state.setRepo(r.id) }
                 }
             }
-        } else {
-            Hint(text: "No checkout — results are logs and side effects through Connections.")
+            ValueField(label: "Branch", placeholder: "main", text: Binding(get: { state.draft.repoBranch }, set: { v in state.edit { $0.repoBranch = v } }))
         }
     }
 }
@@ -320,32 +304,22 @@ struct WhereSection: View {
 struct WhoSection: View {
     @Bindable var state: WorkFormState
 
+    private var runtimes: [F.Choice<String>] { F.runtimeOptions(state.draft) }
+
+    private func name(_ runtime: String) -> String { runtime == F.terminal ? "Terminal" : F.runtimeLabel(runtime) }
+
     var body: some View {
-        let runtimes = F.runtimeOptions(state.draft)
-        let disabledOnes = runtimes.filter { !$0.isEnabled }
-        FormSection(step: 3, label: "Who", hint: "A terminal, or an agent?", summary: state.summaryWho, id: .who) {
-            PillRow(
-                pills: runtimes.map { r in
-                    Pill(value: r.value, label: r.value == F.terminal ? "Terminal" : F.runtimeLabel(r.value),
-                         systemImage: r.value == F.terminal ? "terminal" : "cpu",
-                         disabled: r.disabled.map { "\(r.value == F.terminal ? "Terminal" : F.runtimeLabel(r.value)) — \($0)" })
-                },
-                selection: state.draft.runtime,
-                onSelect: state.setRuntime
-            )
-            Hint(text: whoHint(disabledOnes))
-            if !state.isTerminal {
-                Divider()
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(F.runtimeLabel(state.draft.runtime)) parameters").font(.footnote).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(state.isLocal
-                        ? "Only the model — the rest comes from the machine's own config"
-                        : state.draft.withRepo
-                            ? "Starts from the repo's defaults; applies to this run only"
-                            : "Blank means the runtime's default")
-                        .font(.caption2).foregroundStyle(.tertiary).multilineTextAlignment(.trailing)
+        Section {
+            MenuRow(label: "Runtime", value: name(state.draft.runtime)) {
+                ForEach(runtimes, id: \.value) { r in
+                    Button { state.setRuntime(r.value) } label: {
+                        Label(name(r.value), systemImage: r.value == state.draft.runtime ? "checkmark" : r.value == F.terminal ? "terminal" : "cpu")
+                        if let why = r.disabled { Text(why) }
+                    }
+                    .disabled(!r.isEnabled)
                 }
+            }
+            if !state.isTerminal {
                 AgentOptionsPickerView(
                     provider: state.provider,
                     state: state.catalogs.state(state.provider),
@@ -354,22 +328,34 @@ struct WhoSection: View {
                     onChange: state.setOption
                 )
             }
+        } header: {
+            FormSectionHeader("Who", question: "A terminal, or an agent?", anchor: .who)
+        } footer: {
+            Text(footer)
         }
         .task(id: state.draft.runtime) { state.loadCatalog() }
         .onChange(of: state.catalogs.states.count) { _, _ in state.seedOptionsIfNeeded() }
     }
 
-    private func whoHint(_ disabled: [F.Choice<String>]) -> String {
-        var s = state.isTerminal ? "Just you at a shell prompt — no agent, no prompt."
-            : state.isLocal ? "Uses the CLI and login already on the machine."
-            : "Runs with the server's agent credentials."
+    private var footer: String {
+        var lines: [String] = []
+        if state.isTerminal {
+            lines.append("Just you at a shell prompt — no agent, no prompt.")
+        } else if state.isLocal {
+            lines.append("Uses the CLI and login already on the machine; only the model is set here.")
+        } else if state.draft.withRepo {
+            lines.append("Runs with the server's credentials. Parameters start from the repo's defaults and apply to this run only.")
+        } else {
+            lines.append("Runs with the server's credentials. Blank means the runtime's default.")
+        }
+        let disabled = runtimes.filter { !$0.isEnabled }
         if let first = disabled.first {
-            let names = disabled.map { $0.value == F.terminal ? "Terminal" : F.runtimeLabel($0.value) }.joined(separator: ", ")
             var why = first.disabled ?? ""
             if why.hasSuffix(".") { why.removeLast() }
-            s += " \(names) — \(why)."
+            lines.append("\(disabled.map { name($0.value) }.joined(separator: ", ")) — \(why).")
         }
-        return s
+        if let note = AgentOptionsPickerView.footnote(state.catalogs.state(state.provider)) { lines.append(note) }
+        return lines.joined(separator: " ")
     }
 }
 
@@ -392,167 +378,199 @@ struct WhatSection: View {
     }
 
     var body: some View {
-        FormSection(step: 4, label: "What", hint: "The prompt", id: .prompt) {
-            HStack {
-                FieldLabel(text: state.draft.then == .waitsForMessages ? "Initial prompt" : "Prompt", optional: state.kind == .localTerminal)
-                Spacer()
+        Section {
+            PromptEditor(text: Binding(get: { state.draft.prompt }, set: { v in state.edit { $0.prompt = v } }), placeholder: placeholder, controller: editor)
+            if !state.params.isEmpty {
+                ChipRow(chips: state.params.map { Chip(value: $0, label: "{{\($0)}}") }, selection: nil, mono: true) { p in
+                    state.edit { d in editor.insert("{{\(p)}}", into: &d.prompt) }
+                }
+            }
+        } header: {
+            FormSectionHeader("What", question: state.draft.then == .waitsForMessages ? "The first prompt" : "The prompt", anchor: .prompt) {
                 if !state.templates.isEmpty {
                     Menu {
                         ForEach(state.templates) { t in
                             Button(t.name) { state.edit { $0.prompt = t.template ?? "" } }
                         }
                     } label: {
-                        Label("Saved prompt", systemImage: "text.book.closed").font(.footnote)
+                        Label("Saved prompts", systemImage: "text.book.closed")
+                            .font(.footnote.weight(.medium))
+                            .imageScale(.small)
+                            .foregroundStyle(AppTheme.accent)
                     }
                 }
             }
-            PromptEditor(text: Binding(get: { state.draft.prompt }, set: { v in state.edit { $0.prompt = v } }), placeholder: placeholder, controller: editor)
-            if state.draft.when != .manual {
-                if !state.params.isEmpty {
-                    Hint(text: "From the \(state.draft.when.label) trigger — tap to insert:")
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(state.params, id: \.self) { p in
-                                Button("{{\(p)}}") {
-                                    state.edit { d in editor.insert("{{\(p)}}", into: &d.prompt) }
-                                }
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.primary)
-                                .padding(.horizontal, Spacing.s).padding(.vertical, 4)
-                                .background(.fill.tertiary, in: Radius.smallShape)
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                } else if state.draft.when == .webhook {
-                    Hint(text: "Any top-level field of the POSTed JSON is available as {{field}}.")
-                } else {
-                    Hint(text: "A schedule carries no parameters.")
-                }
-            }
+        } footer: {
+            if let footer { Text(footer) }
+        }
+    }
+
+    private var footer: String? {
+        if state.kind == .localTerminal { return "Optional for a terminal: typed into the shell once it opens." }
+        switch state.draft.when {
+        case .manual: return nil
+        case .schedule: return "A schedule carries no parameters."
+        case .webhook: return "Any top-level field of the POSTed JSON is available as {{field}}."
+        default: return "Tap a parameter to insert it at the cursor."
         }
     }
 }
 
-// MARK: - Exit conditions
+// MARK: - Then
 
 struct ThenSection: View {
     @Bindable var state: WorkFormState
 
-    private static let cards: [F.Then: (icon: String, title: String, subtitle: String, description: String)] = [
-        .exits: ("rectangle.portrait.and.arrow.right", "Exit when done", "A one-shot run",
-                 "The agent does one turn of work and the run finishes. On a branch, it opens the PR first."),
-        .waitsForMe: ("terminal", "Wait for me", "An interactive session",
-                      "Stops at its prompt after each turn and lands in your “needs you” queue until you type."),
-        .waitsForMessages: ("cpu", "Persistent agent", "Stays reachable",
-                            "Named and addressable. Keeps its memory between turns and wakes when a person or another agent messages it."),
-    ]
+    private func meta(_ then: F.Then) -> (icon: String, title: String, subtitle: String) {
+        switch then {
+        case .exits:
+            return ("rectangle.portrait.and.arrow.right", "Exit when done",
+                    state.draft.withRepo ? "One turn of work; opens the PR, then finishes" : "One turn of work, then the run finishes")
+        case .waitsForMe:
+            return ("terminal", "Wait for me", "Stops at its prompt after each turn until you type")
+        case .waitsForMessages:
+            return ("cpu", "Persistent agent", "Named, keeps its memory, wakes when messaged")
+        }
+    }
 
     var body: some View {
-        FormSection(step: state.isTerminal ? 4 : 5, label: "Then", hint: "What happens when a turn ends?", summary: state.summaryThen, id: .then) {
+        Section {
             ForEach(F.thenOptions(state.draft), id: \.value) { c in
-                let meta = Self.cards[c.value]!
-                ChoiceCard(systemImage: meta.icon, title: meta.title, subtitle: meta.subtitle, description: meta.description,
-                           active: state.draft.then == c.value, disabled: c.disabled) { state.setThen(c.value) }
+                let m = meta(c.value)
+                ChoiceRow(systemImage: m.icon, title: m.title, subtitle: m.subtitle, selected: state.draft.then == c.value, disabled: c.disabled) {
+                    withAnimation(.snappy) { state.setThen(c.value) }
+                }
             }
             if state.draft.then == .waitsForMessages {
-                Divider()
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    FieldLabel(text: "Pod lifecycle")
-                    SegmentedChoice(options: F.PodLifecycle.allCases.map { ($0, $0.label) }, selection: state.draft.agent.podLifecycle) { v in
-                        state.edit { $0.agent.podLifecycle = v }
+                MenuRow(label: "Pod lifecycle", value: state.draft.agent.podLifecycle.label) {
+                    ForEach(F.PodLifecycle.allCases, id: \.self) { p in
+                        MenuChoice(title: p.label, subtitle: p.hint, selected: p == state.draft.agent.podLifecycle) {
+                            state.edit { $0.agent.podLifecycle = p }
+                        }
                     }
-                    Hint(text: state.draft.agent.podLifecycle.hint)
                 }
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    FieldLabel(text: "System prompt", optional: true)
-                    CardTextEditor(placeholder: "Persona — who is this agent?", text: Binding(get: { state.draft.agent.systemPrompt }, set: { v in state.edit { $0.agent.systemPrompt = v } }))
-                }
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    FieldLabel(text: "Operator manual (agents.md)", optional: true)
-                    CardTextEditor(placeholder: "Blank = Optio's standard manual (messaging other agents, reading the inbox, finishing a turn).", text: Binding(get: { state.draft.agent.agentsMd }, set: { v in state.edit { $0.agent.agentsMd = v } }), mono: true)
-                }
+                TextField("System prompt — who is this agent?", text: Binding(get: { state.draft.agent.systemPrompt }, set: { v in state.edit { $0.agent.systemPrompt = v } }), axis: .vertical)
+                    .lineLimit(2...8)
+                TextField("Operator manual (agents.md)", text: Binding(get: { state.draft.agent.agentsMd }, set: { v in state.edit { $0.agent.agentsMd = v } }), axis: .vertical)
+                    .font(.monoSubheadline)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .lineLimit(2...8)
+            }
+        } header: {
+            FormSectionHeader("Then", question: "When a turn ends", anchor: .then)
+        } footer: {
+            if state.draft.then == .waitsForMessages {
+                Text("\(state.draft.agent.podLifecycle.hint) The system prompt and manual are optional — a blank manual means Optio's standard one (messaging other agents, reading the inbox, finishing a turn).")
+            } else if state.draft.then == .waitsForMe {
+                Text("Interactive sessions land in your “needs you” queue whenever they stop.")
             }
         }
     }
 }
 
-// MARK: - Name (+ More)
+// MARK: - Name (+ more)
 
 struct NameSection: View {
     @Bindable var state: WorkFormState
 
     private var activeTasks: [TaskRow] { state.existingTasks.filter { !["completed", "cancelled"].contains($0.state) } }
+    private var slugPlaceholder: String {
+        F.slugify(state.draft.name.trimmingCharacters(in: .whitespaces).isEmpty ? state.autoName : state.draft.name)
+    }
 
     var body: some View {
-        FormSection(step: state.isTerminal ? 5 : 6, label: "Name", summary: state.summaryName, id: .name) {
-            CardTextField(placeholder: state.autoName, text: Binding(get: { state.draft.name }, set: { v in state.edit { $0.name = v } }))
+        Section {
+            TextField("Name", text: Binding(get: { state.draft.name }, set: { v in state.edit { $0.name = v } }), prompt: Text(state.autoName))
                 .textInputAutocapitalization(.sentences)
-            if state.draft.name.trimmingCharacters(in: .whitespaces).isEmpty {
-                Hint(text: "Leave blank to call it “\(state.autoName)”.")
-            } else if state.kind == .repoTask || state.kind == .repoBlueprint {
-                Hint(text: "Also the title of the task that opens the PR.")
-            }
             if state.draft.then == .waitsForMessages {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    FieldLabel(text: "Address")
-                    CardTextField(placeholder: F.slugify(state.draft.name.trimmingCharacters(in: .whitespaces).isEmpty ? state.autoName : state.draft.name),
-                                  text: Binding(get: { state.draft.agent.slug }, set: { v in state.edit { $0.agent.slug = F.slugify(v) } }), mono: true)
-                    Hint(text: "How other agents message it.")
-                }
+                ValueField(label: "Address", placeholder: slugPlaceholder,
+                           text: Binding(get: { state.draft.agent.slug }, set: { v in state.edit { $0.agent.slug = F.slugify(v) } }))
             }
-
-            DisclosureGroup(isExpanded: $state.more) {
-                VStack(alignment: .leading, spacing: Spacing.m) {
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        FieldLabel(text: "Description", optional: true)
-                        CardTextField(placeholder: "Why does this exist? Who asked for it?", text: Binding(get: { state.draft.description }, set: { v in state.edit { $0.description = v } }))
-                            .textInputAutocapitalization(.sentences)
-                    }
-                    if state.draft.then == .exits {
-                        if state.draft.withRepo {
-                            Stepper(value: Binding(get: { state.draft.priority }, set: { v in state.edit { $0.priority = v } }), in: 1...1000, step: 10) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Priority: \(state.draft.priority)").font(.subheadline)
-                                    Text("Lower = sooner. Default 100.").font(.caption).foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                        Stepper(value: Binding(get: { state.draft.maxRetries }, set: { v in state.edit { $0.maxRetries = v } }), in: 0...10) {
-                            Text("Max retries: \(state.draft.maxRetries)").font(.subheadline)
-                        }
-                    }
-                    if state.kind == .repoTask {
-                        DisclosureGroup(isExpanded: $state.showDeps) {
-                            if activeTasks.isEmpty {
-                                Hint(text: "Nothing to wait on.")
-                            } else {
-                                Hint(text: "Wait for these to complete first.")
-                                ForEach(activeTasks.prefix(40)) { t in
-                                    Toggle(isOn: Binding(
-                                        get: { state.draft.dependsOn.contains(t.id) },
-                                        set: { on in state.edit { $0.dependsOn = on ? $0.dependsOn + [t.id] : $0.dependsOn.filter { $0 != t.id } } }
-                                    )) {
-                                        HStack {
-                                            Text(t.title).font(.footnote).lineLimit(1)
-                                            Spacer()
-                                            Text(t.state).font(.caption).foregroundStyle(.tertiary)
-                                        }
-                                    }
-                                    .tint(AppTheme.accent)
-                                }
-                            }
-                        } label: {
-                            Label(state.draft.dependsOn.isEmpty ? "Dependencies" : "Dependencies (\(state.draft.dependsOn.count))", systemImage: "link")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .padding(.top, Spacing.s)
-            } label: {
-                Text("More").font(.footnote).foregroundStyle(.secondary)
-            }
-            .tint(.secondary)
+        } header: {
+            FormSectionHeader("Name", anchor: .name)
+        } footer: {
+            Text(footer)
         }
+
+        Section {
+            DisclosureGroup(isExpanded: $state.more) {
+                TextField("Description", text: Binding(get: { state.draft.description }, set: { v in state.edit { $0.description = v } }), axis: .vertical)
+                    .lineLimit(1...4)
+                    .textInputAutocapitalization(.sentences)
+                if state.draft.then == .exits {
+                    if state.draft.withRepo {
+                        Stepper(value: Binding(get: { state.draft.priority }, set: { v in state.edit { $0.priority = v } }), in: 1...1000, step: 10) {
+                            LabeledContent("Priority", value: "\(state.draft.priority)")
+                        }
+                    }
+                    Stepper(value: Binding(get: { state.draft.maxRetries }, set: { v in state.edit { $0.maxRetries = v } }), in: 0...10) {
+                        LabeledContent("Max retries", value: "\(state.draft.maxRetries)")
+                    }
+                }
+                if state.kind == .repoTask {
+                    NavigationLink {
+                        DependenciesPicker(state: state, tasks: activeTasks)
+                    } label: {
+                        LabeledContent("Wait for", value: state.draft.dependsOn.isEmpty ? "Nothing" : "\(state.draft.dependsOn.count) task\(state.draft.dependsOn.count == 1 ? "" : "s")")
+                    }
+                }
+            } label: {
+                Text("More options")
+            }
+        } footer: {
+            if state.more, state.draft.then == .exits {
+                Text(state.draft.withRepo ? "Lower priority runs sooner; 100 is the default." : "Failed runs retry with backoff, up to the limit.")
+            }
+        }
+    }
+
+    private var footer: String {
+        var lines: [String] = []
+        if state.draft.name.trimmingCharacters(in: .whitespaces).isEmpty {
+            lines.append("Blank calls it “\(state.autoName)”.")
+        } else if state.kind == .repoTask || state.kind == .repoBlueprint {
+            lines.append("Also the title of the task that opens the PR.")
+        }
+        if state.draft.then == .waitsForMessages { lines.append("The address is how other agents message it.") }
+        return lines.joined(separator: " ")
+    }
+}
+
+/// Pick the tasks a Task waits on: a checklist pushed from "Wait for".
+struct DependenciesPicker: View {
+    @Bindable var state: WorkFormState
+    let tasks: [TaskRow]
+
+    var body: some View {
+        List {
+            if tasks.isEmpty {
+                ContentUnavailableView("Nothing to wait on", systemImage: "link", description: Text("No other tasks are queued or running."))
+            } else {
+                Section {
+                    ForEach(tasks.prefix(40)) { t in
+                        let on = state.draft.dependsOn.contains(t.id)
+                        Button {
+                            state.edit { $0.dependsOn = on ? $0.dependsOn.filter { $0 != t.id } : $0.dependsOn + [t.id] }
+                        } label: {
+                            HStack(spacing: Spacing.m) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t.title).font(.body).foregroundStyle(.primary).lineLimit(2)
+                                    Text(t.state.replacingOccurrences(of: "_", with: " ")).font(.footnote).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if on { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(AppTheme.accent) }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                } footer: {
+                    Text("This task starts only after every checked task completes.")
+                }
+            }
+        }
+        .navigationTitle("Wait for")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
