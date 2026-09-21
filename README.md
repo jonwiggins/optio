@@ -17,11 +17,11 @@ Every kind of work is one noun with five attributes:
 | **What**  | What is it asked to do? | A prompt, or a saved prompt template with `{{param}}` substitution filled from the trigger payload                                                                                                                               |
 | **Then**  | What happens after?     | **Exits when done** (open a PR / produce side effects and stop) · **Waits for you** (an interactive session between turns) · **Persistent agent** (keeps memory, wakes on messages, addressable by other agents)                 |
 
-Pick any combination and Optio derives the right runtime — a repo worktree pod that opens a PR, a pooled job pod, a local terminal, a recurring blueprint, or a long-lived agent — and shows them all in one **Sessions** feed with one status scale: _needs you_ · _running_ · _queued_ · _waiting_ · _scheduled_ · _paused_ · _done_ · _failed_. The New Session form reads back what you've built as a sentence, so you always know exactly what will happen:
+Pick any combination and Optio derives the right runtime — a repo worktree pod that opens a PR, a pooled job pod, a local terminal, a recurring blueprint, or a long-lived agent — and shows them all in one **Work** feed with one status scale: _needs you_ · _running_ · _queued_ · _waiting_ · _scheduled_ · _paused_ · _done_ · _failed_. The New work form reads back what you've built as a sentence, so you always know exactly what will happen:
 
-> _Started by Linear events, a Claude Code session on my laptop on a new branch in ~/src/app that opens a PR and exits when done._
+> _Started by Linear events, a Claude Code run on my laptop on a new branch in ~/src/app that opens a PR and exits when done._
 
-> _Running weekdays at 09:00 UTC, an OpenAI Codex session in an Optio pod that exits when done._
+> _Running weekdays at 09:00 UTC, an OpenAI Codex run in an Optio pod that exits when done._
 
 > _Woken by messages, a Claude Code agent in an Optio pod that keeps its memory between turns._
 
@@ -47,7 +47,7 @@ The five attributes cover a lot of ground. Some shapes Optio runs today, all fro
 - **Event automations on your own machine.** A `review_requested` on GitHub, an `@mention` in Slack, or a Linear state change spawns Claude Code (or Codex, Cursor, Gemini, OpenCode) in a checkout on your laptop, using your local CLI login — no server secrets ever leave the cluster. Interactive mode halts at the agent's prompt so you can take over; headless mode exits when done and can be resumed later. ([docs/optio-local.md](./docs/optio-local.md))
 - **Interactive agent terminals, anywhere.** Open a Claude Code session in a repo pod or on a paired machine, chat with it in the browser or the iOS app, split up to three side by side, and let the layered attention detector (Claude Code hooks → terminal bell → silence) tell you when one **needs you** — as a favicon, a tab count, a push notification, or a Live Activity on your lock screen.
 - **Persistent agents and swarms.** Named, long-lived agents with a stable slug, an inbox, and a cyclic turn loop. They wake on user messages, messages from other agents, webhooks, cron ticks, or ticket events, and address each other over an inter-agent HTTP API — enough to build a dispatcher + specialists team. Three pod lifecycle modes trade latency for cost (`always-on` / `sticky` / `on-demand`). ([docs/persistent-agents.md](./docs/persistent-agents.md), [Forge demo](./examples/persistent-agents/forge/), [Mars Mission Control](./examples/persistent-agents/mars-mission-control/))
-- **Code review as a first-class session.** A review agent (its own prompt, model, and even vendor) runs as a blocking subtask on PR open or CI pass, for Optio-authored PRs and external ones alike. Reviews have their own surface under **Work → Reviews**.
+- **Code review as a first-class session.** A review agent (its own prompt, model, and even vendor) runs as a blocking subtask on PR open or CI pass, for Optio-authored PRs and external ones alike. Reviews have their own surface under **Reviews**.
 - **Connections.** Give any session tools: Notion, Slack, Linear, GitHub, PostgreSQL, Sentry, Filesystem, any MCP server, or an HTTP API — injected into the pod at start with per-repo / per-runtime access rules.
 
 ## Why Optio?
