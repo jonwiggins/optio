@@ -3,7 +3,8 @@
 // Source: packages/shared/src/types/*.ts (+ utils/extract-work-links.ts).
 // Regenerate with `pnpm gen:kotlin`; scripts/check-kotlin-types.sh fails when this is stale.
 // Hand-written support lives beside this file: OptioJson, FlexibleInstantSerializer,
-// RawEnum (enum machinery) and DiscriminatedUnionSerializer (union machinery).
+// RawEnum (enum machinery), DiscriminatedUnionSerializer (union machinery) and
+// JsonElementAccessors (AnyCodable-style reads of JsonElement: stringValue, intValue, …).
 //
 // Conventions:
 //   • String enums carry an `UNKNOWN` fallback so new server values never fail decoding.

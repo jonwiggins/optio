@@ -27,8 +27,9 @@
  * `// gen-kotlin: skip-file` comment. (`// gen-swift: skip-file` only affects
  * Swift: glance.ts is hand-written for ActivityKit on iOS but generated here.)
  *
- * OptioJson, FlexibleInstantSerializer, RawEnum and DiscriminatedUnionSerializer
- * are hand-written beside the output.
+ * OptioJson, FlexibleInstantSerializer, RawEnum, DiscriminatedUnionSerializer and
+ * JsonElementAccessors (the AnyCodable accessors on JsonElement) are hand-written
+ * beside the output.
  */
 
 import fs from "node:fs";
@@ -470,7 +471,8 @@ export function generateKotlin(sourceFiles: string[]): GenerateKotlinResult {
     "// Source: packages/shared/src/types/*.ts (+ utils/extract-work-links.ts).",
     "// Regenerate with `pnpm gen:kotlin`; scripts/check-kotlin-types.sh fails when this is stale.",
     "// Hand-written support lives beside this file: OptioJson, FlexibleInstantSerializer,",
-    "// RawEnum (enum machinery) and DiscriminatedUnionSerializer (union machinery).",
+    "// RawEnum (enum machinery), DiscriminatedUnionSerializer (union machinery) and",
+    "// JsonElementAccessors (AnyCodable-style reads of JsonElement: stringValue, intValue, …).",
     "//",
     "// Conventions:",
     "//   • String enums carry an `UNKNOWN` fallback so new server values never fail decoding.",
