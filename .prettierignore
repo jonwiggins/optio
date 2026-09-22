@@ -12,3 +12,11 @@ pnpm-lock.yaml
 apps/ios/build
 apps/ios/*.xcodeproj
 apps/ios/Optio/Resources/Info.plist
+
+# Android build products (Gradle, Kotlin, IDE)
+apps/android/**/build
+apps/android/.gradle
+apps/android/.kotlin
+apps/android/.idea
+apps/android/build-logic/.gradle
+apps/android/build-logic/.kotlin

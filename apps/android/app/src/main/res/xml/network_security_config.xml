@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Optio servers are usually reached over a tailnet at plain-HTTP addresses
+  (http://laptop.tailnet.ts.net:30400, http://10.0.2.2:4961 on the emulator), so cleartext is
+  allowed everywhere, like iOS NSAllowsArbitraryLoads. Tighten this once servers are behind TLS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

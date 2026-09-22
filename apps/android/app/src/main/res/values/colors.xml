@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Optio purple (#6d28d9): launcher icon background. -->
+    <color name="ic_launcher_background">#FF6D28D9</color>
+</resources>
