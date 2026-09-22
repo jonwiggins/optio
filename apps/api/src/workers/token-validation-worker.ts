@@ -53,9 +53,17 @@ export async function recordTokenValidation(
   );
 }
 
+const EXPIRED = "OAuth token has expired or been revoked — please paste a new one";
+
 /**
  * Validate a Claude OAuth token against the Anthropic API.
  * Returns { valid: true } if the token is accepted, or { valid: false, error } if rejected.
+ *
+ * The usage endpoint answers first. Only a 401 there is a verdict: a revoked
+ * token can keep drawing 429s from it for as long as you keep asking, which
+ * used to read as "valid" and kept the automatic refresh from ever running.
+ * So any other non-2xx answer is confirmed against `GET /v1/models`, which
+ * rejects a revoked token outright. A network error still fails open.
  */
 export async function validateClaudeToken(
   token: string,
@@ -67,10 +75,21 @@ export async function validateClaudeToken(
         "anthropic-beta": "oauth-2025-04-20",
       },
     });
-    if (res.status === 401) {
-      return { valid: false, error: "OAuth token has expired — please paste a new one" };
-    }
-    // Any non-401 response (200, 429, etc.) means the token is still valid
+    if (res.status === 401) return { valid: false, error: EXPIRED };
+    if (res.ok) return { valid: true };
+  } catch {
+    // Network error — fall through to the second opinion.
+  }
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/models?limit=1", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "oauth-2025-04-20",
+      },
+    });
+    if (res.status === 401 || res.status === 403) return { valid: false, error: EXPIRED };
+    // 2xx, a rate limit on this endpoint too, or an outage: not a verdict.
     return { valid: true };
   } catch {
     // Network error — don't mark as invalid, just skip
