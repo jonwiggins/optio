@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lucide "bot" glyph (ISC licence), hand-converted from apps/ios/Design/app-icon.svg.
+  The 24-unit lucide grid is scaled 2.4x and centred on the 108dp adaptive-icon canvas, so the
+  glyph spans ~53dp and its farthest point (the ears) sits ~27dp from the centre: inside the
+  66dp safe zone. Also used as the monochrome (themed icon) layer.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2.4"
+        android:scaleY="2.4"
+        android:translateX="25.2"
+        android:translateY="25.2">
+        <!-- antenna: M12 8V4H8 -->
+        <path
+            android:pathData="M12,8V4H8"
+            android:strokeWidth="1.9"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <!-- head: rect x=4 y=8 w=16 h=12 rx=2.4 -->
+        <path
+            android:pathData="M6.4,8H17.6A2.4,2.4 0,0 1,20 10.4V17.6A2.4,2.4 0,0 1,17.6 20H6.4A2.4,2.4 0,0 1,4 17.6V10.4A2.4,2.4 0,0 1,6.4 8Z"
+            android:strokeWidth="1.9"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <!-- ears: M2 14h2, M20 14h2 -->
+        <path
+            android:pathData="M2,14H4M20,14H22"
+            android:strokeWidth="1.9"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <!-- eyes: M15 13v2, M9 13v2 -->
+        <path
+            android:pathData="M15,13V15M9,13V15"
+            android:strokeWidth="1.9"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

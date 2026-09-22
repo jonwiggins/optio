@@ -1,0 +1,7 @@
+plugins {
+    alias(libs.plugins.optio.android.feature)
+}
+
+android {
+    namespace = "dev.optio.feature.workform"
+}

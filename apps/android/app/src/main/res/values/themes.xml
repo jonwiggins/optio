@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window theme only; everything on screen is Compose (OptioTheme). -->
+    <style name="Theme.Optio" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
