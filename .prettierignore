@@ -7,6 +7,8 @@
 pnpm-lock.yaml
 **/test-results
 **/playwright-report
+# Android dev lab runtime state (test-api.sh / test-daemon.sh logs, seed manifests, daemon config)
+apps/android/e2e/.run
 
 # iOS build products and generated Xcode project
 apps/ios/build
