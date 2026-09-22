@@ -1,0 +1,48 @@
+{
+  "runs": [
+    {
+      "id": "a7b8c9d0-e1f2-4a3b-8c4d-5e6f7a8b9ca3",
+      "workflowId": "f6a7b8c9-d0e1-4f2a-9b3c-4d5e6f7a8b92",
+      "triggerId": "b8c9d0e1-f2a3-4b4c-9d5e-6f7a8b9cadb4",
+      "state": "completed",
+      "params": { "issue": "acme/web#311", "priority": 2 },
+      "title": "Triage acme/web#311",
+      "output": { "labels": ["bug", "p2"] },
+      "costUsd": "0.0123",
+      "inputTokens": 1200,
+      "outputTokens": 340,
+      "modelUsed": "claude-sonnet-4-5",
+      "errorMessage": null,
+      "sessionId": null,
+      "podName": null,
+      "localTerminalId": "0b7e6f4a-2c1d-4e9b-8a3f-5d6c7b8a9e01",
+      "retryCount": 0,
+      "startedAt": "2026-09-22T10:00:01.500Z",
+      "finishedAt": "2026-09-22T10:02:31.250Z",
+      "createdAt": "2026-09-22T10:00:00.000Z",
+      "updatedAt": "2026-09-22T10:02:31.250Z",
+      "podId": null,
+      "lastPodId": null
+    },
+    {
+      "id": "c9d0e1f2-a3b4-4c5d-9e6f-7a8b9cadbec5",
+      "workflowId": "f6a7b8c9-d0e1-4f2a-9b3c-4d5e6f7a8b92",
+      "triggerId": null,
+      "state": "cancelled",
+      "params": null,
+      "output": null,
+      "costUsd": null,
+      "inputTokens": null,
+      "outputTokens": null,
+      "modelUsed": null,
+      "errorMessage": "Cancelled by user",
+      "sessionId": null,
+      "podName": "optio-job-triage-0",
+      "retryCount": 1,
+      "startedAt": null,
+      "finishedAt": 1790071200,
+      "createdAt": 1790071000000,
+      "updatedAt": "2026-09-22T10:00:00+02:00"
+    }
+  ]
+}

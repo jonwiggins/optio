@@ -1,0 +1,101 @@
+[
+  {
+    "type": "task:state_changed",
+    "taskId": "5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10",
+    "fromState": "running",
+    "toState": "pr_opened",
+    "timestamp": "2026-09-22T16:31:07.512Z",
+    "costUsd": "0.4210",
+    "inputTokens": 182344,
+    "outputTokens": 9120,
+    "modelUsed": "claude-sonnet-4-5"
+  },
+  {
+    "type": "task:log",
+    "taskId": "5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10",
+    "stream": "stdout",
+    "content": "Running pnpm test…",
+    "timestamp": "2026-09-22T16:30:01.000Z"
+  },
+  {
+    "type": "task:pending_reason",
+    "taskId": "5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10",
+    "data": { "pendingReason": null }
+  },
+  {
+    "type": "task:message_acked",
+    "taskId": "5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10",
+    "messageId": "m-1",
+    "timestamp": "2026-09-22T16:29:00.000Z"
+  },
+  {
+    "type": "workflow_run:log",
+    "workflowRunId": "a7b8c9d0-e1f2-4a3b-8c4d-5e6f7a8b9ca3",
+    "stream": "stderr",
+    "content": "warn: retrying",
+    "timestamp": "2026-09-22T10:01:00.000Z",
+    "logType": "tool_use",
+    "metadata": { "toolName": "Bash", "toolInput": { "command": "gh issue view 311" } }
+  },
+  {
+    "type": "pr_review:state_changed",
+    "prReviewId": "pr-1",
+    "fromState": null,
+    "toState": "reviewing",
+    "trigger": "auto",
+    "timestamp": "2026-09-22T11:00:00.000Z"
+  },
+  {
+    "type": "persistent_agent:state_changed",
+    "agentId": "4f5e6d7c-8b9a-4c0d-9e1f-2a3b4c5d6e7f",
+    "agentSlug": "forge",
+    "fromState": "idle",
+    "toState": "hibernating",
+    "trigger": "control",
+    "timestamp": "2026-09-22T15:59:00.000Z"
+  },
+  {
+    "type": "persistent_agent:turn_halted",
+    "agentId": "4f5e6d7c-8b9a-4c0d-9e1f-2a3b4c5d6e7f",
+    "agentSlug": "forge",
+    "turnId": "d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70",
+    "turnNumber": 12,
+    "haltReason": "wait_tool",
+    "costUsd": "0.0310",
+    "summary": "Rebased release onto main.",
+    "timestamp": "2026-09-22T15:58:03.221Z"
+  },
+  {
+    "type": "persistent_agent:message",
+    "agentId": "4f5e6d7c-8b9a-4c0d-9e1f-2a3b4c5d6e7f",
+    "agentSlug": "forge",
+    "messageId": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f",
+    "senderType": "agent",
+    "senderId": "agent:w-1/scout",
+    "senderName": "Scout",
+    "body": "CI is green again.",
+    "broadcasted": true,
+    "timestamp": "2026-09-22T16:00:00.000Z"
+  },
+  {
+    "type": "activity:new",
+    "action": "task.created",
+    "resourceType": "task",
+    "resourceId": "5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10",
+    "summary": "Jon created “Fix flaky login test”",
+    "timestamp": "2026-09-22T16:02:11.004Z"
+  },
+  {
+    "type": "local:changed",
+    "terminalId": "0b7e6f4a-2c1d-4e9b-8a3f-5d6c7b8a9e01",
+    "hostId": "9d2e4c6a-8b0f-4a1e-b3c5-d7e9f1a3b5c7",
+    "userId": "u-1"
+  },
+  {
+    "type": "future:event",
+    "payload": { "anything": [1, 2, 3] }
+  },
+  {
+    "event": "no discriminator at all"
+  }
+]
