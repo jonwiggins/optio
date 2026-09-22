@@ -1,0 +1,6 @@
+{
+  "name": "optio-android-devlab-e2e",
+  "private": true,
+  "description": "Not a workspace package: marks apps/android/e2e scripts as ES modules for tsx/tsc.",
+  "type": "module"
+}
