@@ -24,6 +24,13 @@ export const WorkflowSchema = z
     name: z.string().describe("Human-readable workflow name"),
     description: z.string().nullable().describe("Optional description"),
     promptTemplate: z.string().describe("Handlebars-style prompt with {{param}} placeholders"),
+    runTitle: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "Name each run gets: a {{param}} template rendered with the trigger's params; null = the definition's name",
+      ),
     agentRuntime: z.string().describe("Agent runtime identifier (e.g. `claude-code`)"),
     model: z.string().nullable().describe("Optional model override"),
     maxTurns: z.number().int().nullable().describe("Optional hard turn limit"),
@@ -71,6 +78,11 @@ export const WorkflowRunSchema = z
       .string()
       .describe("Run lifecycle: `queued` | `running` | `completed` | `failed` | `cancelled`"),
     params: z.record(z.unknown()).nullable().describe("Run parameter bag"),
+    title: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("The workflow's runTitle rendered with this run's params; null = no template"),
     output: z.record(z.unknown()).nullable().describe("Agent result output if any"),
     costUsd: z.string().nullable().describe("Total cost in USD (decimal string)"),
     inputTokens: z.number().int().nullable(),

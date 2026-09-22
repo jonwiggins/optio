@@ -276,6 +276,8 @@ export interface LocalBlueprint {
    * substituted raw.
    */
   commandTemplate: string;
+  /** `{{param}}` template each spawned terminal is titled from; null = the blueprint name. */
+  runTitle?: string | null;
   /** Non-null = run the rendered template as this agent (gets attention hooks). */
   agent: LocalAgentKind | null;
   spawnMode: LocalBlueprintSpawnMode;

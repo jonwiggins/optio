@@ -665,6 +665,63 @@ describe("event triggers on every target (event-trigger-service.fireEventTrigger
     }
   });
 
+  it("a Linear mention names the Job run and the scheduled Task from their run-title templates", async () => {
+    const { fireEventTriggers, normalizeLinearEvent } = await import("./event-trigger-service.js");
+    const mention = normalizeLinearEvent({
+      type: "Comment",
+      action: "create",
+      actor: { name: "bob" },
+      data: {
+        body: "@jon can you look at this?",
+        url: "https://linear.app/acme/issue/ENG-42#comment-1",
+        issue: {
+          identifier: "ENG-42",
+          title: "Login is broken",
+          url: "https://linear.app/acme/issue/ENG-42",
+          team: { key: "ENG" },
+        },
+      },
+    })!;
+    const config = { events: ["mentioned"], user: "jon" };
+
+    const job = await insertWorkflow({ runTitle: "Triage: {{ticketTitle}} ({{identifier}})" });
+    const jobTrigger = await triggerService.createTrigger({
+      targetType: "job",
+      targetId: job.id,
+      type: "linear",
+      config,
+    });
+    const blueprint = await insertTaskConfig({ title: "Triage: {{ticketTitle}}" });
+    const configTrigger = await triggerService.createTrigger({
+      targetType: "task_config",
+      targetId: blueprint.id,
+      type: "linear",
+      config,
+    });
+
+    const fired = await fireEventTriggers("linear", mention);
+    const runId = fired.find((f) => f.triggerId === jobTrigger.id)?.id;
+    const taskId = fired.find((f) => f.triggerId === configTrigger.id)?.id;
+    expect(runId && taskId).toBeTruthy();
+
+    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId!));
+    expect(run.title).toBe("Triage: Login is broken (ENG-42)");
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId!));
+    expect(task.title).toBe("Triage: Login is broken");
+
+    for (const f of fired) {
+      if (f.kind === "workflow_run") await db.delete(workflowRuns).where(eq(workflowRuns.id, f.id));
+    }
+  });
+
+  it("a Job with no run-title template leaves the run untitled", async () => {
+    const { createWorkflowRun } = await import("./workflow-service.js");
+    const job = await insertWorkflow();
+    const run = await createWorkflowRun(job.id, { params: { ticketTitle: "x" } });
+    expect(run.title).toBeNull();
+    await db.delete(workflowRuns).where(eq(workflowRuns.id, run.id));
+  });
+
   it("a scheduled Task listens to its own repo by default and spawns a task without a ticket link", async () => {
     const { fireEventTriggers, normalizeGitHubEvent } = await import("./event-trigger-service.js");
     const config = await insertTaskConfig({

@@ -117,6 +117,8 @@ export function draftFromRow(kind: EditableKind, row: any, trigger: any | null):
     case "repo-blueprint":
       return normalize({
         ...common,
+        // The form saves `title = name` when no run name is set.
+        runName: row.title && row.title !== row.name ? String(row.title) : "",
         location: runLocationFromRow(row),
         withRepo: true,
         repoUrl: String(row.repoUrl ?? ""),
@@ -132,6 +134,7 @@ export function draftFromRow(kind: EditableKind, row: any, trigger: any | null):
       const runtime = String(row.agentRuntime ?? "claude-code");
       return normalize({
         ...common,
+        runName: String(row.runTitle ?? ""),
         location: runLocationFromRow(row),
         withRepo: false,
         runtime,
@@ -145,6 +148,7 @@ export function draftFromRow(kind: EditableKind, row: any, trigger: any | null):
       const interactive = row.sessionMode !== "headless";
       return normalize({
         ...common,
+        runName: String(row.runTitle ?? ""),
         location: {
           runTarget: "local",
           localHostId: String(row.hostId ?? ""),

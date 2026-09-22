@@ -21,6 +21,7 @@ import { localBlueprints, workflowTriggers } from "../db/schema.js";
 import { logger } from "../logger.js";
 import {
   getPromptTemplateById,
+  renderRunTitle,
   renderTemplateString,
   resolveTemplateConditionals,
 } from "./prompt-template-service.js";
@@ -59,6 +60,8 @@ export interface CreateBlueprintInput {
   /** Agent spawns work on a new branch off this base and open a PR; unset = the dir as it is. */
   baseBranch?: string | null;
   commandTemplate: string;
+  /** `{{param}}` template each spawned terminal is titled from; null = the blueprint name. */
+  runTitle?: string | null;
   /** Saved prompt (Prompts library) that replaces commandTemplate as the agent prompt. */
   promptTemplateId?: string | null;
   agent?: LocalAgentKind | null;
@@ -85,6 +88,7 @@ export async function createBlueprint(input: CreateBlueprintInput): Promise<Loca
       repoUrl: input.repoUrl,
       baseBranch: input.baseBranch ?? null,
       commandTemplate: input.commandTemplate,
+      runTitle: input.runTitle?.trim() || null,
       promptTemplateId: input.promptTemplateId ?? null,
       agent: input.agent ?? null,
       spawnMode: input.spawnMode ?? "auto",
@@ -116,6 +120,7 @@ export async function updateBlueprint(
       CreateBlueprintInput,
       | "name"
       | "commandTemplate"
+      | "runTitle"
       | "promptTemplateId"
       | "agent"
       | "spawnMode"
@@ -130,9 +135,11 @@ export async function updateBlueprint(
     }
   >,
 ): Promise<LocalBlueprintRow | null> {
+  const set = { ...updates, updatedAt: new Date() };
+  if (updates.runTitle !== undefined) set.runTitle = updates.runTitle?.trim() || null;
   const [row] = await db
     .update(localBlueprints)
-    .set({ ...updates, updatedAt: new Date() })
+    .set(set)
     .where(eq(localBlueprints.id, id))
     .returning();
   return row ?? null;
@@ -205,7 +212,11 @@ export async function spawnFromBlueprint(
     ticket?: { source: string; externalId: string; url?: string };
     /** Repo the triggering event was about; used when the blueprint pins no dir. */
     repoUrlHint?: string;
-    /** Terminal title override (defaults to the blueprint name). */
+    /**
+     * What the firing is about ("ENG-12 Login is broken"). The title is the
+     * blueprint's runTitle rendered with the params when it has one, else
+     * "<name> · <this>", else the blueprint name.
+     */
     title?: string;
   } = {},
 ): Promise<LocalTerminalRow> {
@@ -281,7 +292,11 @@ export async function spawnFromBlueprint(
     workspaceId: blueprint.workspaceId,
     dir,
     spec,
-    title: opts.title ?? blueprint.name,
+    title: blueprint.runTitle
+      ? renderRunTitle(blueprint.runTitle, rawParams, blueprint.name)
+      : opts.title
+        ? `${blueprint.name} · ${opts.title}`
+        : blueprint.name,
     spawnedBy: opts.spawnedBy ?? (opts.triggerId ? "trigger" : "blueprint"),
     blueprintId: blueprint.id,
     triggerId: opts.triggerId,

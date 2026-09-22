@@ -33,6 +33,11 @@ function triggerFor(d: WorkDraft) {
   return { type: t.type, config, enabled: true as const };
 }
 
+/** The run-name template, or null for "runs take the definition's name". */
+function runNameFor(d: WorkDraft): string | null {
+  return d.runName.trim() || null;
+}
+
 /** Only the options the user actually set (blank selects mean "default"). */
 function setOptions(d: WorkDraft): Record<string, string | boolean> | null {
   const out: Record<string, string | boolean> = {};
@@ -111,6 +116,7 @@ export async function createWork(
 async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }): Promise<Created> {
   const kind = deriveKind(d);
   const { name } = ctx;
+  const runName = runNameFor(d);
   const prompt = d.prompt.trim();
   const trigger = triggerFor(d);
   const location = runLocationPayload(d.location);
@@ -143,7 +149,7 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
           (
             await api.createTaskUnified({
               type: "repo-blueprint",
-              title: name,
+              title: runName ?? name,
               name,
               prompt,
               description: d.description || undefined,
@@ -171,6 +177,7 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
               type: "standalone",
               title: name,
               name,
+              ...(runName ? { runTitle: runName } : {}),
               prompt,
               description: d.description || undefined,
               agentType: d.runtime,
@@ -205,6 +212,7 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
               // instructions off this base.
               ...(d.withRepo ? { baseBranch: d.repoBranch || "main" } : {}),
               commandTemplate: prompt,
+              ...(runName ? { runTitle: runName } : {}),
               agent: d.runtime === TERMINAL ? null : (d.runtime as "claude-code"),
               spawnMode: "auto",
               sessionMode: d.then === "waits-for-me" ? "interactive" : "headless",
@@ -315,6 +323,7 @@ export async function updateWork(
 ): Promise<Created> {
   const { id, kind } = target;
   const name = d.name.trim() || target.row.name || target.row.title;
+  const runName = runNameFor(d);
   const prompt = d.prompt.trim();
   const trigger = triggerFor(d);
   const location = runLocationPayload(d.location);
@@ -328,7 +337,7 @@ export async function updateWork(
     case "repo-blueprint": {
       await api.updateTaskConfig(id, {
         name,
-        title: name,
+        title: runName ?? name,
         prompt,
         description: d.description || null,
         agentType: d.runtime,
@@ -350,6 +359,7 @@ export async function updateWork(
     case "standalone": {
       await api.updateWorkflow(id, {
         name,
+        runTitle: runName,
         promptTemplate: prompt,
         // The Job PATCH takes a string here (blank clears it), not null.
         description: d.description,
@@ -376,6 +386,7 @@ export async function updateWork(
         repoUrl: d.withRepo && repoUrl ? repoUrl : null,
         baseBranch: d.withRepo ? d.repoBranch || "main" : null,
         commandTemplate: prompt,
+        runTitle: runName,
         agent: d.runtime === TERMINAL ? null : (d.runtime as "claude-code"),
         sessionMode: d.then === "waits-for-me" ? "interactive" : "headless",
       });

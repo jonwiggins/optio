@@ -64,15 +64,10 @@ async function validateAuthToken(
     }
 
     if (name === "CLAUDE_CODE_OAUTH_TOKEN") {
-      const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
-        headers: {
-          Authorization: `Bearer ${value}`,
-          "anthropic-beta": "oauth-2025-04-20",
-        },
-      });
-      if (res.ok) return { valid: true };
-      if (res.status === 401) return { valid: false, error: "OAuth token is invalid or expired" };
-      return { valid: true };
+      // Same check as the periodic worker, so a revoked token that only draws
+      // 429s from the usage endpoint is still caught.
+      const { validateClaudeToken } = await import("../workers/token-validation-worker.js");
+      return await validateClaudeToken(value);
     }
 
     if (name === "ANTHROPIC_API_KEY") {
@@ -183,6 +178,16 @@ export async function secretRoutes(rawApp: FastifyInstance) {
       if (isAuthSecret) {
         invalidateCredentialsCache();
         validation = await validateAuthToken(input.name, input.value);
+        // The global Claude token is what the worker's cached status describes:
+        // record the fresh verdict now, or the "expired" banner outlives the fix.
+        if (input.name === "CLAUDE_CODE_OAUTH_TOKEN" && effectiveScope === "global" && validation) {
+          const { recordTokenValidation } = await import("../workers/token-validation-worker.js");
+          await recordTokenValidation({
+            valid: validation.valid,
+            tokenExists: true,
+            ...(validation.error ? { error: validation.error } : {}),
+          }).catch(() => {});
+        }
         await publishEvent({
           type: "auth:status_changed",
           timestamp: new Date().toISOString(),

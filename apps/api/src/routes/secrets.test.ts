@@ -14,6 +14,15 @@ vi.mock("../services/secret-service.js", () => ({
   deleteSecret: (...args: unknown[]) => mockDeleteSecret(...args),
 }));
 
+vi.mock("../services/event-bus.js", () => ({ publishEvent: vi.fn().mockResolvedValue(undefined) }));
+
+const mockValidateClaudeToken = vi.fn();
+const mockRecordTokenValidation = vi.fn();
+vi.mock("../workers/token-validation-worker.js", () => ({
+  validateClaudeToken: (...args: unknown[]) => mockValidateClaudeToken(...args),
+  recordTokenValidation: (...args: unknown[]) => mockRecordTokenValidation(...args),
+}));
+
 import { secretRoutes } from "./secrets.js";
 
 // ─── Helpers ───
@@ -101,6 +110,23 @@ describe("POST /api/secrets", () => {
       null,
       null,
     );
+  });
+
+  it("validates a global Claude token with the worker's check and records the verdict", async () => {
+    mockStoreSecret.mockResolvedValue(undefined);
+    mockValidateClaudeToken.mockResolvedValue({ valid: true });
+    mockRecordTokenValidation.mockResolvedValue(undefined);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/secrets",
+      payload: { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "sk-ant-oat01-fresh" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(mockValidateClaudeToken).toHaveBeenCalledWith("sk-ant-oat01-fresh");
+    // The cached "expired" status is replaced right away, not at the next 5-min check.
+    expect(mockRecordTokenValidation).toHaveBeenCalledWith({ valid: true, tokenExists: true });
   });
 
   it("creates a secret with custom scope", async () => {

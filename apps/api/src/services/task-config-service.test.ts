@@ -29,6 +29,7 @@ vi.mock("./task-service.js", () => ({
 vi.mock("./prompt-template-service.js", () => ({
   getPromptTemplateById: vi.fn(),
   renderTemplateString: vi.fn((s: string) => s),
+  renderRunTitle: vi.fn((s: string | null, _p: unknown, fallback: string) => s || fallback),
 }));
 
 vi.mock("./repo-service.js", () => ({

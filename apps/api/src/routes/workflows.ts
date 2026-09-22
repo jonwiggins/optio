@@ -22,6 +22,14 @@ const createWorkflowSchema = z
       .string()
       .min(1)
       .describe("Handlebars-style prompt template with {{param}} placeholders"),
+    runTitle: z
+      .string()
+      .max(200)
+      .nullable()
+      .optional()
+      .describe(
+        "Name each run gets: a {{param}} template rendered with the trigger's params; null = the workflow's name",
+      ),
     agentRuntime: z.string().optional().describe("Agent runtime (defaults to `claude-code`)"),
     model: z.string().optional().describe("Optional model override"),
     agentOptions: z
@@ -98,6 +106,7 @@ const updateWorkflowSchema = z
     name: z.string().min(1).optional(),
     description: z.string().optional(),
     promptTemplate: z.string().min(1).optional(),
+    runTitle: z.string().max(200).nullable().optional(),
     agentRuntime: z.string().optional(),
     model: z.string().nullable().optional(),
     agentOptions: z

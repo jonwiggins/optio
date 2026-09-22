@@ -74,17 +74,35 @@ describe("validateClaudeToken", () => {
   });
 
   it("returns valid: true on network error (fail-open)", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("ECONNREFUSED"));
     const result = await validateClaudeToken("some-token");
     expect(result.valid).toBe(true);
   });
 
-  it("returns valid: true when API returns 429 (rate limited but token still valid)", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response("Too Many Requests", { status: 429 }),
-    );
+  it("confirms a usage-endpoint 429 with /v1/models: still valid when that accepts it", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Too Many Requests", { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200 }));
     const result = await validateClaudeToken("rate-limited-token");
     expect(result.valid).toBe(true);
+    expect(String(fetchSpy.mock.calls[1][0])).toBe("https://api.anthropic.com/v1/models?limit=1");
+  });
+
+  it("marks a revoked token invalid even while the usage endpoint only answers 429", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Too Many Requests", { status: 429 }))
+      .mockResolvedValueOnce(new Response("OAuth access token has been revoked.", { status: 401 }));
+    const result = await validateClaudeToken("revoked-token");
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("revoked");
+  });
+
+  it("stays valid when both endpoints are rate limited", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Too Many Requests", { status: 429 }))
+      .mockResolvedValueOnce(new Response("Too Many Requests", { status: 429 }));
+    expect((await validateClaudeToken("busy-token")).valid).toBe(true);
   });
 
   it("sends correct headers to Anthropic API", async () => {

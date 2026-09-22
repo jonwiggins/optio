@@ -230,6 +230,8 @@ suite("presets and params", () => {
     const by = Object.fromEntries(PRESETS.map((p) => [p.id, normalize(p.apply(EMPTY_DRAFT))]));
     expect(deriveKind(by.pr)).toBe("repo-task");
     expect(deriveKind(local(by.chat))).toBe("local-terminal");
+    expect(deriveKind(local(by.terminal))).toBe("local-terminal");
+    expect(by.terminal.runtime).toBe(TERMINAL);
     expect(deriveKind(by.schedule)).toBe("standalone");
     expect(deriveKind(by.agent)).toBe("persistent-agent");
   });

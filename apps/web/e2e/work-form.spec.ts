@@ -124,9 +124,14 @@ test.describe("New work form creates every kind", () => {
     await when(page, "Ticket").click();
     // The param chips insert into the prompt.
     await prompt(page).fill("Triage ");
-    await page.getByRole("button", { name: "{{ticketUrl}}" }).click();
+    await page.locator("#session-prompt").getByRole("button", { name: "{{ticketUrl}}" }).click();
     await expect(prompt(page)).toHaveValue("Triage {{ticketUrl}}");
     await nameInput(page).fill(named("ticket job"));
+    // Recurring work names each run; the Name section's own chips insert there.
+    const runName = page.getByPlaceholder("Triage: {{ticketTitle}}");
+    await runName.fill("Triage: ");
+    await page.locator("#session-name").getByRole("button", { name: "{{ticketTitle}}" }).click();
+    await expect(runName).toHaveValue("Triage: {{ticketTitle}}");
     await submit(page).click();
     await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
 
@@ -135,6 +140,8 @@ test.describe("New work form creates every kind", () => {
     expect(triggers).toHaveLength(1);
     expect(triggers[0].type).toBe("ticket");
     expect(triggers[0].config.source).toBe("github");
+    const { workflow } = await api(`/api/jobs/${id}`);
+    expect(workflow.runTitle).toBe("Triage: {{ticketTitle}}");
   });
 
   test("persistent-agent: the agent preset creates a named, addressable agent", async ({

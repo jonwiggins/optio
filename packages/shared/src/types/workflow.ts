@@ -26,6 +26,8 @@ export interface Workflow {
   workspaceId?: string | null;
   environmentSpec?: Record<string, unknown> | null;
   promptTemplate: string;
+  /** `{{param}}` template each run is named from; null = the workflow's name. */
+  runTitle?: string | null;
   paramsSchema?: Record<string, unknown> | null;
   agentRuntime: string;
   model?: string | null;
@@ -63,6 +65,8 @@ export interface WorkflowRun {
   workflowId: string;
   triggerId?: string | null;
   params?: Record<string, unknown> | null;
+  /** The workflow's runTitle rendered with this run's params; null = no template. */
+  title?: string | null;
   state: WorkflowRunState;
   output?: Record<string, unknown> | null;
   costUsd?: string | null;
