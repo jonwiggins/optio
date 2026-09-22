@@ -115,6 +115,14 @@ const createTaskSchema = z
     // Fields common to all kinds
     title: z.string().min(1).optional().describe("Human-readable task title"),
     name: z.string().min(1).optional().describe("Name (required for blueprints)"),
+    runTitle: z
+      .string()
+      .max(200)
+      .nullable()
+      .optional()
+      .describe(
+        "Standalone: name each run gets, a {{param}} template rendered with the trigger's params (repo-blueprint: use `title`)",
+      ),
     prompt: z.string().min(1).describe("Prompt passed to the agent"),
     description: z.string().optional(),
     agentType: AgentTypeSchema.optional().describe("Agent runtime override"),
@@ -516,6 +524,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             name,
             description: input.description,
             promptTemplate: input.prompt,
+            runTitle: input.runTitle,
             agentRuntime: input.agentType,
             model: input.model,
             agentOptions: input.agentOptions ?? undefined,

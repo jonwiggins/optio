@@ -26,8 +26,45 @@ import {
   saveDefaultPromptTemplate,
   saveRepoPromptTemplate,
   listPromptTemplates,
+  renderRunTitle,
   renderTemplateString,
 } from "./prompt-template-service.js";
+
+describe("renderRunTitle", () => {
+  it("fills the template from the trigger's params", () => {
+    expect(
+      renderRunTitle("Triage: {{ticketTitle}}", { ticketTitle: "Login is broken" }, "Triage"),
+    ).toBe("Triage: Login is broken");
+  });
+
+  it("falls back to the definition name with no template", () => {
+    expect(renderRunTitle(null, { ticketTitle: "x" }, "Linear triage")).toBe("Linear triage");
+    expect(renderRunTitle("   ", {}, "Linear triage")).toBe("Linear triage");
+  });
+
+  it("drops placeholders the firing didn't carry instead of showing braces", () => {
+    expect(renderRunTitle("{{identifier}} {{ticketTitle}}", { ticketTitle: "Bug" }, "n")).toBe(
+      "Bug",
+    );
+    expect(renderRunTitle("{{ticketTitle}}", undefined, "Linear triage")).toBe("Linear triage");
+  });
+
+  it("keeps {{#if}} blocks and collapses a multi-line value to one line", () => {
+    expect(
+      renderRunTitle(
+        "{{#if identifier}}[{{identifier}}] {{/if}}{{title}}",
+        { identifier: "ENG-1", title: "Two\nlines" },
+        "n",
+      ),
+    ).toBe("[ENG-1] Two lines");
+  });
+
+  it("caps a long title", () => {
+    const title = renderRunTitle("{{t}}", { t: "x".repeat(500) }, "n");
+    expect(title.length).toBe(200);
+    expect(title.endsWith("…")).toBe(true);
+  });
+});
 
 describe("renderTemplateString", () => {
   it("substitutes {{param}} placeholders", () => {

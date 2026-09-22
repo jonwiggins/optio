@@ -58,6 +58,37 @@ describe("createWork", () => {
     expect(api.createTaskUnified).toHaveBeenCalledTimes(1);
   });
 
+  it("sends the run name as each kind's run-title template", async () => {
+    api.createTaskUnified.mockResolvedValue({ task: { id: "w-1" } });
+    api.createTaskTrigger.mockResolvedValue({});
+    const linear: WorkDraft = normalize({
+      ...EMPTY_DRAFT,
+      name: "Linear triage",
+      runName: "  Triage: {{ticketTitle}} ",
+      withRepo: false,
+      prompt: "Triage {{ticketUrl}}",
+      when: "linear",
+      event: { type: "linear", config: { events: ["mentioned"], user: "jon" } },
+    });
+    await createWork(linear, { repoUrl: "", autoName: "Job 1" });
+    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
+      type: "standalone",
+      name: "Linear triage",
+      runTitle: "Triage: {{ticketTitle}}",
+    });
+
+    api.createTaskUnified.mockClear();
+    await createWork(
+      { ...linear, withRepo: true, repoUrl: "https://github.com/a/b" },
+      { repoUrl: "https://github.com/a/b", autoName: "Task 1" },
+    );
+    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
+      type: "repo-blueprint",
+      name: "Linear triage",
+      title: "Triage: {{ticketTitle}}",
+    });
+  });
+
   it("rolls a Job back when its trigger is rejected", async () => {
     const job: WorkDraft = normalize({
       ...EMPTY_DRAFT,

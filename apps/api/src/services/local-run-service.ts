@@ -279,7 +279,7 @@ export async function dispatchLocalWorkflowRun(
         mode: workflow.localSessionMode ?? "headless",
         ...(workflow.model ? { model: workflow.model } : {}),
       },
-      title: `${workflow.name} · ${run.id.slice(0, 8)}`,
+      title: run.title ?? `${workflow.name} · ${run.id.slice(0, 8)}`,
       spawnedBy: "job",
       workflowRunId: run.id,
       triggerId: run.triggerId ?? undefined,

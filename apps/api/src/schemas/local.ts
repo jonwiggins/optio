@@ -187,6 +187,13 @@ export const LocalBlueprintSchema = z
       .nullable()
       .describe("Agent spawns work on a new branch off this base and open a PR; null = as-is"),
     commandTemplate: z.string(),
+    runTitle: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "Name each run gets: a {{param}} template rendered with the trigger's params; null = the definition's name",
+      ),
     promptTemplateId: z
       .string()
       .nullable()

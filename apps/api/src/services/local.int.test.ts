@@ -573,6 +573,36 @@ describe("local blueprints", () => {
     expect(terminal.command).toContain("claude");
   });
 
+  it("titles the terminal from the blueprint's run-title template", async () => {
+    const host = await makeHost();
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, null, daemon);
+    const name = `bp-title-${Math.random().toString(36).slice(2, 8)}`;
+    const blueprint = await createBlueprint({
+      userId: null,
+      workspaceId: null,
+      name,
+      hostId: host.id,
+      dir: "/home/dev/optio",
+      agent: "claude-code",
+      commandTemplate: "Triage {{ticketUrl}}",
+      runTitle: "Triage: {{ticketTitle}}",
+    });
+
+    const named = await spawnFromBlueprint(blueprint, {
+      params: { ticketTitle: "Login is broken", ticketUrl: "https://linear.app/x" },
+      title: "ENG-42 Login is broken",
+    });
+    expect(named.title).toBe("Triage: Login is broken");
+
+    // Without a template: "<name> · <what the firing is about>", else the name.
+    const plain = { ...blueprint, runTitle: null };
+    expect((await spawnFromBlueprint(plain, { title: "ENG-42 Login" })).title).toBe(
+      `${name} · ENG-42 Login`,
+    );
+    expect((await spawnFromBlueprint(plain)).title).toBe(name);
+  });
+
   it("fires matching ticket triggers and honors label filters", async () => {
     const host = await makeHost();
     const blueprint = await createBlueprint({

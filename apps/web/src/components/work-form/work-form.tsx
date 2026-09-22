@@ -50,6 +50,7 @@ import {
   deriveKind,
   fullOptionsApply,
   isEventWhen,
+  isTriggered,
   isLocal,
   kindLock,
   missingFields,
@@ -100,6 +101,7 @@ const FIELD_IDS: Record<SentenceField, string> = {
 const PRESET_ICONS: Record<string, ReactNode> = {
   pr: <GitPullRequest className="w-3.5 h-3.5" />,
   chat: <MessageSquare className="w-3.5 h-3.5" />,
+  terminal: <Terminal className="w-3.5 h-3.5" />,
   schedule: <Clock className="w-3.5 h-3.5" />,
   agent: <Bot className="w-3.5 h-3.5" />,
 };
@@ -174,6 +176,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const [me, setMe] = useState<{ provider: string; username: string | null } | null>(null);
   const { hosts } = useLocalHosts();
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const runNameRef = useRef<HTMLInputElement>(null);
 
   // On a machine the checkout's git remote is the repo (the picker reports it).
   const [localRepoUrl, setLocalRepoUrl] = useState<string | null>(null);
@@ -322,21 +325,28 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   // switching it off (or on) starts the parameters over.
   const setWithRepo = (withRepo: boolean) => setDraft({ withRepo, agentOptions: {} });
 
-  const insertParam = (name: string) => {
+  // Recurring work names each run; a one-off run just takes the name.
+  const namesRuns =
+    kind === "repo-blueprint" ||
+    kind === "local-blueprint" ||
+    (kind === "standalone" && isTriggered(draft));
+
+  const insertParam = (name: string, field: "prompt" | "runName" = "prompt") => {
     const token = `{{${name}}}`;
-    const el = promptRef.current;
+    const el = field === "prompt" ? promptRef.current : runNameRef.current;
     setDraft((d) => {
+      const text = d[field];
       if (!el) {
-        const sep = d.prompt && !d.prompt.endsWith(" ") ? " " : "";
-        return { ...d, prompt: `${d.prompt}${sep}${token}` };
+        const sep = text && !text.endsWith(" ") ? " " : "";
+        return { ...d, [field]: `${text}${sep}${token}` };
       }
-      const start = el.selectionStart ?? d.prompt.length;
-      const end = el.selectionEnd ?? d.prompt.length;
+      const start = el.selectionStart ?? text.length;
+      const end = el.selectionEnd ?? text.length;
       requestAnimationFrame(() => {
         el.focus();
         el.setSelectionRange(start + token.length, start + token.length);
       });
-      return { ...d, prompt: d.prompt.slice(0, start) + token + d.prompt.slice(end) };
+      return { ...d, [field]: text.slice(0, start) + token + text.slice(end) };
     });
   };
 
@@ -974,7 +984,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                 />
                 <p className="text-xs text-text-muted/60 mt-1">
                   {draft.name.trim()
-                    ? kind === "repo-task" || kind === "repo-blueprint"
+                    ? kind === "repo-task" || (kind === "repo-blueprint" && !draft.runName.trim())
                       ? "Also the title of the task that opens the PR."
                       : " "
                     : edit
@@ -982,6 +992,48 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                       : `Leave blank to call it “${autoName}”.`}
                 </p>
               </div>
+              {namesRuns && (
+                <div>
+                  <label className="block text-sm text-text-muted mb-1.5">
+                    Each run is named <span className="text-text-muted/60">(optional)</span>
+                  </label>
+                  <input
+                    ref={runNameRef}
+                    type="text"
+                    value={draft.runName}
+                    onChange={(e) => setDraft({ runName: e.target.value })}
+                    placeholder={
+                      params.includes("ticketTitle")
+                        ? "Triage: {{ticketTitle}}"
+                        : params.includes("title")
+                          ? "Review: {{title}}"
+                          : draft.name.trim() || autoName
+                    }
+                    className={cn(INPUT, "font-mono")}
+                  />
+                  <p className="text-xs text-text-muted/60 mt-1">
+                    {params.length > 0
+                      ? "Filled in from the trigger each time it fires. Blank = the name above."
+                      : draft.when === "webhook"
+                        ? "Use {{field}} for any top-level field of the POSTed JSON. Blank = the name above."
+                        : "Blank = the name above."}
+                  </p>
+                  {params.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {params.map((name) => (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => insertParam(name, "runName")}
+                          className="px-1.5 py-0.5 rounded bg-bg border border-border font-mono text-[11px] text-text-muted hover:text-text hover:border-primary/50 transition-colors"
+                        >
+                          {`{{${name}}}`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {draft.then === "waits-for-messages" && (
                 <div>
                   <input

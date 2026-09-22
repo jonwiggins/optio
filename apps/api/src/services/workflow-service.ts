@@ -12,6 +12,7 @@ import { WorkflowRunState, canTransitionWorkflowRun, transitionWorkflowRun } fro
 import { publishWorkflowRunEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
 import * as triggerService from "./trigger-service.js";
+import { renderRunTitle } from "./prompt-template-service.js";
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
 
@@ -35,6 +36,8 @@ export async function createWorkflow(input: {
   name: string;
   description?: string;
   promptTemplate: string;
+  /** `{{param}}` template each run is named from; null = the workflow's name. */
+  runTitle?: string | null;
   agentRuntime?: string;
   model?: string;
   /** Per-run agent parameters keyed like the provider catalog; null = defaults. */
@@ -63,6 +66,7 @@ export async function createWorkflow(input: {
       name: input.name,
       description: input.description,
       promptTemplate: input.promptTemplate,
+      runTitle: input.runTitle?.trim() || null,
       agentRuntime: input.agentRuntime ?? "claude-code",
       model: input.model,
       agentOptions: input.agentOptions ?? null,
@@ -93,6 +97,7 @@ export async function updateWorkflow(
     name?: string;
     description?: string;
     promptTemplate?: string;
+    runTitle?: string | null;
     agentRuntime?: string;
     model?: string | null;
     agentOptions?: Record<string, string | boolean> | null;
@@ -112,11 +117,12 @@ export async function updateWorkflow(
     localSessionMode?: LocalAgentSessionMode | null;
   },
 ) {
-  const { localSessionMode, ...rest } = input;
+  const { localSessionMode, runTitle, ...rest } = input;
   const [workflow] = await db
     .update(workflows)
     .set({
       ...rest,
+      ...(runTitle !== undefined ? { runTitle: runTitle?.trim() || null } : {}),
       // The column is NOT NULL; a null from a "cluster" location means "back to the default".
       ...(localSessionMode !== undefined
         ? { localSessionMode: localSessionMode ?? "headless" }
@@ -144,6 +150,7 @@ export async function cloneWorkflow(
     name: `${source.name} (copy)`,
     description: source.description ?? undefined,
     promptTemplate: source.promptTemplate,
+    runTitle: source.runTitle,
     agentRuntime: source.agentRuntime ?? undefined,
     model: source.model ?? undefined,
     agentOptions: source.agentOptions ?? undefined,
@@ -429,6 +436,9 @@ export async function createWorkflowRun(
       workflowId,
       triggerId: opts?.triggerId,
       params: opts?.params,
+      title: workflow.runTitle
+        ? renderRunTitle(workflow.runTitle, opts?.params, workflow.name)
+        : null,
       state: WorkflowRunState.QUEUED,
     })
     .returning();

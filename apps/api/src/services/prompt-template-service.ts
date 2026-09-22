@@ -190,6 +190,31 @@ export function renderTemplateString(template: string, params: Record<string, un
   return rendered;
 }
 
+const RUN_TITLE_MAX = 200;
+
+/**
+ * The name a run gets from its definition's run-title template and the
+ * trigger's params ("Triage: {{ticketTitle}}" → "Triage: Login is broken").
+ * Unlike a prompt, a title is shown, not parsed: a placeholder the firing
+ * didn't carry (a manual run of a Linear-triggered definition) renders
+ * empty, whitespace collapses to one line, and a blank result — or no
+ * template — falls back to `fallback`.
+ */
+export function renderRunTitle(
+  template: string | null | undefined,
+  params: Record<string, unknown> | null | undefined,
+  fallback: string,
+): string {
+  if (!template?.trim()) return fallback;
+  const bag = params ?? {};
+  const title = renderTemplateString(template, bag)
+    .replace(/\{\{\s*\w+\s*\}\}/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!title) return fallback;
+  return title.length > RUN_TITLE_MAX ? `${title.slice(0, RUN_TITLE_MAX - 1)}…` : title;
+}
+
 export async function renderTemplateById(
   id: string,
   params: Record<string, unknown>,

@@ -1543,6 +1543,8 @@ export const api = {
     type?: "repo-task" | "repo-blueprint" | "standalone";
     title?: string;
     name?: string;
+    /** Standalone: `{{param}}` template each run is named from (repo-blueprint: `title`). */
+    runTitle?: string | null;
     prompt: string;
     description?: string;
     agentType?: string;
@@ -1975,6 +1977,8 @@ export const api = {
     /** Agent spawns work on a new branch off this base and open a PR; unset = the dir as it is. */
     baseBranch?: string | null;
     commandTemplate: string;
+    /** `{{param}}` template each spawned terminal is titled from; null = the name. */
+    runTitle?: string | null;
     /** Saved prompt (Prompts library) rendered as the agent prompt instead of commandTemplate. */
     promptTemplateId?: string | null;
     /** Run the rendered template as this agent's prompt; null = raw shell command. */
@@ -1999,6 +2003,7 @@ export const api = {
       /** Agent spawns work on a new branch off this base and open a PR; null = the dir as it is. */
       baseBranch: string | null;
       commandTemplate: string;
+      runTitle: string | null;
       /** Saved prompt (Prompts library) rendered as the agent prompt instead of commandTemplate. */
       promptTemplateId: string | null;
       /** Run the rendered template as this agent's prompt; null = raw shell command. */

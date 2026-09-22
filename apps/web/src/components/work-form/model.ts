@@ -92,6 +92,11 @@ export interface WorkDraft {
   };
   /** Blank = "<Kind> N" (see `KIND_WORD`). */
   name: string;
+  /**
+   * Triggered work only: what each run is named, with the trigger's params
+   * ("Triage: {{ticketTitle}}"). Blank = the name.
+   */
+  runName: string;
   description: string;
   priority: number;
   maxRetries: number;
@@ -130,6 +135,7 @@ export const EMPTY_DRAFT: WorkDraft = {
   then: "exits",
   agent: { slug: "", podLifecycle: "sticky", systemPrompt: "", agentsMd: "" },
   name: "",
+  runName: "",
   description: "",
   priority: 100,
   maxRetries: 3,
@@ -173,6 +179,22 @@ export const PRESETS: Preset[] = [
       withRepo: false,
       runtime: d.runtime || "claude-code",
       agentOptions: {},
+      then: "waits-for-me",
+    }),
+  },
+  {
+    id: "terminal",
+    label: "Terminal",
+    hint: "A plain shell on your machine — no agent, no prompt.",
+    apply: (d) => ({
+      ...d,
+      when: "manual",
+      trigger: { type: "manual" },
+      location: { ...d.location, runTarget: "local", localSessionMode: "interactive" },
+      withRepo: false,
+      runtime: TERMINAL,
+      agentOptions: {},
+      prompt: "",
       then: "waits-for-me",
     }),
   },

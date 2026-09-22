@@ -637,6 +637,9 @@ export const workflows = pgTable(
     environmentSpec: jsonb("environment_spec").$type<Record<string, unknown>>(),
     promptTemplate: text("prompt_template").notNull(),
     paramsSchema: jsonb("params_schema").$type<Record<string, unknown>>(),
+    // Name each run gets, a `{{param}}` template rendered with the trigger's
+    // params ("Triage: {{ticketTitle}}"). Null = the workflow's name.
+    runTitle: text("run_title"),
     agentRuntime: text("agent_runtime").notNull().default("claude-code"),
     model: text("model"),
     // Per-run agent parameters for the runtime (model, effort, thinking,
@@ -710,6 +713,8 @@ export const workflowRuns = pgTable(
       .references(() => workflows.id, { onDelete: "cascade" }),
     triggerId: uuid("trigger_id").references(() => workflowTriggers.id),
     params: jsonb("params").$type<Record<string, unknown>>(),
+    // workflows.run_title rendered with this run's params; null = no template.
+    title: text("title"),
     state: text("state").notNull().default("queued"), // "queued" | "running" | "completed" | "failed"
     output: jsonb("output").$type<Record<string, unknown>>(),
     costUsd: text("cost_usd"),
@@ -1782,6 +1787,9 @@ export const localBlueprints = pgTable(
     // directory as it is.
     baseBranch: text("base_branch"),
     commandTemplate: text("command_template").notNull(),
+    // Title of each spawned terminal, a `{{param}}` template rendered with the
+    // trigger's params. Null = the blueprint name (plus the ticket, if any).
+    runTitle: text("run_title"),
     // A saved prompt from the Prompts library. When set, its text is the
     // agent's prompt (rendered with the trigger params) and commandTemplate
     // is ignored — so one reviewed prompt can back many automations.

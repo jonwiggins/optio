@@ -3,7 +3,11 @@ import { db } from "../db/client.js";
 import { taskConfigs, workflowTriggers } from "../db/schema.js";
 import { TaskState, type LocalAgentSessionMode, type RunTarget } from "@optio/shared";
 import * as taskService from "./task-service.js";
-import { getPromptTemplateById, renderTemplateString } from "./prompt-template-service.js";
+import {
+  getPromptTemplateById,
+  renderRunTitle,
+  renderTemplateString,
+} from "./prompt-template-service.js";
 import { logger } from "../logger.js";
 
 export interface CreateTaskConfigInput {
@@ -181,7 +185,7 @@ export async function instantiateTask(
   } else {
     effectivePrompt = renderTemplateString(config.prompt, params);
   }
-  const effectiveTitle = renderTemplateString(config.title, params);
+  const effectiveTitle = renderRunTitle(config.title, params, config.name);
 
   const agentType = effectiveAgentType ?? "claude-code";
 

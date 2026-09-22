@@ -39,6 +39,7 @@ interface WorkflowRun {
   workflowId: string;
   triggerId: string | null;
   params: Record<string, unknown> | null;
+  title?: string | null;
   state: string;
   output: Record<string, unknown> | null;
   costUsd: string | null;
@@ -80,7 +81,7 @@ export default function WorkflowRunDetailPage({
   const [outputCollapsed, setOutputCollapsed] = useState(false);
   const [paramsCollapsed, setParamsCollapsed] = useState(false);
 
-  usePageTitle(run ? `Run ${run.id.slice(0, 8)}` : "Task Run");
+  usePageTitle(run ? (run.title ?? `Run ${run.id.slice(0, 8)}`) : "Task Run");
 
   const isActive = run?.state === "running" || run?.state === "queued";
 
@@ -187,7 +188,7 @@ export default function WorkflowRunDetailPage({
   return (
     <div className="flex flex-col h-full">
       <DetailHeader
-        title={`Run ${run.id.slice(0, 8)}`}
+        title={run.title ?? `Run ${run.id.slice(0, 8)}`}
         subtitle={
           <Link
             href={`/jobs/${workflowId}`}

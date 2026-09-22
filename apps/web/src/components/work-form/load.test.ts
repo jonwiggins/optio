@@ -127,6 +127,31 @@ describe("draftFromRow — the row round-trips to its own kind", () => {
   });
 });
 
+describe("draftFromRow — run names", () => {
+  it("reads each kind's run-title template back, blank when it just repeats the name", () => {
+    const linear = { type: "linear", config: { events: ["mentioned"], user: "jon" } };
+    const task = { name: "Triage", prompt: "p", repoUrl: "https://github.com/a/b" };
+    expect(
+      draftFromRow("repo-blueprint", { ...task, title: "Triage: {{ticketTitle}}" }, linear).runName,
+    ).toBe("Triage: {{ticketTitle}}");
+    expect(draftFromRow("repo-blueprint", { ...task, title: "Triage" }, linear).runName).toBe("");
+    expect(
+      draftFromRow(
+        "standalone",
+        { name: "Triage", promptTemplate: "p", runTitle: "Job: {{title}}" },
+        linear,
+      ).runName,
+    ).toBe("Job: {{title}}");
+    expect(
+      draftFromRow(
+        "local-blueprint",
+        { name: "Triage", commandTemplate: "p", agent: "claude-code", runTitle: "T: {{title}}" },
+        linear,
+      ).runName,
+    ).toBe("T: {{title}}");
+  });
+});
+
 describe("whenFromTrigger / pickTrigger", () => {
   it("maps each stored trigger type back to the form's When", () => {
     expect(whenFromTrigger({ type: "webhook", config: { path: "hook-1" } }).trigger).toEqual({

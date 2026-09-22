@@ -120,7 +120,7 @@ async function dispatch(
         params: firing.params,
         ticket: firing.ticket,
         repoUrlHint: firing.repoUrlHint,
-        title: firing.title ? `${blueprint.name} · ${firing.title}` : undefined,
+        title: firing.title,
       });
       return { kind: "local_terminal", id: terminal.id };
     }

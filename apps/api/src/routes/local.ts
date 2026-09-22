@@ -82,6 +82,13 @@ const blueprintBodySchema = z
       .string()
       .max(4000)
       .describe("Inline prompt / command template; may be empty when promptTemplateId is set"),
+    runTitle: z
+      .string()
+      .max(200)
+      .nullish()
+      .describe(
+        "Name each run gets: a {{param}} template rendered with the trigger's params; null = the definition's name",
+      ),
     promptTemplateId: z
       .string()
       .uuid()

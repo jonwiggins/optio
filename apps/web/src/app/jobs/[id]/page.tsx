@@ -69,6 +69,7 @@ interface WorkflowRun {
   workflowId: string;
   triggerId: string | null;
   params: Record<string, unknown> | null;
+  title?: string | null;
   state: string;
   output: Record<string, unknown> | null;
   costUsd: string | null;
@@ -513,6 +514,11 @@ function RunsTable({
                           className="w-3 h-3 text-text-muted"
                           aria-label="Ran on your machine"
                         />
+                      )}
+                      {run.title && (
+                        <span className="text-xs text-text truncate max-w-[18rem]">
+                          {run.title}
+                        </span>
                       )}
                     </Link>
                   </td>

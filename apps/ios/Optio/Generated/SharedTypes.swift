@@ -3560,6 +3560,8 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
     /// result is the agent's prompt (a single quoted argv element), so params are
     /// substituted raw.
     public let commandTemplate: String
+    /// `{{param}}` template each spawned terminal is titled from; null = the blueprint name.
+    public let runTitle: String?
     /// Non-null = run the rendered template as this agent (gets attention hooks).
     public let agent: LocalAgentKind?
     public let spawnMode: LocalBlueprintSpawnMode
@@ -3579,6 +3581,7 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
         case dir = "dir"
         case repoUrl = "repoUrl"
         case commandTemplate = "commandTemplate"
+        case runTitle = "runTitle"
         case agent = "agent"
         case spawnMode = "spawnMode"
         case sessionMode = "sessionMode"
@@ -3597,6 +3600,7 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
         dir: String? = nil,
         repoUrl: String? = nil,
         commandTemplate: String,
+        runTitle: String? = nil,
         agent: LocalAgentKind? = nil,
         spawnMode: LocalBlueprintSpawnMode,
         sessionMode: LocalAgentSessionMode,
@@ -3613,6 +3617,7 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
         self.dir = dir
         self.repoUrl = repoUrl
         self.commandTemplate = commandTemplate
+        self.runTitle = runTitle
         self.agent = agent
         self.spawnMode = spawnMode
         self.sessionMode = sessionMode
@@ -7344,6 +7349,8 @@ public struct Workflow: Codable, Hashable, Sendable {
     public let workspaceId: String?
     public let environmentSpec: [String: AnyCodable]?
     public let promptTemplate: String
+    /// `{{param}}` template each run is named from; null = the workflow's name.
+    public let runTitle: String?
     public let paramsSchema: [String: AnyCodable]?
     public let agentRuntime: String
     public let model: String?
@@ -7369,6 +7376,7 @@ public struct Workflow: Codable, Hashable, Sendable {
         case workspaceId = "workspaceId"
         case environmentSpec = "environmentSpec"
         case promptTemplate = "promptTemplate"
+        case runTitle = "runTitle"
         case paramsSchema = "paramsSchema"
         case agentRuntime = "agentRuntime"
         case model = "model"
@@ -7394,6 +7402,7 @@ public struct Workflow: Codable, Hashable, Sendable {
         workspaceId: String? = nil,
         environmentSpec: [String: AnyCodable]? = nil,
         promptTemplate: String,
+        runTitle: String? = nil,
         paramsSchema: [String: AnyCodable]? = nil,
         agentRuntime: String,
         model: String? = nil,
@@ -7417,6 +7426,7 @@ public struct Workflow: Codable, Hashable, Sendable {
         self.workspaceId = workspaceId
         self.environmentSpec = environmentSpec
         self.promptTemplate = promptTemplate
+        self.runTitle = runTitle
         self.paramsSchema = paramsSchema
         self.agentRuntime = agentRuntime
         self.model = model
@@ -7491,6 +7501,8 @@ public struct WorkflowRun: Codable, Hashable, Sendable {
     public let workflowId: String
     public let triggerId: String?
     public let params: [String: AnyCodable]?
+    /// The workflow's runTitle rendered with this run's params; null = no template.
+    public let title: String?
     public let state: WorkflowRunState
     public let output: [String: AnyCodable]?
     public let costUsd: String?
@@ -7513,6 +7525,7 @@ public struct WorkflowRun: Codable, Hashable, Sendable {
         case workflowId = "workflowId"
         case triggerId = "triggerId"
         case params = "params"
+        case title = "title"
         case state = "state"
         case output = "output"
         case costUsd = "costUsd"
@@ -7535,6 +7548,7 @@ public struct WorkflowRun: Codable, Hashable, Sendable {
         workflowId: String,
         triggerId: String? = nil,
         params: [String: AnyCodable]? = nil,
+        title: String? = nil,
         state: WorkflowRunState,
         output: [String: AnyCodable]? = nil,
         costUsd: String? = nil,
@@ -7555,6 +7569,7 @@ public struct WorkflowRun: Codable, Hashable, Sendable {
         self.workflowId = workflowId
         self.triggerId = triggerId
         self.params = params
+        self.title = title
         self.state = state
         self.output = output
         self.costUsd = costUsd
