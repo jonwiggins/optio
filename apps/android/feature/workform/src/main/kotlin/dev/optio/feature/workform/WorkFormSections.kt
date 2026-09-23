@@ -715,7 +715,7 @@ private fun thenSubtitle(then: Then, withRepo: Boolean): String = when (then) {
 @Composable
 internal fun NameSection(state: WorkFormState, modifier: Modifier = Modifier) {
     val d = state.draft
-    FormSectionCard(title = "Name", footer = nameFooter(state), modifier = modifier.testTag("work-form-name")) {
+    FormSectionCard(title = "Name", footer = nameFooter(state).ifEmpty { null }, modifier = modifier.testTag("work-form-name")) {
         TextAreaRow(
             value = d.name,
             onValueChange = state::setName,

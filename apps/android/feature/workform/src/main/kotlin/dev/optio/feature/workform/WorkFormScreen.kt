@@ -18,9 +18,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.isImeVisible
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -39,13 +39,17 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
@@ -63,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -152,7 +157,35 @@ private fun WorkFormFrame(
     title: String,
     onClose: () -> Unit,
     closeEnabled: Boolean = true,
-    bottomBar: @Composable () -> Unit = {},
+    bottomBar: @Composable (bottomInset: Dp) -> Unit = {},
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    // The keyboard and the navigation bar are measured from the window's bottom, but inside the
+    // shell the form ends above the tab bar (whose own padding already covers the navigation bar,
+    // and whose ancestors consume insets unevenly). So the bottom bar's inset is plain geometry:
+    // how far the keyboard (or the navigation bar) reaches above the form's bottom edge.
+    val density = LocalDensity.current
+    var belowPx by remember { mutableIntStateOf(0) }
+    val reach = maxOf(WindowInsets.ime.getBottom(density), WindowInsets.navigationBars.getBottom(density))
+    val bottomInset = with(density) { (reach - belowPx).coerceAtLeast(0).toDp() }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { coords ->
+                val rootHeight = coords.findRootCoordinates().size.height.toFloat()
+                belowPx = (rootHeight - coords.boundsInRoot().bottom).coerceAtLeast(0f).toInt()
+            },
+    ) {
+        FormScaffold(title, onClose, closeEnabled, { bottomBar(bottomInset) }, content)
+    }
+}
+
+@Composable
+private fun FormScaffold(
+    title: String,
+    onClose: () -> Unit,
+    closeEnabled: Boolean,
+    bottomBar: @Composable () -> Unit,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
@@ -234,7 +267,7 @@ internal fun WorkFormScreen(
         title = if (state.isEditing) "Edit work" else "New work",
         onClose = onClose,
         closeEnabled = !state.submitting,
-        bottomBar = { SubmitBar(state, onSubmit = ::submit, onJump = { jump(it.section) }) },
+        bottomBar = { inset -> SubmitBar(state, inset, onSubmit = ::submit, onJump = { jump(it.section) }) },
     ) { padding ->
         Column(
             Modifier
@@ -296,7 +329,7 @@ private fun EditIntro(state: WorkFormState, onStartNew: () -> Unit) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SubmitBar(state: WorkFormState, onSubmit: () -> Unit, onJump: (SentenceField) -> Unit) {
+private fun SubmitBar(state: WorkFormState, bottomInset: Dp, onSubmit: () -> Unit, onJump: (SentenceField) -> Unit) {
     val colors = OptioTheme.colors
     val ready = state.ready
     val imeVisible = WindowInsets.isImeVisible
@@ -304,8 +337,7 @@ private fun SubmitBar(state: WorkFormState, onSubmit: () -> Unit, onJump: (Sente
         Modifier
             .fillMaxWidth()
             .background(colors.page)
-            .navigationBarsPadding()
-            .imePadding(),
+            .padding(bottom = bottomInset),
     ) {
         Box(Modifier.fillMaxWidth().height(hairline()).background(colors.separator))
         Column(
