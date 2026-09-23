@@ -323,6 +323,23 @@ class SessionStoreTest {
             assertEquals(emptyList(), registry.all())
         }
 
+    @Test
+    fun forgettingAServerTellsRemovalListenersWhileItsTokenExists() =
+        runBlocking<Unit> {
+            val first = fake().apply { validTokens = setOf("optio_pat_first") }
+            val second = fake()
+            val session = session()
+            session.restore()
+            val a = session.addServer(first.url, "optio_pat_first")
+            val b = session.addServer(second.url, GOOD)
+            val heard = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String?>>()
+            registry.addRemovalListener { profile, token -> heard += profile.id to token }
+
+            session.removeServer(b.id)
+            session.signOut()
+            assertEquals(listOf(b.id to GOOD, a.id to "optio_pat_first"), heard.toList())
+        }
+
     // endregion
 
     // region 401 handling, workspace, clients

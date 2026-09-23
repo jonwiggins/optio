@@ -136,6 +136,8 @@ class GlanceRuntime private constructor(
         status.refreshPermission(context)
         watch.start()
         registrar.start()
+        // A server being forgotten gets its DELETE while its credentials still exist.
+        GlanceHost.session?.registry?.addRemovalListener(registrar::beforeRemove)
         GlanceWork.schedule(context)
         scope.launch { keepWatching.startIfEnabled() }
         // Back in the foreground: check at once, and re-arm keep-watching if Android refused it earlier.
