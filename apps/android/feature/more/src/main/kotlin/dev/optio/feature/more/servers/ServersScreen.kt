@@ -175,7 +175,7 @@ private fun ServerRow(
             OutlinedButton(
                 onClick = onEdit,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                modifier = Modifier.testTag("server-edit-${server.id}"),
+                modifier = Modifier.semantics { contentDescription = "Edit ${server.name}" }.testTag("server-edit-${server.id}"),
             ) {
                 Text("Edit", style = OptioTheme.type.footnote.semibold())
             }
