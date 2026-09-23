@@ -119,7 +119,7 @@ fun AgentDetailScreen(
         ui = AgentDetailUi(header, messages, turns, triggers, live, connected),
         actions = vm,
         focusComposer = compose,
-        onRetry = { vm.appeared() },
+        onRetry = vm::retry,
         modifier = modifier,
     )
 }

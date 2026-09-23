@@ -178,6 +178,11 @@ class AgentDetailViewModel(
         }
     }
 
+    /** Retry after a failed load: every part again. */
+    fun retry() {
+        viewModelScope.launch { refresh() }
+    }
+
     /** Opens the events socket (no-op while one is open). */
     fun connect() {
         if (socket != null) return
