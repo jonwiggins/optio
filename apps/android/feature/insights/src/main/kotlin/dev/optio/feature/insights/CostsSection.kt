@@ -220,16 +220,21 @@ internal fun CostsContent(
     onRetry: () -> Unit = {},
     onOpen: (NavKey) -> Unit = {},
 ) {
-    val data = state.value
+    val previous = state.value
+    // A failed refresh of the same period and repo keeps the last numbers up (flagged). Numbers
+    // for another period or repo (the filter just changed and its load failed) would read as the
+    // new filter's, e.g. all repos under an active repo filter, so then only the error shows.
+    val otherQuery = state is LoadState.Failed && shownFilter != null && shownFilter != filter
+    val data = previous.takeUnless { otherQuery }
     val now = rememberNow()
     PullRefresh(onRefresh = onRefresh, modifier = modifier.testTag("costs")) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().readableWidth().dimmedWhileLoading(state.isLoading && data != null),
+            modifier = Modifier.fillMaxSize().readableWidth().dimmedWhileLoading(state.isLoading && previous != null),
             contentPadding = contentPadding,
             verticalArrangement = Arrangement.spacedBy(Spacing.l),
         ) {
             item(key = "period") { PeriodPicker(days = filter.days, onDaysChange = onDays, contentPadding = PaddingValues(horizontal = Spacing.l, vertical = Spacing.xs)) }
-            // A failed reload (e.g. a new repo filter) keeps the last numbers on screen: say they're stale.
+            // A failed refresh keeps the last numbers on screen: say they're stale.
             if (data != null && state is LoadState.Failed) {
                 item(key = "stale") { ErrorRow(error = state.error, what = "costs", retry = onRetry) }
             }

@@ -103,7 +103,8 @@ fun ServerEditScreen(serverId: String) {
     val profile = servers.firstOrNull { it.id == serverId }
     val viewModel = viewModel(key = "server-edit-$serverId") { ServerEditViewModel(session, serverId) }
     val workspaces by viewModel.workspaces.collectAsStateWithLifecycle()
-    // Forgotten elsewhere (or never paired): nothing to edit.
+    // Forgotten (here, or elsewhere) or never paired: nothing to edit. This is the one way out
+    // after Forget (iOS dismisses the editor once), back to the Servers list.
     LaunchedEffect(profile == null) { if (profile == null) navigator.pop() }
     if (profile == null) return
     var draft by rememberSaveable(serverId, stateSaver = ServerDraftSaver) { mutableStateOf(ServerDraft.of(profile)) }
@@ -122,7 +123,7 @@ fun ServerEditScreen(serverId: String) {
             workspaces = workspaces,
             contentPadding = padding,
             onDraft = { draft = it },
-            onForget = { viewModel.forget { navigator.pop() } },
+            onForget = viewModel::forget,
         )
     }
 }

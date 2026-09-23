@@ -122,6 +122,39 @@ class ServerEditFlowTest {
         assertEquals("Mac Studio", session.servers.value.first { it.id == "studio" }.name, "the session sees the edit")
     }
 
+    /** QA: Forget popped twice (its callback and the profile-gone effect), closing Servers too. */
+    @Test
+    fun forgetLeavesTheEditorOnce() {
+        val server = fake.server
+        server.fixture("/api/auth/me", "auth-me-admin.json")
+        server.fixture("/api/workspaces", "workspaces.json")
+        val home = ServerProfile(id = "home", name = "Home", url = server.baseUrl)
+        val studio = ServerProfile(id = "studio", name = "Studio", url = server.baseUrl)
+        runBlocking {
+            registry.upsert(home)
+            registry.setToken("optio_pat_home", home.id)
+            registry.upsert(studio)
+            registry.setToken("optio_pat_studio", studio.id)
+            registry.setActiveId(home.id)
+            session.restore()
+        }
+        compose.setContent {
+            OptioTheme(darkTheme = false) {
+                CompositionLocalProvider(LocalSessionStore provides session, LocalNavigator provides navigator) {
+                    ServerEditScreen(serverId = "studio")
+                }
+            }
+        }
+        compose.onNodeWithTag("server-forget").performClick()
+        compose.onNodeWithTag("confirm").performClick()
+
+        compose.waitUntil(5_000) { compose.runOnIdle { session.servers.value.none { it.id == "studio" } && pops > 0 } }
+        compose.waitForIdle()
+        assertEquals(1, compose.runOnIdle { pops }, "one pop: back to the Servers list, not past it")
+        assertNull(runBlocking { registry.token("studio") }, "its token is gone")
+        assertEquals("home", session.activeServer.value?.id)
+    }
+
     private companion object {
         const val DEVLAB = "35802f88-a258-4eca-9817-be325718ab9e"
         const val SIDE_PROJECT = "4a94e89e-13c5-44b9-996b-75d08dcb58e0"

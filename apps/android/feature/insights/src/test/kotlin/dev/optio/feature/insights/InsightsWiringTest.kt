@@ -3,6 +3,9 @@ package dev.optio.feature.insights
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -19,11 +22,14 @@ import dev.optio.core.navigation.Section
 import dev.optio.core.navigation.WorkView
 import dev.optio.core.navigation.routes.PodDetailRoute
 import dev.optio.core.navigation.routes.TaskDetailRoute
+import dev.optio.core.network.ApiError
 import dev.optio.core.network.CurrentUser
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.network.LocalCurrentUser
 import dev.optio.core.testing.FakeOptioServerRule
+import dev.optio.core.testing.Fixtures
 import dev.optio.core.testing.FakeResponse
+import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.OptioTheme
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.assertEquals
@@ -108,6 +114,28 @@ class InsightsWiringTest {
         waitForText("Paginate the activity feed")
         compose.onNodeWithText("Paginate the activity feed").performScrollTo().performClick()
         assertEquals(TaskDetailRoute("6241d1e4-cb9e-4876-bc33-3c7b8e787251"), pushed.last())
+    }
+
+    /**
+     * QA: after a repo filter's load failed (`repoUrl` 500s on the current API), the all-repos
+     * numbers stayed up under the active filter. Now only the error shows; a failed refresh of
+     * the same filter still keeps its numbers, flagged.
+     */
+    @Test
+    fun aFailedFilterChangeShowsOnlyTheError() {
+        val costs: CostAnalytics = Fixtures.decode("analytics-costs.json")
+        val failed = LoadState.Failed(ApiError(500, "Internal Server Error"), previous = costs)
+        var shown by mutableStateOf(CostsViewModel.Filter())
+        show {
+            CostsContent(state = failed, filter = CostsViewModel.Filter(repoUrl = "https://github.com/e2e-org/mobile-app"), shownFilter = shown, contentPadding = PaddingValues())
+        }
+        waitForText("Couldn't load costs — the server hit an error.")
+        assertEquals(0, compose.onAllNodesWithContentDescription("Total: $2.15").fetchSemanticsNodes().size, "no all-repos numbers under the repo filter")
+        compose.onNodeWithTag("retry").fetchSemanticsNode()
+
+        shown = CostsViewModel.Filter(repoUrl = "https://github.com/e2e-org/mobile-app")
+        await("the same filter's numbers, flagged") { compose.onAllNodesWithContentDescription("Total: $2.15").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Couldn't load costs — the server hit an error.").fetchSemanticsNode()
     }
 
     @Test

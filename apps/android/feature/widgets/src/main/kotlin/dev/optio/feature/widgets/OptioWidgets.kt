@@ -1,7 +1,15 @@
 package dev.optio.feature.widgets
 
+import android.app.Activity
+import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
+import android.os.Bundle
+import android.os.PatternMatcher
+import androidx.core.content.ContextCompat
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.startup.Initializer
 import dev.optio.core.glance.GlanceRefresh
@@ -9,6 +17,7 @@ import dev.optio.feature.widgets.data.WidgetStore
 import dev.optio.feature.widgets.refresh.EventBridge
 import dev.optio.feature.widgets.refresh.WidgetRefresh
 import dev.optio.feature.widgets.run.RunWidgetReceiver
+import dev.optio.feature.widgets.shortcuts.AppShortcuts
 import dev.optio.feature.widgets.work.WorkWidgetReceiver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +43,62 @@ class WidgetsInitializer : Initializer<Unit> {
         GlanceRefresh.register(WidgetRefresh.HOOK) { ctx, reason -> WidgetRefresh.onGlanceRefresh(ctx, reason) }
         EventBridge.start(context, OptioWidgets.scope) { Host.session() }
         OptioWidgets.scope.launch { publishPreviews(context.applicationContext) }
+        keepRunShortcuts(context.applicationContext)
+    }
+
+    /**
+     * Keeps the recent run shortcuts through app-icon switches ([AppShortcuts.restore]): now, when
+     * this package's components change (the icon picker swaps launcher aliases, and the process
+     * usually survives it), and whenever an activity starts.
+     */
+    private fun keepRunShortcuts(app: Context) {
+        val restore = { OptioWidgets.scope.launch { AppShortcuts.restore(app) } }
+        restore()
+        val changed =
+            IntentFilter(Intent.ACTION_PACKAGE_CHANGED).apply {
+                addDataScheme("package")
+                addDataSchemeSpecificPart(app.packageName, PatternMatcher.PATTERN_LITERAL)
+            }
+        runCatching {
+            ContextCompat.registerReceiver(
+                app,
+                object : BroadcastReceiver() {
+                    override fun onReceive(
+                        context: Context,
+                        intent: Intent,
+                    ) {
+                        restore()
+                    }
+                },
+                changed,
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }
+        (app as? Application)?.registerActivityLifecycleCallbacks(
+            object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityStarted(activity: Activity) {
+                    restore()
+                }
+
+                override fun onActivityCreated(
+                    activity: Activity,
+                    savedInstanceState: Bundle?,
+                ) = Unit
+
+                override fun onActivityResumed(activity: Activity) = Unit
+
+                override fun onActivityPaused(activity: Activity) = Unit
+
+                override fun onActivityStopped(activity: Activity) = Unit
+
+                override fun onActivitySaveInstanceState(
+                    activity: Activity,
+                    outState: Bundle,
+                ) = Unit
+
+                override fun onActivityDestroyed(activity: Activity) = Unit
+            },
+        )
     }
 
     override fun dependencies(): List<Class<out Initializer<*>>> = emptyList()
