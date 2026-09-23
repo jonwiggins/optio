@@ -18,8 +18,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { PassThrough, Writable } from "node:stream";
-import Fastify, { type FastifyInstance } from "fastify";
-import websocket from "@fastify/websocket";
+import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { Redis } from "ioredis";
 import postgres from "postgres";
@@ -46,6 +45,11 @@ import {
   insertWorkflowRun,
   insertWorkspace,
 } from "../test-utils/integration/fixtures.js";
+import {
+  listenWsApp,
+  WsTestClient,
+  type WsFrame as Frame,
+} from "../test-utils/integration/ws-client.js";
 import { _getConnectionCounts } from "./ws-limits.js";
 import { eventsWs } from "./events.js";
 import { logStreamWs } from "./log-stream.js";
@@ -171,73 +175,13 @@ async function lockTable(table: "api_keys" | "session_chat_events") {
   };
 }
 
-type Frame = Record<string, any>;
-
-/** A WebSocket client; `onOpen` runs synchronously in the `open` event. */
-class Client {
-  readonly ws: WebSocket;
-  readonly frames: Frame[] = [];
-  readonly opened: Promise<void>;
-  readonly closed: Promise<{ code: number; reason: string }>;
-  private waiters: Array<{ match: (f: Frame) => boolean; resolve: (f: Frame) => void }> = [];
-  private seen = 0;
-
+/** A client of this file's app, authenticated with the test PAT unless `auth: false`. */
+class Client extends WsTestClient {
   constructor(path: string, opts: { auth?: boolean; onOpen?: (c: Client) => void } = {}) {
-    this.ws = new WebSocket(
-      `${wsBase}${path}`,
-      opts.auth === false ? undefined : ["optio-ws-v1", `optio-auth-${token}`],
-    );
-    this.ws.binaryType = "arraybuffer";
-    this.opened = new Promise((resolve, reject) => {
-      this.ws.onopen = () => {
-        opts.onOpen?.(this);
-        resolve();
-      };
-      this.ws.onerror = () => reject(new Error(`socket error on ${path}`));
+    super(`${wsBase}${path}`, {
+      token: opts.auth === false ? undefined : token,
+      onOpen: opts.onOpen as ((c: WsTestClient) => void) | undefined,
     });
-    this.closed = new Promise((resolve) => {
-      this.ws.onclose = (ev) => resolve({ code: ev.code, reason: ev.reason });
-    });
-    this.ws.onmessage = (ev) => {
-      if (typeof ev.data !== "string") return;
-      const frame = JSON.parse(ev.data) as Frame;
-      this.frames.push(frame);
-      const i = this.waiters.findIndex((w) => w.match(frame));
-      if (i >= 0) this.waiters.splice(i, 1)[0].resolve(frame);
-    };
-  }
-
-  send(frame: Frame): void {
-    this.ws.send(JSON.stringify(frame));
-  }
-
-  /** The next frame (after the previous next()) matching `match`. */
-  next(match: (f: Frame) => boolean, timeoutMs = 5_000): Promise<Frame> {
-    const i = this.frames.slice(this.seen).findIndex(match);
-    if (i >= 0) {
-      const frame = this.frames[this.seen + i];
-      this.seen += i + 1;
-      return Promise.resolve(frame);
-    }
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error(`timed out; frames so far: ${JSON.stringify(this.frames)}`)),
-        timeoutMs,
-      );
-      this.waiters.push({
-        match,
-        resolve: (f) => {
-          clearTimeout(timer);
-          this.seen = this.frames.length;
-          resolve(f);
-        },
-      });
-    });
-  }
-
-  async close(): Promise<void> {
-    if (this.ws.readyState < WebSocket.CLOSING) this.ws.close();
-    await this.closed;
   }
 }
 
@@ -330,15 +274,7 @@ beforeAll(async () => {
   await db.insert(workspaceMembers).values({ workspaceId, userId, role: "member" });
   token = (await createApiKey(userId, "ws early frames")).token;
 
-  app = Fastify({ logger: false });
-  // Same protocol negotiation as server.ts.
-  await app.register(websocket, {
-    options: {
-      handleProtocols: (protocols: Set<string>) =>
-        protocols.has("optio-ws-v1") ? "optio-ws-v1" : (protocols.values().next().value ?? false),
-    },
-  });
-  for (const route of [
+  ({ app, wsBase } = await listenWsApp([
     eventsWs,
     logStreamWs,
     workflowRunLogStreamWs,
@@ -349,11 +285,7 @@ beforeAll(async () => {
     sessionChatWs,
     sessionTerminalWs,
     optioChatWs,
-  ]) {
-    await app.register(route);
-  }
-  const address = await app.listen({ port: 0, host: "127.0.0.1" });
-  wsBase = address.replace(/^http/, "ws");
+  ]));
   redis = new Redis(process.env.REDIS_URL!);
 });
 
