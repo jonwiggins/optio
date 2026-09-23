@@ -1,12 +1,12 @@
 package dev.optio.core.ui.state
 
+import dev.optio.core.network.ApiError
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
-import dev.optio.core.network.ApiError
 import kotlinx.serialization.SerializationException
 
 /**

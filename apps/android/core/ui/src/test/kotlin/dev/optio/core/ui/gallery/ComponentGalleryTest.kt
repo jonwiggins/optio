@@ -44,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -61,6 +62,7 @@ import dev.optio.core.testing.captureScreens
 import dev.optio.core.ui.components.ChatComposer
 import dev.optio.core.ui.components.ChipPicker
 import dev.optio.core.ui.components.CodeBlock
+import dev.optio.core.ui.components.ConfirmDialog
 import dev.optio.core.ui.components.CopyableText
 import dev.optio.core.ui.components.DetailHeader
 import dev.optio.core.ui.components.DetailTabs
@@ -103,6 +105,8 @@ import dev.optio.core.ui.theme.Radius
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.StatusKind
 import dev.optio.core.ui.theme.Tone
+import dev.optio.core.ui.toast.ToastHost
+import dev.optio.core.ui.toast.rememberToaster
 import dev.optio.core.ui.usage.AccountUsagePill
 import dev.optio.core.ui.usage.LimitsPanel
 import dev.optio.core.ui.usage.LocalUsageStore
@@ -457,6 +461,30 @@ class ComponentGalleryTest : ScreenshotTest() {
                     OptioRow("Migrate the image cache to Coil 3", tone = Tone.WORKING, meta = metaText("acme/mobile", "Claude Code"), trailing = "now", onClick = {})
                 }
             }
+        }
+    }
+
+    @Test
+    fun feedback() = captureScreens("Gallery_11_Feedback", wholeScreen = true) {
+        val success = rememberToaster()
+        val danger = rememberToaster()
+        LaunchedEffect(Unit) {
+            success.success("Run started")
+            danger.error(dev.optio.core.network.ApiError(403, "Forbidden"))
+        }
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp)) {
+                ToastHost(success)
+                ToastHost(danger)
+            }
+            ConfirmDialog(
+                title = "Kill this terminal?",
+                message = "The agent stops and the session can't be resumed from here.",
+                confirmLabel = "Kill",
+                destructive = true,
+                onConfirm = {},
+                onDismiss = {},
+            )
         }
     }
 

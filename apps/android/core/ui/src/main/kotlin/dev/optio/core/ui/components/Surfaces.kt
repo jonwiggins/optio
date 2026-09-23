@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +43,16 @@ import dev.optio.core.ui.theme.tabularNums
 @Composable
 fun Modifier.cardSurface(padding: Dp = Spacing.m): Modifier =
     this.clip(Radius.cardShape).background(OptioTheme.colors.card).padding(padding)
+
+/** The widest a column of rows or a form should grow on tablets and unfolded foldables. */
+val ReadableContentWidth: Dp = 720.dp
+
+/**
+ * Centres the content in at most [max] of width on wide screens (tablets, landscape, foldables);
+ * a no-op on phones. Put it on a screen's scrolling container: `LazyColumn(Modifier.readableWidth())`.
+ */
+fun Modifier.readableWidth(max: Dp = ReadableContentWidth): Modifier =
+    this.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = max)
 
 /** Filter changes keep the old content dimmed instead of blanking it (iOS `dimmedWhileLoading`). */
 @Composable

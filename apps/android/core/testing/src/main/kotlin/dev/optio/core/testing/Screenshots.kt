@@ -10,8 +10,9 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.unit.Density
+import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import dev.optio.core.ui.format.LocalClock
@@ -63,7 +64,7 @@ enum class ScreenSize(val widthDp: Int, val heightDp: Int) {
  * @Test fun jobRow() = captureScreens("JobRow") { JobRow(Samples.workflow()) }
  * ```
  */
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, ExperimentalRoborazziApi::class)
 fun captureScreens(
     name: String,
     size: ScreenSize = ScreenSize.PHONE,
