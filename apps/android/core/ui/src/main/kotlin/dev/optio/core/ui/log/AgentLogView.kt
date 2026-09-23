@@ -54,6 +54,7 @@ import dev.optio.core.model.boolValue
 import dev.optio.core.model.intValue
 import dev.optio.core.model.stringValue
 import dev.optio.core.ui.components.MarkdownText
+import dev.optio.core.ui.format.LocalClock
 import dev.optio.core.ui.format.isoInstant
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Radius
@@ -183,7 +184,7 @@ private fun UserPrompt(entry: AgentLogEntry, modifier: Modifier) {
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("You", style = type.caption.semibold(), color = colors.accent)
-                shortTime(entry.timestamp)?.let { Text(it, style = type.caption2.tabularNums(), color = colors.tertiaryLabel) }
+                shortTime(entry.timestamp, LocalClock.current.zone)?.let { Text(it, style = type.caption2.tabularNums(), color = colors.tertiaryLabel) }
             }
             SelectionContainer { Text(entry.content, style = type.callout, color = colors.label) }
         }

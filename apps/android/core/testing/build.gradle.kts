@@ -2,6 +2,7 @@
 // convention plugin adds it). Screenshots (captureScreens), FakeOptioServer, Fixtures, Samples.
 plugins {
     alias(libs.plugins.optio.android.library.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {

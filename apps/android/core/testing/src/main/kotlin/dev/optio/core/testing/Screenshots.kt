@@ -8,7 +8,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.v2.runComposeUiTest
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
@@ -68,7 +70,7 @@ fun captureScreens(
     modes: List<ThemeMode> = ThemeMode.entries,
     clock: Clock = Samples.clock,
     wholeScreen: Boolean = false,
-    interact: ComposeUiTest.() -> Unit = {},
+    interact: ScreenScope.() -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     for (mode in modes) {
@@ -78,12 +80,28 @@ fun captureScreens(
             setContent {
                 ScreenshotFrame(dark = mode.dark, clock = clock, content = content)
             }
-            interact()
+            ScreenScope(this).interact()
             waitForIdle()
             val path = "$SCREENSHOT_DIR/${name}_${mode.suffix}.png"
             if (wholeScreen) captureScreenRoboImage(path) else onRoot().captureRoboImage(path)
         }
     }
+}
+
+/**
+ * What [captureScreens]' `interact` block can do before the capture: find nodes (`onNode`,
+ * `onNodeWithTag`, `onNodeWithText`, …) and act on them (`performClick`, `performScrollTo`, …),
+ * wait for idle, or advance the frame clock (animations).
+ */
+@OptIn(ExperimentalTestApi::class)
+class ScreenScope internal constructor(private val test: ComposeUiTest) : SemanticsNodeInteractionsProvider by test {
+    val density: Density
+        get() = test.density
+
+    fun waitForIdle() = test.waitForIdle()
+
+    /** Advances the test frame clock by [millis] (runs animations forward). */
+    fun advanceTimeBy(millis: Long) = test.mainClock.advanceTimeBy(millis)
 }
 
 /**

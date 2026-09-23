@@ -1,5 +1,8 @@
 package dev.optio.core.ui.theme
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -8,8 +11,11 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
 /** Optio's accent (#6d28d9, iOS `AppTheme.accent`): interactive accents, the FAB, selection. */
 val OptioPurple = Color(0xFF6D28D9)
@@ -108,15 +114,41 @@ internal val LocalOptioColors = staticCompositionLocalOf { OptioColors.Light }
 internal val LocalOptioTextStyles = staticCompositionLocalOf { OptioTextStyles.Default }
 
 /**
- * The app theme for an [appearance] (system / light / dark). The app passes the stored choice:
- * `OptioTheme(appearanceStore.collectAppearance()) { … }`.
+ * The app theme for an [appearance] (system / light / dark): the root theme of the app, which
+ * passes the stored choice, `OptioTheme(appearanceStore.collectAppearance()) { … }`. With
+ * [applySystemBars] it also sets the status and navigation bar icon colours to match (a Dark
+ * choice on a light system would otherwise leave dark icons on a black bar); nested themes and
+ * previews use the `darkTheme` overload, which leaves the window alone.
  */
 @Composable
 fun OptioTheme(
     appearance: AppAppearance = AppAppearance.SYSTEM,
+    applySystemBars: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    OptioTheme(darkTheme = appearance.isDark(), content = content)
+    val dark = appearance.isDark()
+    if (applySystemBars) SystemBarAppearance(dark)
+    OptioTheme(darkTheme = dark, content = content)
+}
+
+/** Light or dark system-bar icons for the hosting activity's window (no-op in previews). */
+@Composable
+private fun SystemBarAppearance(dark: Boolean) {
+    val view = LocalView.current
+    if (view.isInEditMode) return
+    SideEffect {
+        val window = view.context.findActivity()?.window ?: return@SideEffect
+        WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /**

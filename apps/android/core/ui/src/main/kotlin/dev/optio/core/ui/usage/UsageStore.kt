@@ -116,9 +116,11 @@ class UsageStore(
 
     /**
      * Points the store at the active server's client. A different client, or [api] now configured
-     * for another server / token / workspace, drops the cache.
+     * for another server / token / workspace, drops the cache. A store bound to an explicit
+     * [UsageSource] (previews, screenshots) keeps that source.
      */
     fun bind(api: ApiClient) {
+        if (source != null && source !is ApiUsageSource) return
         bind(ApiUsageSource(api), ServerKey.of(api))
     }
 

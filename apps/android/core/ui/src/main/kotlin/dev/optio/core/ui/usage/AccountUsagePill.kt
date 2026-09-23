@@ -97,8 +97,8 @@ fun AccountUsagePill(
             }
             .clickable(role = Role.Button, onClick = open)
             .padding(horizontal = Spacing.s, vertical = 4.dp)
-            .clearAndSetSemantics { contentDescription = "Claude usage: worst window $worst percent. Tap for details." }
-            .testTag("usage-pill"),
+            .testTag("usage-pill")
+            .clearAndSetSemantics { contentDescription = "Claude usage: worst window $worst percent. Tap for details." },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {

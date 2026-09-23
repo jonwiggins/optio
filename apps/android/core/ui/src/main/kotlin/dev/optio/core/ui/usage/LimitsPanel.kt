@@ -21,7 +21,6 @@ import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -272,8 +271,15 @@ fun UsageTokenBanners(
 private fun TokenBanner(title: String, message: String, onRecheck: () -> Unit) {
     NoticeBanner(tone = Tone.DANGER, icon = Icons.Outlined.KeyOff, title = title) {
         Text(message)
-        TextButton(onClick = onRecheck, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-            Text("Re-check", style = OptioTheme.type.footnote.semibold(), color = OptioTheme.colors.accent)
-        }
+        Text(
+            "Re-check",
+            style = OptioTheme.type.footnote.semibold(),
+            color = OptioTheme.colors.accent,
+            modifier = Modifier
+                .clip(Radius.smallShape)
+                .clickable(role = Role.Button, onClick = onRecheck)
+                .padding(vertical = Spacing.xs, horizontal = 2.dp)
+                .testTag("usage-recheck"),
+        )
     }
 }

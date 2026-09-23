@@ -50,7 +50,7 @@ fun MarkdownText(
             h6 = type.subheadline.semibold().copy(color = colors.secondaryLabel),
             text = body,
             code = type.monoFootnote.copy(color = color),
-            inlineCode = style.copy(fontFamily = type.monoSubheadline.fontFamily, color = color),
+            inlineCode = style.copy(fontFamily = type.monoSubheadline.fontFamily, fontSize = style.fontSize * 0.88f, color = color),
             quote = body.copy(fontStyle = FontStyle.Italic, color = colors.secondaryLabel),
             paragraph = body,
             ordered = body,

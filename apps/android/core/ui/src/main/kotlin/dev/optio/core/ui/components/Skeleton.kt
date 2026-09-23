@@ -68,13 +68,12 @@ fun SkeletonRows(
                         .clip(RoundedCornerShape(50))
                         .background(OptioTheme.colors.fillSecondary),
                 )
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Box(Modifier.height(1.dp))
+                Column(Modifier.weight(1f).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     PlaceholderLine(width = if (index % 2 == 0) 230.dp else 120.dp, height = 13.dp)
                     if (index % 2 == 0) PlaceholderLine(width = 150.dp, height = 13.dp)
                     PlaceholderLine(width = 190.dp, height = 11.dp)
                 }
-                PlaceholderLine(width = 22.dp, height = 10.dp, modifier = Modifier.padding(top = 6.dp))
+                PlaceholderLine(width = 22.dp, height = 10.dp, modifier = Modifier.padding(top = 5.5.dp))
             }
         }
     }
@@ -103,15 +102,7 @@ fun SkeletonStrip(
                 PlaceholderLine(width = 26.dp, height = 20.dp)
                 PlaceholderLine(width = 48.dp, height = 10.dp)
             }
-            if (index < labels.lastIndex) {
-                Box(
-                    Modifier
-                        .padding(vertical = Spacing.m)
-                        .fillMaxHeight()
-                        .width(Dp.Hairline)
-                        .background(colors.separator),
-                )
-            }
+            if (index < labels.lastIndex) VerticalHairline()
         }
     }
 }

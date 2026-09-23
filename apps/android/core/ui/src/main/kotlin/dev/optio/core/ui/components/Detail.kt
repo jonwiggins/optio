@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -73,7 +75,7 @@ fun DetailHeader(
                         Text(line, style = type.subheadline, color = colors.secondaryLabel, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
                     }
                 }
-                accessory()
+                CompositionLocalProvider(LocalContentColor provides colors.secondaryLabel) { accessory() }
             }
             when {
                 secondary != null && showsUsage -> FlowRow(

@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -99,6 +100,7 @@ fun StatStrip(
                     .weight(1f)
                     .fillMaxHeight()
                     .then(tap)
+                    .testTag("stat-${item.key}")
                     .clearAndSetSemantics {
                         contentDescription = "${item.label}: ${item.value}"
                         if (onSelect != null) {
@@ -136,15 +138,7 @@ fun StatStrip(
                     )
                 }
             }
-            if (index < items.lastIndex) {
-                Box(
-                    Modifier
-                        .padding(vertical = Spacing.m)
-                        .fillMaxHeight()
-                        .width(Dp.Hairline)
-                        .background(colors.separator),
-                )
-            }
+            if (index < items.lastIndex) VerticalHairline()
         }
     }
 }

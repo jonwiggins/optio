@@ -79,7 +79,7 @@ fun GroupedSection(
             SectionHeader(
                 header,
                 action = headerAction,
-                contentPadding = PaddingValues(start = Spacing.xs, end = Spacing.xs, top = Spacing.l + Spacing.xs, bottom = Spacing.s),
+                contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.l + Spacing.xs, bottom = Spacing.s),
             )
         }
         Column(Modifier.fillMaxWidth().clip(Radius.cardShape).background(OptioTheme.colors.card), content = content)
@@ -88,7 +88,7 @@ fun GroupedSection(
                 footer,
                 style = OptioTheme.type.footnote,
                 color = OptioTheme.colors.secondaryLabel,
-                modifier = Modifier.padding(start = Spacing.xs, end = Spacing.xs, top = Spacing.s),
+                modifier = Modifier.padding(start = Spacing.l, end = Spacing.l, top = Spacing.s),
             )
         }
     }
