@@ -1,71 +1,45 @@
 package dev.optio.feature.library
 
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
-import dev.optio.core.navigation.LocalNavigator
-import dev.optio.core.navigation.routes.ConnectionDetailRoute
-import dev.optio.core.navigation.routes.NewConnectionRoute
-import dev.optio.core.navigation.routes.NewRepoRoute
-import dev.optio.core.navigation.routes.PromptDetailRoute
-import dev.optio.core.navigation.routes.RepoDetailRoute
-import dev.optio.core.navigation.routes.RepoSettingsRoute
-import dev.optio.core.navigation.routes.SharedDirectoriesRoute
-import dev.optio.core.ui.PlaceholderSection
-import dev.optio.core.ui.hub.HubActions
+import dev.optio.feature.library.connections.ConnectionsScreen
+import dev.optio.feature.library.prompts.PromptsScreen
+import dev.optio.feature.library.repos.ReposScreen
 
-/** Library › Prompts (iOS `PromptsListView`). Stub: Agent A7 builds it. */
+// The Library hub's sections from this module (iOS `LibraryHubView` switches between them; the hub
+// itself lives in `:app`, Machines in `:feature:local`). iOS's hub also owned a `MoreContext` for
+// role gating; here every section reads `LocalCurrentUser` through `Roles` instead.
+
+/**
+ * Library › Prompts (iOS `PromptsListView`): the named templates with a kind filter; members get
+ * a "New prompt" action and swipe-to-delete.
+ */
 @Composable
 fun PromptsSection(
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
-    PlaceholderSection("Prompts", contentPadding, modifier, samples = listOf(PromptDetailRoute("sample-prompt")))
+    PromptsScreen(contentPadding, modifier)
 }
 
-/**
- * Library › Repos (iOS `ReposListView`). Stub: Agent A7 builds it.
- * Demonstrates the hub slot API with an "Add repo" top-bar action.
- */
+/** Library › Repos (iOS `ReposListView`): the workspace's repositories; admins get "Add repository". */
 @Composable
 fun ReposSection(
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
-    val navigator = LocalNavigator.current
-    HubActions {
-        IconButton(onClick = { navigator.push(NewRepoRoute) }, modifier = Modifier.testTag("add-repo")) {
-            Icon(Icons.Filled.Add, contentDescription = "Add repo")
-        }
-    }
-    PlaceholderSection(
-        title = "Repos",
-        contentPadding = contentPadding,
-        modifier = modifier,
-        samples =
-            listOf(
-                RepoDetailRoute("sample-repo"),
-                RepoSettingsRoute("sample-repo"),
-                SharedDirectoriesRoute(repoId = "sample-repo"),
-            ),
-    )
+    ReposScreen(contentPadding, modifier)
 }
 
-/** Library › Connections (iOS `ConnectionsView`). Stub: Agent A7 builds it. */
+/**
+ * Library › Connections (iOS `ConnectionsView`): active connections, the provider catalogue (admins
+ * tap a provider to add a connection) and the global MCP servers.
+ */
 @Composable
 fun ConnectionsSection(
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
 ) {
-    PlaceholderSection(
-        title = "Connections",
-        contentPadding = contentPadding,
-        modifier = modifier,
-        samples = listOf(ConnectionDetailRoute("sample-connection"), NewConnectionRoute(providerId = "notion")),
-    )
+    ConnectionsScreen(contentPadding, modifier)
 }

@@ -10,6 +10,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class PromptDetailRoute(val id: String? = null) : NavKey
 
+/** Edit an existing prompt template (the detail's Edit; iOS `PromptEditorSheet`). */
+@Serializable
+data class PromptEditRoute(val id: String) : NavKey
+
 @Serializable
 data class RepoDetailRoute(val id: String) : NavKey
 

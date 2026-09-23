@@ -1,0 +1,13 @@
+{
+  "assignments": [
+    {
+      "id": "af3e95fe-9f5a-49a2-93f3-24888a4e174c",
+      "connectionId": "fc8f92a0-163b-40c6-b163-0106f299c754",
+      "repoId": "85d784a6-338f-4675-9070-2890f6855cab",
+      "agentTypes": ["claude-code"],
+      "permission": "read",
+      "enabled": true,
+      "createdAt": "2026-09-23T00:46:17.040Z"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "directories": [
+    {
+      "id": "97c149c7-a774-4396-aa2e-f2c4f410b9e8",
+      "repoId": "85d784a6-338f-4675-9070-2890f6855cab",
+      "workspaceId": "055320e7-b5f1-4ec7-89e2-b24027571e0d",
+      "name": "npm-cache",
+      "description": "npm cache",
+      "mountLocation": "home",
+      "mountSubPath": ".npm",
+      "sizeGi": 10,
+      "scope": "per-pod",
+      "createdBy": null,
+      "lastClearedAt": "2026-09-23T00:47:05.526Z",
+      "lastMountedAt": null,
+      "createdAt": "2026-09-23T00:46:59.065Z",
+      "updatedAt": "2026-09-23T00:47:05.526Z"
+    }
+  ]
+}
