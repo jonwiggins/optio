@@ -75,10 +75,9 @@ class MainShellTest {
         compose.onNodeWithTag("tab-work").performClick()
         compose.onNodeWithText("NewWorkRoute(preset=null)").assertIsDisplayed()
 
-        // Cross-tab: Overview › "Open Library › Machines" lands on the Machines section.
+        // The Overview contributes New work to its top bar; it pushes the form on the Overview tab.
         compose.onNodeWithTag("tab-overview").performClick()
-        compose.onNodeWithTag("open-machines").performClick()
-        compose.onNodeWithTag("hub-library").assertIsDisplayed()
-        compose.onNodeWithText("Push LocalTerminalRoute(id=sample-terminal, compose=false)").assertIsDisplayed()
+        compose.onNodeWithTag("overview-new-work").performClick()
+        compose.onNodeWithText("NewWorkRoute(preset=null)").assertIsDisplayed()
     }
 }
