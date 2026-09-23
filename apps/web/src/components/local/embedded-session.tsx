@@ -121,8 +121,18 @@ export function EmbeddedLocalSession({
     setBusy(true);
     try {
       const res = await api.resumeLocalTerminal(terminalId);
-      toast.success("Resuming the session in a new terminal");
-      window.open(`/local/${res.terminal.id}`, "_self");
+      const next = res.terminal;
+      if (next.state === "pending" && next.pendingReason === "host_offline") {
+        const name = hosts.find((h) => h.id === next.hostId)?.name ?? "The machine";
+        toast.info(`${name} is offline — the chat starts when it reconnects`);
+      } else {
+        toast.success(
+          res.reused
+            ? "Opening the chat already resumed"
+            : "Resuming the session in a new terminal",
+        );
+      }
+      window.open(`/local/${next.id}`, "_self");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to resume");
     }
@@ -156,10 +166,12 @@ export function EmbeddedLocalSession({
     !!terminal.agentSessionId;
   const links = collectWorkLinks(terminal);
   const hasTranscript = transcript.entries.length > 0;
+  // The machine may still be reading a finished session's conversation off disk.
+  const readingTranscript = transcript.backfilling && !hasTranscript;
   const view = resolveSessionView(viewChoice, {
     isDead,
     hasTranscript,
-    loaded: transcript.loaded,
+    loaded: transcript.loaded && !readingTranscript,
   });
   const button =
     "inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors";
@@ -234,7 +246,9 @@ export function EmbeddedLocalSession({
         {view === null ? (
           <div className="flex-1 min-h-0 bg-[#09090b] flex items-center justify-center text-text-muted text-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" />
-            Loading session…
+            {readingTranscript
+              ? `Reading the conversation from ${host?.name ?? "your machine"}…`
+              : "Loading session…"}
           </div>
         ) : view === "transcript" ? (
           <div className="flex-1 min-h-0">

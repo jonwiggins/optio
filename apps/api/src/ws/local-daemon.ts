@@ -90,6 +90,7 @@ export async function localDaemonWs(app: FastifyInstance) {
         if (conn.closed) return;
         relay.registerDaemon(host.id, host.userId, socket, {
           claudeCredentials: msg.claudeCredentials === true,
+          transcriptBackfill: msg.transcriptBackfill === true,
         });
         await markHostOnline(host.id, {
           dirs: msg.dirs,
@@ -169,6 +170,9 @@ export async function localDaemonWs(app: FastifyInstance) {
           return;
         case "transcript":
           await terminalService.handleTranscript(hostId, msg.terminalId, msg.entries);
+          return;
+        case "transcript-backfill":
+          await terminalService.handleTranscriptBackfill(hostId, msg);
           return;
         case "session":
           await terminalService.handleSession(hostId, msg.terminalId, msg.agentSessionId);

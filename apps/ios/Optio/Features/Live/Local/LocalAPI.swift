@@ -69,6 +69,9 @@ struct LocalTerminalInputBody: Encodable {
 struct LocalTranscriptPage: Decodable {
     let entries: [LocalTranscriptEntry]
     let complete: Bool
+    /// The session's machine is reading its conversation off disk (a finished
+    /// session whose transcript was never streamed): read again shortly.
+    let backfilling: Bool?
 }
 
 /// Shared by create (POST) and update (PATCH). Nil fields are omitted, matching

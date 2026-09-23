@@ -9,13 +9,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { localTerminals, users } from "../db/schema.js";
+import { localTerminals, taskConfigs, tasks, users, workflows } from "../db/schema.js";
 import * as relay from "./local-relay.js";
 import {
   findHostDirForRepo,
   getHost,
   isDirAllowed,
   listHosts,
+  mergeHosts,
   registerHost,
   sweepStaleHosts,
 } from "./local-host-service.js";
@@ -42,6 +43,7 @@ import {
 } from "./local-terminal-service.js";
 import {
   createBlueprint,
+  getBlueprint,
   resolveBlueprintDir,
   spawnFromBlueprint,
 } from "./local-blueprint-service.js";
@@ -49,7 +51,13 @@ import { createTrigger } from "./trigger-service.js";
 import { fireTicketTriggers } from "./trigger-dispatch.js";
 import { fireEventTriggers, normalizeGitHubEvent } from "./event-trigger-service.js";
 import { createNamedTemplate } from "./prompt-template-service.js";
-import { insertRepo, insertWorkspace } from "../test-utils/integration/fixtures.js";
+import {
+  insertRepo,
+  insertTask,
+  insertTaskConfig,
+  insertWorkflow,
+  insertWorkspace,
+} from "../test-utils/integration/fixtures.js";
 
 class FakeDaemonSocket implements relay.RelaySocket {
   readyState = 1;
@@ -131,6 +139,185 @@ describe("local hosts", () => {
     const devHosts = await listHosts(null);
     expect(devHosts.map((h) => h.id)).toContain(devHost.id);
     expect(devHosts.map((h) => h.id)).not.toContain(aliceHost.id);
+  });
+
+  it("keeps a machine's row when its hostname changes, by the id its daemon sends back", async () => {
+    const host = await makeHost("it-rename-before");
+    const again = await registerHost({
+      userId: null,
+      workspaceId: null,
+      hostname: "it-rename-after",
+      platform: "darwin",
+      dirs: DIRS,
+      hostId: host.id,
+    });
+    expect(again.id).toBe(host.id);
+    expect(again.hostname).toBe("it-rename-after");
+    // The name was only ever the hostname, so it follows.
+    expect(again.name).toBe("it-rename-after");
+
+    // A name someone chose stays put across a rename.
+    await registerHost({
+      userId: null,
+      workspaceId: null,
+      hostname: "it-rename-after",
+      name: "Work laptop",
+      platform: "darwin",
+      dirs: DIRS,
+      hostId: host.id,
+    });
+    const renamed = await registerHost({
+      userId: null,
+      workspaceId: null,
+      hostname: "it-rename-third",
+      platform: "darwin",
+      dirs: DIRS,
+      hostId: host.id,
+    });
+    expect(renamed.id).toBe(host.id);
+    expect(renamed.name).toBe("Work laptop");
+  });
+
+  it("ignores a claimed host id that isn't the caller's, or no longer exists", async () => {
+    const [bob] = await db
+      .insert(users)
+      .values({
+        provider: "github",
+        externalId: `it-${Math.random()}`,
+        email: "bob@example.com",
+        displayName: "Bob",
+      })
+      .returning();
+    const bobHost = await registerHost({
+      userId: bob.id,
+      workspaceId: null,
+      hostname: "it-claim-bob",
+      platform: "linux",
+      dirs: [],
+    });
+    const mine = await registerHost({
+      userId: null,
+      workspaceId: null,
+      hostname: "it-claim-mine",
+      platform: "darwin",
+      dirs: DIRS,
+      hostId: bobHost.id,
+    });
+    expect(mine.id).not.toBe(bobHost.id);
+    expect((await getHost(bobHost.id))?.hostname).toBe("it-claim-bob");
+
+    const gone = await registerHost({
+      userId: null,
+      workspaceId: null,
+      hostname: "it-claim-gone",
+      platform: "darwin",
+      dirs: DIRS,
+      hostId: "00000000-0000-4000-8000-000000000000",
+    });
+    expect(gone.hostname).toBe("it-claim-gone");
+  });
+
+  it("folds in the row a machine left under a name it is using again", async () => {
+    // Registered as "a" (old daemon), renamed to "b" (a second row, whose id
+    // the daemon kept), then named "a" again.
+    const a = await makeHost("it-fold-a");
+    const b = await makeHost("it-fold-b");
+    const parked = await createTerminal({
+      host: a,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "shell" },
+    });
+    const back = await registerHost({
+      userId: null,
+      workspaceId: null,
+      hostname: "it-fold-a",
+      platform: "darwin",
+      dirs: DIRS,
+      hostId: b.id,
+    });
+    expect(back.id).toBe(b.id);
+    expect(back.hostname).toBe("it-fold-a");
+    expect(await getHost(a.id)).toBeNull();
+    expect((await getTerminal(parked.id))?.hostId).toBe(b.id);
+  });
+
+  it("leaves a same-named row alone while another daemon is connected as it", async () => {
+    const a = await makeHost("it-fold-live-a");
+    const b = await makeHost("it-fold-live-b");
+    relay.registerDaemon(a.id, null, new FakeDaemonSocket());
+    const back = await registerHost({
+      userId: null,
+      workspaceId: null,
+      hostname: "it-fold-live-a",
+      platform: "darwin",
+      dirs: DIRS,
+      hostId: b.id,
+    });
+    expect(back.id).toBe(b.id);
+    expect(back.hostname).toBe("it-fold-live-b");
+    expect((await getHost(a.id))?.hostname).toBe("it-fold-live-a");
+  });
+
+  it("merges one computer registered twice: its work moves, the old row goes", async () => {
+    const old = await makeHost("it-merge-old");
+    const current = await makeHost("it-merge-current");
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(current.id, null, daemon);
+
+    const finished = await createTerminal({
+      host: old,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "agent", agent: "claude-code", prompt: "triage" },
+    });
+    await db
+      .update(localTerminals)
+      .set({ state: "exited", pendingReason: null, exitCode: 143, agentSessionId: "s-1" })
+      .where(eq(localTerminals.id, finished.id));
+    const waiting = await createTerminal({
+      host: old,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "shell" },
+    });
+    expect(waiting.pendingReason).toBe("host_offline");
+    const automation = await createBlueprint({
+      userId: null,
+      workspaceId: null,
+      name: "PR triage",
+      hostId: old.id,
+      dir: "/home/dev/optio",
+      commandTemplate: "triage",
+    });
+    const task = await insertTask({ runTarget: "local", localHostId: old.id });
+    const config = await insertTaskConfig({ runTarget: "local", localHostId: old.id });
+    const job = await insertWorkflow({ runTarget: "local", localHostId: old.id });
+
+    const moved = await mergeHosts(old.id, current.id);
+    expect(moved).toEqual({ terminals: 2, automations: 1, runLocations: 3 });
+    expect(await getHost(old.id)).toBeNull();
+    expect((await getTerminal(finished.id))?.hostId).toBe(current.id);
+    expect((await getBlueprint(automation.id))?.hostId).toBe(current.id);
+    const [t] = await db.select().from(tasks).where(eq(tasks.id, task.id));
+    const [c] = await db.select().from(taskConfigs).where(eq(taskConfigs.id, config.id));
+    const [w] = await db.select().from(workflows).where(eq(workflows.id, job.id));
+    expect([t.localHostId, c.localHostId, w.localHostId]).toEqual([
+      current.id,
+      current.id,
+      current.id,
+    ]);
+
+    // What was waiting for the old machine starts on the connected one.
+    await flushParkedTerminals(current.id);
+    expect((await getTerminal(waiting.id))?.state).toBe("launching");
+    expect(daemon.messages().some((m) => m.type === "spawn" && m.terminalId === waiting.id)).toBe(
+      true,
+    );
+    await expect(mergeHosts(current.id, current.id)).rejects.toThrow(/itself/);
   });
 
   it("enforces the dir allowlist and resolves repo dirs", async () => {
@@ -917,7 +1104,7 @@ describe("local automations (event triggers + session modes)", () => {
     expect(done?.attentionState).toBe("needs_you");
     expect(done?.attentionReason).toBe("done");
 
-    const resumed = await resumeTerminal(done!);
+    const { terminal: resumed } = await resumeTerminal(done!);
     expect(resumed.spawnedBy).toBe("resume");
     expect(resumed.dir).toBe("/home/dev/optio");
     expect(resumed.ticketExternalId).toBe("ENG-1");
@@ -929,10 +1116,20 @@ describe("local automations (event triggers + session modes)", () => {
     };
     expect(spawn.spec.resumeSessionId).toBe("sess-abc-123");
 
+    // Asked again while that resume is open: the same terminal, not a
+    // second session on the same conversation.
+    const again = await resumeTerminal(done!);
+    expect(again).toMatchObject({ reused: true, terminal: { id: resumed.id } });
+
     // A resumed session that exits goes quiet, like a manual one.
     await handleStarted(host.id, resumed.id);
     await handleExit(host.id, resumed.id, 0);
     expect((await getTerminal(resumed.id))?.attentionState).toBe("idle");
+
+    // Once it has ended, resuming starts a fresh one.
+    const next = await resumeTerminal(done!);
+    expect(next.reused).toBe(false);
+    expect(next.terminal.id).not.toBe(resumed.id);
 
     // Shells and non-headless agents keep the plain "exit" reason.
     const shell = await createTerminal({

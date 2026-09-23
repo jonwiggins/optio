@@ -1878,6 +1878,16 @@ export const api = {
 
   deleteLocalHost: (id: string) => request<{}>(`/api/local/hosts/${id}`, { method: "DELETE" }),
 
+  /** One computer registered twice (its hostname changed): fold `id` (offline) into `intoHostId`. */
+  mergeLocalHost: (id: string, intoHostId: string) =>
+    request<{
+      host: any;
+      moved: { terminals: number; automations: number; runLocations: number };
+    }>(`/api/local/hosts/${id}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ intoHostId }),
+    }),
+
   listLocalTerminals: (params?: { hostId?: string; state?: string }) => {
     const qs = new URLSearchParams();
     if (params?.hostId) qs.set("hostId", params.hostId);
@@ -1894,7 +1904,7 @@ export const api = {
     if (params?.after) qs.set("after", String(params.after));
     if (params?.limit) qs.set("limit", String(params.limit));
     const query = qs.toString();
-    return request<{ entries: LocalTranscriptEntry[]; complete: boolean }>(
+    return request<{ entries: LocalTranscriptEntry[]; complete: boolean; backfilling?: boolean }>(
       `/api/local/terminals/${id}/transcript${query ? `?${query}` : ""}`,
     );
   },
@@ -1958,8 +1968,9 @@ export const api = {
     request<{}>(`/api/local/terminals/${id}`, { method: "DELETE" }),
 
   /** Open an exited agent session again as a fresh interactive terminal. */
+  /** `reused`: a resume of this session that hasn't ended, returned instead of a second one. */
   resumeLocalTerminal: (id: string) =>
-    request<{ terminal: any }>(`/api/local/terminals/${id}/resume`, {
+    request<{ terminal: any; reused?: boolean }>(`/api/local/terminals/${id}/resume`, {
       method: "POST",
       body: "{}",
     }),

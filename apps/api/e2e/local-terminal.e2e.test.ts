@@ -47,7 +47,12 @@ class FakeDaemon {
   inbox: Json[] = [];
   private waiters: Array<{ match: (m: Json) => boolean; resolve: (m: Json) => void }> = [];
 
-  async connect(hostId: string, dirs: Json[], terminals: Json[] = []): Promise<void> {
+  async connect(
+    hostId: string,
+    dirs: Json[],
+    terminals: Json[] = [],
+    capabilities: Json = {},
+  ): Promise<void> {
     this.ws = new WebSocket(`${wsBase}/ws/local/daemon`);
     await new Promise<void>((resolve, reject) => {
       this.ws.onopen = () => resolve();
@@ -63,7 +68,14 @@ class FakeDaemon {
         this.inbox.push(msg);
       }
     };
-    this.send({ type: "hello", hostId, daemonVersion: "0.0.0-e2e", dirs, terminals });
+    this.send({
+      type: "hello",
+      hostId,
+      daemonVersion: "0.0.0-e2e",
+      dirs,
+      terminals,
+      ...capabilities,
+    });
   }
 
   send(msg: Json): void {
@@ -150,10 +162,12 @@ interface HostBody {
 interface TerminalBody {
   terminal: {
     id: string;
+    hostId: string;
     state: string;
+    pendingReason: string | null;
     attentionState: string;
     exitCode: number | null;
-    spec: { kind: string; command?: string };
+    spec: { kind: string; command?: string; resumeSessionId?: string };
   };
 }
 
@@ -707,5 +721,161 @@ describe("optio local e2e", () => {
     cleanups.push(() => daemon2.close());
     await daemon2.connect(hostId, DIRS, []);
     await waitFor(async () => ((await getTerminal(terminalId)).state === "exited" ? true : null));
+  });
+});
+
+describe("optio local e2e: machine identity, resume, and backfill", () => {
+  const cleanups: Array<() => void> = [];
+  afterEach(() => {
+    for (const fn of cleanups.splice(0)) fn();
+  });
+
+  const SESSION = "c1545b8e-d116-4761-8921-38509a508395";
+
+  async function register(body: Json): Promise<HostBody["host"]> {
+    const res = await api<HostBody>("/api/local/hosts/register", {
+      method: "POST",
+      body: JSON.stringify({ platform: "darwin", dirs: DIRS, ...body }),
+    });
+    expect(res.status).toBe(200);
+    return res.body.host;
+  }
+
+  /** An agent session that ran on the host and ended (SIGTERM), having reported its session id. */
+  async function finishedAgentSession(daemon: FakeDaemon, hostId: string): Promise<string> {
+    const { body } = await api<TerminalBody>("/api/local/terminals", {
+      method: "POST",
+      body: JSON.stringify({
+        hostId,
+        dir: "/tmp/e2e-repo",
+        spec: { kind: "agent", agent: "claude-code", prompt: "Triage PR #607" },
+      }),
+    });
+    const terminalId = body.terminal.id;
+    await daemon.next((m) => m.type === "spawn" && m.terminalId === terminalId);
+    daemon.send({ type: "started", terminalId });
+    daemon.send({ type: "session", terminalId, agentSessionId: SESSION });
+    daemon.send({ type: "exit", terminalId, exitCode: 143 });
+    await waitFor(async () => ((await getTerminal(terminalId)).state === "exited" ? true : null));
+    return terminalId;
+  }
+
+  it("keeps a machine through a hostname change, resumes once, and merges a machine registered twice", async () => {
+    // First paired before daemons sent their id; a session ran and ended there.
+    const old = await register({ hostname: "e2e-M1-Macbook.local" });
+    const oldDaemon = new FakeDaemon();
+    cleanups.push(() => oldDaemon.close());
+    await oldDaemon.connect(old.id, DIRS);
+    const finished = await finishedAgentSession(oldDaemon, old.id);
+    oldDaemon.close();
+
+    // The hostname changed under that old daemon: a second row.
+    const current = await register({ hostname: "e2e-MacBookPro" });
+    expect(current.id).not.toBe(old.id);
+    // From here the daemon sends the id it was given: the next rename keeps it.
+    const renamed = await register({ hostname: "e2e-MacBookPro-2", hostId: current.id });
+    expect(renamed).toMatchObject({ id: current.id, hostname: "e2e-MacBookPro-2" });
+
+    // Resume on the old row waits for that machine — once, however often it's asked.
+    await waitFor(async () => {
+      const { body } = await api<{ hosts: HostBody["host"][] }>("/api/local/hosts");
+      return body.hosts.find((h) => h.id === old.id)?.state === "offline" ? true : null;
+    });
+    const first = await api<TerminalBody & { reused: boolean }>(
+      `/api/local/terminals/${finished}/resume`,
+      { method: "POST", body: "{}" },
+    );
+    expect(first.status).toBe(201);
+    expect(first.body).toMatchObject({
+      reused: false,
+      terminal: { state: "pending", pendingReason: "host_offline" },
+    });
+    const second = await api<TerminalBody & { reused: boolean }>(
+      `/api/local/terminals/${finished}/resume`,
+      { method: "POST", body: "{}" },
+    );
+    expect(second.status).toBe(200);
+    expect(second.body).toMatchObject({ reused: true, terminal: { id: first.body.terminal.id } });
+
+    // A connected machine can't be merged away.
+    const daemon = new FakeDaemon();
+    cleanups.push(() => daemon.close());
+    await daemon.connect(current.id, DIRS);
+    await waitFor(async () => {
+      const { body } = await api<{ hosts: HostBody["host"][] }>("/api/local/hosts");
+      return body.hosts.find((h) => h.id === current.id)?.state === "online" ? true : null;
+    });
+    const refused = await api<{ error: string }>(`/api/local/hosts/${current.id}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ intoHostId: old.id }),
+    });
+    expect(refused.status).toBe(409);
+    const self = await api<{ error: string }>(`/api/local/hosts/${old.id}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ intoHostId: old.id }),
+    });
+    expect(self.status).toBe(400);
+
+    // Merge the old row into the current machine: its sessions move, and the
+    // resume that was waiting starts there as `claude --resume`.
+    const merged = await api<{ host: HostBody["host"]; moved: Json }>(
+      `/api/local/hosts/${old.id}/merge`,
+      { method: "POST", body: JSON.stringify({ intoHostId: current.id }) },
+    );
+    expect(merged.status).toBe(200);
+    expect(merged.body.moved).toEqual({ terminals: 2, automations: 0, runLocations: 0 });
+    const spawn = await daemon.next(
+      (m) => m.type === "spawn" && m.terminalId === first.body.terminal.id,
+    );
+    expect((spawn.spec as Json).resumeSessionId).toBe(SESSION);
+    expect((await getTerminal(finished)).hostId).toBe(current.id);
+    const { body: hosts } = await api<{ hosts: HostBody["host"][] }>("/api/local/hosts");
+    expect(hosts.hosts.some((h) => h.id === old.id)).toBe(false);
+  });
+
+  it("reads a finished session's conversation off its machine when it was never streamed", async () => {
+    const host = await register({ hostname: "e2e-backfill" });
+    const daemon = new FakeDaemon();
+    cleanups.push(() => daemon.close());
+    await daemon.connect(host.id, DIRS, [], { transcriptBackfill: true });
+    const terminalId = await finishedAgentSession(daemon, host.id);
+
+    type Page = { entries: Array<{ seq: number; text: string }>; backfilling: boolean };
+    const firstRead = await api<Page>(`/api/local/terminals/${terminalId}/transcript`);
+    expect(firstRead.body).toMatchObject({ entries: [], backfilling: true });
+    const req = await daemon.next((m) => m.type === "transcript-request");
+    expect(req).toMatchObject({ terminalId, agent: "claude-code", agentSessionId: SESSION });
+
+    const entry = (seq: number, role: string, kind: string, text: string) => ({
+      seq,
+      role,
+      kind,
+      text,
+      detail: null,
+      toolName: null,
+      toolUseId: null,
+      isError: false,
+      at: "2026-09-20T03:46:20.000Z",
+    });
+    daemon.send({
+      type: "transcript-backfill",
+      requestId: req.requestId,
+      terminalId,
+      entries: [entry(1, "user", "text", "Triage PR #607"), entry(2, "assistant", "text", "…")],
+      done: false,
+    });
+    daemon.send({
+      type: "transcript-backfill",
+      requestId: req.requestId,
+      terminalId,
+      entries: [entry(3, "assistant", "text", "Do not merge.")],
+      done: true,
+    });
+    const page = await waitFor(async () => {
+      const { body } = await api<Page>(`/api/local/terminals/${terminalId}/transcript`);
+      return body.entries.length === 3 ? body : null;
+    });
+    expect(page.backfilling).toBe(false);
+    expect(page.entries.map((e) => e.text)).toEqual(["Triage PR #607", "…", "Do not merge."]);
   });
 });

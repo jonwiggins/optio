@@ -44,8 +44,15 @@ const registerHostSchema = z
     arch: z.string().max(50).optional(),
     daemonVersion: z.string().max(50).optional(),
     dirs: z.array(LocalHostDirSchema).max(200).default([]),
+    hostId: z
+      .string()
+      .uuid()
+      .optional()
+      .describe(
+        "The id this server gave the daemon last time; keeps the machine's row when its hostname changes",
+      ),
   })
-  .describe("Daemon host registration (upsert by user + hostname)");
+  .describe("Daemon host registration (the daemon's last host id, else user + hostname)");
 
 const createTerminalSchema = z
   .object({
@@ -112,6 +119,12 @@ const HostResponse = z.object({ host: LocalHostSchema });
 const HostsResponse = z.object({ hosts: z.array(LocalHostSchema) });
 const TerminalResponse = z.object({ terminal: LocalTerminalSchema });
 const TerminalsResponse = z.object({ terminals: z.array(LocalTerminalSchema) });
+const ResumeResponse = z.object({
+  terminal: LocalTerminalSchema,
+  reused: z
+    .boolean()
+    .describe("An unfinished resume of this session, returned instead of a new one"),
+});
 const BlueprintResponse = z.object({ blueprint: LocalBlueprintSchema });
 const BlueprintsResponse = z.object({ blueprints: z.array(LocalBlueprintSchema) });
 const TriggerResponse = z.object({ trigger: LocalTriggerSchema });
@@ -180,8 +193,10 @@ export async function localRoutes(rawApp: FastifyInstance) {
         operationId: "registerLocalHost",
         summary: "Register (or refresh) a local host",
         description:
-          "Called by the `optio local` daemon on startup. Upserts by " +
-          "(user, hostname) and replaces the advertised directory allowlist.",
+          "Called by the `optio local` daemon on every connect. Matches the " +
+          "host the daemon was given last time (`hostId`, so a hostname " +
+          "change keeps the machine), else upserts by (user, hostname), and " +
+          "replaces the advertised directory allowlist.",
         tags: ["Local"],
         body: registerHostSchema,
         response: { 200: HostResponse },
@@ -216,6 +231,63 @@ export async function localRoutes(rawApp: FastifyInstance) {
       }
       await hostService.deleteHost(host.id);
       reply.send({});
+    },
+  );
+
+  app.post(
+    "/api/local/hosts/:id/merge",
+    {
+      ...member,
+      schema: {
+        operationId: "mergeLocalHost",
+        summary: "Merge a machine into another (one computer registered twice)",
+        description:
+          "For a computer that shows up twice because its hostname changed: moves " +
+          "this offline machine's terminals, automations, and Task / Job run " +
+          "locations to `intoHostId`, then removes it. Terminals waiting for this " +
+          "machine start on the other one.",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        body: z.object({ intoHostId: z.string().uuid() }),
+        response: {
+          200: z.object({
+            host: LocalHostSchema,
+            moved: z.object({
+              terminals: z.number().int(),
+              automations: z.number().int(),
+              runLocations: z.number().int(),
+            }),
+          }),
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const source = await hostService.getHost(req.params.id);
+      if (!source || !hostService.canAccessHost(source, req.user?.id)) {
+        return reply.status(404).send({ error: "Host not found" });
+      }
+      const target = await hostService.getHost(req.body.intoHostId);
+      if (!target || !hostService.canAccessHost(target, req.user?.id)) {
+        return reply.status(404).send({ error: "Host to merge into not found" });
+      }
+      if (source.id === target.id) {
+        return reply.status(400).send({ error: "Pick another machine to merge into" });
+      }
+      if (relay.isHostOnline(source.id)) {
+        return reply.status(409).send({
+          error: `${source.name} is connected — only an offline machine can be merged into another`,
+        });
+      }
+      const moved = await hostService.mergeHosts(source.id, target.id);
+      await terminalService.flushParkedTerminals(target.id);
+      const host = (await hostService.getHost(target.id))!;
+      reply.send({
+        host: { ...host, claudeCredentials: relay.hostHasClaudeCredentials(host.id) },
+        moved,
+      });
     },
   );
 
@@ -393,6 +465,11 @@ export async function localRoutes(rawApp: FastifyInstance) {
             entries: z.array(LocalTranscriptEntrySchema),
             /** True when fewer than `limit` entries came back, i.e. the caller has everything stored. */
             complete: z.boolean(),
+            backfilling: z
+              .boolean()
+              .describe(
+                "True while the session's machine is reading its conversation off disk (a finished session whose transcript was never streamed); read again shortly",
+              ),
           }),
           404: ErrorResponseSchema,
         },
@@ -408,7 +485,13 @@ export async function localRoutes(rawApp: FastifyInstance) {
         req.query.after,
         req.query.limit,
       );
-      reply.send({ entries, complete: entries.length < req.query.limit });
+      // Nothing stored at all: a finished session's machine can still read
+      // it off disk.
+      const backfilling =
+        req.query.after === 0 &&
+        entries.length === 0 &&
+        terminalService.requestTranscriptBackfill(terminal);
+      reply.send({ entries, complete: entries.length < req.query.limit, backfilling });
     },
   );
 
@@ -502,12 +585,19 @@ export async function localRoutes(rawApp: FastifyInstance) {
           "Opens a fresh interactive terminal in the same directory that resumes the " +
           "agent's own session (`claude --resume <id>`). Works for headless runs that " +
           "already exited and for sessions still open. The agent must have reported a " +
-          "session id (Claude Code / Codex).",
+          "session id (Claude Code / Codex). A resume of the session that hasn't ended " +
+          "(waiting for its machine, starting, or open) is returned instead, with 200 " +
+          "and `reused: true`.",
         tags: ["Local"],
         params: z.object({ id: z.string().uuid() }),
         // nullish: a bodiless POST reaches the validator as null (see kill).
         body: z.object({}).nullish(),
-        response: { 201: TerminalResponse, 404: ErrorResponseSchema, 409: ErrorResponseSchema },
+        response: {
+          200: ResumeResponse,
+          201: ResumeResponse,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
       },
     },
     async (req, reply) => {
@@ -516,8 +606,8 @@ export async function localRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Terminal not found" });
       }
       try {
-        const resumed = await terminalService.resumeTerminal(terminal);
-        reply.status(201).send({ terminal: resumed });
+        const { terminal: resumed, reused } = await terminalService.resumeTerminal(terminal);
+        reply.status(reused ? 200 : 201).send({ terminal: resumed, reused });
       } catch (err) {
         reply.status(409).send({ error: err instanceof Error ? err.message : String(err) });
       }

@@ -568,8 +568,14 @@ export async function handleSession(
  * terminal in the same dir — `claude --resume <id>`. The new row inherits the
  * blueprint / ticket links so its badges carry over; it is `spawnedBy:
  * "resume"`, so exiting it later doesn't re-enter the needs-you queue.
+ *
+ * A resume of the same session that hasn't ended — waiting for its machine
+ * to come online, starting, or open — is returned instead (`reused`): a
+ * second click must not start the same conversation twice.
  */
-export async function resumeTerminal(row: LocalTerminalRow): Promise<LocalTerminalRow> {
+export async function resumeTerminal(
+  row: LocalTerminalRow,
+): Promise<{ terminal: LocalTerminalRow; reused: boolean }> {
   const spec = row.spec as unknown as LocalTerminalSpec;
   if (spec.kind !== "agent") throw new Error("Only agent sessions can be resumed");
   if (!row.agentSessionId) throw new Error("This session never reported a session id to resume");
@@ -578,7 +584,21 @@ export async function resumeTerminal(row: LocalTerminalRow): Promise<LocalTermin
   }
   const host = await getHost(row.hostId);
   if (!host) throw new Error("Host not found");
-  return createTerminal({
+  const [open] = await db
+    .select()
+    .from(localTerminals)
+    .where(
+      and(
+        eq(localTerminals.hostId, row.hostId),
+        eq(localTerminals.spawnedBy, "resume"),
+        inArray(localTerminals.state, ["pending", "launching", "running"]),
+        sql`${localTerminals.spec}->>'resumeSessionId' = ${row.agentSessionId}`,
+      ),
+    )
+    .orderBy(desc(localTerminals.createdAt))
+    .limit(1);
+  if (open) return { terminal: open, reused: true };
+  const terminal = await createTerminal({
     host,
     userId: row.userId,
     workspaceId: row.workspaceId,
@@ -597,6 +617,7 @@ export async function resumeTerminal(row: LocalTerminalRow): Promise<LocalTermin
           }
         : undefined,
   });
+  return { terminal, reused: false };
 }
 
 export async function handleAttention(
@@ -773,10 +794,17 @@ export async function handleTranscript(
   const row = await getTerminal(terminalId);
   if (!row || row.hostId !== hostId) return 0;
   if (row.state !== "running" && row.state !== "launching") return 0;
+  return insertTranscriptEntries(terminalId, clean);
+}
+
+async function insertTranscriptEntries(
+  terminalId: string,
+  entries: LocalTranscriptEntry[],
+): Promise<number> {
   const inserted = await db
     .insert(localTerminalTranscripts)
     .values(
-      clean.map((e) => ({
+      entries.map((e) => ({
         terminalId,
         seq: e.seq,
         role: e.role,
@@ -792,6 +820,110 @@ export async function handleTranscript(
     .onConflictDoNothing()
     .returning({ seq: localTerminalTranscripts.seq });
   return inserted.length;
+}
+
+// ── Transcript backfill ─────────────────────────────────────────────────────
+// A finished agent session whose conversation was never streamed (it ran
+// under a daemon that predates transcripts, or its hooks never named the
+// file) can still be read: the agent CLI keeps its own transcript on the
+// machine. The first read of such a session asks its host's daemon for it,
+// and the entries come back as `transcript-backfill` frames addressed to a
+// request id only that host was told.
+
+/** A request unanswered this long is asked again by the next read. */
+const BACKFILL_TIMEOUT_MS = 20_000;
+/** A session the host had nothing for isn't asked about again for this long. */
+const BACKFILL_RETRY_MS = 10 * 60_000;
+
+interface Backfill {
+  requestId: string;
+  hostId: string;
+  requestedAt: number;
+  /** When the daemon's last frame (`done`) arrived; null while in flight. */
+  finishedAt: number | null;
+}
+
+/** By terminal id. */
+const backfills = new Map<string, Backfill>();
+
+/**
+ * Ask a finished session's host for its conversation (the caller found
+ * none stored). True while a request is in flight — the caller should read
+ * again shortly; false when there is nothing to wait for (not an agent
+ * session with a session id, the host is offline or its daemon predates
+ * backfill, or it recently had nothing).
+ */
+export function requestTranscriptBackfill(row: LocalTerminalRow, now = Date.now()): boolean {
+  const spec = row.spec as unknown as LocalTerminalSpec;
+  if (row.state !== "exited" && row.state !== "error") return false;
+  if (spec.kind !== "agent" || spec.agent !== "claude-code" || !row.agentSessionId) return false;
+  for (const [id, b] of backfills) {
+    if (now - (b.finishedAt ?? b.requestedAt) > BACKFILL_RETRY_MS) backfills.delete(id);
+  }
+  const prev = backfills.get(row.id);
+  if (prev?.finishedAt === null && now - prev.requestedAt < BACKFILL_TIMEOUT_MS) return true;
+  if (prev?.finishedAt != null && now - prev.finishedAt < BACKFILL_RETRY_MS) return false;
+  if (!relay.hostCanBackfillTranscripts(row.hostId)) return false;
+  const requestId = randomUUID();
+  const sent = relay.sendToHost(row.hostId, {
+    type: "transcript-request",
+    requestId,
+    terminalId: row.id,
+    agent: spec.agent,
+    agentSessionId: row.agentSessionId,
+  });
+  if (!sent) return false;
+  backfills.set(row.id, { requestId, hostId: row.hostId, requestedAt: now, finishedAt: null });
+  return true;
+}
+
+/**
+ * A `transcript-backfill` frame. Stored only when it answers the request in
+ * flight for that terminal, from the host it was sent to; keyed by seq like
+ * the live stream, so a repeated answer is a no-op.
+ */
+export async function handleTranscriptBackfill(
+  hostId: string,
+  msg: {
+    requestId?: unknown;
+    terminalId?: unknown;
+    entries?: unknown;
+    done?: unknown;
+    error?: unknown;
+  },
+): Promise<number> {
+  if (typeof msg.terminalId !== "string" || typeof msg.requestId !== "string") return 0;
+  const pending = backfills.get(msg.terminalId);
+  if (
+    !pending ||
+    pending.requestId !== msg.requestId ||
+    pending.hostId !== hostId ||
+    pending.finishedAt !== null
+  ) {
+    return 0;
+  }
+  const clean = sanitizeTranscriptEntries(msg.entries);
+  const inserted = clean.length > 0 ? await insertTranscriptEntries(msg.terminalId, clean) : 0;
+  if (msg.done === true) {
+    pending.finishedAt = Date.now();
+    if (typeof msg.error === "string") {
+      logger.info(
+        { terminalId: msg.terminalId, hostId, reason: msg.error.slice(0, 200) },
+        "local: host had no transcript to backfill",
+      );
+    }
+    const row = await getTerminal(msg.terminalId);
+    if (row) {
+      await publishLocalChanged({ terminalId: row.id, hostId, userId: row.userId }).catch((err) =>
+        logger.warn({ err }, "local: failed to publish transcript backfill"),
+      );
+    }
+  }
+  return inserted;
+}
+
+export function resetTranscriptBackfillsForTests(): void {
+  backfills.clear();
 }
 
 /** The stored conversation of a terminal, in order, optionally only entries after `afterSeq`. */

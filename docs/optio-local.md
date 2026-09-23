@@ -21,6 +21,17 @@ server never ships secrets to your machine.
 - **Host** (`local_hosts`) — one paired machine, bound to the registering **user** (hosts
   are personal, never workspace-shared compute). Carries an allowlist of directories, each
   with an auto-detected git remote. Online/offline tracked via daemon heartbeat.
+  **Identity**: the daemon keeps the host id each server gave it (`local.json`, per server
+  URL) and sends it back on every registration, so a machine keeps its row — terminals,
+  automations, resumable sessions — when its hostname changes (macOS renames itself as it
+  moves between networks); the row's hostname, and its name unless someone chose one,
+  follow. Without an id (first pairing, or a daemon from before ids were sent) the row is
+  matched by `(user, hostname)`. A computer that got a second row under an old daemon
+  shows up twice, the old row offline for good: **Merge** on the Machines page
+  (`POST /api/local/hosts/:id/merge`) moves the offline row's terminals, automations, and
+  Task / Job run locations to the other machine and removes it; terminals that were
+  waiting for it start there. A daemon that sends its id under a hostname an offline row
+  of the same user still has folds that row in by itself.
 - **Terminal** (`local_terminals`) — one PTY on a host: state machine
   `pending → launching → running → exited | error`, plus an **attention state**
   (`working` / `needs_you` / `idle`) that drives the UI's "needs you" queue. A terminal
@@ -56,6 +67,10 @@ server never ships secrets to your machine.
   exited agent session) opens a fresh interactive terminal in the same dir with
   `claude --resume <id>` (or `codex resume <id>`), inheriting the ticket / automation
   badges; `spawnedBy = "resume"`, so exiting it later goes quiet like a manual shell.
+  It runs on the session's own host (the agent's transcript lives there); while that host
+  is offline the new terminal waits as `pending` / `host_offline` and its page says so.
+  Asking again while a resume of the same session hasn't ended (waiting, starting, or
+  open) returns that one (`reused: true`) instead of a second copy of the conversation.
 
 ## Claude token refresh from your machine
 
@@ -277,6 +292,16 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
 /api/local/terminals/:id/transcript` serves it; the session page opens a finished agent
   session on this **Transcript** view (the **Screen** toggle brings the recorded grid
   back), which reflows to any width — a session run on a 132×40 grid reads on a phone.
+  **Backfill**: a finished Claude Code session with a session id but no stored entries (it
+  ran under a daemon that predates transcripts, or its hooks never named the file) is read
+  off its machine on demand. The first transcript read asks the host's daemon
+  (`transcript-request`, only to daemons whose hello set `transcriptBackfill`); the daemon
+  finds `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/*/<session id>.jsonl`, refuses a
+  session whose working dir is outside its allowlist, and answers with the whole
+  conversation as `transcript-backfill` frames addressed to the request id. Meanwhile the
+  read returns `backfilling: true` and clients poll briefly; a host that had nothing isn't
+  asked again for 10 minutes (`cli/src/local/transcript-backfill.ts`,
+  `requestTranscriptBackfill` in `local-terminal-service.ts`).
 - Live UI updates: content-free nudges `{type:"local:changed", terminalId, hostId, userId}`
   on the shared `/ws/events` stream (that stream is visible to all authenticated users, so
   no terminal content may ever be published there); clients refetch via REST.
@@ -289,9 +314,15 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
 
 ## REST API (all under `/api/local`, member role for mutations, owner-scoped)
 
-- `POST /api/local/hosts/register` — daemon upsert by `(userId, hostname)`; body
-  `{name?, hostname, platform, arch, daemonVersion, dirs: [{path, repoUrl?}]}` → `{host}`
+- `POST /api/local/hosts/register` — daemon registration: the host it names in `hostId`
+  (its id from last time), else upsert by `(userId, hostname)`; body
+  `{hostId?, name?, hostname, platform, arch, daemonVersion, dirs: [{path, repoUrl?}]}` →
+  `{host}` (see "Identity" under Host)
 - `GET /api/local/hosts` / `DELETE /api/local/hosts/:id`
+- `POST /api/local/hosts/:id/merge` — `{intoHostId}`: one computer registered twice;
+  moves this (offline) host's terminals, automations, and run locations to `intoHostId`,
+  removes it, and starts terminals that were waiting for it → `{host, moved: {terminals,
+automations, runLocations}}`; 409 while the host is connected
 - `GET /api/local/terminals?state=&hostId=` — caller's terminals (with `preview`)
 - `POST /api/local/terminals` — `{hostId, dir?, title?, spec?}` where `spec` is
   `{kind:"shell"} | {kind:"command", command} | {kind:"agent", agent, prompt?}` (defaults to
@@ -302,11 +333,14 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   host allowlist.
 - `GET /api/local/terminals/:id`
 - `GET /api/local/terminals/:id/transcript?after=&limit=` — the agent session's
-  conversation as `{entries, complete}` (see "The conversation" above); `after` is a seq,
-  for live polling
+  conversation as `{entries, complete, backfilling}` (see "The conversation" above);
+  `after` is a seq, for live polling; `backfilling` while the host reads a finished
+  session's conversation off disk
 - `POST /api/local/terminals/:id/start` — spawn a `pending` terminal
 - `POST /api/local/terminals/:id/resume` — new interactive terminal resuming the agent's
-  own session (`agentSessionId`); 409 when the session never reported one
+  own session (`agentSessionId`) → 201 `{terminal, reused: false}`, or 200
+  `{terminal, reused: true}` with a resume of that session that hasn't ended; 409 when the
+  session never reported an id
 - `POST /api/local/terminals/:id/kill` — `{signal?}` (default SIGTERM)
 - `POST /api/local/terminals/:id/input` — `{data}` (fallback for non-WS input; primary
   input path is the stream WS)
@@ -340,7 +374,7 @@ single quoted argv element, never interpolated into shell syntax; a prompt that 
 Daemon → server:
 
 - `{type:"hello", hostId, daemonVersion, dirs, terminals:[{terminalId, running}],
-claudeCredentials?}` — first frame; server reconciles DB rows against `terminals` (rows believed running that
+claudeCredentials?, transcriptBackfill?}` — first frame; server reconciles DB rows against `terminals` (rows believed running that
   the daemon doesn't have → `exited`, reason `daemon_restart`) and flushes
   `pending/host_offline` spawns.
 - `{type:"started", terminalId}` / `{type:"spawn-error", terminalId, message}`
@@ -375,6 +409,11 @@ toolUseId, isError, at}]}` — new conversation entries distilled from the agent
   session runs, and flushed once more just before `exit`. Accepted only from the owning host
   while the row is live; the server bounds text (16 KB) / detail (8 KB) and caps a terminal
   at 20 000 entries
+- `{type:"transcript-backfill", requestId, terminalId, entries, done, error?}` — answer to
+  `transcript-request`: a finished session's whole conversation read off disk, batched
+  (40 per frame) with `seq` from 1; `done` on the last frame, `error` when there was
+  nothing to send. Stored only when it answers the request in flight for that terminal,
+  from the host it was sent to
 - `{type:"snapshot", terminalId, dataB64, cols, rows}` — the final screen (ring tail +
   grid), sent right before `exit`; its own frame so an oversize one the server drops
   (>1 MB) can never swallow the exit. Accepted only from the owning host while the row
@@ -395,6 +434,8 @@ Server → daemon:
   snapshots the ring buffer and enables live output atomically on attach; the snapshot
   is routed only to the attaching viewer (no gap, no duplicated history for others)
 - `{type:"credentials", requestId}` — ask for the machine's Claude OAuth access token
+- `{type:"transcript-request", requestId, terminalId, agent, agentSessionId}` — read a
+  finished session's conversation off disk (see "Backfill" above)
 - `{type:"pong"}`
 
 Host liveness: sweeper marks hosts offline after 90 s without a ping and fails
@@ -514,7 +555,10 @@ eliminates the classic "pasted JSON swallowed as control" bug):
 - `optio local up` — register host (name defaults to `os.hostname()`), connect, serve.
 - `optio local add <dir>` / `optio local remove <dir>` / `optio local dirs`
 - `optio local status` — host + terminal summary.
-- Dir list persists in `~/.optio/local.json`; git remote auto-detected per dir.
+- Dir list and the host id each server gave this machine persist in
+  `~/.config/optio/local.json` (`$XDG_CONFIG_HOME/optio/local.json`); git remote
+  auto-detected per dir. The host id is the machine's identity: don't copy this file to
+  another computer.
 
 ## Non-goals / follow-ups (v1)
 

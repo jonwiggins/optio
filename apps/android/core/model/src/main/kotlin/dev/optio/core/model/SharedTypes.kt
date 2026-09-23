@@ -1779,6 +1779,8 @@ sealed interface LocalDaemonMessage {
         val terminals: List<LocalDaemonTerminalSync>,
         /** The machine has a Claude Code login the server may ask for (see `credentials`). */
         val claudeCredentials: Boolean? = null,
+        /** The daemon answers `transcript-request` (reads a finished session's conversation off disk). */
+        val transcriptBackfill: Boolean? = null,
     ) : LocalDaemonMessage
 
     @Serializable
@@ -1853,6 +1855,15 @@ sealed interface LocalDaemonMessage {
     ) : LocalDaemonMessage
 
     @Serializable
+    data class TranscriptBackfill(
+        val requestId: String,
+        val terminalId: String,
+        val entries: List<LocalTranscriptEntry>,
+        val done: Boolean,
+        val error: String? = null,
+    ) : LocalDaemonMessage
+
+    @Serializable
     data class Session(
         val terminalId: String,
         val agentSessionId: String,
@@ -1903,6 +1914,7 @@ sealed interface LocalDaemonMessage {
             "links" -> json.decodeFromJsonElement(Links.serializer(), element.withoutDiscriminator())
             "usage" -> json.decodeFromJsonElement(Usage.serializer(), element.withoutDiscriminator())
             "transcript" -> json.decodeFromJsonElement(Transcript.serializer(), element.withoutDiscriminator())
+            "transcript-backfill" -> json.decodeFromJsonElement(TranscriptBackfill.serializer(), element.withoutDiscriminator())
             "session" -> json.decodeFromJsonElement(Session.serializer(), element.withoutDiscriminator())
             "agent-limits" -> json.decodeFromJsonElement(AgentLimits.serializer(), element.withoutDiscriminator())
             "size" -> json.decodeFromJsonElement(Size.serializer(), element.withoutDiscriminator())
@@ -1925,6 +1937,7 @@ sealed interface LocalDaemonMessage {
             is Links -> tagged("links", json.encodeToJsonElement(Links.serializer(), value))
             is Usage -> tagged("usage", json.encodeToJsonElement(Usage.serializer(), value))
             is Transcript -> tagged("transcript", json.encodeToJsonElement(Transcript.serializer(), value))
+            is TranscriptBackfill -> tagged("transcript-backfill", json.encodeToJsonElement(TranscriptBackfill.serializer(), value))
             is Session -> tagged("session", json.encodeToJsonElement(Session.serializer(), value))
             is AgentLimits -> tagged("agent-limits", json.encodeToJsonElement(AgentLimits.serializer(), value))
             is Size -> tagged("size", json.encodeToJsonElement(Size.serializer(), value))
@@ -1984,6 +1997,14 @@ sealed interface LocalServerMessage {
         val requestId: String,
     ) : LocalServerMessage
 
+    @Serializable
+    data class TranscriptRequest(
+        val requestId: String,
+        val terminalId: String,
+        val agent: LocalAgentKind,
+        val agentSessionId: String,
+    ) : LocalServerMessage
+
     data object Pong : LocalServerMessage
 
     /** Fallback for discriminator values this client does not know about yet. */
@@ -1998,6 +2019,7 @@ sealed interface LocalServerMessage {
             "attach" -> json.decodeFromJsonElement(Attach.serializer(), element.withoutDiscriminator())
             "detach" -> json.decodeFromJsonElement(Detach.serializer(), element.withoutDiscriminator())
             "credentials" -> json.decodeFromJsonElement(Credentials.serializer(), element.withoutDiscriminator())
+            "transcript-request" -> json.decodeFromJsonElement(TranscriptRequest.serializer(), element.withoutDiscriminator())
             "pong" -> Pong
             else -> null
         }
@@ -2010,6 +2032,7 @@ sealed interface LocalServerMessage {
             is Attach -> tagged("attach", json.encodeToJsonElement(Attach.serializer(), value))
             is Detach -> tagged("detach", json.encodeToJsonElement(Detach.serializer(), value))
             is Credentials -> tagged("credentials", json.encodeToJsonElement(Credentials.serializer(), value))
+            is TranscriptRequest -> tagged("transcript-request", json.encodeToJsonElement(TranscriptRequest.serializer(), value))
             is Pong -> tagged("pong")
             is Unknown -> value.raw
         }
