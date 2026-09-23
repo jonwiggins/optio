@@ -13,6 +13,7 @@ import { db } from "../db/client.js";
 import { interactiveSessions, repoPods } from "../db/schema.js";
 import { listenWsApp, WsTestClient, type WsFrame } from "../test-utils/integration/ws-client.js";
 import { listSessionChatEvents } from "../services/interactive-session-service.js";
+import { insertSessionWithChatEvents } from "../test-utils/integration/fixtures.js";
 import { sessionChatWs } from "./session-chat.js";
 
 vi.hoisted(() => {
@@ -117,5 +118,31 @@ describe("session chat history", () => {
     );
     const stored = (await listSessionChatEvents(session.id)).map((e) => e.content);
     expect(stored).toEqual(["do the thing [[mock:cost:0.01]]", ...streamed]);
+  });
+});
+
+describe("session chat replay of a long session", () => {
+  it("replays the newest events, ending with the latest", async () => {
+    const session = await insertSessionWithChatEvents(1200);
+    // The chat handler needs a pod; a replay needs nothing else.
+    const [pod] = await db
+      .insert(repoPods)
+      .values({ repoUrl: session.repoUrl, podName: "long-pod", podId: "long-pod", state: "ready" })
+      .returning();
+    await db
+      .update(interactiveSessions)
+      .set({ podId: pod.id })
+      .where(eq(interactiveSessions.id, session.id));
+
+    const chat = new WsTestClient(`${wsBase}/ws/sessions/${session.id}/chat`);
+    const done = await chat.next((f) => f.type === "history_done", 10_000);
+    const replayed = chat.frames
+      .filter((f) => f.type === "chat_event" && f.catchUp)
+      .map((f) => f.event.content as string);
+    await chat.close();
+
+    expect(done.count).toBe(1000);
+    expect(replayed[0]).toBe("event 201");
+    expect(replayed.at(-1)).toBe("event 1200");
   });
 });

@@ -11,6 +11,9 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { db } from "../db/client.js";
 import { interactiveSessions, sessionChatEvents } from "../db/schema.js";
+import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
+import { sessionRoutes } from "../routes/sessions.js";
+import { insertSessionWithChatEvents } from "../test-utils/integration/fixtures.js";
 import { appendSessionChatEvent, listSessionChatEvents } from "./interactive-session-service.js";
 
 describe("session chat history order", () => {
@@ -45,5 +48,33 @@ describe("session chat history order", () => {
 
     const replay = await listSessionChatEvents(session.id);
     expect(replay.map((e) => e.content.split("\n")[0])).toEqual(written);
+  });
+});
+
+describe("a long session's history", () => {
+  const labels = (events: Array<{ content: string }>) => events.map((e) => e.content);
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, k) => `event ${from + k}`);
+
+  it("is the newest events, oldest first, not the oldest ones", async () => {
+    const session = await insertSessionWithChatEvents(1200);
+
+    // What the WebSocket replay loads (the default window).
+    expect(labels(await listSessionChatEvents(session.id))).toEqual(range(201, 1200));
+    expect(labels(await listSessionChatEvents(session.id, { limit: 3 }))).toEqual(
+      range(1198, 1200),
+    );
+
+    // GET /api/sessions/:id/chat: the same window; the web asks for all 5000.
+    const app = await buildRouteTestApp(sessionRoutes);
+    const res = await app.inject({ method: "GET", url: `/api/sessions/${session.id}/chat` });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(labels(res.json().events)).toEqual(range(201, 1200));
+    const all = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/chat?limit=5000`,
+    });
+    expect(labels(all.json().events)).toEqual(range(1, 1200));
+    await app.close();
   });
 });
