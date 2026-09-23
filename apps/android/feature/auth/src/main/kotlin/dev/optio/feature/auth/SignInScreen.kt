@@ -144,11 +144,19 @@ fun SignInScreen(
     }
 
     // Android 17: a server on the local network is unreachable without the local network
-    // permission. Ask first when the address is local (never for public servers); a denial shows
-    // why at once (with Open settings) instead of a connect timeout.
+    // permission. Ask first when the address is local (never for public servers). After a denial,
+    // a definitely-local address fails at once (with Open settings) instead of a connect timeout;
+    // a Tailscale address (asked about conservatively) is still tried.
     val localNetworkRequest =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) pair(localNetworkBlocked = false) else model.form.localNetworkDenied()
+            val url = model.form.normalizedUrl
+            when {
+                granted || url == null -> pair(localNetworkBlocked = false)
+                else ->
+                    scope.launch {
+                        if (LocalNetworkAccess.isBlocked(context, url)) model.form.localNetworkDenied() else pair(localNetworkBlocked = true)
+                    }
+            }
         }
     SignInContent(
         form = model.form,

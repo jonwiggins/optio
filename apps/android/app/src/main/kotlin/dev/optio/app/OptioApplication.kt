@@ -48,14 +48,15 @@ class AppGraph(val application: Application) {
     val serverRegistry: ServerRegistry by lazy { registry(application) }
 
     /**
-     * The live session: active server, current user, the one `ApiClient` + `EventHub`. A local
-     * server without Android 17's local network permission counts as unreachable at once.
+     * The live session: active server, current user, the one `ApiClient` + `EventHub`. A server
+     * on the local network without Android 17's local network permission counts as unreachable at
+     * once (`LocalNetworkAccess.isBlocked`).
      */
     val session: SessionStore by lazy {
         SessionStore(
             registry = serverRegistry,
             scope = appScope,
-            reachable = { server -> !LocalNetworkAccess.needsPrompt(application, server.url) },
+            reachable = { server -> !LocalNetworkAccess.isBlocked(application, server.url) },
         )
     }
 

@@ -88,6 +88,24 @@ class LocalNetworkAccessTest {
         }
 
     @Test
+    fun carrierGradeNatCanBeLeftOut() {
+        assertFalse(LocalNetworkAccess.isLocalAddress(ip("100.101.102.103"), includeCarrierGradeNat = false))
+        assertTrue(LocalNetworkAccess.isLocalAddress(ip("192.168.1.20"), includeCarrierGradeNat = false))
+        assertTrue(LocalNetworkAccess.isLocalAddress(ip("fd7a:115c:a1e0::1"), includeCarrierGradeNat = false))
+    }
+
+    @Test
+    fun definitelyLocalHostsLeaveOutTailscale() =
+        runTest {
+            val resolver: (String) -> List<InetAddress> = { name ->
+                if (name == "laptop.tailnet.ts.net") listOf(ip("100.101.102.103")) else listOf(ip("192.168.1.20"))
+            }
+            assertFalse(LocalNetworkAccess.isLocalHost("laptop.tailnet.ts.net", Dispatchers.Unconfined, resolver, includeCarrierGradeNat = false))
+            assertTrue(LocalNetworkAccess.isLocalHost("laptop.lan", Dispatchers.Unconfined, resolver, includeCarrierGradeNat = false))
+            assertTrue(LocalNetworkAccess.isLocalHost("MacBook.local", Dispatchers.Unconfined, resolver, includeCarrierGradeNat = false))
+        }
+
+    @Test
     fun belowAndroid17NothingIsEnforced() {
         // JVM unit tests see Build.VERSION.SDK_INT = 0.
         assertFalse(LocalNetworkAccess.applies)
