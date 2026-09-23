@@ -13,9 +13,10 @@ import { z } from "zod";
  * history. This keeps the named schema stable while tolerating enrichment.
  */
 
-// Some service methods (e.g. `listWorkflowsWithStats`) JSON-serialize
-// timestamps to ISO strings before enriching with aggregate run stats.
-// Accept both `Date` and `string` so the serializer validates either.
+// Timestamps are `Date`s (serialized as ISO-8601). `listWorkflowsWithStats`
+// reads raw SQL and converts its Postgres timestamp text with `pgDate` first
+// (utils/pg-timestamp.ts). Strings are still accepted so an already-serialized
+// ISO value validates too.
 const flexibleTimestamp = z.union([z.date(), z.string()]).describe("ISO-8601 timestamp");
 
 export const WorkflowSchema = z

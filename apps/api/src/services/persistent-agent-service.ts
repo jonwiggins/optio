@@ -363,7 +363,11 @@ export async function listInboxSummary(agentId: string) {
   const [row] = await db
     .select({
       pending: count(persistentAgentMessages.id),
-      oldest: sql<Date | null>`MIN(${persistentAgentMessages.receivedAt})`,
+      // mapWith: a bare sql aggregate comes back as Postgres text
+      // ("2026-09-23 01:22:37.388801+00"), not a Date — see utils/pg-timestamp.
+      oldest: sql<Date | null>`MIN(${persistentAgentMessages.receivedAt})`.mapWith(
+        persistentAgentMessages.receivedAt,
+      ),
     })
     .from(persistentAgentMessages)
     .where(
@@ -374,7 +378,7 @@ export async function listInboxSummary(agentId: string) {
     );
   return {
     pending: Number(row?.pending ?? 0),
-    oldest: (row?.oldest as Date | null) ?? null,
+    oldest: row?.oldest ?? null,
   };
 }
 

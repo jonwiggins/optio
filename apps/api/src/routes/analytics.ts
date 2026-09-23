@@ -18,6 +18,7 @@ import {
   getFailureAnalytics,
   getPrAnalytics,
 } from "../services/analytics-service.js";
+import { pgIso } from "../utils/pg-timestamp.js";
 
 // Every row that can carry AI spend, normalised to the `tasks` cost columns so
 // the /costs queries below read one source:
@@ -451,7 +452,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
           modelUsed: r.model_used,
           repoAvgCost: parseFloat(r.repo_avg_cost) || 0,
           costRatio: parseFloat(r.cost_ratio) || 0,
-          createdAt: r.created_at,
+          createdAt: pgIso(r.created_at),
         })),
         modelSuggestions: modelSuggestions.map((r) => ({
           repoUrl: r.repo_url,
@@ -470,7 +471,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
           inputTokens: parseInt(r.input_tokens) || 0,
           outputTokens: parseInt(r.output_tokens) || 0,
           modelUsed: r.model_used,
-          createdAt: r.created_at,
+          createdAt: pgIso(r.created_at),
         })),
       });
     },
