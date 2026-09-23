@@ -19,6 +19,16 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** The client-side state filter (iOS `filtered`): "" = all, `unreviewed`, or a review state. */
+internal fun filterPullRequests(prs: List<PullRequestSummary>, filter: String): List<PullRequestSummary> =
+    prs.filter { pr ->
+        when (filter) {
+            "" -> true
+            "unreviewed" -> pr.review == null
+            else -> pr.review?.state == filter
+        }
+    }
+
 /** One-off things a screen's model asks the UI to do (toast, open a screen, leave). */
 internal sealed interface ScreenEvent {
     data class Toast(val message: String) : ScreenEvent
@@ -66,14 +76,7 @@ internal class ReviewsListViewModel(private val api: ApiClient) : ViewModel() {
     private var loadJob: Job? = null
 
     /** The PRs the state filter keeps. */
-    fun filtered(data: Data, filter: String = _ui.value.stateFilter): List<PullRequestSummary> =
-        data.prs.filter { pr ->
-            when (filter) {
-                "" -> true
-                "unreviewed" -> pr.review == null
-                else -> pr.review?.state == filter
-            }
-        }
+    fun filtered(data: Data, filter: String = _ui.value.stateFilter): List<PullRequestSummary> = filterPullRequests(data.prs, filter)
 
     /** Loads in the background (first show, the section coming back, a filter change). */
     fun refresh() {

@@ -27,7 +27,8 @@ import kotlinx.serialization.json.JsonObject
  *    `catchUp: true` replay is skipped: REST history is canonical);
  * 2. backfills history over REST ([start]'s `history`);
  * 3. buffers live frames until history has merged, then drops the ones history already has
- *    ([LogMerge.merge]); later frames append, skipping an exact repeat of the last line;
+ *    ([LogMerge.absorb]); later frames append, unless they are the late echo of a row the history
+ *    response already carried (the row is stamped on insert, its frame is published just after);
  * 4. after the socket reconnects (the client retries every 3 s), re-reads history to fill the gap
  *    ([LogMerge.reload]); the owner calls [reloadHistory] too when a new run starts.
  *
@@ -65,6 +66,9 @@ internal class RunLogStream(
     private var pump: Job? = null
     private var historyJob: Job? = null
     private var pending = mutableListOf<AgentLogEntry>()
+
+    /** The newest history rows no live frame has matched yet: a late frame of one is dropped. */
+    private var recentHistory = mutableListOf<AgentLogEntry>()
     private var merged = false
     private var opens = 0
     private var history: (suspend () -> List<AgentLogEntry>)? = null
@@ -79,6 +83,7 @@ internal class RunLogStream(
         this.history = history
         merged = false
         pending = mutableListOf()
+        recentHistory = mutableListOf()
         opens = 0
         if (wsPath != null) {
             val ws = openSocket(wsPath)
@@ -89,7 +94,9 @@ internal class RunLogStream(
         historyJob = scope.launch {
             try {
                 val rows = history()
-                _entries.value = LogMerge.merge(rows, pending)
+                val pool = rows.toMutableList()
+                _entries.value = rows + LogMerge.absorb(pool, pending)
+                recentHistory = pool.takeLast(LogMerge.RECENT_ROWS).toMutableList()
                 _error.value = null
             } catch (e: CancellationException) {
                 throw e
@@ -113,7 +120,10 @@ internal class RunLogStream(
             } catch (_: Exception) {
                 return@launch
             }
-            _entries.value = LogMerge.reload(rows, _entries.value)
+            val pool = rows.toMutableList()
+            val last = rows.lastOrNull()?.timestamp.orEmpty()
+            _entries.value = rows + LogMerge.absorb(pool, _entries.value).filter { it.timestamp > last }
+            recentHistory = pool.takeLast(LogMerge.RECENT_ROWS).toMutableList()
             _error.value = null
         }
     }
@@ -162,6 +172,7 @@ internal class RunLogStream(
             pending += entry
             return
         }
+        if (LogMerge.absorb(recentHistory, listOf(entry)).isEmpty()) return
         val last = _entries.value.lastOrNull()
         if (last != null && last.content == entry.content && last.type == entry.type && last.timestamp == entry.timestamp) return
         _entries.value = _entries.value + entry
@@ -177,6 +188,9 @@ internal class RunLogStream(
 internal object LogMerge {
     const val MATCH_WINDOW_MS = 5_000L
 
+    /** How many of the newest history rows stay matchable by late live frames. */
+    const val RECENT_ROWS = 50
+
     fun sameLine(a: AgentLogEntry, b: AgentLogEntry): Boolean {
         if (a.type != b.type || a.content != b.content) return false
         val ta = ReviewDates.parse(a.timestamp)
@@ -185,22 +199,12 @@ internal object LogMerge {
         return abs(ta.toEpochMilli() - tb.toEpochMilli()) <= MATCH_WINDOW_MS
     }
 
-    /** [history] then the [live] lines it does not already contain, in arrival order. */
-    fun merge(history: List<AgentLogEntry>, live: List<AgentLogEntry>): List<AgentLogEntry> =
-        history + unmatched(history, live)
-
     /**
-     * A fresh [history] (latest run) plus the lines on screen it does not contain and that are newer
-     * than its last line: live lines not persisted yet survive, an older run's lines drop out.
+     * The [lines] that [pool] does not contain, in order. Each pool row absorbs at most one line and
+     * is removed from [pool] when it does.
      */
-    fun reload(history: List<AgentLogEntry>, current: List<AgentLogEntry>): List<AgentLogEntry> {
-        val last = history.lastOrNull()?.timestamp.orEmpty()
-        return history + unmatched(history, current).filter { it.timestamp > last }
-    }
-
-    private fun unmatched(history: List<AgentLogEntry>, lines: List<AgentLogEntry>): List<AgentLogEntry> {
-        val pool = history.toMutableList()
-        return lines.filter { line ->
+    fun absorb(pool: MutableList<AgentLogEntry>, lines: List<AgentLogEntry>): List<AgentLogEntry> =
+        lines.filter { line ->
             val index = pool.indexOfFirst { sameLine(it, line) }
             if (index >= 0) {
                 pool.removeAt(index)
@@ -209,6 +213,18 @@ internal object LogMerge {
                 true
             }
         }
+
+    /** [history] then the [live] lines it does not already contain, in arrival order. */
+    fun merge(history: List<AgentLogEntry>, live: List<AgentLogEntry>): List<AgentLogEntry> =
+        history + absorb(history.toMutableList(), live)
+
+    /**
+     * A fresh [history] (latest run) plus the lines on screen it does not contain and that are newer
+     * than its last line: live lines not persisted yet survive, an older run's lines drop out.
+     */
+    fun reload(history: List<AgentLogEntry>, current: List<AgentLogEntry>): List<AgentLogEntry> {
+        val last = history.lastOrNull()?.timestamp.orEmpty()
+        return history + absorb(history.toMutableList(), current).filter { it.timestamp > last }
     }
 }
 

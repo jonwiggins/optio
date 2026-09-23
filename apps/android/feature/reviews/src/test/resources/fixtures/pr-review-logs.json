@@ -1,0 +1,49 @@
+{
+  "logs": [
+    {
+      "id": "log-1",
+      "taskId": null,
+      "workflowRunId": null,
+      "prReviewRunId": "run-initial-1",
+      "stream": "stdout",
+      "content": "Reviewing e2e-org/e2e-repo#138 at c41d0a9",
+      "logType": "system",
+      "metadata": null,
+      "timestamp": "2026-09-22T16:06:12.114Z"
+    },
+    {
+      "id": "log-2",
+      "taskId": null,
+      "workflowRunId": null,
+      "prReviewRunId": "run-initial-1",
+      "stream": "stdout",
+      "content": "{\"file_path\":\"apps/web/src/app/activity/page.tsx\"}",
+      "logType": "tool_use",
+      "metadata": { "toolName": "Read", "summary": "apps/web/src/app/activity/page.tsx" },
+      "timestamp": "2026-09-22T16:07:40.500Z"
+    },
+    {
+      "id": "log-3",
+      "taskId": null,
+      "workflowRunId": null,
+      "prReviewRunId": "run-initial-1",
+      "stream": "stdout",
+      "content": "The pagination works, but **offset** is never reset when a filter changes.",
+      "logType": "text",
+      "metadata": null,
+      "timestamp": "2026-09-22T16:30:58.020Z"
+    },
+    {
+      "id": "log-4",
+      "taskId": null,
+      "workflowRunId": null,
+      "prReviewRunId": "run-initial-1",
+      "stream": "stdout",
+      "content": "draft saved",
+      "logType": "checkpoint",
+      "metadata": null,
+      "timestamp": "2026-09-22 16:31:04.9+00"
+    }
+  ],
+  "runId": "run-initial-1"
+}

@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -46,13 +48,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,6 +70,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -352,11 +355,9 @@ private fun ReviewHeader(
     onOpenPr: () -> Unit,
 ) {
     val stateTone = ReviewFormat.stateTone(review.state)
-    val secondary = when {
-        review.state == "failed" && !review.errorMessage.isNullOrEmpty() -> review.errorMessage
-        review.isWorking -> ReviewFormat.workingHint(review.state)
-        else -> null
-    }
+    val failure = review.errorMessage?.takeIf { review.state == "failed" && it.isNotEmpty() }
+    // Prose, so under the pipeline in the body face (iOS sets it in the header's mono line).
+    val hint = failure ?: ReviewFormat.workingHint(review.state).takeIf { review.isWorking }
     Column(Modifier.fillMaxWidth()) {
         DetailHeader(
             state = ReviewFormat.stateLabel(review.state),
@@ -370,7 +371,6 @@ private fun ReviewHeader(
                 status?.reviewStatus?.let { "review ${it.replace('_', ' ')}" },
                 status?.prState?.takeIf { it != "open" }?.let { "PR $it" },
             ),
-            secondary = secondary?.let { androidx.compose.ui.text.AnnotatedString(it) },
             needsYou = ReviewFormat.needsYou(review.state),
         ) {
             if (live) StateDot(Tone.WORKING, size = 6.dp, modifier = Modifier.testTag("live-dot"))
@@ -384,6 +384,16 @@ private fun ReviewHeader(
             failed = ReviewFormat.pipelineFailed(review.state),
             modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s),
         )
+        if (hint != null) {
+            Text(
+                hint,
+                style = OptioTheme.type.footnote,
+                color = if (failure != null) OptioTheme.colors.red else OptioTheme.colors.secondaryLabel,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.xs).testTag("review-hint"),
+            )
+        }
     }
 }
 
@@ -417,20 +427,15 @@ private fun DraftTab(
             .padding(bottom = Spacing.xl)
             .testTag("draft-tab"),
     ) {
-        GroupedSection(header = "Verdict") {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.s),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-            ) {
-                ReviewFormat.verdicts.forEach { verdict ->
-                    VerdictChip(
-                        verdict = verdict,
-                        selected = draft.verdict == verdict,
-                        enabled = editable,
-                        onClick = { actions.onVerdict(verdict) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+        GroupedSection(header = "Verdict", modifier = Modifier.selectableGroup()) {
+            ReviewFormat.verdicts.forEachIndexed { index, verdict ->
+                if (index > 0) InsetDivider()
+                VerdictRow(
+                    verdict = verdict,
+                    selected = draft.verdict == verdict,
+                    enabled = editable,
+                    onClick = { actions.onVerdict(verdict) },
+                )
             }
         }
         GroupedSection(header = "Review summary") {
@@ -471,36 +476,39 @@ private fun DraftTab(
     }
 }
 
+/** One verdict as a radio row (iOS: three tinted buttons), tinted by its tone when chosen. */
 @Composable
-private fun VerdictChip(
+private fun VerdictRow(
     verdict: String,
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
+    val colors = OptioTheme.colors
     val tone = ReviewFormat.verdictTone(verdict)
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        enabled = enabled,
-        label = {
-            Text(
-                ReviewFormat.verdictLabel(verdict),
-                style = OptioTheme.type.caption.medium(),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        leadingIcon = { Icon(ReviewFormat.verdictIcon(verdict), contentDescription = null, modifier = Modifier.size(16.dp)) },
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = tone.color.copy(alpha = 0.16f),
-            selectedLabelColor = tone.textColor,
-            selectedLeadingIconColor = tone.textColor,
-            disabledSelectedContainerColor = tone.color.copy(alpha = 0.10f),
-        ),
-        modifier = modifier.testTag("verdict-$verdict"),
-    )
+    val tint = when {
+        selected -> tone.textColor
+        enabled -> colors.label
+        else -> colors.secondaryLabel
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = Spacing.l, vertical = Spacing.m)
+            .testTag("verdict-$verdict"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.m),
+    ) {
+        Icon(ReviewFormat.verdictIcon(verdict), contentDescription = null, tint = if (selected) tone.textColor else colors.secondaryLabel, modifier = Modifier.size(20.dp))
+        Text(ReviewFormat.verdictLabel(verdict), style = OptioTheme.type.body, color = tint, modifier = Modifier.weight(1f))
+        RadioButton(
+            selected = selected,
+            onClick = null,
+            enabled = enabled,
+            colors = RadioButtonDefaults.colors(selectedColor = tone.color, disabledSelectedColor = tone.color.copy(alpha = 0.6f)),
+        )
+    }
 }
 
 @Composable
