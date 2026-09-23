@@ -60,6 +60,7 @@ import dev.optio.core.ui.components.DetailTabs
 import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.components.StateDot
+import dev.optio.core.ui.components.Truncation
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.mono
 import dev.optio.core.ui.components.rememberConfirmState
@@ -285,8 +286,10 @@ internal fun AgentHeaderView(
                 agent.lastTurnAt?.let { "last turn ${it.sinceDescription(now)}" },
                 Cost.formatIfNonZero(agent.totalCostUsd),
             ),
-        // DetailHeader sets its second line in mono (paths, branches); a description is prose.
+        // DetailHeader sets its second line in mono (paths, branches) and cuts it at the start; a
+        // description is prose, cut at the end.
         secondary = secondary?.let(::prose),
+        secondaryTruncation = Truncation.END,
         needsYou = needsYou,
         modifier = modifier,
     ) {

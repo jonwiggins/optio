@@ -39,6 +39,10 @@ import dev.optio.core.ui.usage.ObservesUsage
  * · Sonnet`), an optional mono [secondary] line (path, branch, PR), and a single accent row only
  * when the thing [needsYou]. [accessory] sits at the end of the badge row (a PR link button).
  *
+ * [secondaryTruncation] cuts a [secondary] line that doesn't fit: at the start by default, so a
+ * path keeps its leaf; free text such as a description reads better cut at the end
+ * ([Truncation.END]).
+ *
  * [showsUsage] adds the shared Claude usage pill ([AccountUsagePill]) after the secondary line (on
  * the same line when both fit) and keeps the usage poller running while the header is on screen
  * ([ObservesUsage]). Both need `LocalUsageStore`; without it the pill is simply absent.
@@ -51,6 +55,7 @@ fun DetailHeader(
     tone: Tone? = null,
     line: AnnotatedString? = null,
     secondary: AnnotatedString? = null,
+    secondaryTruncation: Truncation = Truncation.HEAD,
     needsYou: String? = null,
     showsUsage: Boolean = false,
     accessory: @Composable RowScope.() -> Unit = {},
@@ -84,10 +89,10 @@ fun DetailHeader(
                     verticalArrangement = Arrangement.spacedBy(Spacing.xs),
                     itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
-                    SecondaryLine(secondary, Modifier.padding(end = Spacing.s))
+                    SecondaryLine(secondary, secondaryTruncation, Modifier.padding(end = Spacing.s))
                     AccountUsagePill()
                 }
-                secondary != null -> SecondaryLine(secondary)
+                secondary != null -> SecondaryLine(secondary, secondaryTruncation)
                 showsUsage -> AccountUsagePill()
             }
             if (needsYou != null) {
@@ -102,13 +107,13 @@ fun DetailHeader(
 }
 
 @Composable
-private fun SecondaryLine(text: AnnotatedString, modifier: Modifier = Modifier) {
+private fun SecondaryLine(text: AnnotatedString, truncation: Truncation, modifier: Modifier = Modifier) {
     Text(
         text,
         style = OptioTheme.type.monoFootnote,
         color = OptioTheme.colors.secondaryLabel,
         maxLines = 1,
-        overflow = TextOverflow.StartEllipsis,
+        overflow = truncation.overflow,
         modifier = modifier,
     )
 }
