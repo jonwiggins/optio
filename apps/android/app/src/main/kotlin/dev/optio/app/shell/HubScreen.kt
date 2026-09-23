@@ -1,5 +1,10 @@
 package dev.optio.app.shell
 
+import androidx.compose.ui.unit.sp
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,7 +22,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.optio.core.data.LocalSessionStore
@@ -125,7 +129,17 @@ private fun HubSwitcher(
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = sections.size),
                 icon = {},
                 modifier = Modifier.testTag("section-${section.name.lowercase()}"),
-                label = { Text(section.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                // Four segments ("Connections") don't fit a phone at the label size: shrink to fit
+                // rather than truncate.
+                label = {
+                    val style = LocalTextStyle.current
+                    BasicText(
+                        section.label,
+                        style = style.copy(color = LocalContentColor.current),
+                        maxLines = 1,
+                        autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = style.fontSize),
+                    )
+                },
             )
         }
     }
