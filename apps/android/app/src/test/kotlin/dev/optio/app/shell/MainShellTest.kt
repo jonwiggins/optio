@@ -1,12 +1,17 @@
 package dev.optio.app.shell
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -25,6 +30,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -90,5 +96,31 @@ class MainShellTest {
         compose.runOnIdle { router.open(Section.MACHINES) }
         compose.onNodeWithTag("hub-library").assertIsDisplayed()
         compose.onNodeWithTag("section-machines").assertIsSelected()
+    }
+
+    /**
+     * QA: at font scale 1.3 the Library switcher showed "Connectio" (the shrink-to-fit floor was
+     * in sp, so it grew with the font scale). Every hub label must fit its segment.
+     */
+    @Test
+    @Config(qualifiers = RobolectricDeviceQualifiers.Pixel7, fontScale = 1.3f)
+    fun hubLabelsFitAtALargeFontScale() {
+        val session = SessionStore(ServerRegistry.inMemory(), scope)
+        val router = AppRouter()
+        compose.setContent {
+            CompositionLocalProvider(LocalSessionStore provides session) {
+                OptioTheme { MainShell(router = router) }
+            }
+        }
+        for (tab in listOf(Tab.WORK, Tab.LIBRARY, Tab.INSIGHTS)) {
+            compose.onNodeWithTag("tab-${tab.name.lowercase()}").performClick()
+            for (section in tab.sections) {
+                val label = hasText(section.label) and hasAnyAncestor(hasTestTag("section-${section.name.lowercase()}"))
+                val node = compose.onNode(label, useUnmergedTree = true).fetchSemanticsNode()
+                val layouts = mutableListOf<TextLayoutResult>()
+                node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
+                assertFalse("${section.label} is cut off at font scale 1.3", layouts.single().hasVisualOverflow)
+            }
+        }
     }
 }

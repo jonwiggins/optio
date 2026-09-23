@@ -1,6 +1,5 @@
 package dev.optio.app.shell
 
-import androidx.compose.ui.unit.sp
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.foundation.text.TextAutoSize
@@ -21,7 +20,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.optio.core.data.LocalSessionStore
@@ -130,17 +131,24 @@ private fun HubSwitcher(
                 icon = {},
                 modifier = Modifier.testTag("section-${section.name.lowercase()}"),
                 // Four segments ("Connections") don't fit a phone at the label size: shrink to fit
-                // rather than truncate.
+                // rather than truncate. The floor is in dp, not sp: an sp floor grows with the
+                // font scale (at 1.3 "Connections" still didn't fit and was clipped mid-word).
+                // Past the floor (very large font scales) the label ends in an ellipsis.
                 label = {
                     val style = LocalTextStyle.current
+                    val floor = with(LocalDensity.current) { HUB_LABEL_MIN.toSp() }
                     BasicText(
                         section.label,
                         style = style.copy(color = LocalContentColor.current),
                         maxLines = 1,
-                        autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = style.fontSize),
+                        overflow = TextOverflow.Ellipsis,
+                        autoSize = TextAutoSize.StepBased(minFontSize = floor, maxFontSize = style.fontSize),
                     )
                 },
             )
         }
     }
 }
+
+/** The smallest a hub segment label shrinks to (in dp, so it holds at every font scale). */
+private val HUB_LABEL_MIN = 9.dp
