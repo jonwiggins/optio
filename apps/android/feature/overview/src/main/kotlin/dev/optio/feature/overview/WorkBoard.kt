@@ -45,7 +45,7 @@ internal fun LazyListScope.workBoard(
     onOpenView: (WorkView) -> Unit,
     onOpenRow: (WorkRow) -> Unit,
     onOpenPr: (String) -> Unit,
-    onNewWork: () -> Unit,
+    onNewWork: (() -> Unit)?,
     onRetry: () -> Unit,
 ) {
     val counts = feed.counts
@@ -91,7 +91,7 @@ internal fun LazyListScope.workBoard(
         title = "Active now",
         detail = if (active.isEmpty()) null else "${feed.count(WorkView.ACTIVE)}",
         action = { onOpenView(WorkView.ACTIVE) },
-        trailing = { NewWorkLink(onNewWork) },
+        trailing = onNewWork?.let { newWork -> { NewWorkLink(newWork) } },
     )
     if (active.isEmpty()) {
         plainNote("board-active-empty", if (feed.placeholder) "Loading…" else "Nothing running or waiting on you right now.", centered = true)

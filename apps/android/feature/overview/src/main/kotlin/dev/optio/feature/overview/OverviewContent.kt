@@ -86,7 +86,8 @@ internal class OverviewActions(
     val onOpenSection: (Section) -> Unit = {},
     val onOpen: (NavKey) -> Unit = {},
     val onOpenExternal: (String) -> Unit = {},
-    val onNewWork: () -> Unit = {},
+    /** Null hides every "New work" entry (viewers are read-only). */
+    val onNewWork: (() -> Unit)? = {},
     val onManageServers: () -> Unit = {},
     val onSwitchServer: (String) -> Unit = {},
 )
@@ -215,7 +216,7 @@ private fun LazyListScope.content(
                 title = "No tasks yet",
                 icon = Icons.Outlined.Checklist,
                 message = "Start work that opens a PR in one of your repos.",
-                actionTitle = "New work",
+                actionTitle = if (actions.onNewWork != null) "New work" else null,
                 action = actions.onNewWork,
             )
         }
@@ -382,7 +383,7 @@ private fun Subtitle(c: WorkCounts) {
 @Composable
 private fun Welcome(
     repoCount: Int?,
-    onNewWork: () -> Unit,
+    onNewWork: (() -> Unit)?,
 ) {
     val colors = OptioTheme.colors
     Column(
@@ -404,11 +405,13 @@ private fun Welcome(
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 360.dp),
         )
-        Button(
-            onClick = onNewWork,
-            colors = ButtonDefaults.buttonColors(containerColor = colors.label, contentColor = colors.page),
-            modifier = Modifier.testTag("welcome-new-work"),
-        ) { Text("New work") }
+        if (onNewWork != null) {
+            Button(
+                onClick = onNewWork,
+                colors = ButtonDefaults.buttonColors(containerColor = colors.label, contentColor = colors.page),
+                modifier = Modifier.testTag("welcome-new-work"),
+            ) { Text("New work") }
+        }
         UsageTokenBanners()
     }
 }
