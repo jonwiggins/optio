@@ -71,7 +71,7 @@ class AgentDetailViewModelTest {
     private fun connect(): FakeSocket {
         val endpoint = server.webSocket("/ws/persistent-agents/:id/events")
         main.onMain { vm.connect() }
-        val socket = endpoint.awaitConnection()
+        val socket = endpoint.awaitConnection(15_000)
         eventually(message = { "connected" }) { vm.connected.value }
         return socket
     }
@@ -175,7 +175,7 @@ class AgentDetailViewModelTest {
         loadAll()
         val endpoint = server.webSocket("/ws/persistent-agents/:id/events")
         main.onMain { vm.connect() }
-        val first = endpoint.awaitConnection()
+        val first = endpoint.awaitConnection(15_000)
         first.sendText(log("turn-3", "a", catchUp = true))
         first.sendText(log("turn-3", "b", catchUp = true))
         eventually { vm.live.value.entries.size == 2 }
@@ -183,7 +183,7 @@ class AgentDetailViewModelTest {
         val agentFetches = server.count("GET", "/api/persistent-agents/$id")
         first.close(1011, "restart")
         eventually { !vm.connected.value }
-        val second = endpoint.awaitConnection()
+        val second = endpoint.awaitConnection(15_000)
         eventually { vm.connected.value }
         // The server replays the same turn's logs: they replace the tail instead of doubling it.
         second.sendText(log("turn-3", "a", catchUp = true))

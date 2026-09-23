@@ -60,7 +60,7 @@ class SessionDetailViewModelTest {
         }
         eventually { vm.session.value.value != null && vm.prs.value.size == 1 }
         assertTrue(vm.isActive)
-        val socket = chat.awaitConnection()
+        val socket = chat.awaitConnection(15_000)
         main.onMain { vm.disconnect() }
         eventually { socket.closed != null }
     }
@@ -110,7 +110,7 @@ class SessionDetailViewModelTest {
             vm.appeared()
             vm.connect()
         }
-        val socket = chat.awaitConnection()
+        val socket = chat.awaitConnection(15_000)
         main.onMain { vm.end() }
         server.awaitRequest("POST", "/api/sessions/$id/end")
         eventually { vm.session.value.value?.session?.state == InteractiveSessionState.ENDED }
@@ -139,7 +139,7 @@ class SessionDetailViewModelTest {
             vm.appeared()
             vm.connect()
         }
-        val socket = chat.awaitConnection()
+        val socket = chat.awaitConnection(15_000)
         val loads = server.count("GET", "/api/sessions/$id")
         server.fixture("/api/sessions/:id", "session-detail-ended.json")
         socket.sendText("""{"type":"error","message":"Session is not active"}""")

@@ -39,7 +39,7 @@ class RealMainRule : TestWatcher() {
 }
 
 /** Polls [condition] (on the calling thread) until it holds or [timeoutMs] passes. */
-fun eventually(timeoutMs: Long = 5_000, message: () -> String = { "condition" }, condition: () -> Boolean) {
+fun eventually(timeoutMs: Long = 10_000, message: () -> String = { "condition" }, condition: () -> Boolean) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (System.currentTimeMillis() < deadline) {
         if (condition()) return

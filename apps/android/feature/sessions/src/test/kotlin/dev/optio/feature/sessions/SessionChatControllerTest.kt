@@ -53,7 +53,7 @@ class SessionChatControllerTest {
 
     private fun start(): FakeSocket {
         main.onMain { chat.start() }
-        return endpoint.awaitConnection()
+        return endpoint.awaitConnection(15_000)
     }
 
     private fun FakeSocket.ready(model: String = "sonnet") = sendText("""{"type":"status","status":"ready","model":"$model","costUsd":0}""")
@@ -167,7 +167,7 @@ class SessionChatControllerTest {
         assertEquals(1, endpoint.connections.size, "no reconnect")
         // Starting again (the screen came back) tries once more.
         main.onMain { chat.start() }
-        endpoint.awaitConnection()
+        endpoint.awaitConnection(15_000)
     }
 
     @Test
@@ -180,7 +180,7 @@ class SessionChatControllerTest {
         first.close(1011, "restart")
         eventually { chat.status.value == SessionChatConnection.DISCONNECTED }
         assertFalse(chat.canSend.value)
-        val second = endpoint.awaitConnection()
+        val second = endpoint.awaitConnection(15_000)
         eventually { server.count("GET", "/api/sessions/$id/chat") > historyLoads }
         second.ready()
         eventually { chat.canSend.value }

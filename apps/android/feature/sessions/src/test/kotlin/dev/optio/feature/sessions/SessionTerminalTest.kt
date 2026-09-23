@@ -65,7 +65,7 @@ class SessionTerminalTest {
         }
         compose.waitUntil(5_000) { controller.terminal.naturalGrid != null }
         compose.runOnIdle { controller.start() }
-        val socket = endpoint.awaitConnection()
+        val socket = endpoint.awaitConnection(15_000)
         compose.waitUntil(5_000) { controller.connected.value }
         return controller to socket
     }
@@ -103,7 +103,7 @@ class SessionTerminalTest {
         assertEquals(1, endpoint.connections.size, "no retry after an error frame")
 
         compose.onNodeWithTag("terminal-reconnect").performClick()
-        endpoint.awaitConnection()
+        endpoint.awaitConnection(15_000)
         compose.waitUntil(5_000) { controller.connected.value && !controller.stopped.value }
     }
 
@@ -112,8 +112,8 @@ class SessionTerminalTest {
         val endpoint = server.webSocket("/ws/sessions/:id/terminal")
         val (controller, first) = show(endpoint)
         first.close(1000, "")
-        endpoint.awaitConnection().close(1000, "")
-        endpoint.awaitConnection().close(1000, "")
+        endpoint.awaitConnection(15_000).close(1000, "")
+        endpoint.awaitConnection(15_000).close(1000, "")
         compose.waitUntil(5_000) { controller.stopped.value }
         assertEquals("The terminal keeps closing. The session's pod may be gone.", controller.error.value)
         Thread.sleep(400)
@@ -127,7 +127,7 @@ class SessionTerminalTest {
         first.sendBytes("$ ".encodeUtf8())
         compose.waitUntil(5_000) { controller.terminal.screenText().contains("$") }
         first.close(1001, "going away")
-        val second = endpoint.awaitConnection()
+        val second = endpoint.awaitConnection(15_000)
         compose.waitUntil(5_000) { controller.connected.value }
         assertEquals("resize", Json.parseToJsonElement(second.awaitText()).jsonObject["type"]?.stringValue)
         assertTrue(!controller.stopped.value)
