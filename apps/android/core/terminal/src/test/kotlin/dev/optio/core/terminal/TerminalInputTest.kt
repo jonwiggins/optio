@@ -123,6 +123,52 @@ class TerminalInputTest {
     }
 
     @Test
+    fun gboardRecomposesCommittedLettersToAutocorrectThem() {
+        // The exact sequence Gboard sent on the emulator for "helo" + space in prose mode.
+        val c = ic(TerminalInputMode.Prose)
+        for (letter in listOf("h", "e", "l", "o")) c.commitText(letter, 1)
+        c.beginBatchEdit()
+        c.setComposingRegion(0, 4)
+        c.beginBatchEdit()
+        c.endBatchEdit()
+        c.commitText("hello ", 1)
+        c.endBatchEdit()
+        assertEquals("helo\u007flo ", sent.joinToString(""))
+        // Undo the autocorrect: the keyboard puts "helo " back.
+        events.clear()
+        c.beginBatchEdit()
+        c.setComposingRegion(0, 5)
+        c.commitText("helo", 1)
+        c.endBatchEdit()
+        assertEquals("\u007f\u007f\u007fo ", sent.joinToString(""))
+    }
+
+    @Test
+    fun proseBackspaceKeyDeletesFromTheMirror() {
+        val c = ic(TerminalInputMode.Prose)
+        c.commitText("ab", 1)
+        val now = SystemClock.uptimeMillis()
+        c.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0))
+        c.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0))
+        c.setComposingText("c", 1)
+        assertEquals("ab\u007fc", sent.joinToString(""))
+    }
+
+    @Test
+    fun proseLineEndsWithEnterOrAnyOtherKey() {
+        val c = ic(TerminalInputMode.Prose)
+        c.commitText("ls", 1)
+        key(KeyEvent.KEYCODE_ENTER)
+        events.clear()
+        c.setComposingText("x", 1) // a new line: nothing of "ls" is erased
+        assertEquals("x", sent.joinToString(""))
+        state.sendKey(TerminalKeyBarKey.Left.key) // the key bar moved the cursor: the mirror starts over
+        events.clear()
+        c.setComposingText("y", 1)
+        assertEquals("y", sent.joinToString(""))
+    }
+
+    @Test
     fun backspaceFromTheImeDeletes() {
         val c = ic(TerminalInputMode.Text)
         c.deleteSurroundingText(1, 0)
@@ -345,6 +391,20 @@ class TerminalInputTest {
         assertTrue(view.isFocused)
         assertTrue(state.isFocused)
         assertEquals(listOf("!"), events)
+    }
+
+    @Test
+    fun aFocusRequestBeforeTheViewExistsIsKeptUntilItAttaches() {
+        val early = TerminalState()
+        early.focus() // e.g. a deep link's ?compose=1, before the screen composed
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val v = OptioTerminalView(activity)
+        v.state = early // not attached to a window yet
+        assertFalse(v.isFocused)
+        activity.setContentView(v, ViewGroup.LayoutParams(1080, 2000))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(v.isFocused)
+        assertTrue(early.isFocused)
     }
 
     @Test

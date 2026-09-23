@@ -1,8 +1,10 @@
 package dev.optio.core.terminal.playground
 
 import android.content.Intent
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -61,8 +63,11 @@ import kotlinx.coroutines.delay
  * adb shell am start -S -n dev.optio.android/dev.optio.core.terminal.playground.TerminalPlaygroundActivity \
  *   [--es mode samples|echo|live] [--es sample colors|unicode|shell|claude|htop|mouse] \
  *   [--es grid fit|80x24|160x45] [--es theme system|light|dark] [--es input text|raw|prose] \
- *   [--es url http://10.0.2.2:4973 --es token dev --es terminal <uuid>] [--ez focus true]
+ *   [--es url http://127.0.0.1:4973 --es token dev --es terminal <uuid>] [--ez focus true]
  * ```
+ *
+ * For the live stream on an emulator, `adb reverse tcp:4973 tcp:4973` first (Android 17 blocks
+ * 10.0.2.2 without the local-network permission; loopback is fine), or install with `-g`.
  */
 class TerminalPlaygroundActivity : ComponentActivity() {
     private lateinit var model: PlaygroundModel
@@ -71,7 +76,15 @@ class TerminalPlaygroundActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         model = PlaygroundModel.obtain(PlaygroundConfig.from(intent), fresh = savedInstanceState == null)
-        setContent { PlaygroundScreen(model) }
+        setContent {
+            val dark = model.isDark(isSystemInDarkTheme())
+            LaunchedEffect(dark) {
+                val bars =
+                    if (dark) SystemBarStyle.dark(AndroidColor.TRANSPARENT) else SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+            }
+            PlaygroundScreen(model)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -105,7 +118,9 @@ internal data class PlaygroundConfig(
                 grid = parseGrid(extra("grid")),
                 theme = PlaygroundTheme.entries.firstOrNull { it.name.equals(extra("theme"), ignoreCase = true) } ?: PlaygroundTheme.System,
                 input = TerminalInputMode.entries.firstOrNull { it.name.equals(extra("input"), ignoreCase = true) } ?: TerminalInputMode.Text,
-                url = extra("url") ?: "http://10.0.2.2:4973",
+                // Loopback via `adb reverse tcp:4973 tcp:4973`: Android 17 blocks 10.0.2.2 without
+                // ACCESS_LOCAL_NETWORK.
+                url = extra("url") ?: "http://127.0.0.1:4973",
                 token = extra("token") ?: "dev",
                 terminal = extra("terminal") ?: "",
                 focus = intent?.getBooleanExtra("focus", false) ?: false,
@@ -157,9 +172,20 @@ internal class PlaygroundModel private constructor(config: PlaygroundConfig) {
             live?.onInteraction()
         }
         terminal.onGridSizeChanged = { live?.onGridSizeChanged(it) }
-        terminal.onNaturalGridChanged = { live?.onNaturalGridChanged() }
+        terminal.onNaturalGridChanged = {
+            live?.onNaturalGridChanged()
+            // Like a TUI on SIGWINCH: redraw the sample for the grid the view now has.
+            if (mode == PlaygroundMode.Samples && terminal.gridMode == TerminalGridMode.Fit) sample?.let { play(it) }
+        }
         apply(config)
     }
+
+    fun isDark(systemDark: Boolean): Boolean =
+        when (theme) {
+            PlaygroundTheme.System -> systemDark
+            PlaygroundTheme.Light -> false
+            PlaygroundTheme.Dark -> true
+        }
 
     fun apply(config: PlaygroundConfig) {
         theme = config.theme
@@ -195,8 +221,11 @@ internal class PlaygroundModel private constructor(config: PlaygroundConfig) {
         val s = TerminalSamples.byId(id) ?: return
         if (mode != PlaygroundMode.Samples) switchTo(PlaygroundMode.Samples)
         animating = false
-        terminal.reset()
         sample = id
+        // A TUI draws for the grid it has: in Fit mode wait until the view has laid out
+        // (onNaturalGridChanged plays it), or the screen would be drawn for 80×24 and sheared.
+        if (terminal.gridMode == TerminalGridMode.Fit && terminal.naturalGrid == null) return
+        terminal.reset()
         terminal.feed(s.render(terminal.grid))
     }
 
@@ -235,12 +264,7 @@ internal class PlaygroundModel private constructor(config: PlaygroundConfig) {
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun PlaygroundScreen(model: PlaygroundModel) {
-    val dark =
-        when (model.theme) {
-            PlaygroundTheme.System -> isSystemInDarkTheme()
-            PlaygroundTheme.Light -> false
-            PlaygroundTheme.Dark -> true
-        }
+    val dark = model.isDark(isSystemInDarkTheme())
     val fg = TerminalTheme.foreground(dark)
     MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
         Column(

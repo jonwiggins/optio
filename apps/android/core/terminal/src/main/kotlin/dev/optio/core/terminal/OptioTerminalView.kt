@@ -264,7 +264,8 @@ constructor(
         if (st != null) {
             st.applyTheme(dark)
             st.isFocused = isFocused
-            if (st.takeFocusRequest() && isAttachedToWindow) post { requestTerminalFocus(showKeyboard = true) }
+            // Not attached yet: onAttachedToWindow takes the request.
+            if (isAttachedToWindow && st.takeFocusRequest()) post { requestTerminalFocus(showKeyboard = true) }
         }
         relayout()
         invalidate()
@@ -307,7 +308,27 @@ constructor(
         }
     }
 
-    internal fun onUserInput() = restartBlink()
+    internal fun onUserInput() {
+        restartBlink()
+        // Input that didn't come through the keyboard's text path ends the prose mirror's line.
+        if (!imeEditing) inputConnection?.resetLine()
+    }
+
+    private var imeEditing = false
+
+    /** A latched Ctrl/Alt changed text the keyboard typed (the prose mirror no longer matches). */
+    internal var consumedLatch = false
+
+    /** Runs IME-originated sends: they are the mirror's own edits, not other input. */
+    internal fun imeInput(block: () -> Unit) {
+        val was = imeEditing
+        imeEditing = true
+        try {
+            block()
+        } finally {
+            imeEditing = was
+        }
+    }
 
     internal fun copyToClipboard(text: String) {
         val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
@@ -1022,6 +1043,7 @@ constructor(
     internal fun typeText(text: CharSequence) {
         val st = state ?: return
         if (text.isEmpty()) return
+        if (st.ctrlLatched || st.altLatched) consumedLatch = true
         val bytes = TerminalKeys.encodeTyped(text, ctrl = st.ctrlLatched, alt = st.altLatched)
         st.consumeLatches()
         st.userInput(bytes)
