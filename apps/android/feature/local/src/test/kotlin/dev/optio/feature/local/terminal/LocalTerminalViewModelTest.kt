@@ -212,9 +212,11 @@ class LocalTerminalViewModelTest {
             awaitReal("passive") { vm.streamState.value.foreignGrid == TerminalGrid(160, 45) }
             // No view has laid out in this test, so the phone's fit is unknown: a claim switches to
             // Fit but has nothing to send yet. Input still goes through.
+            assertNull(vm.viewChoice.value)
             vm.claim()
             runCurrent()
             assertEquals(TerminalSizing.Mode.Owner, vm.streamState.value.mode)
+            assertEquals(LocalSessionView.SCREEN, vm.viewChoice.value, "using the screen keeps it: a transcript arriving later won't swap the face")
             assertNull(vm.streamState.value.foreignGrid)
             vm.screen.sendText("ls\r")
             awaitReal("the input frame") { socket.received.isNotEmpty() }

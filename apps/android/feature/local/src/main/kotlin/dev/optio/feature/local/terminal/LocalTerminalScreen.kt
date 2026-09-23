@@ -144,7 +144,9 @@ fun LocalTerminalScreen(
         busy = busy,
         canMutate = Roles.canMutate,
         focusComposer = focusComposer,
-        snoozedUntil = loadState.value?.let { LocalPresentation.snoozedUntil(it, now) ?: vm.localSnoozeUntil() },
+        // Only while it sits in the needs-you queue (a finished, quiet run has nothing left to snooze).
+        snoozedUntil =
+            loadState.value?.takeIf(LocalPresentation::canSnooze)?.let { LocalPresentation.snoozedUntil(it, now) ?: vm.localSnoozeUntil() },
         actions =
             TerminalActions(
                 onBack = navigator::pop,

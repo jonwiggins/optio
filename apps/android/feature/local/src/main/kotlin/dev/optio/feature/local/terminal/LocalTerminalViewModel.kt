@@ -149,7 +149,10 @@ class LocalTerminalViewModel(
 
     init {
         screen.onInput = { bytes -> _stream.value?.sendInput(bytes) }
-        screen.onInteraction = { _stream.value?.onInteraction() }
+        screen.onInteraction = {
+            keepScreen()
+            _stream.value?.onInteraction()
+        }
         screen.onGridSizeChanged = { grid -> _stream.value?.onGridSizeChanged(grid) }
         screen.onNaturalGridChanged = { _stream.value?.onNaturalGridChanged() }
         viewModelScope.launch { load() }
@@ -320,7 +323,17 @@ class LocalTerminalViewModel(
 
     /** "Use this screen": take the PTY grid for this phone. */
     fun claim() {
+        keepScreen()
         _stream.value?.claim()
+    }
+
+    /**
+     * Using the Screen (a tap, a key, "Use this screen") counts as choosing it: a conversation that
+     * starts arriving meanwhile doesn't swap the face out from under the user's fingers. (iOS flips
+     * to the Transcript as soon as one exists.)
+     */
+    private fun keepScreen() {
+        if (_viewChoice.value == null) _viewChoice.value = LocalSessionView.SCREEN
     }
 
     /** "Reconnect" after the stream gave up. */
