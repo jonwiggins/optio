@@ -1,0 +1,19 @@
+{
+  "triggers": [
+    {
+      "id": "d15e9ef4-2a31-493d-8688-c076c1440d70",
+      "targetType": "local_blueprint",
+      "targetId": "b943e417-92ae-4103-978b-143dc3af3ffd",
+      "type": "schedule",
+      "config": {
+        "cronExpression": "0 7 * * 1-5"
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": "2026-09-23T13:00:00.000Z",
+      "createdAt": "2026-09-23T01:19:30.217Z",
+      "updatedAt": "2026-09-23T01:19:30.217Z"
+    }
+  ]
+}

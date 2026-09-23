@@ -29,14 +29,20 @@ object LocalPresentation {
         return tail.ifEmpty { dir }
     }
 
-    /** The daemon's attention reason in words (`attentionLabel` in terminal-card.tsx). */
+    /**
+     * The daemon's attention reason in words (`ATTENTION_LABELS` in the web's terminal-card.tsx;
+     * iOS knows the first five).
+     */
     fun attentionLabel(reason: String?): String =
         when (reason) {
             "stop" -> "waiting for you"
             "notification" -> "wants your attention"
             "bell" -> "rang the bell"
             "quiet" -> "gone quiet — probably waiting on you"
+            "finished" -> "command finished"
             "exit" -> "finished — review the result"
+            "done" -> "done — review the result"
+            "stale" -> "went quiet a while ago"
             else -> "needs you"
         }
 

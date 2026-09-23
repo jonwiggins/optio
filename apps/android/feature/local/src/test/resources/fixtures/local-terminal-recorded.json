@@ -1,0 +1,58 @@
+{
+  "terminal": {
+    "id": "5556918e-ae5a-4a41-8eed-5eebef2e10cc",
+    "hostId": "c88b691f-c2f0-4aa3-a48e-b5c8607ae9e1",
+    "userId": null,
+    "workspaceId": null,
+    "title": "Fix flaky tests",
+    "dir": "/Users/e2e/repos/e2e-repo",
+    "command": "claude -p \"Fix the flaky test format-date and open a PR\"",
+    "spec": {
+      "kind": "agent",
+      "mode": "headless",
+      "agent": "claude-code",
+      "prompt": "Fix the flaky test format-date and open a PR"
+    },
+    "state": "exited",
+    "pendingReason": null,
+    "exitCode": 0,
+    "errorMessage": null,
+    "attentionState": "needs_you",
+    "attentionReason": "done",
+    "spawnedBy": "blueprint",
+    "blueprintId": "b943e417-92ae-4103-978b-143dc3af3ffd",
+    "triggerId": null,
+    "ticketSource": null,
+    "ticketExternalId": null,
+    "ticketUrl": null,
+    "agentSessionId": "90c4d532-ad0f-492b-8dc1-04ec2aac7961",
+    "workflowRunId": null,
+    "taskId": null,
+    "preview": "Fixed: hourCycle \"h23\" keeps midnight at 00:00. PR: https://github.com/e2e-org/e2e-repo/pull/412",
+    "links": [
+      {
+        "url": "https://github.com/e2e-org/e2e-repo/pull/412",
+        "kind": "pr",
+        "provider": "github",
+        "label": "e2e-org/e2e-repo#412"
+      }
+    ],
+    "usage": {
+      "inputTokens": 18342,
+      "outputTokens": 2106,
+      "cacheReadTokens": 41210,
+      "cacheWriteTokens": 6402,
+      "turns": 2,
+      "model": "claude-haiku-4-5",
+      "costUsd": 0.0184,
+      "updatedAt": "2026-09-23T01:19:30.271Z"
+    },
+    "costUsd": null,
+    "lastActivityAt": "2026-09-23T01:19:30.271Z",
+    "snoozedUntil": null,
+    "createdAt": "2026-09-23T01:19:30.262Z",
+    "updatedAt": "2026-09-23T01:19:30.304Z",
+    "startedAt": "2026-09-23T01:19:30.275Z",
+    "endedAt": "2026-09-23T01:19:30.303Z"
+  }
+}

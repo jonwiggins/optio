@@ -179,7 +179,8 @@ internal fun AutomationContent(
                         if (busy) {
                             CircularProgressIndicator(Modifier.padding(horizontal = 12.dp).size(20.dp), strokeWidth = 2.dp)
                         } else {
-                            IconButton(onClick = onRun, modifier = Modifier.testTag("automation-run")) {
+                            // The server refuses to run a paused automation ("Blueprint is disabled").
+                            IconButton(onClick = onRun, enabled = data.automation.enabled, modifier = Modifier.testTag("automation-run")) {
                                 Icon(Icons.Outlined.PlayArrow, contentDescription = "Run now")
                             }
                         }
@@ -355,7 +356,7 @@ private fun AutomationBody(
                     TerminalRow(t, onClick = { navigator.push(LocalTerminalRoute(t.id)) })
                     if (i < data.runs.lastIndex) InsetDivider()
                 }
-                if (data.runs.isEmpty() && canMutate) {
+                if (data.runs.isEmpty() && canMutate && bp.enabled) {
                     TextButton(onClick = onRun, modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.s).testTag("run-now")) {
                         Icon(Icons.Outlined.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("Run it now", modifier = Modifier.padding(start = Spacing.s).weight(1f))

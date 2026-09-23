@@ -37,7 +37,11 @@ class LocalPresentationTest {
         assertEquals("waiting for you", LocalPresentation.attentionLabel("stop"))
         assertEquals("rang the bell", LocalPresentation.attentionLabel("bell"))
         assertEquals("finished — review the result", LocalPresentation.attentionLabel("exit"))
+        assertEquals("done — review the result", LocalPresentation.attentionLabel("done"))
+        assertEquals("command finished", LocalPresentation.attentionLabel("finished"))
+        assertEquals("went quiet a while ago", LocalPresentation.attentionLabel("stale"))
         assertEquals("needs you", LocalPresentation.attentionLabel(null))
+        assertEquals("needs you", LocalPresentation.attentionLabel("something-new"))
     }
 
     @Test

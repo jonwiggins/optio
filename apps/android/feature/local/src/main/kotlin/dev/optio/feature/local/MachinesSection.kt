@@ -296,7 +296,13 @@ internal fun AutomationMenu(
                 onDismiss()
                 action()
             }
-        DropdownMenuItem(text = { Text("Run now") }, leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) }, onClick = pick(onRun))
+        // A paused automation can't be run by hand (the server answers "Blueprint is disabled").
+        DropdownMenuItem(
+            text = { Text(if (automation.enabled) "Run now" else "Run now (paused)") },
+            leadingIcon = { Icon(Icons.Outlined.PlayArrow, null) },
+            onClick = pick(onRun),
+            enabled = automation.enabled,
+        )
         DropdownMenuItem(text = { Text("Edit") }, leadingIcon = { Icon(Icons.Outlined.Edit, null) }, onClick = pick(onEdit))
         DropdownMenuItem(
             text = { Text(if (automation.enabled) "Pause" else "Enable") },
