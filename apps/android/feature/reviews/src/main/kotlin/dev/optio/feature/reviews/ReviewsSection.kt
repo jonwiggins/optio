@@ -196,10 +196,12 @@ internal fun ReviewsContent(
             item(key = "filter") {
                 ChipPicker(options = ReviewFormat.stateOptions, selection = ui.stateFilter, onSelect = onStateFilter)
             }
+            if (state is LoadState.Failed) {
+                // Alone, or above PRs from an earlier load that are now stale.
+                item(key = "error") { ErrorRow(error = state.error, what = "pull requests", retry = onRetry) }
+            }
             when {
-                data == null && state is LoadState.Failed -> item(key = "error") {
-                    ErrorRow(error = state.error, what = "pull requests", retry = onRetry)
-                }
+                data == null && state is LoadState.Failed -> Unit
                 data == null -> item(key = "skeleton") { SkeletonRows() }
                 filtered.isEmpty() -> item(key = "empty") {
                     val label = ReviewFormat.stateOptions.firstOrNull { it.first == ui.stateFilter }?.second?.lowercase() ?: "matching"

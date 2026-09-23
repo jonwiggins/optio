@@ -1,0 +1,73 @@
+{
+  "items": [
+    {
+      "id": "b1f0e7c2-1d7a-4b6e-9d51-7f3a2c1e0a11",
+      "type": "action",
+      "timestamp": "2026-09-22T16:36:02.000Z",
+      "actor": {
+        "id": "7a1d0f3e-0000-4000-8000-000000000001",
+        "displayName": "Ada Admin",
+        "avatarUrl": null
+      },
+      "action": "task.retry",
+      "resourceType": "task",
+      "resourceId": "5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10",
+      "summary": "task.retry succeeded",
+      "details": { "taskId": "5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10", "reason": "flaky" }
+    },
+    {
+      "id": "8812",
+      "type": "task_event",
+      "timestamp": "2026-09-22T16:21:44.000Z",
+      "actor": null,
+      "action": "task:running→pr_opened",
+      "resourceType": "task",
+      "resourceId": "cdae1418-e285-4cf2-9fba-6b50bfcdd0f9",
+      "summary": "Task transitioned to pr_opened via agent_completed",
+      "details": { "fromState": "running", "toState": "pr_opened", "trigger": "agent_completed" }
+    },
+    {
+      "id": "3f4e5d6c-7b8a-4912-a3b4-c5d6e7f80912",
+      "type": "infra_event",
+      "timestamp": "2026-09-22T15:02:10.000Z",
+      "actor": null,
+      "action": "pod:crashed",
+      "resourceType": "pod",
+      "resourceId": "4fee1b30-8ebf-48a2-a8d2-1f937888c282",
+      "summary": "Pod optio-repo-mobile-app-0 crashed",
+      "details": {
+        "eventType": "crashed",
+        "podName": "optio-repo-mobile-app-0",
+        "message": "Back-off restarting failed container"
+      }
+    },
+    {
+      "id": "c0ffee00-1111-4222-8333-444455556666",
+      "type": "auth_event",
+      "timestamp": "2026-09-21T22:14:00.000Z",
+      "actor": null,
+      "action": "auth:github_failed",
+      "resourceType": "auth",
+      "resourceId": null,
+      "summary": "github auth failed: Bad credentials",
+      "details": { "tokenType": "github", "error": "Bad credentials" }
+    },
+    {
+      "id": "d2e3f4a5-b6c7-4d8e-9f01-a2b3c4d5e6f7",
+      "type": "action",
+      "timestamp": "2026-09-21T09:30:00.000Z",
+      "actor": {
+        "id": "7a1d0f3e-0000-4000-8000-000000000002",
+        "displayName": "Mia Member",
+        "avatarUrl": null
+      },
+      "action": "workflow.run",
+      "resourceType": "workflow",
+      "resourceId": "0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9",
+      "summary": "workflow.run succeeded",
+      "details": null
+    }
+  ],
+  "total": 127,
+  "stats": { "actions": 64, "taskEvents": 58, "authEvents": 1, "infraEvents": 4 }
+}

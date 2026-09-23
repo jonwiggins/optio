@@ -1,0 +1,31 @@
+{
+  "events": [
+    {
+      "id": "9b8a7c6d-5e4f-4321-8765-43210fedcba9",
+      "repoPodId": "4fee1b30-8ebf-48a2-a8d2-1f937888c282",
+      "repoUrl": "https://github.com/e2e-org/mobile-app",
+      "eventType": "crash_loop",
+      "podName": "optio-repo-e2e-org-mobile-app-e9b2",
+      "message": "Back-off restarting failed container main",
+      "createdAt": "2026-09-22T16:12:00.000Z"
+    },
+    {
+      "id": "8a7b6c5d-4e3f-4210-9876-543210fedcb8",
+      "repoPodId": "765b3ac4-c6d1-44b5-ae35-bb5a831da9f4",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "eventType": "restarted",
+      "podName": "optio-repo-e2e-org-e2e-repo-317e",
+      "message": "Manual restart via API",
+      "createdAt": "2026-09-22T14:40:00.000Z"
+    },
+    {
+      "id": "7a6b5c4d-3e2f-4109-8765-43210fedcba7",
+      "repoPodId": "765b3ac4-c6d1-44b5-ae35-bb5a831da9f4",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "eventType": "orphan_cleaned",
+      "podName": "optio-repo-e2e-org-e2e-repo-0001",
+      "message": null,
+      "createdAt": "2026-09-21T08:00:00.000Z"
+    }
+  ]
+}

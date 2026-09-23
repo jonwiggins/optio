@@ -158,6 +158,10 @@ internal fun AnalyticsContent(
             verticalArrangement = Arrangement.spacedBy(Spacing.l),
         ) {
             item(key = "period") { PeriodPicker(days = days, onDaysChange = onDays, contentPadding = PaddingValues(horizontal = Spacing.l, vertical = Spacing.xs)) }
+            // A failed reload keeps the last numbers on screen: say they're stale.
+            if (data != null && state is LoadState.Failed) {
+                item(key = "stale") { ErrorRow(error = state.error, what = "analytics", retry = onRetry) }
+            }
             when {
                 data == null && state is LoadState.Failed -> item(key = "error") {
                     if (state.error.isForbidden) AdminOnlyState(what = "Analytics") else ErrorRow(error = state.error, what = "analytics", retry = onRetry)
@@ -265,7 +269,7 @@ private fun AgentComparison(agents: List<AgentAnalyticsRow>) {
                 Column(Modifier.fillMaxWidth().padding(vertical = Spacing.s), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                         Text(
-                            (a.agentType ?: "?").replace('-', ' ').replaceFirstChar { it.titlecase(Locale.US) },
+                            agentLabel(a.agentType),
                             style = type.subheadline.medium(),
                             color = colors.label,
                             modifier = Modifier.weight(1f),
@@ -354,6 +358,12 @@ private fun LabeledRate(icon: ImageVector, label: String, value: String, detail:
         )
     }
 }
+
+/** "claude-code" → "Claude Code" (iOS `capitalized`). */
+internal fun agentLabel(agentType: String?): String =
+    (agentType ?: "?").replace('-', ' ').split(' ').joinToString(" ") { word ->
+        word.lowercase(Locale.US).replaceFirstChar { it.titlecase(Locale.US) }
+    }
 
 /** At most 28 characters, like the iOS bar labels. */
 internal fun shortMessage(message: String): String {

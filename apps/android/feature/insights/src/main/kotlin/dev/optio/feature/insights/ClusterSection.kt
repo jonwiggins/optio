@@ -205,7 +205,11 @@ internal fun ClusterContent(
                         SkeletonRows()
                     }
                 }
-                else -> clusterRows(overview, state, now, onTab, onOpenPod)
+                else -> {
+                    // The poll failed: the overview on screen is the last good one.
+                    state.error?.let { error -> item(key = "stale") { ErrorRow(error = error, what = "the cluster", retry = onRetry) } }
+                    clusterRows(overview, state, now, onTab, onOpenPod)
+                }
             }
         }
     }

@@ -1,0 +1,212 @@
+{
+  "summary": {
+    "totalCost": "2.1521",
+    "taskCount": 10,
+    "tasksWithCost": 10,
+    "avgCost": "0.2152",
+    "costTrend": "0.0",
+    "prevPeriodCost": "0.0000",
+    "days": 30
+  },
+  "forecast": {
+    "dailyAvgCost": "2.1521",
+    "monthCostSoFar": "2.1521",
+    "forecastedMonthTotal": "19.3689",
+    "daysRemaining": 8
+  },
+  "dailyCosts": [
+    {
+      "date": "2026-09-23",
+      "cost": 2.1521,
+      "taskCount": 10
+    }
+  ],
+  "costByRepo": [
+    {
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "totalCost": 2.0571,
+      "taskCount": 6
+    },
+    {
+      "repoUrl": "job:Nightly release notes",
+      "totalCost": 0.0643,
+      "taskCount": 2
+    },
+    {
+      "repoUrl": "/Users/e2e/repos/e2e-repo",
+      "totalCost": 0.0184,
+      "taskCount": 1
+    },
+    {
+      "repoUrl": "job:Triage Sentry alerts",
+      "totalCost": 0.0123,
+      "taskCount": 1
+    }
+  ],
+  "costByType": [
+    {
+      "taskType": "coding",
+      "totalCost": 1.6358,
+      "taskCount": 5
+    },
+    {
+      "taskType": "review",
+      "totalCost": 0.4213,
+      "taskCount": 1
+    },
+    {
+      "taskType": "job",
+      "totalCost": 0.0766,
+      "taskCount": 3
+    },
+    {
+      "taskType": "local-session",
+      "totalCost": 0.0184,
+      "taskCount": 1
+    }
+  ],
+  "costByModel": [
+    {
+      "model": "fake-model",
+      "totalCost": 2.1337,
+      "taskCount": 9,
+      "successRate": 67,
+      "avgCost": 0.23707777777777778,
+      "totalInputTokens": 900,
+      "totalOutputTokens": 225
+    },
+    {
+      "model": "claude-haiku-4-5",
+      "totalCost": 0.0184,
+      "taskCount": 1,
+      "successRate": 100,
+      "avgCost": 0.0184,
+      "totalInputTokens": 18342,
+      "totalOutputTokens": 2106
+    }
+  ],
+  "anomalies": [],
+  "modelSuggestions": [],
+  "topTasks": [
+    {
+      "id": "6241d1e4-cb9e-4876-bc33-3c7b8e787251",
+      "title": "Paginate the activity feed",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "taskType": "coding",
+      "state": "completed",
+      "costUsd": "0.8764",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "createdAt": "2026-09-23 00:47:43.464027+00"
+    },
+    {
+      "id": "e5a0e85e-ba35-4175-99f9-6ec9597ad5a7",
+      "title": "Add a dark mode toggle to Settings",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "taskType": "coding",
+      "state": "pr_opened",
+      "costUsd": "0.4213",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "createdAt": "2026-09-23 00:47:43.407987+00"
+    },
+    {
+      "id": "e9e5dad0-94b3-4445-85ba-6f1ab16b9494",
+      "title": "Review: Add a dark mode toggle to Settings",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "taskType": "review",
+      "state": "completed",
+      "costUsd": "0.4213",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "createdAt": "2026-09-23 00:47:58.898653+00"
+    },
+    {
+      "id": "cdae1418-e285-4cf2-9fba-6b50bfcdd0f9",
+      "title": "Bump minor dependency versions",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "taskType": "coding",
+      "state": "pr_opened",
+      "costUsd": "0.214",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "createdAt": "2026-09-23 00:48:01.883902+00"
+    },
+    {
+      "id": "9e3aa8d5-3178-4cd0-bb5d-26aebcb409f7",
+      "title": "Tidy up the config loader",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "taskType": "coding",
+      "state": "needs_attention",
+      "costUsd": "0.0931",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "createdAt": "2026-09-23 00:47:43.553076+00"
+    },
+    {
+      "id": "986c162d-ee74-4fd7-a8ef-5ac4d702a56a",
+      "title": "Nightly release notes",
+      "repoUrl": "job:Nightly release notes",
+      "taskType": "job",
+      "state": "completed",
+      "costUsd": "0.052",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "createdAt": "2026-09-23 00:48:00.159926+00"
+    },
+    {
+      "id": "e7ffcb16-87ad-45d7-9515-d8063a89f5ac",
+      "title": "Upgrade the payments SDK",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "taskType": "coding",
+      "state": "failed",
+      "costUsd": "0.031",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "createdAt": "2026-09-23 00:47:43.503926+00"
+    },
+    {
+      "id": "e937d007-3e27-4b14-9533-9e9583fe496e",
+      "title": "Fix flaky tests",
+      "repoUrl": "/Users/e2e/repos/e2e-repo",
+      "taskType": "local-session",
+      "state": "completed",
+      "costUsd": "0.0184",
+      "inputTokens": 18342,
+      "outputTokens": 2106,
+      "modelUsed": "claude-haiku-4-5",
+      "createdAt": "2026-09-23 00:48:05.199295+00"
+    },
+    {
+      "id": "09e92551-72b7-4c9b-9f27-cc33ef8df969",
+      "title": "Nightly release notes",
+      "repoUrl": "job:Nightly release notes",
+      "taskType": "job",
+      "state": "failed",
+      "costUsd": "0.0123",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "createdAt": "2026-09-23 00:48:00.577061+00"
+    },
+    {
+      "id": "9df7c273-7dea-4f97-bc97-d243aae58796",
+      "title": "Triage Sentry alerts",
+      "repoUrl": "job:Triage Sentry alerts",
+      "taskType": "job",
+      "state": "completed",
+      "costUsd": "0.0123",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "createdAt": "2026-09-23 00:48:01.421367+00"
+    }
+  ]
+}

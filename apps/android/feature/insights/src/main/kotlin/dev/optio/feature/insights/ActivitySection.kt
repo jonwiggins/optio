@@ -379,6 +379,9 @@ internal fun ActivityContent(
                     }
                 }
             }
+            if (page != null && page.items.isNotEmpty() && state is LoadState.Failed) {
+                item(key = "stale") { ErrorRow(error = state.error, what = "activity", retry = onRetry) }
+            }
             when {
                 (page == null || page.items.isEmpty()) && state is LoadState.Failed -> item(key = "error") {
                     if (state.error.isForbidden) AdminOnlyState(what = "The activity feed") else ErrorRow(error = state.error, what = "activity", retry = onRetry)

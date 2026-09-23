@@ -217,6 +217,10 @@ internal fun CostsContent(
             verticalArrangement = Arrangement.spacedBy(Spacing.l),
         ) {
             item(key = "period") { PeriodPicker(days = filter.days, onDaysChange = onDays, contentPadding = PaddingValues(horizontal = Spacing.l, vertical = Spacing.xs)) }
+            // A failed reload (e.g. a new repo filter) keeps the last numbers on screen: say they're stale.
+            if (data != null && state is LoadState.Failed) {
+                item(key = "stale") { ErrorRow(error = state.error, what = "costs", retry = onRetry) }
+            }
             when {
                 data == null && state is LoadState.Failed -> item(key = "error") {
                     if (state.error.isForbidden) AdminOnlyState(what = "Cost analytics") else ErrorRow(error = state.error, what = "costs", retry = onRetry)

@@ -1,0 +1,17 @@
+{
+  "totalPrs": 4,
+  "merged": 0,
+  "closed": 0,
+  "open": 0,
+  "ciPassRate": 0,
+  "reviewApprovalRate": 0,
+  "autoMergeRate": 0,
+  "avgMergeTime": 0,
+  "mergeCount": 0,
+  "funnel": {
+    "prOpened": 4,
+    "ciPassed": 0,
+    "reviewApproved": 0,
+    "merged": 0
+  }
+}
