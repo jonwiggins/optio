@@ -215,7 +215,9 @@ struct TaskDetailView: View {
         }()
         return DetailHeader(
             state: stalled ? "stalled" : task.state,
-            tone: stalled ? .working : (task.state == "needs_attention" ? .working : nil),
+            // Stalled = still running but quiet (working); needs_attention takes its own tone (the
+            // needs-you yellow), as on every other surface.
+            tone: stalled ? .working : nil,
             line: Text.meta(facts),
             secondary: Text.meta(line2),
             needsYou: needsYou,
