@@ -56,8 +56,8 @@ import dev.optio.core.ui.components.MonoText
 import dev.optio.core.ui.components.Truncation
 import dev.optio.core.ui.components.copyToClipboard
 import dev.optio.core.ui.components.metaText
-import dev.optio.core.ui.format.LocalClock
 import dev.optio.core.ui.format.relativeDescription
+import dev.optio.core.ui.format.rememberNow
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.ProvideElevatedSurfaces
 import dev.optio.core.ui.theme.Radius
@@ -103,7 +103,7 @@ fun TriggerRowView(
 ) {
     val colors = OptioTheme.colors
     val type = OptioTheme.type
-    val now = LocalClock.current.instant()
+    val now = rememberNow()
     val clipboard = LocalClipboard.current
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()

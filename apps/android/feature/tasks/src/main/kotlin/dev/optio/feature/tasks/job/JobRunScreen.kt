@@ -52,6 +52,7 @@ import dev.optio.core.ui.format.Cost
 import dev.optio.core.ui.format.InsightsFormat
 import dev.optio.core.ui.format.LocalClock
 import dev.optio.core.ui.format.relativeDescription
+import dev.optio.core.ui.format.rememberNow
 import dev.optio.core.ui.log.AgentLogView
 import dev.optio.core.ui.state.ErrorText
 import dev.optio.core.ui.state.LoadState
@@ -207,7 +208,7 @@ internal object RunHeaderText {
 
 @Composable
 private fun RunHeader(run: JobRun, runId: String, connected: Boolean) {
-    val now = LocalClock.current.instant()
+    val now = rememberNow()
     DetailHeader(
         state = run.state,
         line = RunHeaderText.line(run, runId, now),
@@ -243,7 +244,7 @@ private val detailDate: DateTimeFormatter = DateTimeFormatter.ofLocalizedDateTim
 @Composable
 private fun RunDetails(run: JobRun) {
     val clock = LocalClock.current
-    val now = clock.instant()
+    val now = rememberNow()
     fun date(i: Instant?): String = i?.let { detailDate.withZone(clock.zone).format(it) } ?: "—"
     LazyColumn(Modifier.fillMaxSize().testTag("run-details"), contentPadding = PaddingValues(bottom = Spacing.xl)) {
         item(key = "run") {

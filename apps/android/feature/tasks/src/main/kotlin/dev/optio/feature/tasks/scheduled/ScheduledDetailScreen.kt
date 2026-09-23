@@ -11,6 +11,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.navigation.LocalNavigator
+import dev.optio.core.navigation.routes.EditWorkRoute
 import dev.optio.core.navigation.routes.ScheduledFormRoute
 import dev.optio.core.navigation.routes.TaskDetailRoute
 import dev.optio.core.network.LocalApiClient
@@ -87,7 +89,10 @@ internal fun ScheduledDetailScreen(vm: ScheduledDetailViewModel, baseUrl: String
             refresh = vm::load,
             runNow = vm::runNow,
             toggleEnabled = vm::toggleEnabled,
-            edit = { navigator.push(ScheduledFormRoute(vm.configId)) },
+            // Recurring work is edited in the one Work form (web `/work/:id/edit`); the blueprint
+            // form (iOS `TaskConfigFormSheet`) stays for its title template, priority and retries.
+            edit = { navigator.push(EditWorkRoute(vm.configId)) },
+            editSettings = { navigator.push(ScheduledFormRoute(vm.configId)) },
             addTrigger = { showAddTrigger = true },
             delete = vm::delete,
             setTriggerEnabled = vm::setTriggerEnabled,
@@ -107,6 +112,7 @@ class ScheduledDetailActions(
     val runNow: () -> Unit = {},
     val toggleEnabled: () -> Unit = {},
     val edit: () -> Unit = {},
+    val editSettings: () -> Unit = {},
     val addTrigger: () -> Unit = {},
     val delete: () -> Unit = {},
     val setTriggerEnabled: (TriggerRow, Boolean) -> Unit = { _, _ -> },
@@ -155,6 +161,7 @@ fun ScheduledDetailContent(
                             MenuAction("Resume", Icons.Outlined.PlayArrow, testTag = "action-resume", onClick = actions.toggleEnabled)
                         },
                         MenuAction("Edit", Icons.Outlined.Edit, testTag = "action-edit", onClick = actions.edit),
+                        MenuAction("Edit blueprint settings", Icons.Outlined.Tune, testTag = "action-edit-settings", onClick = actions.editSettings),
                         MenuAction("Add trigger", Icons.Outlined.Bolt, testTag = "action-add-trigger", onClick = actions.addTrigger),
                         MenuAction("Delete", Icons.Outlined.Delete, destructive = true, dividerBefore = true, testTag = "action-delete") {
                             confirm.ask("Delete \"${config.name}\"?", "This removes all triggers.", "Delete", destructive = true, onConfirm = actions.delete)

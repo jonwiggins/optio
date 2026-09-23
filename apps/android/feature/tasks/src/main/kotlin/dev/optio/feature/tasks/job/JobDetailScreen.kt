@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -43,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.model.OptioJson
 import dev.optio.core.navigation.LocalNavigator
+import dev.optio.core.navigation.routes.EditWorkRoute
 import dev.optio.core.navigation.routes.JobFormRoute
 import dev.optio.core.navigation.routes.JobRunRoute
 import dev.optio.core.network.LocalApiClient
@@ -64,9 +66,9 @@ import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.Cost
 import dev.optio.core.ui.format.InsightsFormat
-import dev.optio.core.ui.format.LocalClock
 import dev.optio.core.ui.format.capitalizedFirst
 import dev.optio.core.ui.format.relativeDescription
+import dev.optio.core.ui.format.rememberNow
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.Loadable
 import dev.optio.core.ui.theme.OptioTheme
@@ -130,7 +132,10 @@ internal fun JobDetailScreen(vm: JobDetailViewModel, baseUrl: String?) {
             retryLoad = vm::load,
             refresh = vm::load,
             run = { showRun = true },
-            edit = { navigator.push(JobFormRoute(vm.jobId)) },
+            // Recurring work is edited in the one Work form (web `/work/:id/edit`); the Job form
+            // (iOS `JobFormView`) stays for what that form doesn't cover: limits and pods.
+            edit = { navigator.push(EditWorkRoute(vm.jobId)) },
+            editSettings = { navigator.push(JobFormRoute(vm.jobId)) },
             duplicate = vm::duplicate,
             toggleEnabled = vm::toggleEnabled,
             delete = vm::delete,
@@ -156,6 +161,7 @@ class JobDetailActions(
     val refresh: () -> Unit = {},
     val run: () -> Unit = {},
     val edit: () -> Unit = {},
+    val editSettings: () -> Unit = {},
     val duplicate: () -> Unit = {},
     val toggleEnabled: () -> Unit = {},
     val delete: () -> Unit = {},
@@ -196,6 +202,7 @@ fun JobDetailContent(
                     items = buildList {
                         if (canMutate) {
                             add(MenuAction("Edit", Icons.Outlined.Edit, testTag = "action-edit", onClick = actions.edit))
+                            add(MenuAction("Edit job settings", Icons.Outlined.Tune, testTag = "action-edit-settings", onClick = actions.editSettings))
                             add(MenuAction("Duplicate", Icons.Outlined.ContentCopy, testTag = "action-duplicate", onClick = actions.duplicate))
                             add(
                                 if (detail.job.isEnabled) {
@@ -255,7 +262,7 @@ internal object JobHeaderText {
 
 @Composable
 private fun JobHeader(detail: JobDetail) {
-    val now = LocalClock.current.instant()
+    val now = rememberNow()
     val (state, tone) = JobHeaderText.state(detail)
     Column {
         DetailHeader(
@@ -360,7 +367,7 @@ private fun LazyListScope.triggersSection(
 
 private fun LazyListScope.configSection(job: JobSummary, showPrompt: Boolean, onTogglePrompt: () -> Unit) {
     item(key = "config") {
-        val now = LocalClock.current.instant()
+        val now = rememberNow()
         GroupedSection(header = "Job Configuration") {
             val rows = listOf(
                 "Agent Runtime" to JobFormat.runtimeLabel(job.runtime),
@@ -412,7 +419,7 @@ private fun LazyListScope.configSection(job: JobSummary, showPrompt: Boolean, on
 /** A run in the job's list (iOS `JobRunRow`): state, duration · model · cost · tokens, the error. */
 @Composable
 fun JobRunRow(run: JobRun, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
-    val now = LocalClock.current.instant()
+    val now = rememberNow()
     val stateLabel = run.state.replace('_', ' ').capitalizedFirst()
     OptioRow(
         title = run.title?.takeIf { it.isNotBlank() } ?: stateLabel,

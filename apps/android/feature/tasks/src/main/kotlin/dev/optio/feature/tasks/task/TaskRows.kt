@@ -27,8 +27,8 @@ import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.StatusBadge
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.mono
-import dev.optio.core.ui.format.LocalClock
 import dev.optio.core.ui.format.relativeDescription
+import dev.optio.core.ui.format.rememberNow
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
@@ -92,7 +92,7 @@ fun TaskRowView(
     onClick: (() -> Unit)? = null,
     trailingContent: (@Composable androidx.compose.foundation.layout.RowScope.() -> Unit)? = null,
 ) {
-    val now = LocalClock.current.instant()
+    val now = rememberNow()
     val (trailing, trailingTone) = TaskRowText.trailing(task, now)
     OptioRow(
         title = task.title.ifEmpty { "Untitled task" },
@@ -119,7 +119,7 @@ fun TaskActivityRow(
 ) {
     val colors = OptioTheme.colors
     val type = OptioTheme.type
-    val now = LocalClock.current.instant()
+    val now = rememberNow()
     Row(
         modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.m).testTag("activity-${item.id}"),
         horizontalArrangement = Arrangement.spacedBy(Spacing.s),

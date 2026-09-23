@@ -157,6 +157,12 @@ class TasksScreenshotTest : ScreenshotTest() {
         JobDetailContent(LoadState.Loaded(detail), busy = false, baseUrl = baseUrl, actions = JobDetailActions(), initialSection = JobSection.CONFIG)
     }
 
+    /** Edit opens the Work form; the Job's own form (limits, pods) is one item below. */
+    @Test
+    fun jobMenu() = captureScreens("Job_Menu", clock = clock, interact = { onNodeWithTag("overflow").performClick() }) {
+        JobDetailContent(LoadState.Loaded(TaskSamples.jobDetail), busy = false, baseUrl = baseUrl, actions = JobDetailActions())
+    }
+
     @Test
     fun jobEmpty() = captureScreens("Job_NoRuns", clock = clock) {
         JobDetailContent(LoadState.Loaded(dev.optio.feature.tasks.job.JobDetail(TaskSamples.paramsJob)), busy = false, baseUrl = baseUrl, actions = JobDetailActions())
@@ -277,6 +283,12 @@ class TasksScreenshotTest : ScreenshotTest() {
     fun scheduledTriggers() = captureScreens("Scheduled_Triggers", clock = clock) {
         val detail = TaskSamples.scheduled.copy(triggers = TaskSamples.scheduled.triggers + TaskSamples.triggers.drop(1))
         ScheduledDetailContent(LoadState.Loaded(detail), busy = false, baseUrl = baseUrl, actions = ScheduledDetailActions(), initialSection = ScheduledSection.TRIGGERS)
+    }
+
+    /** Edit opens the Work form; the blueprint's own form (title template, priority, retries) is one item below. */
+    @Test
+    fun scheduledMenu() = captureScreens("Scheduled_Menu", clock = clock, interact = { onNodeWithTag("overflow").performClick() }) {
+        ScheduledDetailContent(LoadState.Loaded(TaskSamples.scheduled), busy = false, baseUrl = baseUrl, actions = ScheduledDetailActions())
     }
 
     @Test

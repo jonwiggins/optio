@@ -89,9 +89,9 @@ import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.Cost
 import dev.optio.core.ui.format.InsightsFormat
-import dev.optio.core.ui.format.LocalClock
 import dev.optio.core.ui.format.pathTail
 import dev.optio.core.ui.format.relativeDescription
+import dev.optio.core.ui.format.rememberNow
 import dev.optio.core.ui.log.AgentLogView
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.OptioTheme
@@ -392,7 +392,7 @@ internal object TaskHeaderText {
 
 @Composable
 private fun TaskHeader(detail: TaskDetail, onOpenPr: (String) -> Unit) {
-    val now = LocalClock.current.instant()
+    val now = rememberNow()
     val task = detail.task
     val stalled = detail.isStalled
     DetailHeader(
