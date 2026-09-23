@@ -116,6 +116,8 @@ class FormatTest {
     @Test
     fun relativeTimeMatchesIosShortStyle() {
         assertEquals("now", ago(0).relativeDescription(now))
+        assertEquals("now", ago(-5).relativeDescription(now)) // clock skew, not the future
+        assertEquals("in 3 hr.", ago(-3 * 3600).relativeDescription(now))
         assertEquals("30 sec. ago", ago(30).relativeDescription(now))
         assertEquals("5 min. ago", ago(5 * 60 + 20).relativeDescription(now))
         assertEquals("2 hr. ago", ago(2 * 3600 + 59 * 60).relativeDescription(now))

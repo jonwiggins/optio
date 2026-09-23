@@ -166,6 +166,9 @@ object RelativeTime {
         val deltaSeconds = (now.toEpochMilli() - date.toEpochMilli()) / 1000.0
         val past = deltaSeconds >= 0
         val s = abs(deltaSeconds)
+        // A server clock a few seconds ahead of the phone's makes "just happened" read as the
+        // future ("in 5 sec."); under a minute ahead is skew, not a schedule.
+        if (!past && s < 60) return "now"
         val amount: String = when {
             s < 1 -> return "now"
             s < 60 -> "${s.toInt()} sec."
