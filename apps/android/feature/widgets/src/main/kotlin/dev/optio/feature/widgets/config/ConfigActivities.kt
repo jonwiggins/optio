@@ -77,12 +77,16 @@ class WorkWidgetConfigActivity : ComponentActivity() {
             var choice by rememberSaveable { mutableStateOf<String?>(null) }
             var touched by rememberSaveable { mutableStateOf(false) }
             val selection = if (touched) choice else saved?.get(WorkWidget.SERVER)
-            ConfigScreen(
-                title = "Work widget",
+            WorkWidgetConfigContent(
+                servers = servers,
+                selection = selection,
+                onSelect = {
+                    choice = it
+                    touched = true
+                },
                 onClose = ::finish,
-                primaryLabel = "Save",
-                primaryEnabled = servers != null,
-                onPrimary = {
+                onOpenApp = { startActivity(Links.launch(this@WorkWidgetConfigActivity)) },
+                onSave = {
                     lifecycleScope.launch {
                         updateAppWidgetState(this@WorkWidgetConfigActivity, glanceId) { prefs ->
                             if (selection == null) prefs.remove(WorkWidget.SERVER) else prefs[WorkWidget.SERVER] = selection
@@ -94,18 +98,30 @@ class WorkWidgetConfigActivity : ComponentActivity() {
                         finish()
                     }
                 },
-            ) {
-                val paired = servers ?: return@ConfigScreen
-                if (paired.isEmpty()) {
-                    signedOut { startActivity(Links.launch(this@WorkWidgetConfigActivity)) }
-                } else {
-                    serverChoices(paired, selection) {
-                        choice = it
-                        touched = true
-                    }
-                }
-            }
+            )
         }
+    }
+}
+
+/** The Work widget's setup: the Server option ([servers] null while loading, empty when signed out). */
+@Composable
+internal fun WorkWidgetConfigContent(
+    servers: List<ServerProfile>?,
+    selection: String?,
+    onSelect: (String?) -> Unit,
+    onClose: () -> Unit,
+    onOpenApp: () -> Unit,
+    onSave: () -> Unit,
+) {
+    ConfigScreen(
+        title = "Work widget",
+        onClose = onClose,
+        primaryLabel = "Save",
+        primaryEnabled = servers != null,
+        onPrimary = onSave,
+    ) {
+        val paired = servers ?: return@ConfigScreen
+        if (paired.isEmpty()) signedOut(onOpenApp) else serverChoices(paired, selection, onSelect)
     }
 }
 

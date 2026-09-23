@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import dev.optio.core.glance.RunTarget
@@ -26,19 +27,7 @@ class RunShortcutActivity : ComponentActivity() {
             finish()
             return
         }
-        setThemedContent {
-            AlertDialog(
-                onDismissRequest = ::finish,
-                title = { Text("Run ${target.name}?") },
-                text = { Text(detail(target)) },
-                confirmButton = {
-                    TextButton(onClick = { run(target) }, modifier = Modifier.testTag("confirm")) { Text("Run") }
-                },
-                dismissButton = {
-                    TextButton(onClick = ::finish, modifier = Modifier.testTag("dismiss")) { Text("Cancel") }
-                },
-            )
-        }
+        setThemedContent { RunConfirmDialog(target, onRun = { run(target) }, onDismiss = ::finish) }
     }
 
     private fun run(target: RunTarget) {
@@ -47,12 +36,30 @@ class RunShortcutActivity : ComponentActivity() {
         finish()
     }
 
-    private fun detail(target: RunTarget): String {
-        val server = target.serverName?.let { " on $it" }.orEmpty()
-        return when {
-            target.kind == RunTarget.Kind.JOB -> "Starts a run of this Job$server now."
-            target.spawnMode == "auto" -> "It starts immediately on your machine$server."
-            else -> "It waits in Optio until you start it$server."
-        }
+}
+
+/** "Run ⟨target⟩?" with what running it does (iOS `requestConfirmation` in the run intents). */
+@Composable
+internal fun RunConfirmDialog(
+    target: RunTarget,
+    onRun: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Run ${target.name}?") },
+        text = { Text(runDetail(target)) },
+        confirmButton = { TextButton(onClick = onRun, modifier = Modifier.testTag("confirm")) { Text("Run") } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("dismiss")) { Text("Cancel") } },
+    )
+}
+
+/** What running [target] does, in one sentence. */
+internal fun runDetail(target: RunTarget): String {
+    val server = target.serverName?.let { " on $it" }.orEmpty()
+    return when {
+        target.kind == RunTarget.Kind.JOB -> "Starts a run of this Job$server now."
+        target.spawnMode == "auto" -> "It starts immediately on your machine$server."
+        else -> "It waits in Optio until you start it$server."
     }
 }

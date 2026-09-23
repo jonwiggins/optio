@@ -1,5 +1,6 @@
 package dev.optio.feature.widgets.config
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -17,6 +18,7 @@ import dev.optio.core.ui.components.GroupedSection
 import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.state.LoadState
+import dev.optio.core.ui.theme.Spacing
 import dev.optio.feature.widgets.Host
 import dev.optio.feature.widgets.run.resolveRunTargets
 import kotlin.coroutines.cancellation.CancellationException
@@ -25,7 +27,7 @@ import kotlin.coroutines.cancellation.CancellationException
  * Picks what a Run widget or the Run tile fires (iOS `RunConfigurationIntent` /
  * `RunControlConfigurationIntent`): every paired server's Local blueprints and Jobs, plus "Ask
  * before running" for the widget ([confirm] non-null) and, for a chosen target, a home-screen
- * shortcut ([onPin]).
+ * shortcut ([onPin]). Loads the servers and targets; [RunTargetConfigContent] draws them.
  */
 @Composable
 internal fun RunTargetConfig(
@@ -52,31 +54,74 @@ internal fun RunTargetConfig(
     var selectedId by rememberSaveable { mutableStateOf(initial?.id) }
     var askFirst by rememberSaveable { mutableStateOf(confirm ?: true) }
     LaunchedEffect(initial?.id) { if (selectedId == null) selectedId = initial?.id }
+    RunTargetConfigContent(
+        title = title,
+        signedOut = servers?.isEmpty() == true,
+        targets = targets,
+        initial = initial,
+        selectedId = selectedId,
+        onSelect = { selectedId = it.id },
+        askFirst = if (confirm != null) askFirst else null,
+        onAskFirst = { askFirst = it },
+        onRetry = { reload++ },
+        onClose = onClose,
+        onSave = onSave,
+        onOpenApp = onOpenApp,
+        onPin = onPin,
+    )
+}
+
+/** A header-less group, set off from the one above it. */
+private val SpacedGroup = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.l)
+
+/** The run-target picker's layout, given its state (screenshots draw it directly). */
+@Composable
+internal fun RunTargetConfigContent(
+    title: String,
+    signedOut: Boolean,
+    targets: LoadState<List<RunTarget>>,
+    initial: RunTarget?,
+    selectedId: String?,
+    onSelect: (RunTarget) -> Unit,
+    /** "Ask before running" (the widget); null hides the toggle (the tile). */
+    askFirst: Boolean?,
+    onAskFirst: (Boolean) -> Unit,
+    onRetry: () -> Unit,
+    onClose: () -> Unit,
+    onSave: (target: RunTarget, confirm: Boolean) -> Unit,
+    onOpenApp: () -> Unit,
+    onPin: ((RunTarget) -> Unit)? = null,
+) {
     // The live row for the selection, else the saved one (offline, or a legacy id).
     val selected = targets.value?.let { resolveRunTargets(listOfNotNull(selectedId), it).firstOrNull() } ?: initial?.takeIf { it.id == selectedId }
-
     ConfigScreen(
         title = title,
         onClose = onClose,
         primaryLabel = "Save",
         primaryEnabled = selected != null,
-        onPrimary = { selected?.let { onSave(it, askFirst) } },
+        onPrimary = { selected?.let { onSave(it, askFirst ?: false) } },
     ) {
-        if (servers?.isEmpty() == true) {
+        if (signedOut) {
             signedOut(onOpenApp)
             return@ConfigScreen
         }
-        targetChoices(targets, selectedId, onSelect = { selectedId = it.id }, onRetry = { reload++ })
-        if (confirm != null) {
+        targetChoices(targets, selectedId, onSelect = onSelect, onRetry = onRetry)
+        if (askFirst != null) {
             item(key = "confirm") {
-                GroupedSection(footer = "The first tap arms the widget for ten seconds; the second runs it.") {
-                    ToggleRow(title = "Ask before running", checked = askFirst, onChange = { askFirst = it }, modifier = Modifier.testTag("config-confirm"))
+                GroupedSection(footer = "The first tap arms the widget for ten seconds; the second runs it.", contentPadding = SpacedGroup) {
+                    ToggleRow(
+                        title = "Ask before running",
+                        meta = metaText(if (askFirst) "Tap twice to run" else "One tap runs it"),
+                        checked = askFirst,
+                        onChange = onAskFirst,
+                        modifier = Modifier.testTag("config-confirm"),
+                    )
                 }
             }
         }
         if (onPin != null && selected != null) {
             item(key = "pin") {
-                GroupedSection(footer = "A launcher shortcut that runs it after one confirmation.") {
+                GroupedSection(footer = "A launcher shortcut that runs it after one confirmation.", contentPadding = SpacedGroup) {
                     OptioRow(
                         title = "Add to home screen",
                         meta = metaText("Run ${selected.name}"),
