@@ -7,7 +7,11 @@
  * stops the API and drops the private database.
  *
  * Start it with apps/android/scripts/test-api.sh, which backgrounds it and waits for `ready`:
- *   tsx apps/android/e2e/launch-api.ts [--port 4961] [--auth] [--run-dir DIR] [--no-seed] [--log-level warn]
+ *   tsx apps/android/e2e/launch-api.ts [--port 4961] [--auth] [--fcm-fake] [--run-dir DIR] [--no-seed] [--log-level warn]
+ *
+ * --fcm-fake runs the API with OPTIO_FCM_TRANSPORT=fake and OPTIO_FCM_FAKE_OUTBOX=<run-dir>/fcm-outbox.jsonl:
+ * Android push (docs/android-push.md) is "configured", and every FCM HTTP v1 request the server
+ * would send is appended to that file as one JSON line instead (nothing leaves the machine).
  *
  * --auth runs the API with authentication ENABLED: it first creates real users (admin, member,
  * viewer, and one outside the workspace), a workspace and personal access tokens, then seeds
@@ -43,17 +47,26 @@ interface Args {
   runDir: string;
   seed: boolean;
   auth: boolean;
+  fcmFake: boolean;
   logLevel: string;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { port: 0, runDir: "", seed: true, auth: false, logLevel: "warn" };
+  const args: Args = {
+    port: 0,
+    runDir: "",
+    seed: true,
+    auth: false,
+    fcmFake: false,
+    logLevel: "warn",
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--port") args.port = Number(argv[++i]);
     else if (a === "--run-dir") args.runDir = resolve(argv[++i]);
     else if (a === "--no-seed") args.seed = false;
     else if (a === "--auth") args.auth = true;
+    else if (a === "--fcm-fake") args.fcmFake = true;
     else if (a === "--log-level") args.logLevel = argv[++i];
     else throw new Error(`unknown argument ${a}`);
   }
@@ -1867,6 +1880,13 @@ async function main(): Promise<void> {
       ...apiEnv,
       ...API_ENV_OVERRIDES,
       OPTIO_AUTH_DISABLED: ARGS.auth ? "false" : "true",
+      // Android push with a recording transport (see --fcm-fake above).
+      ...(ARGS.fcmFake
+        ? {
+            OPTIO_FCM_TRANSPORT: "fake",
+            OPTIO_FCM_FAKE_OUTBOX: join(ARGS.runDir, "fcm-outbox.jsonl"),
+          }
+        : {}),
     },
   });
   const api = apiServer;

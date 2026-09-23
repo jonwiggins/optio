@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Alerts and the Watch (runtime on Android 13+; asked when something first needs you). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 16+: the Watch may be promoted to a Live Update (status bar chip, lock screen). -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- "Keep watching in the background": an opt-in foreground service holding /ws/events. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Re-arms "Keep watching" after a reboot when it was on. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application>
+        <!--
+          Keep watching: holds the app's one /ws/events connection while Optio is closed, so the
+          Watch notification and needs-you alerts update in real time on servers that cannot push
+          (no FCM). No platform foreground-service type fits a user-requested live connection to
+          the user's own self-hosted server, hence specialUse with the subtype below.
+        -->
+        <service
+            android:name=".watch.KeepWatchingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a user-enabled live connection to the user's own self-hosted Optio server so the ongoing notification can show, in real time, which of their AI coding agents is waiting for them. The user turns it on and off in Settings; it stops when they sign out." />
+        </service>
+
+        <!-- FCM data messages (alerts and Watch frames). Idle unless the build has google-services.json. -->
+        <service
+            android:name=".push.OptioMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Notification actions that call the API without opening the app: Reply, Later, Resume, Retry. -->
+        <receiver
+            android:name=".notifications.NotificationActionReceiver"
+            android:exported="false" />
+
+        <!-- Restores "Keep watching" after a reboot / app update. -->
+        <receiver
+            android:name=".watch.KeepWatchingBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
