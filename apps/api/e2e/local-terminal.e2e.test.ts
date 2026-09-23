@@ -301,6 +301,128 @@ describe("optio local e2e", () => {
     expect(daemon.inbox.some((m) => m.type === "attach")).toBe(false);
   });
 
+  /** A running terminal on a fresh host, plus a viewer whose attach reached the daemon. */
+  async function runningTerminalWithPendingViewer(hostname: string) {
+    const hostId = await registerHost(hostname);
+    const daemon = new FakeDaemon();
+    cleanups.push(() => daemon.close());
+    await daemon.connect(hostId, DIRS);
+    const { body } = await api<TerminalBody>("/api/local/terminals", {
+      method: "POST",
+      body: JSON.stringify({
+        hostId,
+        dir: "/tmp/e2e-repo",
+        spec: { kind: "command", command: "echo hi" },
+      }),
+    });
+    const terminalId = body.terminal.id;
+    await daemon.next((m) => m.type === "spawn");
+    daemon.send({ type: "started", terminalId });
+    await waitFor(async () => ((await getTerminal(terminalId)).state === "running" ? true : null));
+
+    const viewer = new FakeViewer();
+    cleanups.push(() => viewer.close());
+    await viewer.connect(terminalId);
+    const attach = await daemon.next((m) => m.type === "attach" && m.terminalId === terminalId);
+    return { daemon, viewer, terminalId, attachId: String(attach.attachId) };
+  }
+
+  const screen = "$ echo hi\r\nhi\r\n";
+  const finish = (daemon: FakeDaemon, terminalId: string) => {
+    daemon.send({
+      type: "snapshot",
+      terminalId,
+      dataB64: Buffer.from(screen).toString("base64"),
+      cols: 100,
+      rows: 30,
+    });
+    daemon.send({ type: "exit", terminalId, exitCode: 0 });
+  };
+  const refuse = (daemon: FakeDaemon, terminalId: string, attachId: string) =>
+    daemon.send({
+      type: "attach-error",
+      terminalId,
+      attachId,
+      message: "Unknown terminal — the daemon may have restarted since it ran",
+    });
+
+  it("replays the recorded screen when the daemon refuses an attach after the exit", async () => {
+    // A command that exits instantly: by the time the attach reaches the
+    // daemon, its screen and exit are out and the terminal is forgotten.
+    const { daemon, viewer, terminalId, attachId } =
+      await runningTerminalWithPendingViewer("e2e-instant-exit");
+    finish(daemon, terminalId);
+    refuse(daemon, terminalId, attachId);
+
+    await waitFor(async () => (viewer.control.some((m) => m.type === "exit") ? true : null));
+    // Nothing about "Unknown terminal"; the finished session as a viewer
+    // opening it fresh would see it (status first, so it pins the grid).
+    expect(viewer.control.some((m) => m.type === "error")).toBe(false);
+    expect(viewer.order).toEqual([
+      "control:status",
+      "control:status",
+      "control:size",
+      "binary",
+      "control:exit",
+    ]);
+    expect(viewer.control[1]).toMatchObject({ type: "status", state: "exited" });
+    expect(viewer.control[2]).toMatchObject({ type: "size", cols: 100, rows: 30 });
+    expect(viewer.text()).toBe(screen);
+  });
+
+  it("waits for the exit when an older daemon refuses the attach before sending it", async () => {
+    // Daemons before the flush-ordering fix forgot a terminal the moment its
+    // process ended, then sent the screen and exit up to 1.5 s later.
+    const { daemon, viewer, terminalId, attachId } =
+      await runningTerminalWithPendingViewer("e2e-old-daemon-exit");
+    refuse(daemon, terminalId, attachId);
+    await new Promise((r) => setTimeout(r, 300));
+    finish(daemon, terminalId);
+
+    await waitFor(async () => (viewer.control.some((m) => m.type === "exit") ? true : null));
+    expect(viewer.control.some((m) => m.type === "error")).toBe(false);
+    expect(viewer.order).toEqual([
+      "control:status",
+      "control:status",
+      "control:size",
+      "binary",
+      "control:exit",
+    ]);
+    expect(viewer.text()).toBe(screen);
+  });
+
+  it("tells a viewer watching a terminal exit the grid its final screen was recorded at", async () => {
+    const { daemon, viewer, terminalId, attachId } =
+      await runningTerminalWithPendingViewer("e2e-watched-exit");
+    daemon.send({
+      type: "scrollback",
+      terminalId,
+      attachId,
+      dataB64: Buffer.from("$ make\r\n").toString("base64"),
+    });
+    await waitFor(async () => (viewer.text() === "$ make\r\n" ? true : null));
+    finish(daemon, terminalId);
+
+    await waitFor(async () => (viewer.control.some((m) => m.type === "size") ? true : null));
+    // exit, then the recorded grid — clients pin it ("Recorded screen").
+    expect(viewer.order.slice(-2)).toEqual(["control:exit", "control:size"]);
+    expect(viewer.control.at(-1)).toMatchObject({ type: "size", cols: 100, rows: 30 });
+  });
+
+  it("still reports the daemon's error for a terminal that keeps running", async () => {
+    const { daemon, viewer, terminalId, attachId } =
+      await runningTerminalWithPendingViewer("e2e-refused-live");
+    refuse(daemon, terminalId, attachId);
+    await waitFor(async () => (viewer.control.some((m) => m.type === "error") ? true : null), {
+      timeoutMs: 10_000,
+    });
+    expect(viewer.control.at(-1)).toMatchObject({
+      type: "error",
+      message: "Unknown terminal — the daemon may have restarted since it ran",
+    });
+    expect((await getTerminal(terminalId)).state).toBe("running");
+  });
+
   it("accepts a bodiless kill (curl / CLI callers send no JSON body)", async () => {
     const hostId = await registerHost("e2e-bare-kill");
     const daemon = new FakeDaemon();

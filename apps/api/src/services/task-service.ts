@@ -518,14 +518,23 @@ export async function appendTaskLog(
   logType?: string,
   metadata?: Record<string, unknown>,
 ) {
-  await db.insert(taskLogs).values({ taskId, content, stream, logType, metadata });
+  const [row] = await db
+    .insert(taskLogs)
+    .values({ taskId, content, stream, logType, metadata })
+    .returning();
 
+  // The live frame is the stored row — id, timestamp, type, metadata as
+  // GET /api/tasks/:id/logs returns them — so clients that merge REST
+  // history with the live stream can recognize the same line twice.
   await publishEvent({
     type: "task:log",
     taskId,
-    stream: stream as "stdout" | "stderr",
-    content,
-    timestamp: new Date().toISOString(),
+    id: row.id,
+    stream: row.stream as "stdout" | "stderr",
+    content: row.content,
+    timestamp: row.timestamp.toISOString(),
+    logType: row.logType ?? undefined,
+    metadata: row.metadata ?? undefined,
   });
 }
 

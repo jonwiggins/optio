@@ -216,7 +216,7 @@ export async function updateRepo(
     reviewPromptTemplate?: string | null;
     testCommand?: string;
     reviewAgentType?: string | null;
-    reviewModel?: string;
+    reviewModel?: string | null;
     externalReviewMode?: string;
     externalReviewFilters?: {
       skipDrafts?: boolean;

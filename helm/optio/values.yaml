@@ -338,8 +338,12 @@ auth:
 # GitHub webhook signature validation
 # ──────────────────────────────────────────────────────────────────────────────
 webhook:
+  # The receivers (/api/webhooks/github, /api/webhooks/slack/events,
+  # /api/webhooks/slack/actions, /api/webhooks/linear) take no Optio session;
+  # each rejects every delivery until its secret below is set.
   githubSecret: ""  # Generate with: openssl rand -hex 32. Must match GitHub's webhook config.
-  # Optio Local automations: signed event ingress for Slack and Linear.
+  # Slack event triggers and the retry/cancel buttons on Slack notifications,
+  # plus Linear event triggers.
   slackSigningSecret: ""  # Slack app → Basic Information → Signing Secret
   linearSecret: ""  # Linear → Settings → API → Webhooks → signing secret
 

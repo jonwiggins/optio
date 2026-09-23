@@ -20,6 +20,7 @@ const mockCreateAssignment = vi.fn();
 const mockUpdateAssignment = vi.fn();
 const mockDeleteAssignment = vi.fn();
 const mockGetConnectionsForTask = vi.fn();
+const mockListConnectionsForRepo = vi.fn();
 
 vi.mock("../services/connection-service.js", () => ({
   listProviders: (...args: unknown[]) => mockListProviders(...args),
@@ -38,6 +39,7 @@ vi.mock("../services/connection-service.js", () => ({
   updateAssignment: (...args: unknown[]) => mockUpdateAssignment(...args),
   deleteAssignment: (...args: unknown[]) => mockDeleteAssignment(...args),
   getConnectionsForTask: (...args: unknown[]) => mockGetConnectionsForTask(...args),
+  listConnectionsForRepo: (...args: unknown[]) => mockListConnectionsForRepo(...args),
 }));
 
 const mockGetRepo = vi.fn();
@@ -572,25 +574,24 @@ describe("GET /api/repos/:id/connections", () => {
     app = await buildTestApp();
   });
 
-  it("returns connections for a repo", async () => {
+  it("returns every connection that applies to the repo, with its agent-type scope", async () => {
     mockGetRepo.mockResolvedValue({ id: "repo-1", repoUrl: "https://github.com/org/repo" });
-    mockGetConnectionsForTask.mockResolvedValue([
-      { connectionId: "conn-1" },
-      { connectionId: "conn-2" },
+    mockListConnectionsForRepo.mockResolvedValue([
+      { id: "conn-1", name: "Notion", agentTypes: [] },
+      { id: "conn-2", name: "Status page API", agentTypes: ["claude-code"] },
     ]);
-    mockGetConnection
-      .mockResolvedValueOnce({ id: "conn-1", name: "Notion" })
-      .mockResolvedValueOnce({ id: "conn-2", name: "Postgres" });
 
     const res = await app.inject({ method: "GET", url: "/api/repos/repo-1/connections" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().connections).toHaveLength(2);
-    expect(mockGetConnectionsForTask).toHaveBeenCalledWith(
-      "https://github.com/org/repo",
-      "",
-      "ws-1",
-    );
+    expect(res.json().connections).toEqual([
+      { id: "conn-1", name: "Notion", agentTypes: [] },
+      { id: "conn-2", name: "Status page API", agentTypes: ["claude-code"] },
+    ]);
+    expect(mockListConnectionsForRepo).toHaveBeenCalledWith("https://github.com/org/repo", "ws-1");
+    // Not the per-agent task resolver: an empty agent type matched nothing
+    // limited to specific agents.
+    expect(mockGetConnectionsForTask).not.toHaveBeenCalled();
   });
 
   it("returns 404 for nonexistent repo", async () => {

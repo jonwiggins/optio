@@ -280,7 +280,7 @@ export async function appendSessionChatEvent(input: AppendSessionChatEventInput)
       .select({ ts: sessionChatEvents.timestamp })
       .from(sessionChatEvents)
       .where(eq(sessionChatEvents.sessionId, input.sessionId))
-      .orderBy(desc(sessionChatEvents.timestamp))
+      .orderBy(desc(sessionChatEvents.timestamp), desc(sessionChatEvents.seq))
       .limit(1)
       .offset(MAX_SESSION_CHAT_EVENTS);
     if (cutoff?.ts) {
@@ -302,12 +302,15 @@ export async function appendSessionChatEvent(input: AppendSessionChatEventInput)
 
 export async function listSessionChatEvents(sessionId: string, opts?: { limit?: number }) {
   const limit = Math.min(opts?.limit ?? 1000, MAX_SESSION_CHAT_EVENTS);
-  return db
-    .select()
-    .from(sessionChatEvents)
-    .where(eq(sessionChatEvents.sessionId, sessionId))
-    .orderBy(asc(sessionChatEvents.timestamp))
-    .limit(limit);
+  return (
+    db
+      .select()
+      .from(sessionChatEvents)
+      .where(eq(sessionChatEvents.sessionId, sessionId))
+      // seq breaks ties: several events share one millisecond.
+      .orderBy(asc(sessionChatEvents.timestamp), asc(sessionChatEvents.seq))
+      .limit(limit)
+  );
 }
 
 /**

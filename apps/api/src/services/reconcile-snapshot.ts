@@ -889,7 +889,11 @@ async function loadInboxSummary(agentId: string) {
   const [row] = await db
     .select({
       pending: sql<number>`count(*)::int`,
-      oldest: sql<Date | null>`MIN(${persistentAgentMessages.receivedAt})`,
+      // mapWith: without it the aggregate arrives as Postgres text, not the
+      // Date the snapshot's `oldestPendingAt` promises.
+      oldest: sql<Date | null>`MIN(${persistentAgentMessages.receivedAt})`.mapWith(
+        persistentAgentMessages.receivedAt,
+      ),
     })
     .from(persistentAgentMessages)
     .where(
@@ -900,7 +904,7 @@ async function loadInboxSummary(agentId: string) {
     );
   return {
     pending: Number(row?.pending ?? 0),
-    oldest: (row?.oldest as Date | null) ?? null,
+    oldest: row?.oldest ?? null,
   };
 }
 

@@ -11,14 +11,8 @@ import {
   type OptioToolSchema,
 } from "@optio/shared";
 import { executeToolCall, truncateToolResult } from "../services/optio-tool-executor.js";
-import {
-  getClientIp,
-  trackConnection,
-  releaseConnection,
-  isMessageWithinSizeLimit,
-  WS_CLOSE_CONNECTION_LIMIT,
-  WS_CLOSE_MESSAGE_TOO_LARGE,
-} from "./ws-limits.js";
+import { acceptWs } from "./ws-connection.js";
+import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -390,18 +384,14 @@ function buildAnthropicHeaders(auth: {
 
 export async function optioChatWs(app: FastifyInstance) {
   app.get("/ws/optio/chat", { websocket: true }, async (socket, req) => {
-    const clientIp = getClientIp(req);
-
-    if (!trackConnection(clientIp)) {
-      socket.close(WS_CLOSE_CONNECTION_LIMIT, "Too many connections");
-      return;
-    }
+    // Synchronously, before any await: a prompt sent the moment the socket
+    // opens is held until ready() below, and a client that leaves during
+    // setup never takes the per-user conversation slot (see ws-connection.ts).
+    const conn = acceptWs(socket, req);
+    if (!conn) return;
 
     const user = await authenticateWs(socket, req);
-    if (!user) {
-      releaseConnection(clientIp);
-      return;
-    }
+    if (!user) return conn.discard();
 
     const userId = user.id;
     const log = logger.child({ userId, ws: "optio-chat" });
@@ -409,9 +399,9 @@ export async function optioChatWs(app: FastifyInstance) {
     // The Optio assistant executes tools against the workspace (and `approve`
     // authorizes pending tool calls) — viewers are read-only.
     if (!(await requireWsRole(socket, user, "member"))) {
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
+    if (conn.closed) return;
 
     // Enforce one active conversation per user
     if (activeConnections.has(userId)) {
@@ -421,12 +411,16 @@ export async function optioChatWs(app: FastifyInstance) {
           message: "You already have an active Optio conversation. Close the other one first.",
         }),
       );
-      releaseConnection(clientIp);
       socket.close(4409, "Concurrent conversation");
-      return;
+      return conn.discard();
     }
 
     activeConnections.set(userId, socket as unknown as WebSocket);
+    conn.onClose(() => {
+      if (activeConnections.get(userId) === (socket as unknown as WebSocket)) {
+        activeConnections.delete(userId);
+      }
+    });
     log.info("Optio chat connected");
 
     // Extract session token for tool execution (cookie only — never URL query params).
@@ -737,8 +731,17 @@ export async function optioChatWs(app: FastifyInstance) {
       }
     };
 
-    // Handle incoming messages from the client
-    socket.on("message", (data: Buffer | string) => {
+    conn.onClose(() => {
+      log.info("Optio chat disconnected");
+      if (abortController) {
+        abortController.abort();
+        abortController = null;
+      }
+    });
+
+    // Handle incoming messages from the client (starting with any that
+    // arrived before this point).
+    conn.ready((data: Buffer | string) => {
       if (!isMessageWithinSizeLimit(data)) {
         socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
         return;
@@ -816,16 +819,6 @@ export async function optioChatWs(app: FastifyInstance) {
 
         default:
           send({ type: "error", message: `Unknown message type: ${msg.type}` });
-      }
-    });
-
-    socket.on("close", () => {
-      log.info("Optio chat disconnected");
-      releaseConnection(clientIp);
-      activeConnections.delete(userId);
-      if (abortController) {
-        abortController.abort();
-        abortController = null;
       }
     });
   });

@@ -6,8 +6,17 @@
  * seeds enough data that every page renders a non-empty state.
  *
  * Invoked by playwright.config.ts as `tsx e2e/launch-stack.ts`; Playwright
- * waits on the web URL and SIGTERMs this process at teardown (children are
- * killed by the exit handlers below).
+ * waits on the web URL and, at teardown, SIGTERMs this process group (the
+ * config's `gracefulShutdown`). The API runs in its own process group
+ * (startApiServer spawns it detached), so shutdown() below stops it
+ * explicitly; Playwright's default SIGKILL would skip that and orphan the API
+ * on port 4931.
+ *
+ * The API is hermetic (startApiServer's default, see
+ * apps/api/src/test-utils/e2e/hermetic-env.ts): it talks to a fake read-only
+ * Kubernetes API instead of this machine's kubeconfig — so the cluster pages,
+ * shared directories and network policies never reach the real cluster — and
+ * sees neither this machine's Claude login nor the shell's credentials.
  *
  * Fixed ports (chosen to avoid dev defaults): API 4931, web 3131.
  */
@@ -15,8 +24,8 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import buildTestInfra from "../../api/src/test-utils/integration/global-setup.js";
-import { provisionRunInfra } from "../../api/src/test-utils/provision.js";
-import { startApiServer } from "../../api/src/test-utils/e2e/api-server.js";
+import { provisionRunInfra, type RunInfra } from "../../api/src/test-utils/provision.js";
+import { startApiServer, type ApiServerHandle } from "../../api/src/test-utils/e2e/api-server.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = join(HERE, "..");
@@ -26,25 +35,43 @@ export const API_PORT = 4931;
 export const WEB_PORT = 3131;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 
-const children: ChildProcess[] = [];
-function killChildren() {
-  for (const child of children) {
+let apiServer: ApiServerHandle | null = null;
+let web: ChildProcess | null = null;
+let infra: RunInfra | null = null;
+let stopping = false;
+
+/** Stop next dev, then the API's whole process group, then drop the run database. */
+async function shutdown(code: number): Promise<void> {
+  if (stopping) return;
+  stopping = true;
+  try {
+    web?.kill("SIGTERM");
+  } catch {
+    /* already gone */
+  }
+  // SIGTERM to the API's process group, SIGKILL after 10 s.
+  await apiServer?.stop().catch(() => {});
+  await infra?.drop().catch(() => {});
+  process.exit(code);
+}
+process.on("SIGTERM", () => void shutdown(0));
+process.on("SIGINT", () => void shutdown(0));
+process.on("exit", () => {
+  // Last resort (e.g. an uncaught throw): never leave the API running.
+  const pid = apiServer?.proc.pid;
+  if (pid && apiServer?.proc.exitCode === null) {
     try {
-      child.kill("SIGTERM");
+      process.kill(-pid, "SIGKILL");
     } catch {
       /* already gone */
     }
   }
-}
-process.on("SIGTERM", () => {
-  killChildren();
-  process.exit(0);
+  try {
+    web?.kill("SIGKILL");
+  } catch {
+    /* already gone */
+  }
 });
-process.on("SIGINT", () => {
-  killChildren();
-  process.exit(0);
-});
-process.on("exit", killChildren);
 
 async function provisionDatabase(): Promise<void> {
   // Containers + migrated template + redis-lease sequence. Same global setup
@@ -52,7 +79,7 @@ async function provisionDatabase(): Promise<void> {
   // into process.env.
   await buildTestInfra();
 
-  const infra = await provisionRunInfra("optio_e2e_run_");
+  infra = await provisionRunInfra("optio_e2e_run_");
   process.env.DATABASE_URL = infra.testDatabaseUrl;
   process.env.REDIS_URL = infra.testRedisUrl;
   process.env.OPTIO_ENCRYPTION_KEY ??=
@@ -130,8 +157,10 @@ async function seed(): Promise<void> {
     await new Promise((r) => setTimeout(r, 400));
   }
 
-  // A prompt template for /templates and a persistent agent for /agents.
-  await api("/api/prompt-templates", {
+  // A named prompt for /templates and a persistent agent for /agents.
+  // (POST /api/prompt-templates would overwrite the global default coding
+  // prompt that every Repo Task renders; /named creates a Library prompt.)
+  await api("/api/prompt-templates/named", {
     name: "E2E seed prompt",
     kind: "prompt",
     template: "Do the thing: {{thing}}",
@@ -164,10 +193,9 @@ async function main(): Promise<void> {
   await provisionDatabase();
 
   console.warn("[stack] starting API server...");
-  const apiServer = await startApiServer({ port: API_PORT, logLevel: "warn" });
-  // Register for teardown IMMEDIATELY — if seed() throws, the exit handlers
-  // must still find and kill the API server.
-  children.push(apiServer.proc);
+  // Assigned before anything can throw, so shutdown() and the exit handler
+  // always find the API server.
+  apiServer = await startApiServer({ port: API_PORT, logLevel: "warn" });
   console.warn(`[stack] API ready at ${apiServer.baseUrl}`);
 
   console.warn("[stack] seeding data...");
@@ -175,7 +203,7 @@ async function main(): Promise<void> {
   console.warn("[stack] seed complete");
 
   console.warn("[stack] starting next dev...");
-  const web = spawn("npx", ["next", "dev", "-p", String(WEB_PORT)], {
+  web = spawn("npx", ["next", "dev", "-p", String(WEB_PORT)], {
     cwd: WEB_DIR,
     env: {
       ...process.env,
@@ -187,17 +215,16 @@ async function main(): Promise<void> {
     },
     stdio: "inherit",
   });
-  children.push(web);
 
   web.on("exit", (code) => {
+    if (stopping) return;
     console.error(`[stack] next dev exited (${code})`);
-    process.exit(code ?? 1);
+    void shutdown(code ?? 1);
   });
   // Keep running until Playwright tears us down.
 }
 
 main().catch((err) => {
   console.error("[stack] failed:", err);
-  killChildren();
-  process.exit(1);
+  void shutdown(1);
 });

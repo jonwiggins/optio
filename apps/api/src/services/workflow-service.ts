@@ -13,6 +13,7 @@ import { publishWorkflowRunEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
 import * as triggerService from "./trigger-service.js";
 import { renderRunTitle } from "./prompt-template-service.js";
+import { pgDate } from "../utils/pg-timestamp.js";
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
 
@@ -366,10 +367,12 @@ export async function listWorkflowsWithStats(workspaceId?: string) {
     enabled: r.enabled,
     environmentSpec: r.environment_spec,
     createdBy: r.created_by,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
+    // Raw rows carry Postgres timestamp text; hand back Dates like every
+    // drizzle-selected row (serialized as ISO-8601).
+    createdAt: pgDate(r.created_at),
+    updatedAt: pgDate(r.updated_at),
     runCount: parseInt(r.run_count) || 0,
-    lastRunAt: r.last_run_at || null,
+    lastRunAt: pgDate(r.last_run_at),
     totalCostUsd: r.total_cost_usd,
     recentStats: {
       queued: parseInt(r.recent_queued) || 0,
@@ -401,7 +404,7 @@ export async function getWorkflowWithStats(id: string) {
   return {
     ...workflow,
     runCount: parseInt(stats?.run_count) || 0,
-    lastRunAt: stats?.last_run_at || null,
+    lastRunAt: pgDate(stats?.last_run_at),
     totalCostUsd: stats?.total_cost_usd || "0",
   };
 }

@@ -1,5 +1,6 @@
 import {
   pgTable,
+  bigint,
   uuid,
   text,
   timestamp,
@@ -517,6 +518,9 @@ export const sessionChatEvents = pgTable(
     logType: text("log_type"), // "text" | "tool_use" | "tool_result" | "thinking" | "system" | "error" | "info"
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+    // Insertion order: breaks `timestamp` ties (ms clock, several events per
+    // output chunk) so history replays in the order it streamed.
+    seq: bigint("seq", { mode: "number" }).generatedByDefaultAsIdentity(),
   },
   (table) => [index("session_chat_events_session_idx").on(table.sessionId, table.timestamp)],
 );
@@ -711,7 +715,8 @@ export const workflowRuns = pgTable(
     workflowId: uuid("workflow_id")
       .notNull()
       .references(() => workflows.id, { onDelete: "cascade" }),
-    triggerId: uuid("trigger_id").references(() => workflowTriggers.id),
+    // SET NULL: deleting a trigger keeps the runs it started (1791000000).
+    triggerId: uuid("trigger_id").references(() => workflowTriggers.id, { onDelete: "set null" }),
     params: jsonb("params").$type<Record<string, unknown>>(),
     // workflows.run_title rendered with this run's params; null = no template.
     title: text("title"),

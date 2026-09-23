@@ -6,6 +6,7 @@ import type {
   ConnectionProvider,
   Connection,
   ConnectionAssignment,
+  RepoConnection,
   ResolvedConnection,
   ConnectionProviderMcpConfig,
 } from "@optio/shared";
@@ -609,15 +610,28 @@ export async function deleteAssignment(id: string): Promise<void> {
 
 // ── Resolution (for task-worker) ──────────────────────────────────────────
 
+type AssignmentRow = typeof connectionAssignments.$inferSelect;
+
+/** Empty (or null) agentTypes means the assignment covers every agent. */
+function assignmentAgentTypes(a: AssignmentRow): string[] {
+  return (a.agentTypes as string[] | null) ?? [];
+}
+
 /**
- * Resolve all connections that should be injected into a task.
- * Filters by: workspace, enabled state, repo assignments, and agent type.
+ * Every enabled connection in the workspace that has an enabled assignment
+ * covering the repo (a global assignment covers every repo), with those
+ * assignments. One read path for task injection and the repo listing.
  */
-export async function getConnectionsForTask(
+async function loadRepoConnections(
   repoUrl: string,
-  agentType: string,
   workspaceId?: string | null,
-): Promise<ResolvedConnection[]> {
+): Promise<
+  Array<{
+    connection: typeof connections.$inferSelect;
+    provider: typeof connectionProviders.$inferSelect;
+    assignments: AssignmentRow[];
+  }>
+> {
   // 1. Find the repo by URL to get its ID
   const [repo] = await db.select().from(repos).where(eq(repos.repoUrl, repoUrl));
 
@@ -652,35 +666,47 @@ export async function getConnectionsForTask(
       ),
     );
 
-  // Index assignments by connectionId
-  const assignmentsByConn = new Map<string, (typeof assignmentRows)[number][]>();
+  // 4. Keep the assignments that cover this repo: global ones (repoId=null)
+  // and the repo's own.
+  const byConn = new Map<string, AssignmentRow[]>();
   for (const a of assignmentRows) {
-    const existing = assignmentsByConn.get(a.connectionId) ?? [];
-    existing.push(a);
-    assignmentsByConn.set(a.connectionId, existing);
+    if (a.repoId && (!repo || a.repoId !== repo.id)) continue;
+    const list = byConn.get(a.connectionId) ?? [];
+    list.push(a);
+    byConn.set(a.connectionId, list);
   }
 
+  return connRows
+    .filter((r) => byConn.has(r.connection.id))
+    .map((r) => ({ ...r, assignments: byConn.get(r.connection.id)! }));
+}
+
+/**
+ * Resolve all connections that should be injected into a task.
+ * Filters by: workspace, enabled state, repo assignments, and agent type.
+ */
+export async function getConnectionsForTask(
+  repoUrl: string,
+  agentType: string,
+  workspaceId?: string | null,
+): Promise<ResolvedConnection[]> {
   const results: ResolvedConnection[] = [];
 
-  for (const { connection: conn, provider } of connRows) {
-    const assignments = assignmentsByConn.get(conn.id) ?? [];
-
-    // 4. Check if there's a matching assignment
-    // Global assignments (repoId=null) match all repos.
-    // Repo-specific assignments match by repo ID.
-    const matching = assignments.find((a) => {
-      // Global assignment
-      if (!a.repoId) return true;
-      // Repo-specific: match by repo ID
-      if (repo && a.repoId === repo.id) return true;
-      return false;
-    });
-
+  for (const { connection: conn, provider, assignments } of await loadRepoConnections(
+    repoUrl,
+    workspaceId,
+  )) {
+    // 5. An assignment that covers this repo AND this agent type (empty
+    // agentTypes = all agents). Every covering assignment counts — a global
+    // one limited to another agent must not hide the repo's own. The repo's
+    // own assignment wins over a global one (its permission applies).
+    const matching = assignments
+      .filter((a) => {
+        const types = assignmentAgentTypes(a);
+        return types.length === 0 || types.includes(agentType);
+      })
+      .sort((a, b) => Number(!a.repoId) - Number(!b.repoId))[0];
     if (!matching) continue;
-
-    // 5. Filter by agentType (empty agentTypes = all agents)
-    const types = (matching.agentTypes as string[]) ?? [];
-    if (types.length > 0 && !types.includes(agentType)) continue;
 
     // 6. Build resolved connection
     results.push({
@@ -693,11 +719,49 @@ export async function getConnectionsForTask(
       mcpConfig: (provider.mcpConfig as ConnectionProviderMcpConfig) ?? null,
       config: (conn.config as Record<string, unknown>) ?? {},
       permission: matching.permission,
-      agentTypes: types,
+      agentTypes: assignmentAgentTypes(matching),
     });
   }
 
   return results;
+}
+
+/**
+ * Every connection that applies to a repo, for any agent — what
+ * `GET /api/repos/:id/connections` lists. Each carries its full assignment
+ * list plus `agentTypes`: the agent types it's injected for on this repo
+ * (union of the covering assignments; empty = every agent).
+ */
+export async function listConnectionsForRepo(
+  repoUrl: string,
+  workspaceId?: string | null,
+): Promise<RepoConnection[]> {
+  const matches = await loadRepoConnections(repoUrl, workspaceId);
+  if (matches.length === 0) return [];
+
+  const allAssignments = await db
+    .select()
+    .from(connectionAssignments)
+    .where(
+      inArray(
+        connectionAssignments.connectionId,
+        matches.map((m) => m.connection.id),
+      ),
+    );
+
+  return matches.map(({ connection, provider, assignments }) => {
+    const everyAgent = assignments.some((a) => assignmentAgentTypes(a).length === 0);
+    const agentTypes = everyAgent
+      ? []
+      : [...new Set(assignments.flatMap((a) => assignmentAgentTypes(a)))];
+    return {
+      ...mapConnectionRow(connection, provider),
+      assignments: allAssignments
+        .filter((a) => a.connectionId === connection.id)
+        .map(mapAssignmentRow),
+      agentTypes,
+    };
+  });
 }
 
 // ── Row mappers ───────────────────────────────────────────────────────────

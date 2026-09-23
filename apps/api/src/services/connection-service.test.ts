@@ -663,6 +663,36 @@ describe("connection-service", () => {
       expect(result[0].providerSlug).toBe("notion");
     });
 
+    it("uses any covering assignment that allows the agent, preferring the repo's own", async () => {
+      mockTaskQueries(
+        [{ id: "repo-1", repoUrl: "https://github.com/o/r" }],
+        [{ connection: makeConnectionRow(), provider: makeProviderRow() }],
+        [
+          // Global, limited to another agent — listed first, as the DB may.
+          makeAssignmentRow({
+            id: "a-global",
+            connectionId: "conn-1",
+            repoId: null,
+            agentTypes: ["codex"],
+            permission: "read",
+          }),
+          makeAssignmentRow({
+            id: "a-repo",
+            connectionId: "conn-1",
+            repoId: "repo-1",
+            agentTypes: [],
+            permission: "write",
+          }),
+        ],
+      );
+
+      const result = await getConnectionsForTask("https://github.com/o/r", "claude", "ws-1");
+
+      expect(result).toHaveLength(1);
+      expect(result[0].permission).toBe("write");
+      expect(result[0].agentTypes).toEqual([]);
+    });
+
     it("filters by agent type when agentTypes is set on assignment", async () => {
       mockTaskQueries(
         [{ id: "repo-1", repoUrl: "https://github.com/o/r" }],

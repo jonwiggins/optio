@@ -16,30 +16,24 @@ import type { LocalStreamClientMessage } from "@optio/shared";
 import { logger } from "../logger.js";
 import { authenticateWs } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
-import {
-  getClientIp,
-  trackConnection,
-  releaseConnection,
-  isMessageWithinSizeLimit,
-  WS_CLOSE_CONNECTION_LIMIT,
-  WS_CLOSE_MESSAGE_TOO_LARGE,
-} from "./ws-limits.js";
+import { acceptWs } from "./ws-connection.js";
+import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 import * as relay from "../services/local-relay.js";
-import { canAccessTerminal, getSnapshot, getTerminal } from "../services/local-terminal-service.js";
+import {
+  canAccessTerminal,
+  getTerminal,
+  replayRecordedScreen,
+} from "../services/local-terminal-service.js";
 
 export async function localTerminalStreamWs(app: FastifyInstance) {
   app.get("/ws/local/terminals/:terminalId/stream", { websocket: true }, async (socket, req) => {
-    const clientIp = getClientIp(req);
-    if (!trackConnection(clientIp)) {
-      socket.close(WS_CLOSE_CONNECTION_LIMIT, "Too many connections");
-      return;
-    }
+    // Synchronously, before any await: keystrokes and the first resize sent
+    // while we authenticate are held for ready() below (see ws-connection.ts).
+    const conn = acceptWs(socket, req);
+    if (!conn) return;
 
     const user = await authenticateWs(socket, req);
-    if (!user) {
-      releaseConnection(clientIp);
-      return;
-    }
+    if (!user) return conn.discard();
 
     const { terminalId } = z.object({ terminalId: z.string().uuid() }).parse(req.params);
     const log = logger.child({ terminalId, ws: "local-terminal" });
@@ -47,21 +41,19 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
     const terminal = await getTerminal(terminalId);
     if (!terminal) {
       socket.send(JSON.stringify({ type: "error", message: "Terminal not found" }));
-      releaseConnection(clientIp);
       socket.close();
-      return;
+      return conn.discard();
     }
     if (!canAccessTerminal(terminal, user.id)) {
       socket.close(4403, "Not authorized for this terminal");
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
     // The stream writes straight to a PTY on the owner's machine — read-only
     // viewers must not reach it.
     if (!(await requireWsRole(socket, user, "member", terminal.workspaceId))) {
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
+    if (conn.closed) return;
 
     socket.send(
       JSON.stringify({
@@ -71,10 +63,10 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
       }),
     );
 
-    let attached = false;
     if (terminal.state === "running" || terminal.state === "launching") {
-      attached = relay.attachBrowser(terminal.hostId, terminal.id, socket);
-      if (!attached) {
+      if (relay.attachBrowser(terminal.hostId, terminal.id, socket)) {
+        conn.onClose(() => relay.detachBrowser(terminal.hostId, terminal.id, socket));
+      } else {
         socket.send(JSON.stringify({ type: "error", message: "Host is offline" }));
       }
     } else if (terminal.state === "exited" || terminal.state === "error") {
@@ -82,15 +74,11 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
       // at exit, announcing its grid first so the viewer lays it out at the
       // size it was drawn for. Older rows have no snapshot and get only the
       // exit frame (the pane shows its text preview instead).
-      const snapshot = await getSnapshot(terminal.id);
-      if (snapshot) {
-        socket.send(JSON.stringify({ type: "size", cols: snapshot.cols, rows: snapshot.rows }));
-        socket.send(snapshot.data, { binary: true });
-      }
-      socket.send(JSON.stringify({ type: "exit", exitCode: terminal.exitCode }));
+      await replayRecordedScreen(socket, terminal, { withStatus: false });
     }
 
-    socket.on("message", (raw: Buffer | string) => {
+    conn.onClose(() => log.debug("local terminal viewer disconnected"));
+    conn.ready((raw) => {
       if (!isMessageWithinSizeLimit(raw)) {
         socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
         return;
@@ -121,12 +109,6 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
           rows: Math.min(msg.rows, 1000),
         });
       }
-    });
-
-    socket.on("close", () => {
-      releaseConnection(clientIp);
-      if (attached) relay.detachBrowser(terminal.hostId, terminal.id, socket);
-      log.debug("local terminal viewer disconnected");
     });
   });
 }

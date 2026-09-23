@@ -962,6 +962,86 @@ public struct UpdateConnectionAssignmentInput: Codable, Hashable, Sendable {
     }
 }
 
+/// A connection as `GET /api/repos/:id/connections` lists it: every enabled
+/// connection with an enabled assignment covering that repo (its own or a
+/// global one), whichever agent types that assignment is limited to.
+public struct RepoConnection: Codable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let providerId: String
+    public let config: [String: AnyCodable]?
+    /// "global" or repo URL
+    public let scope: String
+    public let repoUrl: String?
+    public let workspaceId: String?
+    public let enabled: Bool
+    public let status: ConnectionStatus
+    public let statusMessage: String?
+    public let lastCheckedAt: Date?
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let provider: ConnectionProvider?
+    public let assignments: [ConnectionAssignment]?
+    /// The agent types the connection is injected for on this repo — the union
+    /// over its assignments that cover the repo. Empty = every agent.
+    public let agentTypes: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case name = "name"
+        case providerId = "providerId"
+        case config = "config"
+        case scope = "scope"
+        case repoUrl = "repoUrl"
+        case workspaceId = "workspaceId"
+        case enabled = "enabled"
+        case status = "status"
+        case statusMessage = "statusMessage"
+        case lastCheckedAt = "lastCheckedAt"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+        case provider = "provider"
+        case assignments = "assignments"
+        case agentTypes = "agentTypes"
+    }
+
+    public init(
+        id: String,
+        name: String,
+        providerId: String,
+        config: [String: AnyCodable]? = nil,
+        scope: String,
+        repoUrl: String? = nil,
+        workspaceId: String? = nil,
+        enabled: Bool,
+        status: ConnectionStatus,
+        statusMessage: String? = nil,
+        lastCheckedAt: Date? = nil,
+        createdAt: Date,
+        updatedAt: Date,
+        provider: ConnectionProvider? = nil,
+        assignments: [ConnectionAssignment]? = nil,
+        agentTypes: [String]
+    ) {
+        self.id = id
+        self.name = name
+        self.providerId = providerId
+        self.config = config
+        self.scope = scope
+        self.repoUrl = repoUrl
+        self.workspaceId = workspaceId
+        self.enabled = enabled
+        self.status = status
+        self.statusMessage = statusMessage
+        self.lastCheckedAt = lastCheckedAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.provider = provider
+        self.assignments = assignments
+        self.agentTypes = agentTypes
+    }
+}
+
 public struct ResolvedConnection: Codable, Hashable, Sendable {
     public let connectionId: String
     public let connectionName: String
@@ -1487,6 +1567,11 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
     }
 }
 
+/// A task log line on `/ws/logs/:taskId`. Live frames carry the stored row —
+/// the same `id`, `timestamp`, `logType` and `metadata` that
+/// `GET /api/tasks/:id/logs` returns — so a client merging REST history with
+/// the live stream can drop duplicates. Frames replayed on connect are flagged
+/// `catchUp: true`.
 public struct TaskLogEvent: Codable, Hashable, Sendable {
     public enum Stream: String, Codable, Hashable, Sendable, CaseIterable {
         case stdout = "stdout"
@@ -1504,24 +1589,47 @@ public struct TaskLogEvent: Codable, Hashable, Sendable {
 
     public let type: String
     public let taskId: String
+    /// The `task_logs` row id.
+    public let id: String?
     public let stream: Stream
     public let content: String
     public let timestamp: String
+    public let logType: String?
+    public let metadata: [String: AnyCodable]?
+    public let catchUp: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case type = "type"
         case taskId = "taskId"
+        case id = "id"
         case stream = "stream"
         case content = "content"
         case timestamp = "timestamp"
+        case logType = "logType"
+        case metadata = "metadata"
+        case catchUp = "catchUp"
     }
 
-    public init(type: String, taskId: String, stream: Stream, content: String, timestamp: String) {
+    public init(
+        type: String,
+        taskId: String,
+        id: String? = nil,
+        stream: Stream,
+        content: String,
+        timestamp: String,
+        logType: String? = nil,
+        metadata: [String: AnyCodable]? = nil,
+        catchUp: Bool? = nil
+    ) {
         self.type = type
         self.taskId = taskId
+        self.id = id
         self.stream = stream
         self.content = content
         self.timestamp = timestamp
+        self.logType = logType
+        self.metadata = metadata
+        self.catchUp = catchUp
     }
 }
 
@@ -6462,12 +6570,19 @@ public enum SessionChatClientMessage: Codable, Hashable, Sendable {
     }
 }
 
-/// Server → Client message for the session chat WebSocket
+/// Server → Client message for the session chat WebSocket.
+///
+/// On connect: `status` "ready", then the persisted history as `chat_event`
+/// frames flagged `catchUp: true`, then `history_done`; everything after that
+/// is live. Client messages may be sent as soon as the socket opens — the
+/// server queues any that arrive before `history_done` and handles them, in
+/// order, right after it.
 public enum SessionChatServerMessage: Codable, Hashable, Sendable {
     case chatEvent(ChatEventPayload)
     case costUpdate(CostUpdatePayload)
     case status(StatusPayload)
     case error(ErrorPayload)
+    case historyDone(HistoryDonePayload)
     /// Fallback for discriminator values this client does not know about yet.
     case unknown(AnyCodable)
 
@@ -6525,6 +6640,18 @@ public enum SessionChatServerMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct HistoryDonePayload: Codable, Hashable, Sendable {
+        public let count: Double
+
+        private enum CodingKeys: String, CodingKey {
+            case count = "count"
+        }
+
+        public init(count: Double) {
+            self.count = count
+        }
+    }
+
     private enum DiscriminatorKey: String, CodingKey {
         case type
     }
@@ -6537,6 +6664,7 @@ public enum SessionChatServerMessage: Codable, Hashable, Sendable {
         case "cost_update": self = .costUpdate(try CostUpdatePayload(from: decoder))
         case "status": self = .status(try StatusPayload(from: decoder))
         case "error": self = .error(try ErrorPayload(from: decoder))
+        case "history_done": self = .historyDone(try HistoryDonePayload(from: decoder))
         default: self = .unknown(try AnyCodable(from: decoder))
         }
     }
@@ -6558,6 +6686,10 @@ public enum SessionChatServerMessage: Codable, Hashable, Sendable {
         case .error(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("error", forKey: .type)
+            try payload.encode(to: encoder)
+        case .historyDone(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("history_done", forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let value):
             try value.encode(to: encoder)

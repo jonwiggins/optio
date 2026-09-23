@@ -383,6 +383,36 @@ data class UpdateConnectionAssignmentInput(
     val enabled: Boolean? = null,
 )
 
+/**
+ * A connection as `GET /api/repos/:id/connections` lists it: every enabled
+ * connection with an enabled assignment covering that repo (its own or a
+ * global one), whichever agent types that assignment is limited to.
+ */
+@Serializable
+data class RepoConnection(
+    val id: String,
+    val name: String,
+    val providerId: String,
+    val config: Map<String, JsonElement>? = null,
+    /** "global" or repo URL */
+    val scope: String,
+    val repoUrl: String? = null,
+    val workspaceId: String? = null,
+    val enabled: Boolean,
+    val status: ConnectionStatus,
+    val statusMessage: String? = null,
+    val lastCheckedAt: Instant? = null,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+    val provider: ConnectionProvider? = null,
+    val assignments: List<ConnectionAssignment>? = null,
+    /**
+     * The agent types the connection is injected for on this repo — the union
+     * over its assignments that cover the repo. Empty = every agent.
+     */
+    val agentTypes: List<String>,
+)
+
 @Serializable
 data class ResolvedConnection(
     val connectionId: String,
@@ -609,13 +639,25 @@ data class TaskStateChangedEvent(
     val errorMessage: String? = null,
 ) : WsEvent
 
+/**
+ * A task log line on `/ws/logs/:taskId`. Live frames carry the stored row —
+ * the same `id`, `timestamp`, `logType` and `metadata` that
+ * `GET /api/tasks/:id/logs` returns — so a client merging REST history with
+ * the live stream can drop duplicates. Frames replayed on connect are flagged
+ * `catchUp: true`.
+ */
 @Serializable
 data class TaskLogEvent(
     val type: String,
     val taskId: String,
+    /** The `task_logs` row id. */
+    val id: String? = null,
     val stream: Stream,
     val content: String,
     val timestamp: String,
+    val logType: String? = null,
+    val metadata: Map<String, JsonElement>? = null,
+    val catchUp: Boolean? = null,
 ) : WsEvent {
     @Serializable(with = Stream.Companion::class)
     enum class Stream(override val raw: String) : RawEnum {
@@ -2948,7 +2990,15 @@ sealed interface SessionChatClientMessage {
     }
 }
 
-/** Server → Client message for the session chat WebSocket */
+/**
+ * Server → Client message for the session chat WebSocket.
+ *
+ * On connect: `status` "ready", then the persisted history as `chat_event`
+ * frames flagged `catchUp: true`, then `history_done`; everything after that
+ * is live. Client messages may be sent as soon as the socket opens — the
+ * server queues any that arrive before `history_done` and handles them, in
+ * order, right after it.
+ */
 @Serializable(with = SessionChatServerMessage.Serializer::class)
 sealed interface SessionChatServerMessage {
     @Serializable
@@ -2973,6 +3023,11 @@ sealed interface SessionChatServerMessage {
         val message: String,
     ) : SessionChatServerMessage
 
+    @Serializable
+    data class HistoryDone(
+        val count: Double,
+    ) : SessionChatServerMessage
+
     /** Fallback for discriminator values this client does not know about yet. */
     data class Unknown(val raw: JsonElement) : SessionChatServerMessage
 
@@ -2982,6 +3037,7 @@ sealed interface SessionChatServerMessage {
             "cost_update" -> json.decodeFromJsonElement(CostUpdate.serializer(), element.withoutDiscriminator())
             "status" -> json.decodeFromJsonElement(Status.serializer(), element.withoutDiscriminator())
             "error" -> json.decodeFromJsonElement(Error.serializer(), element.withoutDiscriminator())
+            "history_done" -> json.decodeFromJsonElement(HistoryDone.serializer(), element.withoutDiscriminator())
             else -> null
         }
 
@@ -2990,6 +3046,7 @@ sealed interface SessionChatServerMessage {
             is CostUpdate -> tagged("cost_update", json.encodeToJsonElement(CostUpdate.serializer(), value))
             is Status -> tagged("status", json.encodeToJsonElement(Status.serializer(), value))
             is Error -> tagged("error", json.encodeToJsonElement(Error.serializer(), value))
+            is HistoryDone -> tagged("history_done", json.encodeToJsonElement(HistoryDone.serializer(), value))
             is Unknown -> value.raw
         }
 

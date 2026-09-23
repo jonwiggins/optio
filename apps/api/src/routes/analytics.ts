@@ -18,6 +18,7 @@ import {
   getFailureAnalytics,
   getPrAnalytics,
 } from "../services/analytics-service.js";
+import { pgIso } from "../utils/pg-timestamp.js";
 
 // Every row that can carry AI spend, normalised to the `tasks` cost columns so
 // the /costs queries below read one source:
@@ -128,7 +129,9 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
 
       const workspaceId = req.user?.workspaceId || null;
 
-      const repoFilter = repoUrl ? sql`AND repo_url = ${repoUrl}` : sql``;
+      // Qualified: every query reads ${costRows} (aliased `tasks`), and the
+      // anomalies query joins repo_avgs, which has a repo_url of its own.
+      const repoFilter = repoUrl ? sql`AND tasks.repo_url = ${repoUrl}` : sql``;
       const wsFilter = workspaceId ? sql`AND workspace_id = ${workspaceId}` : sql``;
 
       const dateFilter = sql`AND created_at >= NOW() - INTERVAL '1 day' * ${days}`;
@@ -451,7 +454,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
           modelUsed: r.model_used,
           repoAvgCost: parseFloat(r.repo_avg_cost) || 0,
           costRatio: parseFloat(r.cost_ratio) || 0,
-          createdAt: r.created_at,
+          createdAt: pgIso(r.created_at),
         })),
         modelSuggestions: modelSuggestions.map((r) => ({
           repoUrl: r.repo_url,
@@ -470,7 +473,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
           inputTokens: parseInt(r.input_tokens) || 0,
           outputTokens: parseInt(r.output_tokens) || 0,
           modelUsed: r.model_used,
-          createdAt: r.created_at,
+          createdAt: pgIso(r.created_at),
         })),
       });
     },

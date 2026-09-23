@@ -92,9 +92,11 @@ for (const { from, to } of [
 test("templates page shows the seeded prompt", async ({ page }) => {
   await page.goto("/templates");
   await expectNoAuthOrSetupRedirect(page);
-  // The prompt-templates API stores per-kind defaults (the provided name is
-  // not displayed), so assert on the template CONTENT.
-  await expect(page.getByText("Do the thing").first()).toBeVisible({ timeout: 30_000 });
+  const main = page.locator("main");
+  await expect(main.getByRole("heading", { name: "E2E seed prompt" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(main.getByText("Do the thing: {{thing}}").first()).toBeVisible();
 });
 
 for (const { path, marker } of [

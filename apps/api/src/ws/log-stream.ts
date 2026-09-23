@@ -3,27 +3,16 @@ import { z } from "zod";
 import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
 import { getTask, getTaskLogs } from "../services/task-service.js";
-import {
-  getClientIp,
-  trackConnection,
-  releaseConnection,
-  WS_CLOSE_CONNECTION_LIMIT,
-} from "./ws-limits.js";
+import { acceptWs } from "./ws-connection.js";
 
 export async function logStreamWs(app: FastifyInstance) {
   app.get("/ws/logs/:taskId", { websocket: true }, async (socket, req) => {
-    const clientIp = getClientIp(req);
-
-    if (!trackConnection(clientIp)) {
-      socket.close(WS_CLOSE_CONNECTION_LIMIT, "Too many connections");
-      return;
-    }
+    // Synchronously, before any await (see ws-connection.ts).
+    const conn = acceptWs(socket, req);
+    if (!conn) return;
 
     const user = await authenticateWs(socket, req);
-    if (!user) {
-      releaseConnection(clientIp);
-      return;
-    }
+    if (!user) return conn.discard();
 
     const { taskId } = z.object({ taskId: z.string() }).parse(req.params);
 
@@ -31,11 +20,11 @@ export async function logStreamWs(app: FastifyInstance) {
     const task = await getTask(taskId);
     if (!task) {
       socket.close(4404, "Task not found");
-      return;
+      return conn.discard();
     }
     if (user.workspaceId && task.workspaceId && task.workspaceId !== user.workspaceId) {
       socket.close(4403, "Access denied");
-      return;
+      return conn.discard();
     }
 
     // Send catch-up: recent logs so reconnecting clients don't miss data
@@ -46,6 +35,7 @@ export async function logStreamWs(app: FastifyInstance) {
           JSON.stringify({
             type: "task:log",
             taskId,
+            id: log.id,
             content: log.content,
             stream: log.stream,
             timestamp: log.timestamp,
@@ -58,6 +48,7 @@ export async function logStreamWs(app: FastifyInstance) {
     } catch {
       // ignore catch-up errors — still subscribe to live events
     }
+    if (conn.closed) return;
 
     const subscriber = createSubscriber();
 
@@ -83,10 +74,11 @@ export async function logStreamWs(app: FastifyInstance) {
       }
     });
 
-    socket.on("close", () => {
-      releaseConnection(clientIp);
+    conn.onClose(() => {
       subscriber.unsubscribe(channel);
       subscriber.disconnect();
     });
+    // Server → client only: client frames are ignored.
+    conn.ready(() => {});
   });
 }
