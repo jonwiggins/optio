@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only: the terminal playground (canned ANSI, a local echo loop, and a live Optio Local
+  stream). Merged into the app's debug APK because :app depends on :core:terminal:
+    adb shell am start -n dev.optio.android/dev.optio.core.terminal.playground.TerminalPlaygroundActivity
+  Extras: see PlaygroundConfig.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application>
+        <activity
+            android:name="dev.optio.core.terminal.playground.TerminalPlaygroundActivity"
+            android:exported="true"
+            android:label="Terminal playground"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+    </application>
+</manifest>
