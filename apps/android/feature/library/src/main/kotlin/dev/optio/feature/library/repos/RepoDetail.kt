@@ -295,7 +295,10 @@ internal fun RepoDetailContent(
 
             groupHeader("Connections", key = "connections-header")
             if (detail.connections.isEmpty()) {
-                groupedCard(key = "connections-empty") { NoteRow("No connections assigned to this repo.") }
+                // A GroupedRow, not a groupedCard: the header above already gives the air.
+                item(key = "connections-empty") {
+                    GroupedRow(cardPosition(0, 1)) { NoteRow("No connections assigned to this repo.") }
+                }
             } else {
                 detail.connections.forEachIndexed { index, connection ->
                     item(key = "connection-${connection.id}") {
