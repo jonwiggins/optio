@@ -9,6 +9,7 @@ import Foundation
 ///   optio://section/work?view=active|recurring|agents|history|all   (`.work(view:)`; legacy section/sessions)
 ///   optio://section/<name>          (work|reviews|inbox|prompts|repos|machines|connections|analytics|costs|
 ///                                    activity|cluster|more; legacy sessions|tasks|jobs|scheduled|agents|local|issues map onto those)
+///   optio://settings                (the app's settings; the server's test push links here)
 public enum DeepLink: Hashable, Sendable {
     case task(String), local(String, compose: Bool), agent(String, compose: Bool), session(String)
     case needsYou
@@ -17,6 +18,8 @@ public enum DeepLink: Hashable, Sendable {
     /// The Work list in a named view (`optio://section/work?view=…`).
     case work(view: String)
     case section(String)
+    /// The app's settings (`optio://settings`, what `POST /api/notifications/devices/test` links).
+    case settings
 
     public static let scheme = "optio"
     /// Query key carrying a `ServerProfile.id`; the app switches to that server before
@@ -37,6 +40,7 @@ public enum DeepLink: Hashable, Sendable {
         case .needsYou: c.host = "needs-you"
         case .work(let view): c.host = "section"; c.path = "/work"; c.queryItems = [.init(name: "view", value: view)]
         case .section(let name): c.host = "section"; c.path = "/\(name)"
+        case .settings: c.host = "settings"
         }
         if let server { c.queryItems = (c.queryItems ?? []) + [URLQueryItem(name: Self.serverQuery, value: server)] }
         return c.url!
@@ -62,6 +66,7 @@ public enum DeepLink: Hashable, Sendable {
         case ("needs-you", _): self = .needsYou
         case ("section", "work") where view != nil, ("section", "sessions") where view != nil: self = .work(view: view!)
         case ("section", let name?): self = .section(name)
+        case ("settings", _): self = .settings
         default: return nil
         }
     }

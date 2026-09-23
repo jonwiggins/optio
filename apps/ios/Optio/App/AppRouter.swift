@@ -83,6 +83,7 @@ final class AppRouter {
             } else {
                 return false
             }
+        case .settings: pendingDetail = nil; selectedTab = .more
         }
         return true
     }

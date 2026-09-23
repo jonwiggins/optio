@@ -20,6 +20,7 @@ import dev.optio.core.navigation.routes.HubRoute
 import dev.optio.core.navigation.routes.LocalTerminalRoute
 import dev.optio.core.navigation.routes.NewWorkRoute
 import dev.optio.core.navigation.routes.SessionDetailRoute
+import dev.optio.core.navigation.routes.SettingsRoute
 import dev.optio.core.navigation.routes.TaskDetailRoute
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -145,7 +146,8 @@ class AppRouter(
     /**
      * Routes [link]: details push onto the Work tab (replacing whatever was there, so a deep link
      * lands in one hop), `needs-you` / `section/…` open their hub, `work/new` pushes the New work
-     * form. [explicitView] (`?view=` on a `section/<legacy name>` URL) overrides the section's view.
+     * form, `settings` opens More › Settings. [explicitView] (`?view=` on a `section/<legacy name>`
+     * URL) overrides the section's view.
      */
     fun handle(
         link: DeepLink,
@@ -166,6 +168,10 @@ class AppRouter(
                     link.name == "more" -> openTab(Tab.MORE)
                     else -> return false
                 }
+            }
+            DeepLink.Settings -> {
+                openTab(Tab.MORE)
+                push(SettingsRoute, Tab.MORE)
             }
         }
         return true
