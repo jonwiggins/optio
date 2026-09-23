@@ -1,29 +1,38 @@
 package dev.optio.feature.widgets.config
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.optio.core.data.ServerProfile
 import dev.optio.core.glance.RunTarget
@@ -32,6 +41,7 @@ import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.GroupedSection
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.OptioRow
+import dev.optio.core.ui.components.OptioRowDefaults
 import dev.optio.core.ui.components.ServerDot
 import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.components.metaText
@@ -74,7 +84,10 @@ internal fun ConfigScreen(
     }
 }
 
-/** A choice row with a radio button on the trailing edge. */
+/**
+ * One option of a single-choice list (iOS: a picker row and its checkmark): the whole row selects,
+ * the chosen one carries a trailing check. Centred vertically, whether or not it has a meta line.
+ */
 @Composable
 internal fun ChoiceRow(
     title: String,
@@ -84,14 +97,28 @@ internal fun ChoiceRow(
     meta: AnnotatedString? = null,
     leading: (@Composable () -> Unit)? = null,
 ) {
-    OptioRow(
-        title = title,
-        meta = meta,
-        leading = leading,
-        modifier = modifier,
-        onClick = onClick,
-        trailingContent = { RadioButton(selected = selected, onClick = onClick) },
-    )
+    val type = OptioTheme.type
+    val colors = OptioTheme.colors
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(OptioRowDefaults.ContentPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        leading?.invoke()
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Text(title, style = type.body, color = colors.label, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (meta != null) Text(meta, style = type.subheadline, color = colors.secondaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(
+            Icons.Filled.Check,
+            contentDescription = null,
+            tint = if (selected) colors.accent else Color.Transparent,
+            modifier = Modifier.size(20.dp),
+        )
+    }
 }
 
 /** A toggle row. */

@@ -31,7 +31,9 @@ import java.time.Instant
  * footer). Nothing here waits on the network.
  */
 class WorkWidget : GlanceAppWidget() {
-    override val sizeMode: SizeMode = SizeMode.Responsive(WorkFamily.entries.map { it.breakpoint }.toSet())
+    // Exact, not Responsive: the content reads the real width (a large row fits its Where chip to
+    // it) and picks small / medium / large from the real size.
+    override val sizeMode: SizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(
         context: Context,

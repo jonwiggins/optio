@@ -62,7 +62,7 @@ import dev.optio.feature.widgets.ui.shortTime
 
 /** The Work widget's three layouts (iOS systemSmall / systemMedium / systemLarge). */
 enum class WorkFamily(
-    /** The smallest size this layout is designed for (Glance picks the largest that fits). */
+    /** The smallest size this layout is designed for. */
     val breakpoint: DpSize,
     /** Session rows shown before "+N more". */
     val budget: Int,

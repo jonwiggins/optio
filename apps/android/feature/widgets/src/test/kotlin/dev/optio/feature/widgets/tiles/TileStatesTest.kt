@@ -15,6 +15,7 @@ import java.time.Duration
 import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -106,6 +107,10 @@ class TileStatesTest {
         assertFalse(RunFiring.tileShowsStarted(now.minusSeconds(4), now))
         assertFalse(RunFiring.tileShowsStarted(null, now))
         assertFalse(RunFiring.tileShowsStarted(now.plusSeconds(1), now), "a clock that went back never flashes")
+        // While it shows, the tile knows when to take it down (3.5 s after the start).
+        assertEquals(Duration.ofMillis(1500), RunFiring.tileStartedRemaining(now.minusSeconds(2), now))
+        assertNull(RunFiring.tileStartedRemaining(now.minusSeconds(4), now))
+        assertNull(RunFiring.tileStartedRemaining(null, now))
     }
 
     @Test

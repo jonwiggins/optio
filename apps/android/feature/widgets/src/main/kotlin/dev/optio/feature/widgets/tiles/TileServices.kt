@@ -7,16 +7,24 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.TileService
 import dev.optio.core.data.DeepLink
+import dev.optio.core.glance.RunTarget
 import dev.optio.feature.widgets.Host
 import dev.optio.feature.widgets.Links
 import dev.optio.feature.widgets.OptioWidgets
 import dev.optio.feature.widgets.data.WidgetStore
 import dev.optio.feature.widgets.run.RunFiring
+import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 /** Flags the tiles keep in the widgets' store. */
@@ -33,9 +41,34 @@ internal object TileFlags {
 abstract class OptioTileService : TileService() {
     protected val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    private var listening: Job? = null
+
+    /**
+     * Renders now, then again whenever what the tile shows changes while it listens: a refresh
+     * landing, a run started elsewhere, a target saved in the tile's settings. The system does not
+     * call [onStartListening] again for a tile that is still listening (an unconfigured Run tile's
+     * tap opens its settings without stopping), so waiting for the next call would leave it stale.
+     */
     override fun onStartListening() {
         super.onStartListening()
-        scope.launch { render(look()) }
+        listening?.cancel()
+        listening =
+            scope.launch {
+                changes().collectLatest {
+                    render(look())
+                    // A look that goes by itself (the Run tile's checkmark) renders again when it does.
+                    expiresIn()?.let {
+                        delay(it.toMillis())
+                        render(look())
+                    }
+                }
+            }
+    }
+
+    override fun onStopListening() {
+        listening?.cancel()
+        listening = null
+        super.onStopListening()
     }
 
     override fun onDestroy() {
@@ -45,6 +78,12 @@ abstract class OptioTileService : TileService() {
 
     /** What the tile shows now. */
     protected abstract suspend fun look(): TileLook
+
+    /** What re-renders the tile while it listens; its first value renders it at once. */
+    protected open fun changes(): Flow<Unit> = flowOf(Unit)
+
+    /** How long what the tile shows now lasts by itself (null: until something changes). */
+    protected open suspend fun expiresIn(): Duration? = null
 
     protected fun render(look: TileLook) {
         val tile = qsTile ?: return
@@ -89,6 +128,8 @@ class NeedsYouTileService : OptioTileService() {
         OptioWidgets.scope.launch { WidgetStore.get(applicationContext).setFlag(TileFlags.NEEDS_YOU, false) }
     }
 
+    override fun changes(): Flow<Unit> = Host.store(this).changes
+
     override suspend fun look(): TileLook {
         // Every paired server's cached snapshot, merged oldest first with "Later" items last.
         val entry = Host.loader(this).cached()
@@ -118,11 +159,16 @@ class NewWorkTileService : OptioTileService() {
  * on an unconfigured tile opens it too.
  */
 class RunTargetTileService : OptioTileService() {
+    override fun changes(): Flow<Unit> = combine(WidgetStore.get(this).data, Host.store(this).changes) { _, _ -> }
+
     override suspend fun look(): TileLook {
         val target = WidgetStore.get(this).tileTarget()
-        val started = target?.let { Host.store(this).startedAt(it.id) }
-        return TileStates.runTarget(signedIn(), target, RunFiring.tileShowsStarted(started, Instant.now()))
+        return TileStates.runTarget(signedIn(), target, RunFiring.tileShowsStarted(startedAt(target), Instant.now()))
     }
+
+    override suspend fun expiresIn(): Duration? = RunFiring.tileStartedRemaining(startedAt(WidgetStore.get(this).tileTarget()), Instant.now())
+
+    private suspend fun startedAt(target: RunTarget?): Instant? = target?.let { Host.store(this).startedAt(it.id) }
 
     override fun onClick() {
         super.onClick()

@@ -132,9 +132,16 @@ internal object RunFiring {
     fun tileShowsStarted(
         started: Instant?,
         now: Instant,
-    ): Boolean {
-        started ?: return false
-        val age = Duration.between(started, now)
-        return !age.isNegative && age < tileFlash.plusMillis(500)
+    ): Boolean = tileStartedRemaining(started, now) != null
+
+    /** How much longer the tile's checkmark shows for a run [started] then (null: it doesn't). */
+    fun tileStartedRemaining(
+        started: Instant?,
+        now: Instant,
+    ): Duration? {
+        started ?: return null
+        if (Duration.between(started, now).isNegative) return null
+        val left = Duration.between(now, started.plus(tileFlash).plusMillis(500))
+        return left.takeIf { !it.isNegative && !it.isZero }
     }
 }
