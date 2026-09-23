@@ -32,6 +32,16 @@ export const metadata: Metadata = {
   },
 };
 
+// The layout reads PUBLIC_API_URL at render time, so it must render per
+// request: a statically prerendered route (/sessions, /issues, …) would bake
+// the *build-time* value ("" in the Docker build) into its HTML, and since
+// the SPA keeps whichever document it started from, every client-side
+// navigation out of such a page would open its WebSockets against the wrong
+// origin (the Next server instead of the API) until a hard reload from a
+// dynamic route. Every page is a client component that fetches its own data,
+// so there is nothing to gain from prerendering the shell.
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   // Inject runtime config so client-side code can derive the API WebSocket URL.
   // PUBLIC_API_URL is the browser-reachable API URL (e.g. http://localhost:30400
