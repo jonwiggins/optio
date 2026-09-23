@@ -1,0 +1,17 @@
+{
+  "devices": [
+    {
+      "id": "9e3c4009-2e2f-4989-bfad-e7afc5823804",
+      "token": "8f76b2…1298",
+      "platform": "ios",
+      "environment": "sandbox",
+      "bundleId": "dev.optio.ios",
+      "appVersion": "1.0 (devlab)",
+      "deviceName": "Ada's iPhone",
+      "failureCount": 0,
+      "lastSeenAt": "2026-09-23T01:00:25.620Z",
+      "createdAt": "2026-09-23T01:00:25.620Z"
+    }
+  ],
+  "push": { "apns": false, "fcm": false }
+}
