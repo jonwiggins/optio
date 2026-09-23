@@ -11,7 +11,6 @@ import dev.optio.core.network.ApiClient
 import dev.optio.core.network.ApiError
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -87,7 +86,7 @@ fun whenFromTrigger(trigger: JsonObject?): WhenAnswer {
             trigger = TriggerConfig(
                 type = TriggerType.TICKET,
                 ticketSource = TicketSource.fromRaw(c.text("source")) ?: TicketSource.GITHUB,
-                ticketLabels = (c["labels"] as? JsonArray)?.let { c.strings("labels") } ?: emptyList(),
+                ticketLabels = c.strings("labels"),
             ),
         )
         else -> base
