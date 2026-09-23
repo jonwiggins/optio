@@ -1,0 +1,79 @@
+{
+  "hosts": [
+    {
+      "id": "9d2e4c6a-8b0f-4a1e-b3c5-d7e9f1a3b5c7",
+      "userId": null,
+      "workspaceId": null,
+      "name": "mbp",
+      "hostname": "jons-mbp.tail1234.ts.net",
+      "platform": "darwin",
+      "arch": "arm64",
+      "daemonVersion": "0.6.3",
+      "dirs": [
+        {
+          "path": "/Users/e2e/repos/e2e-repo",
+          "repoUrl": "https://github.com/e2e-org/e2e-repo"
+        },
+        {
+          "path": "/Users/e2e/notes"
+        }
+      ],
+      "agentLimits": {
+        "codex": {
+          "primary": {
+            "usedPercent": 42.5,
+            "windowMinutes": 300,
+            "resetsAt": "2026-09-22T19:00:00Z"
+          },
+          "secondary": {
+            "usedPercent": 7,
+            "windowMinutes": 10080,
+            "resetsAt": "2026-09-26T19:00:00Z"
+          },
+          "planType": "pro",
+          "observedAt": "2026-09-22T16:20:00.000Z"
+        }
+      },
+      "claudeCredentials": true,
+      "state": "online",
+      "lastSeenAt": "2026-09-22T16:39:40.000Z",
+      "createdAt": "2026-08-01T10:00:00.000Z",
+      "updatedAt": "2026-09-22T16:39:40.000Z"
+    },
+    {
+      "id": "3b1f6c2e-7a4d-4e8f-9c0b-1d2e3f4a5b6c",
+      "userId": null,
+      "workspaceId": null,
+      "name": "studio",
+      "hostname": "studio.tail1234.ts.net",
+      "platform": "darwin",
+      "arch": "arm64",
+      "daemonVersion": "0.1.0-devlab-playback",
+      "dirs": [
+        {
+          "path": "/Users/e2e/repos/e2e-repo",
+          "repoUrl": "https://github.com/e2e-org/e2e-repo"
+        },
+        {
+          "path": "/Users/e2e/notes"
+        }
+      ],
+      "agentLimits": {
+        "codex": {
+          "primary": {
+            "usedPercent": 90,
+            "windowMinutes": 300,
+            "resetsAt": "2026-09-21T12:00:00Z"
+          },
+          "planType": "plus",
+          "observedAt": "2026-09-21T09:00:00.000Z"
+        }
+      },
+      "claudeCredentials": false,
+      "state": "offline",
+      "lastSeenAt": "2026-09-21T09:12:00.000Z",
+      "createdAt": "2026-09-22T23:58:07.020Z",
+      "updatedAt": "2026-09-22T23:58:08.358Z"
+    }
+  ]
+}

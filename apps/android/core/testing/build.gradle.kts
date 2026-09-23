@@ -1,4 +1,5 @@
-// Test helpers; other modules use it via testImplementation(projects.core.testing).
+// Test helpers; other modules use it via testImplementation(projects.core.testing) (the feature
+// convention plugin adds it). Screenshots (captureScreens), FakeOptioServer, Fixtures, Samples.
 plugins {
     alias(libs.plugins.optio.android.library.compose)
 }
@@ -9,6 +10,7 @@ android {
 
 dependencies {
     api(projects.core.model)
+    api(projects.core.network)
     implementation(projects.core.ui)
 
     api(libs.junit4)
