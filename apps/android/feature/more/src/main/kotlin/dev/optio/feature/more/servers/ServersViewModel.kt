@@ -152,10 +152,11 @@ class ServerEditViewModel(
         }
     }
 
-    fun forget(onForgotten: () -> Unit) {
-        viewModelScope.launch {
-            session.removeServer(serverId)
-            onForgotten()
-        }
+    /**
+     * Forgets this server and its token. The screen leaves by itself once the profile is gone (its
+     * `profile == null` effect), so there is no callback: popping here too closed two screens.
+     */
+    fun forget() {
+        viewModelScope.launch { session.removeServer(serverId) }
     }
 }
