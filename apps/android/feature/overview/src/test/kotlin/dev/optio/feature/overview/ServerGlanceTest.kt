@@ -14,6 +14,19 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 
+/** Another server's Local work: one agent terminal waiting on you, one working, one host online. */
+internal fun serveLocalWork(server: FakeOptioServer) {
+    server.json("/api/local/hosts", """{"hosts":[{"id":"h1","name":"Studio mac","state":"online"}]}""")
+    server.json(
+        "/api/local/terminals",
+        """{"terminals":[
+            {"id":"t1","title":"Fix login","dir":"/Users/dev/app","state":"running","hostId":"h1",
+             "attentionState":"needs_you","attentionReason":"stop","spec":{"kind":"agent","agent":"claude-code"}},
+            {"id":"t2","title":"Refactor","dir":"/Users/dev/app","state":"running","hostId":"h1",
+             "attentionState":"working","spec":{"kind":"agent","agent":"codex"}}]}""",
+    )
+}
+
 /** Other servers' glances (iOS `ServerGlance.load` / `OtherServersModel`). */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ServerGlanceTest {
@@ -45,6 +58,18 @@ class ServerGlanceTest {
         assertEquals(2, glance.running)
         assertEquals(1, glance.hostsOnline)
         assertEquals(2, glance.hostsTotal)
+    }
+
+    @Test
+    fun theDefaultSnapshotIsTheServersNeedsYouSnapshot() = runBlocking<Unit> {
+        server.fixture("/api/tasks/stats", "overview-tasks-stats.json")
+        serveLocalWork(server)
+        val glance = ServerGlances.load(profile, client())
+        assertEquals(2, glance.needsYou, "1 task needing attention + 1 terminal waiting")
+        assertEquals(2, glance.running, "1 running task + 1 working agent terminal")
+        assertEquals(1, glance.hostsOnline)
+        assertEquals(1, glance.hostsTotal)
+        assertEquals("running", server.lastRequest("GET", "/api/local/terminals")?.queryParam("state"))
     }
 
     @Test

@@ -31,6 +31,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.optio.core.data.ServerProfile
+import dev.optio.core.glance.NeedsYouSnapshot
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.ApiError
 import dev.optio.core.network.OptioHttp
@@ -84,7 +85,26 @@ internal data class GlanceCounts(
     val running: Int,
     val hostsOnline: Int,
     val hostsTotal: Int,
-)
+) {
+    companion object {
+        /**
+         * [server]'s snapshot through [api] (its hosts, running terminals and board tiles, iOS
+         * `NeedsYouSnapshot.load(using:)`); throws when its hosts or terminals don't answer.
+         */
+        suspend fun load(
+            api: ApiClient,
+            server: ServerProfile,
+        ): GlanceCounts {
+            val snapshot = NeedsYouSnapshot.load(api, serverId = server.id, serverName = server.shortName)
+            return GlanceCounts(
+                needsYou = snapshot.needsYou.size,
+                running = snapshot.running.size,
+                hostsOnline = snapshot.hostsOnline,
+                hostsTotal = snapshot.hostsTotal,
+            )
+        }
+    }
+}
 
 internal object ServerGlances {
     /** Other servers get 6 s (iOS `timeout: 6`): one dead laptop must not hold the card up. */
@@ -101,7 +121,7 @@ internal object ServerGlances {
     suspend fun load(
         server: ServerProfile,
         client: ApiClient?,
-        snapshot: suspend (ApiClient) -> GlanceCounts? = { null },
+        snapshot: suspend (ApiClient) -> GlanceCounts? = { GlanceCounts.load(it, server) },
         clock: Clock = Clock.systemUTC(),
     ): ServerGlance {
         client ?: return ServerGlance(server, ServerGlance.State.UNAUTHORIZED)

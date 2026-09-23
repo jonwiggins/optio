@@ -8,4 +8,6 @@ android {
 
 dependencies {
     implementation(projects.core.workfeed)
+    // NeedsYouSnapshot: the other paired servers' Local work (Overview › Other servers).
+    implementation(projects.core.glance)
 }

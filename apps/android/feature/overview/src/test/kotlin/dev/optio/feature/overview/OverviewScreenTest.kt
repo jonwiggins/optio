@@ -107,6 +107,7 @@ class OverviewScreenTest {
         active.json("/api/auth/me", """{"user":{"id":"u1","email":"dev@localhost","displayName":"Local Dev","workspaceRole":"admin"},"authDisabled":false}""")
         active.webSocket("/ws/events")
         other.fixture("/api/tasks/stats", "overview-tasks-stats.json")
+        serveLocalWork(other)
         val registry = ServerRegistry.inMemory()
         runBlocking {
             registry.upsert(OverviewSeed.laptop.copy(url = active.baseUrl))
@@ -184,8 +185,10 @@ class OverviewScreenTest {
     fun anotherServersCountsComeFromItAndATapSwitches() {
         val session = show()
         compose.onNodeWithTag("overview-list").performScrollToNode(hasTestTag("other-server-${OverviewSeed.studio.id}"))
-        compose.waitUntilAtLeastOneExists(hasText("1 needs you · 1 running · 1 failed"), 10_000)
+        // Its stats plus its NeedsYouSnapshot (a terminal waiting, one working, the host online).
+        compose.waitUntilAtLeastOneExists(hasText("2 need you · 2 running · 1 failed · 1/1 host online"), 10_000)
         assertEquals(1, other.count("GET", "/api/tasks/stats"), "the other server's own stats")
+        assertEquals(1, other.count("GET", "/api/local/terminals"))
         compose.onNodeWithTag("other-server-${OverviewSeed.studio.id}").performClick()
         compose.waitUntil(10_000) { session.activeServer.value?.id == OverviewSeed.studio.id }
     }
