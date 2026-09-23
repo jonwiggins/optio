@@ -5,10 +5,19 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import dev.optio.core.data.DeepLink
 import dev.optio.core.data.DevServers
+import dev.optio.core.data.LocalNetworkAccess
+import dev.optio.core.data.SessionStore
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 
 /**
@@ -21,14 +30,25 @@ import kotlinx.coroutines.launch
  * Debug builds also read the `OPTIO_DEV_*` launch extras (PLAN §6): servers to pair
  * (`OPTIO_DEV_SERVER_URL[_n]`, `OPTIO_DEV_TOKEN[_n]`, `OPTIO_DEV_SERVER_NAME[_n]`), a section to
  * open (`OPTIO_DEV_SECTION`) and a link delivered ~2 s after launch (`OPTIO_DEV_OPEN_URL`).
+ *
+ * On Android 17 it also asks for local network access ([LocalNetworkAccess]) once per process
+ * when the active server is on the local network and the permission is missing (sign-in asks
+ * before pairing; this covers restores, switches and a revoked permission).
  */
 class MainActivity : ComponentActivity() {
+    private val localNetworkRequest =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            // The server was unreachable until now: reconnect the event socket and re-read the user.
+            if (granted) appGraph.appScope.launch { appGraph.session.reconnect() }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val fresh = savedInstanceState == null
         appGraph.start(devExtras = if (fresh) devExtras(intent) else emptyMap())
         if (fresh) handleIntent(intent)
+        askForLocalNetworkWhenNeeded()
         setContent {
             CompositionLocalProvider(LocalAppGraph provides appGraph) {
                 OptioApp()
@@ -52,6 +72,27 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         appGraph.session.appBackgrounded()
+    }
+
+    /** Watches the active server while started; asks once per process when it is local and blocked. */
+    private fun askForLocalNetworkWhenNeeded() {
+        if (!LocalNetworkAccess.applies) return
+        val graph = appGraph
+        val session = graph.session
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(session.phase, session.activeServer) { phase, server -> server.takeIf { phase == SessionStore.Phase.SIGNED_IN } }
+                    .filterNotNull()
+                    .distinctUntilChanged()
+                    .collect { server ->
+                        if (graph.askedForLocalNetwork) return@collect
+                        if (LocalNetworkAccess.needsPrompt(this@MainActivity, server.url)) {
+                            graph.askedForLocalNetwork = true
+                            localNetworkRequest.launch(LocalNetworkAccess.PERMISSION)
+                        }
+                    }
+            }
+        }
     }
 
     private fun handleIntent(intent: Intent?) {

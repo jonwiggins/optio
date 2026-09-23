@@ -14,8 +14,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.optio.app.shell.MainShell
@@ -39,6 +42,7 @@ import kotlinx.coroutines.flow.filterNotNull
  * wraps everything; the signed-in shell also gets [LocalApiClient], [LocalEventHub] and
  * [LocalCurrentUser].
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun OptioApp(
     session: SessionStore = LocalAppGraph.current.session,
@@ -47,7 +51,8 @@ fun OptioApp(
     OptioTheme {
         CompositionLocalProvider(LocalSessionStore provides session) {
             val phase by session.phase.collectAsStateWithLifecycle()
-            Crossfade(targetState = phase, label = "auth-gate") { current ->
+            // testTags become resource-ids for uiautomator / adb-driven QA, sign-in included.
+            Crossfade(targetState = phase, label = "auth-gate", modifier = Modifier.semantics { testTagsAsResourceId = true }) { current ->
                 when (current) {
                     SessionStore.Phase.RESTORING -> RestoringScreen()
                     SessionStore.Phase.SIGNED_OUT -> SignInScreen(SignInMode.FIRST)

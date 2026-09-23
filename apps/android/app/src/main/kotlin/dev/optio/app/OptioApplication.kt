@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.preferencesDataStoreFile
 import dev.optio.core.data.DevServers
 import dev.optio.core.data.KeystoreTokenCipher
+import dev.optio.core.data.LocalNetworkAccess
 import dev.optio.core.data.ServerRegistry
 import dev.optio.core.data.SessionStore
 import dev.optio.core.data.TokenStore
@@ -41,11 +42,24 @@ class AppGraph(val application: Application) {
     /** Paired servers (DataStore) and their tokens (Keystore-encrypted DataStore). */
     val serverRegistry: ServerRegistry by lazy { registry(application) }
 
-    /** The live session: active server, current user, the one `ApiClient` + `EventHub`. */
-    val session: SessionStore by lazy { SessionStore(serverRegistry, appScope) }
+    /**
+     * The live session: active server, current user, the one `ApiClient` + `EventHub`. A local
+     * server without Android 17's local network permission counts as unreachable at once.
+     */
+    val session: SessionStore by lazy {
+        SessionStore(
+            registry = serverRegistry,
+            scope = appScope,
+            reachable = { server -> !LocalNetworkAccess.needsPrompt(application, server.url) },
+        )
+    }
 
     /** `optio://` links waiting for the signed-in shell (and for a server switch to finish). */
     val deepLinks = DeepLinkInbox()
+
+    /** The local network permission prompt was shown in this process (ask at most once). */
+    @Volatile
+    var askedForLocalNetwork = false
 
     private val startLock = Mutex()
     private var restored = false
