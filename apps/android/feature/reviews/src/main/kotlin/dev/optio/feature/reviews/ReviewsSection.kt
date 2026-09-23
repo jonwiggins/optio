@@ -323,12 +323,13 @@ internal fun PullRequestRow(
     var menu by remember { mutableStateOf(false) }
     val review = pr.review
     val tone = review?.state?.let(ReviewFormat::stateTone) ?: if (pr.draft == true) Tone.IDLE else null
+    val updated = pr.updatedAt?.relativeDescription(now)
     val (trailing, trailingTone) = when {
         busy -> "Working…" to Tone.WORKING
         review?.verdict != null -> ReviewFormat.verdictLabel(review.verdict) to ReviewFormat.verdictTone(review.verdict)
         review?.state != null -> ReviewFormat.stateLabel(review.state) to ReviewFormat.stateTone(review.state).takeIf { it == Tone.ACCENT }
         pr.draft == true -> "Draft" to null
-        else -> (pr.updatedAt?.relativeDescription(now) ?: "") to null
+        else -> (updated ?: "") to null
     }
     val reviewLabel = when {
         review == null -> "Review with Optio"
@@ -340,7 +341,8 @@ internal fun PullRequestRow(
         OptioRow(
             title = pr.title,
             tone = tone,
-            meta = metaText(mono("#${pr.number}"), pr.repo?.fullName, pr.author, pr.updatedAt?.relativeDescription(now)),
+            // The time shows once: in the trailing slot when nothing else is there, else in the meta line.
+            meta = metaText(mono("#${pr.number}"), pr.repo?.fullName, pr.author, updated.takeIf { it != trailing }),
             trailing = trailing.ifEmpty { null },
             trailingTone = trailingTone,
             footer = pr.labels?.takeIf { it.isNotEmpty() }?.let { metaText(it) },
