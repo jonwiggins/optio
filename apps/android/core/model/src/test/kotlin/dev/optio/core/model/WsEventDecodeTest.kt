@@ -58,14 +58,14 @@ class WsEventDecodeTest {
     }
 
     @Test
-    fun unknownEventsFallBackToUnknownWithTheirRawJson() {
-        // `local:changed` is published on /ws/events but is not part of the `WsEvent` union.
-        val localChanged = assertIs<WsEvent.Unknown>(events[10])
-        assertEquals(JsonPrimitive("local:changed"), localChanged.raw.jsonObject["type"])
-        // …so the raw JSON can still be read as the struct that describes it.
-        val decoded = OptioJson.decodeFromJsonElement(LocalChangedEvent.serializer(), localChanged.raw)
-        assertEquals("9d2e4c6a-8b0f-4a1e-b3c5-d7e9f1a3b5c7", decoded.hostId)
+    fun localChangedIsTyped() {
+        // The content-free Local nudge published on /ws/events.
+        val localChanged = assertIs<LocalChangedEvent>(events[10])
+        assertEquals("9d2e4c6a-8b0f-4a1e-b3c5-d7e9f1a3b5c7", localChanged.hostId)
+    }
 
+    @Test
+    fun unknownEventsFallBackToUnknownWithTheirRawJson() {
         val future = assertIs<WsEvent.Unknown>(events[11])
         assertEquals(JsonPrimitive("future:event"), future.raw.jsonObject["type"])
 

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.navigation3.runtime.NavKey
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
+import dev.optio.core.glance.NotificationSubject
 import dev.optio.core.model.PersistentAgentControlIntent
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.Navigator
@@ -26,6 +27,8 @@ import dev.optio.core.network.LocalCurrentUser
 import dev.optio.core.testing.Samples
 import dev.optio.core.ui.theme.OptioTheme
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -145,6 +148,21 @@ class AgentDetailUiTest {
         compose.onNodeWithText("Delete").performClick()
         compose.onNodeWithTag("confirm").performClick()
         assertEquals(true, actions.deleted)
+    }
+
+    @Test
+    fun theAgentOnScreenIsTheNotificationSubject() {
+        var shown by mutableStateOf(true)
+        compose.setContent {
+            CompositionLocalProvider(LocalNavigator provides navigator) {
+                OptioTheme(darkTheme = false) { if (shown) AgentDetailScreen(agentId = AgentSamples.ID) }
+            }
+        }
+        compose.waitForIdle()
+        assertTrue(NotificationSubject.isViewing("agent", AgentSamples.ID), "alerts about it post silently")
+        compose.runOnIdle { shown = false }
+        compose.waitForIdle()
+        assertFalse(NotificationSubject.isViewing("agent", AgentSamples.ID))
     }
 
     @Test

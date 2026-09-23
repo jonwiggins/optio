@@ -8,6 +8,7 @@ import dev.optio.core.navigation.routes.HubRoute
 import dev.optio.core.navigation.routes.JobRunRoute
 import dev.optio.core.navigation.routes.LocalTerminalRoute
 import dev.optio.core.navigation.routes.NewWorkRoute
+import dev.optio.core.navigation.routes.NotificationDevicesRoute
 import dev.optio.core.navigation.routes.RepoDetailRoute
 import dev.optio.core.navigation.routes.SessionDetailRoute
 import dev.optio.core.navigation.routes.SettingsRoute
@@ -138,6 +139,16 @@ class AppRouterDeepLinkTest {
         assertTrue(router.handle("optio://section/more"))
         assertEquals(Tab.MORE, router.selectedTab)
         assertEquals(listOf(HubRoute(Tab.MORE)), router.stack(Tab.MORE))
+    }
+
+    @Test
+    fun settingsOpensMoreSettingsInOneHop() {
+        // The server's test push links `optio://settings`.
+        val router = AppRouter()
+        router.push(NotificationDevicesRoute, Tab.MORE)
+        assertTrue(router.handle("optio://settings?server=srv-1"))
+        assertEquals(Tab.MORE, router.selectedTab)
+        assertEquals(listOf(HubRoute(Tab.MORE), SettingsRoute), router.stack(Tab.MORE))
     }
 
     @Test

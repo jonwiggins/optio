@@ -13,6 +13,7 @@ import dev.optio.core.glance.NeedsYouSnapshot
 import dev.optio.core.glance.WatchCopy
 import dev.optio.core.glance.WatchSources
 import dev.optio.core.model.AndroidPushWatchEvent
+import dev.optio.core.model.LocalChangedEvent
 import dev.optio.core.model.PersistentAgentStateChangedEvent
 import dev.optio.core.model.PersistentAgentTurnHaltedEvent
 import dev.optio.core.model.PersistentAgentTurnStartedEvent
@@ -518,6 +519,7 @@ class WatchManager(
             is PersistentAgentTurnStartedEvent -> if (sources.isRecentAgentSend(event.agentId)) reconcileSoon()
             is PersistentAgentTurnHaltedEvent -> if (sources.isRecentAgentSend(event.agentId)) reconcileSoon()
             is PersistentAgentStateChangedEvent -> if (sources.isRecentAgentSend(event.agentId)) reconcileSoon()
+            is LocalChangedEvent -> reconcileSoon()
             is WsEvent.Unknown -> if (event.raw["type"]?.stringValue?.startsWith("local:") == true) reconcileSoon()
             else -> Unit
         }

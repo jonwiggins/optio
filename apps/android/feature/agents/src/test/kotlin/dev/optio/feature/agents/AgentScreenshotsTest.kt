@@ -36,6 +36,18 @@ class AgentScreenshotsTest : ScreenshotTest() {
         }
 
     @Test
+    fun chatWithALongDescription() =
+        captureScreens("AgentChat_longDescription") {
+            val ui = AgentSamples.ui()
+            val header = ui.header.value!!
+            val description = "Coordinates releases across acme/web and acme/api, answers what is blocking them and keeps the changelog honest."
+            AgentDetailContent(
+                ui = ui.copy(header = LoadState.Loaded(header.copy(agent = header.agent.copy(description = description)))),
+                actions = AgentDetailActions.None,
+            )
+        }
+
+    @Test
     fun chatEmpty() =
         captureScreens("AgentChat_empty") {
             AgentDetailContent(

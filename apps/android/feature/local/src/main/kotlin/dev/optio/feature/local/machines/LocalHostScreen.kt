@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.model.LocalBlueprint
+import dev.optio.core.model.LocalChangedEvent
 import dev.optio.core.model.LocalHost
 import dev.optio.core.model.LocalHostState
 import dev.optio.core.model.LocalTerminal
@@ -55,7 +56,7 @@ import dev.optio.core.network.ApiClient
 import dev.optio.core.network.EventHub
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.network.LocalEventHub
-import dev.optio.core.network.unknown
+import dev.optio.core.network.on
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.DetailHeader
@@ -97,7 +98,6 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.jsonPrimitive
 
 /** Everything the machine page shows. */
 data class HostPage(
@@ -202,8 +202,8 @@ class LocalHostViewModel(
         if (nudgeJob == null && hub != null) {
             nudgeJob =
                 viewModelScope.launch {
-                    hub.unknown("local:changed")
-                        .filter { it["hostId"]?.jsonPrimitive?.content == hostId }
+                    hub.on<LocalChangedEvent>()
+                        .filter { it.hostId == hostId }
                         .collect { runCatching { _page.value = LoadState.Loaded(fetch()) } }
                 }
         }

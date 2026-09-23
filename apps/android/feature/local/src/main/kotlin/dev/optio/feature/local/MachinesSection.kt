@@ -99,7 +99,7 @@ fun MachinesSection(
     val canMutate = Roles.canMutate
     if (canMutate) {
         HubActions {
-            IconButton(onClick = { navigator.push(LocalAutomationFormRoute()) }, modifier = Modifier.testTag("new-automation")) {
+            IconButton(onClick = { navigator.push(LocalAutomationFormRoute) }, modifier = Modifier.testTag("new-automation")) {
                 Icon(Icons.Outlined.Add, contentDescription = "New automation")
             }
         }
@@ -232,7 +232,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.automationsSection(
                     icon = Icons.Outlined.AutoAwesome,
                     message = "An automation runs an agent on your machine when something happens — a schedule, a webhook, a ticket, or a GitHub / Slack / Linear event.",
                     actionTitle = if (canMutate) "New automation" else null,
-                    action = if (canMutate) ({ navigator.push(LocalAutomationFormRoute()) }) else null,
+                    action = if (canMutate) ({ navigator.push(LocalAutomationFormRoute) }) else null,
                 )
             }
         else ->

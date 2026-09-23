@@ -1,5 +1,6 @@
 package dev.optio.core.workfeed
 
+import dev.optio.core.model.LocalChangedEvent
 import dev.optio.core.model.TaskLogEvent
 import dev.optio.core.model.TaskState
 import dev.optio.core.model.TaskStateChangedEvent
@@ -163,9 +164,9 @@ class WorkFeedModelTest {
         runCurrent()
         assertTrue(loads <= 3, "a burst costs at most two refreshes, got ${loads - 1}")
 
-        // local:* nudges are not in the typed union; they arrive as Unknown and still count.
+        // The Local nudge counts too.
         val before = loads
-        events.emit(WsEvent.Unknown(buildJsonObject { put("type", JsonPrimitive("local:changed")) }))
+        events.emit(LocalChangedEvent(type = "local:changed", terminalId = "lt1", hostId = "h1"))
         advanceTimeBy(1.seconds)
         runCurrent()
         assertEquals(before + 1, loads)

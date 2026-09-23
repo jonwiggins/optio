@@ -154,6 +154,8 @@ final class LiveActivityManager {
             if RecentAgentSends.isRecent(e.agentId) { reconcileSoon() }
         case .persistentAgentStateChanged(let e):
             if RecentAgentSends.isRecent(e.agentId) { reconcileSoon() }
+        case .localChanged:
+            reconcileSoon()
         case .unknown(let payload):
             if case .object(let o) = payload, case .string(let type)? = o["type"], type.hasPrefix("local:") {
                 reconcileSoon()

@@ -93,4 +93,12 @@ final class DeepLinkServerTests: XCTestCase {
         XCTAssertEqual(DeepLink.serverId(in: DeepLink.needsYou.url(server: "s")), "s")
         XCTAssertEqual(DeepLink(url: DeepLink.needsYou.url(server: "s")), .needsYou)
     }
+
+    /// The server's test push links `optio://settings`.
+    func testSettingsRoundTrips() throws {
+        XCTAssertEqual(DeepLink.settings.url.absoluteString, "optio://settings")
+        XCTAssertEqual(DeepLink(url: try XCTUnwrap(URL(string: "optio://settings"))), .settings)
+        XCTAssertEqual(DeepLink(url: DeepLink.settings.url(server: "s")), .settings)
+        XCTAssertEqual(DeepLink.serverId(in: DeepLink.settings.url(server: "s")), "s")
+    }
 }

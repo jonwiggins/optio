@@ -63,6 +63,28 @@ class ServerRegistryTest {
         }
 
     @Test
+    fun removalListenersHearFirstWithTheToken() =
+        runTest {
+            registry.upsert(a)
+            registry.setToken("optio_pat_a", a.id)
+            registry.upsert(b) // no token stored
+            val heard = mutableListOf<Pair<String, String?>>()
+            val handle = registry.addRemovalListener { profile, token -> heard += profile.id to token }
+            registry.addRemovalListener { _, _ -> error("a broken listener") }
+
+            registry.remove("not-there")
+            registry.remove(a.id)
+            registry.remove(b.id)
+            assertEquals(listOf(a.id to "optio_pat_a", b.id to null), heard)
+            assertEquals(emptyList(), registry.all(), "a failing listener never keeps a server")
+
+            handle.close()
+            registry.upsert(a)
+            registry.remove(a.id)
+            assertEquals(2, heard.size, "a closed handle hears nothing more")
+        }
+
+    @Test
     fun activeFallsBackToTheFirstAndConfiguredNeedsAToken() =
         runTest {
             assertNull(registry.active())

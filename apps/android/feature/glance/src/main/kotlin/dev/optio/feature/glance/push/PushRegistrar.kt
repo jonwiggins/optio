@@ -38,8 +38,8 @@ import kotlinx.coroutines.sync.withLock
  * as `serverId` (every push then carries it, so taps and actions route without probing), the
  * device name and app version. Re-registers on every launch, when Firebase rotates the token
  * (`onNewToken`) and when notifications are allowed; a server that is forgotten gets a `DELETE`
- * with the address and token it was registered under ([SessionStore.removeServer] deletes the
- * token first, so they are kept from registration time, in memory only, like iOS).
+ * with its address and PAT, handed over by [beforeRemove] just before the registry deletes them
+ * (so it works after a process restart too), else the ones kept since registration.
  *
  * Registration waits for the notification permission (a push the phone may not show is a push FCM
  * counts against the app). Everything it learns lands in [PushStatus].
@@ -84,6 +84,24 @@ class PushRegistrar(
             }
         }
         scope.launch { sync() }
+    }
+
+    /**
+     * A paired server is about to be forgotten (`ServerRegistry.addRemovalListener`): DELETEs this
+     * device's token from it with the credentials it still has, even when this process never
+     * registered with it (a restart, a failed launch sync).
+     */
+    fun beforeRemove(
+        profile: ServerProfile,
+        pat: String?,
+    ) {
+        val registered = registeredWith.remove(profile.id)
+        status.setPushCovered(profile.id, false)
+        val auth = pat ?: registered?.pat ?: return
+        scope.launch {
+            val token = registered?.token ?: currentToken() ?: return@launch
+            unregister(profile.id, Registered(profile.url, auth, profile.workspaceId, token))
+        }
     }
 
     /** Firebase issued a new token: register it everywhere. */
@@ -189,11 +207,23 @@ class PushRegistrar(
             if (id in known) continue
             registeredWith.remove(id)
             status.setPushCovered(id, false)
-            runCatching { ApiClient(creds.baseUrl, creds.pat, creds.workspaceId).delete("/api/notifications/devices/${creds.token}") }
-                .onFailure { Log.w(TAG, "unregistering from $id failed", it) }
+            unregister(id, creds)
         }
         status.update { s -> s.copy(servers = s.servers.filterKeys { it in known }) }
     }
+
+    private suspend fun unregister(
+        serverId: String,
+        creds: Registered,
+    ) {
+        runCatching { ApiClient(creds.baseUrl, creds.pat, creds.workspaceId).delete("/api/notifications/devices/${creds.token}") }
+            .onFailure { Log.w(TAG, "unregistering from $serverId failed", it) }
+    }
+
+    /** This device's FCM token without registering it: the last one seen, else Firebase's (null without FCM). */
+    private suspend fun currentToken(): String? =
+        status.state.value.token
+            ?: if (tokens.availability() == FcmAvailability.NotConfigured) null else runCatching { tokens.token() }.getOrNull()
 
     private fun idle(
         paired: List<ServerClient>,

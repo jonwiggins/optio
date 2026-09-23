@@ -1,5 +1,6 @@
 package dev.optio.core.workfeed
 
+import dev.optio.core.model.LocalChangedEvent
 import dev.optio.core.model.PersistentAgentStateChangedEvent
 import dev.optio.core.model.PersistentAgentTurnHaltedEvent
 import dev.optio.core.model.PersistentAgentTurnStartedEvent
@@ -167,13 +168,14 @@ class WorkFeedModel(
 
         /**
          * `/ws/events` frames that can change a feed row: the ones iOS reacts to (task state, stall
-         * and recovery; persistent-agent turns and state; any `local:*` nudge), plus the ones that
-         * add or end a row (`task:created`, `session:created`, `session:ended`).
+         * and recovery; persistent-agent turns and state; `local:changed` and any newer `local:*`
+         * nudge), plus the ones that add or end a row (`task:created`, `session:created`,
+         * `session:ended`).
          */
         fun refreshesOn(event: WsEvent): Boolean = when (event) {
             is TaskStateChangedEvent, is TaskCreatedEvent, is TaskStalledEvent, is TaskRecoveredEvent -> true
             is PersistentAgentStateChangedEvent, is PersistentAgentTurnStartedEvent, is PersistentAgentTurnHaltedEvent -> true
-            is SessionCreatedEvent, is SessionEndedEvent -> true
+            is SessionCreatedEvent, is SessionEndedEvent, is LocalChangedEvent -> true
             is WsEvent.Unknown -> event.raw["type"]?.stringValue?.startsWith("local:") == true
             else -> false
         }

@@ -16,8 +16,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
 // Job (standalone workflow) endpoints (iOS `Features/Run/Jobs/JobsAPI.swift`). The /api/jobs
-// routes enrich workflow rows with aggregate run stats (`runCount`, `lastRunAt`, `totalCostUsd`)
-// and runs can carry states the generated `WorkflowRunState` doesn't know, so these are local.
+// routes enrich workflow rows with aggregate run stats (`runCount`, `lastRunAt`, `totalCostUsd`),
+// so these are local.
 
 /** A Job (`workflows` row) with its run stats. */
 @Serializable

@@ -1333,6 +1333,7 @@ public enum WsEvent: Codable, Hashable, Sendable {
     case persistentAgentTurnHalted(PersistentAgentTurnHaltedEvent)
     case persistentAgentMessage(PersistentAgentMessageEvent)
     case persistentAgentLog(PersistentAgentLogEvent)
+    case localChanged(LocalChangedEvent)
     /// Fallback for discriminator values this client does not know about yet.
     case unknown(AnyCodable)
 
@@ -1369,6 +1370,7 @@ public enum WsEvent: Codable, Hashable, Sendable {
         case "persistent_agent:turn_halted": self = .persistentAgentTurnHalted(try PersistentAgentTurnHaltedEvent(from: decoder))
         case "persistent_agent:message": self = .persistentAgentMessage(try PersistentAgentMessageEvent(from: decoder))
         case "persistent_agent:log": self = .persistentAgentLog(try PersistentAgentLogEvent(from: decoder))
+        case "local:changed": self = .localChanged(try LocalChangedEvent(from: decoder))
         default: self = .unknown(try AnyCodable(from: decoder))
         }
     }
@@ -1424,6 +1426,8 @@ public enum WsEvent: Codable, Hashable, Sendable {
         case .persistentAgentMessage(let payload):
             try payload.encode(to: encoder)
         case .persistentAgentLog(let payload):
+            try payload.encode(to: encoder)
+        case .localChanged(let payload):
             try payload.encode(to: encoder)
         case .unknown(let value):
             try value.encode(to: encoder)
@@ -7693,10 +7697,12 @@ public enum WorkflowRunState: String, Codable, Hashable, Sendable, CaseIterable 
     case running = "running"
     case completed = "completed"
     case failed = "failed"
+    /// Documented by the API (`WorkflowRunSchema`); a user's cancel is stored as `failed` today.
+    case cancelled = "cancelled"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [WorkflowRunState] = [.queued, .running, .completed, .failed]
+    public static let allCases: [WorkflowRunState] = [.queued, .running, .completed, .failed, .cancelled]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

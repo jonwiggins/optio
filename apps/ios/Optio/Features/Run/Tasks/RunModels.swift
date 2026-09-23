@@ -158,7 +158,7 @@ struct TriggerRow: Decodable, Identifiable, Hashable {
     var summary: String {
         switch type {
         case "schedule": return cronExpression ?? "cron"
-        case "webhook": return webhookPath.map { "/api/webhooks/\($0)" } ?? "webhook"
+        case "webhook": return webhookPath.map { "/api/hooks/\($0)" } ?? "webhook"
         case "ticket":
             let src = ticketSource ?? "github"
             return ticketLabels.isEmpty ? src : "\(src) · \(ticketLabels.joined(separator: ", "))"

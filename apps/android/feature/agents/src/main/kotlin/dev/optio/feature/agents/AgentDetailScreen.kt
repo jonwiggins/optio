@@ -25,6 +25,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -45,6 +47,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.optio.core.glance.NotificationSubject
+import dev.optio.core.glance.WatchSources
 import dev.optio.core.model.PersistentAgent
 import dev.optio.core.model.PersistentAgentControlIntent
 import dev.optio.core.model.PersistentAgentState
@@ -60,6 +64,7 @@ import dev.optio.core.ui.components.DetailTabs
 import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.components.StateDot
+import dev.optio.core.ui.components.Truncation
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.mono
 import dev.optio.core.ui.components.rememberConfirmState
@@ -90,7 +95,9 @@ fun AgentDetailScreen(
     modifier: Modifier = Modifier,
 ) {
     val api = LocalApiClient.current
-    val vm: AgentDetailViewModel = viewModel(key = "agent:$agentId") { AgentDetailViewModel(agentId, api) }
+    val context = LocalContext.current
+    val vm: AgentDetailViewModel =
+        viewModel(key = "agent:$agentId") { AgentDetailViewModel(agentId, api, watchSources = WatchSources.get(context)) }
     val header by vm.header.collectAsStateWithLifecycle()
     val messages by vm.messages.collectAsStateWithLifecycle()
     val turns by vm.turns.collectAsStateWithLifecycle()
@@ -102,6 +109,11 @@ fun AgentDetailScreen(
 
     LaunchedEffect(vm) { vm.appeared() }
     ConnectWhileShown(vm, connect = vm::connect, disconnect = vm::disconnect)
+    // Alerts about this agent post silently while it is on screen (iOS `.notificationSubject`).
+    DisposableEffect(agentId) {
+        NotificationSubject.set("agent", agentId)
+        onDispose { NotificationSubject.clear("agent", agentId) }
+    }
     LaunchedEffect(vm, toaster) {
         vm.events.collect { event ->
             when (event) {
@@ -228,9 +240,6 @@ fun AgentDetailContent(
             if (section == AgentSection.CHAT && canMutate) {
                 val composerEnabled = agent != null && agent.state != PersistentAgentState.ARCHIVED
                 ChatComposer(
-                    // iOS also records the send so this agent's next turn joins the Watch for an hour
-                    // (`RecentAgentSends.record`). Android: `WatchSources.get(context).recordAgentSend(id)`
-                    // from :core:glance (agent A9), wired at integration once that module is merged here.
                     onSend = { text -> actions.send(text) },
                     placeholder = "Message ${agent?.name ?: "agent"}…",
                     enabled = composerEnabled,
@@ -285,8 +294,10 @@ internal fun AgentHeaderView(
                 agent.lastTurnAt?.let { "last turn ${it.sinceDescription(now)}" },
                 Cost.formatIfNonZero(agent.totalCostUsd),
             ),
-        // DetailHeader sets its second line in mono (paths, branches); a description is prose.
+        // DetailHeader sets its second line in mono (paths, branches) and cuts it at the start; a
+        // description is prose, cut at the end.
         secondary = secondary?.let(::prose),
+        secondaryTruncation = Truncation.END,
         needsYou = needsYou,
         modifier = modifier,
     ) {

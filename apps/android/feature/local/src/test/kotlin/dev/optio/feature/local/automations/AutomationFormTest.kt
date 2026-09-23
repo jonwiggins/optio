@@ -1,16 +1,14 @@
 package dev.optio.feature.local.automations
 
 import dev.optio.core.model.LocalAgentKind
-import dev.optio.core.model.LocalAgentSessionMode
 import dev.optio.core.model.LocalBlueprintSpawnMode
-import dev.optio.core.testing.Samples
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.Test
 
-/** [AutomationForm]: iOS `BlueprintFormSheet`'s `canSave` / `save()` rules, with the web's explicit nulls on edit. */
+/** [AutomationForm]: iOS `BlueprintFormSheet`'s `canSave` / `save()` rules. */
 class AutomationFormTest {
     private val valid =
         AutomationForm(
@@ -36,7 +34,7 @@ class AutomationFormTest {
 
     @Test
     fun creatingSendsOnlyWhatIsSet() {
-        val json = valid.body(editing = false).toJson().toString()
+        val json = valid.body().toJson().toString()
         assertEquals(
             """{"name":"Fix flaky tests","dir":"/Users/dev/acme/web","commandTemplate":"Find the flakiest test and fix it.","agent":"claude-code","spawnMode":"hold","sessionMode":"interactive"}""",
             json,
@@ -44,36 +42,13 @@ class AutomationFormTest {
     }
 
     @Test
-    fun editingSendsExplicitNullsForWhatWasCleared() {
-        val shell = valid.copy(agent = null, location = AutomationForm.Location.EVENT, hostId = "", description = "")
-        val json = shell.body(editing = true).toJson().toString()
+    fun aShellCommandFromTheEventsRepoSendsNoPlaceOrSessionMode() {
+        val shell = valid.copy(agent = null, location = AutomationForm.Location.EVENT, spawnMode = LocalBlueprintSpawnMode.AUTO)
         assertEquals(
-            """{"name":"Fix flaky tests","description":null,"hostId":null,"dir":null,"repoUrl":null,"commandTemplate":"Find the flakiest test and fix it.","agent":null,"spawnMode":"hold"}""",
-            json,
+            """{"name":"Fix flaky tests","commandTemplate":"Find the flakiest test and fix it.","spawnMode":"auto"}""",
+            shell.body().toJson().toString(),
         )
-        val repo = valid.copy(location = AutomationForm.Location.REPO, repoUrl = "https://github.com/acme/web", hostId = "h1", description = "Nightly")
-        assertEquals(
-            """{"name":"Fix flaky tests","description":"Nightly","hostId":"h1","dir":null,"repoUrl":"https://github.com/acme/web","commandTemplate":"Find the flakiest test and fix it.","agent":"claude-code","spawnMode":"hold","sessionMode":"interactive"}""",
-            repo.body(editing = true).toJson().toString(),
-        )
-    }
-
-    @Test
-    fun anExistingAutomationRoundTrips() {
-        val bp = Samples.localBlueprint()
-        val form = AutomationForm.from(bp)
-        assertEquals("Fix flaky tests", form.name)
-        assertEquals(AutomationForm.Location.DIR, form.location)
-        assertEquals("/Users/dev/acme/web", form.dir)
-        assertEquals(LocalAgentKind.CLAUDE_CODE, form.agent)
-        assertEquals(LocalAgentSessionMode.HEADLESS, form.sessionMode)
-        assertEquals(LocalBlueprintSpawnMode.AUTO, form.spawnMode)
-
-        val byRepo = AutomationForm.from(bp.copy(dir = null, repoUrl = "https://github.com/acme/web"))
-        assertEquals(AutomationForm.Location.REPO, byRepo.location)
-        val byEvent = AutomationForm.from(bp.copy(dir = null, repoUrl = null, agent = null))
-        assertEquals(AutomationForm.Location.EVENT, byEvent.location)
-        assertNull(byEvent.agent)
-        assertEquals("claude {{prompt}}", AutomationForm.placeholder(byEvent.agent))
+        assertEquals("claude {{prompt}}", AutomationForm.placeholder(shell.agent))
+        assertEquals("Investigate {{ticketTitle}}", AutomationForm.placeholder(LocalAgentKind.CLAUDE_CODE))
     }
 }

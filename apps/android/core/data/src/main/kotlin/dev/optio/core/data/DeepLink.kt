@@ -16,6 +16,7 @@ import java.net.URLDecoder
  * optio://section/work?view=active|recurring|agents|history|all   ([Work]; legacy section/sessions)
  * optio://section/<name>          (work|reviews|inbox|prompts|repos|machines|connections|analytics|costs|
  *                                  activity|cluster|more; legacy sessions|tasks|jobs|scheduled|agents|local|issues)
+ * optio://settings                (the app's settings; the server's test push links here)
  * ```
  *
  * Any link may carry `?server=<ServerProfile.id>` ([url] with a server, [serverId]): the app
@@ -44,6 +45,9 @@ sealed interface DeepLink {
     /** A hub section by its deep-link name, legacy names included (`AppRouter.section(named)`). */
     data class Section(val name: String) : DeepLink
 
+    /** The app's settings (`optio://settings`, what `POST /api/notifications/devices/test` links). */
+    data object Settings : DeepLink
+
     /** This link as a URL, without a server hint. */
     val url: String
         get() = url(server = null)
@@ -60,6 +64,7 @@ sealed interface DeepLink {
                 NeedsYou -> Triple("needs-you", "", emptyList())
                 is Work -> Triple("section", "/work", listOf("view" to view))
                 is Section -> Triple("section", "/$name", emptyList())
+                Settings -> Triple("settings", "", emptyList())
             }
         val query = items + listOfNotNull(server?.let { SERVER_QUERY to it })
         return buildString {
@@ -101,6 +106,7 @@ sealed interface DeepLink {
                 host == "needs-you" -> NeedsYou
                 host == "section" && (id == "work" || id == "sessions") && view != null -> Work(view)
                 host == "section" && id != null -> Section(id)
+                host == "settings" -> Settings
                 else -> null
             }
         }

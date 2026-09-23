@@ -449,8 +449,7 @@ class LocalScreensTest : ScreenshotTest() {
     fun newAutomationForm() =
         captureScreens("AutomationForm_new", size = ScreenSize.TALL) {
             AutomationFormContent(
-                editing = false,
-                loaded = LoadState.Loaded(AutomationFormViewModel.Loaded(listOf(mbp, laptop), null)),
+                loaded = LoadState.Loaded(AutomationFormViewModel.Loaded(listOf(mbp, laptop))),
                 form = AutomationForm(hostId = mbp.id, dir = "/Users/dev/acme/web", name = "Triage new issues", commandTemplate = "Triage {{ticketTitle}} and label it."),
                 saving = false,
                 error = null,
@@ -462,12 +461,11 @@ class LocalScreensTest : ScreenshotTest() {
         }
 
     @Test
-    fun editShellAutomationForm() =
-        captureScreens("AutomationForm_edit", modes = listOf(dev.optio.core.testing.ThemeMode.DARK)) {
+    fun shellAutomationFormWithAnError() =
+        captureScreens("AutomationForm_error", modes = listOf(dev.optio.core.testing.ThemeMode.DARK)) {
             AutomationFormContent(
-                editing = true,
-                loaded = LoadState.Loaded(AutomationFormViewModel.Loaded(listOf(mbp), paused)),
-                form = AutomationForm.from(paused).copy(location = AutomationForm.Location.EVENT),
+                loaded = LoadState.Loaded(AutomationFormViewModel.Loaded(listOf(mbp))),
+                form = AutomationForm(name = paused.name, hostId = mbp.id, location = AutomationForm.Location.EVENT, agent = null, commandTemplate = paused.commandTemplate),
                 saving = false,
                 error = "Host not found",
                 onChange = {},

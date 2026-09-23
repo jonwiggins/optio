@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -23,6 +24,8 @@ class ServerRegistry(
     /** Where the tokens live. */
     val tokens: TokenStore,
 ) {
+    private val removalListeners = CopyOnWriteArrayList<ServerRemovalListener>()
+
     /** Every profile, in the order added; emits on every change. */
     val profiles: Flow<List<ServerProfile>> = store.data.map { decode(it[SERVERS]) }.distinctUntilChanged()
 
@@ -70,8 +73,16 @@ class ServerRegistry(
         }
     }
 
-    /** Forgets a profile and its token; removing the active one makes the first remaining active. */
+    /**
+     * Forgets a profile and its token; removing the active one makes the first remaining active.
+     * [ServerRemovalListener]s hear about it first, while the token still exists.
+     */
     suspend fun remove(id: String) {
+        profile(id)?.let { profile ->
+            val token = token(id)
+            // A failing listener never keeps a server around.
+            removalListeners.forEach { listener -> runCatching { listener.beforeRemove(profile, token) } }
+        }
         tokens.delete(tokenAccount(id))
         store.edit { prefs ->
             val servers = decode(prefs[SERVERS]).filter { it.id != id }
@@ -85,6 +96,12 @@ class ServerRegistry(
 
     /** The token for server [id]. */
     suspend fun token(id: String): String? = tokens.get(tokenAccount(id))
+
+    /** Calls [listener] before every later [remove]; close the handle to stop. */
+    fun addRemovalListener(listener: ServerRemovalListener): AutoCloseable {
+        removalListeners += listener
+        return AutoCloseable { removalListeners -= listener }
+    }
 
     /** Stores the token for server [id]; false when it could not be encrypted. */
     suspend fun setToken(
@@ -124,4 +141,17 @@ class ServerRegistry(
         /** A registry held in memory with unencrypted tokens: for tests and previews only. */
         fun inMemory(): ServerRegistry = ServerRegistry(InMemoryPreferences(), TokenStore(InMemoryPreferences(), TokenCipher.Plain))
     }
+}
+
+/**
+ * Told about a server just before [ServerRegistry.remove] deletes its profile and [token] (null
+ * when none is stored): the last moment anything can still reach that server as this user, e.g. to
+ * unregister this device's push token from it. Removal runs under the session's lock, so don't
+ * block: copy what you need and do network work in your own scope.
+ */
+fun interface ServerRemovalListener {
+    fun beforeRemove(
+        profile: ServerProfile,
+        token: String?,
+    )
 }

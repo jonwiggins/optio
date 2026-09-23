@@ -4,6 +4,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.firebase.messaging.RemoteMessage
 import dev.optio.core.data.InMemoryPreferences
 import dev.optio.core.data.ServerClient
+import dev.optio.core.data.ServerProfile
+import dev.optio.core.data.ServerRegistry
 import dev.optio.core.glance.FcmAvailability
 import dev.optio.core.glance.GlanceStore
 import dev.optio.core.glance.NeedsYouSnapshot
@@ -49,6 +51,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonObject
@@ -358,6 +361,44 @@ class PushAndActionsTest {
             assertTrue(delete.path.endsWith("/fcm-token-" + "x".repeat(40)))
             assertEquals("Bearer ${dev.optio.core.testing.FakeOptioServer.TEST_TOKEN}", delete.header("Authorization"))
             assertNull(status.state.value.server("srv-2"))
+        }
+
+    @Test
+    fun aServerForgottenAfterARestartIsStillUnregistered(): Unit =
+        runBlocking {
+            second.delete("/api/notifications/devices/:ref") { FakeResponse(status = 204) }
+            val status = PushStatus.detached()
+            status.update { it.copy(permission = NotificationPermissionState.GRANTED) }
+            // A fresh process: this registrar never registered with anything.
+            val registrar = PushRegistrar(context, scope, status, FakeTokens(), { emptyList() }, MutableStateFlow(emptyList()))
+            val registry = ServerRegistry.inMemory()
+            registry.addRemovalListener(registrar::beforeRemove)
+            val studio = ServerProfile(id = "srv-2", name = "Studio", url = second.baseUrl, workspaceId = "ws-2")
+            registry.upsert(studio)
+            registry.setToken("optio_pat_studio", studio.id)
+
+            registry.remove(studio.id)
+            val delete = second.awaitRequest("DELETE", "/api/notifications/devices/:ref")
+            assertTrue(delete.path.endsWith("/fcm-token-" + "x".repeat(40)))
+            assertEquals("Bearer optio_pat_studio", delete.header("Authorization"), "the PAT it had until now")
+            assertEquals("ws-2", delete.header("x-workspace-id"))
+            assertNull(registry.token(studio.id))
+        }
+
+    @Test
+    fun forgettingAServerWithoutFirebaseSendsNothing(): Unit =
+        runBlocking {
+            val status = PushStatus.detached()
+            val registrar =
+                PushRegistrar(context, scope, status, FakeTokens(availability = FcmAvailability.NotConfigured), { emptyList() }, MutableStateFlow(emptyList()))
+            val registry = ServerRegistry.inMemory()
+            registry.addRemovalListener(registrar::beforeRemove)
+            val studio = ServerProfile(id = "srv-2", name = "Studio", url = second.baseUrl)
+            registry.upsert(studio)
+            registry.setToken("optio_pat_studio", studio.id)
+            registry.remove(studio.id)
+            delay(300)
+            assertEquals(0, second.count("DELETE"))
         }
 
     @Test

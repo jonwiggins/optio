@@ -3,6 +3,7 @@ package dev.optio.core.network
 import app.cash.turbine.test
 import app.cash.turbine.turbineScope
 import dev.optio.core.model.ActivityNewEvent
+import dev.optio.core.model.LocalChangedEvent
 import dev.optio.core.model.TaskState
 import dev.optio.core.model.TaskStateChangedEvent
 import dev.optio.core.model.WsEvent
@@ -106,8 +107,8 @@ class EventHubTest {
                 assertEquals("t1", changed.taskId)
                 assertEquals(TaskState.PR_OPENED, changed.toState)
 
-                val local = assertIs<WsEvent.Unknown>(awaitItem())
-                assertEquals("local:changed", local.raw["type"]?.stringValue)
+                val local = assertIs<LocalChangedEvent>(awaitItem())
+                assertEquals("lt1", local.terminalId)
 
                 val malformed = assertIs<WsEvent.Unknown>(awaitItem())
                 assertEquals("t2", malformed.raw["taskId"]?.stringValue)
@@ -128,21 +129,26 @@ class EventHubTest {
             enqueueEvents(
                 stateChanged,
                 """{"type":"local:changed","terminalId":"lt1","hostId":"h1"}""",
+                """{"type":"future:event","id":"f1"}""",
             )
             val hub = hub()
             turbineScope {
                 val all = hub.events.testIn(backgroundScope)
                 val typed = hub.on<TaskStateChangedEvent>().testIn(backgroundScope)
-                val local = hub.unknown("local:changed").testIn(backgroundScope)
+                val local = hub.on<LocalChangedEvent>().testIn(backgroundScope)
+                val future = hub.unknown("future:event").testIn(backgroundScope)
                 hub.start()
                 assertIs<TaskStateChangedEvent>(all.awaitItem())
+                assertIs<LocalChangedEvent>(all.awaitItem())
                 assertIs<WsEvent.Unknown>(all.awaitItem())
                 assertEquals("t1", typed.awaitItem().taskId)
-                assertEquals(JsonPrimitive("lt1"), local.awaitItem()["terminalId"])
+                assertEquals("lt1", local.awaitItem().terminalId)
+                assertEquals(JsonPrimitive("f1"), future.awaitItem()["id"])
                 hub.stop()
                 all.cancelAndIgnoreRemainingEvents()
                 typed.cancelAndIgnoreRemainingEvents()
                 local.cancelAndIgnoreRemainingEvents()
+                future.cancelAndIgnoreRemainingEvents()
             }
         }
 

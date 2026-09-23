@@ -69,8 +69,8 @@ class AgentAndWorkflowDecodeTest {
         assertEquals("0b7e6f4a-2c1d-4e9b-8a3f-5d6c7b8a9e01", done.localTerminalId)
         assertEquals(Instant.parse("2026-09-22T10:02:31.250Z"), done.finishedAt)
 
-        // The API documents `cancelled` although the shared enum lacks it: UNKNOWN, not a failure.
-        assertEquals(WorkflowRunState.UNKNOWN, cancelled.state)
+        // The API documents `cancelled` (the shared enum carries it).
+        assertEquals(WorkflowRunState.CANCELLED, cancelled.state)
         assertEquals(1.0, cancelled.retryCount)
         assertNull(cancelled.title)
         assertNull(cancelled.startedAt)

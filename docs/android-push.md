@@ -343,10 +343,16 @@ Watch frame, should post or update a visible notification.
   device, drives a Local agent terminal and repo tasks, and reads the requests
   the server would have sent from `OPTIO_FCM_FAKE_OUTBOX`.
 
-**Grabbing real payloads.** Run any API (for example the Android private test
-API) with `OPTIO_FCM_TRANSPORT=fake OPTIO_FCM_FAKE_OUTBOX=/tmp/fcm.jsonl`. Each
-line in that file is one HTTP v1 request body. `LOG_LEVEL=debug` also logs each
-send as `FCM (fake): recorded send`.
+**Grabbing real payloads.** Run any API with
+`OPTIO_FCM_TRANSPORT=fake OPTIO_FCM_FAKE_OUTBOX=/tmp/fcm.jsonl`. Each line in
+that file is one HTTP v1 request body. `LOG_LEVEL=debug` also logs each send as
+`FCM (fake): recorded send`.
+
+The Android private test API ignores those variables, because its launcher drops
+every `OPTIO_*` variable it inherits from your shell. Start it with
+`apps/android/scripts/test-api.sh start --auth --fcm-fake` instead. The device
+routes need auth, and the outbox is written to
+`apps/android/e2e/.run/<port>/fcm-outbox.jsonl`.
 
 To exercise the app's handler without Firebase, feed a line's `data` to a
 Robolectric test with `RemoteMessage.Builder("x").setData(data).build()`.

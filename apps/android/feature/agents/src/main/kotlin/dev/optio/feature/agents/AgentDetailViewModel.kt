@@ -3,6 +3,7 @@ package dev.optio.feature.agents
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.optio.core.glance.WatchSources
 import dev.optio.core.model.AgentLogEntry
 import dev.optio.core.model.OptioJson
 import dev.optio.core.model.PersistentAgent
@@ -115,6 +116,8 @@ class AgentDetailViewModel(
     private val api: ApiClient,
     private val socketFactory: (ApiClient, String) -> WebSocketClient = { client, path -> client.webSocket(path) },
     private val clock: Clock = Clock.systemUTC(),
+    /** Where a message sent from this phone is recorded, so the agent's next turn joins the Watch. */
+    private val watchSources: WatchSources? = null,
 ) : ViewModel(), AgentDetailActions {
     /** One-shot outcomes the screen turns into toasts and navigation. */
     sealed interface Event {
@@ -257,6 +260,8 @@ class AgentDetailViewModel(
         _messages.update { state -> LoadState.Loaded(state.value.orEmpty() + optimistic) }
         return try {
             api.sendPersistentAgentMessage(agentId, text)
+            // The turn it wakes joins the Watch for an hour (iOS `RecentAgentSends.record`).
+            watchSources?.recordAgentSend(agentId)
             request(Part.AGENT, Part.MESSAGES)
             true
         } catch (e: CancellationException) {

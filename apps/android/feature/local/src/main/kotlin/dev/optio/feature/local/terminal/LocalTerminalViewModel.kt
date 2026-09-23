@@ -3,13 +3,14 @@ package dev.optio.feature.local.terminal
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.optio.core.model.LocalAttentionState
+import dev.optio.core.model.LocalChangedEvent
 import dev.optio.core.model.LocalHost
 import dev.optio.core.model.LocalTerminal
 import dev.optio.core.model.LocalTerminalState
 import dev.optio.core.navigation.routes.LocalTerminalRoute
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.EventHub
-import dev.optio.core.network.unknown
+import dev.optio.core.network.on
 import dev.optio.core.terminal.TerminalState
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.load
@@ -55,7 +56,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The focus view of one Local terminal (iOS `LocalTerminalScreen`'s state): the terminal row (REST,
@@ -190,8 +190,8 @@ class LocalTerminalViewModel(
                 null
             } else {
                 viewModelScope.launch {
-                    hub.unknown("local:changed")
-                        .filter { it["terminalId"]?.jsonPrimitive?.content == terminalId }
+                    hub.on<LocalChangedEvent>()
+                        .filter { it.terminalId == terminalId }
                         .collect {
                             load(quiet = true)
                             transcript.poke()

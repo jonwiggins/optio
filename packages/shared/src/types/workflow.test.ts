@@ -14,6 +14,7 @@ describe("WorkflowRunState enum", () => {
     expect(WorkflowRunState.RUNNING).toBe("running");
     expect(WorkflowRunState.COMPLETED).toBe("completed");
     expect(WorkflowRunState.FAILED).toBe("failed");
+    expect(WorkflowRunState.CANCELLED).toBe("cancelled");
   });
 });
 
@@ -81,8 +82,9 @@ describe("workflow run state machine", () => {
   });
 
   describe("isTerminalWorkflowRunState", () => {
-    it("identifies completed as terminal", () => {
+    it("identifies completed and cancelled as terminal", () => {
       expect(isTerminalWorkflowRunState(WorkflowRunState.COMPLETED)).toBe(true);
+      expect(isTerminalWorkflowRunState(WorkflowRunState.CANCELLED)).toBe(true);
     });
 
     it("identifies non-terminal states", () => {

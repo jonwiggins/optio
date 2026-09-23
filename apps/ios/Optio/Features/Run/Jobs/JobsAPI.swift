@@ -3,9 +3,8 @@ import Foundation
 // MARK: - Row types
 //
 // The /api/jobs routes enrich workflow rows with aggregate run stats
-// (`runCount`, `lastRunAt`, `totalCostUsd`, `triggerTypes`) and workflow runs
-// can carry a `cancelled` state the generated `WorkflowRunState` enum does not
-// know about, so these are declared locally with optionals throughout.
+// (`runCount`, `lastRunAt`, `totalCostUsd`, `triggerTypes`), so these are
+// declared locally with optionals throughout.
 
 struct JobSummary: Decodable, Identifiable, Hashable {
     let id: String

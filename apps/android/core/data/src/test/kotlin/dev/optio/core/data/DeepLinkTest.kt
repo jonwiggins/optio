@@ -19,6 +19,7 @@ class DeepLinkTest {
             DeepLink.Work("recurring") to "optio://section/work?view=recurring",
             DeepLink.Section("machines") to "optio://section/machines",
             DeepLink.Section("more") to "optio://section/more",
+            DeepLink.Settings to "optio://settings",
         )
 
     @Test
@@ -60,6 +61,7 @@ class DeepLinkTest {
         assertEquals(DeepLink.Section("tasks"), DeepLink.parse("optio://section/tasks?view=recurring"))
         assertEquals("recurring", DeepLink.queryValue("optio://section/tasks?view=recurring", "view"))
         assertEquals(DeepLink.NeedsYou, DeepLink.parse("optio://needs-you/anything"))
+        assertEquals(DeepLink.Settings, DeepLink.parse("optio://settings/"))
     }
 
     @Test
