@@ -3,6 +3,8 @@ package dev.optio.buildlogic
 import com.android.build.api.dsl.CommonExtension
 import org.gradle.api.Project
 import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.gradle.kotlin.dsl.dependencies
 import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
@@ -34,9 +36,20 @@ internal fun Project.configureAndroidCommon(android: CommonExtension) {
             "--add-opens=java.base/java.io=ALL-UNNAMED",
             "--enable-native-access=ALL-UNNAMED",
         )
+        configureTestLogging()
     }
     configureKotlinCompile()
     addStandardUnitTestDependencies()
+}
+
+/** A failing test prints its assertion message and stack trace (CI logs are all we get there). */
+internal fun Test.configureTestLogging() {
+    testLogging {
+        events(TestLogEvent.FAILED)
+        exceptionFormat = TestExceptionFormat.FULL
+        showCauses = true
+        showStackTraces = true
+    }
 }
 
 /** Kotlin compiler settings shared by Android and JVM modules. */

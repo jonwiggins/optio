@@ -79,6 +79,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       # Android modules run `testDebugUnitTest`; :core:model and :core:network are pure JVM (`test`).
       - run: ./gradlew assembleDebug testDebugUnitTest :core:model:test :core:network:test --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-test-reports
+          path: apps/android/**/build/reports/tests/
+          retention-days: 7
 
   test:
     name: Test

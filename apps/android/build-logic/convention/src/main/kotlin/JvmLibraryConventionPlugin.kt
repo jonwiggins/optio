@@ -1,3 +1,4 @@
+import dev.optio.buildlogic.configureTestLogging
 import dev.optio.buildlogic.OptioSdk
 import dev.optio.buildlogic.addStandardUnitTestDependencies
 import dev.optio.buildlogic.configureKotlinCompile
@@ -28,6 +29,7 @@ class JvmLibraryConventionPlugin : Plugin<Project> {
             }
             tasks.withType<Test>().configureEach {
                 useJUnit()
+                configureTestLogging()
             }
             configureKotlinCompile()
             addStandardUnitTestDependencies()
