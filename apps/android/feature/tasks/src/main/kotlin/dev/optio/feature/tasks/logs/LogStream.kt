@@ -8,6 +8,7 @@ import dev.optio.core.network.ApiClient
 import dev.optio.core.network.WebSocketClient
 import dev.optio.core.network.WsFrame
 import dev.optio.core.ui.log.TaskLogRow
+import dev.optio.feature.tasks.data.HISTORICAL_LOG_LIMIT
 import dev.optio.feature.tasks.data.jobRunLogs
 import dev.optio.feature.tasks.data.taskLogs
 import java.time.Instant
@@ -56,6 +57,11 @@ open class LogStream(
     private val history: suspend (offset: Int) -> List<TaskLogRow>,
     private val upgradeUntyped: Boolean = false,
     private val upgradeDelay: Duration = UPGRADE_DELAY,
+    /**
+     * When [history] pages by offset: a full page means more rows follow (the route returns the
+     * oldest rows first), so the stream keeps fetching until a page comes back short.
+     */
+    private val pageSize: Int? = null,
 ) {
     private val book = LogBook(ownerId)
     private val fetchLock = Mutex()
@@ -154,10 +160,18 @@ open class LogStream(
     private suspend fun fetchLocked() = fetchLock.withLock {
         val gen = generation
         try {
-            val rows = history(book.storedCount)
-            if (gen != generation) return@withLock
-            book.addStored(rows)
-            _error.value = null
+            var pages = 0
+            while (true) {
+                val rows = history(book.storedCount)
+                if (gen != generation) return@withLock
+                book.addStored(rows)
+                _error.value = null
+                // A long log comes in pages from the oldest row; show the first page right away.
+                if (pageSize == null || rows.size < pageSize || ++pages >= MAX_PAGES) break
+                historyLoaded = true
+                _loaded.value = true
+                publish()
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -213,6 +227,9 @@ open class LogStream(
         /** How long an untyped live frame waits for its typed row. */
         val UPGRADE_DELAY: Duration = 1_500.milliseconds
 
+        /** At most this many pages per fetch (a runaway log shouldn't pin the screen). */
+        const val MAX_PAGES = 20
+
         /** The "You" line for a sent message (rendered as a prompt card by `AgentLogRow`). */
         fun localEntry(ownerId: String, text: String, interrupt: Boolean, now: Instant): AgentLogEntry = AgentLogEntry(
             taskId = ownerId,
@@ -236,6 +253,7 @@ class TaskLogStream(
     scope: CoroutineScope,
     socketFactory: (path: String) -> WebSocketClient = { api.webSocket(it) },
     upgradeDelay: Duration = LogStream.UPGRADE_DELAY,
+    pageSize: Int = HISTORICAL_LOG_LIMIT,
 ) : LogStream(
     scope = scope,
     ownerId = taskId,
@@ -243,9 +261,10 @@ class TaskLogStream(
     logEventType = "task:log",
     stateEventTypes = setOf("task:state_changed", "task:stalled", "task:recovered", "task:message_delivered", "task:message_acked"),
     socketFactory = socketFactory,
-    history = { offset -> api.taskLogs(taskId, offset = offset) },
+    history = { offset -> api.taskLogs(taskId, offset = offset, limit = pageSize) },
     upgradeUntyped = true,
     upgradeDelay = upgradeDelay,
+    pageSize = pageSize,
 )
 
 /**

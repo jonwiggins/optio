@@ -208,7 +208,7 @@ class LiveTasksTest {
         eventually(20.seconds) { saved != null || form.error.value != null }
         assertEquals(null, form.error.value)
         val job = saved!!.job
-        assertTrue(saved!!.created)
+        assertTrue(saved.created)
         val hook = api.listTriggers(TriggerOwner.JOB, job.id).single()
         assertEquals(path, hook.webhookPath)
         assertEquals("string", job.paramsSchema?.get("properties")?.get("TOPIC")?.get("type")?.stringValue)

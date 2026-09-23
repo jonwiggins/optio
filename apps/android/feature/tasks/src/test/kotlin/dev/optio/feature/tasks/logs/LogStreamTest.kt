@@ -196,6 +196,21 @@ class LogStreamTest {
     }
 
     @Test
+    fun aLongLogIsPagedFromTheOldestRowUntilComplete() = main.onMain {
+        serveTaskLogs()
+        (1..5).forEach { store("$it", "line $it", it * 10L) }
+        server.webSocket("/ws/logs/:taskId")
+        val api = server.client()
+        val logs = TaskLogStream(api, "t1", newScope(), fastSockets(api), pageSize = 2)
+        logs.start()
+        logs.entries.await { it.size == 5 }
+        assertEquals((1..5).map { "line $it" }, logs.contents())
+        assertEquals(listOf(null, "2", "4"), server.requests("GET", "/api/tasks/t1/logs").map { it.queryParam("offset") })
+        assertEquals(listOf("2", "2", "2"), server.requests("GET", "/api/tasks/t1/logs").map { it.queryParam("limit") })
+        logs.stop()
+    }
+
+    @Test
     fun reloadStartsOverAfterAForceRedo() = main.onMain {
         serveTaskLogs()
         store("1", "old a", 0)
