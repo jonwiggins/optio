@@ -1,0 +1,8 @@
+{
+  "subscription": {
+    "available": false,
+    "error": "OAuth token has expired — please paste a new one",
+    "expired": true,
+    "lastValidated": "2026-09-22T16:30:00.000Z"
+  }
+}

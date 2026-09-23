@@ -1,0 +1,11 @@
+{
+  "usage": {
+    "available": false,
+    "error": "OAuth token has expired — please paste a new one",
+    "hasRecentAuthFailure": true,
+    "authFailures": {
+      "claude": true,
+      "github": true
+    }
+  }
+}
