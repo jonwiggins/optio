@@ -71,7 +71,11 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      # The action's default packages include the legacy `tools`, which the SDK repository no
+      # longer has (sdkmanager exits 1); AGP downloads the platform it needs itself.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
       # Android modules run `testDebugUnitTest`; :core:model and :core:network are pure JVM (`test`).
       - run: ./gradlew assembleDebug testDebugUnitTest :core:model:test :core:network:test --stacktrace
