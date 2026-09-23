@@ -498,6 +498,8 @@ class WatchManager(
     private fun handle(event: WsEvent) {
         when (event) {
             is TaskStateChangedEvent -> {
+                // iOS PushRegistrar: the first thing needing you while the app is open is when to ask.
+                if (event.toState == TaskState.NEEDS_ATTENTION && foreground()) onNeedsYouWhileOpen()
                 if (!sources.isFollowing(event.taskId)) return
                 when (event.toState) {
                     TaskState.COMPLETED -> {

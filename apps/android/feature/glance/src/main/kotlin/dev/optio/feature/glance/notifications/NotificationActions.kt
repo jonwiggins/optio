@@ -101,14 +101,22 @@ object NotificationActions {
                 val pr = target.prUrl ?: return target.url?.let { build(context, NotificationAction.OPEN, target, action.title) }
                 NotificationCompat.Action.Builder(0, title, DeepLinkIntents.browserPending(context, pr, "pr|$key")).build()
             }
+            // Typing into a terminal, resuming or retrying from a locked phone asks to unlock first
+            // (iOS `.authenticationRequired`); Later does not.
             NotificationAction.REPLY ->
                 NotificationCompat.Action.Builder(R.drawable.ic_stat_optio, title, broadcast(context, action, target, key, mutable = true))
                     .addRemoteInput(AlertNotifier.replyInput(if (target.kind == "agent") "Message ${target.title ?: "the agent"}" else "Your reply"))
                     .setAllowGeneratedReplies(false)
                     .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
                     .setShowsUserInterface(false)
+                    .setAuthenticationRequired(true)
                     .build()
-            NotificationAction.LATER, NotificationAction.RESUME, NotificationAction.RETRY ->
+            NotificationAction.RESUME, NotificationAction.RETRY ->
+                NotificationCompat.Action.Builder(0, title, broadcast(context, action, target, key, mutable = false))
+                    .setShowsUserInterface(false)
+                    .setAuthenticationRequired(true)
+                    .build()
+            NotificationAction.LATER ->
                 NotificationCompat.Action.Builder(0, title, broadcast(context, action, target, key, mutable = false))
                     .setShowsUserInterface(false)
                     .build()

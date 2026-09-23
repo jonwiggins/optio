@@ -30,13 +30,16 @@ object DeepLinkIntents {
         kind: String?,
         id: String?,
     ): String? {
-        if (id.isNullOrEmpty()) return if (kind == "host") DeepLink.Section("machines").url else null
         return when (kind) {
-            "local" -> DeepLink.Local(id).url
-            "task" -> DeepLink.Task(id).url
-            "agent" -> DeepLink.Agent(id).url
             "host" -> DeepLink.Section("machines").url
-            else -> null
+            // The test push links `optio://settings`; Settings live under More.
+            "test" -> DeepLink.Section("more").url
+            else -> if (id.isNullOrEmpty()) null else when (kind) {
+                "local" -> DeepLink.Local(id).url
+                "task" -> DeepLink.Task(id).url
+                "agent" -> DeepLink.Agent(id).url
+                else -> null
+            }
         }
     }
 
