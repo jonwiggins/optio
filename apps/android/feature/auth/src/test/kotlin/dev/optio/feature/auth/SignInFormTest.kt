@@ -102,6 +102,23 @@ class SignInFormTest {
         }
 
     @Test
+    fun aDeniedLocalNetworkPermissionExplainsItself() =
+        runBlocking<Unit> {
+            val form = SignInForm(SignInMode.FIRST).apply {
+                serverUrl = "http://192.168.1.20:30400"
+                token = "optio_pat_x"
+            }
+            form.localNetworkDenied()
+            assertEquals(SignInError.LocalNetworkBlocked("192.168.1.20"), form.error)
+            assertTrue(form.error!!.message.contains("Nearby devices"))
+
+            // Unreachable while the permission is denied: the same explanation.
+            form.serverUrl = "http://127.0.0.1:1"
+            assertFalse(form.submit(session, localNetworkBlocked = true))
+            assertEquals(SignInError.LocalNetworkBlocked("127.0.0.1"), form.error)
+        }
+
+    @Test
     fun anUnreachableServerNamesTheHost() =
         runBlocking<Unit> {
             val form = SignInForm(SignInMode.FIRST).apply {

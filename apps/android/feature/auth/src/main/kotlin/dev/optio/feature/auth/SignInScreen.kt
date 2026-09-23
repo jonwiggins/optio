@@ -1,5 +1,12 @@
 package dev.optio.feature.auth
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -44,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,6 +69,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -79,6 +90,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.optio.core.data.LocalNetworkAccess
 import dev.optio.core.data.LocalSessionStore
 import dev.optio.core.data.ServerColor
 import dev.optio.core.data.SessionStore
@@ -111,22 +123,64 @@ fun SignInScreen(
 ) {
     val session = LocalSessionStore.current
     val navigator = LocalNavigator.current
+    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val servers by session.servers.collectAsStateWithLifecycle()
     val model = viewModel(key = "sign-in-${mode.name}") { SignInViewModel(mode, session, servers.map { it.color }) }
     val scope = rememberCoroutineScope()
+
+    fun pair(localNetworkBlocked: Boolean) {
+        scope.launch {
+            if (model.form.submit(session, localNetworkBlocked)) {
+                model.form.token = ""
+                if (mode == SignInMode.ADD) navigator.pop()
+            }
+        }
+    }
+
+    // Android 17: a server on the local network is unreachable without the local network
+    // permission. Ask first when the address is local (never for public servers); a denial shows
+    // why at once (with Open settings) instead of a connect timeout.
+    val localNetworkRequest =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) pair(localNetworkBlocked = false) else model.form.localNetworkDenied()
+        }
     SignInContent(
         form = model.form,
         onSubmit = {
-            scope.launch {
-                if (model.form.submit(session)) {
-                    model.form.token = ""
-                    if (mode == SignInMode.ADD) navigator.pop()
+            // Keep the progress, and any error with its action, in view.
+            focusManager.clearFocus()
+            keyboard?.hide()
+            val url = model.form.normalizedUrl
+            if (model.form.busy || url == null || LocalNetworkAccess.isGranted(context)) {
+                pair(localNetworkBlocked = false)
+            } else {
+                scope.launch {
+                    if (LocalNetworkAccess.needsPrompt(context, url)) {
+                        localNetworkRequest.launch(LocalNetworkAccess.PERMISSION)
+                    } else {
+                        pair(localNetworkBlocked = false)
+                    }
                 }
             }
         },
         onBack = { navigator.pop() },
+        onOpenSettings = { context.openAppSettings() },
         modifier = modifier,
     )
+}
+
+/** The app's system settings page (where the Nearby devices permission is granted). */
+private fun Context.openAppSettings() {
+    val intent =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        // No settings app (some test devices): nothing to open.
+    }
 }
 
 /** Holds the form across configuration changes (never in saved state: the token stays in memory). */
@@ -154,6 +208,7 @@ internal fun SignInContent(
     onSubmit: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenSettings: () -> Unit = {},
 ) {
     val add = form.mode == SignInMode.ADD
     Scaffold(
@@ -202,6 +257,11 @@ internal fun SignInContent(
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 10.dp).testTag("sign-in-error"),
                     )
+                    if (error is SignInError.LocalNetworkBlocked) {
+                        TextButton(onClick = onOpenSettings, modifier = Modifier.testTag("open-settings")) {
+                            Text("Open settings")
+                        }
+                    }
                 }
                 SubmitButton(form, onSubmit, Modifier.padding(top = 24.dp))
                 Help(Modifier.padding(top = 28.dp))

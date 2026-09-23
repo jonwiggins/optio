@@ -28,6 +28,16 @@ sealed interface SignInError {
         override val message = "The server rejected that token. Create a new one in the web app under Settings › API keys."
     }
 
+    /**
+     * Unreachable while Android 17's local network permission is denied (`LocalNetworkAccess`):
+     * the likely cause for a server on this network. Not in iOS (its prompt is automatic).
+     */
+    data class LocalNetworkBlocked(val host: String) : SignInError {
+        override val message =
+            "Couldn't reach $host. Optio can't reach devices on your local network without the Nearby devices " +
+                "permission: allow it in Settings, then try again."
+    }
+
     /** Something answered, but not an Optio API (wrong port, a web page). Not in iOS, which says "(HTTP 0)". */
     data class NotOptio(val host: String) : SignInError {
         override val message = "$host answered, but not like an Optio server. Check the address and port."
@@ -72,10 +82,22 @@ class SignInForm(
         get() = normalizedUrl != null && token.isNotBlank()
 
     /**
-     * Verifies and pairs the server through [session] (`addServer` probes `/api/auth/me` first).
-     * True on success: the new server is active and the session signed in.
+     * The local network permission was denied for a local address: pairing cannot reach it, so say
+     * so at once instead of waiting out a connect timeout.
      */
-    suspend fun submit(session: SessionStore): Boolean {
+    fun localNetworkDenied() {
+        error = SignInError.LocalNetworkBlocked(hostLabel)
+    }
+
+    /**
+     * Verifies and pairs the server through [session] (`addServer` probes `/api/auth/me` first).
+     * True on success: the new server is active and the session signed in. [localNetworkBlocked]
+     * (the local network permission is denied) explains an unreachable server.
+     */
+    suspend fun submit(
+        session: SessionStore,
+        localNetworkBlocked: Boolean = false,
+    ): Boolean {
         val url = normalizedUrl
         if (url == null) {
             error = SignInError.BadUrl
@@ -98,6 +120,7 @@ class SignInForm(
             error =
                 when {
                     e.isUnauthorized -> SignInError.Rejected
+                    e.isTransportFailure && localNetworkBlocked -> SignInError.LocalNetworkBlocked(hostLabel)
                     e.isTransportFailure -> SignInError.Unreachable(hostLabel)
                     e.isDecodingFailure || e.status == ApiError.NOT_FOUND -> SignInError.NotOptio(hostLabel)
                     else -> SignInError.Other(e.message)

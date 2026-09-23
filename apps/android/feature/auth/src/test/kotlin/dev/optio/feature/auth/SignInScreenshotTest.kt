@@ -91,6 +91,19 @@ class SignInScreenshotTest {
     }
 
     @Test
+    fun localNetworkDenied() {
+        show(
+            SignInForm(SignInMode.FIRST).apply {
+                serverUrl = "http://192.168.1.20:30400"
+                token = "optio_pat_4f2c9a1b"
+                localNetworkDenied()
+            },
+        )
+        compose.onNodeWithTag("open-settings").assertIsDisplayed()
+        capture("SignIn_first_localNetworkDenied")
+    }
+
+    @Test
     fun addServerLight() {
         show(addServer())
         compose.onNodeWithText("Pair another Optio instance").assertIsDisplayed()
