@@ -1,13 +1,15 @@
 package dev.optio.feature.widgets.tiles
 
 import android.service.quicksettings.Tile
-import dev.optio.core.data.InMemoryPreferences
+import dev.optio.core.data.ServerClient
+import dev.optio.core.glance.GlanceLoader
+import dev.optio.core.glance.GlanceStore
+import dev.optio.core.glance.NeedsYouSnapshot
+import dev.optio.core.glance.RunTarget
+import dev.optio.core.network.ApiClient
 import dev.optio.feature.widgets.R
-import dev.optio.feature.widgets.data.CachedItem
-import dev.optio.feature.widgets.data.CachedSlice
-import dev.optio.feature.widgets.data.WidgetStore
+import dev.optio.feature.widgets.run.FireReceipt
 import dev.optio.feature.widgets.run.RunFiring
-import dev.optio.feature.widgets.run.RunTarget
 import dev.optio.feature.widgets.work.WidgetSamples
 import java.time.Duration
 import java.time.Instant
@@ -54,13 +56,18 @@ class TileStatesTest {
     @Test
     fun needsYouReadsEveryServersCacheWithLaterLast() =
         runTest {
-            val store = WidgetStore(InMemoryPreferences())
-            store.setCached(CachedSlice("srv-laptop", needsYou = listOf(CachedItem.of(WidgetSamples.web(now))), asOf = now))
-            store.setCached(CachedSlice("srv-studio", needsYou = listOf(CachedItem.of(WidgetSamples.forge(now))), asOf = now))
+            // The tile reads GlanceLoader.cached(): every server's cached snapshot, merged, Later last.
+            val store = GlanceStore.inMemory()
+            store.setCachedSnapshot(NeedsYouSnapshot(needsYou = listOf(WidgetSamples.web(now)), asOf = now), "srv-laptop")
+            store.setCachedSnapshot(NeedsYouSnapshot(needsYou = listOf(WidgetSamples.forge(now)), asOf = now), "srv-studio")
             store.snooze("a-vesper", now.plus(Duration.ofMinutes(15)))
-            val merged = TileStates.mergedNeedsYou(listOf(WidgetSamples.laptop, WidgetSamples.studio), store.snapshot(), now)
-            assertEquals(listOf("t-web", "a-vesper"), merged.map { it.id })
-            assertTrue(TileStates.mergedNeedsYou(emptyList(), store.snapshot(), now).isEmpty())
+            val clients = listOf(WidgetSamples.laptop, WidgetSamples.studio).map { ServerClient(it, ApiClient(it.url, "t")) }
+            val entry = GlanceLoader(store, { clients }).cached(now = now)
+            val look = TileStates.needsYou(signedIn = entry.slices.isNotEmpty(), needsYou = entry.needsYou, multiServer = entry.isMulti)
+            assertEquals(listOf("t-web", "a-vesper"), entry.needsYou.map { it.id })
+            assertEquals("2 · web", look.subtitle)
+            val signedOut = GlanceLoader(store, { emptyList() }).cached(now = now)
+            assertEquals("Sign in to Optio", TileStates.needsYou(signedOut.slices.isNotEmpty(), signedOut.needsYou, signedOut.isMulti).subtitle)
         }
 
     @Test
@@ -105,11 +112,15 @@ class TileStatesTest {
     fun runMessagesFollowIos() {
         val job = RunTarget("s|job:1", "Nightly", RunTarget.Kind.JOB)
         val blueprint = RunTarget("s|local:2", "Fix flaky tests", RunTarget.Kind.LOCAL, spawnMode = "hold")
-        assertEquals("Started Nightly.", RunFiring.message(RunFiring.Outcome.Started(job, dev.optio.feature.widgets.run.FireReceipt())))
-        assertEquals("Started Fix flaky tests in web.", RunFiring.message(RunFiring.Outcome.Started(blueprint, dev.optio.feature.widgets.run.FireReceipt(dir = "web"))))
+        assertEquals("Started Nightly.", RunFiring.message(RunFiring.Outcome.Started(job, FireReceipt())))
+        assertEquals("Started Fix flaky tests in web.", RunFiring.message(RunFiring.Outcome.Started(blueprint, FireReceipt(dir = "web"))))
         assertEquals(
             "Fix flaky tests is ready — start it from Optio.",
-            RunFiring.message(RunFiring.Outcome.Started(blueprint, dev.optio.feature.widgets.run.FireReceipt(held = true))),
+            RunFiring.message(RunFiring.Outcome.Started(blueprint, FireReceipt(held = true))),
+        )
+        assertEquals(
+            "Fix flaky tests starts when its machine is back online.",
+            RunFiring.message(RunFiring.Outcome.Started(blueprint, FireReceipt(waitsForHost = true))),
         )
         assertEquals("Couldn't start Nightly.", RunFiring.message(RunFiring.Outcome.Failed(job, "500")))
         assertEquals("Sign in to Optio first.", RunFiring.message(RunFiring.Outcome.SignedOut))

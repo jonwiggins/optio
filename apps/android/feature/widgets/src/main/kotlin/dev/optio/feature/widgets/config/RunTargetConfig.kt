@@ -16,9 +16,9 @@ import dev.optio.core.ui.components.GroupedSection
 import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.state.LoadState
-import dev.optio.feature.widgets.OptioWidgets
-import dev.optio.feature.widgets.run.RunTarget
-import dev.optio.feature.widgets.run.fetchAllRunTargets
+import dev.optio.core.glance.RunTarget
+import dev.optio.feature.widgets.Host
+import dev.optio.feature.widgets.run.resolveRunTargets
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -38,12 +38,11 @@ internal fun RunTargetConfig(
     onPin: ((RunTarget) -> Unit)? = null,
 ) {
     var reload by remember { mutableIntStateOf(0) }
-    val servers by produceState<List<ServerProfile>?>(null) { value = OptioWidgets.session()?.registry?.configured().orEmpty() }
+    val servers by produceState<List<ServerProfile>?>(null) { value = Host.session()?.registry?.configured().orEmpty() }
     val targets by produceState<LoadState<List<RunTarget>>>(LoadState.Loading(), reload) {
-        val session = OptioWidgets.session()
         value =
             try {
-                LoadState.Loaded(session?.let { fetchAllRunTargets(it.clients()) }.orEmpty())
+                LoadState.Loaded(RunTarget.fetchAll(Host.clients()))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -54,7 +53,7 @@ internal fun RunTargetConfig(
     var askFirst by rememberSaveable { mutableStateOf(confirm ?: true) }
     LaunchedEffect(initial?.id) { if (selectedId == null) selectedId = initial?.id }
     // The live row for the selection, else the saved one (offline, or a legacy id).
-    val selected = targets.value?.let { RunTarget.resolve(listOfNotNull(selectedId), it).firstOrNull() } ?: initial?.takeIf { it.id == selectedId }
+    val selected = targets.value?.let { resolveRunTargets(listOfNotNull(selectedId), it).firstOrNull() } ?: initial?.takeIf { it.id == selectedId }
 
     ConfigScreen(
         title = title,

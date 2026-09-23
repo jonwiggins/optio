@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.outlined.Bedtime
-import androidx.compose.material.icons.outlined.Cancel
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Schedule
@@ -59,7 +58,6 @@ class WidgetIconGenerator {
             "widget_ic_alert_bubble" to Icons.Filled.Feedback,
             "widget_ic_triangle" to Icons.Filled.Warning,
             "widget_ic_x_filled" to Icons.Filled.Cancel,
-            "widget_ic_x_outline" to Icons.Outlined.Cancel,
             "widget_ic_check_outline" to Icons.Outlined.CheckCircle,
             "widget_ic_clock" to Icons.Outlined.Schedule,
             "widget_ic_play" to Icons.Filled.PlayArrow,

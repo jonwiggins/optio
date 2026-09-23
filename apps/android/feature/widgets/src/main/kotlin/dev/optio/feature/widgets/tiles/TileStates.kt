@@ -1,15 +1,9 @@
 package dev.optio.feature.widgets.tiles
 
 import android.service.quicksettings.Tile
-import androidx.datastore.preferences.core.Preferences
-import dev.optio.core.data.ServerProfile
+import dev.optio.core.glance.GlanceItem
+import dev.optio.core.glance.RunTarget
 import dev.optio.feature.widgets.R
-import dev.optio.feature.widgets.data.WidgetStore
-import dev.optio.feature.widgets.model.GlanceEntry
-import dev.optio.feature.widgets.model.WidgetItem
-import dev.optio.feature.widgets.run.RunTarget
-import dev.optio.feature.widgets.work.WorkEntryBuilder
-import java.time.Instant
 
 /** How a Quick Settings tile looks: what `TileService.qsTile` is set to. */
 data class TileLook(
@@ -34,7 +28,7 @@ object TileStates {
      */
     fun needsYou(
         signedIn: Boolean,
-        needsYou: List<WidgetItem>,
+        needsYou: List<GlanceItem>,
         multiServer: Boolean,
     ): TileLook {
         if (!signedIn) return TileLook("Needs you", "Sign in to Optio", Tile.STATE_INACTIVE, R.drawable.widget_ic_moon, "Sign in to Optio")
@@ -78,16 +72,4 @@ object TileStates {
             else -> TileLook(label, target.subtitle, Tile.STATE_INACTIVE, R.drawable.widget_ic_play, "Run ${target.name}, ${target.subtitle}")
         }
     }
-
-    /** Every paired server's cached needs-you items, merged oldest first with "Later" items last. */
-    fun mergedNeedsYou(
-        servers: List<ServerProfile>,
-        prefs: Preferences,
-        now: Instant,
-    ): List<WidgetItem> = if (servers.isEmpty()) emptyList() else WorkEntryBuilder.build(servers, prefs, null, now).needsYouItems()
-
-    private fun GlanceEntry.needsYouItems(): List<WidgetItem> = needsYou
-
-    /** The Run tile's configured target. */
-    fun tileTarget(prefs: Preferences): RunTarget? = WidgetStore.tileTarget(prefs)
 }

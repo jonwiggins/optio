@@ -2,8 +2,8 @@ package dev.optio.feature.widgets.work
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -13,16 +13,12 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.provideContent
+import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.currentState
-import dev.optio.core.data.ServerProfile
-import dev.optio.feature.widgets.OptioWidgets
-import dev.optio.feature.widgets.data.WidgetStore
+import androidx.glance.state.PreferencesGlanceStateDefinition
+import dev.optio.feature.widgets.Host
 import dev.optio.feature.widgets.refresh.WidgetRefreshWorker
 import java.time.Instant
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 
 /**
  * The Work widget (iOS `WorkWidget`, kind `dev.optio.ios.needs-you`): what needs you, what's
@@ -30,9 +26,9 @@ import kotlinx.coroutines.flow.map
  * set by [dev.optio.feature.widgets.config.WorkWidgetConfigActivity]): one paired server, or all of
  * them (the default) with a coloured server dot on each row.
  *
- * The content reads the refresher's per-server cache as a flow, so a refresh recomposes a running
- * session, and the widget's own Glance state (its Server option and a refresh tick that re-reads
- * the clock for waits and staleness).
+ * It renders `:core:glance`'s per-server cache (`GlanceLoader.cached`), recomputed whenever the
+ * cache changes and on every refresh tick (a new tick re-reads the clock for waits and the stale
+ * footer). Nothing here waits on the network.
  */
 class WorkWidget : GlanceAppWidget() {
     override val sizeMode: SizeMode = SizeMode.Responsive(WorkFamily.entries.map { it.breakpoint }.toSet())
@@ -41,20 +37,17 @@ class WorkWidget : GlanceAppWidget() {
         context: Context,
         id: GlanceId,
     ) {
-        val store = WidgetStore.get(context)
-        val registry = OptioWidgets.session()?.registry
-        val servers: Flow<List<ServerProfile>> =
-            registry?.let { combine(it.profiles, it.activeIdChanges) { _, _ -> }.map { _ -> it.configured() } } ?: flowOf(emptyList())
-        val initialServers = registry?.configured().orEmpty()
-        val initialPrefs = store.snapshot()
+        val loader = Host.loader(context)
+        val store = Host.store(context)
+        val initial = loader.cached(getAppWidgetState(context, PreferencesGlanceStateDefinition, id)[SERVER])
         provideContent {
             val state = currentState<Preferences>()
-            val paired by servers.collectAsState(initialServers)
-            val cache by store.data.collectAsState(initialPrefs)
-            // A refresh bumps TICK, which changes `state` and recomposes this with a fresh clock
-            // (waits, the stale footer).
-            val now = Instant.now()
-            WorkWidgetContent(WorkEntryBuilder.build(paired, cache, state[SERVER], now), WorkFamily.forSize(LocalSize.current))
+            val server = state[SERVER]
+            val entry by produceState(initial, server, state[TICK]) {
+                value = loader.cached(server, Instant.now())
+                store.changes.collect { value = loader.cached(server, Instant.now()) }
+            }
+            WorkWidgetContent(entry, WorkFamily.forSize(LocalSize.current))
         }
     }
 
@@ -69,12 +62,12 @@ class WorkWidget : GlanceAppWidget() {
         /** The widget's Server option: a `ServerProfile.id`, or absent for every paired server. */
         val SERVER = stringPreferencesKey("work.server")
 
-        /** Bumped by every refresh; reading it makes the content recompose (and re-read the clock). */
+        /** Bumped by every refresh; a new value recomputes the entry (and re-reads the clock). */
         val TICK = longPreferencesKey("work.tick")
     }
 }
 
-/** Receives the Work widget's broadcasts; placing or updating one also refreshes the data. */
+/** Receives the Work widget's broadcasts; placing or updating one also loads fresh data. */
 class WorkWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = WorkWidget()
 

@@ -4,10 +4,9 @@ import android.content.Context
 import androidx.glance.GlanceId
 import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.action.ActionCallback
+import dev.optio.core.glance.GlanceRefresh
 import dev.optio.core.model.WatchItemKind
-import dev.optio.feature.widgets.OptioWidgets
-import dev.optio.feature.widgets.data.WidgetStore
-import dev.optio.feature.widgets.refresh.WidgetUpdates
+import dev.optio.feature.widgets.Host
 import dev.optio.feature.widgets.run.attempt
 import java.time.Duration
 import java.time.Instant
@@ -43,13 +42,14 @@ class LaterAction : ActionCallback {
             kind: String?,
             serverId: String?,
         ) {
-            WidgetStore.get(context).snooze(id, Instant.now().plus(window))
+            // The shared "Later" (the Watch notification and the tiles read it too), then the server's.
+            Host.store(context).snooze(id, Instant.now().plus(window))
             if (kind == WatchItemKind.LOCAL.raw) {
-                val client = OptioWidgets.session()?.resolveClient(serverId)
+                val client = Host.session()?.resolveClient(serverId)
                 attempt { client?.api?.post("/api/local/terminals/$id/snooze", body = mapOf("minutes" to window.toMinutes())) }
             }
-            WidgetUpdates.updateWork(context)
-            WidgetUpdates.requestTiles(context)
+            // Re-renders the widgets and tiles (this module's hook) and the other glance surfaces.
+            GlanceRefresh.refreshAll(context, GlanceRefresh.Reason.ACTION)
         }
     }
 }

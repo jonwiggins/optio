@@ -37,7 +37,8 @@ import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
-import dev.optio.feature.widgets.run.RunTarget
+import dev.optio.core.glance.RunTarget
+import dev.optio.feature.widgets.run.rawId
 
 /**
  * A configuration screen (widget setup, the Run tile's settings): a top bar with Close, a grouped
@@ -168,7 +169,7 @@ internal fun LazyListScope.targetChoices(
             groups.forEach { (header, kind) ->
                 val rows = targets.filter { it.kind == kind }
                 if (rows.isEmpty()) return@forEach
-                item(key = "targets-${kind.raw}") {
+                item(key = "targets-${kind.name.lowercase()}") {
                     GroupedSection(header = header) {
                         rows.forEachIndexed { index, target ->
                             if (index > 0) InsetDivider()

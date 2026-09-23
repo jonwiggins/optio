@@ -6,8 +6,8 @@ import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.TileService
-import androidx.datastore.preferences.core.Preferences
 import dev.optio.core.data.DeepLink
+import dev.optio.feature.widgets.Host
 import dev.optio.feature.widgets.Links
 import dev.optio.feature.widgets.OptioWidgets
 import dev.optio.feature.widgets.data.WidgetStore
@@ -21,10 +21,8 @@ import kotlinx.coroutines.launch
 
 /** Flags the tiles keep in the widgets' store. */
 internal object TileFlags {
+    /** The Needs-you tile is in the panel. */
     const val NEEDS_YOU = "tile.needsYou.added"
-
-    /** The Needs-you tile is in the panel (so event-driven refreshes are worth fetching). */
-    fun needsYouAdded(prefs: Preferences): Boolean = WidgetStore.flag(prefs, NEEDS_YOU)
 }
 
 /**
@@ -59,7 +57,7 @@ abstract class OptioTileService : TileService() {
         tile.updateTile()
     }
 
-    protected suspend fun signedIn(): Boolean = OptioWidgets.session()?.registry?.configured()?.isNotEmpty() == true
+    protected suspend fun signedIn(): Boolean = Host.session()?.registry?.configured()?.isNotEmpty() == true
 
     /** Opens [intent] and collapses the panel (unlocking first when the device is locked). */
     @SuppressLint("StartActivityAndCollapseDeprecated")
@@ -92,9 +90,9 @@ class NeedsYouTileService : OptioTileService() {
     }
 
     override suspend fun look(): TileLook {
-        val servers = OptioWidgets.session()?.registry?.configured().orEmpty()
-        val prefs = WidgetStore.get(this).snapshot()
-        return TileStates.needsYou(signedIn = servers.isNotEmpty(), TileStates.mergedNeedsYou(servers, prefs, Instant.now()), servers.size > 1)
+        // Every paired server's cached snapshot, merged oldest first with "Later" items last.
+        val entry = Host.loader(this).cached()
+        return TileStates.needsYou(signedIn = entry.slices.isNotEmpty(), needsYou = entry.needsYou, multiServer = entry.isMulti)
     }
 
     override fun onClick() {
@@ -121,17 +119,15 @@ class NewWorkTileService : OptioTileService() {
  */
 class RunTargetTileService : OptioTileService() {
     override suspend fun look(): TileLook {
-        val prefs = WidgetStore.get(this).snapshot()
-        val target = TileStates.tileTarget(prefs)
-        val started = target?.let { WidgetStore.startedAt(prefs, it.id) }
+        val target = WidgetStore.get(this).tileTarget()
+        val started = target?.let { Host.store(this).startedAt(it.id) }
         return TileStates.runTarget(signedIn(), target, RunFiring.tileShowsStarted(started, Instant.now()))
     }
 
     override fun onClick() {
         super.onClick()
         scope.launch {
-            val prefs = WidgetStore.get(this@RunTargetTileService).snapshot()
-            val target = TileStates.tileTarget(prefs)
+            val target = WidgetStore.get(this@RunTargetTileService).tileTarget()
             if (target == null || !signedIn()) {
                 open(TilePreferencesActivity.intent(this@RunTargetTileService))
                 return@launch

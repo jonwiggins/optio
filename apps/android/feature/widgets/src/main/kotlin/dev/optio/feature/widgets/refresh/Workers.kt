@@ -7,10 +7,11 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
-import dev.optio.feature.widgets.OptioWidgets
-import dev.optio.feature.widgets.model.GlancePolicy
+import dev.optio.core.glance.GlancePolicy
+import dev.optio.feature.widgets.Host
 import java.time.Duration
 import java.util.concurrent.TimeUnit
+import kotlin.time.toJavaDuration
 
 /**
  * One background refresh of every paired server for the widgets and tiles. Enqueued when a Work
@@ -22,8 +23,8 @@ class WidgetRefreshWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val session = OptioWidgets.session() ?: return Result.success()
-        WidgetRefresher.refresh(applicationContext, session)
+        if (Host.session() == null) return Result.success()
+        WidgetRefresh.loadAndRender(applicationContext)
         return Result.success()
     }
 
@@ -83,7 +84,7 @@ internal object WidgetTicks {
     ) = schedule(context, WidgetTickWorker.TILE, after)
 
     /** Re-renders the Work widget when its freshest possible snapshot turns stale. */
-    fun scheduleStaleFlip(context: Context) = schedule(context, WidgetTickWorker.WORK, GlancePolicy.staleAfter.plusSeconds(5))
+    fun scheduleStaleFlip(context: Context) = schedule(context, WidgetTickWorker.WORK, GlancePolicy.STALE_AFTER.toJavaDuration().plusSeconds(5))
 
     private fun schedule(
         context: Context,

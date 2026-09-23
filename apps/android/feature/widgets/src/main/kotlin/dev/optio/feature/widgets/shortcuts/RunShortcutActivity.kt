@@ -10,7 +10,7 @@ import androidx.compose.ui.platform.testTag
 import dev.optio.feature.widgets.OptioWidgets
 import dev.optio.feature.widgets.config.setThemedContent
 import dev.optio.feature.widgets.run.RunFiring
-import dev.optio.feature.widgets.run.RunTarget
+import dev.optio.core.glance.RunTarget
 import kotlinx.coroutines.launch
 
 /**

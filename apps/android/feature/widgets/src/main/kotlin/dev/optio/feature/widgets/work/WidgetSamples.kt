@@ -3,16 +3,17 @@ package dev.optio.feature.widgets.work
 import dev.optio.core.data.DeepLink
 import dev.optio.core.data.ServerColor
 import dev.optio.core.data.ServerProfile
+import dev.optio.core.glance.GlanceEntry
+import dev.optio.core.glance.GlanceItem
+import dev.optio.core.glance.GlancePolicy
+import dev.optio.core.glance.GlanceSlice
+import dev.optio.core.glance.InFlightTask
+import dev.optio.core.glance.NeedsYouSnapshot
+import dev.optio.core.glance.SessionTileCounts
 import dev.optio.core.model.WatchItemKind
 import dev.optio.core.model.WatchThen
 import dev.optio.core.model.WatchWhere
 import dev.optio.core.model.WatchWhereTarget
-import dev.optio.feature.widgets.model.GlanceEntry
-import dev.optio.feature.widgets.model.GlancePolicy
-import dev.optio.feature.widgets.model.GlanceSlice
-import dev.optio.feature.widgets.model.InFlightTask
-import dev.optio.feature.widgets.model.TileCounts
-import dev.optio.feature.widgets.model.WidgetItem
 import java.time.Duration
 import java.time.Instant
 
@@ -31,7 +32,7 @@ object WidgetSamples {
     ): Instant = now.minus(Duration.ofMinutes(minutes))
 
     fun web(now: Instant) =
-        WidgetItem(
+        GlanceItem(
             kind = WatchItemKind.LOCAL, id = "t-web", title = "claude-code · web", mono = "optio/apps/web",
             reason = "Waiting on a permission", since = ago(now, 4), state = "needs_you",
             link = DeepLink.Local("t-web", compose = true).url(server = laptop.id), serverId = laptop.id, serverName = laptop.shortName,
@@ -40,7 +41,7 @@ object WidgetSamples {
         )
 
     fun api(now: Instant) =
-        WidgetItem(
+        GlanceItem(
             kind = WatchItemKind.LOCAL, id = "t-api", title = "claude-code · api", mono = "optio/apps/api",
             reason = "Claude stopped — reply to continue", since = ago(now, 11), state = "needs_you",
             link = DeepLink.Local("t-api", compose = true).url(server = laptop.id), serverId = laptop.id, serverName = laptop.shortName,
@@ -49,7 +50,7 @@ object WidgetSamples {
         )
 
     fun forge(now: Instant) =
-        WidgetItem(
+        GlanceItem(
             kind = WatchItemKind.AGENT, id = "a-vesper", title = "Vesper", mono = "@vesper",
             reason = "Turn failed — resume?", since = ago(now, 38), state = "failed",
             link = DeepLink.Agent("a-vesper", compose = true).url(server = studio.id), serverId = studio.id, serverName = studio.shortName,
@@ -58,7 +59,7 @@ object WidgetSamples {
         )
 
     fun cli(now: Instant) =
-        WidgetItem(
+        GlanceItem(
             kind = WatchItemKind.LOCAL, id = "t-cli", title = "codex · cli", mono = "optio/apps/cli", since = ago(now, 23), state = "working",
             link = DeepLink.Local("t-cli").url(server = laptop.id), serverId = laptop.id, serverName = laptop.shortName,
             `when` = "job", where = WatchWhere(WatchWhereTarget.MACHINE, "MacBook Pro · ~/repos/optio/apps/cli"), who = "codex",
@@ -66,7 +67,7 @@ object WidgetSamples {
         )
 
     fun docs(now: Instant) =
-        WidgetItem(
+        GlanceItem(
             kind = WatchItemKind.LOCAL, id = "t-docs", title = "claude-code · docs", mono = "optio/docs", since = ago(now, 2), state = "working",
             link = DeepLink.Local("t-docs").url(server = studio.id), serverId = studio.id, serverName = studio.shortName,
             `when` = "now", where = WatchWhere(WatchWhereTarget.MACHINE, "Studio · ~/repos/optio/docs"), who = "claude-code",
@@ -78,29 +79,35 @@ object WidgetSamples {
             InFlightTask(
                 id = "task-1", title = "fix: login redirect loops on expired PAT", state = "pr_opened", repoBranch = "fix/login-redirect",
                 repoUrl = "https://github.com/jonwiggins/optio", agentType = "claude-code", prNumber = 581,
-                prUrl = "https://github.com/jonwiggins/optio/pull/581", prChecksStatus = "pending", startedAt = ago(now, 52),
+                prUrl = "https://github.com/jonwiggins/optio/pull/581", prChecksStatus = "pending", startedAt = ago(now, 52).toString(),
                 serverId = laptop.id, serverName = laptop.shortName,
             ),
             InFlightTask(
                 id = "task-2", title = "feat(ios): widgets and controls", state = "running", repoBranch = "feat/ios-widgets",
-                repoUrl = "https://github.com/jonwiggins/optio", agentType = "codex", startedAt = ago(now, 12),
+                repoUrl = "https://github.com/jonwiggins/optio", agentType = "codex", startedAt = ago(now, 12).toString(),
                 serverId = studio.id, serverName = studio.shortName,
             ),
         )
 
-    val counts = TileCounts(waiting = 2, recurring = 4, agents = 3)
+    val counts = SessionTileCounts(waiting = 2, recurring = 4, agents = 3)
 
     fun slice(
         server: ServerProfile,
         now: Instant,
-        needs: List<WidgetItem>,
-        running: List<WidgetItem>,
+        needs: List<GlanceItem>,
+        running: List<GlanceItem>,
         tasks: List<InFlightTask> = emptyList(),
         asOf: Instant = now,
         reachability: GlancePolicy.Reachability = GlancePolicy.Reachability.LIVE,
         unreachableSince: Instant? = null,
-        counts: TileCounts? = WidgetSamples.counts,
-    ) = GlanceSlice(server, reachability, needs, running, counts, asOf, tasks, unreachableSince)
+        counts: SessionTileCounts? = WidgetSamples.counts,
+    ) = GlanceSlice(
+        server = server,
+        reachability = reachability,
+        snapshot = NeedsYouSnapshot(needsYou = needs, running = running, hostsOnline = 1, hostsTotal = 1, counts = counts, asOf = asOf),
+        tasks = tasks,
+        unreachableSince = unreachableSince,
+    )
 
     /** Two servers: three sessions need you, two running, two tasks. */
     fun waiting(now: Instant) =

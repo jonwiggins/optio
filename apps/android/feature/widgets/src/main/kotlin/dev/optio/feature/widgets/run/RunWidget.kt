@@ -4,8 +4,8 @@ import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -40,12 +40,14 @@ import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import dev.optio.core.data.ServerColor
+import dev.optio.core.data.ServerProfile
+import dev.optio.core.glance.GlancePolicy
+import dev.optio.core.glance.GlanceStore
+import dev.optio.core.glance.RunTarget
 import dev.optio.core.model.OptioJson
-import dev.optio.feature.widgets.OptioWidgets
+import dev.optio.feature.widgets.Host
 import dev.optio.feature.widgets.R
 import dev.optio.feature.widgets.config.RunWidgetConfigActivity
-import dev.optio.feature.widgets.data.WidgetStore
-import dev.optio.feature.widgets.model.GlancePolicy
 import dev.optio.feature.widgets.ui.Dot
 import dev.optio.feature.widgets.ui.Glyph
 import dev.optio.feature.widgets.ui.WidgetColors
@@ -54,9 +56,6 @@ import dev.optio.feature.widgets.ui.shortTime
 import dev.optio.feature.widgets.work.SignedOutBody
 import dev.optio.feature.widgets.work.WidgetSurface
 import java.time.Instant
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 
 /**
  * "Run": the phone as a remote control for one recurring item (iOS `RunWidget`, kind
@@ -71,28 +70,30 @@ class RunWidget : GlanceAppWidget() {
         context: Context,
         id: GlanceId,
     ) {
-        val store = WidgetStore.get(context)
+        val store = Host.store(context)
         val appWidgetId = GlanceAppWidgetManager(context).getAppWidgetId(id)
-        val registry = OptioWidgets.session()?.registry
-        val servers = registry?.let { combine(it.profiles, it.activeIdChanges) { _, _ -> }.map { _ -> it.configured() } } ?: flowOf(emptyList())
-        val initialServers = registry?.configured().orEmpty()
-        val initialPrefs = store.snapshot()
+        val (savedTarget, _) = config(context, id)
+        val initial = RunContext.read(store, savedTarget)
         provideContent {
             val state = currentState<Preferences>()
-            val paired by servers.collectAsState(initialServers)
-            val prefs by store.data.collectAsState(initialPrefs)
             val target = targetOf(state)
-            val server = target?.serverId?.let { id -> paired.firstOrNull { it.id == id } }
+            // Re-read on every change to the shared store (armed / started) and on refresh ticks.
+            val live by produceState(initial, target?.id, state[TICK]) {
+                value = RunContext.read(store, target)
+                store.changes.collect { value = RunContext.read(store, target) }
+            }
+            val server = target?.serverId?.let { id -> live.servers.firstOrNull { it.id == id } }
+            val several = live.servers.size > 1
             RunWidgetContent(
                 RunWidgetState(
-                    signedIn = paired.isNotEmpty(),
+                    signedIn = live.servers.isNotEmpty(),
                     target = target,
                     confirm = state[CONFIRM] ?: true,
-                    startedAt = target?.let { WidgetStore.startedAt(prefs, it.id) },
-                    armedAt = target?.let { WidgetStore.armedAt(prefs, it.id) },
+                    startedAt = live.startedAt,
+                    armedAt = live.armedAt,
                     now = Instant.now(),
-                    serverName = if (paired.size > 1) target?.serverName ?: server?.shortName else null,
-                    serverColor = if (paired.size > 1) server?.color else null,
+                    serverName = if (several) target?.serverName ?: server?.shortName else null,
+                    serverColor = if (several) server?.color else null,
                     appWidgetId = appWidgetId,
                 ),
             )
@@ -130,6 +131,24 @@ class RunWidget : GlanceAppWidget() {
     }
 }
 
+/** What a Run widget reads besides its own configuration: the paired servers and its target's flashes. */
+private data class RunContext(
+    val servers: List<ServerProfile>,
+    val armedAt: Instant?,
+    val startedAt: Instant?,
+) {
+    companion object {
+        suspend fun read(
+            store: GlanceStore,
+            target: RunTarget?,
+        ) = RunContext(
+            servers = Host.session()?.registry?.configured().orEmpty(),
+            armedAt = target?.let { store.armedAt(it.id) },
+            startedAt = target?.let { store.startedAt(it.id) },
+        )
+    }
+}
+
 /** Receives the Run widget's broadcasts. */
 class RunWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = RunWidget()
@@ -158,7 +177,7 @@ data class RunWidgetState(
         fun sample(now: Instant) =
             RunWidgetState(
                 signedIn = true,
-                target = RunTarget("srv-laptop|job:nightly", "Nightly release notes", RunTarget.Kind.JOB),
+                target = RunTarget(RunTarget.makeId("srv-laptop", RunTarget.Kind.JOB, "nightly"), "Nightly release notes", RunTarget.Kind.JOB),
                 confirm = true,
                 startedAt = null,
                 armedAt = null,

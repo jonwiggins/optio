@@ -17,10 +17,9 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import dev.optio.core.data.ServerColor
+import dev.optio.core.glance.GlanceIcon
 import dev.optio.core.ui.theme.StatusKind
 import dev.optio.feature.widgets.R
-import dev.optio.feature.widgets.model.ChipIcon
-import dev.optio.feature.widgets.model.RowBadge
 import java.time.Instant
 import java.util.Date
 import androidx.glance.color.ColorProvider as DayNight
@@ -79,35 +78,27 @@ internal object WidgetType {
     val count: TextUnit = 44.sp
 }
 
-/** The drawable for a row badge's symbol (iOS SF Symbols → Material / lucide glyphs). */
-internal fun RowBadge.Symbol.drawable(): Int =
+/** The drawable for a glance glyph (iOS SF Symbols → Material Symbols, lucide for git glyphs). */
+internal fun GlanceIcon.drawable(): Int =
     when (this) {
-        RowBadge.Symbol.HAND -> R.drawable.widget_ic_hand
-        RowBadge.Symbol.BUBBLE -> R.drawable.widget_ic_bubble
-        RowBadge.Symbol.ZZZ -> R.drawable.widget_ic_zzz
-        RowBadge.Symbol.BELL -> R.drawable.widget_ic_bell
-        RowBadge.Symbol.CHECK_FILLED -> R.drawable.widget_ic_check_filled
-        RowBadge.Symbol.ALERT_BUBBLE -> R.drawable.widget_ic_alert_bubble
-        RowBadge.Symbol.MERGE -> R.drawable.widget_ic_merge
-        RowBadge.Symbol.TRIANGLE -> R.drawable.widget_ic_triangle
-        RowBadge.Symbol.X_FILLED -> R.drawable.widget_ic_x_filled
-        RowBadge.Symbol.X_OUTLINE -> R.drawable.widget_ic_x_outline
-        RowBadge.Symbol.CHECK_OUTLINE -> R.drawable.widget_ic_check_outline
-        RowBadge.Symbol.PULL -> R.drawable.widget_ic_pull
-        RowBadge.Symbol.CLOCK -> R.drawable.widget_ic_clock
-    }
-
-/** The drawable for a chip icon. */
-internal fun ChipIcon.drawable(): Int =
-    when (this) {
-        ChipIcon.PLAY -> R.drawable.widget_ic_play
-        ChipIcon.CPU -> R.drawable.widget_ic_cpu
-        ChipIcon.CLOCK -> R.drawable.widget_ic_clock
-        ChipIcon.LAPTOP -> R.drawable.widget_ic_laptop
-        ChipIcon.SERVER -> R.drawable.widget_ic_server
-        ChipIcon.TERMINAL -> R.drawable.widget_ic_terminal
-        ChipIcon.BOLT -> R.drawable.widget_ic_bolt
-        ChipIcon.EXIT -> R.drawable.widget_ic_exit
+        GlanceIcon.PLAY -> R.drawable.widget_ic_play
+        GlanceIcon.CPU -> R.drawable.widget_ic_cpu
+        GlanceIcon.CLOCK -> R.drawable.widget_ic_clock
+        GlanceIcon.LAPTOP -> R.drawable.widget_ic_laptop
+        GlanceIcon.SERVER -> R.drawable.widget_ic_server
+        GlanceIcon.TERMINAL -> R.drawable.widget_ic_terminal
+        GlanceIcon.BOLT -> R.drawable.widget_ic_bolt
+        GlanceIcon.EXIT -> R.drawable.widget_ic_exit
+        GlanceIcon.HAND -> R.drawable.widget_ic_hand
+        GlanceIcon.BUBBLE -> R.drawable.widget_ic_bubble
+        GlanceIcon.SLEEP -> R.drawable.widget_ic_zzz
+        GlanceIcon.BELL -> R.drawable.widget_ic_bell
+        GlanceIcon.CHECK -> R.drawable.widget_ic_check_filled
+        GlanceIcon.ATTENTION -> R.drawable.widget_ic_alert_bubble
+        GlanceIcon.MERGE -> R.drawable.widget_ic_merge
+        GlanceIcon.WARNING -> R.drawable.widget_ic_triangle
+        GlanceIcon.FAILED -> R.drawable.widget_ic_x_filled
+        GlanceIcon.PULL_REQUEST -> R.drawable.widget_ic_pull
     }
 
 /** A tinted glyph (every drawable in this module is white, so the tint is its colour). */

@@ -26,9 +26,9 @@ import dev.optio.core.ui.theme.AppearanceStore
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.collectAppearance
 import dev.optio.feature.widgets.Links
-import dev.optio.feature.widgets.OptioWidgets
+import dev.optio.feature.widgets.Host
 import dev.optio.feature.widgets.refresh.WidgetRefreshWorker
-import dev.optio.feature.widgets.run.RunTarget
+import dev.optio.core.glance.RunTarget
 import dev.optio.feature.widgets.run.RunWidget
 import dev.optio.feature.widgets.shortcuts.AppShortcuts
 import dev.optio.feature.widgets.work.WorkWidget
@@ -58,7 +58,7 @@ class WorkWidgetConfigActivity : ComponentActivity() {
         }
         val glanceId = GlanceAppWidgetManager(this).getGlanceIdBy(appWidgetId)
         setThemedContent {
-            val servers by produceState<List<ServerProfile>?>(null) { value = OptioWidgets.session()?.registry?.configured().orEmpty() }
+            val servers by produceState<List<ServerProfile>?>(null) { value = Host.session()?.registry?.configured().orEmpty() }
             val saved by produceState<Preferences?>(null) { value = getAppWidgetState(this@WorkWidgetConfigActivity, PreferencesGlanceStateDefinition, glanceId) }
             var choice by rememberSaveable { mutableStateOf<String?>(null) }
             var touched by rememberSaveable { mutableStateOf(false) }

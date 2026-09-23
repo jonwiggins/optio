@@ -2,10 +2,11 @@ package dev.optio.feature.widgets.run
 
 import android.content.Context
 import android.widget.Toast
+import dev.optio.core.glance.GlancePolicy
+import dev.optio.core.glance.GlanceRefresh
+import dev.optio.core.glance.RunTarget
 import dev.optio.core.network.ApiError
-import dev.optio.feature.widgets.OptioWidgets
-import dev.optio.feature.widgets.data.WidgetStore
-import dev.optio.feature.widgets.model.GlancePolicy
+import dev.optio.feature.widgets.Host
 import dev.optio.feature.widgets.refresh.WidgetTicks
 import dev.optio.feature.widgets.refresh.WidgetUpdates
 import dev.optio.feature.widgets.shortcuts.AppShortcuts
@@ -15,6 +16,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlin.time.toJavaDuration
 
 /**
  * Fires run targets from the Run widget, the Run tile and run shortcuts, in the background (iOS
@@ -54,12 +56,12 @@ internal object RunFiring {
         target: RunTarget,
         confirm: Boolean,
     ): Outcome {
-        val store = WidgetStore.get(context)
+        val store = Host.store(context)
         val now = Instant.now()
-        if (confirm && !GlancePolicy.isArmed(WidgetStore.armedAt(store.snapshot(), target.id), now)) {
+        if (confirm && !GlancePolicy.isArmed(store.armedAt(target.id), now)) {
             store.setArmed(target.id, now)
             WidgetUpdates.updateRun(context)
-            WidgetTicks.scheduleRun(context, GlancePolicy.armWindow.plusSeconds(1))
+            WidgetTicks.scheduleRun(context, GlancePolicy.ARM_WINDOW.toJavaDuration().plusSeconds(1))
             return Outcome.Armed(target)
         }
         store.setArmed(target.id, null)
@@ -71,8 +73,8 @@ internal object RunFiring {
         context: Context,
         target: RunTarget,
     ): Outcome {
-        val store = WidgetStore.get(context)
-        val client = OptioWidgets.session()?.resolveClient(target.serverId)
+        val store = Host.store(context)
+        val client = Host.session()?.resolveClient(target.serverId)
         if (client == null) {
             WidgetUpdates.updateRun(context)
             return Outcome.SignedOut
@@ -92,11 +94,13 @@ internal object RunFiring {
         if (outcome is Outcome.Started) {
             store.setStarted(target.id, Instant.now())
             AppShortcuts.recordFired(context, target)
-            WidgetTicks.scheduleRun(context, GlancePolicy.startedFlash.plusSeconds(1))
+            WidgetTicks.scheduleRun(context, GlancePolicy.STARTED_FLASH.toJavaDuration().plusSeconds(1))
             WidgetTicks.scheduleTile(context, tileFlash.plusMillis(500))
         }
         WidgetUpdates.updateRun(context)
         WidgetUpdates.requestTiles(context)
+        // A spawned terminal or a new run changes the board: let the other surfaces know.
+        if (outcome is Outcome.Started) GlanceRefresh.refreshAll(context, GlanceRefresh.Reason.ACTION)
         return outcome
     }
 

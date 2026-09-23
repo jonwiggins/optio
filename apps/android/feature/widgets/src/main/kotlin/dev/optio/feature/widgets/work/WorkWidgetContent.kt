@@ -32,22 +32,33 @@ import androidx.glance.semantics.testTag
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import dev.optio.core.data.ServerProfile
+import dev.optio.core.glance.GlanceCopy
+import dev.optio.core.glance.GlanceEntry
+import dev.optio.core.glance.GlanceItem
+import dev.optio.core.glance.GlancePolicy
+import dev.optio.core.glance.icon
+import dev.optio.core.glance.label
 import dev.optio.core.model.WatchItemKind
 import dev.optio.feature.widgets.Links
 import dev.optio.feature.widgets.R
-import dev.optio.feature.widgets.model.GlanceCopy
-import dev.optio.feature.widgets.model.GlanceEntry
-import dev.optio.feature.widgets.model.GlancePolicy
-import dev.optio.feature.widgets.model.WidgetItem
-import dev.optio.feature.widgets.model.icon
-import dev.optio.feature.widgets.model.label
+import dev.optio.feature.widgets.model.boardLink
+import dev.optio.feature.widgets.model.boardTiles
+import dev.optio.feature.widgets.model.headSession
+import dev.optio.feature.widgets.model.kind
+import dev.optio.feature.widgets.model.needsYouCount
+import dev.optio.feature.widgets.model.runningCount
+import dev.optio.feature.widgets.model.serverProfile
+import dev.optio.feature.widgets.model.sessionRows
+import dev.optio.feature.widgets.model.statusKind
+import dev.optio.feature.widgets.model.statusWord
+import dev.optio.feature.widgets.model.tileLink
+import dev.optio.feature.widgets.ui.ChipFit
 import dev.optio.feature.widgets.ui.Dot
 import dev.optio.feature.widgets.ui.Glyph
 import dev.optio.feature.widgets.ui.WidgetColors
 import dev.optio.feature.widgets.ui.WidgetType
 import dev.optio.feature.widgets.ui.drawable
 import dev.optio.feature.widgets.ui.shortTime
-import dev.optio.feature.widgets.ui.ChipFit
 
 /** The Work widget's three layouts (iOS systemSmall / systemMedium / systemLarge). */
 enum class WorkFamily(
@@ -142,13 +153,14 @@ private fun SmallBody(entry: GlanceEntry) {
         Spacer(GlanceModifier.defaultWeight())
         val headline = GlanceCopy.headlineCount(needs, entry.runningCount)
         if (headline != null) {
+            val (count, noun) = headline
             Text(
-                "${headline.count}",
+                "$count",
                 style = WidgetType.style(WidgetType.count, if (needs > 0) WidgetColors.needsYou else WidgetColors.working, FontWeight.Medium),
                 maxLines = 1,
                 modifier = GlanceModifier.semantics { testTag = "work-headline" },
             )
-            Text(headline.noun, style = WidgetType.style(WidgetType.footnote, WidgetColors.secondary, FontWeight.Medium), maxLines = 1)
+            Text(noun, style = WidgetType.style(WidgetType.footnote, WidgetColors.secondary, FontWeight.Medium), maxLines = 1)
         } else {
             Text(
                 "Quiet",
@@ -225,7 +237,7 @@ private fun EmptyBoard(
 @Composable
 private fun SessionRows(
     entry: GlanceEntry,
-    rows: List<WidgetItem>,
+    rows: List<GlanceItem>,
     family: WorkFamily,
     modifier: GlanceModifier,
 ) {
@@ -305,7 +317,7 @@ private fun TileStrip(
 ) {
     val context = LocalContext.current
     Row(modifier = modifier.fillMaxWidth()) {
-        entry.tiles.forEachIndexed { index, tile ->
+        entry.boardTiles.forEachIndexed { index, tile ->
             val color =
                 when {
                     tile.count == 0 -> WidgetColors.secondary
@@ -342,7 +354,7 @@ private fun TileStrip(
 @Composable
 private fun SessionRow(
     entry: GlanceEntry,
-    item: WidgetItem,
+    item: GlanceItem,
     showsServer: Boolean,
     showsLater: Boolean,
     expanded: Boolean,
@@ -369,7 +381,7 @@ private fun SessionRow(
             }
             Row(modifier = GlanceModifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 val badge = item.badge
-                if (badge != null) Glyph(badge.symbol.drawable(), WidgetColors.status(badge.kind), 11.dp)
+                if (badge != null) Glyph(badge.icon.drawable(), WidgetColors.status(badge.status.kind), 11.dp)
                 Text(
                     item.statusWord,
                     style = WidgetType.style(WidgetType.caption2, WidgetColors.status(item.statusKind), FontWeight.Medium),
@@ -398,7 +410,7 @@ private fun SessionRow(
 }
 
 /** "Later" on a needs-you row: snooze it for 15 minutes without opening the app. */
-private fun laterAction(item: WidgetItem): Action =
+private fun laterAction(item: GlanceItem): Action =
     actionRunCallback<LaterAction>(
         actionParametersOf(
             LaterAction.itemId to item.id,
@@ -414,7 +426,7 @@ private fun laterAction(item: WidgetItem): Action =
  */
 @Composable
 private fun SessionChips(
-    item: WidgetItem,
+    item: GlanceItem,
     modifier: GlanceModifier = GlanceModifier,
 ) {
     val context = LocalContext.current
@@ -468,7 +480,7 @@ private fun Chip(
  */
 @Composable
 private fun RowName(
-    item: WidgetItem,
+    item: GlanceItem,
     size: androidx.compose.ui.unit.TextUnit,
 ) {
     Text(
@@ -508,7 +520,7 @@ private fun ServerTag(
 @Composable
 private fun ServerDotFor(
     entry: GlanceEntry,
-    item: WidgetItem,
+    item: GlanceItem,
     leading: Int,
 ) {
     val profile = entry.serverProfile(item.serverId) ?: return

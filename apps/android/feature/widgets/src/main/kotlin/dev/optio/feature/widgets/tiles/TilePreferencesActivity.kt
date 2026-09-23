@@ -16,7 +16,7 @@ import dev.optio.feature.widgets.Links
 import dev.optio.feature.widgets.config.RunTargetConfig
 import dev.optio.feature.widgets.config.setThemedContent
 import dev.optio.feature.widgets.data.WidgetStore
-import dev.optio.feature.widgets.run.RunTarget
+import dev.optio.core.glance.RunTarget
 import kotlinx.coroutines.launch
 
 /**
@@ -36,7 +36,7 @@ class TilePreferencesActivity : ComponentActivity() {
             return
         }
         setThemedContent {
-            val saved by produceState<RunTarget?>(null) { value = WidgetStore.tileTarget(WidgetStore.get(this@TilePreferencesActivity).snapshot()) }
+            val saved by produceState<RunTarget?>(null) { value = WidgetStore.get(this@TilePreferencesActivity).tileTarget() }
             RunTargetConfig(
                 title = "Run tile",
                 initial = saved,

@@ -8,6 +8,17 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <application>
+        <!-- Registers the widgets' refresh hook at process start (androidx.startup, as WorkManager does). -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="dev.optio.feature.widgets.WidgetsInitializer"
+                android:value="androidx.startup" />
+        </provider>
+
         <!-- Static shortcuts (New work, Needs you) belong to the launcher activity, declared by :app. -->
         <activity
             android:name="dev.optio.app.MainActivity"
