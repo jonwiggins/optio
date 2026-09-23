@@ -10,19 +10,49 @@ import dev.optio.core.model.PersistentAgentMessage
 import dev.optio.core.model.PersistentAgentTurn
 import dev.optio.core.network.ApiClient
 import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.format.DateTimeParseException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 // Envelopes and local row types of `routes/persistent-agents.ts` (iOS `AgentsAPI.swift`).
 
-/** The detail route's `inbox` summary: messages not yet drained into a turn. */
+/**
+ * The detail route's `inbox` summary: messages not yet drained into a turn. [oldest] stays raw JSON:
+ * the server computes it with a raw `MIN(received_at)` and sends Postgres text
+ * (`2026-09-23 01:21:25.080298+00`), not ISO, whenever something is pending, which a strict date
+ * would fail to decode (and with it the whole agent). Read it through [oldestInstant].
+ */
 @Serializable
 data class PersistentAgentInbox(
     val pending: Int = 0,
-    val oldest: Instant? = null,
-)
+    val oldest: JsonElement? = null,
+) {
+    /** [oldest] as an instant: ISO-8601, Postgres `timestamptz` text, or epoch millis. */
+    val oldestInstant: Instant?
+        get() = LenientDates.parse(oldest)
+}
+
+/** Dates as the API sends them, including the Postgres text some raw SQL aggregates leak. */
+internal object LenientDates {
+    private val offsetHours = Regex("([+-]\\d{2})$")
+
+    fun parse(element: JsonElement?): Instant? {
+        val primitive = element as? JsonPrimitive ?: return null
+        if (!primitive.isString) return primitive.content.toDoubleOrNull()?.let { Instant.ofEpochMilli(it.toLong()) }
+        val text = primitive.content.trim()
+        if (text.isEmpty()) return null
+        val iso = text.replaceFirst(' ', 'T').replace(offsetHours, "$1:00")
+        return try {
+            OffsetDateTime.parse(iso).toInstant()
+        } catch (_: DateTimeParseException) {
+            null
+        }
+    }
+}
 
 /** `GET /api/persistent-agents/:id` → `{ agent, inbox }`. */
 @Serializable
@@ -85,7 +115,7 @@ data class PersistentAgentTrigger(
 
 /**
  * Body of `POST /api/persistent-agents` (create). Null fields are omitted (`OptioJson`
- * `explicitNulls = false`); edits go through [PersistentAgentPatch] so they can clear fields.
+ * `explicitNulls = false`); edits PATCH a JSON object instead ([AgentFormDraft.patch]) so they can clear fields.
  */
 @Serializable
 data class PersistentAgentInput(

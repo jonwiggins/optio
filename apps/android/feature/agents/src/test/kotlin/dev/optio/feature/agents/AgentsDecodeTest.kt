@@ -54,6 +54,20 @@ class AgentsDecodeTest {
     }
 
     @Test
+    fun pendingInboxWithAPostgresTimestamp() {
+        // Captured with a message waiting on a paused agent: `oldest` is Postgres text, not ISO.
+        val envelope = Fixtures.decode<PersistentAgentEnvelope>("agent-detail-pending.json")
+        val inbox = assertNotNull(envelope.inbox)
+        assertEquals(1, inbox.pending)
+        assertEquals("2026-09-23T01:22:37.388801Z", inbox.oldestInstant.toString())
+        assertEquals(java.time.Instant.parse("2026-09-22T16:40:00Z"), LenientDates.parse(kotlinx.serialization.json.JsonPrimitive("2026-09-22T16:40:00Z")))
+        assertEquals(java.time.Instant.parse("2026-09-22T16:40:00Z"), LenientDates.parse(kotlinx.serialization.json.JsonPrimitive("2026-09-22 18:40:00+02")))
+        assertEquals(java.time.Instant.ofEpochMilli(1_758_559_200_000), LenientDates.parse(kotlinx.serialization.json.JsonPrimitive(1_758_559_200_000)))
+        assertNull(LenientDates.parse(kotlinx.serialization.json.JsonPrimitive("yesterday")))
+        assertNull(LenientDates.parse(null))
+    }
+
+    @Test
     fun pausedAgent() {
         val agent = Fixtures.decode<PersistentAgentEnvelope>("agent-detail-paused.json").agent
         assertEquals(PersistentAgentState.PAUSED, agent.state)

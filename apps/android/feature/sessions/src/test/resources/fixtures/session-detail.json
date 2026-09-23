@@ -1,0 +1,22 @@
+{
+  "session": {
+    "id": "d95d4894-5728-4125-8700-fca98c9a2166",
+    "repoUrl": "https://github.com/e2e-org/e2e-repo",
+    "userId": null,
+    "worktreePath": "/workspace/sessions/fb812229",
+    "branch": "session/anon/fb812229",
+    "title": "Investigate slow cold start",
+    "state": "active",
+    "podId": "8e3c6a45-0cf5-4f19-a4a5-35062f6c9bd7",
+    "costUsd": "0.0123",
+    "workspaceId": null,
+    "createdAt": "2026-09-23T00:46:06.194Z",
+    "endedAt": null,
+    "agentSessionId": "c90455b8-036a-4536-ade2-d466cad94d54",
+    "podName": "optio-repo-e2e-org-e2e-repo-ca3f"
+  },
+  "modelConfig": {
+    "claudeModel": "opus",
+    "availableModels": ["haiku", "sonnet", "opus"]
+  }
+}

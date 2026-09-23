@@ -38,7 +38,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -280,7 +284,8 @@ internal fun AgentHeaderView(
                 agent.lastTurnAt?.let { "last turn ${it.relativeDescription(now)}" },
                 Cost.formatIfNonZero(agent.totalCostUsd),
             ),
-        secondary = secondary?.let(::AnnotatedString),
+        // DetailHeader sets its second line in mono (paths, branches); a description is prose.
+        secondary = secondary?.let(::prose),
         needsYou = needsYou,
         modifier = modifier,
     ) {
@@ -340,6 +345,10 @@ private fun MenuItem(
         modifier = Modifier.testTag("menu-${label.lowercase()}"),
     )
 }
+
+/** [text] in the body font, inside a line styled mono. */
+internal fun prose(text: String): AnnotatedString =
+    buildAnnotatedString { withStyle(SpanStyle(fontFamily = FontFamily.Default)) { append(text) } }
 
 /** The state as the API spells it (`paused`); "unknown" for a state this app doesn't know. */
 internal val PersistentAgentState.label: String

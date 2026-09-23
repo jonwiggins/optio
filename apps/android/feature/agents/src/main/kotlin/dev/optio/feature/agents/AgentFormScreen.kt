@@ -233,10 +233,8 @@ private fun AgentFormFields(
             }
         }
 
-        GroupedSection(
-            header = "Limits",
-            footer = "Idle pod TTL applies to sticky mode only. Consecutive failures past the limit move the agent to FAILED.",
-        ) {
+        FormHeader("Limits")
+        GroupedSection(footer = "Idle pod TTL applies to sticky mode only. Consecutive failures past the limit move the agent to FAILED.") {
             StepperRow(
                 label = "Idle pod TTL",
                 value = "${draft.idlePodTimeoutMs / 1000}s",
@@ -288,6 +286,7 @@ private fun AgentFormFields(
             footer = "Persona — who is this agent? Stays constant across all turns.",
             value = draft.systemPrompt,
             minLines = 4,
+            maxLines = 10,
             tag = "agent-system-prompt",
         ) { v -> onChange { it.copy(systemPrompt = v) } }
         PromptField(
@@ -295,6 +294,7 @@ private fun AgentFormFields(
             footer = "How to use the Optio internal API. Shown to the agent every turn.",
             value = draft.agentsMd,
             minLines = 6,
+            maxLines = 14,
             tag = "agent-agents-md",
         ) { v -> onChange { it.copy(agentsMd = v) } }
         PromptField(
@@ -302,6 +302,7 @@ private fun AgentFormFields(
             footer = "The agent's first mission — sent only on the first turn.",
             value = draft.initialPrompt,
             minLines = 4,
+            maxLines = 10,
             tag = "agent-initial-prompt",
         ) { v -> onChange { it.copy(initialPrompt = v) } }
 
@@ -405,6 +406,7 @@ private fun PromptField(
     footer: String,
     value: String,
     minLines: Int,
+    maxLines: Int,
     tag: String,
     onValueChange: (String) -> Unit,
 ) {
@@ -414,6 +416,7 @@ private fun PromptField(
             value = value,
             onValueChange = onValueChange,
             minLines = minLines,
+            maxLines = maxLines,
             textStyle = OptioTheme.type.footnote.mono(),
             supportingText = { Text(footer) },
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),

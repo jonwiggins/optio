@@ -1,0 +1,15 @@
+{"type":"status","status":"ready","model":"sonnet","costUsd":0,"settings":{"maxTurns":20,"confirmWrites":true,"enabledTools":[]}}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T00:46:07.221Z","type":"user_message","content":"Profile the app's cold start and list the three slowest steps."},"catchUp":true}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T00:46:07.222Z","type":"text","content":"Mock agent handled: Profile the app"},"catchUp":true}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T00:46:07.222Z","type":"system","content":"Session started · fake-model · 0 tools","metadata":{"model":"fake-model"}},"catchUp":true}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T00:46:07.223Z","type":"info","content":"(1 turns · 0.0s · $0.0123)","metadata":{"cost":0.0123,"turns":1,"isError":false,"durationMs":5}},"catchUp":true}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T00:47:31.725Z","type":"system","content":"Session started · fake-model · 0 tools","metadata":{"model":"fake-model"}},"catchUp":true}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T00:47:31.725Z","type":"text","content":"Mock agent handled: List the slowest steps"},"catchUp":true}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T00:47:31.725Z","type":"user_message","content":"List the slowest steps"},"catchUp":true}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T00:47:31.726Z","type":"info","content":"(1 turns · 0.0s · $0.0123)","metadata":{"cost":0.0123,"turns":1,"isError":false,"durationMs":5}},"catchUp":true}
+{"type":"status","status":"thinking"}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T01:08:17.667Z","sessionId":"c90455b8-036a-4536-ade2-d466cad94d54","type":"system","content":"Session started · fake-model · 0 tools","metadata":{"model":"fake-model"}}}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T01:08:17.667Z","sessionId":"c90455b8-036a-4536-ade2-d466cad94d54","type":"text","content":"Mock agent handled: Which step is slowest?"}}
+{"type":"chat_event","event":{"taskId":"d95d4894-5728-4125-8700-fca98c9a2166","timestamp":"2026-09-23T01:08:17.667Z","sessionId":"c90455b8-036a-4536-ade2-d466cad94d54","type":"info","content":"(1 turns · 0.0s · $0.0123)","metadata":{"cost":0.0123,"turns":1,"durationMs":5,"isError":false}}}
+{"type":"cost_update","costUsd":0.0123}
+{"type":"status","status":"idle"}
