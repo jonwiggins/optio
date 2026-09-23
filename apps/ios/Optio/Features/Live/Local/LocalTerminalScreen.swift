@@ -148,7 +148,12 @@ struct LocalTerminalScreen: View {
     private var hasTranscript: Bool { transcript?.hasEntries ?? false }
 
     private var resolvedView: LocalSessionView? {
-        LocalSessionViewRule.resolve(choice: viewChoice, hasTranscript: hasTranscript, loaded: transcript?.loaded ?? false)
+        LocalSessionViewRule.resolve(
+            choice: viewChoice,
+            hasTranscript: hasTranscript,
+            // A finished session's machine may still be reading its conversation off disk.
+            loaded: (transcript?.loaded ?? false) && !(transcript?.readingConversation ?? false)
+        )
     }
 
     @ViewBuilder

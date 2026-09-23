@@ -3767,6 +3767,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case links(LinksPayload)
     case usage(UsagePayload)
     case transcript(TranscriptPayload)
+    case transcriptBackfill(TranscriptBackfillPayload)
     case session(SessionPayload)
     case agentLimits(AgentLimitsPayload)
     case size(SizePayload)
@@ -3783,6 +3784,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         public let terminals: [LocalDaemonTerminalSync]
         /// The machine has a Claude Code login the server may ask for (see `credentials`).
         public let claudeCredentials: Bool?
+        /// The daemon answers `transcript-request` (reads a finished session's conversation off disk).
+        public let transcriptBackfill: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case hostId = "hostId"
@@ -3790,6 +3793,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             case dirs = "dirs"
             case terminals = "terminals"
             case claudeCredentials = "claudeCredentials"
+            case transcriptBackfill = "transcriptBackfill"
         }
 
         public init(
@@ -3797,13 +3801,15 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             daemonVersion: String,
             dirs: [LocalHostDir],
             terminals: [LocalDaemonTerminalSync],
-            claudeCredentials: Bool? = nil
+            claudeCredentials: Bool? = nil,
+            transcriptBackfill: Bool? = nil
         ) {
             self.hostId = hostId
             self.daemonVersion = daemonVersion
             self.dirs = dirs
             self.terminals = terminals
             self.claudeCredentials = claudeCredentials
+            self.transcriptBackfill = transcriptBackfill
         }
     }
 
@@ -3992,6 +3998,36 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct TranscriptBackfillPayload: Codable, Hashable, Sendable {
+        public let requestId: String
+        public let terminalId: String
+        public let entries: [LocalTranscriptEntry]
+        public let done: Bool
+        public let error: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case requestId = "requestId"
+            case terminalId = "terminalId"
+            case entries = "entries"
+            case done = "done"
+            case error = "error"
+        }
+
+        public init(
+            requestId: String,
+            terminalId: String,
+            entries: [LocalTranscriptEntry],
+            done: Bool,
+            error: String? = nil
+        ) {
+            self.requestId = requestId
+            self.terminalId = terminalId
+            self.entries = entries
+            self.done = done
+            self.error = error
+        }
+    }
+
     public struct SessionPayload: Codable, Hashable, Sendable {
         public let terminalId: String
         public let agentSessionId: String
@@ -4093,6 +4129,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case "links": self = .links(try LinksPayload(from: decoder))
         case "usage": self = .usage(try UsagePayload(from: decoder))
         case "transcript": self = .transcript(try TranscriptPayload(from: decoder))
+        case "transcript-backfill": self = .transcriptBackfill(try TranscriptBackfillPayload(from: decoder))
         case "session": self = .session(try SessionPayload(from: decoder))
         case "agent-limits": self = .agentLimits(try AgentLimitsPayload(from: decoder))
         case "size": self = .size(try SizePayload(from: decoder))
@@ -4153,6 +4190,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("transcript", forKey: .type)
             try payload.encode(to: encoder)
+        case .transcriptBackfill(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("transcript-backfill", forKey: .type)
+            try payload.encode(to: encoder)
         case .session(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("session", forKey: .type)
@@ -4190,6 +4231,7 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
     case attach(AttachPayload)
     case detach(DetachPayload)
     case credentials(CredentialsPayload)
+    case transcriptRequest(TranscriptRequestPayload)
     case pong
     /// Fallback for discriminator values this client does not know about yet.
     case unknown(AnyCodable)
@@ -4311,6 +4353,32 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct TranscriptRequestPayload: Codable, Hashable, Sendable {
+        public let requestId: String
+        public let terminalId: String
+        public let agent: LocalAgentKind
+        public let agentSessionId: String
+
+        private enum CodingKeys: String, CodingKey {
+            case requestId = "requestId"
+            case terminalId = "terminalId"
+            case agent = "agent"
+            case agentSessionId = "agentSessionId"
+        }
+
+        public init(
+            requestId: String,
+            terminalId: String,
+            agent: LocalAgentKind,
+            agentSessionId: String
+        ) {
+            self.requestId = requestId
+            self.terminalId = terminalId
+            self.agent = agent
+            self.agentSessionId = agentSessionId
+        }
+    }
+
     private enum DiscriminatorKey: String, CodingKey {
         case type
     }
@@ -4326,6 +4394,7 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         case "attach": self = .attach(try AttachPayload(from: decoder))
         case "detach": self = .detach(try DetachPayload(from: decoder))
         case "credentials": self = .credentials(try CredentialsPayload(from: decoder))
+        case "transcript-request": self = .transcriptRequest(try TranscriptRequestPayload(from: decoder))
         case "pong": self = .pong
         default: self = .unknown(try AnyCodable(from: decoder))
         }
@@ -4360,6 +4429,10 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         case .credentials(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("credentials", forKey: .type)
+            try payload.encode(to: encoder)
+        case .transcriptRequest(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("transcript-request", forKey: .type)
             try payload.encode(to: encoder)
         case .pong:
             var container = encoder.container(keyedBy: DiscriminatorKey.self)

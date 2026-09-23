@@ -32,6 +32,8 @@ interface DaemonConn {
   socket: RelaySocket;
   /** From the hello: the machine can supply a Claude OAuth token on request. */
   claudeCredentials: boolean;
+  /** From the hello: the daemon answers `transcript-request`. */
+  transcriptBackfill: boolean;
 }
 
 interface PendingAttach {
@@ -63,7 +65,7 @@ export function registerDaemon(
   hostId: string,
   userId: string | null,
   socket: RelaySocket,
-  capabilities: { claudeCredentials?: boolean } = {},
+  capabilities: { claudeCredentials?: boolean; transcriptBackfill?: boolean } = {},
 ): void {
   const existing = daemonsByHost.get(hostId);
   if (existing && existing.socket !== socket) {
@@ -78,6 +80,7 @@ export function registerDaemon(
     userId,
     socket,
     claudeCredentials: capabilities.claudeCredentials === true,
+    transcriptBackfill: capabilities.transcriptBackfill === true,
   });
 }
 
@@ -85,6 +88,12 @@ export function registerDaemon(
 export function hostHasClaudeCredentials(hostId: string): boolean {
   const conn = daemonsByHost.get(hostId);
   return conn !== undefined && conn.socket.readyState === WS_OPEN && conn.claudeCredentials;
+}
+
+/** Whether the host's connected daemon can read a finished session's transcript off disk (false when offline). */
+export function hostCanBackfillTranscripts(hostId: string): boolean {
+  const conn = daemonsByHost.get(hostId);
+  return conn !== undefined && conn.socket.readyState === WS_OPEN && conn.transcriptBackfill;
 }
 
 /** Online hosts whose daemon advertised Claude credentials. */

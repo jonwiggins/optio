@@ -13,7 +13,12 @@ import type {
 import type { ApiClient } from "../api/client.js";
 import { CLI_VERSION } from "../version.js";
 import { claudeHookSettingsPath } from "../config/paths.js";
-import { loadLocalConfig, saveLocalConfig, setHostIdForServer } from "../config/local-store.js";
+import {
+  getHostIdForServer,
+  loadLocalConfig,
+  saveLocalConfig,
+  setHostIdForServer,
+} from "../config/local-store.js";
 import { dim, green, red, yellow } from "../output/colors.js";
 import { AttentionTracker } from "./attention.js";
 import { detectRepoUrl } from "./git-remote.js";
@@ -25,6 +30,7 @@ import {
 } from "./hook-server.js";
 import { UsageTracker } from "./usage-tracker.js";
 import { TranscriptTracker } from "./transcript-tracker.js";
+import { readSessionTranscript } from "./transcript-backfill.js";
 import { readAgentLimits } from "./codex-limits.js";
 import { hasClaudeCredentials, readClaudeCredentials } from "./claude-credentials.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
@@ -231,9 +237,48 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
       case "credentials":
         void answerCredentials(msg.requestId);
         return;
+      case "transcript-request":
+        answerTranscriptRequest(msg);
+        return;
       case "pong":
         return;
     }
+  }
+
+  /**
+   * The server asked for a finished session's conversation (its transcript
+   * was never streamed): read it off disk and send it in batches, the last
+   * one marked `done` — with the reason when there is nothing to send.
+   */
+  function answerTranscriptRequest(
+    msg: Extract<LocalServerMessage, { type: "transcript-request" }>,
+  ): void {
+    const { entries, error } = readSessionTranscript({
+      agent: msg.agent,
+      sessionId: msg.agentSessionId,
+      allowedDirs: loadLocalConfig().dirs.map((d) => d.path),
+    });
+    const batches: LocalTranscriptEntry[][] = [];
+    for (let i = 0; i < entries.length; i += TRANSCRIPT_BATCH) {
+      batches.push(entries.slice(i, i + TRANSCRIPT_BATCH));
+    }
+    if (batches.length === 0) batches.push([]);
+    batches.forEach((batch, i) => {
+      const done = i === batches.length - 1;
+      sendRaw({
+        type: "transcript-backfill",
+        requestId: msg.requestId,
+        terminalId: msg.terminalId,
+        entries: batch,
+        done,
+        ...(done && error ? { error } : {}),
+      });
+    });
+    status(
+      error
+        ? dim(`no conversation to send for terminal ${msg.terminalId}: ${error}`)
+        : `sent the conversation of terminal ${msg.terminalId} (${entries.length} entries)`,
+    );
   }
 
   /** Re-detect git remotes for every allowlisted dir (persisting changes). */
@@ -256,6 +301,9 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
 
   async function register(dirs: LocalHostDir[]): Promise<LocalHost> {
     const { host } = await client.post<{ host: LocalHost }>("/api/local/hosts/register", {
+      // The id this server gave us last time: the machine keeps its host
+      // (terminals, automations) when its hostname changes.
+      hostId: getHostIdForServer(loadLocalConfig(), client.serverUrl),
       hostname: os.hostname(),
       platform: process.platform,
       arch: process.arch,
@@ -316,6 +364,7 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
           dirs,
           terminals: manager.terminalsSync(),
           claudeCredentials,
+          transcriptBackfill: true,
         };
         socket.send(JSON.stringify(hello));
         status(green(`connected to ${client.serverUrl} as host "${host.name}" (${host.id})`));

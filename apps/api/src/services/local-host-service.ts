@@ -7,9 +7,17 @@ import {
   type LocalHostDir,
 } from "@optio/shared";
 import { db } from "../db/client.js";
-import { localHosts } from "../db/schema.js";
+import {
+  localBlueprints,
+  localHosts,
+  localTerminals,
+  taskConfigs,
+  tasks,
+  workflows,
+} from "../db/schema.js";
 import { logger } from "../logger.js";
 import { publishLocalChanged } from "./event-bus.js";
+import * as relay from "./local-relay.js";
 import { isAuthDisabled } from "./oauth/index.js";
 
 export type LocalHostRow = typeof localHosts.$inferSelect;
@@ -62,21 +70,55 @@ export interface RegisterHostInput {
   arch?: string;
   daemonVersion?: string;
   dirs: LocalHostDir[];
+  /** The id this server gave the daemon last time (it keeps one per server). */
+  hostId?: string;
 }
 
-/** Daemon pairing: upsert by (userId, hostname). */
+/**
+ * Daemon pairing. The machine is the row whose id its daemon was given last
+ * time, so a laptop keeps its terminals, automations, and resumable
+ * sessions when its hostname changes (macOS renames itself as it moves
+ * between networks); failing that, the caller's row with this hostname;
+ * failing that, a new row.
+ */
 export async function registerHost(input: RegisterHostInput): Promise<LocalHostRow> {
   const dirs = sanitizeDirs(input.dirs);
-  const [existing] = await db
+  const [byName] = await db
     .select()
     .from(localHosts)
     .where(and(ownedBy(input.userId), eq(localHosts.hostname, input.hostname)));
 
+  let existing: LocalHostRow | undefined = byName;
+  let hostname = input.hostname;
+  if (input.hostId && input.hostId !== byName?.id) {
+    const [claimed] = await db
+      .select()
+      .from(localHosts)
+      .where(and(ownedBy(input.userId), eq(localHosts.id, input.hostId)));
+    if (claimed) {
+      if (byName && relay.isHostOnline(byName.id)) {
+        // Another of the caller's computers is connected under this name
+        // right now: keep the two apart, and this one keeps its old name.
+        hostname = claimed.hostname;
+      } else if (byName) {
+        // The row this machine got under this name before daemons sent their
+        // id (it has since been renamed and back): fold it in.
+        await mergeHosts(byName.id, claimed.id);
+      }
+      existing = claimed;
+    }
+  }
+
   if (existing) {
+    const renamed = existing.hostname !== hostname;
     const [updated] = await db
       .update(localHosts)
       .set({
-        name: input.name ?? existing.name,
+        hostname,
+        // A name that was only ever the hostname follows it; one someone
+        // chose stays.
+        name:
+          input.name ?? (renamed && existing.name === existing.hostname ? hostname : existing.name),
         platform: input.platform,
         arch: input.arch ?? existing.arch,
         daemonVersion: input.daemonVersion ?? existing.daemonVersion,
@@ -117,6 +159,71 @@ export async function listHosts(userId: string | null | undefined): Promise<Loca
 export async function deleteHost(id: string): Promise<boolean> {
   const deleted = await db.delete(localHosts).where(eq(localHosts.id, id)).returning();
   return deleted.length > 0;
+}
+
+export interface HostMergeResult {
+  terminals: number;
+  automations: number;
+  /** Tasks, scheduled Tasks, and Jobs whose run location named the machine. */
+  runLocations: number;
+}
+
+/**
+ * Fold `sourceId` into `targetId`: one computer that was registered twice
+ * (its hostname changed under a daemon that didn't send its id yet).
+ * Everything that names the source moves to the target — terminals,
+ * automations, and Task / scheduled Task / Job run locations — and the
+ * source row goes. Terminals parked for the source are the target's to
+ * start: its daemon's next hello flushes them, or the caller does.
+ */
+export async function mergeHosts(sourceId: string, targetId: string): Promise<HostMergeResult> {
+  if (sourceId === targetId) throw new Error("Can't merge a machine into itself");
+  const result = await db.transaction(async (tx) => {
+    const terminals = await tx
+      .update(localTerminals)
+      .set({ hostId: targetId })
+      .where(eq(localTerminals.hostId, sourceId))
+      .returning({ id: localTerminals.id });
+    const automations = await tx
+      .update(localBlueprints)
+      .set({ hostId: targetId, updatedAt: new Date() })
+      .where(eq(localBlueprints.hostId, sourceId))
+      .returning({ id: localBlueprints.id });
+    const movedTasks = await tx
+      .update(tasks)
+      .set({ localHostId: targetId })
+      .where(eq(tasks.localHostId, sourceId))
+      .returning({ id: tasks.id });
+    const movedConfigs = await tx
+      .update(taskConfigs)
+      .set({ localHostId: targetId })
+      .where(eq(taskConfigs.localHostId, sourceId))
+      .returning({ id: taskConfigs.id });
+    const movedJobs = await tx
+      .update(workflows)
+      .set({ localHostId: targetId })
+      .where(eq(workflows.localHostId, sourceId))
+      .returning({ id: workflows.id });
+    const [source] = await tx
+      .delete(localHosts)
+      .where(eq(localHosts.id, sourceId))
+      .returning({ userId: localHosts.userId });
+    return {
+      userId: source?.userId ?? null,
+      moved: {
+        terminals: terminals.length,
+        automations: automations.length,
+        runLocations: movedTasks.length + movedConfigs.length + movedJobs.length,
+      },
+    };
+  });
+  logger.info({ sourceId, targetId, ...result.moved }, "local: merged hosts");
+  for (const hostId of [sourceId, targetId]) {
+    await publishLocalChanged({ terminalId: null, hostId, userId: result.userId }).catch((err) =>
+      logger.warn({ err, hostId }, "local: failed to publish host merge"),
+    );
+  }
+  return result.moved;
 }
 
 export async function markHostOnline(

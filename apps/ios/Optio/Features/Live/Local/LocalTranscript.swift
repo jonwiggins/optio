@@ -6,13 +6,21 @@ import Observation
 /// web's `use-transcript.ts`. `loaded` flips once the first fetch settles, so
 /// the screen can decide its default face (transcript vs. screen) without a
 /// flash of the wrong one.
+///
+/// A finished session whose conversation was never streamed is read off its
+/// machine on that first fetch (the server answers `backfilling`): the model
+/// polls briefly until the entries land, and `readingConversation` holds the
+/// default face meanwhile.
 @MainActor
 @Observable
 final class LocalTranscriptModel {
     private(set) var entries: [LocalTranscriptEntry] = []
     private(set) var loaded = false
+    private(set) var backfilling = false
 
     private static let livePoll: Duration = .seconds(4)
+    private static let backfillPoll: Duration = .seconds(1)
+    private static let backfillPolls = 12
     private static let page = 2000
 
     private let api: APIClient
@@ -30,6 +38,9 @@ final class LocalTranscriptModel {
 
     var hasEntries: Bool { !entries.isEmpty }
 
+    /// The machine is still reading the conversation and nothing has landed yet.
+    var readingConversation: Bool { backfilling && entries.isEmpty }
+
     /// Fetch everything stored, then keep polling while `live`.
     func start(live: Bool) {
         self.live = live
@@ -37,11 +48,13 @@ final class LocalTranscriptModel {
         loadTask = Task { [weak self] in
             guard let self else { return }
             var all: [LocalTranscriptEntry] = []
+            var backfill = false
             do {
                 var after = 0
                 while !Task.isCancelled {
                     let page = try await api.getLocalTerminalTranscript(terminalId, after: after, limit: Self.page)
                     all.append(contentsOf: page.entries)
+                    backfill = page.backfilling ?? false
                     if page.complete || page.entries.isEmpty { break }
                     after = Int(page.entries[page.entries.count - 1].seq)
                 }
@@ -51,6 +64,7 @@ final class LocalTranscriptModel {
             if Task.isCancelled { return }
             lastSeq = all.last.map { Int($0.seq) } ?? 0
             entries = all
+            backfilling = backfill && all.isEmpty
             loaded = true
             restartPolling()
         }
@@ -74,6 +88,19 @@ final class LocalTranscriptModel {
 
     private func restartPolling() {
         pollTask?.cancel()
+        if backfilling {
+            pollTask = Task { [weak self] in
+                for _ in 0..<Self.backfillPolls {
+                    try? await Task.sleep(for: Self.backfillPoll)
+                    if Task.isCancelled { return }
+                    guard let self, self.backfilling else { return }
+                    await self.fetchMore()
+                }
+                self?.backfilling = false
+                self?.restartPolling()
+            }
+            return
+        }
         if !live {
             pollTask = Task { [weak self] in await self?.fetchMore() }
             return
@@ -94,7 +121,14 @@ final class LocalTranscriptModel {
         defer { inflight = false }
         do {
             let page = try await api.getLocalTerminalTranscript(terminalId, after: lastSeq, limit: Self.page)
-            guard !page.entries.isEmpty else { return }
+            guard !page.entries.isEmpty else {
+                // Nothing new and nothing more being read: a backfill is over.
+                if backfilling && !(page.backfilling ?? false) {
+                    backfilling = false
+                    restartPolling()
+                }
+                return
+            }
             lastSeq = Int(page.entries[page.entries.count - 1].seq)
             entries.append(contentsOf: page.entries)
         } catch {

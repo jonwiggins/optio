@@ -14,6 +14,7 @@ import {
   Briefcase,
   Columns2,
   GitPullRequest,
+  Laptop,
   Loader2,
   Maximize2,
   PanelLeftOpen,
@@ -215,8 +216,17 @@ export function TerminalPane({
     setBusy(true);
     try {
       const res = await api.resumeLocalTerminal(terminalId);
-      toast.success("Resuming session in a new terminal");
-      router.push(`/local/${res.terminal.id}`);
+      const next = res.terminal;
+      if (next.state === "pending" && next.pendingReason === "host_offline") {
+        toast.info(
+          `${host?.name ?? "The machine"} is offline — the chat starts when it reconnects`,
+        );
+      } else {
+        toast.success(
+          res.reused ? "Opening the chat already resumed" : "Resuming session in a new terminal",
+        );
+      }
+      router.push(`/local/${next.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to resume");
     }
@@ -312,11 +322,17 @@ export function TerminalPane({
     !!terminal.agentSessionId;
   const links = collectWorkLinks(terminal);
   const hasTranscript = transcript.entries.length > 0;
+  // A finished session's machine may still be reading its conversation off
+  // disk: hold the default view until the first entries land (or it gives up).
+  const readingTranscript = transcript.backfilling && !hasTranscript;
   const view = resolveSessionView(viewChoice, {
     isDead,
     hasTranscript,
-    loaded: transcript.loaded,
+    loaded: transcript.loaded && !readingTranscript,
   });
+  const parked = terminal.state === "pending" && terminal.pendingReason === "host_offline";
+  // The likeliest reason a machine never comes back: it's online under a new name.
+  const onlineElsewhere = hosts.find((h) => h.id !== terminal.hostId && h.state === "online");
   const viewToggle = hasTranscript && view && (
     <SessionViewToggle view={view} onChange={setViewChoice} />
   );
@@ -670,11 +686,30 @@ export function TerminalPane({
         {view === null ? (
           <div className="flex-1 min-h-0 bg-[#09090b] flex items-center justify-center text-text-muted text-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" />
-            Loading session…
+            {readingTranscript
+              ? `Reading the conversation from ${host?.name ?? "its machine"}…`
+              : "Loading session…"}
           </div>
         ) : view === "transcript" ? (
           <div className="flex-1 min-h-0">
             <TranscriptView entries={transcript.entries} live={!isDead} />
+          </div>
+        ) : parked ? (
+          <div className="flex-1 min-h-0 bg-[#09090b] flex flex-col items-center justify-center gap-2 px-6 text-center">
+            <Laptop className="w-6 h-6 text-text-muted/60" />
+            <p className="text-sm text-text">Waiting for {host?.name ?? "its machine"}</p>
+            <p className="text-xs text-text-muted max-w-sm">
+              This session starts on its own when that machine&apos;s daemon reconnects (
+              <code className="font-mono">optio local up</code>).
+            </p>
+            {onlineElsewhere && (
+              <p className="text-xs text-text-muted max-w-sm">
+                Is {onlineElsewhere.name} the same computer under a new name?{" "}
+                <Link href="/machines" className="text-primary hover:underline">
+                  Merge them on Machines
+                </Link>
+              </p>
+            )}
           </div>
         ) : isDead && streamSettled && !streamedOutput && terminal.preview ? (
           <div className="flex-1 min-h-0 flex flex-col bg-[#09090b] px-4 py-3">

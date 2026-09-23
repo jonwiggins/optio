@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { ExternalLink, FolderGit2, Laptop, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
+import { ExternalLink, FolderGit2, Laptop, Merge, RefreshCw } from "lucide-react";
+import { api } from "@/lib/api-client";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
@@ -9,6 +12,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { shortDir } from "@/lib/work-feed";
 import { AutomationsSection } from "@/components/local/automations-section";
+import { likelySameComputer, mergeTargets } from "@/components/local/host-merge";
 
 /**
  * Your paired machines (Optio Local hosts) and the directories each one
@@ -108,12 +112,116 @@ export default function MachinesPage() {
                   ))
                 )}
               </ul>
+              {h.state !== "online" && likelySameComputer(h, hosts) && (
+                <MergeInto source={h} hosts={hosts} onMerged={refetch} />
+              )}
             </div>
           ))}
         </div>
       )}
 
       {hosts.length > 0 && <AutomationsSection hosts={hosts} defaultOpen />}
+    </div>
+  );
+}
+
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
+/**
+ * A computer whose hostname changed under an older daemon shows up twice:
+ * the old row (offline for good, still holding its sessions and
+ * automations) and the one it connects as now. Offered only on an offline
+ * machine that looks like another one (same kind, a shared folder), so a
+ * second computer that is merely switched off isn't invited to merge.
+ * Merging moves everything onto the machine picked here and removes the
+ * old row.
+ */
+function MergeInto({
+  source,
+  hosts,
+  onMerged,
+}: {
+  source: any;
+  hosts: any[];
+  onMerged: () => void;
+}) {
+  const targets = mergeTargets(source, hosts);
+  const likely = likelySameComputer(source, hosts);
+  const [open, setOpen] = useState(false);
+  const [targetId, setTargetId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const target = targets.find((h) => h.id === targetId) ?? likely ?? targets[0];
+  if (!likely || !target) return null;
+
+  const merge = async () => {
+    if (
+      !confirm(
+        `Merge “${source.name}” into “${target.name}”?\n\n` +
+          `Its sessions, automations and run locations move to ${target.name}, and ` +
+          `${source.name} is removed. Only do this if both are the same computer.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const { moved } = await api.mergeLocalHost(source.id, target.id);
+      toast.success(
+        `Moved ${count(moved.terminals, "session")} and ${count(moved.automations, "automation")} to ${target.name}`,
+      );
+      onMerged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to merge");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/60 text-xs">
+      {!open ? (
+        <button
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1.5 text-text-muted hover:text-text transition-colors"
+        >
+          <Merge className="w-3.5 h-3.5" />
+          <span>
+            Same computer as <span className="font-medium text-text">{likely.name}</span>? Merge…
+          </span>
+        </button>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-text-muted">Merge into</span>
+          <select
+            value={target.id}
+            onChange={(e) => setTargetId(e.target.value)}
+            className="px-2 py-1.5 rounded bg-bg-card border border-border text-xs focus:outline-none focus:border-primary"
+          >
+            {targets.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.name}
+                {h.state === "online" ? " (online)" : ""}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={merge}
+            disabled={busy}
+            className="h-7 px-3 rounded-md bg-primary text-white font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
+          >
+            {busy ? "Merging…" : "Merge"}
+          </button>
+          <button
+            onClick={() => setOpen(false)}
+            className="h-7 px-2 rounded-md text-text-muted hover:text-text transition-colors"
+          >
+            Cancel
+          </button>
+          <p className="basis-full text-text-muted">
+            For a computer that shows up twice because its name changed: {source.name}&apos;s
+            sessions and automations move there, and {source.name} is removed.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

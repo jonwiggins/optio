@@ -309,6 +309,8 @@ export type LocalDaemonMessage =
       terminals: LocalDaemonTerminalSync[];
       /** The machine has a Claude Code login the server may ask for (see `credentials`). */
       claudeCredentials?: boolean;
+      /** The daemon answers `transcript-request` (reads a finished session's conversation off disk). */
+      transcriptBackfill?: boolean;
     }
   /**
    * Answer to the server's `credentials` request: the machine's current
@@ -336,6 +338,21 @@ export type LocalDaemonMessage =
    * and flushed once more right before `exit`.
    */
   | { type: "transcript"; terminalId: string; entries: LocalTranscriptEntry[] }
+  /**
+   * Answer to `transcript-request`: the whole conversation of a finished
+   * session, read from the agent CLI's own transcript on disk, in `seq`
+   * order from 1 across frames. `done` marks the last frame; `error` says
+   * why there is nothing to show (no transcript on this machine, the
+   * session ran outside the allowlisted dirs, …).
+   */
+  | {
+      type: "transcript-backfill";
+      requestId: string;
+      terminalId: string;
+      entries: LocalTranscriptEntry[];
+      done: boolean;
+      error?: string;
+    }
   /** The agent CLI's own session id, once its hooks report it (sent once). */
   | { type: "session"; terminalId: string; agentSessionId: string }
   | { type: "agent-limits"; limits: LocalHostAgentLimits }
@@ -372,6 +389,19 @@ export type LocalServerMessage =
    * Only ever sent to a host owned by an admin (or in auth-disabled dev).
    */
   | { type: "credentials"; requestId: string }
+  /**
+   * Read a finished agent session's conversation off disk, for a session
+   * whose transcript was never streamed (it ran under a daemon that predates
+   * transcripts, or its hooks never named the file). Only sent to daemons
+   * whose hello set `transcriptBackfill`; answered with `transcript-backfill`.
+   */
+  | {
+      type: "transcript-request";
+      requestId: string;
+      terminalId: string;
+      agent: LocalAgentKind;
+      agentSessionId: string;
+    }
   | { type: "pong" };
 
 // ── Browser ⇄ server stream protocol (/ws/local/terminals/:id/stream) ──────
