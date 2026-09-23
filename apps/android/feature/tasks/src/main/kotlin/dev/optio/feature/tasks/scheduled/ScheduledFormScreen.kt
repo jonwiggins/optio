@@ -17,6 +17,7 @@ import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.ScheduledDetailRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.components.ErrorRow
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.Loadable
 import dev.optio.core.ui.theme.Spacing
@@ -91,7 +92,7 @@ fun ScheduledFormContent(
         modifier = modifier.testTag("scheduled-form"),
     ) { padding ->
         Loadable(state = loading, onRetry = onRetryLoad, onRefresh = null, what = "schedule", modifier = Modifier.padding(top = padding.calculateTopPadding())) {
-            LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(bottom = padding.formPadding().calculateBottomPadding())) {
+            LazyColumn(Modifier.fillMaxSize().imePadding().readableWidth(), contentPadding = PaddingValues(bottom = padding.formPadding().calculateBottomPadding())) {
                 item(key = "blueprint") {
                     FormSection(header = "Blueprint") {
                         FormTextField(draft.name, { v -> onChange { it.copy(name = v) } }, label = "Name", placeholder = "e.g. Daily CVE patch", testTag = "scheduled-name")

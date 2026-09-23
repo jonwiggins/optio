@@ -65,8 +65,8 @@ class ScheduledDetailViewModel(
     }
 
     fun refresh() {
-        if (_state.value.value == null) return load()
         if (refreshJob?.isActive == true) return
+        if (_state.value.value == null) return load()
         refreshJob = viewModelScope.launch { refreshNow() }
     }
 

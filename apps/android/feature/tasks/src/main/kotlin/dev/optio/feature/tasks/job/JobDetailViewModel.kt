@@ -89,8 +89,8 @@ class JobDetailViewModel(
 
     /** A quiet refetch (polling while runs are active, coming back to the screen). */
     fun refresh() {
-        if (_state.value.value == null) return load()
         if (refreshJob?.isActive == true) return
+        if (_state.value.value == null) return load()
         refreshJob = viewModelScope.launch { refreshNow() }
     }
 

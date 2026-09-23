@@ -39,6 +39,7 @@ import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.KeyValueRow
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.mono
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.Loadable
@@ -165,7 +166,7 @@ fun ScheduledDetailContent(
     ) { padding ->
         Loadable(state = state, onRetry = actions.retryLoad, onRefresh = actions.refresh, what = "schedule", modifier = Modifier.padding(padding)) { value ->
             val config = value.config
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = Spacing.xl)) {
+            LazyColumn(Modifier.fillMaxSize().readableWidth(), contentPadding = PaddingValues(bottom = Spacing.xl)) {
                 item(key = "header") {
                     DetailHeader(
                         state = if (config.enabled) "active" else "paused",

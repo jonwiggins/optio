@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -21,7 +22,6 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.automirrored.outlined.PlaylistPlay
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,12 +47,12 @@ import dev.optio.core.navigation.routes.JobFormRoute
 import dev.optio.core.navigation.routes.JobRunRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
+import dev.optio.core.ui.components.ChipPicker
 import dev.optio.core.ui.components.CodeBlock
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.DetailHeader
 import dev.optio.core.ui.components.DetailTabs
 import dev.optio.core.ui.components.EmptyState
-import dev.optio.core.ui.components.ChipPicker
 import dev.optio.core.ui.components.GroupedSection
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.KeyValueRow
@@ -60,6 +60,7 @@ import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.StatItem
 import dev.optio.core.ui.components.StatStrip
 import dev.optio.core.ui.components.metaText
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.Cost
 import dev.optio.core.ui.format.InsightsFormat
@@ -218,7 +219,7 @@ fun JobDetailContent(
         },
     ) { padding ->
         Loadable(state = state, onRetry = actions.retryLoad, onRefresh = actions.refresh, what = "job", modifier = Modifier.padding(padding)) { value ->
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = Spacing.xl)) {
+            LazyColumn(Modifier.fillMaxSize().readableWidth(), contentPadding = PaddingValues(bottom = Spacing.xl)) {
                 item(key = "header") { JobHeader(value) }
                 item(key = "tabs") {
                     DetailTabs(options = JobSection.entries.map { it to it.label }, selection = section, onSelect = { section = it })

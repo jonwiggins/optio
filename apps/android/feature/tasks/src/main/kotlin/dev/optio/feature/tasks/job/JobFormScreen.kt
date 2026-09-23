@@ -35,6 +35,7 @@ import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.JobDetailRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.components.ErrorRow
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.Loadable
 import dev.optio.core.ui.theme.OptioTheme
@@ -126,7 +127,7 @@ fun JobFormContent(
         modifier = modifier.testTag("job-form"),
     ) { padding ->
         Loadable(state = loading, onRetry = onRetryLoad, onRefresh = null, what = "job", modifier = Modifier.padding(top = padding.calculateTopPadding())) {
-            LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(bottom = padding.formPadding().calculateBottomPadding())) {
+            LazyColumn(Modifier.fillMaxSize().imePadding().readableWidth(), contentPadding = PaddingValues(bottom = padding.formPadding().calculateBottomPadding())) {
                 item(key = "basics") {
                     FormSection(header = "Basics") {
                         FormTextField(draft.name, { v -> onChange { it.copy(name = v) } }, label = "Name", capitalization = KeyboardCapitalization.Words, testTag = "job-name")

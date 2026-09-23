@@ -46,6 +46,7 @@ import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.components.StateDot
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.mono
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.Cost
 import dev.optio.core.ui.format.InsightsFormat
@@ -172,7 +173,7 @@ fun JobRunContent(
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding).readableWidth()) {
             when {
                 run != null -> {
                     RunHeader(run, runId, logConnected)

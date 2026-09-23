@@ -117,6 +117,14 @@ class TasksScreenshotTest : ScreenshotTest() {
     fun taskLocalQueued() = taskScreen("Task_Local_Queued", TaskSamples.queuedLocal)
 
     @Test
+    fun taskOnATablet() = taskScreen("Task_Tablet", TaskSamples.prOpened, logs = TaskSamples.transcript, size = ScreenSize.TABLET)
+
+    @Test
+    fun jobOnATablet() = captureScreens("Job_Tablet", size = ScreenSize.TABLET, clock = clock) {
+        JobDetailContent(LoadState.Loaded(TaskSamples.jobDetail), busy = false, baseUrl = baseUrl, actions = JobDetailActions(), initialSection = JobSection.TRIGGERS)
+    }
+
+    @Test
     fun taskViewerReadOnly() = taskScreen("Task_PrOpened_Viewer", TaskSamples.prOpened, logs = TaskSamples.prLogs, viewer = true)
 
     @Test

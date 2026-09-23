@@ -124,8 +124,8 @@ class TaskDetailViewModel(
 
     /** A quiet refetch (polling, after an action): keeps what's on screen, no spinner, no error. */
     fun refresh() {
-        if (_state.value.value == null) return load()
         if (refreshJob?.isActive == true) return
+        if (_state.value.value == null) return load()
         refreshJob = viewModelScope.launch { refreshNow() }
     }
 
@@ -139,7 +139,7 @@ class TaskDetailViewModel(
         }
     }
 
-    /** The detail and events are required; the rest degrade to empty lists (iOS `load`). */
+    /** The task itself is required; events, subtasks, dependencies and activity degrade to empty lists (iOS `load`). */
     private suspend fun fetch(): TaskDetail = coroutineScope {
         val detail = async { api.getTask(taskId) }
         val events = async { runCatching { api.taskEvents(taskId) }.getOrDefault(emptyList()) }
