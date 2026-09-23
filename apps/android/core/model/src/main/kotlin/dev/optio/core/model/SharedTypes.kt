@@ -555,6 +555,7 @@ sealed interface WsEvent {
             "persistent_agent:turn_halted" -> json.decodeFromJsonElement(PersistentAgentTurnHaltedEvent.serializer(), element)
             "persistent_agent:message" -> json.decodeFromJsonElement(PersistentAgentMessageEvent.serializer(), element)
             "persistent_agent:log" -> json.decodeFromJsonElement(PersistentAgentLogEvent.serializer(), element)
+            "local:changed" -> json.decodeFromJsonElement(LocalChangedEvent.serializer(), element)
             else -> null
         }
 
@@ -584,6 +585,7 @@ sealed interface WsEvent {
             is PersistentAgentTurnHaltedEvent -> json.encodeToJsonElement(PersistentAgentTurnHaltedEvent.serializer(), value)
             is PersistentAgentMessageEvent -> json.encodeToJsonElement(PersistentAgentMessageEvent.serializer(), value)
             is PersistentAgentLogEvent -> json.encodeToJsonElement(PersistentAgentLogEvent.serializer(), value)
+            is LocalChangedEvent -> json.encodeToJsonElement(LocalChangedEvent.serializer(), value)
             is Unknown -> value.raw
         }
 
@@ -2063,7 +2065,7 @@ data class LocalChangedEvent(
     val terminalId: String? = null,
     val hostId: String,
     val userId: String? = null,
-)
+) : WsEvent
 
 // endregion
 
@@ -3474,6 +3476,8 @@ enum class WorkflowRunState(override val raw: String) : RawEnum {
     RUNNING("running"),
     COMPLETED("completed"),
     FAILED("failed"),
+    /** Documented by the API (`WorkflowRunSchema`); a user's cancel is stored as `failed` today. */
+    CANCELLED("cancelled"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 

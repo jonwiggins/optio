@@ -7,6 +7,8 @@ export enum WorkflowRunState {
   RUNNING = "running",
   COMPLETED = "completed",
   FAILED = "failed",
+  /** Documented by the API (`WorkflowRunSchema`); a user's cancel is stored as `failed` today. */
+  CANCELLED = "cancelled",
 }
 
 export enum WorkflowTriggerType {
@@ -113,6 +115,7 @@ const VALID_WORKFLOW_RUN_TRANSITIONS: Record<WorkflowRunState, WorkflowRunState[
   [WorkflowRunState.RUNNING]: [WorkflowRunState.COMPLETED, WorkflowRunState.FAILED],
   [WorkflowRunState.COMPLETED]: [],
   [WorkflowRunState.FAILED]: [WorkflowRunState.QUEUED],
+  [WorkflowRunState.CANCELLED]: [],
 };
 
 export function canTransitionWorkflowRun(from: WorkflowRunState, to: WorkflowRunState): boolean {

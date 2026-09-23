@@ -29,9 +29,9 @@ import kotlinx.serialization.json.JsonObject
  * `EventHub`): the Watch notification, widget refreshes, lists that refresh on change.
  *
  * Every JSON frame is decoded as the generated [WsEvent] union, one frame at a time: types this
- * app does not know (`local:changed`, newer server events) and frames that fail to decode arrive
- * as [WsEvent.Unknown] with the raw JSON, so nothing is dropped silently and one bad frame never
- * ends the stream.
+ * app does not know (newer server events) and frames that fail to decode arrive as
+ * [WsEvent.Unknown] with the raw JSON, so nothing is dropped silently and one bad frame never ends
+ * the stream.
  *
  * `SessionStore` owns the instance and starts it while signed in (restarting it on every server
  * switch). Collect [events] for as long as you need them:
@@ -131,8 +131,8 @@ class EventHub(
 inline fun <reified E : WsEvent> EventHub.on(): Flow<E> = events.filterIsInstance<E>()
 
 /**
- * The raw JSON of events whose `type` this app has no model for, e.g. `hub.unknown("local:changed")`
- * (published on `/ws/events` but not part of the TS `WsEvent` union).
+ * The raw JSON of events whose `type` this app has no model for (a newer server's events, which the
+ * TS `WsEvent` union doesn't list yet), e.g. `hub.unknown("future:event")`.
  */
 fun EventHub.unknown(type: String): Flow<JsonObject> =
     events.filterIsInstance<WsEvent.Unknown>()

@@ -3,12 +3,13 @@ package dev.optio.feature.local.machines
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.optio.core.model.LocalBlueprint
+import dev.optio.core.model.LocalChangedEvent
 import dev.optio.core.model.LocalHost
 import dev.optio.core.model.LocalHostState
 import dev.optio.core.navigation.routes.LocalTerminalRoute
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.EventHub
-import dev.optio.core.network.unknown
+import dev.optio.core.network.on
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.load
 import dev.optio.feature.local.api.LocalTrigger
@@ -135,7 +136,7 @@ class MachinesViewModel(
         }
         val hub = eventHub
         if (nudgeJob == null && hub != null) {
-            nudgeJob = viewModelScope.launch { hub.unknown("local:changed").collect { refreshHostsQuietly() } }
+            nudgeJob = viewModelScope.launch { hub.on<LocalChangedEvent>().collect { refreshHostsQuietly() } }
         }
     }
 

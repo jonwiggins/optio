@@ -3,6 +3,7 @@ import type { InteractiveSessionState } from "./session.js";
 import type { WorkflowRunState } from "./workflow.js";
 import type { PrReviewState, PrReviewRunState } from "./pr-review.js";
 import type { PersistentAgentState, PersistentAgentTurnHaltReason } from "./persistent-agent.js";
+import type { LocalChangedEvent } from "./local.js";
 
 export type WsEvent =
   | TaskStateChangedEvent
@@ -29,7 +30,8 @@ export type WsEvent =
   | PersistentAgentTurnStartedEvent
   | PersistentAgentTurnHaltedEvent
   | PersistentAgentMessageEvent
-  | PersistentAgentLogEvent;
+  | PersistentAgentLogEvent
+  | LocalChangedEvent;
 
 export interface TaskStateChangedEvent {
   type: "task:state_changed";
