@@ -212,9 +212,22 @@ export async function sessionChatWs(app: FastifyInstance) {
       });
     };
 
+    // One insert at a time, in emission order: the stored order (seq) is the
+    // replay order, and concurrent fire-and-forget inserts could land in any
+    // order. Persistence stays off the streaming path.
+    let persistChain: Promise<void> = Promise.resolve();
+    const persist = (input: Parameters<typeof appendSessionChatEvent>[0], what: string) => {
+      persistChain = persistChain
+        .then(() => appendSessionChatEvent(input))
+        .then(
+          () => undefined,
+          (err) => log.warn({ err }, `Failed to persist ${what}`),
+        );
+    };
+
     const emitEntry = (entry: AgentLogEntry) => {
       send({ type: "chat_event", event: entry });
-      persistChatEvent(sessionId, entry, log);
+      persist(chatEventRow(sessionId, entry), "session chat event");
 
       // Extract cost from result events
       if (entry.metadata?.cost && typeof entry.metadata.cost === "number") {
@@ -455,12 +468,10 @@ export async function sessionChatWs(app: FastifyInstance) {
           // Persist the user's prompt so reconnecting clients see their own
           // side of the conversation, not just the agent's responses. Use
           // logType=user_message so the UI can render it distinctly.
-          appendSessionChatEvent({
-            sessionId,
-            content: msg.content,
-            stream: "stdin",
-            logType: "user_message",
-          }).catch((err) => log.warn({ err }, "Failed to persist user message"));
+          persist(
+            { sessionId, content: msg.content, stream: "stdin", logType: "user_message" },
+            "user message",
+          );
           runPrompt(msg.content).catch((err) => {
             log.error({ err }, "Prompt execution failed");
             send({ type: "error", message: "Prompt failed" });
@@ -557,21 +568,16 @@ async function addSessionCost(sessionId: string, turnCostUsd: number) {
     .where(eq(interactiveSessions.id, sessionId));
 }
 
-/**
- * Fire-and-forget persistence for an agent chat event. Failures are logged
- * but don't break the live stream — the client still gets the event over
- * the WebSocket; only history-on-reconnect is impacted.
- */
-function persistChatEvent(
+/** The stored row for one agent chat event. */
+function chatEventRow(
   sessionId: string,
   entry: import("@optio/shared").AgentLogEntry,
-  log: { warn: (obj: unknown, msg: string) => void },
-) {
-  appendSessionChatEvent({
+): Parameters<typeof appendSessionChatEvent>[0] {
+  return {
     sessionId,
     content: entry.content,
     logType: entry.type,
     metadata: entry.metadata,
     timestamp: entry.timestamp ? new Date(entry.timestamp) : undefined,
-  }).catch((err) => log.warn({ err }, "Failed to persist session chat event"));
+  };
 }

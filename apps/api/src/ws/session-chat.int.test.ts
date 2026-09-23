@@ -12,6 +12,7 @@ import type { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
 import { interactiveSessions, repoPods } from "../db/schema.js";
 import { listenWsApp, WsTestClient, type WsFrame } from "../test-utils/integration/ws-client.js";
+import { listSessionChatEvents } from "../services/interactive-session-service.js";
 import { sessionChatWs } from "./session-chat.js";
 
 vi.hoisted(() => {
@@ -97,5 +98,24 @@ describe("session chat cost", () => {
     await vi.waitFor(async () => expect(await storedCost(session.id)).toBe("0.7500"));
     await a.chat.close();
     await b.chat.close();
+  });
+});
+
+describe("session chat history", () => {
+  it("stores a turn in the order it streamed, so a replay reads the same", async () => {
+    const session = await seedSession(null);
+    const { chat } = await open(session.id);
+    await turn(chat, "0.01");
+    const streamed = chat.frames
+      .filter((f) => f.type === "chat_event" && !f.catchUp)
+      .map((f) => f.event.content as string);
+    await chat.close();
+
+    // The user's prompt first, then the agent's events in streaming order.
+    await vi.waitFor(async () =>
+      expect(await listSessionChatEvents(session.id)).toHaveLength(streamed.length + 1),
+    );
+    const stored = (await listSessionChatEvents(session.id)).map((e) => e.content);
+    expect(stored).toEqual(["do the thing [[mock:cost:0.01]]", ...streamed]);
   });
 });

@@ -701,6 +701,13 @@
       "when": 1791000000000,
       "tag": "1791000000_workflow_runs_trigger_set_null",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1791100000000,
+      "tag": "1791100000_session_chat_events_seq",
+      "breakpoints": true
     }
   ]
 }

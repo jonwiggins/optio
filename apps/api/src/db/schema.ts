@@ -1,5 +1,6 @@
 import {
   pgTable,
+  bigint,
   uuid,
   text,
   timestamp,
@@ -517,6 +518,9 @@ export const sessionChatEvents = pgTable(
     logType: text("log_type"), // "text" | "tool_use" | "tool_result" | "thinking" | "system" | "error" | "info"
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+    // Insertion order: breaks `timestamp` ties (ms clock, several events per
+    // output chunk) so history replays in the order it streamed.
+    seq: bigint("seq", { mode: "number" }).generatedByDefaultAsIdentity(),
   },
   (table) => [index("session_chat_events_session_idx").on(table.sessionId, table.timestamp)],
 );
