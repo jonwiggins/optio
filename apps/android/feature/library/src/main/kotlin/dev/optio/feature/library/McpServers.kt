@@ -116,7 +116,7 @@ internal fun McpServerForm(
                 modifier = Modifier.testTag("mcp-args"),
             )
         }
-        GroupedCard(header = "Env (KEY=value per line)", footer = "Use \${{SECRET_NAME}} to reference an Optio secret.") {
+        GroupedCard(header = "Env (KEY=value per line)", footer = "Use \$\u2060{{SECRET_NAME}} to reference an Optio secret.") {
             FormTextField(
                 draft.env,
                 { draft = draft.copy(env = it) },

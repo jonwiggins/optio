@@ -303,7 +303,11 @@ internal fun SharedDirectoryItem(
     val colors = OptioTheme.colors
     val now = rememberNow()
     Column(
-        modifier.fillMaxWidth().padding(OptioRowDefaults.ContentPadding).testTag("directory-${dir.id}"),
+        modifier
+            .fillMaxWidth()
+            // The admin buttons carry their own touch padding: less air under them.
+            .padding(start = Spacing.l, end = Spacing.l, top = Spacing.m, bottom = if (isAdmin) Spacing.xs else Spacing.m)
+            .testTag("directory-${dir.id}"),
         verticalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
@@ -402,7 +406,7 @@ internal fun NewSharedDirectoryForm(
             busy = saving,
             onConfirm = { onSave(draft.input()) },
         )
-        GroupedCard(header = "Preset") {
+        GroupedCard {
             PickerRow(
                 "Preset",
                 listOf("" to "Custom") + SharedDirectoryRules.presets.map { it.first to "${it.first} — ${it.third}" },
@@ -411,7 +415,6 @@ internal fun NewSharedDirectoryForm(
                 modifier = Modifier.testTag("directory-preset"),
             )
         }
-        Spacer(Modifier.height(Spacing.s))
         GroupedCard {
             FormTextField(
                 draft.name,

@@ -195,7 +195,7 @@ internal fun NewConnectionContent(
     LibraryForm(state, what = "connection provider", onRetry = onRetry, modifier = modifier, contentPadding = contentPadding, testTag = "new-connection") { data ->
         val provider = data.provider
         val colors = OptioTheme.colors
-        GroupedCard(modifier = Modifier.padding(top = Spacing.m)) {
+        GroupedCard {
             Row(
                 Modifier.fillMaxWidth().padding(OptioRowDefaults.ContentPadding),
                 verticalAlignment = Alignment.CenterVertically,
@@ -265,7 +265,6 @@ internal fun NewConnectionContent(
         }
 
         GroupedCard(
-            modifier = Modifier.padding(top = Spacing.m),
             footer = if (showAccess) "Leave all agent toggles off to allow every agent type." else "Defaults: all repos · all agents · read only",
         ) {
             Row(

@@ -64,7 +64,7 @@ class PromptDetailViewModel(private val api: ApiClient, val id: String) : Librar
     var extraParams by mutableStateOf("")
 
     var rendered by mutableStateOf<String?>(null)
-        private set
+        internal set
 
     var rendering by mutableStateOf(false)
         private set

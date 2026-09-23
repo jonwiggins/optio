@@ -229,7 +229,6 @@ internal fun RepoDetailContent(
         loadStateItems(state, what = "repository", onRetry = onRefresh) { detail ->
             val repo = detail.repo
             val agent = repo.defaultAgentType ?: "claude-code"
-            item(key = "top") { Spacer(Modifier.height(12.dp)) }
             groupedCard(key = "info") {
                 repo.repoUrl?.let {
                     KeyValueRow("URL", it, mono = true)
@@ -342,7 +341,7 @@ internal fun RepoDetailContent(
                 }
             }
             groupFooter(
-                "Injected into the agent's .mcp.json at runtime. Use \${{SECRET_NAME}} to reference Optio secrets.",
+                "Injected into the agent's .mcp.json at runtime. Use \$\u2060{{SECRET_NAME}} to reference Optio secrets.",
                 key = "mcp-footer",
             )
 

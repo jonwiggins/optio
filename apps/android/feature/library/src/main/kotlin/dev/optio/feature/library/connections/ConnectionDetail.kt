@@ -71,7 +71,6 @@ import dev.optio.feature.library.groupedCard
 import dev.optio.feature.library.listConnectionAssignments
 import dev.optio.feature.library.listOrEmpty
 import dev.optio.feature.library.listRepos
-import dev.optio.feature.library.listTopSpace
 import dev.optio.feature.library.loadStateItems
 import dev.optio.feature.library.setConnectionEnabled
 import dev.optio.feature.library.testConnection
@@ -241,7 +240,6 @@ internal fun ConnectionDetailContent(
     LibraryList(state, onRefresh, modifier, contentPadding, testTag = "connection-detail") {
         loadStateItems(state, what = "connection", onRetry = onRefresh) { detail ->
             val connection = detail.connection
-            listTopSpace()
             groupedCard(key = "status", footer = "Configuration values (tokens, URLs) are write-only and never shown here.") {
                 Row(
                     Modifier.fillMaxWidth().padding(OptioRowDefaults.ContentPadding).testTag("connection-status"),
@@ -259,7 +257,10 @@ internal fun ConnectionDetailContent(
                         Text("checked ${it.relativeDescription(now)}", style = OptioTheme.type.caption, color = OptioTheme.colors.secondaryLabel)
                     }
                 }
-                connection.statusMessage?.takeIf { it.isNotEmpty() }?.let { NoteRow(it) }
+                connection.statusMessage?.takeIf { it.isNotEmpty() }?.let {
+                    InsetDivider()
+                    NoteRow(it)
+                }
                 connection.provider?.let { provider ->
                     InsetDivider()
                     KeyValueRow("Provider", provider.name ?: provider.slug ?: "")

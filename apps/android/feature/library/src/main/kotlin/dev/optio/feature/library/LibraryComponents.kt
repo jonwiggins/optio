@@ -103,6 +103,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import dev.optio.core.ui.theme.ProvideElevatedSurfaces
+import androidx.compose.ui.text.style.TextAlign
+import dev.optio.core.ui.components.hairline
 import kotlinx.coroutines.launch
 
 // Building blocks shared by the Library screens: the inset-grouped look of iOS `.insetGrouped`
@@ -189,7 +191,7 @@ internal fun GroupedRow(
             .clip(position.shape())
             .background(OptioTheme.colors.card),
     ) {
-        if (position == CardPosition.MIDDLE || position == CardPosition.LAST) InsetDivider()
+        if (position == CardPosition.MIDDLE || position == CardPosition.LAST) RowSeparator()
         content()
     }
 }
@@ -197,6 +199,21 @@ internal fun GroupedRow(
 /** Air above a list's first card when it has no section header (iOS inset-grouped top margin). */
 internal fun LazyListScope.listTopSpace(key: String = "top-space") {
     item(key = key, contentType = "space") { Spacer(Modifier.height(Spacing.m)) }
+}
+
+/**
+ * The hairline between two rows of a grouped card in a lazy list: a 1px box inside the row (an
+ * [InsetDivider] at the row's clipped top edge would lose half its stroke to the clip).
+ */
+@Composable
+private fun RowSeparator() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = Spacing.l)
+            .height(hairline())
+            .background(OptioTheme.colors.separator),
+    )
 }
 
 /** A section header above a grouped card in a lazy list. */
@@ -253,7 +270,10 @@ internal fun LazyListScope.groupedCard(
     }
 }
 
-/** An inset-grouped card outside a lazy list (sheets, forms). Separate rows with [InsetDivider]. */
+/**
+ * An inset-grouped card outside a lazy list (sheets, forms). Separate rows with [InsetDivider]. A
+ * card without a [header] keeps the same air above it as one with.
+ */
 @Composable
 internal fun GroupedCard(
     modifier: Modifier = Modifier,
@@ -267,6 +287,9 @@ internal fun GroupedCard(
                 header,
                 contentPadding = PaddingValues(start = Spacing.l * 2, end = Spacing.l * 2, top = Spacing.l + Spacing.xs, bottom = Spacing.s),
             )
+        } else {
+            // The same air above a card as a section header gives (iOS section spacing).
+            Spacer(Modifier.height(Spacing.l + Spacing.xs))
         }
         Column(
             Modifier
@@ -549,14 +572,14 @@ internal fun <T> PickerRow(
             horizontalArrangement = Arrangement.spacedBy(Spacing.s),
         ) {
             Text(label, style = OptioTheme.type.body, color = if (enabled) colors.label else colors.tertiaryLabel, maxLines = 1)
-            Spacer(Modifier.weight(1f))
             Text(
                 selectedLabel,
                 style = OptioTheme.type.body,
                 color = colors.secondaryLabel,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
             )
             Icon(Icons.Outlined.UnfoldMore, contentDescription = null, tint = colors.tertiaryLabel, modifier = Modifier.size(18.dp))
         }
@@ -641,6 +664,9 @@ internal fun SwipeToDelete(
         },
         enableDismissFromStartToEnd = false,
         backgroundContent = {
+            // Nothing behind the row at rest: a red layer would bleed through the card's
+            // anti-aliased corners.
+            if (state.dismissDirection != SwipeToDismissBoxValue.EndToStart) return@SwipeToDismissBox
             Row(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.error).padding(horizontal = Spacing.l),
                 horizontalArrangement = Arrangement.End,
