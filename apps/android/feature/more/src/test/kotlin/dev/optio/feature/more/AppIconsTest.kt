@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.optio.feature.more.settings.AppIconOption
 import dev.optio.feature.more.settings.AppIcons
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -58,5 +59,13 @@ class AppIconsTest {
             }
             assertEquals(listOf(option), enabled, "after picking ${option.title}")
         }
+    }
+
+    @Test
+    fun onlyASessionStartedFromAnotherAliasClosesOnASwitch() {
+        assertTrue(AppIcons.closesApp(AppIconOption.DEFAULT.alias, AppIconOption.MIDNIGHT), "opened from the launcher")
+        assertFalse(AppIcons.closesApp(AppIconOption.MIDNIGHT.alias, AppIconOption.MIDNIGHT), "its own alias stays enabled")
+        assertFalse(AppIcons.closesApp("dev.optio.app.MainActivity", AppIconOption.MIDNIGHT), "opened by a notification or link")
+        assertFalse(AppIcons.closesApp(null, AppIconOption.MIDNIGHT), "no activity (previews)")
     }
 }

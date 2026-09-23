@@ -44,7 +44,24 @@ enum class AppIconOption(
     }
 }
 
-/** Reads and switches the launcher icon through the aliases' enabled states. */
+/**
+ * Reads and switches the launcher icon through the aliases' enabled states.
+ *
+ * Launcher caveats (Android has no alternate-icon API; this is the usual alias trick). Seen on an
+ * API 37 emulator with Pixel Launcher:
+ * - Disabling the alias a task was started from finishes that task: it leaves the screen and
+ *   Recents, although `DONT_KILL_APP` keeps the process alive. So a session opened from the
+ *   launcher closes when its icon is switched ([closesApp]; the picker asks first), while one
+ *   opened by a notification, widget or link (those start `MainActivity` itself) stays open.
+ * - The app drawer shows the new icon within a second or two. Launchers may drop a home-screen
+ *   icon of the old alias; the user adds Optio again from the drawer.
+ * - Static app shortcuts (`android.app.shortcuts` meta-data) are read only from the enabled
+ *   MAIN/LAUNCHER component, so they must be declared on every alias, not on `MainActivity`.
+ *   Dynamic shortcuts attach to whichever alias is enabled when they are published.
+ * - Themed (monochrome) icons use the default bot glyph for every alternate.
+ * - `adb shell am start -n dev.optio.android/dev.optio.app.MainActivity` keeps working: the
+ *   activity itself stays exported; only the MAIN/LAUNCHER entry moved to the aliases.
+ */
 object AppIcons {
     /**
      * The icon the launcher shows now: the first enabled alias ([AppIconOption.DEFAULT] when none
@@ -80,6 +97,16 @@ object AppIcons {
             false
         }
     }
+
+    /**
+     * Whether switching to [option] closes the running app: true when the activity was started
+     * from another launcher alias ([runningClass] is its `componentName.className`), since
+     * disabling that alias finishes its task.
+     */
+    fun closesApp(
+        runningClass: String?,
+        option: AppIconOption,
+    ): Boolean = runningClass != null && runningClass.startsWith(AppIconOption.ALIAS_PREFIX) && runningClass != option.alias
 
     fun component(
         packageName: String,

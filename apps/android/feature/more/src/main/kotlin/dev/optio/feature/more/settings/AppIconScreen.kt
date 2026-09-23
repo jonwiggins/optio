@@ -1,5 +1,6 @@
 package dev.optio.feature.more.settings
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,36 +40,62 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.optio.core.ui.components.ConfirmHost
+import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Radius
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.toast.LocalToaster
 import dev.optio.feature.more.ui.MoreScaffold
 
-/** `AppIconRoute` (iOS `AppIconPickerView`): the launcher icons, switched through activity aliases. */
+/**
+ * `AppIconRoute` (iOS `AppIconPickerView`): the launcher icons, switched through activity aliases.
+ * Opened from the launcher, the app runs under the current icon's alias and Android closes it when
+ * that alias is switched off ([AppIcons.closesApp]), so the picker asks first and then leaves.
+ */
 @Composable
 fun AppIconScreen() {
     val context = LocalContext.current
+    val activity = LocalActivity.current
     val toaster = LocalToaster.current
     val haptics = LocalHapticFeedback.current
+    val confirm = rememberConfirmState()
     var selected by remember { mutableStateOf(AppIcons.current(context)) }
+
+    fun switchTo(
+        option: AppIconOption,
+        closing: Boolean,
+    ) {
+        val previous = selected
+        selected = option
+        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        if (!AppIcons.select(context, option)) {
+            selected = previous
+            toaster.error("This build doesn't include alternate app icons.")
+        } else if (closing) {
+            // Android finishes this task now that its alias is off; leave cleanly instead of racing it.
+            activity?.finishAndRemoveTask()
+        }
+    }
     MoreScaffold("App icon") { padding ->
         AppIconContent(
             selected = selected,
             contentPadding = padding,
             onSelect = { option ->
-                if (option != selected) {
-                    val previous = selected
-                    selected = option
-                    haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                    if (!AppIcons.select(context, option)) {
-                        selected = previous
-                        toaster.error("This build doesn't include alternate app icons.")
-                    }
+                when {
+                    option == selected -> Unit
+                    AppIcons.closesApp(activity?.componentName?.className, option) ->
+                        confirm.ask(
+                            title = "Switch to ${option.title}?",
+                            message = "Android closes Optio to change its icon. Open it again from your home screen or app drawer.",
+                            confirmLabel = "Switch icon",
+                        ) { switchTo(option, closing = true) }
+                    else -> switchTo(option, closing = false)
                 }
             },
         )
     }
+    ConfirmHost(confirm)
 }
 
 /** The icon grid, stateless. */
@@ -96,8 +123,8 @@ fun AppIconContent(
         }
         item(span = { GridItemSpan(maxLineSpan) }, key = "footer") {
             Text(
-                "Your launcher shows the new icon within a few seconds. Some launchers drop the old icon from the " +
-                    "home screen; add Optio again from the app drawer.",
+                "Your launcher shows the new icon within a few seconds. Opened from the launcher, Optio closes to " +
+                    "switch icons. Some launchers drop the old icon from the home screen; add Optio again from the app drawer.",
                 style = OptioTheme.type.footnote,
                 color = OptioTheme.colors.secondaryLabel,
             )
