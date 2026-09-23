@@ -4,7 +4,7 @@
 #   emu.sh start [--port N] [--avd NAME] [--window] [--gpu MODE] [--timeout SECS] [--reuse]
 #   emu.sh stop <serial|port> [--force] [--timeout SECS]
 #   emu.sh list
-#   emu.sh http <serial|port> <url>     GET <url> from inside the device (toybox nc) and print it
+#   emu.sh http <serial|port> <url> [--token T]   GET <url> from inside the device (toybox nc)
 #
 # `start` prints ONLY the serial (emulator-N) on stdout, so `SERIAL=$(emu.sh start --port 5562)`
 # works; progress and errors go to stderr. Instances run with -read-only: several can share the
@@ -381,12 +381,19 @@ $(ps -ax -o command= 2>/dev/null | awk '/qemu-system/ {for (i = 1; i < NF; i++) 
 # GET a URL from inside the device with toybox nc (no curl/wget in the image) — handy to check
 # that the app will reach an API: `emu.sh http emulator-5562 http://10.0.2.2:4961/api/health`.
 cmd_http() {
-  [ $# -eq 2 ] || die "usage: emu.sh http <serial|port> <http://host:port/path>"
+  [ $# -eq 2 ] || [ $# -eq 4 ] || die "usage: emu.sh http <serial|port> <http://host:port/path> [--token PAT]"
   need_tools
-  local port serial url hostport host hport path
+  local port serial url hostport host hport path auth=""
   port="$(parse_target "$1")"
   serial="emulator-$port"
   url="$2"
+  if [ $# -eq 4 ]; then
+    [ "$3" = "--token" ] || die "unknown option '$3'"
+    case "$4" in
+      *[!A-Za-z0-9_-]*) die "unexpected characters in the token" ;;
+    esac
+    auth="Authorization: Bearer $4\\r\\n"
+  fi
   case "$url" in
     http://*) ;;
     *) die "only plain http:// URLs are supported, got '$url'" ;;
@@ -399,7 +406,7 @@ cmd_http() {
   hport="${hostport##*:}"
   [ "$hport" = "$hostport" ] && hport=80
   # Keep stdin open briefly: an adb-reverse tunnel answers a beat after the request goes out.
-  "$ADB" -s "$serial" shell "(printf 'GET $path HTTP/1.0\r\nHost: $hostport\r\nConnection: close\r\n\r\n'; sleep 1) | nc -w 5 -W 5 $host $hport" |
+  "$ADB" -s "$serial" shell "(printf 'GET $path HTTP/1.0\r\nHost: $hostport\r\n${auth}Connection: close\r\n\r\n'; sleep 1) | nc -w 5 -W 5 $host $hport" |
     tr -d '\r'
 }
 

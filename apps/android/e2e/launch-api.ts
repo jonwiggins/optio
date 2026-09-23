@@ -7,7 +7,12 @@
  * stops the API and drops the private database.
  *
  * Start it with apps/android/scripts/test-api.sh, which backgrounds it and waits for `ready`:
- *   tsx apps/android/e2e/launch-api.ts [--port 4961] [--run-dir DIR] [--no-seed] [--log-level warn]
+ *   tsx apps/android/e2e/launch-api.ts [--port 4961] [--auth] [--run-dir DIR] [--no-seed] [--log-level warn]
+ *
+ * --auth runs the API with authentication ENABLED: it first creates real users (admin, member,
+ * viewer, and one outside the workspace), a workspace and personal access tokens, then seeds
+ * everything through the admin's PAT and records the tokens in seed.json (`auth`). Default port
+ * with --auth is 4980.
  *
  * It runs on the same Mac as the user's real Optio, so it is hermetic on purpose:
  *  - it listens on 127.0.0.1 only; an emulator reaches it at http://10.0.2.2:<port>;
@@ -21,7 +26,7 @@
  *    caller's shell are not inherited.
  */
 import { execFileSync } from "node:child_process";
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
@@ -37,19 +42,22 @@ interface Args {
   port: number;
   runDir: string;
   seed: boolean;
+  auth: boolean;
   logLevel: string;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { port: 4961, runDir: "", seed: true, logLevel: "warn" };
+  const args: Args = { port: 0, runDir: "", seed: true, auth: false, logLevel: "warn" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--port") args.port = Number(argv[++i]);
     else if (a === "--run-dir") args.runDir = resolve(argv[++i]);
     else if (a === "--no-seed") args.seed = false;
+    else if (a === "--auth") args.auth = true;
     else if (a === "--log-level") args.logLevel = argv[++i];
     else throw new Error(`unknown argument ${a}`);
   }
+  args.port ||= args.auth ? 4980 : 4961;
   if (!Number.isInteger(args.port) || args.port < 1024 || args.port > 65535) {
     throw new Error(`invalid --port ${args.port}`);
   }
@@ -74,6 +82,7 @@ const serverState: Record<string, unknown> = {
   baseUrl: API_URL,
   emulatorBaseUrl: EMULATOR_API_URL,
   pid: process.pid,
+  auth: ARGS.auth,
   repoRoot: REPO_ROOT,
   startedAt: new Date().toISOString(),
 };
@@ -87,6 +96,129 @@ function writeJsonAtomic(path: string, value: unknown): void {
 function setState(patch: Record<string, unknown>): void {
   Object.assign(serverState, patch);
   writeJsonAtomic(join(ARGS.runDir, "server.json"), serverState);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Auth-enabled mode (--auth). Principals are created in the private database before the API
+// boots, like the API's own auth e2e test (apps/api/e2e/rbac.e2e.test.ts), but through the API's
+// services: users are upserted exactly as an OAuth login upserts them (createSession), the
+// workspaces and memberships come from workspace-service, and the personal access tokens from
+// api-key-service (`optio_pat_…`, stored as the SHA-256 hash the auth plugin looks up).
+
+type Role = "admin" | "member" | "viewer";
+
+interface Principal {
+  id: string;
+  email: string;
+  displayName: string;
+  username: string;
+  /** Role in the main workspace; null for the user who is in no workspace yet. */
+  role: Role | null;
+}
+
+interface TokenPrincipal extends Principal {
+  token: string;
+  tokenId: string;
+}
+
+interface AuthContext {
+  workspace: { id: string; slug: string; name: string };
+  secondWorkspace: { id: string; slug: string; name: string };
+  admin: TokenPrincipal;
+  member: TokenPrincipal;
+  viewer: TokenPrincipal;
+  outsider: Principal;
+}
+
+let AUTH: AuthContext | null = null;
+
+/** The token seed requests and sockets authenticate with: the admin's PAT, or any string. */
+function seedToken(): string {
+  return AUTH?.admin.token ?? "dev";
+}
+
+/** Bearer + workspace headers for a seed request (none when auth is disabled). */
+function authHeaders(token?: string): Record<string, string> {
+  if (!AUTH) return {};
+  return {
+    authorization: `Bearer ${token ?? AUTH.admin.token}`,
+    "x-workspace-id": AUTH.workspace.id,
+  };
+}
+
+/** WebSocket subprotocols carrying a token, as every Optio client sends them. */
+function wsProtocols(token = seedToken()): string[] {
+  return ["optio-ws-v1", `optio-auth-${token}`];
+}
+
+async function createPrincipals(): Promise<AuthContext> {
+  // The API's own services, imported only now: their DB client binds to DATABASE_URL on import.
+  const { createSession } = await import("../../api/src/services/session-service.js");
+  const { createWorkspace, addMember, switchWorkspace } =
+    await import("../../api/src/services/workspace-service.js");
+  const { createApiKey } = await import("../../api/src/services/api-key-service.js");
+  const { db } = await import("../../api/src/db/client.js");
+  try {
+    const person = async (
+      handle: string,
+      displayName: string,
+      role: Role | null,
+    ): Promise<Principal> => {
+      const { user } = await createSession("github", {
+        externalId: `devlab-${handle}`,
+        email: `${handle}@example.com`,
+        displayName,
+        username: handle,
+      });
+      return {
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        username: handle,
+        role,
+      };
+    };
+    const admin = await person("ada-admin", "Ada Admin", "admin");
+    const member = await person("mia-member", "Mia Member", "member");
+    const viewer = await person("vic-viewer", "Vic Viewer", "viewer");
+    // Exists (can be looked up by email and invited) but belongs to no workspace.
+    const outsider = await person("noor-newcomer", "Noor Newcomer", null);
+
+    // The creator becomes admin and, having no default yet, lands in the first workspace.
+    const main = await createWorkspace(
+      { name: "Android DevLab", slug: "android-devlab", description: "Seeded by apps/android/e2e" },
+      admin.id,
+    );
+    const side = await createWorkspace(
+      {
+        name: "Side project",
+        slug: "side-project",
+        description: "A second workspace to switch to",
+      },
+      admin.id,
+    );
+    for (const p of [member, viewer]) {
+      await addMember(main.id, p.id, p.role as Role);
+      await switchWorkspace(p.id, main.id);
+    }
+    const withToken = async (p: Principal): Promise<TokenPrincipal> => {
+      const key = await createApiKey(p.id, `Android dev lab (${p.role})`);
+      return { ...p, token: key.token, tokenId: key.tokenId };
+    };
+    return {
+      workspace: { id: main.id, slug: main.slug, name: main.name },
+      secondWorkspace: { id: side.id, slug: side.slug, name: side.name },
+      admin: await withToken(admin),
+      member: await withToken(member),
+      viewer: await withToken(viewer),
+      outsider,
+    };
+  } finally {
+    // Everything after this goes over HTTP: release this process's connection pool.
+    const client = (db as unknown as { $client?: { end(o?: { timeout?: number }): Promise<void> } })
+      .$client;
+    await client?.end({ timeout: 5 }).catch(() => undefined);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -381,7 +513,7 @@ async function startFakeKube(): Promise<string> {
 /** Credentials and settings a developer's shell may carry that must not reach the test API. */
 const STRIPPED_ENV = [
   /^OPTIO_(?!TEST_)/,
-  /^(GITHUB|GH|GITLAB|LINEAR|SLACK|SENTRY|NOTION)_/,
+  /^(GITHUB|GH|GITLAB|LINEAR|SLACK|SENTRY|NOTION|OIDC)_/,
   /^(ANTHROPIC|OPENAI|GEMINI|GOOGLE|CURSOR|OPENCODE)_/,
   /^CLAUDE_CODE_OAUTH_TOKEN$/,
   /^AWS_/,
@@ -429,15 +561,14 @@ class ScriptedDaemon {
   private ws!: WebSocket;
   private spawns: DaemonFrame[] = [];
   private waiters: Array<(f: DaemonFrame) => void> = [];
+  private pongs = 0;
 
   async connect(hostId: string, dirs: Array<{ path: string; repoUrl?: string }>): Promise<void> {
-    this.ws = new WebSocket(`ws://127.0.0.1:${ARGS.port}/ws/local/daemon`, [
-      "optio-ws-v1",
-      "optio-auth-dev",
-    ]);
+    this.ws = new WebSocket(`ws://127.0.0.1:${ARGS.port}/ws/local/daemon`, wsProtocols());
     this.ws.addEventListener("message", (ev) => {
       if (typeof ev.data !== "string") return;
       const frame = JSON.parse(ev.data) as DaemonFrame;
+      if (frame.type === "pong") this.pongs += 1;
       if (frame.type !== "spawn") return;
       const waiter = this.waiters.shift();
       if (waiter) waiter(frame);
@@ -449,14 +580,27 @@ class ScriptedDaemon {
         once: true,
       });
     });
-    this.send({
+    // With auth enabled the server attaches its message listener only after the PAT lookup, so
+    // a hello sent right on `open` is usually dropped (then 4408 "Expected hello" after 10 s).
+    // Confirm it: the server answers `ping` with `pong` only once a hello was accepted, and
+    // ignores a duplicate hello, so re-send until a pong comes back.
+    const hello = {
       type: "hello",
       hostId,
       daemonVersion: "0.1.0-devlab-playback",
       dirs,
       terminals: [],
       claudeCredentials: false,
-    });
+    };
+    for (let attempt = 0; attempt < 20 && this.pongs === 0; attempt++) {
+      this.send(hello);
+      this.send({ type: "ping" });
+      const deadline = Date.now() + 500;
+      while (this.pongs === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+    if (this.pongs === 0) throw new Error("the daemon hello was never accepted");
   }
 
   send(frame: DaemonFrame): void {
@@ -661,11 +805,19 @@ const LAPTOP_DIRS = [
 
 type Json = Record<string, any>;
 
-async function api<T = Json>(path: string, body?: unknown, method?: string): Promise<T> {
+async function api<T = Json>(
+  path: string,
+  body?: unknown,
+  method?: string,
+  token?: string,
+): Promise<T> {
   const verb = method ?? (body === undefined ? "GET" : "POST");
   const res = await fetch(`${API_URL}${path}`, {
     method: verb,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
+    headers: {
+      ...authHeaders(token),
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -729,6 +881,7 @@ async function githubEvent(event: string, payload: Json): Promise<void> {
   const res = await fetch(`${API_URL}/api/webhooks/github`, {
     method: "POST",
     headers: {
+      ...authHeaders(),
       "content-type": "application/json",
       "x-github-event": event,
       "x-github-delivery": randomUUID(),
@@ -742,10 +895,10 @@ async function githubEvent(event: string, payload: Json): Promise<void> {
 /** One message on a pod session's chat socket; resolves once the fake agent's turn ends. */
 function sessionChat(sessionId: string, content: string): Promise<void> {
   return new Promise((resolveChat, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${ARGS.port}/ws/sessions/${sessionId}/chat`, [
-      "optio-ws-v1",
-      "optio-auth-dev",
-    ]);
+    const ws = new WebSocket(
+      `ws://127.0.0.1:${ARGS.port}/ws/sessions/${sessionId}/chat`,
+      wsProtocols(),
+    );
     const timer = setTimeout(() => {
       ws.close();
       reject(new Error("no chat reply within 30s"));
@@ -789,21 +942,54 @@ function sessionChat(sessionId: string, content: string): Promise<void> {
   });
 }
 
-async function seed(): Promise<Json> {
-  const errors: Array<{ step: string; error: string }> = [];
-  const m: Json = {
+/** The manifest every run writes: API coordinates, and (with --auth) the principals. */
+function baseManifest(): Json {
+  return {
     version: 1,
     generatedAt: new Date().toISOString(),
     api: {
       port: ARGS.port,
       baseUrl: API_URL,
       emulatorBaseUrl: EMULATOR_API_URL,
-      token: "dev",
-      authDisabled: true,
+      // What a client sends: any string with auth disabled, the admin's PAT with --auth.
+      token: seedToken(),
+      authDisabled: !AUTH,
       githubWebhookSecret: DEV_GITHUB_WEBHOOK_SECRET,
     },
-    errors,
+    errors: [],
+    ...(AUTH ? { auth: authManifest(AUTH) } : {}),
   };
+}
+
+function authManifest(a: AuthContext): Json {
+  const person = (p: Principal) => pick(p, "id", "email", "displayName", "username", "role");
+  return {
+    enabled: true,
+    workspaceId: a.workspace.id,
+    workspaceSlug: a.workspace.slug,
+    workspaceName: a.workspace.name,
+    secondWorkspaceId: a.secondWorkspace.id,
+    adminToken: a.admin.token,
+    memberToken: a.member.token,
+    viewerToken: a.viewer.token,
+    userIds: {
+      admin: a.admin.id,
+      member: a.member.id,
+      viewer: a.viewer.id,
+      outsider: a.outsider.id,
+    },
+    users: {
+      admin: { ...person(a.admin), apiKeyId: a.admin.tokenId },
+      member: { ...person(a.member), apiKeyId: a.member.tokenId },
+      viewer: { ...person(a.viewer), apiKeyId: a.viewer.tokenId },
+      outsider: person(a.outsider),
+    },
+  };
+}
+
+async function seed(): Promise<Json> {
+  const m = baseManifest();
+  const errors = m.errors as Array<{ step: string; error: string }>;
   const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | undefined> => {
     try {
       return await fn();
@@ -1200,6 +1386,8 @@ async function seed(): Promise<Json> {
     m.local = await seedLocal();
   });
 
+  if (AUTH) await seedAuthExtras(m, AUTH, step);
+
   if (m.local?.offlineHost) {
     // A Task whose run location is the (offline) laptop: it stays queued, its terminal parked.
     await step("task: queued on the offline laptop", async () => {
@@ -1359,6 +1547,241 @@ async function seedLocal(): Promise<Json> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Auth-enabled extras and self-checks.
+
+type Step = <T>(name: string, fn: () => Promise<T>) => Promise<T | undefined>;
+
+/** Data only an authenticated server has: more keys, preferences, a push device, other authors. */
+async function seedAuthExtras(m: Json, a: AuthContext, step: Step): Promise<void> {
+  await step("auth: a second, expiring API key for the admin", async () => {
+    const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+    const key = await api("/api/auth/api-keys", { name: "Pixel 9 emulator", expiresAt });
+    m.auth.users.admin.extraApiKey = { id: key.tokenId, name: key.name, expiresAt };
+  });
+  await step("auth: non-default notification preferences", async () => {
+    await api(
+      "/api/notifications/preferences",
+      { "task.stalled": { push: true }, "agent.turn_completed": { push: false } },
+      "PUT",
+    );
+  });
+  // An iOS device (the only platform the API registers today). APNs is not configured on the
+  // test API, so nothing is ever pushed to it.
+  await step("auth: a registered iOS push device", async () => {
+    const { device } = await api("/api/notifications/devices", {
+      token: randomBytes(32).toString("hex"),
+      platform: "ios",
+      environment: "sandbox",
+      bundleId: "dev.optio.ios",
+      appVersion: "1.0 (devlab)",
+      deviceName: "Ada's iPhone",
+    });
+    m.auth.pushDeviceId = device.id;
+  });
+  if (m.tasks?.prOpened) {
+    await step("auth: a comment by the member", async () => {
+      const body = await api(
+        `/api/tasks/${m.tasks.prOpened.id}/comments`,
+        { content: "Could you attach a screenshot of the dark theme?" },
+        "POST",
+        a.member.token,
+      );
+      m.tasks.prOpened.memberCommentId = (body.comment ?? body).id;
+    });
+  }
+}
+
+interface AuthCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+interface WsProbe {
+  outcome: "message" | "open" | "closed";
+  code?: number;
+  reason?: string;
+  first?: string;
+}
+
+/** Open a socket and report whether the server let it in: a frame, still open, or closed. */
+function probeWs(path: string, protocols: string[], waitMs = 1500): Promise<WsProbe> {
+  return new Promise((resolveProbe) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${ARGS.port}${path}`, protocols);
+    let settled = false;
+    const finish = (result: WsProbe) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        ws.close();
+      } catch {
+        /* already closed */
+      }
+      resolveProbe(result);
+    };
+    const timer = setTimeout(() => finish({ outcome: "open" }), waitMs);
+    ws.addEventListener("message", (ev) =>
+      finish({
+        outcome: "message",
+        first: typeof ev.data === "string" ? ev.data.slice(0, 60) : "<binary>",
+      }),
+    );
+    ws.addEventListener("close", (ev) =>
+      finish({ outcome: "closed", code: ev.code, reason: ev.reason }),
+    );
+    ws.addEventListener("error", () => {
+      /* a close event follows */
+    });
+  });
+}
+
+/**
+ * Proves the auth-enabled server behaves: the user-scoped routes answer the PATs, roles gate
+ * writes, and sockets accept a PAT or a single-use /api/auth/ws-token token in the subprotocol.
+ * HTTP checks send only the token (no x-workspace-id), as a freshly paired app does.
+ */
+async function runAuthChecks(m: Json, a: AuthContext): Promise<AuthCheck[]> {
+  const checks: AuthCheck[] = [];
+  const http = async (
+    name: string,
+    token: string | null,
+    method: string,
+    path: string,
+    expect: number,
+    verify?: (body: any) => string | null,
+    body?: unknown,
+  ) => {
+    let detail = `${method} ${path} → `;
+    let ok = false;
+    try {
+      const res = await fetch(`${API_URL}${path}`, {
+        method,
+        headers: {
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => null);
+      const problem = res.status === expect && verify ? verify(json) : null;
+      ok = res.status === expect && !problem;
+      detail += `${res.status}${problem ? ` (${problem})` : ""}`;
+    } catch (err) {
+      detail += `request failed: ${err instanceof Error ? err.message : err}`;
+    }
+    checks.push({ name, ok, detail: `${detail} [expected ${expect}]` });
+  };
+  const ws = async (name: string, path: string, protocols: string[], expect: "in" | number) => {
+    const r = await probeWs(path, protocols);
+    const ok =
+      expect === "in" ? r.outcome !== "closed" : r.outcome === "closed" && r.code === expect;
+    const got =
+      r.outcome === "closed"
+        ? `closed ${r.code}${r.reason ? ` "${r.reason}"` : ""}`
+        : r.outcome === "message"
+          ? `accepted, first frame ${r.first}`
+          : "accepted, still open after 1.5 s";
+    checks.push({
+      name,
+      ok,
+      detail: `WS ${path} → ${got} [expected ${expect === "in" ? "accepted" : `close ${expect}`}]`,
+    });
+  };
+  const role = (want: Role) => (b: any) =>
+    b?.user?.workspaceRole === want && b?.user?.workspaceId === a.workspace.id
+      ? null
+      : `workspaceRole=${b?.user?.workspaceRole} workspaceId=${b?.user?.workspaceId}`;
+  const count = (key: string, min: number) => (b: any) =>
+    (b?.[key]?.length ?? 0) >= min ? null : `${b?.[key]?.length ?? "no"} ${key}`;
+  const lookup = `/api/users/lookup?email=${encodeURIComponent(a.outsider.email)}`;
+
+  await http("admin: /api/auth/me", a.admin.token, "GET", "/api/auth/me", 200, role("admin"));
+  await http("admin: /api/glance/watch", a.admin.token, "GET", "/api/glance/watch", 200);
+  await http(
+    "admin: /api/notifications/devices",
+    a.admin.token,
+    "GET",
+    "/api/notifications/devices",
+    200,
+  );
+  await http(
+    "admin: /api/notifications/preferences",
+    a.admin.token,
+    "GET",
+    "/api/notifications/preferences",
+    200,
+  );
+  await http(
+    "admin: /api/workspaces",
+    a.admin.token,
+    "GET",
+    "/api/workspaces",
+    200,
+    count("workspaces", 2),
+  );
+  await http(
+    "admin: workspace members",
+    a.admin.token,
+    "GET",
+    `/api/workspaces/${a.workspace.id}/members`,
+    200,
+    count("members", 3),
+  );
+  await http(
+    "admin: /api/auth/api-keys",
+    a.admin.token,
+    "GET",
+    "/api/auth/api-keys",
+    200,
+    count("keys", 1),
+  );
+  await http("admin: /api/users/lookup", a.admin.token, "GET", lookup, 200, (b) =>
+    b?.user?.id === a.outsider.id ? null : "wrong user",
+  );
+  await http("admin: /api/auth/ws-token", a.admin.token, "GET", "/api/auth/ws-token", 200, (b) =>
+    typeof b?.token === "string" && b.token !== "auth-disabled" ? null : "no token",
+  );
+  await http("member: /api/auth/me", a.member.token, "GET", "/api/auth/me", 200, role("member"));
+  await http(
+    "member: secrets are admin-only",
+    a.member.token,
+    "POST",
+    "/api/secrets",
+    403,
+    undefined,
+    {
+      name: "DEVLAB_ROLE_CHECK",
+      value: "should-not-be-stored",
+    },
+  );
+  await http("member: user lookup is admin-only", a.member.token, "GET", lookup, 403);
+  await http("viewer: /api/auth/me", a.viewer.token, "GET", "/api/auth/me", 200, role("viewer"));
+  await http("viewer: read-only", a.viewer.token, "POST", "/api/jobs", 403, undefined, {
+    name: "viewer job",
+    promptTemplate: "nope",
+    agentRuntime: "claude-code",
+  });
+  await http("no token", null, "GET", "/api/tasks", 401);
+  await http("unknown PAT", `optio_pat_${"0".repeat(64)}`, "GET", "/api/auth/me", 401);
+
+  await ws("WS: admin PAT", "/ws/events", wsProtocols(a.admin.token), "in");
+  const wsToken = await api<{ token: string }>("/api/auth/ws-token")
+    .then((b) => b.token)
+    .catch(() => "unavailable");
+  await ws("WS: /api/auth/ws-token token", "/ws/events", wsProtocols(wsToken), "in");
+  await ws("WS: ws-token is single-use", "/ws/events", wsProtocols(wsToken), 4401);
+  await ws("WS: no token", "/ws/events", ["optio-ws-v1"], 4401);
+  const terminalId = m.local?.recordedAgentSession?.terminalId;
+  if (terminalId) {
+    const stream = `/ws/local/terminals/${terminalId}/stream`;
+    await ws("WS: terminal stream, owner's PAT", stream, wsProtocols(a.admin.token), "in");
+    await ws("WS: terminal stream, another user's PAT", stream, wsProtocols(a.member.token), 4403);
+  }
+  return checks;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Lifecycle.
 
 let apiServer: ApiServerHandle | undefined;
@@ -1427,8 +1850,15 @@ async function main(): Promise<void> {
     stdio: ["ignore", "inherit", "inherit"],
   });
   await provisionDatabase();
+  if (ARGS.auth) {
+    log("auth enabled: creating users, workspaces and personal access tokens...");
+    AUTH = await createPrincipals();
+    setState({ workspaceId: AUTH.workspace.id });
+  }
 
-  log(`starting the API server on ${API_URL} (fake runtime, auth disabled)...`);
+  log(
+    `starting the API server on ${API_URL} (fake runtime, auth ${ARGS.auth ? "ENABLED" : "disabled"})...`,
+  );
   apiServer = await startApiServer({
     port: ARGS.port,
     logLevel: ARGS.logLevel,
@@ -1436,6 +1866,7 @@ async function main(): Promise<void> {
     env: {
       ...apiEnv,
       ...API_ENV_OVERRIDES,
+      OPTIO_AUTH_DISABLED: ARGS.auth ? "false" : "true",
     },
   });
   const api = apiServer;
@@ -1454,16 +1885,36 @@ async function main(): Promise<void> {
   setState({ apiPid: api.proc.pid });
   log(`API healthy at ${API_URL}`);
 
+  let manifest: Json | null = null;
   if (ARGS.seed) {
     setState({ phase: "seeding" });
-    const manifest = await seed();
+    manifest = await seed();
+  } else if (AUTH) {
+    manifest = baseManifest(); // no data, but the tokens
+  }
+  if (AUTH && manifest) {
+    setState({ phase: "checking auth" });
+    const checks = await runAuthChecks(manifest, AUTH);
+    const failed = checks.filter((c) => !c.ok);
+    manifest.auth.checks = checks;
+    for (const c of failed) {
+      (manifest.errors as Json[]).push({ step: `auth check: ${c.name}`, error: c.detail });
+      log(`auth check failed: ${c.name}: ${c.detail}`);
+    }
+    log(`auth checks: ${checks.length - failed.length}/${checks.length} passed`);
+    setState({ authChecks: `${checks.length - failed.length}/${checks.length} passed` });
+  }
+  if (manifest) {
     writeJsonAtomic(join(ARGS.runDir, "seed.json"), manifest);
     const errors = (manifest.errors as unknown[]).length;
     log(`seed complete${errors ? ` with ${errors} skipped step(s), see seed.json "errors"` : ""}`);
     setState({ seedErrors: errors });
   }
   setState({ phase: "ready", readyAt: new Date().toISOString() });
-  log(`ready: host ${API_URL}, emulator ${EMULATOR_API_URL}`);
+  log(
+    `ready: host ${API_URL}, emulator ${EMULATOR_API_URL}` +
+      (AUTH ? " (auth enabled; tokens under `auth` in seed.json)" : ""),
+  );
 }
 
 main().catch((err) => {

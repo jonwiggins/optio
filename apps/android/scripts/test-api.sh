@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Private Optio API for Android dev and tests: the REAL API server with the fake container
-# runtime, auth disabled, a private Postgres database and Redis DB, and seeded data.
+# runtime, auth disabled by default, a private Postgres database and Redis DB, and seeded data.
 #
-#   test-api.sh start  [--port N] [--no-seed] [--timeout SECS] [--log-level LEVEL]
-#   test-api.sh stop   [--port N] [--force]
-#   test-api.sh status [--port N | --all]
+#   test-api.sh start  [--auth] [--port N] [--no-seed] [--timeout SECS] [--log-level LEVEL]
+#   test-api.sh stop   [--auth] [--port N] [--force]
+#   test-api.sh status [--auth] [--port N | --all]
 #
-# Port 4961 is the shared instance; use 4962-4979 for a private one. The host reaches it at
+# Port 4961 is the shared instance; use 4962-4979 for a private one. --auth runs the API with
+# authentication ENABLED (real users, a workspace, personal access tokens; see seed.json `auth`)
+# and defaults to port 4980, the shared auth-enabled instance. The host reaches it at
 # http://127.0.0.1:<port>, an emulator at http://10.0.2.2:<port> (it listens on loopback only).
 # State lives in apps/android/e2e/.run/<port>/: api.log, launcher.pid, api.pid, server.json and
 # seed.json (the seeded ids). `start` returns once the API is healthy AND seeding finished.
@@ -71,12 +73,26 @@ owner_run_dir() { # prints the run dir of a live instance on <port>, preferring 
   if [ -n "$dir" ] && pid_alive "$(launcher_pid_of "$dir")"; then echo "$dir"; fi
 }
 
+# The token a client should send (from seed.json: the admin PAT with --auth, else "dev").
+seed_token() {
+  [ -f "$1/seed.json" ] || return 0
+  node -e 'try { const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (s.api && s.api.token) console.log(s.api.token) } catch {}' "$1/seed.json"
+}
+
 print_summary() {
   local port="$1" dir="$2"
   echo "Optio test API on port $port"
   echo "  host URL:      http://127.0.0.1:$port"
   echo "  emulator URL:  http://10.0.2.2:$port"
   echo "  health:        $(healthy "$port" && echo healthy || echo 'NOT healthy')"
+  if [ "$(json_field "$dir/server.json" auth)" = "true" ]; then
+    local tok
+    tok="$(seed_token "$dir")"
+    echo "  auth:          ENABLED ($(json_field "$dir/server.json" authChecks)); admin PAT ${tok:0:16}…"
+    echo "                 tokens: node -p 'require(\"$dir/seed.json\").auth.adminToken' (memberToken, viewerToken)"
+  else
+    echo "  auth:          disabled (any token works)"
+  fi
   echo "  phase:         $(json_field "$dir/server.json" phase)"
   echo "  launcher pid:  $(launcher_pid_of "$dir")   api pid: $(read_file "$dir/api.pid")"
   echo "  database:      $(json_field "$dir/server.json" dbName)"
@@ -91,12 +107,16 @@ kill_group_or_pid() { # <pid> <signal>
   kill "-$2" -- "-$1" 2>/dev/null || kill "-$2" "$1" 2>/dev/null || true
 }
 
+# Default port for a mode: the shared auth-enabled instance lives on 4980.
+default_port() { [ "$1" = 1 ] && echo 4980 || echo 4961; }
+
 cmd_start() {
-  local port=4961 seed=1 timeout=420 level="warn"
+  local port="" seed=1 timeout=420 level="warn" auth=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --port) port="${2:-}"; shift 2 ;;
       --port=*) port="${1#*=}"; shift ;;
+      --auth) auth=1; shift ;;
       --no-seed) seed=0; shift ;;
       --timeout) timeout="${2:-}"; shift 2 ;;
       --log-level) level="${2:-}"; shift 2 ;;
@@ -104,11 +124,17 @@ cmd_start() {
       *) die "start: unknown option '$1'" ;;
     esac
   done
+  [ -n "$port" ] || port="$(default_port "$auth")"
   validate_port "$port"
 
   local existing
   existing="$(owner_run_dir "$port")"
   if [ -n "$existing" ]; then
+    local running_auth=0
+    [ "$(json_field "$existing/server.json" auth)" = "true" ] && running_auth=1
+    if [ "$running_auth" != "$auth" ]; then
+      die "port $port already runs an auth-$([ "$running_auth" = 1 ] && echo enabled || echo disabled) test API; stop it first or pick another port"
+    fi
     if [ "$(json_field "$existing/server.json" phase)" = "ready" ] && healthy "$port"; then
       log "already running (launcher pid $(launcher_pid_of "$existing"))"
       print_summary "$port" "$existing"
@@ -131,6 +157,7 @@ cmd_start() {
 
   local args=("$E2E_DIR/launch-api.ts" --port "$port" --run-dir "$dir" --log-level "$level")
   [ "$seed" = 1 ] || args+=(--no-seed)
+  [ "$auth" = 1 ] && args+=(--auth)
   # New session so the launcher (and the API it spawns) outlive this shell. `exec` keeps one pid
   # from the subshell through nohup and perl to tsx, so $! is the launcher itself.
   (cd "$REPO_ROOT/apps/api" && exec nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec failed: $!\n"' \
@@ -139,7 +166,7 @@ cmd_start() {
   echo "$lpid" >"$dir/launcher.pid"
   mkdir -p "$REGISTRY"
   ln -sfn "$dir" "$REGISTRY/$port"
-  log "starting on port $port (launcher pid $lpid, log $dir/api.log)"
+  log "starting on port $port$([ "$auth" = 1 ] && echo ", auth ENABLED") (launcher pid $lpid, log $dir/api.log)"
 
   local started phase
   started="$(now)"
@@ -190,16 +217,18 @@ stop_dir() { # <port> <run dir>
 }
 
 cmd_stop() {
-  local port=4961 force=0
+  local port="" force=0 auth=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --port) port="${2:-}"; shift 2 ;;
       --port=*) port="${1#*=}"; shift ;;
+      --auth) auth=1; shift ;;
       --force) force=1; shift ;;
       -h | --help) usage; exit 0 ;;
       *) die "stop: unknown option '$1'" ;;
     esac
   done
+  [ -n "$port" ] || port="$(default_port "$auth")"
   validate_port "$port"
   local dir
   dir="$(owner_run_dir "$port")"
@@ -223,11 +252,12 @@ cmd_stop() {
 }
 
 cmd_status() {
-  local port=4961 all=0
+  local port="" all=0 auth=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --port) port="${2:-}"; shift 2 ;;
       --port=*) port="${1#*=}"; shift ;;
+      --auth) auth=1; shift ;;
       --all) all=1; shift ;;
       -h | --help) usage; exit 0 ;;
       *) die "status: unknown option '$1'" ;;
@@ -251,6 +281,7 @@ cmd_status() {
     [ "$any" = 1 ] || echo "no test API instances running"
     return 0
   fi
+  [ -n "$port" ] || port="$(default_port "$auth")"
   validate_port "$port"
   local dir
   dir="$(owner_run_dir "$port")"
