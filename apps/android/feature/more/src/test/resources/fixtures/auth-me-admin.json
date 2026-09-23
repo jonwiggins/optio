@@ -1,0 +1,13 @@
+{
+  "user": {
+    "id": "d38f2c32-5be0-48ba-84f6-3138f208f841",
+    "provider": "github",
+    "email": "ada-admin@example.com",
+    "displayName": "Ada Admin",
+    "username": "ada-admin",
+    "avatarUrl": null,
+    "workspaceId": "35802f88-a258-4eca-9817-be325718ab9e",
+    "workspaceRole": "admin"
+  },
+  "authDisabled": false
+}

@@ -1,0 +1,10 @@
+{
+  "subscription": {
+    "available": false,
+    "error": "No Claude subscription credentials found on this host"
+  },
+  "authFailures": {
+    "claude": false,
+    "github": false
+  }
+}

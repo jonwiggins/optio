@@ -1,0 +1,16 @@
+{
+  "workspaces": [
+    {
+      "id": "35802f88-a258-4eca-9817-be325718ab9e",
+      "name": "Android DevLab",
+      "slug": "android-devlab",
+      "role": "admin"
+    },
+    {
+      "id": "4a94e89e-13c5-44b9-996b-75d08dcb58e0",
+      "name": "Side project",
+      "slug": "side-project",
+      "role": "admin"
+    }
+  ]
+}
