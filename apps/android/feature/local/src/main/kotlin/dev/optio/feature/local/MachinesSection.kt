@@ -38,6 +38,7 @@ import dev.optio.core.model.LocalBlueprint
 import dev.optio.core.model.LocalHost
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.Navigator
+import dev.optio.core.navigation.routes.EditWorkRoute
 import dev.optio.core.navigation.routes.LocalAutomationFormRoute
 import dev.optio.core.navigation.routes.LocalAutomationRoute
 import dev.optio.core.navigation.routes.LocalHostRoute
@@ -252,7 +253,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.automationsSection(
                                 automation = bp,
                                 onDismiss = { menu = false },
                                 onRun = { onSpawn(bp) },
-                                onEdit = { navigator.push(LocalAutomationFormRoute(bp.id)) },
+                                // Edited in the one Work form, like every recurring definition.
+                                onEdit = { navigator.push(EditWorkRoute(bp.id)) },
                                 onToggle = { onSetEnabled(bp, !bp.enabled) },
                                 onDelete = {
                                     confirm.ask(

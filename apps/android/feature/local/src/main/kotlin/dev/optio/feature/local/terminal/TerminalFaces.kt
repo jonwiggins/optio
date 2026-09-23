@@ -7,11 +7,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -35,17 +34,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
@@ -92,8 +85,6 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
-import kotlin.math.max
-import kotlin.math.roundToInt
 
 // region Header
 
@@ -229,7 +220,7 @@ internal fun TranscriptFace(
     val live = !LocalPresentation.isDead(terminal)
     val log: List<AgentLogEntry> = remember(entries) { LocalTranscriptLog.entries(entries, terminal.id) }
     LaunchedEffect(autofocus) { if (autofocus) onComposerFocused() }
-    Column(modifier.fillMaxSize().background(OptioTheme.colors.page).keyboardPadding().testTag("transcript-face")) {
+    Column(modifier.fillMaxSize().background(OptioTheme.colors.page).testTag("transcript-face")) {
         if (log.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 EmptyState(
@@ -261,11 +252,11 @@ internal fun TranscriptFace(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.l).padding(bottom = 2.dp),
                 )
             }
+            // Pads itself for the keyboard (the tab bar steps aside while it's up).
             ChatComposer(
                 onSend = onSend,
                 placeholder = "Message the agent",
                 autofocus = autofocus,
-                windowInsets = WindowInsets(0, 0, 0, 0),
             )
         }
     }
@@ -301,7 +292,8 @@ internal fun ScreenFace(
     }
     val showPreview =
         LocalPresentation.isDead(terminal) && stream.settled && !stream.outputSeen && !terminal.preview.isNullOrEmpty()
-    Column(modifier.fillMaxSize().background(background).keyboardPadding().testTag("screen-face")) {
+    // The key bar sits on the keyboard (the tab bar steps aside while it's up).
+    Column(modifier.fillMaxSize().background(background).imePadding().testTag("screen-face")) {
         if (stream.conn != LocalTerminalStream.ConnState.CONNECTED) {
             Strip(dot = connColor(stream.conn), background = background) {
                 Text(stream.conn.label, maxLines = 1)
@@ -470,23 +462,3 @@ private fun connColor(conn: LocalTerminalStream.ConnState): Color =
     }
 
 // endregion
-
-/**
- * Bottom padding that keeps this column's bottom (a composer, the key bar) on top of the keyboard.
- * `imePadding()` alone measures from the window's bottom edge; a detail screen inside the tab
- * shell ends above the navigation bar, so it would float that far above the keyboard. This pads by
- * exactly the part of the keyboard that overlaps the column.
- */
-internal fun Modifier.keyboardPadding(): Modifier =
-    composed {
-        val density = LocalDensity.current
-        val imeBottom = WindowInsets.ime.getBottom(density)
-        val windowHeight = LocalWindowInfo.current.containerSize.height
-        var bottomGap by remember { mutableIntStateOf(0) }
-        val overlap = max(0, imeBottom - bottomGap)
-        this
-            .onGloballyPositioned { coordinates ->
-                val bottom = coordinates.boundsInWindow().bottom
-                bottomGap = max(0, (windowHeight - bottom).roundToInt())
-            }.padding(bottom = with(density) { overlap.toDp() })
-    }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -159,7 +160,12 @@ class AutomationFormViewModel(
     }
 }
 
-/** `LocalAutomationFormRoute`: New automation / Edit automation (iOS `BlueprintFormSheet`, a full screen here). */
+/**
+ * `LocalAutomationFormRoute`: New automation (iOS `BlueprintFormSheet`, a full screen here; the web's
+ * Machines page editor). Editing an existing automation goes to the one Work form
+ * (`EditWorkRoute`), like every recurring definition; with an id this screen still edits the row
+ * directly.
+ */
 @Composable
 fun AutomationFormScreen(automationId: String?) {
     val api = LocalApiClient.current
@@ -224,7 +230,7 @@ internal fun AutomationFormContent(
         },
     ) { padding ->
         val data = loaded.value
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             when {
                 data != null -> FormBody(data.hosts, form, error, onChange)
                 loaded is LoadState.Failed -> ErrorRow(error = loaded.error, what = "automation", retry = onRetry)

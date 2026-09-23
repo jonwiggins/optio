@@ -49,7 +49,7 @@ import dev.optio.core.model.LocalAgentSessionMode
 import dev.optio.core.model.LocalBlueprintSpawnMode
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.Navigator
-import dev.optio.core.navigation.routes.LocalAutomationFormRoute
+import dev.optio.core.navigation.routes.EditWorkRoute
 import dev.optio.core.navigation.routes.LocalTerminalRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
@@ -184,7 +184,8 @@ internal fun AutomationContent(
                                 Icon(Icons.Outlined.PlayArrow, contentDescription = "Run now")
                             }
                         }
-                        IconButton(onClick = { navigator.push(LocalAutomationFormRoute(data.automation.id)) }, modifier = Modifier.testTag("automation-edit")) {
+                        // Recurring work is edited in the one Work form (the web's /work/:id/edit).
+                        IconButton(onClick = { navigator.push(EditWorkRoute(data.automation.id)) }, modifier = Modifier.testTag("automation-edit")) {
                             Icon(Icons.Outlined.Edit, contentDescription = "Edit")
                         }
                         Box {
