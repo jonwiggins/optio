@@ -1,0 +1,12 @@
+{
+  "stats": {
+    "queued": 1,
+    "running": 1,
+    "completed": 2,
+    "failed": 1,
+    "total": 10,
+    "ci": 2,
+    "review": 0,
+    "needsAttention": 1
+  }
+}
