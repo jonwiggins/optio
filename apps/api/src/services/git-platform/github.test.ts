@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { GitHubPlatform, GitHubApiError, classifyGitHubFailure } from "./github.js";
-import type { RepoIdentifier } from "@optio/shared";
+import {
+  GitHubPlatform,
+  GitHubApiError,
+  classifyGitHubFailure,
+  describeGitHubErrorBody,
+} from "./github.js";
+import { classifyError, type RepoIdentifier } from "@optio/shared";
 
 const ri: RepoIdentifier = {
   platform: "github",
@@ -316,5 +321,89 @@ describe("classifyGitHubFailure", () => {
     expect(classifyGitHubFailure(new GitHubApiError(422, "Unprocessable"))).toBeNull();
     expect(classifyGitHubFailure(new Error("db hiccup"))).toBeNull();
     expect(classifyGitHubFailure(undefined)).toBeNull();
+  });
+});
+
+describe("GitHubApiError message", () => {
+  const badCredentials = JSON.stringify({
+    message: "Bad credentials",
+    documentation_url: "https://docs.github.com/rest",
+    status: "401",
+  });
+
+  it("reads GitHub's message and documentation link instead of the raw JSON", () => {
+    const err = new GitHubApiError(401, badCredentials);
+    expect(err.message).toBe(
+      "GitHub API error 401: Bad credentials (see https://docs.github.com/rest)",
+    );
+    expect(err.message).not.toContain("{");
+    // Status and raw body stay available to callers.
+    expect(err.status).toBe(401);
+    expect(err.body).toBe(badCredentials);
+  });
+
+  it("spells out a 422's field errors", () => {
+    expect(
+      describeGitHubErrorBody(
+        JSON.stringify({
+          message: "Validation Failed",
+          errors: [
+            {
+              resource: "PullRequestReview",
+              code: "custom",
+              message: "Can not approve your own pull request",
+            },
+            { resource: "Issue", field: "title", code: "missing_field" },
+          ],
+          documentation_url: "https://docs.github.com/rest/pulls/reviews",
+        }),
+      ),
+    ).toBe(
+      "Validation Failed (Can not approve your own pull request; Issue.title missing_field) " +
+        "(see https://docs.github.com/rest/pulls/reviews)",
+    );
+  });
+
+  it("collapses and trims a non-JSON body", () => {
+    expect(describeGitHubErrorBody("Not Found")).toBe("Not Found");
+    expect(describeGitHubErrorBody("  <html>\n  <body>Bad gateway</body>\n</html> ")).toBe(
+      "<html> <body>Bad gateway</body> </html>",
+    );
+    expect(describeGitHubErrorBody("x".repeat(500))).toBe(`${"x".repeat(300)}…`);
+    expect(describeGitHubErrorBody("")).toBe("Empty response");
+  });
+
+  it("still detects a secondary rate limit from the raw body", () => {
+    const err = new GitHubApiError(
+      403,
+      JSON.stringify({
+        message:
+          "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
+        documentation_url: "https://docs.github.com/rest/overview/rate-limits-for-the-rest-api",
+      }),
+    );
+    expect(err.isSecondaryRateLimit).toBe(true);
+  });
+
+  it("keeps the phrasing the error classifier matches on", () => {
+    expect(classifyError(new GitHubApiError(401, badCredentials).message).recovery).toBe(
+      "github-token",
+    );
+    expect(
+      classifyError(
+        new GitHubApiError(
+          403,
+          JSON.stringify({ message: "Resource not accessible by integration" }),
+        ).message,
+      ).recovery,
+    ).toBe("github-permission");
+    expect(
+      classifyError(
+        new GitHubApiError(
+          403,
+          JSON.stringify({ message: "You have exceeded a secondary rate limit." }),
+        ).message,
+      ).recovery,
+    ).toBe("rate-limit");
   });
 });

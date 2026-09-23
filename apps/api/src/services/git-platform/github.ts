@@ -12,15 +12,59 @@ import type {
 } from "@optio/shared";
 
 /**
+ * GitHub's error body in words, for `GitHubApiError.message`: its `message`,
+ * any per-field `errors`, and the documentation link, instead of raw JSON that
+ * clients would otherwise show verbatim. A body that isn't GitHub's JSON error
+ * shape (an HTML error page, plain text) is collapsed and cut short.
+ */
+export function describeGitHubErrorBody(body: string): string {
+  const text = body.trim();
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown> | null;
+    if (parsed && typeof parsed === "object" && typeof parsed.message === "string") {
+      let out = parsed.message.trim() || "No message";
+      const details = Array.isArray(parsed.errors)
+        ? parsed.errors.map(describeGitHubFieldError).filter(Boolean)
+        : [];
+      if (details.length > 0) out += ` (${details.join("; ")})`;
+      if (typeof parsed.documentation_url === "string" && parsed.documentation_url) {
+        out += ` (see ${parsed.documentation_url})`;
+      }
+      return out;
+    }
+  } catch {
+    // not JSON
+  }
+  const collapsed = text.replace(/\s+/g, " ");
+  if (!collapsed) return "Empty response";
+  return collapsed.length > 300 ? `${collapsed.slice(0, 300)}…` : collapsed;
+}
+
+/** One entry of a GitHub 422 `errors` array: its message, else `resource.field code`. */
+function describeGitHubFieldError(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object") return "";
+  const e = error as Record<string, unknown>;
+  if (typeof e.message === "string" && e.message) return e.message;
+  const where = [e.resource, e.field].filter((v) => typeof v === "string" && v).join(".");
+  return [where, typeof e.code === "string" ? e.code : ""].filter(Boolean).join(" ");
+}
+
+/**
  * Error thrown by GitHubPlatform for any non-2xx GitHub REST response. Carries
  * the verified response metadata callers need to choose the correct recovery:
  * HTTP status, `Retry-After`, the `x-ratelimit-*` primary-quota signals, and
- * whether the body indicates a *secondary* rate limit. The `.message` is kept
- * identical to the previous `GitHub API error <status>: <body>` string so
- * existing message-based logging/classification is unaffected.
+ * whether the body indicates a *secondary* rate limit.
+ *
+ * `.message` is `GitHub API error <status>: <GitHub's message>` — readable
+ * (see describeGitHubErrorBody), and still the prefix + GitHub phrasing the
+ * error classifier matches on (`bad credentials`, `secondary rate limit`,
+ * `resource not accessible by …`). The raw body stays on `.body`.
  */
 export class GitHubApiError extends Error {
   readonly status: number;
+  /** GitHub's raw response body. */
+  readonly body: string;
   readonly retryAfterMs: number | null;
   readonly rateLimitRemaining: number | null;
   readonly rateLimitResetMs: number | null;
@@ -36,9 +80,10 @@ export class GitHubApiError extends Error {
       rateLimitResetMs?: number | null;
     } = {},
   ) {
-    super(`GitHub API error ${status}: ${body}`);
+    super(`GitHub API error ${status}: ${describeGitHubErrorBody(body)}`);
     this.name = "GitHubApiError";
     this.status = status;
+    this.body = body;
     this.retryAfterMs = meta.retryAfterMs ?? null;
     this.rateLimitRemaining = meta.rateLimitRemaining ?? null;
     this.rateLimitResetMs = meta.rateLimitResetMs ?? null;
