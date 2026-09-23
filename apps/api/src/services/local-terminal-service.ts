@@ -119,7 +119,7 @@ async function notifyChanged(row: LocalTerminalRow): Promise<void> {
       .then(({ syncLinkedRun }) => syncLinkedRun(row))
       .catch((err) => logger.warn({ err, terminalId: row.id }, "local: run sync failed"));
   }
-  // iOS: Watch Live Activity + needs-you alerts (no-op unless APNs is configured).
+  // iOS + Android: the Watch + needs-you alerts (no-op unless APNs or FCM is configured).
   import("./glance-service.js")
     .then(({ onLocalTerminalChanged }) => onLocalTerminalChanged(row))
     .catch((err) => logger.warn({ err, terminalId: row.id }, "local: glance hook failed"));

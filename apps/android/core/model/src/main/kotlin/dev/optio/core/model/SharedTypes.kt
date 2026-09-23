@@ -2634,6 +2634,211 @@ data class PrReviewFileComment(
 
 // endregion
 
+// region push.ts
+
+/** Which push service a device registered with. */
+@Serializable(with = PushPlatform.Companion::class)
+enum class PushPlatform(override val raw: String) : RawEnum {
+    IOS("ios"),
+    ANDROID("android"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<PushPlatform>("dev.optio.core.model.PushPlatform", entries, UNKNOWN)
+}
+
+/**
+ * One registered device in `GET /api/notifications/devices`. The token is
+ * masked (`abcdef…wxyz`), so delete a listed device by its `id`, or your own
+ * by the raw token you hold. iOS rows carry `environment` + `bundleId`,
+ * Android rows `appId` (+ `serverId` when the app sent one).
+ */
+@Serializable
+data class PushDevice(
+    val id: String,
+    /** Masked token. */
+    val token: String,
+    val platform: PushPlatform,
+    /** iOS only: the APNs host the token belongs to. */
+    val environment: Environment? = null,
+    /** iOS only. */
+    val bundleId: String? = null,
+    /** Android only: the application id, e.g. `dev.optio.android`. */
+    val appId: String? = null,
+    /** Android only: the app's own id for this server, as sent at registration. */
+    val serverId: String? = null,
+    val appVersion: String? = null,
+    val deviceName: String? = null,
+    /** Consecutive failed sends; the row is dropped at 5. */
+    val failureCount: Double,
+    val lastSeenAt: String,
+    val createdAt: String,
+) {
+    @Serializable(with = Environment.Companion::class)
+    enum class Environment(override val raw: String) : RawEnum {
+        SANDBOX("sandbox"),
+        PRODUCTION("production"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<Environment>("dev.optio.core.model.PushDevice.Environment", entries, UNKNOWN)
+    }
+}
+
+/** Which native push providers this server holds credentials for. */
+@Serializable
+data class PushProviderStatus(
+    /** iOS (APNs key configured). */
+    val apns: Boolean,
+    /** Android (FCM service account configured). */
+    val fcm: Boolean,
+)
+
+/** `GET /api/notifications/devices`: both platforms, plus what the server can send. */
+@Serializable
+data class PushDevicesResponse(
+    val devices: List<PushDevice>,
+    val push: PushProviderStatus,
+)
+
+/** `POST /api/notifications/devices` body for an Android device (upsert by token). */
+@Serializable
+data class RegisterAndroidDeviceRequest(
+    val platform: String,
+    /** FCM registration token (opaque, case-sensitive). */
+    val token: String,
+    /** Application id, e.g. `dev.optio.android`. */
+    val appId: String,
+    val appVersion: String? = null,
+    val deviceName: String? = null,
+    /** The app's own id for this server; echoed as `serverId` in every message. */
+    val serverId: String? = null,
+)
+
+/** Alert categories (iOS `aps.category`, Android `data.category`); the apps attach actions per category. */
+@Serializable(with = PushAlertCategory.Companion::class)
+enum class PushAlertCategory(override val raw: String) : RawEnum {
+    LOCAL_NEEDS_YOU("LOCAL_NEEDS_YOU"),
+    LOCAL_EXIT("LOCAL_EXIT"),
+    HOST_OFFLINE("HOST_OFFLINE"),
+    TASK_ATTENTION("TASK_ATTENTION"),
+    TASK_PR_OPENED("TASK_PR_OPENED"),
+    AGENT_REPLY("AGENT_REPLY"),
+    AGENT_FAILED("AGENT_FAILED"),
+    TEST("TEST"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<PushAlertCategory>("dev.optio.core.model.PushAlertCategory", entries, UNKNOWN)
+}
+
+/** What an alert is about (`kind` in both payloads). */
+@Serializable(with = PushSubjectKind.Companion::class)
+enum class PushSubjectKind(override val raw: String) : RawEnum {
+    LOCAL("local"),
+    HOST("host"),
+    TASK("task"),
+    AGENT("agent"),
+    TEST("test"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<PushSubjectKind>("dev.optio.core.model.PushSubjectKind", entries, UNKNOWN)
+}
+
+/**
+ * FCM data message `type: "alert"`: a notification the app posts itself.
+ * Data-only (no `notification` block), so it reaches the app's
+ * FirebaseMessagingService in the background too. Every value is a string.
+ */
+@Serializable
+data class AndroidPushAlert(
+    val type: String,
+    val category: PushAlertCategory,
+    val title: String,
+    val subtitle: String? = null,
+    val body: String,
+    /** Deep link, e.g. `optio://local/<id>?compose=1`. */
+    val url: String,
+    val kind: PushSubjectKind,
+    /** Subject id (terminal / host / task / agent). */
+    val id: String,
+    /** Group key (APNs `thread-id`), e.g. the terminal id or `task-<id>`. */
+    val threadId: String,
+    /** `default` plays the channel's sound; `none` posts silently. */
+    val sound: Sound,
+    /** `"1"` when the alert should break through (iOS `time-sensitive`). */
+    val timeSensitive: String? = null,
+    /** Pull request URL (`TASK_PR_OPENED`). */
+    val prUrl: String? = null,
+    /** Replace key (APNs `apns-collapse-id`, e.g. `task-<id>`): use it as the notification tag. */
+    val collapseId: String? = null,
+    /** The app's id for this server, when it sent one at registration. */
+    val serverId: String? = null,
+) : AndroidPushMessage {
+    @Serializable(with = Sound.Companion::class)
+    enum class Sound(override val raw: String) : RawEnum {
+        DEFAULT("default"),
+        NONE("none"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<Sound>("dev.optio.core.model.AndroidPushAlert.Sound", entries, UNKNOWN)
+    }
+}
+
+/** Lifecycle of the Watch as the server sees it. */
+@Serializable(with = AndroidPushWatchEvent.Companion::class)
+enum class AndroidPushWatchEvent(override val raw: String) : RawEnum {
+    START("start"),
+    UPDATE("update"),
+    END("end"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<AndroidPushWatchEvent>("dev.optio.core.model.AndroidPushWatchEvent", entries, UNKNOWN)
+}
+
+/**
+ * FCM data message `type: "watch"`: one frame of the ongoing Watch
+ * notification (the iOS Live Activity). `start` and `update` carry the same
+ * full state; `end` carries the final `done` frame.
+ */
+@Serializable
+data class AndroidPushWatch(
+    val type: String,
+    val event: AndroidPushWatchEvent,
+    /** JSON-encoded `WatchState` (glance.ts); dates are Apple reference-date seconds. */
+    val state: String,
+    /** The app's id for this server, when it sent one at registration. */
+    val serverId: String? = null,
+) : AndroidPushMessage
+
+/** Every FCM data message the API sends, discriminated by `type`. */
+@Serializable(with = AndroidPushMessage.Serializer::class)
+sealed interface AndroidPushMessage {
+    /** Fallback for discriminator values this client does not know about yet. */
+    data class Unknown(val raw: JsonElement) : AndroidPushMessage
+
+    object Serializer : DiscriminatedUnionSerializer<AndroidPushMessage>("dev.optio.core.model.AndroidPushMessage", "type") {
+        override fun decode(tag: String, element: JsonObject, json: Json): AndroidPushMessage? = when (tag) {
+            "alert" -> json.decodeFromJsonElement(AndroidPushAlert.serializer(), element)
+            "watch" -> json.decodeFromJsonElement(AndroidPushWatch.serializer(), element)
+            else -> null
+        }
+
+        override fun encode(value: AndroidPushMessage, json: Json): JsonElement = when (value) {
+            is AndroidPushAlert -> json.encodeToJsonElement(AndroidPushAlert.serializer(), value)
+            is AndroidPushWatch -> json.encodeToJsonElement(AndroidPushWatch.serializer(), value)
+            is Unknown -> value.raw
+        }
+
+        override fun unknown(raw: JsonElement): AndroidPushMessage = Unknown(raw)
+    }
+}
+
+// endregion
+
 // region secret.ts
 
 @Serializable

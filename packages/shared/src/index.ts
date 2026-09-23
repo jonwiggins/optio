@@ -39,4 +39,5 @@ export * from "./types/persistent-agent.js";
 export * from "./types/local.js";
 export * from "./types/triggers.js";
 export * from "./types/glance.js";
+export * from "./types/push.js";
 export * from "./agent-options/index.js";

@@ -43,7 +43,7 @@ export type NotificationEventType =
   | "task.stalled"
   | "task.review_requested"
   | "task.commented"
-  // Optio Local + Persistent Agents (iOS APNs alerts; see glance-service.ts)
+  // Optio Local + Persistent Agents (iOS APNs + Android FCM alerts; see glance-service.ts)
   | "local.needs_you"
   | "local.host_offline"
   | "agent.turn_completed"

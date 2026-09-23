@@ -89,6 +89,10 @@ spec:
             - secretRef:
                 name: {{ .Values.notifications.apns.existingSecret }}
             {{- end }}
+            {{- if .Values.notifications.fcm.existingSecret }}
+            - secretRef:
+                name: {{ .Values.notifications.fcm.existingSecret }}
+            {{- end }}
           env:
             - name: API_PORT
               value: {{ .Values.api.port | quote }}

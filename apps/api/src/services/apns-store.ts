@@ -144,7 +144,7 @@ export interface RegisterDeviceInput {
 export interface ApnsDeviceView {
   id: string;
   token: string;
-  platform: string;
+  platform: "ios";
   environment: ApnsEnvironment;
   bundleId: string;
   appVersion: string | null;
@@ -214,6 +214,15 @@ export async function unregisterDevice(userId: string, token: string): Promise<b
   const rows = await db
     .delete(apnsDevices)
     .where(and(eq(apnsDevices.userId, userId), eq(apnsDevices.token, token)))
+    .returning({ id: apnsDevices.id });
+  return rows.length > 0;
+}
+
+/** Delete the caller's device by row id (the device list only shows masked tokens). */
+export async function unregisterDeviceById(userId: string, id: string): Promise<boolean> {
+  const rows = await db
+    .delete(apnsDevices)
+    .where(and(eq(apnsDevices.userId, userId), eq(apnsDevices.id, id)))
     .returning({ id: apnsDevices.id });
   return rows.length > 0;
 }

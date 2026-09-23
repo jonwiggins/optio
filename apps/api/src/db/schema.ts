@@ -1261,6 +1261,37 @@ export const liveActivityStartTokens = pgTable(
   (table) => [index("live_activity_start_tokens_user_kind_idx").on(table.userId, table.kind)],
 );
 
+// ── FCM (Android push) ───────────────────────────────────────────────────────
+// Mirrors apns_devices for the Android app: one row per FCM registration
+// token. UNREGISTERED / 404 / an invalid-token INVALID_ARGUMENT drops the row
+// at once; 5 consecutive failures drop it. Android has no per-activity tokens,
+// so Watch frames go to every row of the user. See docs/android-push.md.
+
+export const fcmDevices = pgTable(
+  "fcm_devices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id"),
+    // Opaque, case-sensitive FCM registration token; globally unique — a token
+    // that re-registers under another user moves to them.
+    token: text("token").notNull().unique("fcm_devices_token_key"),
+    // Android application id (`dev.optio.android`); informational.
+    appId: text("app_id").notNull(),
+    appVersion: text("app_version"),
+    deviceName: text("device_name"),
+    // The app's own id for this server (its paired-server profile), echoed as
+    // `serverId` in every message so a multi-server app can route it.
+    clientServerId: text("client_server_id"),
+    failureCount: integer("failure_count").notNull().default(0),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("fcm_devices_user_id_idx").on(table.userId)],
+);
+
 // ── Notification Preferences ─────────────────────────────────────────────────
 
 export const notificationPreferences = pgTable(

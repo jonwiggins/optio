@@ -9,6 +9,11 @@ without a device. Design background: `docs/design/ios-glanceable-surfaces.md`
 Web push (VAPID) is unaffected; both providers share the per-user preference
 map at `GET/PUT /api/notifications/preferences`.
 
+**Android:** the same events, categories, deep links and preference keys reach
+the Android app over Firebase Cloud Messaging, from the same fan-out
+(`services/push-fanout.ts`) and the same device routes (`platform: "android"`).
+See `docs/android-push.md`.
+
 ## Setup
 
 APNs uses **token-based auth** (a `.p8` signing key — no yearly certificate
@@ -79,7 +84,7 @@ lower-cases them.
 | Method   | Path                                                     | Body                                                                            | Response                        |
 | -------- | -------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------- |
 | `POST`   | `/api/notifications/devices`                             | `{ token, platform?: "ios", environment?, bundleId, appVersion?, deviceName? }` | `201 { device }` (token masked) |
-| `GET`    | `/api/notifications/devices`                             | —                                                                               | `200 { devices: [...] }`        |
+| `GET`    | `/api/notifications/devices`                             | —                                                                               | `200 { devices: [...], push }`  |
 | `DELETE` | `/api/notifications/devices/:token`                      | —                                                                               | `204`                           |
 | `POST`   | `/api/notifications/devices/test`                        | —                                                                               | `200 { sent }` / `503`          |
 | `POST`   | `/api/notifications/live-activities/:kind/token`         | `{ token, environment?, subjectId? }`                                           | `201 { ok: true }`              |
@@ -88,6 +93,8 @@ lower-cases them.
 | `POST`   | `/api/local/terminals/:id/snooze`                        | `{ minutes?: 1–1440 }` (default 15)                                             | `200 { terminal }`              |
 | `DELETE` | `/api/local/terminals/:id/snooze`                        | —                                                                               | `200 { terminal }`              |
 
+`GET` lists iOS and Android rows (each with a `platform`) plus
+`push: { apns, fcm }`; `DELETE` also takes a row `id` (the list masks tokens).
 `:kind` is `watch` — the one aggregate Live Activity per user. Registration is
 an upsert by token (re-registering resets the failure counter; a token that
 re-registers under another user moves to them). The app should re-register the

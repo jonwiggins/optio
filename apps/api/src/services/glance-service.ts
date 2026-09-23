@@ -1,18 +1,19 @@
 /**
- * Server-side "Watch" for the iOS glanceable surfaces: computes the per-user
- * Live Activity frame from Optio Local state and turns producer events
- * (terminal attention, host liveness, task transitions, agent turns) into
- * APNs alerts + Live Activity updates.
+ * Server-side "Watch" for the glanceable surfaces of the iOS and Android
+ * apps: computes the per-user Watch frame (the iOS Live Activity / the
+ * Android ongoing notification) from Optio Local state and turns producer
+ * events (terminal attention, host liveness, task transitions, agent turns)
+ * into alerts + Watch frames, fanned out to APNs and FCM by push-fanout.ts.
  *
  *   docs/design/ios-glanceable-surfaces.md §2a (Watch) and §2i (notifications)
- *   docs/ios-push.md (setup, event → push table)
+ *   docs/ios-push.md, docs/android-push.md (setup, event → push table)
  *
- * Every hook is fire-and-forget behind `apnsService.isConfigured()`; alerts go
- * through notification-service's per-user preference checks so web push and
- * APNs share one opt-out surface. Attention/queue bookkeeping is in-memory —
- * the API runs a single replica for Optio Local (see local-relay.ts), and the
- * worst case after a restart is one duplicate alert that `apns-collapse-id`
- * folds on the device.
+ * Every hook is fire-and-forget behind `isPushConfigured()`; alerts go
+ * through notification-service's per-user preference checks so web push,
+ * APNs and FCM share one opt-out surface. Attention/queue bookkeeping is
+ * in-memory — the API runs a single replica for Optio Local (see
+ * local-relay.ts), and the worst case after a restart is one duplicate alert
+ * that the collapse id folds on the device.
  */
 import { and, count, eq, inArray, ne } from "drizzle-orm";
 import {
@@ -35,8 +36,15 @@ import {
   workspaceMembers,
 } from "../db/schema.js";
 import { logger } from "../logger.js";
-import { apnsService } from "./apns-service.js";
 import type { AlertInput } from "./apns-payloads.js";
+import {
+  configuredPushProviders,
+  eachProvider,
+  isPushConfigured,
+  providersWithWatch,
+  sendAlertToAll,
+  type PushProvider,
+} from "./push-fanout.js";
 import { shouldNotify, type NotificationEventType } from "./notification-service.js";
 import type { LocalHostRow } from "./local-host-service.js";
 import type { LocalTerminalRow } from "./local-terminal-service.js";
@@ -52,8 +60,11 @@ const lastAttention = new Map<string, LocalTerminalRow["attentionState"]>();
 const lastNeedsYou = new Map<string, number>();
 /** userId → last computed running count (first running terminal → push-to-start). */
 const lastRunning = new Map<string, number>();
-/** userId → pending end-of-Watch timer. */
-const endTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** userId → pending end-of-Watch timer, and the providers whose Watch it ends. */
+const endTimers = new Map<
+  string,
+  { timer: ReturnType<typeof setTimeout>; providers: Set<PushProvider> }
+>();
 /** terminalId → snooze-expiry recompute timer. */
 const snoozeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** hostIds we already alerted about going offline (cleared when back online). */
@@ -63,7 +74,7 @@ export function resetGlanceForTests(): void {
   lastAttention.clear();
   lastNeedsYou.clear();
   lastRunning.clear();
-  for (const t of endTimers.values()) clearTimeout(t);
+  for (const t of endTimers.values()) clearTimeout(t.timer);
   endTimers.clear();
   for (const t of snoozeTimers.values()) clearTimeout(t);
   snoozeTimers.clear();
@@ -394,55 +405,62 @@ export async function countSessionTiles(userId: string): Promise<WatchTileCounts
 
 // ── Shared push helpers ─────────────────────────────────────────────────────
 
+/** Preference-gated alert to every native push provider (iOS + Android). */
 async function alert(userId: string, eventType: NotificationEventType, input: AlertInput) {
   if (!(await shouldNotify(userId, eventType))) return;
-  await apnsService.sendAlert(userId, input);
+  await sendAlertToAll(userId, input);
 }
 
 /**
- * Push the freshest frame to the user's Watch, starting one via push-to-start
- * when the first running terminal appears and no activity is live, or
- * scheduling the end when everything has gone quiet. Reads the previous
- * counts, so callers `remember()` the new state only after this returns.
+ * Push the freshest frame to the user's Watch on every provider — each maps
+ * it onto its platform (iOS: update the live activity, or push-to-start on
+ * the first running terminal; Android: start / update the ongoing
+ * notification) — or schedule the end when everything has gone quiet.
+ * `providers` narrows the fan-out (task transitions only refresh a Watch that
+ * is already showing). Reads the previous counts, so callers `remember()` the
+ * new state only after this returns.
  */
 async function syncWatch(
   userId: string,
   state: WatchState,
   laAlert?: { title: string; body: string } | null,
+  providers: readonly PushProvider[] = configuredPushProviders(),
 ): Promise<void> {
   const active = state.needsYouCount > 0 || state.runningCount > 0;
-  const hasToken = await apnsService.hasWatchToken(userId);
 
   if (active) {
     const pendingEnd = endTimers.get(userId);
     if (pendingEnd) {
-      clearTimeout(pendingEnd);
+      clearTimeout(pendingEnd.timer);
       endTimers.delete(userId);
     }
-    if (hasToken) {
-      await apnsService.updateWatch(userId, state, { event: "update", alert: laAlert ?? null });
-    } else if ((lastRunning.get(userId) ?? 0) === 0 || laAlert) {
-      // First running terminal (or something needing you) and no live Watch:
-      // start one if the device gave us a push-to-start token.
-      await apnsService.startWatch(userId, state, { alert: laAlert ?? null });
-    }
+    const opts = { alert: laAlert ?? null, firstRunning: (lastRunning.get(userId) ?? 0) === 0 };
+    await eachProvider(providers, "Watch frame", (p) => p.pushWatch(userId, state, opts));
     return;
   }
 
-  if (hasToken && !endTimers.has(userId)) {
-    const timer = setTimeout(() => {
-      endTimers.delete(userId);
+  const watching = await providersWithWatch(providers, userId);
+  if (watching.length === 0) return;
+  const pending = endTimers.get(userId);
+  if (pending) {
+    for (const p of watching) pending.providers.add(p);
+    return;
+  }
+  const entry = {
+    providers: new Set(watching),
+    timer: setTimeout(() => {
+      if (endTimers.get(userId) === entry) endTimers.delete(userId);
       void computeWatchState(userId)
-        .then((latest) => {
+        .then(async (latest) => {
           if (latest.needsYouCount > 0 || latest.runningCount > 0) return;
           const done: WatchState = { ...latest, phase: "done", summary: "Quiet." };
-          return apnsService.updateWatch(userId, done, { event: "end" });
+          await eachProvider([...entry.providers], "Watch end", (p) => p.endWatch(userId, done));
         })
         .catch((err) => logger.warn({ err, userId }, "glance: ending Watch failed"));
-    }, WATCH_END_GRACE_MS);
-    timer.unref?.();
-    endTimers.set(userId, timer);
-  }
+    }, WATCH_END_GRACE_MS),
+  };
+  entry.timer.unref?.();
+  endTimers.set(userId, entry);
 }
 
 function remember(userId: string, state: WatchState): void {
@@ -458,7 +476,7 @@ function remember(userId: string, state: WatchState): void {
  * `needs_you`; sound only when the queue was empty (§2i).
  */
 export async function onLocalTerminalChanged(row: LocalTerminalRow): Promise<void> {
-  if (!apnsService.isConfigured()) return;
+  if (!isPushConfigured()) return;
   const userId = row.userId;
   if (!userId) return; // auth-disabled dev user has no devices
 
@@ -519,7 +537,7 @@ export function scheduleSnoozeExpiry(row: LocalTerminalRow): void {
   const existing = snoozeTimers.get(row.id);
   if (existing) clearTimeout(existing);
   snoozeTimers.delete(row.id);
-  if (!row.userId || !row.snoozedUntil || !apnsService.isConfigured()) return;
+  if (!row.userId || !row.snoozedUntil || !isPushConfigured()) return;
   const delay = Math.max(0, row.snoozedUntil.getTime() - Date.now());
   const userId = row.userId;
   const timer = setTimeout(() => {
@@ -539,7 +557,7 @@ export function scheduleSnoozeExpiry(row: LocalTerminalRow): void {
 export async function onLocalHostChanged(
   host: Pick<LocalHostRow, "id" | "userId" | "state" | "name">,
 ): Promise<void> {
-  if (!apnsService.isConfigured()) return;
+  if (!isPushConfigured()) return;
   const userId = host.userId;
   if (!userId) return;
 
@@ -593,7 +611,7 @@ export async function onTaskTransition(
   },
   toState: TaskState,
 ): Promise<void> {
-  if (!apnsService.isConfigured()) return;
+  if (!isPushConfigured()) return;
   const userId = task.createdBy;
   if (!userId) return;
 
@@ -622,9 +640,13 @@ export async function onTaskTransition(
     });
   }
 
-  if (await apnsService.hasWatchToken(userId)) {
+  // Refresh only a Watch that may be showing (iOS: a live activity token;
+  // Android: devices, and no `end` since the last start) — a task transition
+  // never starts one.
+  const watching = await providersWithWatch(configuredPushProviders(), userId);
+  if (watching.length > 0) {
     const state = await computeWatchState(userId);
-    await syncWatch(userId, state);
+    await syncWatch(userId, state, null, watching);
     remember(userId, state);
   }
 }
@@ -640,7 +662,7 @@ export async function onAgentTurnHalted(
   turn: { id: string; agentId: string; haltReason: string | null; summary?: string | null },
   agent: { id: string; name: string; slug: string },
 ): Promise<void> {
-  if (!apnsService.isConfigured()) return;
+  if (!isPushConfigured()) return;
   if (turn.haltReason === "error" || turn.haltReason === "cancelled") return;
 
   const senders = await db
@@ -677,7 +699,7 @@ export async function onAgentFailed(
   agent: { id: string; name: string; createdBy: string | null; lastFailureReason?: string | null },
   reason?: string | null,
 ): Promise<void> {
-  if (!apnsService.isConfigured()) return;
+  if (!isPushConfigured()) return;
   const userId = agent.createdBy;
   if (!userId) return;
   const why = (reason ?? agent.lastFailureReason ?? "").trim().slice(0, 160);
