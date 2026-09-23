@@ -1,0 +1,77 @@
+{
+  "connection": {
+    "id": "fc8f92a0-163b-40c6-b163-0106f299c754",
+    "name": "Status page API",
+    "providerId": "6df4fd9a-6502-4012-be60-9142dae37e23",
+    "config": {
+      "baseUrl": "https://status.example.com",
+      "authType": "none"
+    },
+    "scope": "global",
+    "repoUrl": null,
+    "workspaceId": null,
+    "enabled": true,
+    "status": "healthy",
+    "statusMessage": "Connection OK",
+    "lastCheckedAt": "2026-09-23T00:47:05.626Z",
+    "createdAt": "2026-09-23T00:46:17.030Z",
+    "updatedAt": "2026-09-23T00:47:05.626Z",
+    "provider": {
+      "id": "6df4fd9a-6502-4012-be60-9142dae37e23",
+      "slug": "custom-http",
+      "name": "HTTP API",
+      "description": "Connect any REST API endpoint with custom authentication",
+      "icon": "globe",
+      "category": "custom",
+      "type": "http",
+      "configSchema": {
+        "type": "object",
+        "required": ["baseUrl"],
+        "properties": {
+          "baseUrl": {
+            "type": "string",
+            "title": "Base URL"
+          },
+          "authType": {
+            "enum": ["none", "api-key", "bearer"],
+            "type": "string",
+            "title": "Authentication type"
+          },
+          "AUTH_TOKEN": {
+            "type": "string",
+            "title": "Auth token/key",
+            "format": "secret"
+          },
+          "authHeader": {
+            "type": "string",
+            "title": "Auth header name",
+            "default": "Authorization"
+          },
+          "description": {
+            "type": "string",
+            "title": "API description (helps agent understand usage)"
+          }
+        }
+      },
+      "requiredSecrets": [],
+      "mcpConfig": null,
+      "capabilities": [],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.315Z",
+      "updatedAt": "2026-09-23T00:45:56.315Z"
+    },
+    "assignments": [
+      {
+        "id": "af3e95fe-9f5a-49a2-93f3-24888a4e174c",
+        "connectionId": "fc8f92a0-163b-40c6-b163-0106f299c754",
+        "repoId": "85d784a6-338f-4675-9070-2890f6855cab",
+        "agentTypes": ["claude-code"],
+        "permission": "read",
+        "enabled": true,
+        "createdAt": "2026-09-23T00:46:17.040Z"
+      }
+    ]
+  }
+}

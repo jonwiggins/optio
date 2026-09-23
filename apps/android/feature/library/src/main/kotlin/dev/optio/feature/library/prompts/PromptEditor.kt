@@ -13,9 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.network.ApiClient
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.state.LoadState
 import dev.optio.feature.library.AgentTypes
@@ -31,8 +29,10 @@ import dev.optio.feature.library.PromptKind
 import dev.optio.feature.library.PromptTemplateInput
 import dev.optio.feature.library.PromptTemplateRow
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.createPromptTemplate
 import dev.optio.feature.library.updatePromptTemplate
+import kotlinx.coroutines.Job
 
 /**
  * Create ([id] null) or edit a named template (iOS `PromptEditorSheet`, a port of the web's
@@ -82,10 +82,10 @@ class PromptEditorViewModel(private val api: ApiClient, val id: String?) : Libra
         defaultAgentType = defaultAgentType.ifEmpty { null },
     )
 
-    fun save() {
-        if (!canSave) return
+    fun save(): Job? {
+        if (!canSave) return null
         saving = true
-        action {
+        return action {
             try {
                 if (id == null) {
                     val created = api.createPromptTemplate(input())
@@ -103,9 +103,10 @@ class PromptEditorViewModel(private val api: ApiClient, val id: String?) : Libra
 }
 
 @Composable
-internal fun PromptEditorScreen(id: String?) {
-    val api = LocalApiClient.current
-    val vm = viewModel { PromptEditorViewModel(api, id) }
+internal fun PromptEditorScreen(
+    id: String?,
+    vm: PromptEditorViewModel = libraryViewModel { PromptEditorViewModel(it, id) },
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     ScreenEffects(vm.events, onAppear = vm::loadOnce)
     LibraryScaffold(

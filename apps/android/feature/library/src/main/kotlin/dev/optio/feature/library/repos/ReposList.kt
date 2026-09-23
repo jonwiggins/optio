@@ -11,12 +11,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.NewRepoRoute
 import dev.optio.core.navigation.routes.RepoDetailRoute
 import dev.optio.core.network.ApiClient
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.OptioRow
@@ -29,6 +27,7 @@ import dev.optio.feature.library.LibraryList
 import dev.optio.feature.library.LibraryViewModel
 import dev.optio.feature.library.RepoRow
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.groupedItems
 import dev.optio.feature.library.listRepos
 import dev.optio.feature.library.listTopSpace
@@ -41,9 +40,11 @@ class ReposViewModel(private val api: ApiClient) : LibraryViewModel<List<RepoRow
 
 /** Library › Repos: the repositories, plus "Add repository" for admins. */
 @Composable
-internal fun ReposScreen(contentPadding: PaddingValues, modifier: Modifier = Modifier) {
-    val api = LocalApiClient.current
-    val vm = viewModel { ReposViewModel(api) }
+internal fun ReposScreen(
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    vm: ReposViewModel = libraryViewModel { ReposViewModel(it) },
+) {
     val navigator = LocalNavigator.current
     val isAdmin = Roles.isAdmin
     val state by vm.state.collectAsStateWithLifecycle()

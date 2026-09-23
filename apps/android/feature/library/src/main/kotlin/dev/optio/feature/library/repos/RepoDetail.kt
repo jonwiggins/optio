@@ -18,13 +18,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.ConnectionDetailRoute
 import dev.optio.core.navigation.routes.RepoSettingsRoute
 import dev.optio.core.navigation.routes.SharedDirectoriesRoute
 import dev.optio.core.network.ApiClient
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.InsetDivider
@@ -52,6 +50,7 @@ import dev.optio.feature.library.NoteRow
 import dev.optio.feature.library.RepoRow
 import dev.optio.feature.library.ReviewTriggers
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.SharedDirectoryRow
 import dev.optio.feature.library.SwipeToDelete
 import dev.optio.feature.library.cardPosition
@@ -71,6 +70,7 @@ import dev.optio.feature.library.recycleMessage
 import dev.optio.feature.library.recycleRepoPods
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 
 /** Everything the repo detail shows (iOS `RepoDetailModel`). */
 data class RepoDetail(
@@ -100,10 +100,10 @@ class RepoDetailViewModel(private val api: ApiClient, val repoId: String) : Libr
         }
     }
 
-    fun recycle() {
-        if (busy) return
+    fun recycle(): Job? {
+        if (busy) return null
         busy = true
-        action {
+        return action {
             try {
                 toast(recycleMessage(api.recycleRepoPods(repoId)))
             } finally {
@@ -112,10 +112,10 @@ class RepoDetailViewModel(private val api: ApiClient, val repoId: String) : Libr
         }
     }
 
-    fun delete() {
-        if (busy) return
+    fun delete(): Job? {
+        if (busy) return null
         busy = true
-        action {
+        return action {
             try {
                 api.deleteRepo(repoId)
                 toast("Removed ${state.value.value?.repo?.displayName ?: "the repository"}.")
@@ -127,10 +127,10 @@ class RepoDetailViewModel(private val api: ApiClient, val repoId: String) : Libr
     }
 
     /** Adds a repo-scoped MCP server; [onAdded] closes the sheet. */
-    fun addMcpServer(input: McpServerInput, onAdded: () -> Unit) {
-        if (mcpSaving) return
+    fun addMcpServer(input: McpServerInput, onAdded: () -> Unit): Job? {
+        if (mcpSaving) return null
         mcpSaving = true
-        action {
+        return action {
             try {
                 api.createRepoMcpServer(repoId, input)
                 onAdded()
@@ -149,9 +149,10 @@ class RepoDetailViewModel(private val api: ApiClient, val repoId: String) : Libr
 }
 
 @Composable
-internal fun RepoDetailScreen(repoId: String) {
-    val api = LocalApiClient.current
-    val vm = viewModel { RepoDetailViewModel(api, repoId) }
+internal fun RepoDetailScreen(
+    repoId: String,
+    vm: RepoDetailViewModel = libraryViewModel { RepoDetailViewModel(it, repoId) },
+) {
     val navigator = LocalNavigator.current
     val isAdmin = Roles.isAdmin
     val confirm = rememberConfirmState()

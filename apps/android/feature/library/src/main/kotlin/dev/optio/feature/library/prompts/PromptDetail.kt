@@ -16,12 +16,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.PromptEditRoute
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.ApiError
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.CodeBlock
 import dev.optio.core.ui.components.ConfirmHost
@@ -44,12 +42,14 @@ import dev.optio.feature.library.NoteRow
 import dev.optio.feature.library.PromptKind
 import dev.optio.feature.library.PromptTemplateRow
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.deletePromptTemplate
 import dev.optio.feature.library.groupedCard
 import dev.optio.feature.library.listPromptTemplates
 import dev.optio.feature.library.loadStateItems
 import dev.optio.feature.library.parseKeyValueLines
 import dev.optio.feature.library.previewPromptTemplate
+import kotlinx.coroutines.Job
 
 /** The template [id] from the list (the API has no single-template GET, iOS re-reads the list too). */
 internal suspend fun ApiClient.promptTemplate(id: String): PromptTemplateRow =
@@ -77,10 +77,10 @@ class PromptDetailViewModel(private val api: ApiClient, val id: String) : Librar
     /** What [preview] sends: the non-empty typed values, then the extra lines (which win). */
     fun previewParams(): Map<String, String> = params.filterValues { it.isNotEmpty() } + parseKeyValueLines(extraParams)
 
-    fun preview() {
-        if (rendering) return
+    fun preview(): Job? {
+        if (rendering) return null
         rendering = true
-        action {
+        return action {
             try {
                 rendered = api.previewPromptTemplate(id, previewParams())
             } finally {
@@ -89,10 +89,10 @@ class PromptDetailViewModel(private val api: ApiClient, val id: String) : Librar
         }
     }
 
-    fun delete() {
-        if (deleting) return
+    fun delete(): Job? {
+        if (deleting) return null
         deleting = true
-        action {
+        return action {
             try {
                 api.deletePromptTemplate(id)
                 toast("Deleted “${state.value.value?.name ?: "template"}”.")
@@ -105,9 +105,10 @@ class PromptDetailViewModel(private val api: ApiClient, val id: String) : Librar
 }
 
 @Composable
-internal fun PromptDetailScreen(id: String) {
-    val api = LocalApiClient.current
-    val vm = viewModel { PromptDetailViewModel(api, id) }
+internal fun PromptDetailScreen(
+    id: String,
+    vm: PromptDetailViewModel = libraryViewModel { PromptDetailViewModel(it, id) },
+) {
     val navigator = LocalNavigator.current
     val canMutate = Roles.canMutate
     val confirm = rememberConfirmState()

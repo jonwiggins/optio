@@ -27,9 +27,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.network.ApiClient
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.Dot
@@ -60,6 +58,7 @@ import dev.optio.feature.library.LibraryViewModel
 import dev.optio.feature.library.NoteRow
 import dev.optio.feature.library.RepoRow
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.SwipeToDelete
 import dev.optio.feature.library.cardPosition
 import dev.optio.feature.library.createConnectionAssignment
@@ -78,6 +77,7 @@ import dev.optio.feature.library.setConnectionEnabled
 import dev.optio.feature.library.testConnection
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 
 /** One connection with its assignments and the repos that name them (iOS passes the hub's repos). */
 data class ConnectionDetail(
@@ -111,10 +111,10 @@ class ConnectionDetailViewModel(private val api: ApiClient, val connectionId: St
         ConnectionDetail(connection, assignments, repos.await())
     }
 
-    private fun busyAction(block: suspend () -> Unit) {
-        if (busy) return
+    private fun busyAction(block: suspend () -> Unit): Job? {
+        if (busy) return null
         busy = true
-        action {
+        return action {
             try {
                 block()
             } finally {
@@ -144,10 +144,10 @@ class ConnectionDetailViewModel(private val api: ApiClient, val connectionId: St
     }
 
     /** Adds an assignment; [onAdded] closes the sheet. */
-    fun addAssignment(access: AccessControl, onAdded: () -> Unit) {
-        if (assignmentSaving) return
+    fun addAssignment(access: AccessControl, onAdded: () -> Unit): Job? {
+        if (assignmentSaving) return null
         assignmentSaving = true
-        action {
+        return action {
             try {
                 api.createConnectionAssignment(connectionId, access.assignment())
                 onAdded()
@@ -165,9 +165,10 @@ class ConnectionDetailViewModel(private val api: ApiClient, val connectionId: St
 }
 
 @Composable
-internal fun ConnectionDetailScreen(connectionId: String) {
-    val api = LocalApiClient.current
-    val vm = viewModel { ConnectionDetailViewModel(api, connectionId) }
+internal fun ConnectionDetailScreen(
+    connectionId: String,
+    vm: ConnectionDetailViewModel = libraryViewModel { ConnectionDetailViewModel(it, connectionId) },
+) {
     val isAdmin = Roles.isAdmin
     val canMutate = Roles.canMutate
     val confirm = rememberConfirmState()

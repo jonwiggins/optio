@@ -33,9 +33,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.network.ApiClient
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.EmptyState
@@ -61,6 +59,7 @@ import dev.optio.feature.library.LibrarySheet
 import dev.optio.feature.library.LibraryViewModel
 import dev.optio.feature.library.PickerRow
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.SharedDirectoryInput
 import dev.optio.feature.library.SharedDirectoryRow
 import dev.optio.feature.library.SharedDirectoryRules
@@ -83,6 +82,7 @@ import dev.optio.feature.library.recycleRepoPods
 import dev.optio.feature.library.sharedDirectoryUsage
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 
 /** A repo's shared cache directories and its pod count (the footer's volume maths). */
 data class SharedDirectories(
@@ -108,10 +108,10 @@ class SharedDirectoriesViewModel(private val api: ApiClient, val repoId: String)
         SharedDirectories(api.listSharedDirectories(repoId), pods.await())
     }
 
-    private fun run(id: String, block: suspend () -> Unit) {
-        if (busyId != null) return
+    private fun run(id: String, block: suspend () -> Unit): Job? {
+        if (busyId != null) return null
         busyId = id
-        action {
+        return action {
             try {
                 block()
             } finally {
@@ -141,10 +141,10 @@ class SharedDirectoriesViewModel(private val api: ApiClient, val repoId: String)
     }
 
     /** Adds a directory; [onAdded] closes the sheet. */
-    fun add(input: SharedDirectoryInput, onAdded: () -> Unit) {
-        if (adding) return
+    fun add(input: SharedDirectoryInput, onAdded: () -> Unit): Job? {
+        if (adding) return null
         adding = true
-        action {
+        return action {
             try {
                 api.createSharedDirectory(repoId, input)
                 onAdded()
@@ -170,9 +170,10 @@ internal fun volumesFooter(maxPodInstances: Int): String {
 }
 
 @Composable
-internal fun SharedDirectoriesScreen(repoId: String) {
-    val api = LocalApiClient.current
-    val vm = viewModel { SharedDirectoriesViewModel(api, repoId) }
+internal fun SharedDirectoriesScreen(
+    repoId: String,
+    vm: SharedDirectoriesViewModel = libraryViewModel { SharedDirectoriesViewModel(it, repoId) },
+) {
     val isAdmin = Roles.isAdmin
     val confirm = rememberConfirmState()
     var showAdd by rememberSaveable { mutableStateOf(false) }

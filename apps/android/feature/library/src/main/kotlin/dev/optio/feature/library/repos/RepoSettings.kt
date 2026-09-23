@@ -13,9 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.network.ApiClient
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.state.LoadState
 import dev.optio.feature.library.AgentTypes
@@ -31,10 +29,12 @@ import dev.optio.feature.library.PickerRow
 import dev.optio.feature.library.RepoRow
 import dev.optio.feature.library.ReviewTriggers
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.StepperRow
 import dev.optio.feature.library.SwitchRow
 import dev.optio.feature.library.getRepo
 import dev.optio.feature.library.updateRepo
+import kotlinx.coroutines.Job
 
 /**
  * The editable repo settings (iOS `RepoSettingsView`): the subset of the web's repo page that fits
@@ -177,10 +177,10 @@ class RepoSettingsViewModel(private val api: ApiClient, val repoId: String) : Li
         form = transform(form)
     }
 
-    fun save() {
-        if (saving || !populated) return
+    fun save(): Job? {
+        if (saving || !populated) return null
         saving = true
-        action {
+        return action {
             try {
                 api.updateRepo(repoId, form.patch())
                 toast("Settings saved.")
@@ -204,9 +204,10 @@ internal val ExternalReviewModes = listOf(
 internal val NetworkPolicies = listOf("unrestricted" to "Unrestricted", "restricted" to "Restricted")
 
 @Composable
-internal fun RepoSettingsScreen(repoId: String) {
-    val api = LocalApiClient.current
-    val vm = viewModel { RepoSettingsViewModel(api, repoId) }
+internal fun RepoSettingsScreen(
+    repoId: String,
+    vm: RepoSettingsViewModel = libraryViewModel { RepoSettingsViewModel(it, repoId) },
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     ScreenEffects(vm.events, onAppear = vm::loadOnce)
     LibraryScaffold(

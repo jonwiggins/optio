@@ -6,6 +6,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.optio.core.network.ApiClient
+import dev.optio.core.network.LocalApiClient
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.load
@@ -80,9 +83,9 @@ abstract class LibraryViewModel<T> : LibraryActionsViewModel() {
     protected abstract suspend fun fetch(): T
 
     /** Retry, pull-to-refresh: a visible load over whatever is on screen. */
-    fun refresh() {
+    fun refresh(): Job {
         loadJob?.cancel()
-        loadJob = viewModelScope.launch { _state.load { fetch() } }
+        return viewModelScope.launch { _state.load { fetch() } }.also { loadJob = it }
     }
 
     /** The screen became visible: load the first time, afterwards reload without a spinner. */
@@ -115,6 +118,11 @@ abstract class LibraryViewModel<T> : LibraryActionsViewModel() {
     protected fun replaceValue(value: T) {
         _state.value = LoadState.Loaded(value)
     }
+
+    /** Puts [state] on screen without loading (screenshot and UI tests). */
+    internal fun seed(state: LoadState<T>) {
+        _state.value = state
+    }
 }
 
 /** [block]'s list, or empty when it fails (iOS `(try? await …) ?? []`); cancellation still propagates. */
@@ -133,6 +141,13 @@ internal suspend fun <T> orNull(block: suspend () -> T): T? = try {
     throw e
 } catch (e: Exception) {
     null
+}
+
+/** A Library ViewModel for the active server, scoped to the calling nav entry (or the hub). */
+@Composable
+internal inline fun <reified VM : ViewModel> libraryViewModel(crossinline create: (ApiClient) -> VM): VM {
+    val api = LocalApiClient.current
+    return viewModel { create(api) }
 }
 
 /**

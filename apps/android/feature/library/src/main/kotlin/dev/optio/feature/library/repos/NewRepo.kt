@@ -24,9 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.network.ApiClient
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.OptioRowDefaults
 import dev.optio.core.ui.theme.OptioTheme
@@ -44,6 +42,7 @@ import dev.optio.feature.library.PickerRow
 import dev.optio.feature.library.RepoCreateInput
 import dev.optio.feature.library.ReviewTriggers
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.StepperRow
 import dev.optio.feature.library.SwitchRow
 import dev.optio.feature.library.UrlKeyboard
@@ -53,6 +52,7 @@ import dev.optio.feature.library.inferFullName
 import dev.optio.feature.library.orNull
 import dev.optio.feature.library.updateRepo
 import dev.optio.feature.library.validateRepo
+import kotlinx.coroutines.Job
 
 /**
  * Add a repository (iOS `NewRepoSheet`): paste a URL, validate it against the server (which reads
@@ -96,11 +96,11 @@ class NewRepoViewModel(private val api: ApiClient) : LibraryActionsViewModel() {
     val canCreate: Boolean
         get() = !creating && repoUrl.isNotEmpty() && fullName.isNotEmpty()
 
-    fun validate() {
-        if (!canValidate) return
+    fun validate(): Job? {
+        if (!canValidate) return null
         validating = true
         validationError = null
-        action {
+        return action {
             try {
                 val result = api.validateRepo(repoUrl.trim())
                 val info = result.repo
@@ -138,10 +138,10 @@ class NewRepoViewModel(private val api: ApiClient) : LibraryActionsViewModel() {
         "autoMerge" to autoMerge,
     )
 
-    fun create() {
-        if (!canCreate) return
+    fun create(): Job? {
+        if (!canCreate) return null
         creating = true
-        action {
+        return action {
             try {
                 val repo = api.createRepo(
                     RepoCreateInput(
@@ -162,9 +162,7 @@ class NewRepoViewModel(private val api: ApiClient) : LibraryActionsViewModel() {
 }
 
 @Composable
-internal fun NewRepoScreen() {
-    val api = LocalApiClient.current
-    val vm = viewModel { NewRepoViewModel(api) }
+internal fun NewRepoScreen(vm: NewRepoViewModel = libraryViewModel { NewRepoViewModel(it) }) {
     ScreenEffects(vm.events, onAppear = {})
     LibraryScaffold(
         title = "Add Repository",

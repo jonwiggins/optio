@@ -28,12 +28,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.ConnectionDetailRoute
 import dev.optio.core.navigation.routes.NewConnectionRoute
 import dev.optio.core.network.ApiClient
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.OptioRow
@@ -65,6 +63,7 @@ import dev.optio.feature.library.ProviderCategories
 import dev.optio.feature.library.ProviderCategory
 import dev.optio.feature.library.RepoRow
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.SwipeToDelete
 import dev.optio.feature.library.cardPosition
 import dev.optio.feature.library.createMcpServer
@@ -83,6 +82,7 @@ import dev.optio.feature.library.setMcpServerEnabled
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 
 /** What the Connections hub shows (iOS `ConnectionsModel`). */
 data class ConnectionsCatalog(
@@ -143,10 +143,10 @@ class ConnectionsViewModel(private val api: ApiClient) : LibraryViewModel<Connec
     }
 
     /** Flips a global MCP server right away (iOS waits for the reload); reverts when the server refuses. */
-    fun setMcpEnabled(server: McpServerRow, enabled: Boolean) {
-        val before = state.value.value ?: return
+    fun setMcpEnabled(server: McpServerRow, enabled: Boolean): Job? {
+        val before = state.value.value ?: return null
         replaceValue(before.copy(mcpServers = before.mcpServers.map { if (it.id == server.id) it.copy(enabled = enabled) else it }))
-        action {
+        return action {
             try {
                 api.setMcpServerEnabled(server.id, enabled)
             } catch (e: Exception) {
@@ -166,10 +166,10 @@ class ConnectionsViewModel(private val api: ApiClient) : LibraryViewModel<Connec
     }
 
     /** Adds a global MCP server; [onAdded] closes the sheet. */
-    fun addMcpServer(input: McpServerInput, onAdded: () -> Unit) {
-        if (mcpSaving) return
+    fun addMcpServer(input: McpServerInput, onAdded: () -> Unit): Job? {
+        if (mcpSaving) return null
         mcpSaving = true
-        action {
+        return action {
             try {
                 api.createMcpServer(input)
                 onAdded()
@@ -183,9 +183,11 @@ class ConnectionsViewModel(private val api: ApiClient) : LibraryViewModel<Connec
 }
 
 @Composable
-internal fun ConnectionsScreen(contentPadding: PaddingValues, modifier: Modifier = Modifier) {
-    val api = LocalApiClient.current
-    val vm = viewModel { ConnectionsViewModel(api) }
+internal fun ConnectionsScreen(
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    vm: ConnectionsViewModel = libraryViewModel { ConnectionsViewModel(it) },
+) {
     val navigator = LocalNavigator.current
     val isAdmin = Roles.isAdmin
     val confirm = rememberConfirmState()

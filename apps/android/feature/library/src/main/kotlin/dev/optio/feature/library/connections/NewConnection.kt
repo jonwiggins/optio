@@ -31,10 +31,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.ApiError
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.OptioRowDefaults
 import dev.optio.core.ui.state.LoadState
@@ -54,6 +52,7 @@ import dev.optio.feature.library.NoteRow
 import dev.optio.feature.library.PickerRow
 import dev.optio.feature.library.RepoRow
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.SecretKeyboard
 import dev.optio.feature.library.createConnection
 import dev.optio.feature.library.listConnectionProviders
@@ -62,6 +61,7 @@ import dev.optio.feature.library.listRepos
 import dev.optio.feature.library.providerIcon
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 
 /** The provider being configured and the repos access control can pick from. */
 data class NewConnectionData(
@@ -118,11 +118,11 @@ class NewConnectionViewModel(private val api: ApiClient, val providerId: String)
         revealed[key] = revealed[key] != true
     }
 
-    fun save() {
-        val provider = state.value.value?.provider ?: return
-        if (!canSave(provider)) return
+    fun save(): Job? {
+        val provider = state.value.value?.provider ?: return null
+        if (!canSave(provider)) return null
         saving = true
-        action {
+        return action {
             try {
                 val created = api.createConnection(input(provider))
                 config.clear()
@@ -136,9 +136,10 @@ class NewConnectionViewModel(private val api: ApiClient, val providerId: String)
 }
 
 @Composable
-internal fun NewConnectionScreen(providerId: String) {
-    val api = LocalApiClient.current
-    val vm = viewModel { NewConnectionViewModel(api, providerId) }
+internal fun NewConnectionScreen(
+    providerId: String,
+    vm: NewConnectionViewModel = libraryViewModel { NewConnectionViewModel(it, providerId) },
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     ScreenEffects(vm.events, onAppear = vm::loadOnce)
     val provider = state.value?.provider

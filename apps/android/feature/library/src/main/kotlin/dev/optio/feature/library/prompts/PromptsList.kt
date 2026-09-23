@@ -11,11 +11,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.PromptDetailRoute
 import dev.optio.core.network.ApiClient
-import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.ChipPicker
 import dev.optio.core.ui.components.ConfirmHost
@@ -33,6 +31,7 @@ import dev.optio.feature.library.LibraryViewModel
 import dev.optio.feature.library.PromptKind
 import dev.optio.feature.library.PromptTemplateRow
 import dev.optio.feature.library.ScreenEffects
+import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.SwipeToDelete
 import dev.optio.feature.library.deletePromptTemplate
 import dev.optio.feature.library.groupedItems
@@ -74,9 +73,11 @@ internal val PromptFilterOptions: List<Pair<String, String>> =
 
 /** Library › Prompts: the section body plus a "New prompt" action for members. */
 @Composable
-internal fun PromptsScreen(contentPadding: PaddingValues, modifier: Modifier = Modifier) {
-    val api = LocalApiClient.current
-    val vm = viewModel { PromptsViewModel(api) }
+internal fun PromptsScreen(
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    vm: PromptsViewModel = libraryViewModel { PromptsViewModel(it) },
+) {
     val navigator = LocalNavigator.current
     val canMutate = Roles.canMutate
     val confirm = rememberConfirmState()
