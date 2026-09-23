@@ -71,7 +71,14 @@ const updateRepoSchema = z
       .nullable()
       .optional()
       .describe("Override the agent used for code reviews. Null = inherit."),
-    reviewModel: z.string().optional(),
+    reviewModel: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "Model for code reviews. Null = inherit: the global default review model, " +
+          "else the review agent's catalog default.",
+      ),
     externalReviewMode: z.enum(["off", "on_request", "on_pr_hold", "on_pr_post"]).optional(),
     externalReviewFilters: z
       .object({
