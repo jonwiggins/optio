@@ -24,6 +24,7 @@ import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -74,8 +75,12 @@ interface AgentDetailActions {
 
     fun deleteTrigger(triggerId: String)
 
-    /** Creates a trigger from [draft]; true on success (the sheet closes). */
-    suspend fun createTrigger(draft: AgentTriggerDraft): Boolean
+    /**
+     * Creates a trigger from [draft]: null on success (the sheet closes), else why it failed (the
+     * sheet shows it; a toast would draw under the sheet). Runs to the end even when the caller
+     * goes away (the sheet swiped down mid-save).
+     */
+    suspend fun createTrigger(draft: AgentTriggerDraft): Throwable?
 
     /** Pull to refresh: everything, awaited. */
     suspend fun refresh()
@@ -91,7 +96,7 @@ interface AgentDetailActions {
 
                 override fun deleteTrigger(triggerId: String) = Unit
 
-                override suspend fun createTrigger(draft: AgentTriggerDraft) = true
+                override suspend fun createTrigger(draft: AgentTriggerDraft): Throwable? = null
 
                 override suspend fun refresh() = Unit
             }
@@ -317,19 +322,22 @@ class AgentDetailViewModel(
         }
     }
 
-    override suspend fun createTrigger(draft: AgentTriggerDraft): Boolean =
-        try {
-            val trigger = api.createPersistentAgentTrigger(agentId, draft.input())
-            _triggers.update { state -> LoadState.Loaded(listOf(trigger) + state.value.orEmpty().filterNot { it.id == trigger.id }) }
-            _events.send(Event.Success("${draft.type.label} trigger added"))
-            request(Part.TRIGGERS)
-            true
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            _events.send(Event.Failure(e))
-            false
-        }
+    override suspend fun createTrigger(draft: AgentTriggerDraft): Throwable? =
+        viewModelScope.async {
+            try {
+                val trigger = api.createPersistentAgentTrigger(agentId, draft.input())
+                _triggers.update { state -> LoadState.Loaded(listOf(trigger) + state.value.orEmpty().filterNot { it.id == trigger.id }) }
+                _events.send(Event.Success("${draft.type.label} trigger added"))
+                request(Part.TRIGGERS)
+                null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Also a toast, for when the sheet was dismissed before the answer came.
+                _events.send(Event.Failure(e))
+                e
+            }
+        }.await()
 
     // endregion
 

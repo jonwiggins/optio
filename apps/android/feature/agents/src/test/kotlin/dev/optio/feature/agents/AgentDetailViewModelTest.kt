@@ -260,8 +260,8 @@ class AgentDetailViewModelTest {
             )
         }
         val draft = AgentTriggerDraft(type = AgentTriggerType.SLACK, slackChannel = "C0123ABCD", slackMentionOnly = true)
-        val created = main.onMain { vm.createTrigger(draft) }
-        assertTrue(created)
+        val failure = main.onMain { vm.createTrigger(draft) }
+        assertEquals(null, failure)
         val body = server.lastRequest("POST", "/api/persistent-agents/$id/triggers")!!.json.jsonObject
         assertEquals("slack", body["type"]?.stringValue)
         assertEquals(draft.config(), body["config"])
@@ -278,8 +278,9 @@ class AgentDetailViewModelTest {
     fun aRejectedTriggerStaysOpenWithTheServersReason() {
         loadAll()
         server.error("POST", "/api/persistent-agents/:id/triggers", 409, "Webhook path \"x\" is already in use")
-        val created = main.onMain { vm.createTrigger(AgentTriggerDraft(type = AgentTriggerType.WEBHOOK, webhookPath = "x")) }
-        assertEquals(false, created)
+        val refused = main.onMain { vm.createTrigger(AgentTriggerDraft(type = AgentTriggerType.WEBHOOK, webhookPath = "x")) }
+        // The sheet shows this (QA: the toast alone drew under the sheet, so nothing was visible).
+        assertEquals("Webhook path \"x\" is already in use", refused?.message)
         // The event collector runs on its own coroutine: wait for it rather than racing it.
         eventually { events.any { it is AgentDetailViewModel.Event.Failure } }
         val failure = events.filterIsInstance<AgentDetailViewModel.Event.Failure>().single()
