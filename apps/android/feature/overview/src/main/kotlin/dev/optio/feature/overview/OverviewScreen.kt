@@ -26,6 +26,7 @@ import dev.optio.core.navigation.routes.NewWorkRoute
 import dev.optio.core.navigation.routes.ServersRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.network.LocalEventHub
+import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.hub.HubActions
 import dev.optio.core.ui.usage.LocalUsageStore
 import dev.optio.core.ui.usage.ObservesUsage
@@ -53,6 +54,7 @@ fun OverviewScreen(
     val hub = LocalEventHub.current
     val session = LocalSessionStore.current
     val navigator = LocalNavigator.current
+    val canMutate = Roles.canMutate
     val usage = LocalUsageStore.current
     val vm = viewModel {
         OverviewViewModel(
@@ -104,8 +106,11 @@ fun OverviewScreen(
             },
             modifier = Modifier.testTag("overview-refresh"),
         ) { Icon(Icons.Outlined.Refresh, contentDescription = "Refresh") }
-        IconButton(onClick = { navigator.push(NewWorkRoute()) }, modifier = Modifier.testTag("overview-new-work")) {
-            Icon(Icons.Filled.Add, contentDescription = "New work")
+        // Viewers are read-only: no way into the form (its submit would only 403).
+        if (canMutate) {
+            IconButton(onClick = { navigator.push(NewWorkRoute()) }, modifier = Modifier.testTag("overview-new-work")) {
+                Icon(Icons.Filled.Add, contentDescription = "New work")
+            }
         }
     }
 
@@ -123,7 +128,7 @@ fun OverviewScreen(
         },
         otherServers = if (others.isEmpty()) emptyList() else glances.filter { g -> others.any { it.id == g.server.id } },
         contentPadding = contentPadding,
-        actions = remember(vm, navigator, session, usage) {
+        actions = remember(vm, navigator, session, usage, canMutate) {
             OverviewActions(
                 onRefresh = {
                     coroutineScope {
@@ -138,7 +143,7 @@ fun OverviewScreen(
                 onOpenSection = { section -> navigator.open(section) },
                 onOpen = navigator::push,
                 onOpenExternal = navigator::openExternal,
-                onNewWork = { navigator.push(NewWorkRoute()) },
+                onNewWork = if (canMutate) ({ navigator.push(NewWorkRoute()) }) else null,
                 onManageServers = { navigator.push(ServersRoute) },
                 // The session's own scope finishes the switch although it rebuilds this shell.
                 onSwitchServer = { id -> scope.launch { session.switchTo(id) } },

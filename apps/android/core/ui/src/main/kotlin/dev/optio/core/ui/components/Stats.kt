@@ -119,12 +119,15 @@ fun StatStrip(
                         color = statValueColor(item),
                         autoSize = TextAutoSize.StepBased(minFontSize = 15.sp, maxFontSize = OptioTheme.type.statValue.fontSize),
                     )
+                    // Shrinks before it truncates, like iOS (`minimumScaleFactor`): at larger font
+                    // scales "Recurring" / "Need you" otherwise read "Recurri…" / "Need y…".
                     Text(
                         item.label,
                         style = OptioTheme.type.caption,
                         color = colors.secondaryLabel,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        autoSize = TextAutoSize.StepBased(minFontSize = 9.sp, maxFontSize = OptioTheme.type.caption.fontSize),
                     )
                 }
                 if (isSelected) {

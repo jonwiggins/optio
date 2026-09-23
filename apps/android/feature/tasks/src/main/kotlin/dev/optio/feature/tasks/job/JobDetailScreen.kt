@@ -61,6 +61,7 @@ import dev.optio.core.ui.components.KeyValueRow
 import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.StatItem
 import dev.optio.core.ui.components.StatStrip
+import dev.optio.core.ui.components.Truncation
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
@@ -76,8 +77,10 @@ import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
 import dev.optio.feature.tasks.common.CollectUiMessages
 import dev.optio.feature.tasks.common.DetailScaffold
+import dev.optio.feature.tasks.common.HEADER_LINE_MAX_LINES
 import dev.optio.feature.tasks.common.MenuAction
 import dev.optio.feature.tasks.common.OverflowMenu
+import dev.optio.feature.tasks.common.keepFactsTogether
 import dev.optio.feature.tasks.data.JobFormat
 import dev.optio.feature.tasks.data.JobRun
 import dev.optio.feature.tasks.data.JobSummary
@@ -268,8 +271,11 @@ private fun JobHeader(detail: JobDetail) {
         DetailHeader(
             state = state,
             tone = tone,
-            line = JobHeaderText.line(detail, now),
+            line = JobHeaderText.line(detail, now)?.keepFactsTogether(),
+            lineMaxLines = HEADER_LINE_MAX_LINES,
             secondary = detail.job.description?.takeIf { it.isNotEmpty() }?.let(::AnnotatedString),
+            // A description is prose: keep its start.
+            secondaryTruncation = Truncation.END,
         )
         StatStrip(
             items = listOf(

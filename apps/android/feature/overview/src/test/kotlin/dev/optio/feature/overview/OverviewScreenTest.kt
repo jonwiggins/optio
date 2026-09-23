@@ -29,7 +29,10 @@ import dev.optio.core.navigation.WorkView
 import dev.optio.core.navigation.routes.NewWorkRoute
 import dev.optio.core.navigation.routes.ServersRoute
 import dev.optio.core.navigation.routes.TaskDetailRoute
+import dev.optio.core.network.CurrentUser
+import dev.optio.core.network.LocalCurrentUser
 import dev.optio.core.testing.FakeOptioServer
+import dev.optio.core.testing.Samples
 import dev.optio.core.ui.format.LocalClock
 import dev.optio.core.ui.theme.OptioTheme
 import kotlin.reflect.KClass
@@ -102,7 +105,7 @@ class OverviewScreenTest {
         return owner
     }
 
-    private fun show(): SessionStore {
+    private fun show(user: CurrentUser? = null): SessionStore {
         OverviewSeed.serve(active)
         active.json("/api/auth/me", """{"user":{"id":"u1","email":"dev@localhost","displayName":"Local Dev","workspaceRole":"admin"},"authDisabled":false}""")
         active.webSocket("/ws/events")
@@ -131,6 +134,7 @@ class OverviewScreenTest {
                     LocalSessionStore provides session,
                     LocalClock provides OverviewSeed.clock,
                     LocalViewModelStoreOwner provides owner,
+                    LocalCurrentUser provides user,
                 ) {
                     OverviewSeed.Hub(navigator) { padding -> OverviewScreen(padding) }
                 }
@@ -164,6 +168,16 @@ class OverviewScreenTest {
             ),
             navigator.opened,
         )
+    }
+
+    @Test
+    fun viewersGetNoNewWork() {
+        // Regression: a viewer was offered New work, and its submit could only 403.
+        show(user = Samples.currentUser(role = CurrentUser.ROLE_VIEWER))
+        compose.onNodeWithTag("overview-refresh").assertExists()
+        compose.onNodeWithTag("overview-new-work").assertDoesNotExist()
+        compose.onNodeWithText("Active now").assertExists()
+        compose.onNodeWithTag("board-new-work").assertDoesNotExist()
     }
 
     @Test

@@ -99,10 +99,13 @@ import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
 import dev.optio.core.ui.toast.LocalToaster
+import dev.optio.feature.tasks.common.CollapsingHeader
 import dev.optio.feature.tasks.common.CollectUiMessages
 import dev.optio.feature.tasks.common.DetailScaffold
+import dev.optio.feature.tasks.common.HEADER_LINE_MAX_LINES
 import dev.optio.feature.tasks.common.MenuAction
 import dev.optio.feature.tasks.common.OverflowMenu
+import dev.optio.feature.tasks.common.keepFactsTogether
 import dev.optio.feature.tasks.data.RunFormatting
 import dev.optio.feature.tasks.data.TaskActivityItem
 import dev.optio.feature.tasks.data.TaskRow
@@ -301,15 +304,18 @@ fun TaskDetailContent(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).readableWidth()) {
             when {
-                detail != null -> {
-                    TaskHeader(detail, onOpenPr = actions.openUrl)
-                    TaskBanners(detail, onOpenTerminal = actions.openTerminal)
-                    DetailTabs(
-                        options = TaskSection.entries.map { it to it.label },
-                        selection = section,
-                        onSelect = { section = it },
-                    )
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                detail != null -> CollapsingHeader(
+                    header = {
+                        TaskHeader(detail, onOpenPr = actions.openUrl)
+                        TaskBanners(detail, onOpenTerminal = actions.openTerminal)
+                        DetailTabs(
+                            options = TaskSection.entries.map { it to it.label },
+                            selection = section,
+                            onSelect = { section = it },
+                        )
+                    },
+                ) {
+                    Box(Modifier.fillMaxSize()) {
                         when (section) {
                             TaskSection.LOGS -> LogsSection(detail, logEntries, logConnected, logLoaded)
                             TaskSection.ACTIVITY -> ActivitySection(detail.activity, onDelete = { item ->
@@ -388,6 +394,17 @@ internal object TaskHeaderText {
         return metaText(parts)
     }
 
+    /** The badge's state word: "stalled" for a silent running agent, else the task's state. */
+    fun badgeState(detail: TaskDetail): String = if (detail.isStalled) "stalled" else detail.task.state
+
+    /**
+     * The badge's tone, through the one state map like every other surface (Work rows, Activity
+     * badges, widgets): yellow for needs attention and stalled, purple only for work in progress.
+     * iOS still passes `.working` here, a leftover from when `.working` was grey; since the status
+     * palette made it purple, that override painted NEEDS ATTENTION as if the agent were working.
+     */
+    fun badgeTone(detail: TaskDetail): Tone = Tone.forState(badgeState(detail))
+
     fun needsYou(detail: TaskDetail): String? = when {
         detail.state == "needs_attention" -> detail.task.errorMessage ?: "Needs your attention"
         detail.isStalled -> "Agent looks stuck — check the logs"
@@ -400,11 +417,11 @@ internal object TaskHeaderText {
 private fun TaskHeader(detail: TaskDetail, onOpenPr: (String) -> Unit) {
     val now = rememberNow()
     val task = detail.task
-    val stalled = detail.isStalled
     DetailHeader(
-        state = if (stalled) "stalled" else task.state,
-        tone = if (stalled || task.state == "needs_attention") Tone.WORKING else null,
-        line = TaskHeaderText.facts(task, now),
+        state = TaskHeaderText.badgeState(detail),
+        tone = TaskHeaderText.badgeTone(detail),
+        line = TaskHeaderText.facts(task, now)?.keepFactsTogether(),
+        lineMaxLines = HEADER_LINE_MAX_LINES,
         secondary = TaskHeaderText.secondary(task),
         needsYou = TaskHeaderText.needsYou(detail),
         showsUsage = true,

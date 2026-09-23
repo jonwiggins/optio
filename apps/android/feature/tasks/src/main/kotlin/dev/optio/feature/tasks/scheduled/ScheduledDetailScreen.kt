@@ -50,8 +50,10 @@ import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
 import dev.optio.feature.tasks.common.CollectUiMessages
 import dev.optio.feature.tasks.common.DetailScaffold
+import dev.optio.feature.tasks.common.HEADER_LINE_MAX_LINES
 import dev.optio.feature.tasks.common.MenuAction
 import dev.optio.feature.tasks.common.OverflowMenu
+import dev.optio.feature.tasks.common.keepFactsTogether
 import dev.optio.feature.tasks.data.RunFormatting
 import dev.optio.feature.tasks.data.ScheduleFormat
 import dev.optio.feature.tasks.data.TaskConfigRow
@@ -178,7 +180,8 @@ fun ScheduledDetailContent(
                     DetailHeader(
                         state = if (config.enabled) "active" else "paused",
                         tone = if (config.enabled) Tone.WORKING else Tone.IDLE,
-                        line = ScheduledHeaderText.line(config, value.triggers),
+                        line = ScheduledHeaderText.line(config, value.triggers)?.keepFactsTogether(),
+                        lineMaxLines = HEADER_LINE_MAX_LINES,
                         secondary = ScheduledHeaderText.secondary(value.triggers)?.let(::AnnotatedString),
                     )
                 }

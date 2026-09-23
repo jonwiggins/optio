@@ -39,6 +39,9 @@ import dev.optio.core.ui.usage.ObservesUsage
  * · Sonnet`), an optional mono [secondary] line (path, branch, PR), and a single accent row only
  * when the thing [needsYou]. [accessory] sits at the end of the badge row (a PR link button).
  *
+ * [lineMaxLines] lets a long [line] wrap under itself instead of losing its middle (one line by
+ * default, cut in the middle like iOS; a middle cut can split a value such as `$0.0…1k`).
+ *
  * [secondaryTruncation] cuts a [secondary] line that doesn't fit: at the start by default, so a
  * path keeps its leaf; free text such as a description reads better cut at the end
  * ([Truncation.END]).
@@ -54,6 +57,7 @@ fun DetailHeader(
     modifier: Modifier = Modifier,
     tone: Tone? = null,
     line: AnnotatedString? = null,
+    lineMaxLines: Int = 1,
     secondary: AnnotatedString? = null,
     secondaryTruncation: Truncation = Truncation.HEAD,
     needsYou: String? = null,
@@ -77,7 +81,13 @@ fun DetailHeader(
                 StatusBadge(text = state, tone = tone ?: Tone.forState(state))
                 Box(Modifier.weight(1f)) {
                     if (line != null) {
-                        Text(line, style = type.subheadline, color = colors.secondaryLabel, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                        Text(
+                            line,
+                            style = type.subheadline,
+                            color = colors.secondaryLabel,
+                            maxLines = lineMaxLines,
+                            overflow = if (lineMaxLines == 1) TextOverflow.MiddleEllipsis else TextOverflow.Ellipsis,
+                        )
                     }
                 }
                 CompositionLocalProvider(LocalContentColor provides colors.secondaryLabel) { accessory() }

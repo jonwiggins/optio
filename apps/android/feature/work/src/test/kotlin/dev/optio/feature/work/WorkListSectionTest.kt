@@ -23,6 +23,9 @@ import dev.optio.core.navigation.WorkView
 import dev.optio.core.navigation.routes.AgentDetailRoute
 import dev.optio.core.navigation.routes.NewWorkRoute
 import dev.optio.core.navigation.routes.TaskDetailRoute
+import dev.optio.core.network.CurrentUser
+import dev.optio.core.network.LocalCurrentUser
+import dev.optio.core.testing.Samples
 import dev.optio.core.ui.format.LocalClock
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.workfeed.WorkFeed
@@ -63,12 +66,13 @@ class WorkListSectionTest {
         router: AppRouter = AppRouter(),
         load: suspend () -> WorkFeed.Sources = { WorkSeed.sources },
         initialView: WorkView = WorkView.ACTIVE,
+        user: CurrentUser? = null,
     ): WorkListViewModel {
         val vm = WorkListViewModel(load = load, initialView = initialView)
         val owner = preloadedOwner(WorkListViewModel::class, vm)
         compose.setContent {
             OptioTheme(darkTheme = false) {
-                CompositionLocalProvider(LocalClock provides WorkSeed.clock) {
+                CompositionLocalProvider(LocalClock provides WorkSeed.clock, LocalCurrentUser provides user) {
                     WithViewModels(owner) {
                         TestWorkHub(router = router, navigator = navigator) { padding -> WorkListSection(padding) }
                     }
@@ -119,6 +123,31 @@ class WorkListSectionTest {
         compose.onNodeWithText("Nothing needs you right now").assertIsDisplayed()
         compose.onNodeWithTag("empty-state-action").performClick()
         assertEquals(listOf<NavKey>(NewWorkRoute(), NewWorkRoute()), navigator.pushed)
+    }
+
+    @Test
+    fun viewersGetNoWayIntoTheForm() {
+        // Regression: a viewer was offered New work, and its submit could only 403.
+        show(load = { WorkFeed.Sources() }, user = Samples.currentUser(role = CurrentUser.ROLE_VIEWER))
+        compose.onNodeWithText("Nothing needs you right now").assertIsDisplayed()
+        compose.onNodeWithTag("new-work").assertDoesNotExist()
+        compose.onNodeWithTag("empty-state-action").assertDoesNotExist()
+        assertEquals(emptyList<NavKey>(), navigator.pushed)
+    }
+
+    @Test
+    fun aFailedFirstLoadShowsTheErrorNotAnEmptyState() {
+        // Regression: an unreachable server read "Nothing needs you right now" under the error.
+        show(load = { throw java.io.IOException("Connection refused") })
+        compose.onNodeWithTag("error-row").assertIsDisplayed()
+        compose.onNodeWithText("Nothing needs you right now").assertDoesNotExist()
+        compose.onNodeWithTag("empty-state-action").assertDoesNotExist()
+    }
+
+    @Test
+    fun membersKeepTheFab() {
+        show(user = Samples.currentUser(role = CurrentUser.ROLE_MEMBER))
+        compose.onNodeWithTag("new-work").assertIsDisplayed()
     }
 
     @Test

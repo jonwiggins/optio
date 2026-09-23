@@ -27,6 +27,7 @@ import dev.optio.core.navigation.WorkView
 import dev.optio.core.navigation.routes.NewWorkRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.network.LocalEventHub
+import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.hub.HubActions
 import dev.optio.core.ui.hub.HubFab
 import kotlinx.coroutines.launch
@@ -89,14 +90,18 @@ fun WorkListSection(
         }
     }
     val atTop by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
-    HubFab {
-        ExtendedFloatingActionButton(
-            onClick = { navigator.push(NewWorkRoute()) },
-            expanded = atTop,
-            icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-            text = { Text("New work") },
-            modifier = Modifier.testTag("new-work"),
-        )
+    // Viewers are read-only: no way into the form (its submit would only 403).
+    val canMutate = Roles.canMutate
+    if (canMutate) {
+        HubFab {
+            ExtendedFloatingActionButton(
+                onClick = { navigator.push(NewWorkRoute()) },
+                expanded = atTop,
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text("New work") },
+                modifier = Modifier.testTag("new-work"),
+            )
+        }
     }
 
     WorkListContent(
@@ -112,7 +117,7 @@ fun WorkListSection(
         onRefresh = vm::refresh,
         onOpen = { row -> navigator.push(row.destination.route()) },
         onOpenPr = navigator::openExternal,
-        onNewWork = { navigator.push(NewWorkRoute()) },
+        onNewWork = if (canMutate) ({ navigator.push(NewWorkRoute()) }) else null,
         modifier = modifier,
         listState = listState,
     )

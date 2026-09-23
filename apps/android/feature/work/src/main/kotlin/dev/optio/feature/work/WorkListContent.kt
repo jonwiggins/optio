@@ -83,7 +83,8 @@ internal fun WorkListContent(
     onRefresh: () -> Unit,
     onOpen: (WorkRow) -> Unit,
     onOpenPr: (String) -> Unit,
-    onNewWork: () -> Unit,
+    /** Null hides every "New work" entry (viewers are read-only). */
+    onNewWork: (() -> Unit)?,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
@@ -126,6 +127,9 @@ internal fun WorkListContent(
                         SkeletonRows(count = 5)
                     }
                 }
+                // Nothing loaded because loading failed: the error row says so, and "Nothing needs
+                // you right now" would be a guess (the Overview shows only its error too).
+                state.error != null && state.rows.isEmpty() -> Unit
                 visible.isEmpty() -> item(key = "empty", contentType = "empty") {
                     EmptyState(
                         title = when {
@@ -139,7 +143,7 @@ internal fun WorkListContent(
                         } else {
                             "Start something — a PR, a chat on your machine, a schedule, or a persistent agent."
                         },
-                        actionTitle = if (query.isEmpty()) "New work" else null,
+                        actionTitle = if (query.isEmpty() && onNewWork != null) "New work" else null,
                         action = onNewWork,
                     )
                 }
