@@ -44,6 +44,7 @@ import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.KeyValueRow
 import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.components.StateDot
+import dev.optio.core.ui.components.Truncation
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.mono
 import dev.optio.core.ui.components.readableWidth
@@ -59,8 +60,11 @@ import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
+import dev.optio.feature.tasks.common.CollapsingHeader
 import dev.optio.feature.tasks.common.CollectUiMessages
 import dev.optio.feature.tasks.common.DetailScaffold
+import dev.optio.feature.tasks.common.HEADER_LINE_MAX_LINES
+import dev.optio.feature.tasks.common.keepFactsTogether
 import dev.optio.feature.tasks.data.JobRun
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -176,14 +180,15 @@ fun JobRunContent(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).readableWidth()) {
             when {
-                run != null -> {
-                    RunHeader(run, runId, logConnected)
-                    DetailTabs(options = RunSection.entries.map { it to it.label }, selection = section, onSelect = { section = it })
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        when (section) {
-                            RunSection.LOGS -> RunLogs(run, logEntries, logLoaded, logError)
-                            RunSection.DETAILS -> RunDetails(run)
-                        }
+                run != null -> CollapsingHeader(
+                    header = {
+                        RunHeader(run, runId, logConnected)
+                        DetailTabs(options = RunSection.entries.map { it to it.label }, selection = section, onSelect = { section = it })
+                    },
+                ) {
+                    when (section) {
+                        RunSection.LOGS -> RunLogs(run, logEntries, logLoaded, logError)
+                        RunSection.DETAILS -> RunDetails(run)
                     }
                 }
                 state is LoadState.Failed -> ErrorRow(state.error, what = "run", retry = onRetryLoad)
@@ -211,8 +216,11 @@ private fun RunHeader(run: JobRun, runId: String, connected: Boolean) {
     val now = rememberNow()
     DetailHeader(
         state = run.state,
-        line = RunHeaderText.line(run, runId, now),
+        line = RunHeaderText.line(run, runId, now)?.keepFactsTogether(),
+        lineMaxLines = HEADER_LINE_MAX_LINES,
         secondary = run.errorMessage?.takeIf { it.isNotEmpty() }?.let(::AnnotatedString),
+        // An error message is prose: keep its start.
+        secondaryTruncation = Truncation.END,
     ) {
         if (connected) StateDot(Tone.WORKING, size = 6.dp, modifier = Modifier.testTag("live-dot"))
     }

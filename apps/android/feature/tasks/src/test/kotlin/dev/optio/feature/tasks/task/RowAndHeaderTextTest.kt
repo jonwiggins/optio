@@ -102,6 +102,19 @@ class RowAndHeaderTextTest {
     }
 
     @Test
+    fun headerBadgeUsesTheStateMap() {
+        // Regression: NEEDS ATTENTION was forced to the working (purple) tone.
+        assertEquals("needs_attention", TaskHeaderText.badgeState(TaskSamples.needsAttention))
+        assertEquals(Tone.ACCENT, TaskHeaderText.badgeTone(TaskSamples.needsAttention))
+        assertEquals("stalled", TaskHeaderText.badgeState(TaskSamples.stalledRunning))
+        assertEquals(Tone.ACCENT, TaskHeaderText.badgeTone(TaskSamples.stalledRunning))
+        assertEquals(Tone.WORKING, TaskHeaderText.badgeTone(TaskSamples.prOpened))
+        assertEquals(Tone.DANGER, TaskHeaderText.badgeTone(TaskSamples.failed))
+        // A stall only matters while running: a silent PR task keeps its own state.
+        assertEquals("pr_opened", TaskHeaderText.badgeState(TaskSamples.prOpened.copy(stallInfo = StallInfoRow(isStalled = true, silentForMs = 1.0))))
+    }
+
+    @Test
     fun jobAndRunHeaders() {
         val detail = TaskSamples.jobDetail
         assertEquals("running" to Tone.WORKING, JobHeaderText.state(detail))
