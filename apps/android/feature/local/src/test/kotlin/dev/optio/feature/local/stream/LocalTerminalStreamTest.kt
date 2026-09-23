@@ -276,6 +276,84 @@ class LocalTerminalStreamTest {
             assertEquals(emptyList(), h.socket.sent)
         }
 
+    /** The stream a screen that came back creates over the same sink, handed the old one's grids. */
+    private fun TestScope.replacement(
+        h: Harness,
+        owned: List<TerminalGrid>,
+    ): Pair<LocalTerminalStream, MutableList<FakeStreamSocket>> {
+        val sockets = mutableListOf<FakeStreamSocket>()
+        val next =
+            LocalTerminalStream(
+                terminalId = "t1",
+                scope = backgroundScope,
+                sink = h.sink,
+                openSocket = { FakeStreamSocket().also { sockets += it } },
+                owned = owned,
+            )
+        h.sink.onGridSizeChanged = { next.onGridSizeChanged(it) }
+        return next to sockets
+    }
+
+    @Test
+    fun aPhoneThatHeldTheGridStillHoldsItAfterRotating() =
+        runTest {
+            // QA: rotating recreates the stream; the new one started unclaimed and showed the phone's
+            // own portrait grid as "Sized for another device".
+            val h = Harness(this)
+            h.attachLive(this)
+            h.stream.claim()
+            h.socket.size(50, 20)
+            runCurrent()
+            val owned = h.stream.ownedGrids
+            assertEquals(listOf(TerminalGrid(50, 20)), owned)
+            h.stream.disconnect()
+
+            val (next, sockets) = replacement(h, owned)
+            assertEquals(TerminalSizing.Mode.Owner, next.state.value.mode, "no strip while the screen comes back")
+            h.sink.natural = TerminalGrid(90, 12) // the landscape view lays out
+            next.connect()
+            val socket = sockets.last()
+            socket.opened()
+            runCurrent()
+            assertEquals(emptyList(), socket.resizes(), "nothing is resized before the PTY says it's still ours")
+            socket.status("running")
+            socket.bytes("replay")
+            socket.size(50, 20) // the replay: the PTY is still at the grid we held
+            runCurrent()
+            assertEquals(TerminalSizing.Mode.Owner, next.state.value.mode)
+            assertNull(next.state.value.foreignGrid)
+            assertEquals(listOf(TerminalGrid(90, 12)), socket.resizes(), "then it follows the new fit")
+            socket.size(90, 12) // the echo
+            runCurrent()
+            assertEquals(TerminalSizing.Mode.Owner, next.state.value.mode)
+            assertEquals(listOf(TerminalGrid(90, 12)), next.ownedGrids)
+        }
+
+    @Test
+    fun whoeverTookTheGridWhileThePhoneWasAwayKeepsIt() =
+        runTest {
+            val h = Harness(this)
+            val (next, sockets) = replacement(h, listOf(TerminalGrid(50, 20)))
+            next.connect()
+            val socket = sockets.last()
+            socket.opened()
+            socket.status("running")
+            socket.size(120, 40) // the laptop claimed it meanwhile
+            runCurrent()
+            assertEquals(TerminalSizing.Mode.Passive(TerminalGrid(120, 40)), next.state.value.mode)
+            assertEquals(TerminalGridMode.Fixed(120, 40), h.sink.gridMode)
+            assertEquals(emptyList(), socket.resizes(), "watching never resizes")
+            assertEquals(emptyList(), next.ownedGrids)
+        }
+
+    @Test
+    fun onlyAnOwnerHandsItsGridOn() =
+        runTest {
+            val h = Harness(this)
+            h.attachLive(this) // passive
+            assertEquals(emptyList(), h.stream.ownedGrids)
+        }
+
     // endregion
 
     // region Status, exit, errors, reconnects

@@ -11,6 +11,7 @@ import dev.optio.core.navigation.routes.LocalTerminalRoute
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.EventHub
 import dev.optio.core.network.on
+import dev.optio.core.terminal.TerminalGrid
 import dev.optio.core.terminal.TerminalState
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.load
@@ -144,6 +145,9 @@ class LocalTerminalViewModel(
 
     private var visible = false
     private var transcriptStarted = false
+
+    /** The grids this phone held when the screen went away: the next stream starts owning them. */
+    private var ownedGrids: List<TerminalGrid> = emptyList()
     private var pollJob: Job? = null
     private var eventsJob: Job? = null
 
@@ -209,6 +213,8 @@ class LocalTerminalViewModel(
         eventsJob?.cancel()
         eventsJob = null
         transcript.pause()
+        // Rotation and the background recreate the stream; a phone that held the grid keeps it.
+        ownedGrids = _stream.value?.ownedGrids.orEmpty()
         _stream.value?.disconnect()
         _stream.value = null
     }
@@ -276,12 +282,15 @@ class LocalTerminalViewModel(
 
     private fun startStream() {
         if (_stream.value != null) return
+        val owned = ownedGrids.takeUnless { _terminal.value.value?.let(LocalPresentation::isDead) ?: true }.orEmpty()
+        ownedGrids = emptyList()
         val s =
             LocalTerminalStream(
                 terminalId = terminalId,
                 scope = viewModelScope,
                 sink = sink,
                 openSocket = { socketFactory(api, terminalId) },
+                owned = owned,
             )
         s.onStatus = { state, attention -> applyStatus(state, attention) }
         s.onExit = { code -> onExit(code) }

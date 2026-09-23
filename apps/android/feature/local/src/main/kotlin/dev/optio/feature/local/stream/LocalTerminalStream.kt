@@ -41,7 +41,8 @@ import kotlinx.serialization.json.put
  * Runs on the main thread ([scope] = the ViewModel's scope). Wire the terminal's callbacks to
  * [sendInput], [onInteraction], [onGridSizeChanged] and [onNaturalGridChanged]. A stream is spent
  * after [disconnect]; a screen that comes back creates a new one over the same sink, and the first
- * bytes of its replay reset the screen.
+ * bytes of its replay reset the screen. Pass the spent stream's [ownedGrids] as [owned] so a phone
+ * that held the grid still holds it (iOS keeps one stream across rotation and the background).
  */
 class LocalTerminalStream(
     val terminalId: String,
@@ -50,6 +51,7 @@ class LocalTerminalStream(
     private val openSocket: () -> StreamSocket,
     private val reconnectDelay: Duration = RECONNECT_DELAY,
     private val sizeHold: Duration = SIZE_HOLD,
+    owned: List<TerminalGrid> = emptyList(),
 ) {
     enum class ConnState(val label: String) {
         CONNECTING("connecting…"),
@@ -119,7 +121,38 @@ class LocalTerminalStream(
     /** The PTY grid the daemon last announced. */
     private var announced: TerminalGrid? = null
 
+    /** The last announcement that was ours (an echo of our resize, or our grid re-announced). */
+    private var ownedEcho: TerminalGrid? = null
+
+    /**
+     * Grids a replaced stream held ([owned]), until this connection's first `size` frame says whether
+     * the PTY is still at one of them. Meanwhile we act as the owner but send no resize.
+     */
+    private var reclaiming: List<TerminalGrid> = emptyList()
+
+    init {
+        // The screen came back (rotation, the app back from the background) and this phone held the
+        // grid. If nobody took it meanwhile it's still ours, and the first `size` frame tells: then we
+        // size the PTY to the fit we have now; otherwise we watch whoever took it.
+        if (owned.isNotEmpty()) {
+            reclaiming = owned
+            setMode(TerminalSizing.Mode.Owner)
+        }
+    }
+
     val isDisposed: Boolean get() = disposed
+
+    /**
+     * The grids this phone holds the PTY at, for the stream that replaces this one on the same
+     * screen ([owned]): empty unless we own the grid of a live terminal.
+     */
+    val ownedGrids: List<TerminalGrid>
+        get() =
+            when {
+                mode != TerminalSizing.Mode.Owner || terminalDead -> emptyList()
+                reclaiming.isNotEmpty() -> reclaiming
+                else -> (listOfNotNull(ownedEcho) + sent + sink.grid).distinct()
+            }
 
     // region Connection
 
@@ -178,8 +211,8 @@ class LocalTerminalStream(
             WsFrame.Opened -> {
                 _state.update { it.copy(conn = ConnState.CONNECTED) }
                 // Attaching never resizes the PTY. If we already own it (a reconnect after a blip),
-                // re-assert our grid; otherwise wait for `size`.
-                if (mode == TerminalSizing.Mode.Owner) sendResize(sink.grid)
+                // re-assert our grid; otherwise (or while reclaiming) wait for `size`.
+                if (mode == TerminalSizing.Mode.Owner && reclaiming.isEmpty()) sendResize(sink.grid)
             }
             is WsFrame.Binary -> onBytes(frame.bytes)
             // Non-JSON text is unexpected on this stream; render it so nothing is lost.
@@ -338,6 +371,18 @@ class LocalTerminalStream(
     private fun gridAnnounced(grid: TerminalGrid) {
         announced = grid
         val natural = sink.naturalGrid ?: TerminalGrid(0, 0)
+        if (reclaiming.isNotEmpty()) {
+            val stillOurs = !terminalDead && grid in reclaiming
+            reclaiming = emptyList()
+            if (stillOurs) {
+                ownedEcho = grid
+                // The fit may have changed while we were away (rotation): size the PTY to it now.
+                if (sink.grid != grid) sendResize(sink.grid)
+                return
+            }
+            // Someone else sized it meanwhile (or it has ended): judge it as a fresh attach.
+            mode = TerminalSizing.Mode.Unclaimed
+        }
         val next =
             if (mode == TerminalSizing.Mode.Owner && !terminalDead && grid == sink.grid) {
                 // Our own grid, re-announced because another viewer attached: still ours. (The
@@ -347,6 +392,7 @@ class LocalTerminalStream(
                 TerminalSizing.onGridAnnounced(mode, grid, natural, sent, recorded = terminalDead)
             }
         TerminalSizing.ackSentGrid(sent, grid)?.let { sent = it }
+        ownedEcho = if (next == TerminalSizing.Mode.Owner) grid else null
         setMode(next, recorded = terminalDead)
     }
 
@@ -366,6 +412,7 @@ class LocalTerminalStream(
      */
     fun claim() {
         if (terminalDead || disposed) return
+        reclaiming = emptyList()
         val before = sent.size
         setMode(TerminalSizing.Mode.Owner)
         // Always tell the daemon, even if our grid is what we last sent: another viewer may have
@@ -380,7 +427,7 @@ class LocalTerminalStream(
 
     /** The terminal's own grid changed (rotation, keyboard, our claim). Only the owner tells the PTY. */
     fun onGridSizeChanged(grid: TerminalGrid) {
-        if (mode == TerminalSizing.Mode.Owner) sendResize(grid)
+        if (mode == TerminalSizing.Mode.Owner && reclaiming.isEmpty()) sendResize(grid)
     }
 
     /**
