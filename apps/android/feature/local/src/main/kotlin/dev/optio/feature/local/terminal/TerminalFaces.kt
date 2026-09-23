@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -27,9 +29,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,6 +47,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -99,9 +99,10 @@ import kotlin.math.roundToInt
 
 /**
  * The terminal's header (iOS `LocalTerminalScreen.header`): state badge and a `·`-joined line
- * (host, exit code, "starts when the host reconnects", cost, links), the directory (or the error of
- * a dead terminal), the needs-you row, the Claude usage pill, and, when there is a conversation,
- * the Transcript ⇄ Screen toggle.
+ * (host, exit code, "starts when the host reconnects", cost), the directory (or the error of a dead
+ * terminal), the needs-you row, the Claude usage pill, and, when there is a conversation, the
+ * Transcript ⇄ Screen toggle; then the PR / ticket badges in a strip of their own, as the web lays
+ * them out on a phone (iOS squeezes them into the badge row).
  */
 @Composable
 internal fun TerminalHeader(
@@ -125,7 +126,6 @@ internal fun TerminalHeader(
             if (t.state == LocalTerminalState.EXITED) t.exitCode?.let { "exit ${it.toInt()}" } else null,
             if (t.state == LocalTerminalState.PENDING && t.pendingReason == LocalTerminalPendingReason.HOST_OFFLINE) "starts when the host reconnects" else null,
             Cost.formatIfNonZero(t.costUsd),
-            links.take(3).joinToString(" · ") { LocalPresentation.shortLinkLabel(it) }.takeIf { it.isNotEmpty() },
         )
     val secondary: AnnotatedString =
         if (LocalPresentation.isDead(t) && !t.errorMessage.isNullOrEmpty()) AnnotatedString(t.errorMessage!!) else mono(t.dir)
@@ -138,45 +138,69 @@ internal fun TerminalHeader(
         } else {
             snoozedUntil?.let { "Snoozed until ${SHORT_TIME.format(it.atZone(zone))}" }
         }
-    DetailHeader(
-        state = LocalPresentation.stateLabel(t),
-        tone = if (stateTone == Tone.ACCENT) Tone.WORKING else stateTone,
-        line = line,
-        secondary = secondary,
-        needsYou = waiting,
-        showsUsage = true,
-        modifier = modifier,
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalAlignment = Alignment.CenterVertically) {
-            WorkLinkBadges(links, onOpen = onOpenLink, max = if (showToggle) 1 else 2)
+    Column(modifier) {
+        DetailHeader(
+            state = LocalPresentation.stateLabel(t),
+            tone = if (stateTone == Tone.ACCENT) Tone.WORKING else stateTone,
+            line = line,
+            secondary = secondary,
+            needsYou = waiting,
+            showsUsage = true,
+        ) {
             if (showToggle) SessionViewToggle(view ?: LocalSessionView.TRANSCRIPT, onChooseView)
+        }
+        // The web's phone layout: the PR / ticket badges get their own strip under the header.
+        if (links.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .padding(horizontal = Spacing.l, vertical = 6.dp)
+                    .testTag("work-links"),
+            ) {
+                WorkLinkBadges(links, onOpen = onOpenLink, max = 4)
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = OptioTheme.colors.separator)
         }
     }
 }
 
 private val SHORT_TIME: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 
-/** Transcript ⇄ Screen (iOS `SessionViewToggle`, web `session-view-toggle.tsx`): two icon segments. */
+/**
+ * Transcript ⇄ Screen (iOS `SessionViewToggle`, web `session-view-toggle.tsx`): two small icon
+ * segments in one capsule, the chosen one raised and tinted.
+ */
 @Composable
 internal fun SessionViewToggle(
     view: LocalSessionView,
     onChange: (LocalSessionView) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    SingleChoiceSegmentedButtonRow(modifier.height(34.dp).testTag("face-toggle")) {
-        LocalSessionView.entries.forEachIndexed { index, face ->
-            SegmentedButton(
-                selected = view == face,
-                onClick = { onChange(face) },
-                shape = SegmentedButtonDefaults.itemShape(index, LocalSessionView.entries.size),
-                icon = {},
-                contentPadding = PaddingValues(horizontal = 12.dp),
-                modifier = Modifier.testTag("face-${face.name.lowercase()}"),
+    val colors = OptioTheme.colors
+    Row(
+        modifier
+            .background(colors.fillTertiary, Radius.capsuleShape)
+            .padding(2.dp)
+            .selectableGroup()
+            .testTag("face-toggle"),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        LocalSessionView.entries.forEach { face ->
+            val selected = view == face
+            Box(
+                Modifier
+                    .size(width = 38.dp, height = 28.dp)
+                    .background(if (selected) colors.card else Color.Transparent, Radius.capsuleShape)
+                    .selectable(selected = selected, role = Role.Tab, onClick = { onChange(face) })
+                    .testTag("face-${face.name.lowercase()}"),
+                contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     if (face == LocalSessionView.TRANSCRIPT) Icons.Outlined.ChatBubbleOutline else Icons.Outlined.Terminal,
                     contentDescription = face.label,
-                    modifier = Modifier.size(18.dp),
+                    tint = if (selected) colors.accent else colors.secondaryLabel,
+                    modifier = Modifier.size(17.dp),
                 )
             }
         }
@@ -267,9 +291,14 @@ internal fun ScreenFace(
     onClaim: () -> Unit,
     onReconnect: () -> Unit,
     modifier: Modifier = Modifier,
+    onStart: () -> Unit = {},
     dark: Boolean = optioIsDark(),
 ) {
     val background = TerminalTheme.background(dark)
+    if (terminal.state == LocalTerminalState.PENDING) {
+        PendingScreen(terminal, canType, onStart, modifier.background(background))
+        return
+    }
     val showPreview =
         LocalPresentation.isDead(terminal) && stream.settled && !stream.outputSeen && !terminal.preview.isNullOrEmpty()
     Column(modifier.fillMaxSize().background(background).keyboardPadding().testTag("screen-face")) {
@@ -326,6 +355,34 @@ internal fun ScreenFace(
         if (!stream.dead && canType) {
             TerminalKeyBar(screen, enabled = stream.connected, dark = dark)
         }
+    }
+}
+
+/**
+ * A terminal that hasn't started has no screen yet (the stream only attaches to a launching or
+ * running one): say why, and offer Start when it's held.
+ */
+@Composable
+private fun PendingScreen(
+    terminal: LocalTerminal,
+    canStart: Boolean,
+    onStart: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val offline = terminal.pendingReason == LocalTerminalPendingReason.HOST_OFFLINE
+    Box(modifier.fillMaxSize().testTag("pending-screen"), contentAlignment = Alignment.Center) {
+        EmptyState(
+            title = if (offline) "Waiting for the host" else "Not started yet",
+            icon = if (offline) Icons.Outlined.WifiOff else Icons.Outlined.Terminal,
+            message =
+                if (offline) {
+                    "It starts by itself when the machine reconnects (`optio local up`)."
+                } else {
+                    "This terminal is held: it runs when you start it."
+                },
+            actionTitle = if (canStart && LocalPresentation.canStart(terminal)) "Start" else null,
+            action = if (canStart && LocalPresentation.canStart(terminal)) onStart else null,
+        )
     }
 }
 

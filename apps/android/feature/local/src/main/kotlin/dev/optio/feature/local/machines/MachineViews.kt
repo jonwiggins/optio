@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AccountTree
@@ -22,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.optio.core.model.LocalBlueprint
@@ -133,11 +136,11 @@ internal fun DirLine(
             color = colors.label,
             maxLines = 1,
             overflow = TextOverflow.StartEllipsis,
-            modifier = Modifier.weight(1f, fill = repo == null),
+            modifier = Modifier.weight(1f),
         )
         if (repo != null) {
             Spacer(Modifier.width(Spacing.s))
-            Text(repo, style = type.caption2, color = colors.secondaryLabel, maxLines = 1, overflow = TextOverflow.StartEllipsis)
+            Text(repo, style = type.caption2, color = colors.secondaryLabel, maxLines = 1, overflow = TextOverflow.StartEllipsis, modifier = Modifier.widthIn(max = 180.dp))
         }
     }
 }
@@ -145,6 +148,16 @@ internal fun DirLine(
 /** Where an automation runs, in words: its directory, repo, or "the event's repo". */
 internal fun automationWhere(bp: LocalBlueprint): String =
     bp.dir?.let { LocalPresentation.shortDir(it) } ?: LocalPresentation.shortRepo(bp.repoUrl) ?: "the event's repo"
+
+/** [automationWhere] for a meta line: the path or repo in mono, "on <machine>" plain. */
+internal fun whereText(
+    bp: LocalBlueprint,
+    hostName: String?,
+): AnnotatedString =
+    buildAnnotatedString {
+        if (bp.dir != null || bp.repoUrl != null) append(mono(automationWhere(bp))) else append(automationWhere(bp))
+        if (hostName != null) append(" on $hostName")
+    }
 
 /**
  * One automation (iOS `BlueprintRow`, web `AutomationRow`): name, who runs it and how it ends, where,
@@ -173,7 +186,7 @@ internal fun AutomationRow(
             who,
             then,
             if (bp.spawnMode == LocalBlueprintSpawnMode.HOLD) "hold" else null,
-            mono(automationWhere(bp) + (host?.let { " on $it" } ?: "")),
+            whereText(bp, host),
         )
     val triggerLine =
         if (triggers.isEmpty()) {

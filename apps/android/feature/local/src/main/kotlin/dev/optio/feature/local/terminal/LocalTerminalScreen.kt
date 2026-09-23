@@ -300,6 +300,7 @@ private fun TerminalBody(
                     canType = canMutate,
                     onClaim = actions.onClaim,
                     onReconnect = actions.onReconnect,
+                    onStart = actions.onStart,
                 )
             }
         }

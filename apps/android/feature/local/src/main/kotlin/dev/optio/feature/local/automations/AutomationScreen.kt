@@ -77,7 +77,7 @@ import dev.optio.core.ui.theme.mono
 import dev.optio.core.ui.theme.semibold
 import dev.optio.core.ui.toast.LocalToaster
 import dev.optio.feature.local.api.LocalTrigger
-import dev.optio.feature.local.machines.automationWhere
+import dev.optio.feature.local.machines.whereText
 import dev.optio.feature.local.model.LocalPresentation
 import dev.optio.feature.local.model.TriggerKind
 import dev.optio.feature.local.model.Triggers
@@ -278,7 +278,7 @@ private fun AutomationBody(
                         if (agent == null) null else if (bp.sessionMode == LocalAgentSessionMode.HEADLESS) "exit when done" else "keeps session open",
                         if (bp.spawnMode == LocalBlueprintSpawnMode.HOLD) "hold" else null,
                     ),
-                secondary = mono(automationWhere(bp) + (data.host?.let { " on ${it.name}" } ?: "")),
+                secondary = whereText(bp, data.host?.name),
             )
         }
         item {

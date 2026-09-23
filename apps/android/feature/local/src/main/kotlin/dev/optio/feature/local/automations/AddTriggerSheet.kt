@@ -1,9 +1,10 @@
 package dev.optio.feature.local.automations
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -56,6 +57,7 @@ import kotlinx.serialization.json.JsonObject
  * in that kind's config, and Add. Schedule, webhook and ticket as on iOS, plus the GitHub / Slack /
  * Linear event triggers the web offers. [serverUrl] shows where a webhook listens.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AddTriggerSheet(
     serverUrl: String?,
@@ -101,7 +103,7 @@ internal fun AddTriggerSheet(
             verticalArrangement = Arrangement.spacedBy(Spacing.m),
         ) {
             Text("Add trigger", style = OptioTheme.type.title3.semibold())
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 TriggerKind.entries.forEach { kind ->
                     FilterChip(
                         selected = draft.kind == kind,
