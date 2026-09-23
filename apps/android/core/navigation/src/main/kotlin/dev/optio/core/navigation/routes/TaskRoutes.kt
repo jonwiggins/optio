@@ -24,3 +24,7 @@ data class JobFormRoute(val id: String? = null) : NavKey
 /** A scheduled Task blueprint (`task_configs` row). */
 @Serializable
 data class ScheduledDetailRoute(val id: String) : NavKey
+
+/** Create ([id] null) or edit a scheduled Task blueprint (iOS `TaskConfigFormSheet`). */
+@Serializable
+data class ScheduledFormRoute(val id: String? = null) : NavKey

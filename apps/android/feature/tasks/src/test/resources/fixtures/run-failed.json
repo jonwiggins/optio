@@ -1,0 +1,31 @@
+{
+  "run": {
+    "id": "ec8480d5-54ad-4b06-ad1b-26d63df0d64e",
+    "workflowId": "3e104330-6a43-45a4-a52d-7cbbf7eb39fd",
+    "triggerId": null,
+    "state": "failed",
+    "params": {
+      "mode": "[[mock:fail]]"
+    },
+    "title": null,
+    "output": null,
+    "costUsd": "0.0123",
+    "inputTokens": 100,
+    "outputTokens": 25,
+    "modelUsed": "fake-model",
+    "errorMessage": "Mock agent failure",
+    "sessionId": "4e06826c-adb3-45cc-bf97-9f79438dbee6",
+    "podName": "optio-wf-3e104330-6a43-45a4-a52d-7cbbf7eb39fd-0-8234",
+    "localTerminalId": null,
+    "retryCount": 0,
+    "startedAt": "2026-09-23T00:46:26.267Z",
+    "finishedAt": "2026-09-23T00:46:26.285Z",
+    "createdAt": "2026-09-23T00:46:26.249Z",
+    "updatedAt": "2026-09-23T00:46:26.290Z",
+    "podId": null,
+    "lastPodId": "dd84b8d5-8481-4013-8b9d-3e97ba8c4a46",
+    "controlIntent": null,
+    "reconcileBackoffUntil": null,
+    "reconcileAttempts": 0
+  }
+}

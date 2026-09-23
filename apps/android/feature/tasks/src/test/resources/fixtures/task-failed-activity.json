@@ -1,0 +1,48 @@
+{
+  "activity": [
+    {
+      "type": "event",
+      "id": "b686a2df-a1c9-46e8-8d4f-fbba67c3faff",
+      "taskId": "22ea28fa-6f6d-4b47-9d56-e9d370558d43",
+      "createdAt": "2026-09-23T00:46:10.417Z",
+      "fromState": "pending",
+      "toState": "queued",
+      "trigger": "task_submitted",
+      "message": null,
+      "userId": null
+    },
+    {
+      "type": "event",
+      "id": "ed6d2401-ce32-4948-9e0d-0b6889baa63f",
+      "taskId": "22ea28fa-6f6d-4b47-9d56-e9d370558d43",
+      "createdAt": "2026-09-23T00:46:22.805Z",
+      "fromState": "queued",
+      "toState": "provisioning",
+      "trigger": "worker_pickup",
+      "message": null,
+      "userId": null
+    },
+    {
+      "type": "event",
+      "id": "df980cca-61e9-442b-bb43-37ea579d1ff9",
+      "taskId": "22ea28fa-6f6d-4b47-9d56-e9d370558d43",
+      "createdAt": "2026-09-23T00:46:22.875Z",
+      "fromState": "provisioning",
+      "toState": "running",
+      "trigger": "worktree_created",
+      "message": null,
+      "userId": null
+    },
+    {
+      "type": "event",
+      "id": "35e62639-0652-4f70-a38a-9f3cf542119a",
+      "taskId": "22ea28fa-6f6d-4b47-9d56-e9d370558d43",
+      "createdAt": "2026-09-23T00:46:23.304Z",
+      "fromState": "running",
+      "toState": "failed",
+      "trigger": "agent_failure",
+      "message": "Mock agent failure",
+      "userId": null
+    }
+  ]
+}

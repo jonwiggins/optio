@@ -1,0 +1,44 @@
+{
+  "events": [
+    {
+      "id": "21ff3760-c2a6-4f9c-a32c-024ca3a9ffcd",
+      "taskId": "871a56a2-eb61-4d49-a5b6-5818036fee40",
+      "fromState": "pending",
+      "toState": "queued",
+      "trigger": "task_submitted",
+      "message": null,
+      "userId": null,
+      "createdAt": "2026-09-23T00:46:10.262Z"
+    },
+    {
+      "id": "1877799b-36e3-48c2-8370-a0ba8e3c57ba",
+      "taskId": "871a56a2-eb61-4d49-a5b6-5818036fee40",
+      "fromState": "queued",
+      "toState": "provisioning",
+      "trigger": "worker_pickup",
+      "message": null,
+      "userId": null,
+      "createdAt": "2026-09-23T00:46:10.334Z"
+    },
+    {
+      "id": "db0a6dc7-0868-413a-8f3d-90b6793d1c6c",
+      "taskId": "871a56a2-eb61-4d49-a5b6-5818036fee40",
+      "fromState": "provisioning",
+      "toState": "running",
+      "trigger": "worktree_created",
+      "message": null,
+      "userId": null,
+      "createdAt": "2026-09-23T00:46:10.591Z"
+    },
+    {
+      "id": "a5e0d7e1-4d40-4a93-8c03-6dacee6a67da",
+      "taskId": "871a56a2-eb61-4d49-a5b6-5818036fee40",
+      "fromState": "running",
+      "toState": "pr_opened",
+      "trigger": "pr_detected",
+      "message": "https://github.com/e2e-org/e2e-repo/pull/2",
+      "userId": null,
+      "createdAt": "2026-09-23T00:46:11.164Z"
+    }
+  ]
+}

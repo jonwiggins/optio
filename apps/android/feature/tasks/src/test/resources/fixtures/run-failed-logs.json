@@ -1,0 +1,38 @@
+{
+  "logs": [
+    {
+      "id": "7f682a0e-e734-490a-b7e6-61e06a3a8aaa",
+      "workflowRunId": "ec8480d5-54ad-4b06-ad1b-26d63df0d64e",
+      "content": "Session started \u00b7 fake-model \u00b7 0 tools",
+      "logType": "system",
+      "metadata": {
+        "model": "fake-model"
+      },
+      "timestamp": "2026-09-23T00:46:26.270Z",
+      "stream": "stdout"
+    },
+    {
+      "id": "5f08c7db-bb7b-4436-8bcb-e0655fd40fdf",
+      "workflowRunId": "ec8480d5-54ad-4b06-ad1b-26d63df0d64e",
+      "content": "Mock agent handled: Draft release notes for everything merged yesterday. [[mock:fail]]",
+      "logType": "text",
+      "metadata": null,
+      "timestamp": "2026-09-23T00:46:26.272Z",
+      "stream": "stdout"
+    },
+    {
+      "id": "1bc6d95a-b71f-4073-88d7-f3d96f289523",
+      "workflowRunId": "ec8480d5-54ad-4b06-ad1b-26d63df0d64e",
+      "content": "(1 turns \u00b7 0.0s \u00b7 $0.0123)",
+      "logType": "info",
+      "metadata": {
+        "cost": 0.0123,
+        "turns": 1,
+        "isError": true,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-23T00:46:26.275Z",
+      "stream": "stdout"
+    }
+  ]
+}

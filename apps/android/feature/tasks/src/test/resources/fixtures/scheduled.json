@@ -1,0 +1,25 @@
+{
+  "taskConfig": {
+    "id": "27856ec6-ee1d-4bd0-a28f-2c84937dbdaf",
+    "name": "Weekly dependency bump",
+    "description": null,
+    "workspaceId": null,
+    "title": "Bump minor dependency versions",
+    "prompt": "Bump all minor dependency versions and open a PR. [[mock:pr]] [[mock:cost:0.2140]]",
+    "promptTemplateId": null,
+    "repoUrl": "https://github.com/e2e-org/e2e-repo",
+    "repoBranch": "main",
+    "agentType": "claude-code",
+    "maxRetries": 3,
+    "priority": 100,
+    "agentOptions": null,
+    "runTarget": "cluster",
+    "localHostId": null,
+    "localDir": null,
+    "localSessionMode": null,
+    "enabled": true,
+    "createdBy": null,
+    "createdAt": "2026-09-23T00:46:27.537Z",
+    "updatedAt": "2026-09-23T00:46:27.537Z"
+  }
+}

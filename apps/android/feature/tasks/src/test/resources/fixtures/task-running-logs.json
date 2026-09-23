@@ -1,0 +1,17 @@
+{
+  "logs": [
+    {
+      "id": "b28dd572-d858-4557-8280-f7f21fdd028e",
+      "taskId": "826e5086-a42c-45ce-a768-4e5719f5e68a",
+      "stream": "stdout",
+      "content": "Session started \u00b7 fake-model \u00b7 0 tools",
+      "logType": "system",
+      "metadata": {
+        "model": "fake-model"
+      },
+      "workflowRunId": null,
+      "prReviewRunId": null,
+      "timestamp": "2026-09-23T00:46:23.931Z"
+    }
+  ]
+}

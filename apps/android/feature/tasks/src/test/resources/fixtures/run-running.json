@@ -1,0 +1,31 @@
+{
+  "run": {
+    "id": "078d6064-ca59-466d-a5af-908665729862",
+    "workflowId": "3e104330-6a43-45a4-a52d-7cbbf7eb39fd",
+    "triggerId": null,
+    "state": "running",
+    "params": {
+      "mode": "[[mock:hang]]"
+    },
+    "title": null,
+    "output": null,
+    "costUsd": null,
+    "inputTokens": null,
+    "outputTokens": null,
+    "modelUsed": null,
+    "errorMessage": null,
+    "sessionId": "aa337b8e-01da-454e-8315-9407e4dcc02c",
+    "podName": "optio-wf-3e104330-6a43-45a4-a52d-7cbbf7eb39fd-0-8234",
+    "localTerminalId": null,
+    "retryCount": 0,
+    "startedAt": "2026-09-23T00:46:26.698Z",
+    "finishedAt": null,
+    "createdAt": "2026-09-23T00:46:26.671Z",
+    "updatedAt": "2026-09-23T00:46:26.727Z",
+    "podId": "dd84b8d5-8481-4013-8b9d-3e97ba8c4a46",
+    "lastPodId": "dd84b8d5-8481-4013-8b9d-3e97ba8c4a46",
+    "controlIntent": null,
+    "reconcileBackoffUntil": null,
+    "reconcileAttempts": 0
+  }
+}

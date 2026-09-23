@@ -6,14 +6,21 @@ import dev.optio.core.navigation.routes.JobDetailRoute
 import dev.optio.core.navigation.routes.JobFormRoute
 import dev.optio.core.navigation.routes.JobRunRoute
 import dev.optio.core.navigation.routes.ScheduledDetailRoute
+import dev.optio.core.navigation.routes.ScheduledFormRoute
 import dev.optio.core.navigation.routes.TaskDetailRoute
-import dev.optio.core.ui.PlaceholderScreen
+import dev.optio.feature.tasks.job.JobDetailScreen
+import dev.optio.feature.tasks.job.JobFormScreen
+import dev.optio.feature.tasks.job.JobRunScreen
+import dev.optio.feature.tasks.scheduled.ScheduledDetailScreen
+import dev.optio.feature.tasks.scheduled.ScheduledFormScreen
+import dev.optio.feature.tasks.task.TaskDetailScreen
 
-/** Registers `:feature:tasks`'s routes. Stubs: Agent A3 builds task / job / scheduled screens. */
+/** Registers `:feature:tasks`'s routes: Repo Tasks, Jobs and their runs, scheduled blueprints. */
 fun EntryProviderScope<NavKey>.tasksEntries() {
-    entry<TaskDetailRoute> { key -> PlaceholderScreen(title = "Task", detail = key.toString()) }
-    entry<JobDetailRoute> { key -> PlaceholderScreen(title = "Job", detail = key.toString()) }
-    entry<JobRunRoute> { key -> PlaceholderScreen(title = "Job run", detail = key.toString()) }
-    entry<JobFormRoute> { key -> PlaceholderScreen(title = if (key.id == null) "New job" else "Edit job", detail = key.toString()) }
-    entry<ScheduledDetailRoute> { key -> PlaceholderScreen(title = "Scheduled", detail = key.toString()) }
+    entry<TaskDetailRoute> { key -> TaskDetailScreen(taskId = key.id) }
+    entry<JobDetailRoute> { key -> JobDetailScreen(jobId = key.id) }
+    entry<JobRunRoute> { key -> JobRunScreen(jobId = key.jobId, runId = key.runId) }
+    entry<JobFormRoute> { key -> JobFormScreen(jobId = key.id) }
+    entry<ScheduledDetailRoute> { key -> ScheduledDetailScreen(configId = key.id) }
+    entry<ScheduledFormRoute> { key -> ScheduledFormScreen(configId = key.id) }
 }
