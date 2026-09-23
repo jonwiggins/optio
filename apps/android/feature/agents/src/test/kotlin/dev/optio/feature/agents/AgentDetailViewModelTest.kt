@@ -1,5 +1,6 @@
 package dev.optio.feature.agents
 
+import dev.optio.core.glance.WatchSources
 import dev.optio.core.model.PersistentAgentControlIntent
 import dev.optio.core.model.PersistentAgentMessageSenderType
 import dev.optio.core.model.PersistentAgentState
@@ -22,6 +23,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Before
@@ -43,6 +45,7 @@ class AgentDetailViewModelTest {
     private val id = "63cf2f4a-7616-4cec-8ee7-7585aa370f75"
     private val events = CopyOnWriteArrayList<AgentDetailViewModel.Event>()
     private val collector = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val sources = WatchSources.inMemory(collector)
     private lateinit var vm: AgentDetailViewModel
 
     @Before
@@ -51,7 +54,7 @@ class AgentDetailViewModelTest {
         server.fixture("/api/persistent-agents/:id/messages", "agent-messages.json")
         server.fixture("/api/persistent-agents/:id/turns", "agent-turns.json")
         server.fixture("/api/persistent-agents/:id/triggers", "agent-triggers.json")
-        vm = main.onMain { AgentDetailViewModel(id, server.client(), fastSockets()) }
+        vm = main.onMain { AgentDetailViewModel(id, server.client(), fastSockets(), watchSources = sources) }
         collector.launch { vm.events.collect { events += it } }
     }
 
@@ -212,6 +215,8 @@ class AgentDetailViewModelTest {
         assertEquals("Status?", request.json.jsonObject["body"]?.stringValue)
         // Then the stored list replaces it.
         eventually { vm.messages.value.value!!.none { it.id.startsWith("local-") } }
+        // …and the turn it wakes may join the Watch (iOS `RecentAgentSends.record`).
+        eventually(message = { "send recorded" }) { sources.isRecentAgentSend(id) }
     }
 
     @Test
@@ -223,6 +228,7 @@ class AgentDetailViewModelTest {
         assertEquals(false, sent)
         assertEquals(before, vm.messages.value.value!!.size)
         eventually { events.any { it is AgentDetailViewModel.Event.Failure } }
+        assertTrue(runBlocking { sources.recentAgentSends() }.isEmpty(), "a message the server refused wakes nothing")
     }
 
     @Test

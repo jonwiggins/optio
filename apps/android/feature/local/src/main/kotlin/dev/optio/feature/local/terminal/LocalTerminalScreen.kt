@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.optio.core.glance.NotificationSubject
 import dev.optio.core.model.LocalHost
 import dev.optio.core.model.LocalTerminal
 import dev.optio.core.model.LocalTerminalState
@@ -112,6 +114,11 @@ fun LocalTerminalScreen(
     LifecycleStartEffect(vm) {
         vm.attach()
         onStopOrDispose { vm.detach() }
+    }
+    // Alerts about this terminal post silently while it is on screen (iOS `.notificationSubject`).
+    DisposableEffect(terminalId) {
+        NotificationSubject.set("local", terminalId)
+        onDispose { NotificationSubject.clear("local", terminalId) }
     }
     val navigator = LocalNavigator.current
     val toaster = LocalToaster.current

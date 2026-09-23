@@ -66,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.optio.core.glance.NotificationSubject
 import dev.optio.core.glance.WatchSources
 import dev.optio.core.model.AgentLogEntry
 import dev.optio.core.navigation.LocalNavigator
@@ -142,6 +143,11 @@ internal fun TaskDetailScreen(vm: TaskDetailViewModel) {
     DisposableEffect(vm) {
         vm.logs.start()
         onDispose { vm.logs.stop() }
+    }
+    // Alerts about this task post silently while it is on screen (iOS `.notificationSubject`).
+    DisposableEffect(vm.taskId) {
+        NotificationSubject.set("task", vm.taskId)
+        onDispose { NotificationSubject.clear("task", vm.taskId) }
     }
     CollectUiMessages(vm.messages)
 
