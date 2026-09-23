@@ -99,6 +99,20 @@ class WebSocketClientTest {
     private fun takeRequest() = checkNotNull(server.takeRequest(5, TimeUnit.SECONDS)) { "no request" }
 
     @Test
+    fun aClientWithNoServerReportsNoServerInsteadOfThrowing() =
+        runTest {
+            // A screen can outlive sign-out or a server switch: building its socket must not throw.
+            val ws = ApiClient().webSocket("/ws/logs/t1")
+            ws.connect()
+            ws.frames.test {
+                val closed = assertIs<WsFrame.Closed>(awaitItem())
+                assertEquals(WebSocketClient.CloseCode.NO_SERVER, closed.code)
+                ws.disconnect()
+                awaitComplete()
+            }
+        }
+
+    @Test
     fun authRidesInTheSubprotocolHeader() =
         runTest {
             enqueueSocket(ServerSocket())

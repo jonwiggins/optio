@@ -64,8 +64,12 @@ import okio.ByteString.Companion.toByteString
  * ```
  */
 class WebSocketClient(
-    /** `ws(s)://…` URL of the socket ([ApiClient.wsUrl]). */
-    val url: String,
+    /**
+     * Resolves the `ws(s)://…` URL ([ApiClient.wsUrl]) on each connect. Resolving late means a
+     * socket made for a client that has no server (a screen outliving sign-out or a server
+     * switch) reports [CloseCode.NO_SERVER] instead of throwing from a constructor.
+     */
+    private val urlProvider: () -> String,
     private val tokenProvider: suspend () -> String?,
     private val autoReconnect: Boolean = true,
     private val httpClient: OkHttpClient = OptioHttp.webSocketClient,
@@ -73,13 +77,28 @@ class WebSocketClient(
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val sendHold: Duration = SEND_HOLD,
 ) {
+    /** A socket for a fixed `ws(s)://…` [url]. */
+    constructor(
+        url: String,
+        tokenProvider: suspend () -> String?,
+        autoReconnect: Boolean = true,
+        httpClient: OkHttpClient = OptioHttp.webSocketClient,
+        reconnectDelay: Duration = RECONNECT_DELAY,
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        sendHold: Duration = SEND_HOLD,
+    ) : this({ url }, tokenProvider, autoReconnect, httpClient, reconnectDelay, dispatcher, sendHold)
+
     /** [path] on [api]'s server, authenticated with a fresh ws-token (else [api]'s PAT). */
     constructor(api: ApiClient, path: String, autoReconnect: Boolean = true) : this(
-        url = api.wsUrl(path),
+        urlProvider = { api.wsUrl(path) },
         tokenProvider = api.webSocketTokenProvider(),
         autoReconnect = autoReconnect,
         httpClient = api.webSocketHttpClient,
     )
+
+    /** `ws(s)://…` URL of the socket; throws [ApiError] when its client has no server. */
+    val url: String
+        get() = urlProvider()
 
     /** Close codes the server uses (`apps/api/src/ws/ws-auth.ts`, `ws-authz.ts`, `ws-limits.ts`). */
     object CloseCode {
@@ -92,8 +111,11 @@ class WebSocketClient(
         const val MESSAGE_TOO_LARGE = 4413
         const val CONNECTION_LIMIT = 4429
 
+        /** Client-side: the socket's [ApiClient] has no server configured (never sent by the API). */
+        const val NO_SERVER = 4000
+
         /** Codes no retry can fix: the client never reconnects after them. */
-        val permanent: Set<Int> = setOf(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONNECTION_LIMIT)
+        val permanent: Set<Int> = setOf(UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONNECTION_LIMIT, NO_SERVER)
     }
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
@@ -210,10 +232,19 @@ class WebSocketClient(
             } catch (_: Exception) {
                 null
             }
+        val target =
+            try {
+                urlProvider()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                synchronized(lock) { if (!closed) emit(WsFrame.Closed(CloseCode.NO_SERVER, e.message)) }
+                return
+            }
         val protocols = listOfNotNull(PROTOCOL, token?.let { AUTH_PROTOCOL_PREFIX + it }).joinToString(", ")
         val request =
             Request.Builder()
-                .url(url)
+                .url(target)
                 .header("Sec-WebSocket-Protocol", protocols)
                 .build()
         synchronized(lock) {

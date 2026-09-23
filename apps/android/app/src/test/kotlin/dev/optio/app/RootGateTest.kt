@@ -156,7 +156,7 @@ class RootGateTest {
         waitForTag("hub-overview")
         deepLinks.deliver("optio://tasks/t1?server=${a.id}")
         compose.waitUntil(10_000) { session.activeServer.value?.id == a.id }
-        compose.waitUntilAtLeastOneExists(hasText("TaskDetailRoute(id=t1)"), 10_000)
+        compose.waitUntilAtLeastOneExists(hasTestTag("task-detail"), 10_000)
     }
 
     @Test
