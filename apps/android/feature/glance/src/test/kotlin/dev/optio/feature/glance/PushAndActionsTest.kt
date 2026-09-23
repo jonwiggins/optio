@@ -43,6 +43,7 @@ import java.time.Instant
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -223,9 +224,11 @@ class PushAndActionsTest {
             server.post("/api/persistent-agents/:id/control") { FakeResponse.json("{}") }
             val h = handler(listOf(GlanceTestEnv.client(server)))
 
+            store.snooze("t1", java.time.Instant.now().plusSeconds(600)) // a stale fallback window from an earlier "Later"
             assertEquals(NotificationHandler.Outcome.DONE, h.perform(NotificationAction.LATER, target("local", "t1")))
             assertEquals(15, server.lastRequest("POST", "/api/local/terminals/t1/snooze")!!.json.jsonObject["minutes"]!!.jsonPrimitive.content.toInt())
-            assertNotNull(store.snoozedUntil("t1"), "mirrored locally so widgets agree at once")
+            // QA: a local window next to the server's outlived an unsnooze and swallowed the next alert.
+            assertNull(store.snoozedUntil("t1"), "the server's snooze is the one every surface reads")
 
             h.perform(NotificationAction.RESUME, target("task", "k1", category = NotificationCategory.TASK_ATTENTION))
             assertEquals("{}", server.lastRequest("POST", "/api/tasks/k1/resume")!!.body)
@@ -234,6 +237,18 @@ class PushAndActionsTest {
             h.perform(NotificationAction.RESUME, target("agent", "a1", category = NotificationCategory.AGENT_FAILED))
             assertEquals("resume", server.lastRequest("POST", "/api/persistent-agents/a1/control")!!.json.jsonObject["intent"]!!.jsonPrimitive.content)
             assertEquals(NotificationHandler.Outcome.NOTHING_TO_DO, h.perform(NotificationAction.RETRY, target("agent", "a1")))
+        }
+
+    @Test
+    fun laterKeepsALocalWindowOnlyWhenTheServerCannotSnooze(): Unit =
+        runBlocking {
+            server.error("POST", "/api/local/terminals/:id/snooze", 404, "Not Found")
+            val client = GlanceTestEnv.client(server)
+            assertFalse(dev.optio.core.glance.GlanceActions.later(store, client, "local", "t2"))
+            assertNotNull(store.snoozedUntil("t2"), "unreachable or older server: this phone keeps the window")
+            assertFalse(dev.optio.core.glance.GlanceActions.later(store, client, "task", "k2"))
+            assertNotNull(store.snoozedUntil("k2"), "tasks have no server snooze: local only")
+            assertNull(server.lastRequest("POST", "/api/local/terminals/k2/snooze"))
         }
 
     @Test

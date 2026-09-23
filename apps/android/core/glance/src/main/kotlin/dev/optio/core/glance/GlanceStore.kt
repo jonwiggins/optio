@@ -95,6 +95,9 @@ class GlanceStore(
         until: Instant,
     ) = writeInstant(Keys.snoozed(id), until)
 
+    /** Drops the local "Later" for [id] (the server's snooze took over, or it was undone). */
+    suspend fun clearSnooze(id: String) = writeInstant(Keys.snoozed(id), null)
+
     /** The local snoozes of [ids] (expired ones included; compare with now). */
     suspend fun snoozedUntil(ids: Collection<String>): Map<String, Instant> {
         val prefs = store.data.first()

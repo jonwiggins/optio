@@ -11,6 +11,7 @@ import dev.optio.core.navigation.routes.LocalTerminalRoute
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.EventHub
 import dev.optio.core.network.on
+import dev.optio.core.terminal.TerminalGrid
 import dev.optio.core.terminal.TerminalState
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.load
@@ -144,6 +145,9 @@ class LocalTerminalViewModel(
 
     private var visible = false
     private var transcriptStarted = false
+
+    /** The grids this phone held when the screen went away: the next stream starts owning them. */
+    private var ownedGrids: List<TerminalGrid> = emptyList()
     private var pollJob: Job? = null
     private var eventsJob: Job? = null
 
@@ -209,6 +213,8 @@ class LocalTerminalViewModel(
         eventsJob?.cancel()
         eventsJob = null
         transcript.pause()
+        // Rotation and the background recreate the stream; a phone that held the grid keeps it.
+        ownedGrids = _stream.value?.ownedGrids.orEmpty()
         _stream.value?.disconnect()
         _stream.value = null
     }
@@ -227,13 +233,16 @@ class LocalTerminalViewModel(
     /** GET the terminal; a quiet reload keeps what's on screen when it fails. */
     suspend fun load(quiet: Boolean = false) {
         val before = _terminal.value.value
-        if (quiet && before != null) {
+        // A quiet reload never shows a spinner: it keeps what's on screen (the row, or the error
+        // row when the first load failed, which the 10 s poll used to flip to a spinner and back).
+        if (quiet && (before != null || _terminal.value is LoadState.Failed)) {
             try {
                 applyTerminal(api.getLocalTerminal(terminalId))
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // Keep the last good row; the next poll retries.
+                if (before == null) _terminal.value = LoadState.Failed(e)
             }
             return
         }
@@ -276,12 +285,15 @@ class LocalTerminalViewModel(
 
     private fun startStream() {
         if (_stream.value != null) return
+        val owned = ownedGrids.takeUnless { _terminal.value.value?.let(LocalPresentation::isDead) ?: true }.orEmpty()
+        ownedGrids = emptyList()
         val s =
             LocalTerminalStream(
                 terminalId = terminalId,
                 scope = viewModelScope,
                 sink = sink,
                 openSocket = { socketFactory(api, terminalId) },
+                owned = owned,
             )
         s.onStatus = { state, attention -> applyStatus(state, attention) }
         s.onExit = { code -> onExit(code) }

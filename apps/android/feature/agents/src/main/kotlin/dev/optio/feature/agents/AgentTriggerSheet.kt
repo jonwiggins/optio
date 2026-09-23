@@ -41,6 +41,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import dev.optio.core.ui.state.ErrorText
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.mono
@@ -55,12 +56,14 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun AgentTriggerSheet(
     onDismiss: () -> Unit,
-    onCreate: suspend (AgentTriggerDraft) -> Boolean,
+    onCreate: suspend (AgentTriggerDraft) -> Throwable?,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
 ) {
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf(AgentTriggerDraft()) }
     var saving by remember { mutableStateOf(false) }
+    // Why the server refused the last Create (iOS shows it in the sheet): a 409 "path already in use".
+    var error by remember { mutableStateOf<String?>(null) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -68,17 +71,24 @@ internal fun AgentTriggerSheet(
     ) {
         AgentTriggerForm(
             draft = draft,
-            onChange = { draft = it },
+            onChange = {
+                draft = it
+                error = null
+            },
             saving = saving,
+            error = error,
             onCancel = { scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() } },
             onCreate = {
                 scope.launch {
                     saving = true
-                    val created = onCreate(draft)
+                    error = null
+                    val failure = onCreate(draft)
                     saving = false
-                    if (created) {
+                    if (failure == null) {
                         sheetState.hide()
                         onDismiss()
+                    } else {
+                        error = ErrorText.humanize(failure)
                     }
                 }
             },
@@ -96,6 +106,7 @@ internal fun AgentTriggerForm(
     onCancel: () -> Unit,
     onCreate: () -> Unit,
     modifier: Modifier = Modifier,
+    error: String? = null,
 ) {
     val colors = OptioTheme.colors
     Column(
@@ -154,6 +165,9 @@ internal fun AgentTriggerForm(
             AgentTriggerType.MANUAL -> Unit
         }
 
+        if (error != null) {
+            Text(error, style = OptioTheme.type.footnote, color = colors.red, modifier = Modifier.testTag("trigger-error"))
+        }
         val problem = draft.validation
         Text(
             problem ?: draft.footer,

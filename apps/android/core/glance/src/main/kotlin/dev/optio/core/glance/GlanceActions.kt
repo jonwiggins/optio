@@ -21,9 +21,14 @@ object GlanceActions {
     const val SNOOZE_MINUTES = 15
 
     /**
-     * "Later": a local snooze (so this phone's surfaces agree at once, even offline) plus the
-     * server-side snooze for a Local terminal (`POST /api/local/terminals/:id/snooze`, so the web
-     * and other devices agree too). Never throws: "Later" must always work from a button.
+     * "Later" (iOS `SnoozeStore.snooze`): server first, local fallback. A Local terminal is snoozed on
+     * its server (`POST /api/local/terminals/:id/snooze`), whose `snoozedUntil` every surface reads
+     * after the refresh that follows, the web and other devices included. Only when that fails (the
+     * server is unreachable or predates the route), or for items the server can't snooze, does this
+     * phone keep a local window. A local window next to a server snooze would outlive an unsnooze
+     * (the app's "Back in the queue now", the web): this phone would keep the item at the back and
+     * skip its next needs-you alert until the window closed. Never throws: "Later" must always work
+     * from a button.
      *
      * @return true when the server took it (false: local only).
      */
@@ -35,9 +40,15 @@ object GlanceActions {
         minutes: Int = SNOOZE_MINUTES,
         now: Instant = Instant.now(),
     ): Boolean {
+        if (kind == "local" && client != null) {
+            val taken = runCatching { client.api.post("/api/local/terminals/$id/snooze", body = SnoozeBody(minutes)) }.isSuccess
+            if (taken) {
+                store.clearSnooze(id)
+                return true
+            }
+        }
         store.snooze(id, now.plus(Duration.ofMinutes(minutes.toLong())))
-        if (kind != "local" || client == null) return false
-        return runCatching { client.api.post("/api/local/terminals/$id/snooze", body = SnoozeBody(minutes)) }.isSuccess
+        return false
     }
 
     /** [later] on the item's server, then refreshes every surface. */

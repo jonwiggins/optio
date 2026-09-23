@@ -121,7 +121,7 @@ class AgentsLiveTest {
             )
         for (draft in drafts) {
             assertTrue(draft.isValid, "${draft.type}: ${draft.validation}")
-            assertTrue(main.onMain { vm.createTrigger(draft) }, "create ${draft.type}: $failures")
+            assertEquals(null, main.onMain { vm.createTrigger(draft) }, "create ${draft.type}: $failures")
             val created = vm.triggers.value.value!!.first()
             assertEquals(draft.type.raw, created.type)
             assertEquals(draft.config(), JsonObject(created.config.orEmpty()), "the server stores the config as sent")

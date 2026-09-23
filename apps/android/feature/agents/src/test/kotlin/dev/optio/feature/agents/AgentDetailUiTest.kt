@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -173,5 +174,23 @@ class AgentDetailUiTest {
         compose.onNodeWithText("Pause").assertDoesNotExist()
         compose.onNodeWithText("Resume").performClick()
         assertEquals(listOf(PersistentAgentControlIntent.RESUME), actions.intents)
+    }
+
+    @Test
+    fun aRefusedTriggerSaysWhyInsideTheSheet() {
+        // QA: the 409 ("path already in use") went to a toast that draws under the sheet: nothing showed.
+        compose.setContent {
+            OptioTheme(darkTheme = false) {
+                AgentTriggerForm(
+                    draft = AgentTriggerDraft(type = AgentTriggerType.WEBHOOK, webhookPath = "taken"),
+                    onChange = {},
+                    saving = false,
+                    onCancel = {},
+                    onCreate = {},
+                    error = "Webhook path \"taken\" is already in use",
+                )
+            }
+        }
+        compose.onNodeWithTag("trigger-error").assertTextEquals("Webhook path \"taken\" is already in use")
     }
 }

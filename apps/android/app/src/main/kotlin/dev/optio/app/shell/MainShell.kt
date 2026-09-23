@@ -3,7 +3,11 @@ package dev.optio.app.shell
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.outlined.BarChart
@@ -98,6 +102,16 @@ fun MainShell(
             adaptiveType == NavigationSuiteType.ShortNavigationBarCompact ||
             adaptiveType == NavigationSuiteType.ShortNavigationBarMedium
     val layoutType = if (bottomBar && WindowInsets.isImeVisible) NavigationSuiteType.None else adaptiveType
+    // A bottom bar draws over the gesture-bar inset, so the content above it must not pad for it
+    // again: every Scaffold's content padding and composer's insets left a 24 dp gap between the bar
+    // and a screen's bottom row (the terminal key bar, the chat composers). A rail takes no height,
+    // and a hidden bar leaves the content at the window bottom: both keep the inset.
+    val contentModifier =
+        if (bottomBar && layoutType != NavigationSuiteType.None) {
+            Modifier.consumeWindowInsets(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+        } else {
+            Modifier
+        }
 
     CompositionLocalProvider(LocalAppRouter provides router, LocalNavigator provides navigator) {
         NavigationSuiteScaffold(
@@ -136,6 +150,7 @@ fun MainShell(
             key(tab) {
                 NavDisplay(
                     entries = entriesByTab.getValue(tab),
+                    modifier = contentModifier,
                     onBack = { router.pop(tab) },
                 )
             }

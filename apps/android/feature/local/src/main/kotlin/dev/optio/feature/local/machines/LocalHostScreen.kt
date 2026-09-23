@@ -47,6 +47,7 @@ import dev.optio.core.model.LocalChangedEvent
 import dev.optio.core.model.LocalHost
 import dev.optio.core.model.LocalHostState
 import dev.optio.core.model.LocalTerminal
+import dev.optio.feature.local.api.LocalTrigger
 import dev.optio.core.model.LocalTerminalState
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.Navigator
@@ -76,6 +77,7 @@ import dev.optio.core.ui.theme.Tone
 import dev.optio.core.ui.theme.semibold
 import dev.optio.core.ui.toast.LocalToaster
 import dev.optio.feature.local.api.deleteLocalHost
+import dev.optio.feature.local.api.listLocalBlueprintTriggers
 import dev.optio.feature.local.api.listLocalBlueprints
 import dev.optio.feature.local.api.listLocalHosts
 import dev.optio.feature.local.api.listLocalTerminals
@@ -88,6 +90,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -104,6 +107,8 @@ data class HostPage(
     val host: LocalHost,
     val terminals: List<LocalTerminal>,
     val automations: List<LocalBlueprint>,
+    /** Each automation's triggers; an automation whose triggers failed to load is missing. */
+    val triggers: Map<String, List<LocalTrigger>> = emptyMap(),
 )
 
 /**
@@ -177,7 +182,16 @@ class LocalHostViewModel(
             val terminals = async { api.listLocalTerminals(hostId = hostId) }
             val automations = async { runCatching { api.listLocalBlueprints() }.getOrDefault(emptyList()) }
             val host = hosts.await().firstOrNull { it.id == hostId } ?: throw NoSuchElementException("Machine not found")
-            HostPage(host, terminals.await(), automations.await().filter { it.hostId == hostId })
+            val mine = automations.await().filter { it.hostId == hostId }
+            // The rows summarise their triggers, like the Machines list (QA: every row said "Runs when
+            // you press Run", scheduled or not).
+            val triggers =
+                mine
+                    .map { bp -> async { runCatching { bp.id to api.listLocalBlueprintTriggers(bp.id) }.getOrNull() } }
+                    .awaitAll()
+                    .filterNotNull()
+                    .toMap()
+            HostPage(host, terminals.await(), mine, triggers)
         }
 
     fun reload() {
@@ -373,7 +387,7 @@ private fun HostBody(
             item {
                 GroupedSection(header = "Automations") {
                     data.automations.forEachIndexed { i, bp ->
-                        AutomationRow(automation = bp, triggers = emptyList(), hosts = listOf(host), onClick = { navigator.push(LocalAutomationRoute(bp.id)) })
+                        AutomationRow(automation = bp, triggers = data.triggers[bp.id], hosts = listOf(host), onClick = { navigator.push(LocalAutomationRoute(bp.id)) })
                         if (i < data.automations.lastIndex) InsetDivider()
                     }
                 }
