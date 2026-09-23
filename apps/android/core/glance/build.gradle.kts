@@ -12,5 +12,9 @@ dependencies {
     api(projects.core.network)
     api(projects.core.data)
     api(projects.core.workfeed)
+    implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(projects.core.testing)
 }
