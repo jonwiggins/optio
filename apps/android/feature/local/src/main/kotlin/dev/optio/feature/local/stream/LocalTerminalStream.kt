@@ -108,6 +108,9 @@ class LocalTerminalStream(
     private var liveOnThisConnection = false
     private var terminalDead = false
 
+    /** This terminal's recorded final screen has been asked for after a lost attach (see `error`). */
+    private var recordingRequested = false
+
     private var mode: TerminalSizing.Mode = TerminalSizing.Mode.Unclaimed
 
     /** Grids we've asked for and not yet heard echoed, oldest first. */
@@ -141,6 +144,7 @@ class LocalTerminalStream(
     fun reconnect() {
         if (disposed) return
         terminalDead = false
+        recordingRequested = false
         pendingReset = true
         reconnectJob?.cancel()
         _state.update { it.copy(errorMessage = null, retrying = false, conn = ConnState.RECONNECTING, dead = false, settled = false) }
@@ -229,21 +233,46 @@ class LocalTerminalStream(
                 terminalDead = true
                 releaseHold()
                 val code = message.exitCode?.toInt()
-                _state.update { it.copy(dead = true, settled = true, exitCode = code) }
+                // Whatever was being retried is over: the terminal has ended. A screen watched at
+                // another device's grid ended at that grid: it's the recording now, nothing to claim.
+                _state.update {
+                    it.copy(
+                        dead = true,
+                        settled = true,
+                        exitCode = code,
+                        errorMessage = if (it.retrying) null else it.errorMessage,
+                        retrying = false,
+                        recorded = it.recorded || it.mode is TerminalSizing.Mode.Passive,
+                    )
+                }
                 sink.feed("\r\n\u001b[2m[process exited${code?.let { " (code $it)" } ?: ""}]\u001b[0m\r\n")
                 onExit?.invoke(code)
             }
             is LocalStreamServerMessage.Error -> {
                 releaseHold()
-                // An error on a live terminal ("Host is offline") leaves the socket attached to
-                // nothing: close it and retry until the daemon is back.
-                if (liveOnThisConnection && !terminalDead) {
-                    _state.update { it.copy(errorMessage = message.message, retrying = true) }
-                    from.disconnect() // completes its frames; no Closed follows
-                    if (socket === from) socket = null
-                    scheduleReconnect()
-                } else {
-                    _state.update { it.copy(errorMessage = message.message, retrying = false) }
+                when {
+                    // An error on a live terminal ("Host is offline") leaves the socket attached
+                    // to nothing: close it and retry until the daemon is back.
+                    liveOnThisConnection && !terminalDead -> {
+                        _state.update { it.copy(errorMessage = message.message, retrying = true) }
+                        from.disconnect() // completes its frames; no Closed follows
+                        if (socket === from) socket = null
+                        scheduleReconnect()
+                    }
+                    // The terminal ended while our attach was on its way, and the daemon had
+                    // already let the PTY go ("Unknown terminal"): a race with the exit, not a
+                    // failure. The server stored the final screen before it marked the row
+                    // exited, and a fresh connection replays it, so ask once for that instead.
+                    liveOnThisConnection && !recordingRequested -> {
+                        recordingRequested = true
+                        from.disconnect()
+                        if (socket === from) socket = null
+                        // With no output seen, only our own exit line is on screen: start clean.
+                        if (!_state.value.outputSeen) sink.reset()
+                        _state.update { it.copy(settled = false) }
+                        scheduleReconnect(after = Duration.ZERO)
+                    }
+                    else -> _state.update { it.copy(errorMessage = message.message, retrying = false) }
                 }
             }
             is LocalStreamServerMessage.Unknown -> Unit
@@ -269,14 +298,14 @@ class LocalTerminalStream(
         }
     }
 
-    private fun scheduleReconnect() {
+    private fun scheduleReconnect(after: Duration = reconnectDelay) {
         if (disposed) return
         _state.update { it.copy(conn = ConnState.RECONNECTING) }
         pendingReset = true
         reconnectJob?.cancel()
         reconnectJob =
             scope.launch {
-                delay(reconnectDelay)
+                delay(after)
                 if (!disposed) connect()
             }
     }

@@ -412,6 +412,111 @@ class LocalTerminalStreamTest {
         }
 
     @Test
+    fun anAttachThatLosesTheRaceWithTheExitFetchesTheRecordedScreen() =
+        runTest {
+            // Frames recorded on the emulator: Start on a held `echo` automation run, the attach
+            // reaches the daemon after the PTY is gone, and the relay passes on the exit first.
+            val h = Harness(this)
+            h.stream.connect()
+            val first = h.socket
+            first.opened()
+            first.status("running")
+            first.status("running")
+            first.status("exited", "needs_you")
+            first.json("""{"type":"exit","exitCode":0}""")
+            first.json("""{"type":"error","message":"Unknown terminal — the daemon may have restarted since it ran"}""")
+            runCurrent()
+            assertTrue(first.disconnected)
+            assertNull(h.state.errorMessage, "a race with the exit, not a failure")
+            assertFalse(h.state.settled, "the recorded screen is still to come")
+            assertEquals("", h.sink.painted(), "our own exit line gives way to the replay")
+            assertEquals(2, h.sockets.size, "asked again at once")
+
+            h.socket.opened()
+            h.socket.status("exited", "needs_you")
+            h.socket.size(120, 32)
+            h.socket.bytes("a5-app8\r\n")
+            h.socket.json("""{"type":"exit","exitCode":0}""")
+            runCurrent()
+            assertNull(h.state.errorMessage)
+            assertTrue(h.state.settled && h.state.dead && h.state.recorded)
+            assertEquals(TerminalGrid(120, 32), h.state.foreignGrid)
+            assertTrue(h.sink.painted().startsWith("a5-app8"), h.sink.painted())
+            assertEquals(1, Regex("process exited").findAll(h.sink.painted()).count(), h.sink.painted())
+            assertEquals(listOf<Int?>(0, 0), h.exits)
+
+            advanceTimeBy(10_000)
+            runCurrent()
+            assertEquals(2, h.sockets.size)
+        }
+
+    @Test
+    fun aScreenWatchedAtAnotherGridIsTheRecordingOnceItExits() =
+        runTest {
+            val h = Harness(this)
+            h.attachLive(this, TerminalGrid(120, 32))
+            assertFalse(h.state.recorded, "sized for another device, claimable")
+            h.socket.status("exited", "needs_you")
+            h.socket.json("""{"type":"exit","exitCode":0}""")
+            runCurrent()
+            assertTrue(h.state.recorded, "no Use this screen on a finished terminal")
+            assertEquals(TerminalGrid(120, 32), h.state.foreignGrid)
+
+            // Ours when it ended: no strip, nothing recorded.
+            val owned = Harness(this)
+            owned.attachLive(this)
+            owned.stream.claim()
+            owned.socket.size(50, 20)
+            owned.socket.json("""{"type":"exit","exitCode":0}""")
+            runCurrent()
+            assertFalse(owned.state.recorded)
+            assertNull(owned.state.foreignGrid)
+        }
+
+    @Test
+    fun aLostAttachIsFetchedAgainOnlyOnce() =
+        runTest {
+            val h = Harness(this)
+            h.stream.connect()
+            repeat(2) {
+                h.socket.opened()
+                h.socket.status("running")
+                h.socket.json("""{"type":"exit","exitCode":0}""")
+                h.socket.json("""{"type":"error","message":"Unknown terminal"}""")
+                runCurrent()
+            }
+            advanceTimeBy(10_000)
+            runCurrent()
+            assertEquals(2, h.sockets.size)
+            assertEquals("Unknown terminal", h.state.errorMessage)
+            assertFalse(h.state.retrying)
+        }
+
+    @Test
+    fun theExitEndsARetryEvenWithoutARecordedScreen() =
+        runTest {
+            // The attach lost the race before the exit reached us, so it was retried like an outage;
+            // by then the row has exited, and an older daemon recorded no screen.
+            val h = Harness(this)
+            h.stream.connect()
+            h.socket.opened()
+            h.socket.status("running")
+            h.socket.json("""{"type":"error","message":"Unknown terminal — the daemon may have restarted since it ran"}""")
+            runCurrent()
+            assertTrue(h.state.retrying)
+            advanceTimeBy(LocalTerminalStream.RECONNECT_DELAY.inWholeMilliseconds + 1)
+            runCurrent()
+            h.socket.opened()
+            h.socket.status("exited", "needs_you")
+            h.socket.json("""{"type":"exit","exitCode":0}""")
+            runCurrent()
+            assertNull(h.state.errorMessage, "nothing is being retried any more")
+            assertFalse(h.state.retrying)
+            assertTrue(h.state.settled)
+            assertFalse(h.state.outputSeen, "the Screen face falls back to the text preview")
+        }
+
+    @Test
     fun theUserCanReconnectAfterAStop() =
         runTest {
             val h = Harness(this)
