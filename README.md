@@ -45,7 +45,7 @@ The five attributes cover a lot of ground. Some shapes Optio runs today, all fro
 - **Scheduled and webhook-driven agent jobs.** No repo, just a pooled pod: nightly dependency audits, on-call triage from a PagerDuty webhook, a weekly report posted to Slack, a database query rendered into Notion. Parameterized prompts, retries with backoff, cost tracking, log streaming.
 - **Recurring blueprints.** Save any pod session as a blueprint and attach triggers; each firing spawns a fresh run with the trigger's payload rendered into the prompt. Blueprints are the **Recurring** view of the feed.
 - **Event automations on your own machine.** A `review_requested` on GitHub, an `@mention` in Slack, or a Linear state change spawns Claude Code (or Codex, Cursor, Gemini, OpenCode) in a checkout on your laptop, using your local CLI login — no server secrets ever leave the cluster. Interactive mode halts at the agent's prompt so you can take over; headless mode exits when done and can be resumed later. ([docs/optio-local.md](./docs/optio-local.md))
-- **Interactive agent terminals, anywhere.** Open a Claude Code session in a repo pod or on a paired machine, chat with it in the browser or the iOS app, split up to three side by side, and let the layered attention detector (Claude Code hooks → terminal bell → silence) tell you when one **needs you** — as a favicon, a tab count, a push notification, or a Live Activity on your lock screen.
+- **Interactive agent terminals, anywhere.** Open a Claude Code session in a repo pod or on a paired machine, chat with it in the browser or the iOS or Android app, split up to three side by side, and let the layered attention detector (Claude Code hooks → terminal bell → silence) tell you when one **needs you** — as a favicon, a tab count, a push notification, a Live Activity on your lock screen, or an ongoing notification on Android.
 - **Persistent agents and swarms.** Named, long-lived agents with a stable slug, an inbox, and a cyclic turn loop. They wake on user messages, messages from other agents, webhooks, cron ticks, or ticket events, and address each other over an inter-agent HTTP API — enough to build a dispatcher + specialists team. Three pod lifecycle modes trade latency for cost (`always-on` / `sticky` / `on-demand`). ([docs/persistent-agents.md](./docs/persistent-agents.md), [Forge demo](./examples/persistent-agents/forge/), [Mars Mission Control](./examples/persistent-agents/mars-mission-control/))
 - **Code review as a first-class session.** A review agent (its own prompt, model, and even vendor) runs as a blocking subtask on PR open or CI pass, for Optio-authored PRs and external ones alike. Reviews have their own surface under **Reviews**.
 - **Connections.** Give any session tools: Notion, Slack, Linear, GitHub, PostgreSQL, Sentry, Filesystem, any MCP server, or an HTTP API — injected into the pod at start with per-repo / per-runtime access rules.
@@ -138,8 +138,8 @@ Job pods are shared across runs of the same job (`maxPodInstances × maxAgentsPe
 ### Local — sessions on your own machine
 
 ```
-optio local up  (daemon)    Optio server                   Browser / iOS
-──────────────────────      ─────────────────              ──────────────────────
+optio local up  (daemon)    Optio server                   Browser / iOS / Android
+──────────────────────      ─────────────────              ───────────────────────
 
   One outbound WS           Relay frames                   Attach to any terminal
   Directory allowlist  ←──  Route triggers to host  ──→    Split view, needs-you queue
@@ -175,14 +175,14 @@ Configure a provider once (Notion, GitHub, Slack, Linear, PostgreSQL, Sentry, Fi
 - **Runs where you want** — pods in your cluster or directories on paired machines, with the same triggers, prompts, and tracking
 - **Event triggers** — cron, webhook, ticket sync (GitHub, GitLab, Linear, Jira, Notion), and signed GitHub / Slack / Linear event ingress; trigger payloads render into prompts as `{{params}}` (shell-quoted for local runs, so payloads can never inject commands)
 - **Seven runtimes** — Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini, Cursor, OpenCode, OpenClaw, with live model discovery and per-runtime options
-- **Attention, not polling** — layered needs-you detection for interactive sessions, surfaced as favicon, tab count, browser notification, iOS push, widgets, Live Activity, and Dynamic Island
+- **Attention, not polling** — layered needs-you detection for interactive sessions, surfaced as favicon, tab count, browser notification, iOS and Android push, widgets, Live Activity, Dynamic Island, and Android's ongoing Watch notification
 - **Usage limits at a glance** — Claude 5-hour / 7-day and per-model limits and Codex rate limits on the Overview and in terminal headers; per-session token and cost chips
 - **Connections via MCP** — Notion, Slack, Linear, GitHub, PostgreSQL, Sentry, Filesystem, custom MCP servers, HTTP APIs, with fine-grained assignment
 - **Pod-per-repo architecture** — one long-lived pod per repo, git worktree isolation, multi-pod scaling, shared tool caches, idle cleanup
 - **Reconciliation control plane** — K8s-style pure-decision + CAS executor with periodic resync over `repo`, `standalone`, `pr-review`, and `persistent-agent` run kinds
 - **Workspaces and RBAC** — multi-tenant workspaces; admin / member / viewer enforced on every mutating route and WebSocket
 - **Cost analytics** — every run, local session, and agent turn lands in one ledger with daily / repo / kind breakdowns
-- **Clients** — web UI, a native iOS app (sessions, terminals, widgets, Live Activity), and a CLI that also hosts the Local daemon
+- **Clients** — web UI, a native iOS app (sessions, terminals, widgets, Live Activity), a native Android app (work, terminals, widgets, Quick Settings tiles, an ongoing Watch notification), and a CLI that also hosts the Local daemon
 
 ## Architecture
 
@@ -190,7 +190,8 @@ Configure a provider once (Notion, GitHub, Slack, Linear, PostgreSQL, Sentry, Fi
 ┌──────────────┐     ┌────────────────────┐     ┌────────────────────────────┐
 │   Web UI     │────→│    API Server      │────→│      Kubernetes            │
 │   Next.js    │     │    Fastify         │     │                            │
-│   iOS app    │     │                    │     │  ┌── Repo Pod A ────────┐  │
+│   iOS app    │     │                    │     │                            │
+│   Android    │     │                    │     │  ┌── Repo Pod A ────────┐  │
 │   CLI        │←ws──│  Workers:          │     │  │ clone + sleep        │  │
 │              │     │  ├─ Task Queue     │     │  │ ├─ worktree 1  ⚡     │  │
 │  Overview    │     │  ├─ PR Watcher     │     │  │ ├─ worktree 2  ⚡     │  │
@@ -328,6 +329,8 @@ apps/
   web/          Next.js UI: Sessions feed + New Session form, Reviews, Inbox,
                 Prompts / Repos / Machines / Connections, Insights, local cockpit
   ios/          Native SwiftUI client: sessions, terminals, widgets, Live Activity
+  android/      Native Kotlin + Jetpack Compose client: work, terminals, widgets, tiles,
+                the ongoing Watch notification
   cli/          Terminal client for Optio; hosts the Optio Local daemon (`optio local up`)
   site/         Documentation site (GitHub Pages)
 
@@ -342,7 +345,7 @@ images/               Agent container images: base, node, python, go, rust, ruby
 helm/optio/           Helm chart for production Kubernetes deployment
 scripts/              Setup, init, entrypoint, and test-infra scripts
 docs/                 Design docs: sessions/tasks, persistent agents, Optio Local,
-                      reconciliation, cryptography, observability, iOS push
+                      reconciliation, cryptography, observability, iOS and Android push
 examples/             Runnable example sessions: PR tasks, jobs, multi-agent swarms
 ```
 
@@ -473,6 +476,7 @@ See the [Helm chart values](helm/optio/values.yaml) for full configuration optio
 | [docs/observability.md](./docs/observability.md)         | Logs, metrics, health events                                                          |
 | [docs/cryptography.md](./docs/cryptography.md)           | Secrets at rest, session tokens, TLS                                                  |
 | [docs/ios-push.md](./docs/ios-push.md)                   | APNs push, widgets, Live Activity                                                     |
+| [docs/android-push.md](./docs/android-push.md)           | FCM push, the Watch notification, the on-device baseline                              |
 | [examples/](./examples/README.md)                        | Runnable examples: PR tasks, jobs, and multi-agent swarms                             |
 | [CHANGELOG.md](./CHANGELOG.md)                           | Release notes                                                                         |
 
@@ -484,6 +488,7 @@ See the [Helm chart values](helm/optio/values.yaml) for full configuration optio
 | API      | Fastify 5, Drizzle ORM, BullMQ                                                                       |
 | Web      | Next.js 15, Tailwind CSS 4, Zustand, xterm.js                                                        |
 | iOS      | SwiftUI, WidgetKit, ActivityKit; models generated from the shared TypeScript types                   |
+| Android  | Kotlin, Jetpack Compose, Glance, WorkManager, FCM; models generated from the shared TypeScript types |
 | CLI      | Node, node-pty (Local daemon)                                                                        |
 | Database | PostgreSQL 16                                                                                        |
 | Queue    | Redis 7 + BullMQ                                                                                     |

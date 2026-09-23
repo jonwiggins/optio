@@ -168,6 +168,16 @@ These are well-documented in code; read the relevant service files for details:
 
 Native SwiftUI client at `apps/ios/` (see `apps/ios/README.md`). Models are generated from `packages/shared/src/types` by `pnpm gen:swift` into `apps/ios/Optio/Generated/SharedTypes.swift`; CI fails if that file is stale. Auth is a PAT over HTTP bearer + WebSocket subprotocol, same as the CLI. Build with `cd apps/ios && make build` (needs Xcode + `brew install xcodegen`).
 
+## Android app
+
+Native Kotlin + Jetpack Compose (Material 3) client at `apps/android/`, at parity with the iOS app, whose Swift source is its spec (see `apps/android/README.md`; the dev lab is in `apps/android/e2e/README.md`). Models are generated from `packages/shared/src/types` by `pnpm gen:kotlin` into `apps/android/core/model/src/main/kotlin/dev/optio/core/model/SharedTypes.kt`: never hand-edit it; CI "Kotlin Types In Sync" (`scripts/check-kotlin-types.sh`) fails if it is stale. Auth is the same PAT as iOS and the CLI.
+
+- **Build/test** from `apps/android` with `JAVA_HOME` set to Android Studio's JBR (`/Applications/Android Studio.app/Contents/jbr/Contents/Home`; any JDK 17–25 works): `./gradlew assembleDebug`, `./gradlew testDebugUnitTest :core:model:test :core:network:test` (the two plain-JVM modules use `test`), `./gradlew :<module>:recordRoborazziDebug` for screenshots (`<module>/build/outputs/roborazzi/`). Live tests skip unless `OPTIO_TEST_API_URL` points at a test API. Never run `./gradlew --stop` (it kills every Gradle daemon on the machine).
+- **Modules**: `:app` → `:feature:*` → `:core:*` (`model`, `network`, `data`, `navigation`, `ui`, `terminal`, `testing`, `workfeed`, `glance`). Features never depend on another feature: they push route keys from `:core:navigation`. Convention plugins in `build-logic/`, versions in `gradle/libs.versions.toml`.
+- **Dev lab** (`apps/android/scripts/`): `test-api.sh` (hermetic API with the fake runtime and seeded data: shared 4961, `--auth` 4980, private 4962–4979), `emu.sh` (headless read-only emulators on even console ports 5554–5680; exits 75 when `OPTIO_EMU_MAX`, default 3, are running), `test-daemon.sh` (isolated Optio Local daemon). Never use 30400/30310 (the real Optio) or 4931/3131 (web e2e). Install with `adb install -r -g`: Android 17 needs `ACCESS_LOCAL_NETWORK` to reach `10.0.2.2` or LAN hosts, or requests silently time out.
+- **Push**: FCM is optional. A Firebase `google-services.json` in `apps/android/app/` (git-ignored) makes the build apply the google-services plugin; without it the app uses its on-device baseline (WorkManager check, "Keep watching"). Server side: `docs/android-push.md`.
+- **CI**: job "Android (build + unit tests)" runs `./gradlew assembleDebug testDebugUnitTest :core:model:test :core:network:test` on Temurin 21.
+
 ## Tech Stack
 
 | Layer      | Technology                       | Notes                                                                          |
@@ -291,7 +301,7 @@ Key `values.yaml` settings:
 
 **Repo init timeout**: large repos may exceed 120s default. Increase `OPTIO_REPO_INIT_TIMEOUT_MS`.
 
-**429 Too Many Requests in the UI / iOS app**: the API has a per-IP global limiter (`OPTIO_RATE_LIMIT_MAX`, default 600/min; auth routes have their own stricter limits). The web proxies through the Next server, but the iOS app talks to the API directly and polls several endpoints, so a low limit shows up there first.
+**429 Too Many Requests in the UI / iOS / Android app**: the API has a per-IP global limiter (`OPTIO_RATE_LIMIT_MAX`, default 600/min; auth routes have their own stricter limits). The web proxies through the Next server, but the iOS and Android apps talk to the API directly and poll several endpoints, so a low limit shows up there first.
 
 ## Production Deployment Checklist
 

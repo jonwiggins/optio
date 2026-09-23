@@ -25,7 +25,7 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:
 
 apps/android/scripts/test-api.sh start            # shared API on 4961 (idempotent), ~25 s
 SERIAL=$(apps/android/scripts/emu.sh start --port 5562)   # prints emulator-5562, ~23 s
-adb -s "$SERIAL" install -r apps/android/app/build/outputs/apk/debug/app-debug.apk
+adb -s "$SERIAL" install -r -g apps/android/app/build/outputs/apk/debug/app-debug.apk
 adb -s "$SERIAL" shell am start -n dev.optio.android/dev.optio.app.MainActivity \
   --es OPTIO_DEV_SERVER_URL http://10.0.2.2:4961 --es OPTIO_DEV_TOKEN dev
 adb -s "$SERIAL" exec-out screencap -p > /tmp/shot.png    # then Read the PNG
