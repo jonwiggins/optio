@@ -1,5 +1,10 @@
 package dev.optio.feature.tasks.job
 
+import dev.optio.core.ui.components.NoticeBanner
+import dev.optio.core.navigation.routes.LocalTerminalRoute
+import dev.optio.core.navigation.LocalNavigator
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -228,22 +233,48 @@ private fun RunHeader(run: JobRun, runId: String, connected: Boolean) {
 
 @Composable
 private fun RunLogs(run: JobRun, entries: List<AgentLogEntry>, loaded: Boolean, error: Throwable?) {
-    if (entries.isEmpty()) {
-        Column(
-            Modifier.fillMaxSize().padding(Spacing.xl).testTag("logs-empty"),
-            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            if (run.isActive || !loaded) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-            Text(
-                if (run.isActive || !loaded) "Waiting for output…" else "No logs recorded",
-                style = OptioTheme.type.footnote,
-                color = OptioTheme.colors.secondaryLabel,
-            )
-            if (error != null) Text(ErrorText.humanize(error, "logs"), style = OptioTheme.type.caption, color = OptioTheme.colors.red)
+    val terminalId = run.localTerminalId
+    Column(Modifier.fillMaxSize()) {
+        if (terminalId != null) {
+            val navigator = LocalNavigator.current
+            // Web: a run on the user's machine lives in its Local session, not in pod logs.
+            NoticeBanner(
+                tone = Tone.IDLE,
+                icon = Icons.Outlined.Laptop,
+                title = "Runs on your machine",
+                modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.xs).testTag("banner-local"),
+            ) {
+                TextButton(
+                    onClick = { navigator.push(LocalTerminalRoute(terminalId)) },
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.testTag("open-terminal"),
+                ) { Text("Open the session") }
+            }
         }
-    } else {
-        AgentLogView(entries = entries)
+        Box(Modifier.weight(1f)) {
+            if (entries.isEmpty()) {
+                Column(
+                    Modifier.fillMaxSize().padding(Spacing.xl).testTag("logs-empty"),
+                    verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    val waiting = run.isActive || !loaded
+                    if (waiting) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                    Text(
+                        when {
+                            waiting -> "Waiting for output…"
+                            terminalId != null -> "Its output is in the session on your machine"
+                            else -> "No logs recorded"
+                        },
+                        style = OptioTheme.type.footnote,
+                        color = OptioTheme.colors.secondaryLabel,
+                    )
+                    if (error != null) Text(ErrorText.humanize(error, "logs"), style = OptioTheme.type.caption, color = OptioTheme.colors.red)
+                }
+            } else {
+                AgentLogView(entries = entries)
+            }
+        }
     }
 }
 
