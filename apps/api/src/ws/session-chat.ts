@@ -10,7 +10,7 @@ import {
 import { getSettings } from "../services/optio-settings-service.js";
 import { db } from "../db/client.js";
 import { repoPods, repos, interactiveSessions } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import type { AgentLogEntry, ExecSession } from "@optio/shared";
@@ -123,7 +123,9 @@ export async function sessionChatWs(app: FastifyInstance) {
     const worktreePath = session.worktreePath ?? "/workspace/repo";
 
     let execSession: ExecSession | null = null;
-    let cumulativeCost = 0;
+    // The session's running total, not this socket's: a reconnect (or a
+    // second tab) continues from what the session has already spent.
+    let cumulativeCost = Number.parseFloat(session.costUsd ?? "") || 0;
     let isProcessing = false;
     let outputBuffer = "";
     let promptCount = 0;
@@ -216,11 +218,13 @@ export async function sessionChatWs(app: FastifyInstance) {
 
       // Extract cost from result events
       if (entry.metadata?.cost && typeof entry.metadata.cost === "number") {
-        cumulativeCost += entry.metadata.cost;
+        const turnCost = entry.metadata.cost;
+        cumulativeCost += turnCost;
         send({ type: "cost_update", costUsd: cumulativeCost });
 
-        // Update session cost in DB
-        updateSessionCost(sessionId, cumulativeCost).catch((err) => {
+        // Add this turn to the stored total (never overwrite it with this
+        // socket's view, which would drop spend from earlier connections).
+        addSessionCost(sessionId, turnCost).catch((err) => {
           log.warn({ err }, "Failed to update session cost");
         });
       }
@@ -539,11 +543,17 @@ async function buildAuthEnv(
   return env;
 }
 
-/** Update the cumulative cost on the session record. */
-async function updateSessionCost(sessionId: string, costUsd: number) {
+/**
+ * Add one turn's cost to the session's stored total. The increment happens in
+ * SQL, so connections that overlap (a reconnect racing the old socket, two
+ * tabs) all add rather than overwrite each other's totals.
+ */
+async function addSessionCost(sessionId: string, turnCostUsd: number) {
   await db
     .update(interactiveSessions)
-    .set({ costUsd: costUsd.toFixed(4) })
+    .set({
+      costUsd: sql`ROUND(COALESCE(NULLIF(${interactiveSessions.costUsd}, ''), '0')::numeric + ${turnCostUsd}::numeric, 4)::text`,
+    })
     .where(eq(interactiveSessions.id, sessionId));
 }
 
