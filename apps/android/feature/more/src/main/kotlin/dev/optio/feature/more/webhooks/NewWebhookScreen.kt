@@ -30,6 +30,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.components.InsetDivider
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.semibold
@@ -87,7 +88,7 @@ fun NewWebhookForm(
     onSecret: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(modifier.fillMaxSize().testTag("new-webhook"), contentPadding = contentPadding) {
+    LazyColumn(modifier.fillMaxSize().readableWidth().testTag("new-webhook"), contentPadding = contentPadding) {
         groupedItem(
             "target",
             footer = "Must be a public HTTPS URL — private/internal addresses are blocked. When a secret is set, deliveries include an X-Optio-Signature header.",

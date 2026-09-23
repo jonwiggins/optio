@@ -55,6 +55,7 @@ import dev.optio.core.data.ServerProfile
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.GroupedSection
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
@@ -139,7 +140,7 @@ fun ServerEditContent(
     val colors = OptioTheme.colors
     val confirm = rememberConfirmState()
     val urlValid = draft.editedUrl != null
-    LazyColumn(modifier.fillMaxSize().testTag("server-edit"), contentPadding = contentPadding) {
+    LazyColumn(modifier.fillMaxSize().readableWidth().testTag("server-edit"), contentPadding = contentPadding) {
         groupedItem("name", header = "Name", footer = "Shown in the switcher, on the Overview and in widget sections.") {
             OutlinedTextField(
                 value = draft.name,

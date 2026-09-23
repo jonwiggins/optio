@@ -39,6 +39,7 @@ import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.mono
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.format.rememberNow
@@ -101,7 +102,7 @@ fun WebhooksContent(
     val confirm = rememberConfirmState()
     Loadable(state = state, onRetry = onRetry, what = "webhooks", contentPadding = contentPadding, modifier = modifier) { webhooks ->
         val now = rememberNow()
-        LazyColumn(Modifier.fillMaxSize().testTag("webhooks"), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("webhooks"), contentPadding = contentPadding) {
             if (webhooks.isEmpty()) {
                 item(key = "empty") {
                     EmptyState(

@@ -63,6 +63,7 @@ import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.KeyValueRow
 import dev.optio.core.ui.components.PullRefresh
 import dev.optio.core.ui.components.ServerDot
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.format.rememberNow
 import dev.optio.core.ui.state.ErrorText
@@ -148,7 +149,7 @@ fun SettingsContent(
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     val colors = OptioTheme.colors
     PullRefresh(onRefresh = onRefresh, modifier = modifier) {
-        LazyColumn(Modifier.fillMaxSize().testTag("settings"), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("settings"), contentPadding = contentPadding) {
             groupedItem("optio", header = "Optio") {
                 SettingsRow("Optio agent settings", icon = Icons.Outlined.AutoAwesome, onClick = { onOpen(OptioAgentSettingsRoute) })
                 InsetDivider(start = 56.dp)

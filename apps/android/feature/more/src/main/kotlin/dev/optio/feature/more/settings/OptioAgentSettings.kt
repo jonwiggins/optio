@@ -44,6 +44,7 @@ import dev.optio.core.network.ApiClient
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.InsetDivider
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.Loadable
 import dev.optio.core.ui.state.load
@@ -219,7 +220,7 @@ fun OptioAgentSettingsContent(
 ) {
     val colors = OptioTheme.colors
     Loadable(state = state, onRetry = onRetry, what = "the settings", contentPadding = contentPadding, modifier = modifier) {
-        LazyColumn(Modifier.fillMaxSize().testTag("agent-settings"), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("agent-settings"), contentPadding = contentPadding) {
             groupedItem("assistant", header = "Assistant") {
                 Column(Modifier.padding(horizontal = Spacing.l, vertical = Spacing.m)) {
                     Text("Model", style = OptioTheme.type.body, color = colors.label)

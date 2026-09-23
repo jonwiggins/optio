@@ -27,6 +27,7 @@ import dev.optio.core.network.ApiClient
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.network.LocalCurrentUser
 import dev.optio.core.ui.components.InsetDivider
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.Loadable
 import dev.optio.core.ui.state.load
@@ -154,7 +155,7 @@ fun NotificationPrefsContent(
         return
     }
     Loadable(state = state, onRetry = onRetry, what = "notification preferences", contentPadding = contentPadding, modifier = modifier) { prefs ->
-        LazyColumn(Modifier.fillMaxSize().testTag("notification-prefs"), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("notification-prefs"), contentPadding = contentPadding) {
             item(key = "note") {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = Spacing.l + Spacing.l, vertical = Spacing.m),

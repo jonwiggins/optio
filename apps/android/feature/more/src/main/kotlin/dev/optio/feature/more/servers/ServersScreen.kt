@@ -47,6 +47,7 @@ import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.PullRefresh
 import dev.optio.core.ui.components.ServerDot
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
@@ -97,7 +98,7 @@ fun ServersContent(
 ) {
     val confirm = rememberConfirmState()
     PullRefresh(onRefresh = onRefresh, modifier = modifier) {
-        LazyColumn(Modifier.fillMaxSize().testTag("servers"), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("servers"), contentPadding = contentPadding) {
             groupedItem(
                 "paired",
                 header = "Paired servers",

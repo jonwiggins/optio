@@ -20,6 +20,7 @@ import dev.optio.core.glance.NotificationPermissionState
 import dev.optio.core.network.ApiError
 import dev.optio.core.testing.ScreenSize
 import dev.optio.core.testing.ScreenshotTest
+import dev.optio.core.testing.ThemeMode
 import dev.optio.core.testing.captureScreens
 import dev.optio.core.ui.components.ServerChip
 import dev.optio.core.ui.state.LoadState
@@ -110,6 +111,27 @@ class MoreScreenshotsTest : ScreenshotTest() {
                 version = "0.1.0 (1)",
                 workspaceId = MoreSamples.WS,
                 appIcon = AppIconOption.MIDNIGHT,
+                contentPadding = padding,
+                onOpen = {},
+                onRefresh = {},
+                onRefreshClaude = {},
+                onSignOut = {},
+            )
+        }
+    }
+
+    @Test
+    fun settingsTablet() = captureScreens("More_Settings_tablet", size = ScreenSize.TABLET, modes = listOf(ThemeMode.LIGHT)) {
+        Detail("Settings") { padding ->
+            SettingsContent(
+                claude = LoadState.Loaded(MoreSamples.claudeAvailable),
+                providers = AuthProviders(listOf(AuthProviderInfo("github", "GitHub"))),
+                isAdmin = true,
+                refreshing = false,
+                server = MoreSamples.laptop,
+                version = "0.1.0 (1)",
+                workspaceId = MoreSamples.WS,
+                appIcon = AppIconOption.DEFAULT,
                 contentPadding = padding,
                 onOpen = {},
                 onRefresh = {},

@@ -74,6 +74,7 @@ import dev.optio.core.ui.components.KeyValueRow
 import dev.optio.core.ui.components.PullRefresh
 import dev.optio.core.ui.components.ServerDot
 import dev.optio.core.ui.components.SkeletonRows
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.format.rememberNow
@@ -261,7 +262,7 @@ fun NotificationDevicesContent(
     val confirm = rememberConfirmState()
     val now = rememberNow()
     PullRefresh(onRefresh = onRefresh, modifier = modifier) {
-        LazyColumn(Modifier.fillMaxSize().testTag("notification-devices"), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("notification-devices"), contentPadding = contentPadding) {
             groupedItem(
                 "alerts",
                 header = "Alerts",

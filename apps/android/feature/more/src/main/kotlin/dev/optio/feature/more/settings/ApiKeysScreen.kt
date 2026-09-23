@@ -51,6 +51,7 @@ import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.copyToClipboard
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.LocalClock
 import dev.optio.core.ui.format.relativeDescription
@@ -148,7 +149,7 @@ fun ApiKeysContent(
     }
     Loadable(state = state, onRetry = onRetry, what = "access tokens", contentPadding = contentPadding, modifier = modifier) { keys ->
         if (keys.isEmpty()) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = contentPadding) {
+            LazyColumn(Modifier.fillMaxSize().readableWidth(), contentPadding = contentPadding) {
                 item {
                     EmptyState(
                         title = "No tokens",
@@ -158,7 +159,7 @@ fun ApiKeysContent(
                 }
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize().testTag("api-keys"), contentPadding = contentPadding) {
+            LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("api-keys"), contentPadding = contentPadding) {
                 groupedItem("keys", footer = "Revoking the token this app signed in with will sign you out.") {
                     keys.forEachIndexed { index, key ->
                         if (index > 0) InsetDivider()

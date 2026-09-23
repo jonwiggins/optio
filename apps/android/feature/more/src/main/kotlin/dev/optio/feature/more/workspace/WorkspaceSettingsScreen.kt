@@ -52,6 +52,7 @@ import dev.optio.core.network.LocalCurrentUser
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.KeyValueRow
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.capitalizedFirst
 import dev.optio.core.ui.state.LoadState
@@ -143,7 +144,7 @@ fun WorkspaceSettingsContent(
         val admin = data.isAdmin
         var inviteEmail by rememberSaveable { mutableStateOf("") }
         var inviteRole by rememberSaveable { mutableStateOf("member") }
-        LazyColumn(Modifier.fillMaxSize().testTag("workspace-settings"), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("workspace-settings"), contentPadding = contentPadding) {
             groupedItem(
                 "general",
                 header = "General",

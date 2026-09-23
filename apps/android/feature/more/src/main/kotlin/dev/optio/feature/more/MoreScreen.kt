@@ -63,6 +63,7 @@ import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.PullRefresh
 import dev.optio.core.ui.components.ServerDot
 import dev.optio.core.ui.components.StatusBadge
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
@@ -148,7 +149,7 @@ fun MoreHubContent(
     var confirmSignOut by rememberSaveable { mutableStateOf(false) }
     val multiple = serverCount > 1
     PullRefresh(onRefresh = onRefresh, modifier = modifier.testTag("more-hub")) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize().readableWidth(), contentPadding = contentPadding) {
             groupedItem("admin", header = "Admin") {
                 SettingsRow("Secrets", icon = Icons.Outlined.Key, onClick = { onOpen(SecretsRoute) }, modifier = Modifier.testTag("more-secrets"))
                 InsetDivider(start = 56.dp)

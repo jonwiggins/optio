@@ -50,6 +50,7 @@ import dev.optio.core.ui.components.ChipPicker
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.InsetDivider
+import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.format.rememberNow
@@ -132,7 +133,7 @@ fun SecretsContent(
     }
     Loadable(state = state, onRetry = onRetry, what = "secrets", contentPadding = contentPadding, modifier = modifier) { data ->
         val now = rememberNow()
-        LazyColumn(Modifier.fillMaxSize().testTag("secrets"), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("secrets"), contentPadding = contentPadding) {
             item(key = "filter") {
                 ChipPicker(
                     options = scopeFilters(data.repos),
