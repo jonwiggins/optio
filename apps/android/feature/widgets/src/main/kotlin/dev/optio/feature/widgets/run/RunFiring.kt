@@ -13,10 +13,10 @@ import dev.optio.feature.widgets.shortcuts.AppShortcuts
 import java.time.Duration
 import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.toJavaDuration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
-import kotlin.time.toJavaDuration
 
 /**
  * Fires run targets from the Run widget, the Run tile and run shortcuts, in the background (iOS

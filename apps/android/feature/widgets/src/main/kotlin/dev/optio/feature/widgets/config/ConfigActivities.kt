@@ -8,12 +8,18 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
@@ -21,23 +27,31 @@ import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.lifecycle.lifecycleScope
 import dev.optio.core.data.ServerProfile
+import dev.optio.core.glance.RunTarget
 import dev.optio.core.model.OptioJson
 import dev.optio.core.ui.theme.AppearanceStore
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.collectAppearance
-import dev.optio.feature.widgets.Links
 import dev.optio.feature.widgets.Host
+import dev.optio.feature.widgets.Links
 import dev.optio.feature.widgets.refresh.WidgetRefreshWorker
-import dev.optio.core.glance.RunTarget
 import dev.optio.feature.widgets.run.RunWidget
 import dev.optio.feature.widgets.shortcuts.AppShortcuts
 import dev.optio.feature.widgets.work.WorkWidget
 import kotlinx.coroutines.launch
 
-/** Compose in the app's theme and appearance choice (system / light / dark). */
+/**
+ * Compose in the app's theme and appearance choice (system / light / dark), with test tags exposed
+ * as resource-ids for uiautomator (as the app's root does).
+ */
+@OptIn(ExperimentalComposeUiApi::class)
 internal fun ComponentActivity.setThemedContent(content: @Composable () -> Unit) {
     val appearance = AppearanceStore.create(this)
-    setContent { OptioTheme(appearance.collectAppearance()) { content() } }
+    setContent {
+        OptioTheme(appearance.collectAppearance()) {
+            Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) { content() }
+        }
+    }
 }
 
 /**

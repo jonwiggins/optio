@@ -11,6 +11,7 @@ import androidx.glance.ColorFilter
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
+import androidx.glance.color.ColorProvider as DayNight
 import androidx.glance.layout.size
 import androidx.glance.text.FontFamily
 import androidx.glance.text.FontWeight
@@ -22,7 +23,6 @@ import dev.optio.core.ui.theme.StatusKind
 import dev.optio.feature.widgets.R
 import java.time.Instant
 import java.util.Date
-import androidx.glance.color.ColorProvider as DayNight
 
 /**
  * The widgets' visual language (iOS `GlanceStyle`, docs/design/ios-glanceable-surfaces.md §3):

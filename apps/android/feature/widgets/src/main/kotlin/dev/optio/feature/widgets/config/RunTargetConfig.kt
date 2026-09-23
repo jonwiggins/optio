@@ -12,11 +12,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import dev.optio.core.data.ServerProfile
+import dev.optio.core.glance.RunTarget
 import dev.optio.core.ui.components.GroupedSection
 import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.state.LoadState
-import dev.optio.core.glance.RunTarget
 import dev.optio.feature.widgets.Host
 import dev.optio.feature.widgets.run.resolveRunTargets
 import kotlin.coroutines.cancellation.CancellationException

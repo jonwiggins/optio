@@ -12,11 +12,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.lifecycle.lifecycleScope
 import dev.optio.core.data.DeepLink
+import dev.optio.core.glance.RunTarget
 import dev.optio.feature.widgets.Links
 import dev.optio.feature.widgets.config.RunTargetConfig
 import dev.optio.feature.widgets.config.setThemedContent
 import dev.optio.feature.widgets.data.WidgetStore
-import dev.optio.core.glance.RunTarget
 import kotlinx.coroutines.launch
 
 /**

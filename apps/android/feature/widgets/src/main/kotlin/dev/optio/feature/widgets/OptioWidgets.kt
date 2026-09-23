@@ -1,33 +1,27 @@
 package dev.optio.feature.widgets
 
 import android.content.Context
+import android.os.Build
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.startup.Initializer
-import dev.optio.core.data.SessionStore
 import dev.optio.core.glance.GlanceRefresh
+import dev.optio.feature.widgets.data.WidgetStore
 import dev.optio.feature.widgets.refresh.EventBridge
 import dev.optio.feature.widgets.refresh.WidgetRefresh
+import dev.optio.feature.widgets.run.RunWidgetReceiver
+import dev.optio.feature.widgets.work.WorkWidgetReceiver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * The widgets' process-wide state. Widgets, tiles and shortcuts live in the app's process (no App
- * Group needed, unlike iOS) and share its one [SessionStore].
+ * Group needed, unlike iOS) and share its one session through [Host].
  */
-object OptioWidgets {
-    @Volatile
-    private var sessionProvider: (() -> SessionStore)? = null
-
+internal object OptioWidgets {
     /** Work that outlives a tile click or a widget broadcast (firing a target, refreshing). */
-    internal val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-    /** Connects the widgets to the app's [session] (until `:core:glance`'s host provides it). */
-    fun install(session: () -> SessionStore) {
-        sessionProvider = session
-    }
-
-    /** The app's session, or null before it is installed. */
-    internal fun session(): SessionStore? = sessionProvider?.invoke()
+    val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 }
 
 /**
@@ -39,7 +33,29 @@ class WidgetsInitializer : Initializer<Unit> {
     override fun create(context: Context) {
         GlanceRefresh.register(WidgetRefresh.HOOK) { ctx, reason -> WidgetRefresh.onGlanceRefresh(ctx, reason) }
         EventBridge.start(context, OptioWidgets.scope) { Host.session() }
+        OptioWidgets.scope.launch { publishPreviews(context.applicationContext) }
     }
 
     override fun dependencies(): List<Class<out Initializer<*>>> = emptyList()
+
+    /**
+     * API 35+ pickers show generated previews (each widget's `providePreview`, sample data, the
+     * system's theme) instead of the static `previewImage`. Published once per app version: the
+     * call is rate-limited.
+     */
+    private suspend fun publishPreviews(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
+        val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode }.getOrDefault(0L)
+        val flag = "previews.$version"
+        val store = WidgetStore.get(context)
+        if (store.flag(flag)) return
+        val manager = GlanceAppWidgetManager(context)
+        val published =
+            runCatching {
+                listOf(WorkWidgetReceiver::class, RunWidgetReceiver::class).all {
+                    manager.setWidgetPreviews(it) == GlanceAppWidgetManager.SET_WIDGET_PREVIEWS_RESULT_SUCCESS
+                }
+            }.getOrDefault(false)
+        if (published) store.setFlag(flag, true)
+    }
 }

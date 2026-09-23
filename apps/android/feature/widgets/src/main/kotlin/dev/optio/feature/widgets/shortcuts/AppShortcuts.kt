@@ -5,9 +5,9 @@ import android.content.Intent
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import dev.optio.core.glance.RunTarget
 import dev.optio.core.model.OptioJson
 import dev.optio.feature.widgets.R
-import dev.optio.core.glance.RunTarget
 
 /**
  * Launcher shortcuts (the Android side of iOS App Shortcuts / Siri phrases):
