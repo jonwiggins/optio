@@ -4,7 +4,9 @@ import dev.optio.core.glance.GlanceCopy
 import dev.optio.core.glance.GlanceEntry
 import dev.optio.core.glance.GlanceItem
 import dev.optio.core.glance.GlancePolicy
+import dev.optio.core.glance.InFlightTask
 import dev.optio.core.model.WatchItemKind
+import dev.optio.core.testing.Fixtures
 import dev.optio.core.ui.theme.StatusKind
 import dev.optio.feature.widgets.work.WidgetSamples
 import java.time.Duration
@@ -13,6 +15,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.Serializable
 import org.junit.Test
 
 /**
@@ -131,6 +134,29 @@ class WorkBoardTest {
         assertNull(idle.headSession)
         assertEquals(idle.boardLink, idle.headLink)
     }
+
+    @Test
+    fun taskRowsFromCapturedTasks() {
+        // `GET /api/tasks?limit=8&type=repo-task` captured from the private test API.
+        val tasks =
+            Fixtures.decode<TasksPage>("tasks-repo.json").tasks
+                .filter { it.state in InFlightTask.IN_FLIGHT_STATES }
+                .map { it.copy(serverId = "srv", serverName = "DevLab") }
+        val entry = GlanceEntry(now, listOf(WidgetSamples.slice(WidgetSamples.laptop.copy(id = "srv"), now, emptyList(), emptyList(), tasks = tasks)))
+        val rows = entry.sessionRows
+        // The queued task was updated last (it never started), so it leads the running rows.
+        assertEquals(listOf("needs_attention", "queued", "running", "pr_opened"), rows.map { it.state }, "stuck first, then running (newest first), the open PR last")
+        assertEquals(listOf("Stuck", "Queued", "running", "PR"), rows.map { it.statusWord })
+        assertTrue(rows.all { it.link.startsWith("optio://tasks/") && it.link.endsWith("?server=srv") })
+        // Where: the repo for pod runs, the machine's directory for the task that runs on the laptop.
+        assertEquals(listOf("e2e-org/e2e-repo", "~/repos/e2e-repo", "e2e-org/mobile-app", "e2e-org/e2e-repo"), rows.map { it.whereValue.detail })
+        assertEquals(listOf("pod", "machine", "pod", "pod"), rows.map { it.whereValue.target.raw })
+        assertEquals(1, entry.needsYouCount)
+        assertEquals(2, entry.runningCount, "running and queued run; the open PR waits")
+    }
+
+    @Serializable
+    private data class TasksPage(val tasks: List<InFlightTask> = emptyList())
 
     @Test
     fun statusWordsAndColours() {
