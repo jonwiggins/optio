@@ -42,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
@@ -247,6 +249,16 @@ internal fun PrUrlField(
 ) {
     val colors = OptioTheme.colors
     val canSubmit = text.isNotBlank() && !launching
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    // Put the keyboard away so the result (a toast, or the review opening) is in view.
+    val submit = {
+        if (canSubmit) {
+            keyboard?.hide()
+            focus.clearFocus()
+            onSubmit()
+        }
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -263,7 +275,7 @@ internal fun PrUrlField(
             textStyle = OptioTheme.type.body.copy(color = colors.label),
             cursorBrush = SolidColor(colors.accent),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
-            keyboardActions = KeyboardActions(onGo = { if (canSubmit) onSubmit() }),
+            keyboardActions = KeyboardActions(onGo = { submit() }),
             modifier = Modifier.weight(1f).testTag("pr-url-field"),
             decorationBox = { inner ->
                 Box {
@@ -273,7 +285,7 @@ internal fun PrUrlField(
             },
         )
         IconButton(
-            onClick = onSubmit,
+            onClick = submit,
             enabled = canSubmit,
             shape = CircleShape,
             colors = IconButtonDefaults.filledIconButtonColors(

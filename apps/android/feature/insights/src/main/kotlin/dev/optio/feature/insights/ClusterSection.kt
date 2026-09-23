@@ -351,7 +351,7 @@ private fun NodeRow(node: ClusterNode, metrics: Boolean) {
         }
         val memory = node.memoryUsedGi?.let { String.format(Locale.US, "%.1f / %.1f Gi", it, node.memoryTotalGi ?: 0.0) }
             ?: InsightsFormat.k8sResource(node.memory)
-        metaText("${cores(node.cpu)} cores", memory, node.containerRuntime)?.let {
+        metaText(cores(node.cpu).let { if (it == "1") "1 core" else "$it cores" }, memory, node.containerRuntime)?.let {
             Text(it, style = OptioTheme.type.footnote, color = colors.secondaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (metrics) {
@@ -379,7 +379,7 @@ private fun PodRow(pod: ClusterPodInfo, now: Instant, onClick: (() -> Unit)?) {
             if (pod.isInfra == true) "infra" else null,
             pod.cpuMillicores?.let { "${it}m CPU" },
             pod.memoryMi?.let { "$it Mi" },
-            pod.restarts?.takeIf { it > 0 }?.let { "$it restarts" },
+            pod.restarts?.takeIf { it > 0 }?.let { counted(it, "restart") },
         ),
         trailing = if (tone == Tone.DANGER) pod.status ?: "Failed" else InsightsDates.parse(pod.startedAt)?.relativeDescription(now),
         trailingTone = if (tone == Tone.DANGER) Tone.DANGER else null,

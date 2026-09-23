@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -63,6 +64,7 @@ import dev.optio.core.ui.components.PeriodPicker
 import dev.optio.core.ui.components.PullRefresh
 import dev.optio.core.ui.components.SectionHeader
 import dev.optio.core.ui.components.SkeletonRows
+import dev.optio.core.ui.components.SkeletonStrip
 import dev.optio.core.ui.components.StatItem
 import dev.optio.core.ui.components.StatStrip
 import dev.optio.core.ui.components.StateDot
@@ -369,27 +371,36 @@ internal fun ActivityContent(
                     contentPadding = PaddingValues(horizontal = Spacing.l, vertical = Spacing.xs),
                 )
             }
-            item(key = "stats") {
-                val stats = page?.stats ?: ActivityStats()
-                StatStrip(
-                    items = listOf(
-                        StatItem("Actions", stats.actions),
-                        StatItem("Task events", stats.taskEvents),
-                        StatItem("Auth", stats.authEvents),
-                        StatItem("Infra", stats.infraEvents),
-                    ),
-                    modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s),
-                )
+            // Counts only once a page is in (iOS shows zeros, and "0 events", even when the load failed).
+            if (page != null) {
+                item(key = "stats") {
+                    StatStrip(
+                        items = listOf(
+                            StatItem("Actions", page.stats.actions),
+                            StatItem("Task events", page.stats.taskEvents),
+                            StatItem("Auth", page.stats.authEvents),
+                            StatItem("Infra", page.stats.infraEvents),
+                        ),
+                        modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s),
+                    )
+                }
+            } else if (state !is LoadState.Failed) {
+                item(key = "stats") {
+                    SkeletonStrip(labels = listOf("Actions", "Task events", "Auth", "Infra"), modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s))
+                }
             }
             item(key = "count") {
-                val total = page?.total ?: 0
                 Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.xs), verticalAlignment = Alignment.CenterVertically) {
-                    NumericText(
-                        "$total event${if (total == 1) "" else "s"} in the last ${filter.days} day${if (filter.days == 1) "" else "s"}",
-                        style = OptioTheme.type.caption,
-                        color = colors.secondaryLabel,
-                        modifier = Modifier.weight(1f),
-                    )
+                    if (page != null) {
+                        NumericText(
+                            "${counted(page.total, "event")} in the last ${counted(filter.days, "day")}",
+                            style = OptioTheme.type.caption,
+                            color = colors.secondaryLabel,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
                     if (live) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag("activity-live")) {
                             StateDot(Tone.WORKING, size = 5.dp)

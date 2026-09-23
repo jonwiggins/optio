@@ -174,6 +174,7 @@ class InsightsScreenshotTest : ScreenshotTest() {
             state = LoadState.Failed(ApiError(500, "Internal Server Error"), previous = costs),
             filter = CostsViewModel.Filter(repoUrl = "https://github.com/acme/api"),
             contentPadding = padding,
+            shownFilter = CostsViewModel.Filter(),
         )
     }
 

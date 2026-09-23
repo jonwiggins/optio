@@ -168,7 +168,7 @@ internal fun CostOverTimeChart(
         CartesianLayerRangeProvider.fixed(minX = minDay.toDouble(), maxX = maxDay.toDouble(), minY = 0.0, maxY = ChartScale.niceMax(top, step))
     }
     val yFormatter = remember { CartesianValueFormatter { _, value, _ -> Cost.format(value) } }
-    val description = "Cost over time: ${Cost.format(points.sumOf { it.cost })} over ${points.size} days"
+    val description = "Cost over time: ${Cost.format(points.sumOf { it.cost })} over ${counted(points.size, "day")}"
     if (points.size < 2) {
         val model = remember(points) { CartesianChartModel(ColumnCartesianLayerModel.build { series(x = days, y = points.map { it.cost }) }) }
         val layer = rememberColumnCartesianLayer(

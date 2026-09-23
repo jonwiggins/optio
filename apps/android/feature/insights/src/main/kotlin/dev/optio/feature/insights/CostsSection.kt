@@ -96,6 +96,14 @@ internal class CostsViewModel(private val api: ApiClient) : ViewModel() {
     private val _filter = MutableStateFlow(Filter())
     val filter: StateFlow<Filter> = _filter.asStateFlow()
 
+    private val _shown = MutableStateFlow<Filter?>(null)
+
+    /**
+     * The filter the costs on screen were loaded with: a failed reload (a new repo filter) keeps
+     * the earlier numbers up, and they must not be labelled with the new repo.
+     */
+    val shown: StateFlow<Filter?> = _shown.asStateFlow()
+
     /** (url, name) of the workspace's repos for the filter menu. */
     private val _repos = MutableStateFlow<List<Pair<String, String>>>(emptyList())
     val repos: StateFlow<List<Pair<String, String>>> = _repos.asStateFlow()
@@ -126,7 +134,7 @@ internal class CostsViewModel(private val api: ApiClient) : ViewModel() {
 
     private suspend fun fetch() {
         val f = _filter.value
-        _state.load { api.costAnalytics(f.days, f.repoUrl) }
+        if (_state.load { api.costAnalytics(f.days, f.repoUrl) } != null) _shown.value = f
         if (_repos.value.isEmpty()) runCatching { api.repoUrls() }.onSuccess { _repos.value = it }
     }
 }
@@ -142,12 +150,14 @@ fun CostsSection(
     val model = viewModel(key = "insights-costs") { CostsViewModel(api) }
     val state by model.state.collectAsStateWithLifecycle()
     val filter by model.filter.collectAsStateWithLifecycle()
+    val shown by model.shown.collectAsStateWithLifecycle()
     val repos by model.repos.collectAsStateWithLifecycle()
     LaunchedEffect(model) { model.refresh() }
     HubActions { CostsRepoFilter(repos = repos, selection = filter.repoUrl, onSelect = model::setRepo) }
     CostsContent(
         state = state,
         filter = filter,
+        shownFilter = shown,
         contentPadding = contentPadding,
         modifier = modifier,
         onDays = model::setDays,
@@ -202,6 +212,8 @@ internal fun CostsContent(
     state: LoadState<CostAnalytics>,
     filter: CostsViewModel.Filter,
     contentPadding: PaddingValues,
+    // What the numbers on screen were loaded with (null: [filter]).
+    shownFilter: CostsViewModel.Filter? = null,
     modifier: Modifier = Modifier,
     onDays: (Int) -> Unit = {},
     onRefresh: suspend () -> Unit = {},
@@ -228,7 +240,7 @@ internal fun CostsContent(
                 data == null -> item(key = "skeleton") {
                     SkeletonStrip(labels = listOf("Total", "Average", "Forecast", "Previous"), modifier = Modifier.padding(horizontal = Spacing.l))
                 }
-                else -> costCards(data, filter, now, onOpen)
+                else -> costCards(data, shownFilter ?: filter, now, onOpen)
             }
             item(key = "bottom") { Box(Modifier.padding(bottom = Spacing.s)) }
         }
@@ -293,7 +305,7 @@ private fun CostSummaryTiles(d: CostAnalytics, filter: CostsViewModel.Filter) {
         )
         metaText(
             if (trend != 0.0) String.format(Locale.US, "%s%.1f%% vs previous %dd", if (trend > 0) "+" else "", trend, s?.days ?: filter.days) else null,
-            "${s?.tasksWithCost ?: 0} tasks",
+            counted(s?.tasksWithCost ?: 0, "task"),
             "${InsightsFormat.cost(f?.monthCostSoFar)} this month · ${f?.daysRemaining ?: 0}d left",
             filter.repoUrl?.let(InsightsFormat::repoShortName),
         )?.let { Text(it, style = OptioTheme.type.caption, color = OptioTheme.colors.secondaryLabel) }
@@ -314,7 +326,7 @@ private fun Suggestions(suggestions: List<ModelSuggestion>) {
             val savings = avg - cheaper
             val pct = if (avg > 0) savings / avg * 100 else 0.0
             Text(
-                "${InsightsFormat.repoShortName(x.repoUrl)}: ${x.taskCount ?: 0} tasks ran with ${InsightsFormat.modelShortName(x.currentModel)} " +
+                "${InsightsFormat.repoShortName(x.repoUrl)}: ${counted(x.taskCount ?: 0, "task")} ran with ${InsightsFormat.modelShortName(x.currentModel)} " +
                     "(avg ${InsightsFormat.cost(avg)}). " +
                     if (cheaper > 0) "Try Sonnet to save ~${pct.toInt()}% (${InsightsFormat.cost(savings)}/task)." else "Consider trying Sonnet for potential savings.",
             )
@@ -359,7 +371,7 @@ private fun ByModel(models: List<CostByModel>) {
                     RateBar(label = InsightsFormat.modelShortName(m.model), valueText = InsightsFormat.cost(m.totalCost), fraction = (m.totalCost ?: 0.0) / max)
                     Row {
                         Text(
-                            "${m.taskCount ?: 0} tasks · ${(m.successRate ?: 0.0).toInt()}% success",
+                            "${counted(m.taskCount ?: 0, "task")} · ${(m.successRate ?: 0.0).toInt()}% success",
                             style = OptioTheme.type.caption2,
                             color = colors.tertiaryLabel,
                             modifier = Modifier.weight(1f),

@@ -314,7 +314,7 @@ private fun PodDetailBody(
                         StatusBadge(text = t.state ?: "unknown", tone = Tone.forState(t.state))
                         Text(t.title ?: t.id, style = OptioTheme.type.subheadline, color = colors.label, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         Column(horizontalAlignment = Alignment.End) {
-                            t.agentType?.let { Text(it.replace('-', ' '), style = OptioTheme.type.caption2, color = colors.secondaryLabel) }
+                            t.agentType?.let { Text(agentLabel(it), style = OptioTheme.type.caption2, color = colors.secondaryLabel) }
                             relative(t.createdAt, now)?.let { Text(it, style = OptioTheme.type.caption2, color = colors.secondaryLabel) }
                         }
                     }

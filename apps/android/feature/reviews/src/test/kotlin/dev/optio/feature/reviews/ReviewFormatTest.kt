@@ -15,6 +15,8 @@ class ReviewFormatTest {
         assertEquals("Draft Ready", ReviewFormat.stateLabel("ready"))
         assertEquals("Submitted", ReviewFormat.stateLabel("submitted"))
         assertEquals("Some New State", ReviewFormat.stateLabel("some_new_STATE"))
+        assertEquals("1 issue", counted(1, "issue"))
+        assertEquals("2 issues", counted(2, "issue"))
 
         assertEquals(Tone.ACCENT, ReviewFormat.stateTone("ready"), "a draft waiting for you is the only accent")
         assertEquals(Tone.WORKING, ReviewFormat.stateTone("reviewing"))

@@ -274,7 +274,7 @@ private fun AgentComparison(agents: List<AgentAnalyticsRow>) {
                             color = colors.label,
                             modifier = Modifier.weight(1f),
                         )
-                        Text("${a.taskCount ?: 0} tasks", style = type.caption, color = colors.secondaryLabel)
+                        Text(counted(a.taskCount ?: 0, "task"), style = type.caption, color = colors.secondaryLabel)
                         val rate = a.successRate ?: 0.0
                         Text(
                             InsightsFormat.percent(rate),
@@ -364,6 +364,9 @@ internal fun agentLabel(agentType: String?): String =
     (agentType ?: "?").replace('-', ' ').split(' ').joinToString(" ") { word ->
         word.lowercase(Locale.US).replaceFirstChar { it.titlecase(Locale.US) }
     }
+
+/** "1 task", "3 tasks" (iOS writes "1 tasks"). */
+internal fun counted(count: Int, noun: String): String = "$count $noun${if (count == 1) "" else "s"}"
 
 /** At most 28 characters, like the iOS bar labels. */
 internal fun shortMessage(message: String): String {

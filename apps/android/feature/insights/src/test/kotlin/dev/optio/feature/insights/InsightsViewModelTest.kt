@@ -109,6 +109,24 @@ class InsightsViewModelTest {
         assertEquals("90", last.queryParam("days"))
         assertEquals("https://github.com/e2e-org/mobile-app", last.queryParam("repoUrl"))
         assertEquals(1, server.count("GET", "/api/repos"), "repos are fetched once")
+        assertEquals(CostsViewModel.Filter(90, "https://github.com/e2e-org/mobile-app"), vm.shown.value)
+        vm.viewModelScope.cancel()
+    }
+
+    @Test
+    fun aFailedRepoFilterKeepsTheEarlierCostsLabelledAsTheyWere() = runTest(main.dispatcher) {
+        server.fixture("/api/analytics/costs", "analytics-costs.json")
+        server.json("/api/repos", """{"repos":[]}""")
+        val vm = CostsViewModel(server.client())
+        vm.reload()
+        assertEquals(CostsViewModel.Filter(), vm.shown.value)
+        // `repoUrl` 500s on the current API (an ambiguous column in the anomalies query).
+        server.error("GET", "/api/analytics/costs", 500, "Internal Server Error")
+        vm.setRepo("https://github.com/e2e-org/mobile-app")
+        vm.state.first { it is LoadState.Failed }
+        assertEquals("2.1521", vm.state.value.value?.summary?.totalCost, "the earlier numbers stay up")
+        assertEquals("https://github.com/e2e-org/mobile-app", vm.filter.value.repoUrl, "the menu keeps the choice")
+        assertEquals(CostsViewModel.Filter(), vm.shown.value, "what's on screen is still all repos")
         vm.viewModelScope.cancel()
     }
 

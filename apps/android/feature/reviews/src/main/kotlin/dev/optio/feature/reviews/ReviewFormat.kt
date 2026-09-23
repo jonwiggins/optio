@@ -125,6 +125,9 @@ internal object ReviewFormat {
     }
 }
 
+/** "1 issue", "3 issues". */
+internal fun counted(count: Int, noun: String): String = "$count $noun${if (count == 1) "" else "s"}"
+
 /** Swift's `capitalized`: every word's first letter upper, the rest lower. */
 internal fun String.capitalizedWords(): String =
     split(' ').joinToString(" ") { word -> word.lowercase(Locale.US).replaceFirstChar { it.titlecase(Locale.US) } }

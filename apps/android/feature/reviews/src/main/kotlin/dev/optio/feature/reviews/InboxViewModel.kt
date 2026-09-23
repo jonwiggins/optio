@@ -142,7 +142,7 @@ internal class InboxViewModel(private val api: ApiClient) : ViewModel() {
                 }
             }
             _bulkBusy.value = false
-            _events.send(ScreenEvent.Toast("Assigned $assigned of ${targets.size} issues"))
+            _events.send(ScreenEvent.Toast("Assigned $assigned of ${counted(targets.size, "issue")}"))
         }
     }
 

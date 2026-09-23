@@ -151,6 +151,8 @@ class InsightsDecodeTest {
 
     @Test
     fun formattingHelpers() {
+        assertEquals("1 task", counted(1, "task"))
+        assertEquals("0 tasks", counted(0, "task"))
         assertEquals("Mock agent failure", shortMessage("  Mock agent failure "))
         assertEquals("Error: connect ECONNREFUSED…", shortMessage("Error: connect ECONNREFUSED 127.0.0.1:5432"))
         assertEquals(Tone.DANGER, ClusterViewModel.statusTone("CrashLoopBackOff"))

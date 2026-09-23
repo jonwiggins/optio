@@ -98,7 +98,7 @@ fun InboxSection(
                         leadingIcon = { Icon(Icons.Outlined.Bolt, contentDescription = null) },
                         onClick = {
                             dismiss()
-                            confirm.ask("Assign $unassigned issues to Optio?", confirmLabel = "Assign all") { model.assignAll() }
+                            confirm.ask("Assign ${counted(unassigned, "issue")} to Optio?", confirmLabel = "Assign all") { model.assignAll() }
                         },
                     )
                 }
