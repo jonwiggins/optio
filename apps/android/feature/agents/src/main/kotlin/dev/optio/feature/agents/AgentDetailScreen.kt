@@ -2,7 +2,6 @@ package dev.optio.feature.agents
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -185,8 +184,7 @@ fun AgentDetailContent(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .consumeWindowInsets(padding)
-                .imePaddingInWindow(),
+                .consumeWindowInsets(padding),
         ) {
             val header = ui.header
             val loaded = header.value
@@ -238,7 +236,6 @@ fun AgentDetailContent(
                     enabled = composerEnabled,
                     // A disabled field can't take focus: hold the request until the agent has loaded.
                     autofocus = pendingFocus && composerEnabled,
-                    windowInsets = WindowInsets(0, 0, 0, 0),
                 )
                 LaunchedEffect(composerEnabled) { if (composerEnabled) pendingFocus = false }
             }

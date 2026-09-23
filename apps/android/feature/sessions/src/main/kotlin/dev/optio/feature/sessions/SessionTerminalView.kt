@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -29,7 +30,7 @@ import dev.optio.core.ui.theme.semibold
 /**
  * The session's shell (iOS `SessionTerminalView`): an error strip when the socket failed (with
  * Reconnect once it gave up), the terminal fitted to the phone (the phone owns this grid, so the PTY
- * follows the view), and the extra-keys bar. The screen pads the whole column above the keyboard.
+ * follows the view), and the extra-keys bar, padded above the keyboard.
  */
 @Composable
 internal fun SessionTerminalView(
@@ -40,7 +41,7 @@ internal fun SessionTerminalView(
     focusOnShow: Boolean = true,
 ) {
     val dark = OptioTheme.colors.isDark
-    Column(modifier.background(TerminalTheme.background(dark)).testTag("session-terminal")) {
+    Column(modifier.background(TerminalTheme.background(dark)).imePadding().testTag("session-terminal")) {
         val error = ui.error
         if (error != null || ui.stopped) {
             Row(

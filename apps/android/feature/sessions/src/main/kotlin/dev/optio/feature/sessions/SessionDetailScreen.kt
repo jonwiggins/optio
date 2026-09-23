@@ -257,8 +257,7 @@ fun SessionDetailContent(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .consumeWindowInsets(padding)
-                .imePaddingInWindow(),
+                .consumeWindowInsets(padding),
         ) {
             when {
                 session != null -> {
