@@ -7,10 +7,11 @@ user's real Optio (k8s cluster on `localhost:30400`, a real `optio local up` dae
 | Tool                                  | What it gives you                                                                         |
 | ------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `apps/android/scripts/emu.sh`         | Headless emulator instances of the shared AVD `optio` (read-only, several at once)        |
-| `apps/android/scripts/test-api.sh`    | A private Optio API: real server, fake agent runtime, auth disabled, seeded data          |
+| `apps/android/scripts/test-api.sh`    | A private Optio API: real server, fake agent runtime, seeded data; auth off or `--auth`   |
 | `apps/android/scripts/test-daemon.sh` | An isolated Optio Local daemon attached to a test API, for live terminals and transcripts |
 | `apps/android/e2e/launch-api.ts`      | What `test-api.sh` runs: infra, hermetic API process, seed, `seed.json`                   |
 | `apps/android/e2e/verify-daemon.mjs`  | What `test-daemon.sh verify` runs                                                         |
+| `apps/android/e2e/ws-open-grace.mjs`  | Test-daemon workaround for an API WebSocket race with auth enabled (see below)            |
 
 ## Quick start
 
@@ -32,18 +33,29 @@ adb -s "$SERIAL" exec-out screencap -p > /tmp/shot.png    # then Read the PNG
 apps/android/scripts/emu.sh stop "$SERIAL"        # always stop what you started
 ```
 
+With authentication enabled instead (real users, PATs; needed for widgets/Watch, notifications,
+workspaces, API keys):
+
+```bash
+apps/android/scripts/test-api.sh start --auth     # shared auth-enabled API on 4980, ~30 s
+TOKEN=$(node -p "require('$(readlink ~/.android/optio-devlab/test-api/4980)/seed.json').auth.adminToken")
+adb -s "$SERIAL" shell am start -n dev.optio.android/dev.optio.app.MainActivity \
+  --es OPTIO_DEV_SERVER_URL http://10.0.2.2:4980 --es OPTIO_DEV_TOKEN "$TOKEN"
+```
+
 `pnpm install --frozen-lockfile --prefer-offline` must have run once in your worktree (the
 test API runs the API from your worktree's `apps/api`). Docker must be running (test
 Postgres/Redis containers).
 
 ## Ports
 
-| What                   | Port                                                       | Notes                                                         |
-| ---------------------- | ---------------------------------------------------------- | ------------------------------------------------------------- |
-| Shared test API        | **4961**                                                   | Start it if it is not running; stop it only if you started it |
-| Private test APIs      | **4962–4979**                                              | Your own seeded copy; use it for anything that mutates a lot  |
-| Emulator console ports | even numbers **5554–5680** (adb uses port+1)               | Serial is `emulator-<port>`                                   |
-| Never                  | 4931, 3131 (web e2e), 30400, 30310 (the user's real Optio) | The scripts refuse these                                      |
+| What                    | Port                                                       | Notes                                                         |
+| ----------------------- | ---------------------------------------------------------- | ------------------------------------------------------------- |
+| Shared test API         | **4961**                                                   | Start it if it is not running; stop it only if you started it |
+| Shared auth-enabled API | **4980**                                                   | `test-api.sh start --auth`; same rules                        |
+| Private test APIs       | **4962–4979**                                              | Your own seeded copy (add `--auth` for an auth-enabled one)   |
+| Emulator console ports  | even numbers **5554–5680** (adb uses port+1)               | Serial is `emulator-<port>`                                   |
+| Never                   | 4931, 3131 (web e2e), 30400, 30310 (the user's real Optio) | The scripts refuse these                                      |
 
 Suggested fixed ports so parallel agents never race for one:
 
@@ -64,7 +76,7 @@ Suggested fixed ports so parallel agents never race for one:
 emu.sh start [--port N] [--avd NAME] [--window] [--gpu MODE] [--timeout SECS] [--reuse]
 emu.sh stop <serial|port> [--force] [--timeout SECS]
 emu.sh list
-emu.sh http <serial|port> <http://host:port/path>
+emu.sh http <serial|port> <http://host:port/path> [--token PAT]
 ```
 
 - `start` launches `emulator -avd optio -port N` in its own session with
@@ -80,7 +92,8 @@ emu.sh http <serial|port> <http://host:port/path>
   overrides; don't). Stopping a port with nothing on it is a no-op.
 - `list` shows every emulator on the machine (adb, emu.sh state, qemu processes): serial, adb
   state, AVD, pid, uptime, booted, owner worktree.
-- `http` GETs a URL from inside the device with toybox `nc` (the image has no curl/wget).
+- `http` GETs a URL from inside the device with toybox `nc` (the image has no curl/wget);
+  `--token` adds `Authorization: Bearer <PAT>` for an auth-enabled API.
 - `--window` shows the emulator window on the user's desktop (default: headless);
   `--gpu swiftshader_indirect` is the software fallback if `host` misbehaves.
 - State and logs: `~/.android/optio-devlab/emulators/<port>/` (`emulator.log`, pid, owner).
@@ -141,22 +154,25 @@ use `http://127.0.0.1:4961` in the app (handy for a second profile on the same A
 ## Private test API: `test-api.sh`
 
 ```
-test-api.sh start  [--port N] [--no-seed] [--timeout SECS] [--log-level LEVEL]
-test-api.sh stop   [--port N] [--force]
-test-api.sh status [--port N | --all]
+test-api.sh start  [--auth] [--port N] [--no-seed] [--timeout SECS] [--log-level LEVEL]
+test-api.sh stop   [--auth] [--port N] [--force]
+test-api.sh status [--auth] [--port N | --all]
 ```
 
-`start` (default port 4961) backgrounds `launch-api.ts` and returns once the API is healthy
-**and** seeding finished. It is idempotent: if the port already runs a ready instance, from
-any worktree, it prints the summary and exits 0. `stop` stops the API and **drops its
-database**, so the next `start` gets fresh ids. `status` exits 0 when ready, 3 when not
-running.
+`start` (default port 4961; 4980 with `--auth`, see "Auth-enabled mode" below; `--auth` on
+`stop`/`status` just selects that port) backgrounds `launch-api.ts` and returns once the API
+is healthy **and** seeding finished. It is idempotent: if the port already runs a ready
+instance, from any worktree, it prints the summary and exits 0. `stop` stops the API and
+**drops its database**, so the next `start` gets fresh ids. `status` exits 0 when ready, 3
+when not running.
 
 What runs: the test Postgres/Redis containers (`scripts/test-infra.sh`, shared with the other
 test tiers; `stop` never removes them), a private database cloned from the migrated template,
 and the real API server (`tsx apps/api/src/index.ts`) with `OPTIO_RUNTIME=fake`,
-`OPTIO_AUTH_DISABLED=true` and the pipeline-e2e worker intervals. Agents are played by the fake
-runtime (`packages/container-runtime/src/fake.ts`), so nothing costs money.
+`OPTIO_AUTH_DISABLED=true` (`false` with `--auth`) and the pipeline-e2e worker intervals.
+Agents are played by the fake runtime (`packages/container-runtime/src/fake.ts`), so nothing
+costs money. Starting on a port that already runs an instance in the other mode is an error,
+not a silent reuse.
 
 State: `apps/android/e2e/.run/<port>/` in the worktree that started it: `api.log` (launcher +
 API, `LOG_LEVEL=warn`), `server.json` (phase, pids, database), `seed.json`, `launcher.pid`,
@@ -243,7 +259,17 @@ Every entry is optional: a seed step that fails is logged, listed in `errors`, a
     "recordedCommandSession": { "terminalId", "title", "exitCode" },
     "parkedTerminal": { "id", "title", "state" }
   },
-  "daemon": { "hostId", "hostName", "dirs", "verifiedAt", "transcriptTerminalId"? }  // added by test-daemon.sh verify
+  "daemon": { "hostId", "hostName", "dirs", "verifiedAt", "transcriptTerminalId"? },  // added by test-daemon.sh verify
+  // --auth only (with --auth, api.token is the admin PAT and api.authDisabled is false):
+  "auth": {
+    "enabled": true,
+    "workspaceId", "workspaceSlug", "workspaceName", "secondWorkspaceId",
+    "adminToken", "memberToken", "viewerToken",
+    "userIds": { "admin", "member", "viewer", "outsider" },
+    "users": { "admin": { "id", "email", "displayName", "username", "role", "apiKeyId", "extraApiKey" }, "member": …, "viewer": …, "outsider": … },
+    "pushDeviceId",
+    "checks": [{ "name", "ok", "detail" }]
+  }
 }
 ```
 
@@ -258,7 +284,73 @@ user; `GET /api/auth/ws-token` returns `auth-disabled`; WebSockets take any
 `optio-auth-<token>` subprotocol. These answer **401** because there is no real user (expected;
 handle it gracefully): `/api/workspaces/**`, `/api/auth/api-keys/**`, every
 `/api/notifications/**` route (preferences, devices, subscriptions, live activities),
-**`GET /api/glance/watch`** and `GET /api/users/lookup`.
+**`GET /api/glance/watch`** and `GET /api/users/lookup`. For those, use an auth-enabled
+instance.
+
+### Auth-enabled mode (`--auth`)
+
+`test-api.sh start --auth [--port N]` (default port **4980**, the shared auth-enabled instance)
+runs the same hermetic API with authentication **enabled**, for screens that need a real user:
+`/api/glance/watch` (widgets, the Watch notification), `/api/notifications/*`,
+`/api/workspaces`, `/api/auth/api-keys`, `/api/users/lookup`, and role gating. Before the API
+boots, the launcher creates the principals through the API's own services: users are upserted
+exactly as an OAuth login upserts them (`createSession`), workspaces and memberships come from
+`workspace-service`, and personal access tokens from `api-key-service` (`optio_pat_…`, stored
+as the SHA-256 hash the auth plugin looks up). Then everything in "What is seeded" is created
+through the admin's PAT.
+
+| Who           | Email                       | Role                                                               | Token in `seed.json`                 |
+| ------------- | --------------------------- | ------------------------------------------------------------------ | ------------------------------------ |
+| Ada Admin     | `ada-admin@example.com`     | admin of "Android DevLab" and of "Side project"                    | `auth.adminToken` (also `api.token`) |
+| Mia Member    | `mia-member@example.com`    | member of "Android DevLab"                                         | `auth.memberToken`                   |
+| Vic Viewer    | `vic-viewer@example.com`    | viewer of "Android DevLab" (read-only)                             | `auth.viewerToken`                   |
+| Noor Newcomer | `noor-newcomer@example.com` | in no workspace: find with `/api/users/lookup`, then add as member | none                                 |
+
+All data lives in "Android DevLab" (`auth.workspaceId`), everyone's default workspace; "Side
+project" (`auth.secondWorkspaceId`) is empty, for the workspace switcher. Local hosts,
+terminals and pod sessions belong to Ada. Only this mode also has: a second, expiring API key for
+Ada ("Pixel 9 emulator"), non-default notification preferences (`task.stalled` on,
+`agent.turn_completed` off), a registered iOS push device "Ada's iPhone" (APNs is not
+configured, so nothing is ever pushed), and a comment by Mia on the PR task.
+
+Every start runs **self-checks** and stores them in `auth.checks` (the `test-api.sh` summary
+shows "22/22 passed"; 20 with `--no-seed`, which still creates the principals and writes a
+`seed.json` with just `api` and `auth`). A failed check also lands in `errors`. They cover:
+
+- the admin PAT gets 200 from `/api/auth/me` (`workspaceRole` admin), `/api/glance/watch`,
+  `/api/notifications/devices`, `/api/notifications/preferences`, `/api/workspaces` (2),
+  workspace members (3), `/api/auth/api-keys`, `/api/users/lookup` and `/api/auth/ws-token`;
+- roles: Mia is `member`, gets 403 on secrets and user lookup; Vic is `viewer`, gets 403 on
+  `POST /api/jobs`; no token and an unknown PAT get 401;
+- WebSockets: `/ws/events` accepts `optio-auth-<PAT>` and `optio-auth-<ws-token>`, a reused
+  ws-token and a missing token close 4401; the recorded session's terminal stream accepts Ada
+  and closes 4403 for Mia.
+
+Clients authenticate with `Authorization: Bearer <PAT>` (`x-workspace-id` is optional: the
+user's default workspace applies) and, on sockets, the subprotocols `optio-ws-v1` +
+`optio-auth-<PAT>`, or `optio-auth-<token>` with a single-use token from
+`GET /api/auth/ws-token` (valid for one socket, ~30 s).
+
+Gotchas:
+
+- **Don't send on a socket the instant it opens.** With auth enabled the API attaches a
+  socket's message listener only after looking the token up in Postgres, and
+  `@fastify/websocket` does not buffer: a frame sent right on `open` is dropped (19 of 20 on
+  loopback). On a live terminal stream, wait for the first `status` frame, then send `resize`
+  or input. Session chat is worse, in both modes: it sends `ready`, then replays the history
+  from the database, and only then listens, with no end-of-replay marker, so a message sent
+  right after `ready` can still be lost; user-typed sends are fine, automated ones should wait
+  a moment or re-send until `status: thinking` arrives. (API issues, reported; the first one
+  also stops the stock `optio local up` from ever connecting to a local auth-enabled API, see
+  the test daemon below.)
+- Don't revoke the key you are signed in with ("Android dev lab (admin)"); revoke "Pixel 9
+  emulator". A revoked seed key stays revoked until the instance restarts.
+- Switching workspace (`POST /api/workspaces/:id/switch`) changes the user's default
+  server-side, for every client using that user's token (sockets resolve the workspace from
+  it). Switch back to "Android DevLab" when done.
+- GitHub / Slack / Linear event ingress (`/api/webhooks/github`, `/api/webhooks/slack/events`,
+  `/api/webhooks/linear`) answers 401 without a token when auth is enabled (an API bug,
+  reported): send the admin PAT along with the signature. `/api/hooks/<path>` stays public.
 
 ### Known gaps
 
@@ -303,10 +395,10 @@ work never stalls; cancel it instead.
 ## Isolated Optio Local daemon: `test-daemon.sh`
 
 ```
-test-daemon.sh start  [--port N]            # needs a running test API on that port
-test-daemon.sh stop   [--port N]
-test-daemon.sh status [--port N]
-test-daemon.sh verify [--port N] [--agent]
+test-daemon.sh start  [--port N | --auth]            # needs a running test API on that port
+test-daemon.sh stop   [--port N | --auth]
+test-daemon.sh status [--port N | --auth]
+test-daemon.sh verify [--port N | --auth] [--agent]
 ```
 
 `start` builds `apps/cli` if `dist/optio.js` is missing or older than its sources, then runs
@@ -323,13 +415,22 @@ after this Mac (`hostname`), with two allowlisted dirs in
 One daemon per API port (they would share the host row); a daemon started from another
 worktree is reported, not replaced. Log: `.run/<port>/daemon/daemon.log`.
 
+Against an auth-enabled API (`--auth` picks port 4980) the daemon pairs as **Ada Admin**: it
+reads `auth.adminToken` and `auth.workspaceId` from that API's `seed.json` (found through
+`~/.android/optio-devlab/test-api/<port>`, whichever worktree started it) and runs
+`local up --api-key <PAT> --workspace <id>`; `verify` sends the same PAT. It also preloads
+`apps/android/e2e/ws-open-grace.mjs`, which holds the daemon's first frames for 300 ms after the
+socket opens. Without it the daemon never connects to a local auth-enabled API: its `hello` goes
+out the instant the socket opens, the API drops it (see "Don't send on a socket the instant it
+opens" above) and closes with 4408 "Expected hello" every 10 s, forever.
+
 `verify` checks the host is online, creates a `{kind:"shell"}` terminal, attaches to
-`/ws/local/terminals/:id/stream` (subprotocols `optio-ws-v1`, `optio-auth-dev`), types a command
-through the socket and reads its output back, then kills and deletes the terminal (~7 s).
-`verify --agent` additionally runs **one headless Claude Code session (haiku) — a real LLM call
-on this Mac's own Claude login, about $0.01** — and checks that
-`GET /api/local/terminals/:id/transcript` has the prompt and the reply. That terminal is kept, and its
-id is written to `seed.json` as `daemon.transcriptTerminalId`.
+`/ws/local/terminals/:id/stream` (subprotocols `optio-ws-v1`, `optio-auth-<token>`), types a
+command through the socket and reads its output back, then kills and deletes the terminal
+(~7 s). `verify --agent` additionally runs **one headless Claude Code session (haiku) — a real
+LLM call on this Mac's own Claude login, about $0.01** — and checks that
+`GET /api/local/terminals/:id/transcript` has the prompt and the reply. That terminal is kept,
+and its id is written to `seed.json` as `daemon.transcriptTerminalId`.
 
 Things to know:
 
@@ -372,6 +473,16 @@ adb -s $SERIAL shell am start -S -n dev.optio.android/dev.optio.app.MainActivity
   --es OPTIO_DEV_OPEN_URL "optio://local/$TERM_ID?server=dev-server"
 ```
 
+Against an auth-enabled instance, pass a PAT from its `seed.json` as the token (the member or
+viewer token to test role gating):
+
+```bash
+SEED="$(readlink ~/.android/optio-devlab/test-api/4980)/seed.json"
+adb -s $SERIAL shell am start -S -n dev.optio.android/dev.optio.app.MainActivity \
+  --es OPTIO_DEV_SERVER_URL http://10.0.2.2:4980 \
+  --es OPTIO_DEV_TOKEN "$(node -p "require('$SEED').auth.adminToken")"
+```
+
 `-S` force-stops the app first so the extras apply to a fresh start. Sections: work, reviews,
 inbox, prompts, repos, machines, connections, analytics, costs, activity, cluster, more.
 
@@ -382,7 +493,7 @@ inbox, prompts, repos, machines, connections, analytics, costs, activity, cluste
 | `emu.sh start` (headless, `-gpu host`)     | ~23 s: 15–18 s cold boot + ~5 s until the guest network is up (swiftshader +3 s; `optio-16k` ~26 s) |
 | Two instances booting at once              | 15–17 s each                                                                                        |
 | Idle emulator                              | ~2.9 GB memory footprint, ~40 % CPU                                                                 |
-| `test-api.sh start` (full seed)            | ~25–30 s (`--no-seed`: ~5 s)                                                                        |
+| `test-api.sh start` (full seed)            | ~25–30 s (`--no-seed`: ~5 s); same with `--auth`                                                    |
 | `test-daemon.sh start`                     | ~2 s (+ ~1.5 s if the CLI is rebuilt)                                                               |
 | `test-daemon.sh verify` / `verify --agent` | ~7 s / ~11 s                                                                                        |
 | First `android layout` per boot            | ~5 s                                                                                                |

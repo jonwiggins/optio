@@ -5,14 +5,16 @@
 # the playground dirs under apps/android/e2e/.run/<port>/playground/ (e2e-repo: a git checkout
 # whose origin is the seeded repo; scratch: a plain dir).
 #
-#   test-daemon.sh start  [--port N]           build the CLI if stale, pair, run `optio local up`
-#   test-daemon.sh stop   [--port N]
-#   test-daemon.sh status [--port N]
-#   test-daemon.sh verify [--port N] [--agent] shell-terminal round trip over the stream
+#   test-daemon.sh start  [--port N | --auth]           build the CLI if stale, pair, `optio local up`
+#   test-daemon.sh stop   [--port N | --auth]
+#   test-daemon.sh status [--port N | --auth]
+#   test-daemon.sh verify [--port N | --auth] [--agent] shell-terminal round trip over the stream
 #                                              WebSocket; --agent also runs ONE headless Claude
 #                                              Code session (a real LLM call, ~$0.01, haiku) and
 #                                              checks its transcript; that terminal is kept
 #
+# Against an auth-enabled test API (test-api.sh start --auth; --auth here just picks its default
+# port 4980) the daemon pairs as the seeded admin, with the admin's PAT from that API's seed.json.
 # One daemon per API port (they would share a host row). The daemon cannot hand this machine's
 # Claude login to the test API (see apps/android/e2e/no-host-claude-login.mjs); set
 # OPTIO_DEVLAB_SHARE_CLAUDE_LOGIN=1 only to test "refresh token from machine" on purpose.
@@ -23,6 +25,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 E2E_DIR="$REPO_ROOT/apps/android/e2e"
 CLI="$REPO_ROOT/apps/cli/dist/optio.js"
 REGISTRY="${OPTIO_DEVLAB_STATE:-$HOME/.android/optio-devlab}/test-daemon"
+API_REGISTRY="${OPTIO_DEVLAB_STATE:-$HOME/.android/optio-devlab}/test-api"
 DEFAULT_REPO_URL="https://github.com/e2e-org/e2e-repo"
 
 log() { echo "test-daemon.sh: $*" >&2; }
@@ -37,18 +40,21 @@ pid_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 read_file() { [ -f "$1" ] && cat "$1" || true; }
 healthy() { curl -sf -m 3 "http://127.0.0.1:$1/api/health" 2>/dev/null | grep -q '"healthy":true'; }
 
-parse_port() { # sets PORT and REST from args
-  PORT=4961
+parse_port() { # sets PORT, AGENT and the paths; loads the API's auth (TOKEN, WORKSPACE_ID)
+  PORT=""
   AGENT=0
+  local auth=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --port) PORT="${2:-}"; shift 2 ;;
       --port=*) PORT="${1#*=}"; shift ;;
+      --auth) auth=1; shift ;;
       --agent) AGENT=1; shift ;;
       -h | --help) usage; exit 0 ;;
       *) die "unknown option '$1'" ;;
     esac
   done
+  [ -n "$PORT" ] || PORT=$([ "$auth" = 1 ] && echo 4980 || echo 4961)
   case "$PORT" in
     '' | *[!0-9]*) die "port must be a number, got '$PORT'" ;;
     30400 | 30310) die "port $PORT is the user's real Optio server; never attach the test daemon there" ;;
@@ -58,6 +64,24 @@ parse_port() { # sets PORT and REST from args
   XDG_DIR="$DAEMON_DIR/xdg"
   PLAYGROUND="$RUN_DIR/playground"
   SERVER="http://127.0.0.1:$PORT"
+  # The API may have been started from another worktree: its run dir has seed.json (read only).
+  API_RUN_DIR="$RUN_DIR"
+  [ -L "$API_REGISTRY/$PORT" ] && API_RUN_DIR="$(readlink "$API_REGISTRY/$PORT")"
+  SEED_JSON="$API_RUN_DIR/seed.json"
+  TOKEN=""
+  WORKSPACE_ID=""
+  AUTH_CURL=()
+  if [ "$(seed_get api.authDisabled)" = "false" ]; then
+    TOKEN="$(seed_get auth.adminToken)"
+    WORKSPACE_ID="$(seed_get auth.workspaceId)"
+    [ -n "$TOKEN" ] || die "the test API on port $PORT has auth enabled but $SEED_JSON has no auth.adminToken"
+    AUTH_CURL=(-H "authorization: Bearer $TOKEN")
+  fi
+}
+
+seed_get() { # <dotted.path> from the API's seed.json ("" when absent)
+  [ -f "$SEED_JSON" ] || return 0
+  node -e 'try { let v = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); for (const k of process.argv[2].split(".")) v = v == null ? v : v[k]; if (v !== undefined && v !== null) console.log(v) } catch {}' "$SEED_JSON" "$1"
 }
 
 # The daemon's own pid, only if it is still OUR `local up` for this port (never anything else).
@@ -95,7 +119,7 @@ host_id() { # the host id the daemon registered, from its private local.json
 }
 
 host_field() { # <host id> <field>  from GET /api/local/hosts
-  curl -sf -m 5 "$SERVER/api/local/hosts" 2>/dev/null |
+  curl -sf -m 5 ${AUTH_CURL[@]+"${AUTH_CURL[@]}"} "$SERVER/api/local/hosts" 2>/dev/null |
     node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => { try { const h = JSON.parse(s).hosts.find((x) => x.id === process.argv[1]); if (h) console.log(typeof h[process.argv[2]] === "object" ? JSON.stringify(h[process.argv[2]]) : h[process.argv[2]]) } catch {} })' "$1" "$2"
 }
 
@@ -115,10 +139,8 @@ build_cli_if_stale() {
 }
 
 seeded_repo_url() {
-  local url=""
-  if [ -f "$RUN_DIR/seed.json" ]; then
-    url="$(node -e 'try { const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(s.repos.main.repoUrl) } catch {}' "$RUN_DIR/seed.json")"
-  fi
+  local url
+  url="$(seed_get repos.main.repoUrl)"
   echo "${url:-$DEFAULT_REPO_URL}"
 }
 
@@ -163,14 +185,21 @@ cmd_start() {
   cli local add "$PLAYGROUND/e2e-repo" >/dev/null
   cli local add "$PLAYGROUND/scratch" >/dev/null
 
-  local preload=()
+  local preload=() creds=(--api-key devlab)
   [ "${OPTIO_DEVLAB_SHARE_CLAUDE_LOGIN:-}" = "1" ] || preload=(--import "$E2E_DIR/no-host-claude-login.mjs")
+  # Auth-enabled API: pair as the seeded admin (their PAT; the workspace pins the REST calls),
+  # and hold the first frames a moment (see apps/android/e2e/ws-open-grace.mjs: the API drops a
+  # hello sent the instant the socket opens when it has a PAT to look up).
+  if [ -n "$TOKEN" ]; then
+    creds=(--api-key "$TOKEN" --workspace "$WORKSPACE_ID")
+    preload+=(--import "$E2E_DIR/ws-open-grace.mjs")
+  fi
   [ -f "$DAEMON_DIR/daemon.log" ] && mv -f "$DAEMON_DIR/daemon.log" "$DAEMON_DIR/daemon.log.1"
   # New session so the daemon outlives this shell; env -u drops the caller's Optio credentials
   # and this Claude session's effort override (it would leak into agents the daemon spawns).
   nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec failed: $!\n"' \
     env -u OPTIO_TOKEN -u OPTIO_SERVER -u CLAUDE_EFFORT XDG_CONFIG_HOME="$XDG_DIR" \
-    node ${preload[@]+"${preload[@]}"} "$CLI" --server "$SERVER" --api-key devlab local up \
+    node ${preload[@]+"${preload[@]}"} "$CLI" --server "$SERVER" "${creds[@]}" local up \
     >"$DAEMON_DIR/daemon.log" 2>&1 </dev/null &
   local pid=$!
   echo "$pid" >"$DAEMON_DIR/daemon.pid"
@@ -240,6 +269,11 @@ print_status() {
   id="$(host_id)"
   echo "Optio Local test daemon for $SERVER"
   echo "  pid:        ${pid:-not running}"
+  if [ -n "$TOKEN" ]; then
+    echo "  auth:       paired as $(seed_get auth.users.admin.displayName) with the admin PAT from $SEED_JSON"
+  else
+    echo "  auth:       disabled on this API"
+  fi
   echo "  host id:    ${id:-?}"
   if [ -n "$id" ] && healthy "$PORT"; then
     echo "  host:       $(host_field "$id" name) ($(host_field "$id" state), claudeCredentials=$(host_field "$id" claudeCredentials))"
@@ -277,8 +311,9 @@ cmd_verify() {
   XDG_DIR="$live/xdg"
   PLAYGROUND="$RUN_DIR/playground"
   local args=(--port "$PORT" --host-id "$(host_id)" --scratch "$PLAYGROUND/scratch" --repo-dir "$PLAYGROUND/e2e-repo")
-  # Results go into seed.json only when that run dir is this worktree's own.
-  case "$RUN_DIR" in "$E2E_DIR"/*) args+=(--run-dir "$RUN_DIR") ;; esac
+  [ -n "$TOKEN" ] && args+=(--token "$TOKEN")
+  # Results go into the API's seed.json only when that run dir is this worktree's own.
+  case "$API_RUN_DIR" in "$E2E_DIR"/*) args+=(--run-dir "$API_RUN_DIR") ;; esac
   [ "$AGENT" = 1 ] && args+=(--agent)
   node "$E2E_DIR/verify-daemon.mjs" "${args[@]}"
 }

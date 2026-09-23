@@ -4,7 +4,7 @@
  *
  *  1. The daemon's host is online in GET /api/local/hosts.
  *  2. A throwaway {kind:"shell"} terminal in the scratch dir: wait for `running`, attach to
- *     /ws/local/terminals/:id/stream (subprotocols optio-ws-v1 + optio-auth-dev; binary frames are
+ *     /ws/local/terminals/:id/stream (subprotocols optio-ws-v1 + optio-auth-<token>; binary frames are
  *     terminal bytes, text frames JSON control), type a command through the socket, wait for its
  *     output, then kill and delete the terminal.
  *  3. --agent: ONE headless Claude Code session (haiku) in the e2e-repo checkout: a real LLM call
@@ -12,7 +12,9 @@
  *     hold the prompt and a reply. The terminal is kept, and its id recorded in seed.json under
  *     `daemon.transcriptTerminalId`, so the Android Transcript face has a real conversation.
  *
- * Needs Node 22+ (global fetch and WebSocket). Exit code 0 when every step passed.
+ * --token <PAT> authenticates REST and WebSockets against an auth-enabled test API (default "dev",
+ * which any auth-disabled API accepts). Needs Node 22+ (global fetch and WebSocket). Exit code 0
+ * when every step passed.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -20,7 +22,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 function parseArgs(argv) {
-  const opts = { port: 4961, agent: false };
+  const opts = { port: 4961, agent: false, token: "dev" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--agent") opts.agent = true;
@@ -44,7 +46,7 @@ async function api(path, { method = "GET", body } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
-      authorization: "Bearer dev",
+      authorization: `Bearer ${opts.token}`,
       ...(body === undefined ? {} : { "content-type": "application/json" }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -82,7 +84,7 @@ function openStream(terminalId) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`${WS_BASE}/ws/local/terminals/${terminalId}/stream`, [
       "optio-ws-v1",
-      "optio-auth-dev",
+      `optio-auth-${opts.token}`,
     ]);
     ws.binaryType = "arraybuffer";
     const state = { bytes: 0, text: "", control: [] };
