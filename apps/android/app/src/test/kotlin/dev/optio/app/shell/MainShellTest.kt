@@ -67,13 +67,13 @@ class MainShellTest {
         compose.onNodeWithTag("hub-work").assertIsDisplayed()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/MainShell_work.png")
         compose.onNodeWithTag("new-work").performClick()
-        compose.onNodeWithText("NewWorkRoute(preset=null)").assertIsDisplayed()
+        compose.onNodeWithTag("work-form-close").assertIsDisplayed()
         compose.onNodeWithTag("tab-library").performClick()
         compose.onNodeWithText("NewRepoRoute").assertIsDisplayed()
         compose.onNodeWithTag("tab-library").performClick()
         compose.onNodeWithTag("hub-library").assertIsDisplayed()
         compose.onNodeWithTag("tab-work").performClick()
-        compose.onNodeWithText("NewWorkRoute(preset=null)").assertIsDisplayed()
+        compose.onNodeWithTag("work-form-close").assertIsDisplayed()
 
         // Cross-tab: Overview › "Open Library › Machines" lands on the Machines section.
         compose.onNodeWithTag("tab-overview").performClick()
