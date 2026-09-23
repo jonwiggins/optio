@@ -109,4 +109,32 @@ describe("GET /api/analytics/costs (integration)", () => {
       inputTokens: 1000,
     });
   });
+
+  it("filters every breakdown by repoUrl (the anomalies join used to make it ambiguous)", async () => {
+    const ws = await insertWorkspace();
+    const repoUrl = "https://github.com/it-org/filtered";
+    const otherRepo = "https://github.com/it-org/unfiltered";
+    for (const cost of ["0.10", "0.10", "0.10"]) {
+      await insertTask({ workspaceId: ws.id, repoUrl, costUsd: cost, state: "completed" });
+    }
+    const pricey = await insertTask({ workspaceId: ws.id, repoUrl, costUsd: "5", state: "failed" });
+    await insertTask({ workspaceId: ws.id, repoUrl: otherRepo, costUsd: "7", state: "completed" });
+
+    const app = await buildRouteTestApp(analyticsRoutes, {
+      user: { id: "u", workspaceId: ws.id, workspaceRole: "admin" },
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/analytics/costs?repoUrl=${encodeURIComponent(repoUrl)}`,
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json();
+
+    expect(body.summary.totalCost).toBe("5.3000");
+    expect(body.summary.tasksWithCost).toBe(4);
+    expect(body.costByRepo.map((r: { repoUrl: string }) => r.repoUrl)).toEqual([repoUrl]);
+    expect(body.anomalies.map((a: { id: string }) => a.id)).toEqual([pricey.id]);
+    expect(body.topTasks.every((t: { repoUrl: string }) => t.repoUrl === repoUrl)).toBe(true);
+    await app.close();
+  });
 });

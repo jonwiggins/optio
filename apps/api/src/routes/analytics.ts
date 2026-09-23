@@ -129,7 +129,9 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
 
       const workspaceId = req.user?.workspaceId || null;
 
-      const repoFilter = repoUrl ? sql`AND repo_url = ${repoUrl}` : sql``;
+      // Qualified: every query reads ${costRows} (aliased `tasks`), and the
+      // anomalies query joins repo_avgs, which has a repo_url of its own.
+      const repoFilter = repoUrl ? sql`AND tasks.repo_url = ${repoUrl}` : sql``;
       const wsFilter = workspaceId ? sql`AND workspace_id = ${workspaceId}` : sql``;
 
       const dateFilter = sql`AND created_at >= NOW() - INTERVAL '1 day' * ${days}`;
