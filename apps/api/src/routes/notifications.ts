@@ -3,7 +3,9 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as notificationService from "../services/notification-service.js";
 import * as apnsStore from "../services/apns-store.js";
+import * as fcmStore from "../services/fcm-store.js";
 import { apnsService, defaultApnsEnvironment } from "../services/apns-service.js";
+import { fcmService } from "../services/fcm-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import {
@@ -34,19 +36,25 @@ const preferencesSchema = z
   .record(z.string(), z.object({ push: z.boolean() }))
   .describe("Map of event-type → { push: boolean }");
 
-// ── APNs (iOS) ───────────────────────────────────────────────────────────────
+// ── Native push devices: APNs (iOS) + FCM (Android) ─────────────────────────
+
+const APNS_TOKEN_RE = /^[0-9a-fA-F]{32,512}$/;
+/** FCM registration tokens are opaque URL-safe strings (`<instance>:APA91b…`), case-sensitive. */
+const FCM_TOKEN_RE = /^[A-Za-z0-9_:.-]{32,1024}$/;
+const DEVICE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const apnsTokenSchema = z
   .string()
-  .regex(/^[0-9a-fA-F]{32,512}$/, "hex token expected")
+  .regex(APNS_TOKEN_RE, "hex token expected")
   .transform((t) => t.toLowerCase());
+const fcmTokenSchema = z.string().regex(FCM_TOKEN_RE, "FCM registration token expected");
 const apnsEnvironmentSchema = z.enum(["sandbox", "production"]);
 const liveActivityKindSchema = z.enum(["watch"]);
 
-const registerDeviceSchema = z
+const registerIosDeviceSchema = z
   .object({
     token: apnsTokenSchema.describe("APNs device token (hex)"),
-    platform: z.enum(["ios"]).default("ios"),
+    platform: z.enum(["ios"]).optional().default("ios"),
     environment: apnsEnvironmentSchema
       .optional()
       .describe("APNs host the token belongs to; defaults to the server's OPTIO_APNS_ENVIRONMENT"),
@@ -54,7 +62,36 @@ const registerDeviceSchema = z
     appVersion: z.string().max(50).optional(),
     deviceName: z.string().max(120).optional(),
   })
-  .describe("Body for registering an iOS device for push (upsert by token)");
+  .describe("An iOS device (APNs); `platform` may be omitted");
+
+const registerAndroidDeviceSchema = z
+  .object({
+    token: fcmTokenSchema.describe("FCM registration token"),
+    platform: z.literal("android"),
+    appId: z.string().min(1).max(200).describe("Android application id, e.g. dev.optio.android"),
+    appVersion: z.string().max(50).optional(),
+    deviceName: z.string().max(120).optional(),
+    serverId: z
+      .string()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("The app's own id for this server; echoed as `serverId` in every FCM message"),
+  })
+  .describe("An Android device (FCM)");
+
+const registerDeviceSchema = z
+  .discriminatedUnion("platform", [registerIosDeviceSchema, registerAndroidDeviceSchema])
+  .describe("Body for registering a device for native push (upsert by token)");
+
+/** A raw APNs / FCM token, or a device `id` from the (masked) device list. */
+const deviceRefSchema = z
+  .string()
+  .max(1024)
+  .refine(
+    (v) => APNS_TOKEN_RE.test(v) || FCM_TOKEN_RE.test(v) || DEVICE_ID_RE.test(v),
+    "device token or id expected",
+  );
 
 const liveActivityTokenSchema = z
   .object({
@@ -73,23 +110,39 @@ const pushToStartSchema = z
   })
   .describe("Body for registering a Live Activity push-to-start token");
 
-const ApnsDeviceSchema = z
+const PushDeviceSchema = z
   .object({
     id: z.string(),
-    token: z.string().describe("Masked"),
-    platform: z.string(),
-    environment: apnsEnvironmentSchema,
-    bundleId: z.string(),
+    token: z.string().describe("Masked; delete a listed device by `id`"),
+    platform: z.enum(["ios", "android"]),
+    environment: apnsEnvironmentSchema.optional().describe("iOS only"),
+    bundleId: z.string().optional().describe("iOS only"),
+    appId: z.string().optional().describe("Android only"),
+    serverId: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Android only: the app's id for this server, as registered"),
     appVersion: z.string().nullable(),
     deviceName: z.string().nullable(),
     failureCount: z.number().int(),
     lastSeenAt: z.date(),
     createdAt: z.date(),
   })
-  .describe("A registered iOS device (token masked)");
+  .describe("A registered iOS (APNs) or Android (FCM) device, token masked");
 
-const DeviceResponseSchema = z.object({ device: ApnsDeviceSchema });
-const DevicesResponseSchema = z.object({ devices: z.array(ApnsDeviceSchema) });
+const PushProvidersSchema = z
+  .object({
+    apns: z.boolean().describe("iOS push is configured"),
+    fcm: z.boolean().describe("Android push is configured"),
+  })
+  .describe("Which native push providers this server can send through");
+
+const DeviceResponseSchema = z.object({ device: PushDeviceSchema });
+const DevicesResponseSchema = z.object({
+  devices: z.array(PushDeviceSchema),
+  push: PushProvidersSchema,
+});
 
 const VapidKeyResponseSchema = z.object({ publicKey: z.string() });
 const OkResponseSchema = z.object({ ok: z.boolean() });
@@ -260,18 +313,20 @@ export async function notificationRoutes(rawApp: FastifyInstance) {
     },
   );
 
-  // ── APNs devices (iOS) ─────────────────────────────────────────────────────
+  // ── Push devices (iOS APNs + Android FCM) ─────────────────────────────────
 
   app.post(
     "/api/notifications/devices",
     {
       ...member,
       schema: {
-        operationId: "registerApnsDevice",
-        summary: "Register an iOS device for push",
+        operationId: "registerPushDevice",
+        summary: "Register an iOS or Android device for push",
         description:
-          "Upsert the caller's APNs device token. A token that re-registers under " +
-          "another user moves to them. Resets the failure counter.",
+          "Upsert the caller's device token: an APNs token for `platform: ios` " +
+          "(the default) or an FCM registration token for `platform: android`. " +
+          "A token that re-registers under another user moves to them. Resets " +
+          "the failure counter.",
         tags: ["Workspaces"],
         body: registerDeviceSchema,
         response: { 201: DeviceResponseSchema, 401: ErrorResponseSchema },
@@ -280,14 +335,27 @@ export async function notificationRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const userId = req.user?.id;
       if (!userId) return reply.status(401).send({ error: "Authentication required" });
+      const body = req.body;
+      const workspaceId = req.user?.workspaceId ?? null;
+      if (body.platform === "android") {
+        const device = await fcmStore.registerFcmDevice(userId, {
+          token: body.token,
+          appId: body.appId,
+          appVersion: body.appVersion,
+          deviceName: body.deviceName,
+          serverId: body.serverId,
+          workspaceId,
+        });
+        return reply.status(201).send({ device });
+      }
       const device = await apnsStore.registerDevice(userId, {
-        token: req.body.token,
-        platform: req.body.platform,
-        environment: req.body.environment ?? defaultApnsEnvironment(),
-        bundleId: req.body.bundleId,
-        appVersion: req.body.appVersion,
-        deviceName: req.body.deviceName,
-        workspaceId: req.user?.workspaceId ?? null,
+        token: body.token,
+        platform: body.platform,
+        environment: body.environment ?? defaultApnsEnvironment(),
+        bundleId: body.bundleId,
+        appVersion: body.appVersion,
+        deviceName: body.deviceName,
+        workspaceId,
       });
       return reply.status(201).send({ device });
     },
@@ -297,9 +365,12 @@ export async function notificationRoutes(rawApp: FastifyInstance) {
     "/api/notifications/devices",
     {
       schema: {
-        operationId: "listApnsDevices",
-        summary: "List my iOS devices",
-        description: "Return the caller's registered APNs devices with masked tokens.",
+        operationId: "listPushDevices",
+        summary: "List my iOS and Android devices",
+        description:
+          "Return the caller's registered devices — iOS (APNs) and Android (FCM), " +
+          "each with a `platform` — with masked tokens, plus which providers the " +
+          "server is configured for.",
         tags: ["Workspaces"],
         response: { 200: DevicesResponseSchema, 401: ErrorResponseSchema },
       },
@@ -307,8 +378,14 @@ export async function notificationRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const userId = req.user?.id;
       if (!userId) return reply.status(401).send({ error: "Authentication required" });
-      const devices = await apnsStore.listDevicesForUser(userId);
-      return reply.send({ devices });
+      const [ios, android] = await Promise.all([
+        apnsStore.listDevicesForUser(userId),
+        fcmStore.listFcmDevicesForUser(userId),
+      ]);
+      return reply.send({
+        devices: [...ios, ...android],
+        push: { apns: apnsService.isConfigured(), fcm: fcmService.isConfigured() },
+      });
     },
   );
 
@@ -317,18 +394,30 @@ export async function notificationRoutes(rawApp: FastifyInstance) {
     {
       ...member,
       schema: {
-        operationId: "unregisterApnsDevice",
-        summary: "Remove an iOS device",
-        description: "Delete one of the caller's APNs device tokens. 204 even when absent.",
+        operationId: "unregisterPushDevice",
+        summary: "Remove an iOS or Android device",
+        description:
+          "Delete one of the caller's devices by its raw token (APNs hex or FCM " +
+          "registration token) or by its `id` from the device list. 204 even when absent.",
         tags: ["Workspaces"],
-        params: z.object({ token: apnsTokenSchema }),
+        params: z.object({ token: deviceRefSchema }),
         response: { 204: z.null(), 401: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const userId = req.user?.id;
       if (!userId) return reply.status(401).send({ error: "Authentication required" });
-      await apnsStore.unregisterDevice(userId, req.params.token);
+      const ref = req.params.token;
+      if (DEVICE_ID_RE.test(ref)) {
+        await Promise.all([
+          apnsStore.unregisterDeviceById(userId, ref),
+          fcmStore.unregisterFcmDeviceById(userId, ref),
+        ]);
+      } else if (APNS_TOKEN_RE.test(ref)) {
+        await apnsStore.unregisterDevice(userId, ref.toLowerCase());
+      } else {
+        await fcmStore.unregisterFcmDevice(userId, ref);
+      }
       return reply.status(204).send(null);
     },
   );
@@ -445,11 +534,12 @@ export async function notificationRoutes(rawApp: FastifyInstance) {
     {
       ...member,
       schema: {
-        operationId: "sendTestApnsNotification",
-        summary: "Send a test push to my iOS devices",
+        operationId: "sendTestDevicePush",
+        summary: "Send a test push to my iOS and Android devices",
         description:
-          "Deliver a test alert to every APNs device the caller registered. " +
-          "Returns 503 if APNs is not configured.",
+          "Deliver a test alert to every device the caller registered, through " +
+          "APNs (iOS) and FCM (Android). `sent` counts accepted sends across both. " +
+          "Returns 503 if neither provider is configured.",
         tags: ["Workspaces"],
         response: {
           200: TestResponseSchema,
@@ -461,20 +551,26 @@ export async function notificationRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const userId = req.user?.id;
       if (!userId) return reply.status(401).send({ error: "Authentication required" });
-      if (!apnsService.isConfigured()) {
-        return reply.status(503).send({ error: "APNs not configured" });
+      if (!apnsService.isConfigured() && !fcmService.isConfigured()) {
+        return reply
+          .status(503)
+          .send({ error: "Push not configured (APNs for iOS, FCM for Android)" });
       }
       // sendAlert has no preference gate (glance-service applies it), so a test always ships.
-      const sent = await apnsService.sendAlert(userId, {
+      const test = (platform: string) => ({
         title: "Optio test notification",
-        body: "If you see this, iOS push is working.",
-        category: "TEST",
+        body: `If you see this, ${platform} push is working.`,
+        category: "TEST" as const,
         threadId: "test",
         url: "optio://settings",
-        kind: "test",
+        kind: "test" as const,
         id: "test",
       });
-      return reply.send({ sent });
+      const [ios, android] = await Promise.all([
+        apnsService.isConfigured() ? apnsService.sendAlert(userId, test("iOS")) : 0,
+        fcmService.isConfigured() ? fcmService.sendAlert(userId, test("Android")) : 0,
+      ]);
+      return reply.send({ sent: ios + android });
     },
   );
 }

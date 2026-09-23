@@ -362,10 +362,10 @@ export async function transitionTask(
     )
     .catch((err) => logger.warn({ err, taskId: id }, "Failed to send push notification"));
 
-  // iOS APNs alert + Live Activity refresh (fire-and-forget; no-op unless configured)
+  // iOS (APNs) + Android (FCM) alert + Watch refresh (fire-and-forget; no-op unless configured)
   import("./glance-service.js")
     .then(({ onTaskTransition }) => onTaskTransition(updated[0], toState))
-    .catch((err) => logger.warn({ err, taskId: id }, "Failed to send APNs notification"));
+    .catch((err) => logger.warn({ err, taskId: id }, "Failed to send native push notification"));
 
   // Handle task dependency graph: unblock dependents on completion, cascade on failure
   if (toState === TaskState.COMPLETED) {

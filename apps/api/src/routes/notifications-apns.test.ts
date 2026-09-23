@@ -7,18 +7,33 @@ vi.mock("../services/notification-service.js", () => ({
   isVapidConfigured: vi.fn(() => false),
 }));
 
-const { store, apns } = vi.hoisted(() => ({
+const { store, apns, fcmStore, fcm } = vi.hoisted(() => ({
   store: {
     registerDevice: vi.fn(),
     unregisterDevice: vi.fn(),
+    unregisterDeviceById: vi.fn(),
     listDevicesForUser: vi.fn(),
     registerLiveActivityToken: vi.fn(),
     unregisterLiveActivityToken: vi.fn(),
     registerLiveActivityStartToken: vi.fn(),
   },
   apns: { configured: false, sendAlert: vi.fn(async () => 2) },
+  fcmStore: {
+    registerFcmDevice: vi.fn(),
+    unregisterFcmDevice: vi.fn(),
+    unregisterFcmDeviceById: vi.fn(),
+    listFcmDevicesForUser: vi.fn(async () => [] as unknown[]),
+  },
+  fcm: { configured: false, sendAlert: vi.fn(async () => 1) },
 }));
 vi.mock("../services/apns-store.js", () => store);
+vi.mock("../services/fcm-store.js", () => fcmStore);
+vi.mock("../services/fcm-service.js", () => ({
+  fcmService: {
+    isConfigured: () => fcm.configured,
+    sendAlert: (...args: unknown[]) => fcm.sendAlert(...(args as [])),
+  },
+}));
 
 const glance = vi.hoisted(() => ({ computeWatchState: vi.fn() }));
 vi.mock("../services/glance-service.js", () => ({
@@ -77,8 +92,10 @@ describe("APNs device routes", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     apns.configured = false;
+    fcm.configured = false;
     store.registerDevice.mockResolvedValue(deviceView);
     store.listDevicesForUser.mockResolvedValue([deviceView]);
+    fcmStore.listFcmDevicesForUser.mockResolvedValue([]);
     app = await build();
   });
 
@@ -160,6 +177,162 @@ describe("APNs device routes", () => {
     expect(apns.sendAlert).toHaveBeenCalledWith(
       "user-1",
       expect.objectContaining({ category: "TEST" }),
+    );
+  });
+});
+
+const FCM_TOKEN = "cXz9Qm1aT0uYp3Lr8Vw2Kd:APA91bH-Ek_7vQpZ" + "x".repeat(120);
+const androidView = {
+  id: "0b5f3d9e-8a1c-4c7b-9f2e-6d4a1b3c5e7f",
+  token: "cXz9Qm…xxxx",
+  platform: "android",
+  appId: "dev.optio.android",
+  serverId: "srv-1",
+  appVersion: "0.1.0 (1)",
+  deviceName: "Pixel 9",
+  failureCount: 0,
+  lastSeenAt: new Date("2026-09-17T12:00:00Z"),
+  createdAt: new Date("2026-09-17T12:00:00Z"),
+};
+
+describe("Android (FCM) device routes", () => {
+  let app: FastifyInstance;
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    apns.configured = false;
+    fcm.configured = false;
+    store.listDevicesForUser.mockResolvedValue([deviceView]);
+    fcmStore.registerFcmDevice.mockResolvedValue(androidView);
+    fcmStore.listFcmDevicesForUser.mockResolvedValue([androidView]);
+    app = await build();
+  });
+
+  it("POST /api/notifications/devices registers an FCM token (case kept) with the app's server id", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/notifications/devices",
+      payload: {
+        platform: "android",
+        token: FCM_TOKEN,
+        appId: "dev.optio.android",
+        appVersion: "0.1.0 (1)",
+        deviceName: "Pixel 9",
+        serverId: "srv-1",
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().device).toMatchObject({
+      platform: "android",
+      appId: "dev.optio.android",
+      serverId: "srv-1",
+      token: "cXz9Qm…xxxx",
+    });
+    expect(res.json().device.environment).toBeUndefined();
+    expect(fcmStore.registerFcmDevice).toHaveBeenCalledWith("user-1", {
+      token: FCM_TOKEN,
+      appId: "dev.optio.android",
+      appVersion: "0.1.0 (1)",
+      deviceName: "Pixel 9",
+      serverId: "srv-1",
+      workspaceId: "ws-1",
+    });
+    expect(store.registerDevice).not.toHaveBeenCalled();
+  });
+
+  it("validates the Android body: token shape, appId, and the platform discriminator", async () => {
+    const post = (payload: Record<string, unknown>) =>
+      app.inject({ method: "POST", url: "/api/notifications/devices", payload });
+    expect((await post({ platform: "android", token: FCM_TOKEN })).statusCode).toBe(400);
+    expect(
+      (await post({ platform: "android", token: "short:tok", appId: "dev.optio.android" }))
+        .statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await post({
+          platform: "android",
+          token: "has spaces and / slashes ".repeat(4),
+          appId: "dev.optio.android",
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect((await post({ platform: "windows", token: TOKEN, bundleId: "x" })).statusCode).toBe(400);
+    // An FCM token sent as iOS fails the APNs hex check rather than landing in the wrong table.
+    expect((await post({ token: FCM_TOKEN, bundleId: "dev.optio.ios" })).statusCode).toBe(400);
+    expect(fcmStore.registerFcmDevice).not.toHaveBeenCalled();
+    expect(store.registerDevice).not.toHaveBeenCalled();
+  });
+
+  it("viewers cannot register an Android device", async () => {
+    const viewer = await build({ workspaceRole: "viewer" });
+    const res = await viewer.inject({
+      method: "POST",
+      url: "/api/notifications/devices",
+      payload: { platform: "android", token: FCM_TOKEN, appId: "dev.optio.android" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(fcmStore.registerFcmDevice).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/notifications/devices lists both platforms plus the provider flags", async () => {
+    fcm.configured = true;
+    const res = await app.inject({ method: "GET", url: "/api/notifications/devices" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.push).toEqual({ apns: false, fcm: true });
+    expect(body.devices.map((d: { platform: string }) => d.platform)).toEqual(["ios", "android"]);
+    // The iOS row is exactly what it was before Android existed (additive change).
+    expect(body.devices[0]).toEqual(JSON.parse(JSON.stringify(deviceView)));
+    expect(body.devices[1]).toMatchObject({ platform: "android", appId: "dev.optio.android" });
+    expect(fcmStore.listFcmDevicesForUser).toHaveBeenCalledWith("user-1");
+  });
+
+  it("DELETE /api/notifications/devices/:token routes by token shape, and accepts a device id", async () => {
+    const del = (ref: string) =>
+      app.inject({ method: "DELETE", url: `/api/notifications/devices/${ref}` });
+
+    expect((await del(FCM_TOKEN)).statusCode).toBe(204);
+    expect(fcmStore.unregisterFcmDevice).toHaveBeenCalledWith("user-1", FCM_TOKEN);
+    expect(store.unregisterDevice).not.toHaveBeenCalled();
+
+    expect((await del(TOKEN.toUpperCase())).statusCode).toBe(204);
+    expect(store.unregisterDevice).toHaveBeenCalledWith("user-1", TOKEN);
+    expect(fcmStore.unregisterFcmDevice).toHaveBeenCalledTimes(1);
+
+    expect((await del(androidView.id)).statusCode).toBe(204);
+    expect(store.unregisterDeviceById).toHaveBeenCalledWith("user-1", androidView.id);
+    expect(fcmStore.unregisterFcmDeviceById).toHaveBeenCalledWith("user-1", androidView.id);
+
+    // The masked token from the list is not a reference.
+    expect((await del(encodeURIComponent("cXz9Qm…xxxx"))).statusCode).toBe(400);
+  });
+
+  it("POST /api/notifications/devices/test sends to both platforms and 503s only when neither is configured", async () => {
+    const off = await app.inject({ method: "POST", url: "/api/notifications/devices/test" });
+    expect(off.statusCode).toBe(503);
+
+    fcm.configured = true;
+    const androidOnly = await app.inject({
+      method: "POST",
+      url: "/api/notifications/devices/test",
+    });
+    expect(androidOnly.statusCode).toBe(200);
+    expect(androidOnly.json()).toEqual({ sent: 1 });
+    expect(fcm.sendAlert).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({
+        category: "TEST",
+        body: "If you see this, Android push is working.",
+      }),
+    );
+    expect(apns.sendAlert).not.toHaveBeenCalled();
+
+    apns.configured = true;
+    const both = await app.inject({ method: "POST", url: "/api/notifications/devices/test" });
+    expect(both.json()).toEqual({ sent: 3 });
+    expect(apns.sendAlert).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({ body: "If you see this, iOS push is working." }),
     );
   });
 });

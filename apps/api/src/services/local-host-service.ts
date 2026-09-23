@@ -24,7 +24,7 @@ async function notifyHostChanged(host: {
   await publishLocalChanged({ terminalId: null, hostId: host.id, userId: host.userId }).catch(
     (err) => logger.warn({ err, hostId: host.id }, "local: failed to publish host change"),
   );
-  // iOS: Watch phase + one-shot "laptop unreachable" alert (no-op unless APNs is configured).
+  // iOS + Android: Watch phase + one-shot "laptop unreachable" alert (no-op unless APNs or FCM is configured).
   import("./glance-service.js")
     .then(({ onLocalHostChanged }) => onLocalHostChanged(host))
     .catch((err) => logger.warn({ err, hostId: host.id }, "local: glance host hook failed"));

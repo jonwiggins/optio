@@ -13,25 +13,26 @@
  *
  * APNs rejects anything over 4 KB, so every builder asserts the size.
  */
-import { appleSeconds, type WatchAttributes, type WatchState } from "@optio/shared";
+import {
+  appleSeconds,
+  type PushAlertCategory,
+  type PushSubjectKind,
+  type WatchAttributes,
+  type WatchState,
+} from "@optio/shared";
 
 export const APNS_MAX_PAYLOAD_BYTES = 4096;
 
 export type ApnsPushType = "alert" | "liveactivity";
 export type ApnsPriority = 5 | 10;
 
-/** Notification categories the iOS app registers actions for. */
-export type ApnsAlertCategory =
-  | "LOCAL_NEEDS_YOU"
-  | "LOCAL_EXIT"
-  | "HOST_OFFLINE"
-  | "TASK_ATTENTION"
-  | "TASK_PR_OPENED"
-  | "AGENT_REPLY"
-  | "AGENT_FAILED"
-  | "TEST";
+/**
+ * Notification categories the iOS app registers actions for — shared with the
+ * Android FCM alerts (packages/shared/src/types/push.ts).
+ */
+export type ApnsAlertCategory = PushAlertCategory;
 
-export type ApnsSubjectKind = "local" | "host" | "task" | "agent" | "test";
+export type ApnsSubjectKind = PushSubjectKind;
 
 /** Everything the service needs to know about one push, transport-agnostic. */
 export interface ApnsMessage {

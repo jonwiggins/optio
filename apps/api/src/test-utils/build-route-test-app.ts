@@ -116,7 +116,11 @@ export async function buildRouteTestApp(
   register: RouteRegistrar,
   options: BuildRouteTestAppOptions = {},
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  // Same router options as the production server (server.ts `buildServer`).
+  const app = Fastify({
+    logger: options.logger ?? false,
+    routerOptions: { maxParamLength: 1024 },
+  });
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);

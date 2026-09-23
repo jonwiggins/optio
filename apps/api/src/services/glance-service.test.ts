@@ -41,7 +41,7 @@ vi.mock("../db/schema.js", () => {
   };
 });
 
-const { apns, mockShouldNotify, mockListTerminals, mockListHosts } = vi.hoisted(() => {
+const { apns, fcm, mockShouldNotify, mockListTerminals, mockListHosts } = vi.hoisted(() => {
   type AlertFn = (
     userId: string,
     input: import("./apns-payloads.js").AlertInput,
@@ -64,8 +64,25 @@ const { apns, mockShouldNotify, mockListTerminals, mockListHosts } = vi.hoisted(
     startWatch: vi.fn<StartFn>(async () => 1),
     hasWatchToken: vi.fn(async () => true),
   };
+  type FcmWatchFn = (
+    userId: string,
+    state: import("@optio/shared").WatchState,
+    opts: { alert: boolean },
+  ) => Promise<void>;
+  // Android (FCM) is off by default so the APNs expectations below are untouched by it.
+  const fcm = {
+    configured: false,
+    isConfigured: vi.fn(() => fcm.configured),
+    sendAlert: vi.fn<AlertFn>(async () => 1),
+    hasWatch: vi.fn(async () => true),
+    pushWatch: vi.fn<FcmWatchFn>(async () => {}),
+    endWatch: vi.fn<(userId: string, state: import("@optio/shared").WatchState) => Promise<void>>(
+      async () => {},
+    ),
+  };
   return {
     apns,
+    fcm,
     mockShouldNotify: vi.fn<(userId: string, eventType: string) => Promise<boolean>>(
       async () => true,
     ),
@@ -74,6 +91,7 @@ const { apns, mockShouldNotify, mockListTerminals, mockListHosts } = vi.hoisted(
   };
 });
 vi.mock("./apns-service.js", () => ({ apnsService: apns }));
+vi.mock("./fcm-service.js", () => ({ fcmService: fcm }));
 vi.mock("./notification-service.js", () => ({
   shouldNotify: (userId: string, eventType: string) => mockShouldNotify(userId, eventType),
 }));
@@ -147,6 +165,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   apns.configured = true;
   apns.hasWatchToken.mockResolvedValue(true);
+  fcm.configured = false;
+  fcm.hasWatch.mockResolvedValue(true);
   mockShouldNotify.mockResolvedValue(true);
   mockListHosts.mockResolvedValue([host()]);
   mockListTerminals.mockResolvedValue([]);
@@ -611,5 +631,143 @@ describe("persistent agent hooks", () => {
       }),
     );
     expect(mockShouldNotify).toHaveBeenCalledWith("u1", "agent.failed");
+  });
+});
+
+describe("one fan-out over APNs and FCM", () => {
+  const task = {
+    id: "task-1",
+    title: "Fix login",
+    repoUrl: "https://github.com/acme/web",
+    createdBy: "u1",
+  };
+
+  it("with only FCM configured, alerts and Watch frames go to Android and nothing to APNs", async () => {
+    apns.configured = false;
+    fcm.configured = true;
+    const row = terminal({ attentionState: "needs_you", attentionReason: "notification" });
+    mockListTerminals.mockResolvedValue([row]);
+    await onLocalTerminalChanged(row);
+
+    expect(fcm.sendAlert).toHaveBeenCalledTimes(1);
+    expect(fcm.sendAlert.mock.calls[0]).toEqual([
+      "u1",
+      expect.objectContaining({
+        category: "LOCAL_NEEDS_YOU",
+        url: "optio://local/t1?compose=1",
+        sound: "default",
+        interruptionLevel: "time-sensitive",
+      }),
+    ]);
+    // The queue was empty → the frame alerts (HIGH priority on Android).
+    expect(fcm.pushWatch).toHaveBeenCalledWith(
+      "u1",
+      expect.objectContaining({ phase: "waiting", needsYouCount: 1 }),
+      { alert: true },
+    );
+    expect(apns.sendAlert).not.toHaveBeenCalled();
+    expect(apns.updateWatch).not.toHaveBeenCalled();
+    expect(apns.startWatch).not.toHaveBeenCalled();
+  });
+
+  it("sends the identical alert through both providers, behind one preference check", async () => {
+    fcm.configured = true;
+    await onTaskTransition({ ...task, errorMessage: "boom" }, TaskState.FAILED);
+    expect(apns.sendAlert).toHaveBeenCalledTimes(1);
+    expect(fcm.sendAlert).toHaveBeenCalledTimes(1);
+    expect(fcm.sendAlert.mock.calls[0]).toEqual(apns.sendAlert.mock.calls[0]);
+    expect(mockShouldNotify).toHaveBeenCalledTimes(1);
+    expect(mockShouldNotify).toHaveBeenCalledWith("u1", "task.failed");
+
+    vi.clearAllMocks();
+    mockShouldNotify.mockResolvedValue(false);
+    const row = terminal({ attentionState: "needs_you", attentionReason: "stop" });
+    mockListTerminals.mockResolvedValue([row]);
+    await onLocalTerminalChanged(row);
+    expect(apns.sendAlert).not.toHaveBeenCalled();
+    expect(fcm.sendAlert).not.toHaveBeenCalled();
+    // Opting out of the alert never hides the Watch.
+    expect(apns.updateWatch).toHaveBeenCalled();
+    expect(fcm.pushWatch).toHaveBeenCalled();
+  });
+
+  it("a failing provider never blocks the other", async () => {
+    fcm.configured = true;
+    fcm.sendAlert.mockRejectedValueOnce(new Error("FCM down"));
+    fcm.pushWatch.mockRejectedValueOnce(new Error("FCM down"));
+    const row = terminal({ attentionState: "needs_you", attentionReason: "stop" });
+    mockListTerminals.mockResolvedValue([row]);
+    await onLocalTerminalChanged(row);
+    expect(apns.sendAlert).toHaveBeenCalledTimes(1);
+    expect(apns.updateWatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("a task transition refreshes only a Watch that is showing — never push-to-starts iOS for Android's sake", async () => {
+    fcm.configured = true;
+    apns.hasWatchToken.mockResolvedValue(false); // no live activity on the iPhone
+    fcm.hasWatch.mockResolvedValue(true); // the Android Watch is up
+    mockListTerminals.mockResolvedValue([terminal({ attentionState: "working" })]);
+    await onTaskTransition(task, TaskState.RUNNING);
+    expect(fcm.pushWatch).toHaveBeenCalledWith(
+      "u1",
+      expect.objectContaining({ phase: "working", runningCount: 1 }),
+      { alert: false },
+    );
+    expect(apns.startWatch).not.toHaveBeenCalled();
+    expect(apns.updateWatch).not.toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    fcm.hasWatch.mockResolvedValue(false);
+    await onTaskTransition(task, TaskState.RUNNING);
+    expect(fcm.pushWatch).not.toHaveBeenCalled();
+  });
+
+  it("ends the Watch on each provider that had one, once, after the quiet grace period", async () => {
+    fcm.configured = true;
+    const row = terminal({ attentionState: "working" });
+    mockListTerminals.mockResolvedValue([row]);
+    await onLocalTerminalChanged(row);
+    expect(fcm.pushWatch).toHaveBeenCalledWith("u1", expect.anything(), { alert: false });
+
+    const exited = terminal({ state: "exited", attentionState: "idle" });
+    mockListTerminals.mockResolvedValue([exited]);
+    apns.hasWatchToken.mockResolvedValue(false); // the iPhone already dismissed its activity
+    await onLocalTerminalChanged(exited);
+    await onLocalHostChanged(host()); // another quiet event inside the grace period
+    await vi.advanceTimersByTimeAsync(WATCH_END_GRACE_MS + 10);
+    expect(fcm.endWatch).toHaveBeenCalledTimes(1);
+    expect(fcm.endWatch).toHaveBeenCalledWith(
+      "u1",
+      expect.objectContaining({ phase: "done", summary: "Quiet." }),
+    );
+    expect(apns.updateWatch.mock.calls.some((c) => c[2].event === "end")).toBe(false);
+  });
+
+  it("an iPhone that joins the quiet spell late still gets its end frame", async () => {
+    fcm.configured = true;
+    apns.hasWatchToken.mockResolvedValue(false);
+    const exited = terminal({ state: "exited", attentionState: "idle" });
+    mockListTerminals.mockResolvedValue([exited]);
+    await onLocalTerminalChanged(exited); // FCM schedules the end
+    apns.hasWatchToken.mockResolvedValue(true);
+    await onLocalTerminalChanged(exited); // APNs joins the pending end
+    await vi.advanceTimersByTimeAsync(WATCH_END_GRACE_MS + 10);
+    expect(fcm.endWatch).toHaveBeenCalledTimes(1);
+    expect(apns.updateWatch).toHaveBeenLastCalledWith(
+      "u1",
+      expect.objectContaining({ phase: "done" }),
+      { event: "end" },
+    );
+  });
+
+  it("is a no-op when neither provider is configured", async () => {
+    apns.configured = false;
+    fcm.configured = false;
+    await onLocalTerminalChanged(terminal({ attentionState: "needs_you" }));
+    await onTaskTransition(task, TaskState.FAILED);
+    await onAgentFailed({ id: "ag1", name: "Vesper", createdBy: "u1" }, "x");
+    expect(mockListTerminals).not.toHaveBeenCalled();
+    expect(fcm.sendAlert).not.toHaveBeenCalled();
+    expect(apns.sendAlert).not.toHaveBeenCalled();
   });
 });
