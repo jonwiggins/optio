@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -54,10 +55,11 @@ class RootGateTest {
     private val registry = ServerRegistry.inMemory()
     private val session = SessionStore(registry, scope)
     private val deepLinks = DeepLinkInbox()
+    private val toasts = MutableSharedFlow<String>(replay = 1)
 
     @Before
     fun setUp() {
-        compose.setContent { OptioApp(session = session, deepLinks = deepLinks) }
+        compose.setContent { OptioApp(session = session, deepLinks = deepLinks, appearanceStore = null, toasts = toasts) }
     }
 
     @After
@@ -155,6 +157,20 @@ class RootGateTest {
         deepLinks.deliver("optio://tasks/t1?server=${a.id}")
         compose.waitUntil(10_000) { session.activeServer.value?.id == a.id }
         compose.waitUntilAtLeastOneExists(hasText("TaskDetailRoute(id=t1)"), 10_000)
+    }
+
+    @Test
+    fun appToastsShowOverTheShell() {
+        val api = server()
+        runBlocking {
+            session.restore()
+            session.addServer(api.url, "optio_pat_good")
+        }
+        waitForTag("hub-overview")
+        toasts.tryEmit("Started Fix login")
+        compose.waitUntilAtLeastOneExists(hasTestTag("toast"), 5_000)
+        compose.onNodeWithText("Started Fix login").assertIsDisplayed()
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/Root_toast.png")
     }
 
     @Test

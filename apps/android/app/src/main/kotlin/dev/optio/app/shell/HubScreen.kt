@@ -59,7 +59,7 @@ internal fun HubScreen(tab: Tab) {
                 TopAppBar(
                     title = { Text(tab.label) },
                     actions = {
-                        if (showSwitcher) ServerSwitcherMenu()
+                        if (showSwitcher) HubServerSwitcher()
                         controller.actions?.invoke(this)
                     },
                 )

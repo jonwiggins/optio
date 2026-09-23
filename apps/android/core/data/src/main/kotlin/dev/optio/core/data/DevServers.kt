@@ -24,6 +24,9 @@ object DevServers {
     /** An `optio://` link delivered ~2 s after launch (e.g. `optio://section/tasks?server=dev-server_2`). */
     const val OPEN_URL = "OPTIO_DEV_OPEN_URL"
 
+    /** A success toast shown once the app is on screen (checks the toast host). */
+    const val TOAST = "OPTIO_DEV_TOAST"
+
     /** Server id prefix; the n-th server is `dev-server_n` (the first has no suffix). */
     const val ID = "dev-server"
 
@@ -31,7 +34,7 @@ object DevServers {
     val suffixes: List<String> = listOf("") + (2..9).map { "_$it" }
 
     /** Every extra this app understands (to pick them out of an intent). */
-    val keys: List<String> = suffixes.flatMap { listOf(SERVER_URL + it, TOKEN + it, SERVER_NAME + it) } + listOf(SECTION, OPEN_URL)
+    val keys: List<String> = suffixes.flatMap { listOf(SERVER_URL + it, TOKEN + it, SERVER_NAME + it) } + listOf(SECTION, OPEN_URL, TOAST)
 
     /** True when [extras] pair at least one server. */
     fun hasServers(extras: Map<String, String>): Boolean = suffixes.any { extras[SERVER_URL + it] != null && extras[TOKEN + it] != null }

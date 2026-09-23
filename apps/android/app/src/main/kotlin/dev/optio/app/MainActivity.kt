@@ -29,7 +29,8 @@ import kotlinx.coroutines.launch
  *
  * Debug builds also read the `OPTIO_DEV_*` launch extras (PLAN §6): servers to pair
  * (`OPTIO_DEV_SERVER_URL[_n]`, `OPTIO_DEV_TOKEN[_n]`, `OPTIO_DEV_SERVER_NAME[_n]`), a section to
- * open (`OPTIO_DEV_SECTION`) and a link delivered ~2 s after launch (`OPTIO_DEV_OPEN_URL`).
+ * open (`OPTIO_DEV_SECTION`), a link delivered ~2 s after launch (`OPTIO_DEV_OPEN_URL`) and a
+ * toast to show (`OPTIO_DEV_TOAST`, for checking the toast host).
  *
  * On Android 17 it also asks for local network access ([LocalNetworkAccess]) once per process
  * when the active server is on the local network and the permission is missing (sign-in asks
@@ -105,6 +106,7 @@ class MainActivity : ComponentActivity() {
         if (!BuildConfig.DEBUG) return
         val extras = devExtras(intent)
         extras[DevServers.SECTION]?.takeIf { it.isNotBlank() }?.let { links.deliver(DeepLink.Section(it.trim()).url) }
+        extras[DevServers.TOAST]?.takeIf { it.isNotBlank() }?.let(appGraph::toast)
         extras[DevServers.OPEN_URL]?.takeIf { it.isNotBlank() }?.let { url ->
             // Like iOS: ~2 s after launch, without a system "Open with" prompt.
             appGraph.appScope.launch {

@@ -95,6 +95,10 @@ import dev.optio.core.data.LocalSessionStore
 import dev.optio.core.data.ServerColor
 import dev.optio.core.data.SessionStore
 import dev.optio.core.navigation.LocalNavigator
+import dev.optio.core.ui.components.OptioIcons
+import dev.optio.core.ui.theme.OptioTheme
+import dev.optio.core.ui.theme.medium
+import dev.optio.core.ui.theme.semibold
 import kotlinx.coroutines.launch
 
 /** How the sign-in form is used (iOS `SignInView(mode:)`). */
@@ -253,8 +257,8 @@ internal fun SignInContent(
                 form.error?.let { error ->
                     Text(
                         error.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        style = OptioTheme.type.footnote,
+                        color = OptioTheme.colors.red,
                         modifier = Modifier.padding(top = 10.dp).testTag("sign-in-error"),
                     )
                     if (error is SignInError.LocalNetworkBlocked) {
@@ -392,7 +396,7 @@ private fun SubmitButton(
 /** First run: the app's identity (iOS `identity`). */
 @Composable
 private fun Identity(modifier: Modifier = Modifier) {
-    val accent = MaterialTheme.colorScheme.primary
+    val accent = OptioTheme.colors.accent
     Column(modifier, verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Box(
             modifier =
@@ -402,15 +406,11 @@ private fun Identity(modifier: Modifier = Modifier) {
                     .background(accent.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(BotGlyph, contentDescription = null, tint = accent, modifier = Modifier.padding(17.dp).fillMaxSize())
+            Icon(OptioIcons.Bot, contentDescription = null, tint = accent, modifier = Modifier.padding(17.dp).fillMaxSize())
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Optio", fontSize = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
-            Text(
-                "Remote control for your agents.",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text("Optio", fontSize = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp, color = OptioTheme.colors.label)
+            Text("Remote control for your agents.", style = OptioTheme.type.title3, color = OptioTheme.colors.secondaryLabel)
         }
     }
 }
@@ -419,11 +419,11 @@ private fun Identity(modifier: Modifier = Modifier) {
 @Composable
 private fun AddIntro(modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Pair another Optio instance", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Text("Pair another Optio instance", style = OptioTheme.type.title2.semibold(), color = OptioTheme.colors.label)
         Text(
             "A second laptop, a cluster, a teammate's box. The name and colour label its items wherever servers are shown together.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = OptioTheme.type.subheadline,
+            color = OptioTheme.colors.secondaryLabel,
         )
     }
 }
@@ -464,8 +464,8 @@ private fun FieldLabel(
     icon: ImageVector,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-        Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(icon, contentDescription = null, tint = OptioTheme.colors.secondaryLabel, modifier = Modifier.size(18.dp))
+        Text(text, style = OptioTheme.type.subheadline.medium(), color = OptioTheme.colors.secondaryLabel)
     }
 }
 
@@ -487,14 +487,14 @@ private fun Help(modifier: Modifier = Modifier) {
         ) {
             Text(
                 "Where do I get these?",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = OptioTheme.type.subheadline,
+                color = OptioTheme.colors.secondaryLabel,
                 modifier = Modifier.weight(1f),
             )
             Icon(
                 Icons.Filled.KeyboardArrowDown,
                 contentDescription = if (expanded) "Collapse" else "Expand",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = OptioTheme.colors.secondaryLabel,
                 modifier = Modifier.rotate(rotation),
             )
         }
@@ -514,10 +514,10 @@ private fun HelpRow(
     code: String?,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text, style = OptioTheme.type.footnote, color = OptioTheme.colors.secondaryLabel)
         if (code != null) {
             SelectionContainer {
-                Text(code, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                Text(code, style = OptioTheme.type.monoFootnote, color = OptioTheme.colors.label)
             }
         }
     }

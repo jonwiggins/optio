@@ -11,9 +11,14 @@ import dev.optio.core.data.LocalNetworkAccess
 import dev.optio.core.data.ServerRegistry
 import dev.optio.core.data.SessionStore
 import dev.optio.core.data.TokenStore
+import dev.optio.core.ui.theme.AppearanceStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -56,6 +61,19 @@ class AppGraph(val application: Application) {
 
     /** `optio://` links waiting for the signed-in shell (and for a server switch to finish). */
     val deepLinks = DeepLinkInbox()
+
+    /** System / light / dark (Settings changes it; read before the first frame). */
+    val appearanceStore: AppearanceStore = AppearanceStore.create(application)
+
+    private val _toasts = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** Confirmations raised outside Compose; the root shows them with the app's toaster. */
+    val toasts: SharedFlow<String> = _toasts.asSharedFlow()
+
+    /** Shows [message] as a success toast once the app is on screen. */
+    fun toast(message: String) {
+        _toasts.tryEmit(message)
+    }
 
     /** The local network permission prompt was shown in this process (ask at most once). */
     @Volatile
