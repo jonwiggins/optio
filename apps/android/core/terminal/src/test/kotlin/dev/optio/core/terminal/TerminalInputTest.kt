@@ -408,6 +408,24 @@ class TerminalInputTest {
     }
 
     @Test
+    fun aReadOnlyTerminalTakesNoInputButStillScrollsItsScrollback() {
+        view.readOnly = true
+        state.feed((1..200).joinToString("\r\n") { "line $it" })
+        events.clear()
+        val t = SystemClock.uptimeMillis()
+        view.dispatchTouchEvent(MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, 300f, 300f, 0))
+        view.dispatchTouchEvent(MotionEvent.obtain(t, t + 50, MotionEvent.ACTION_UP, 300f, 300f, 0))
+        assertFalse(view.isFocused)
+        assertFalse(view.onCheckIsTextEditor())
+        drag(600f, 600f + 8 * rowHeight)
+        assertTrue(state.topRow < 0, "the scrollback still scrolls")
+        state.feed("$esc[?1049h$esc[?1000h$esc[?1006h") // a TUI tracking the mouse
+        drag(600f, 600f + 8 * rowHeight)
+        assertFalse(view.onKeyDown(KeyEvent.KEYCODE_A, KeyEvent(t, t, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A, 0)))
+        assertEquals(emptyList(), events, "no wheel reports, keys or interactions")
+    }
+
+    @Test
     fun theViewNeverTakesFocusOnItsOwnInTouchMode() {
         assumeTrue(view.isInTouchMode)
         // The window's initial focus pass (restoreDefaultFocus) must not claim a Local grid.

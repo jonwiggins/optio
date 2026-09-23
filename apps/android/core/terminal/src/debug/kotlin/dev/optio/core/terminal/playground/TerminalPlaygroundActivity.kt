@@ -75,7 +75,10 @@ class TerminalPlaygroundActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        model = PlaygroundModel.obtain(PlaygroundConfig.from(intent), fresh = savedInstanceState == null)
+        // Only an adb launch with extras configures the playground; a recreation (rotation) or a
+        // relaunch without extras (SystemUI after an install) keeps what it was doing.
+        val configured = savedInstanceState == null && intent?.extras?.isEmpty == false
+        model = PlaygroundModel.obtain(PlaygroundConfig.from(intent), fresh = configured)
         setContent {
             val dark = model.isDark(isSystemInDarkTheme())
             LaunchedEffect(dark) {
@@ -89,7 +92,7 @@ class TerminalPlaygroundActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        model.apply(PlaygroundConfig.from(intent))
+        if (intent.extras?.isEmpty == false) model.apply(PlaygroundConfig.from(intent))
     }
 }
 
@@ -326,7 +329,13 @@ internal fun PlaygroundScreen(model: PlaygroundModel) {
                     }
                 }
             }
-            TerminalSurface(model.terminal, Modifier.weight(1f), dark = dark, inputMode = model.inputMode)
+            TerminalSurface(
+                model.terminal,
+                Modifier.weight(1f),
+                dark = dark,
+                inputMode = model.inputMode,
+                readOnly = model.live?.dead == true,
+            )
             TerminalKeyBar(model.terminal, dark = dark, enabled = model.mode != PlaygroundMode.Live || model.live?.conn == PlaygroundLocalStream.Conn.Connected)
         }
     }

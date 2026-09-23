@@ -51,7 +51,9 @@ class TerminalState(
 
     /**
      * What a fit to the view would produce at the base font became known or changed (first layout,
-     * rotation, keyboard). Local re-judges an announced grid here (iOS `TerminalBridge.onSettled`).
+     * rotation, keyboard, chrome above the terminal coming or going). A Local viewer that is
+     * unclaimed or passive judges the announced PTY grid again here (iOS `TerminalBridge.onSettled`);
+     * the owner must not, since the last announcement predates its own resizes and would demote it.
      */
     var onNaturalGridChanged: ((TerminalGrid) -> Unit)? = null
 

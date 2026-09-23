@@ -54,7 +54,9 @@ internal class PlaygroundLocalStream(
     private var generation = 0
     private var sent = emptyList<TerminalGrid>()
     private var announced: TerminalGrid? = null
-    private var dead = false
+    /** The terminal has exited or errored: nothing more streams, and nothing can be typed. */
+    var dead by mutableStateOf(false)
+        private set
     private var pendingReset = false
     private var disposed = false
     private var retryRequested = false
@@ -121,7 +123,14 @@ internal class PlaygroundLocalStream(
         if (mode == TerminalSizing.Mode.Owner) sendResize(grid)
     }
 
+    /**
+     * Our fit changed (first layout, rotation, keyboard, the strip coming or going). Unclaimed or
+     * passive: judge the PTY's grid again against it. Owner: never. The last announcement predates
+     * our own resizes, whose echoes are on the way; judging it would demote us (and the strip that
+     * appears would change the fit again).
+     */
     fun onNaturalGridChanged() {
+        if (mode == TerminalSizing.Mode.Owner) return
         announced?.let { gridAnnounced(it) }
     }
 

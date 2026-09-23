@@ -55,6 +55,7 @@ object TerminalDefaults {
  * @param fontSize the font the grid is ours at; Fixed grids scale from it.
  * @param arrowKeysScrollAltScreen a drag on an alternate screen without mouse tracking sends arrow
  *   keys (see [OptioTerminalView.arrowKeysScrollAltScreen]).
+ * @param readOnly nothing can be typed (an exited terminal, a viewer): see [OptioTerminalView.readOnly].
  */
 @Composable
 fun TerminalSurface(
@@ -66,6 +67,7 @@ fun TerminalSurface(
     contentPadding: PaddingValues = TerminalDefaults.ContentPadding,
     showJumpToBottom: Boolean = true,
     arrowKeysScrollAltScreen: Boolean = true,
+    readOnly: Boolean = false,
 ) {
     val density = LocalDensity.current
     val direction = LocalLayoutDirection.current
@@ -84,6 +86,7 @@ fun TerminalSurface(
                 view.inputMode = inputMode
                 view.fontSizeDp = fontSize.value
                 view.arrowKeysScrollAltScreen = arrowKeysScrollAltScreen
+                view.readOnly = readOnly
                 view.setTerminalPadding(left, top, right, bottom)
             },
         )

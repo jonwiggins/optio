@@ -115,6 +115,20 @@ constructor(
      */
     var arrowKeysScrollAltScreen: Boolean = true
 
+    /**
+     * Nothing can be typed (an exited terminal, a viewer without write access): taps don't raise
+     * the keyboard or count as interactions, keys aren't taken, and drags only scroll the
+     * scrollback, never sending wheel reports or arrow keys. Selection and copy still work.
+     */
+    var readOnly: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            if (value && isFocused) releaseTerminalFocus()
+            isFocusable = !value
+            isFocusableInTouchMode = !value
+        }
+
     private val density = resources.displayMetrics.density
     private val metricsCache = CellMetricsCache()
     private var baseMetrics: CellMetrics? = null
@@ -534,7 +548,7 @@ constructor(
             val v = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
             if (v == 0f) return false
             val up = v > 0f
-            when (TerminalScrollPolicy.dragAction(st.mouseTracking, st.altScreen, arrowKeysScrollAltScreen)) {
+            when (dragAction(st)) {
                 TerminalDragAction.WheelReports -> sendWheel(if (up) 1 else -1, event.x, event.y)
                 TerminalDragAction.ArrowKeys -> sendScrollArrows(if (up) TerminalScrollPolicy.MOUSE_WHEEL_ROWS else -TerminalScrollPolicy.MOUSE_WHEEL_ROWS)
                 TerminalDragAction.Scrollback -> {
@@ -577,6 +591,7 @@ constructor(
             st.clearSelection()
             return
         }
+        if (readOnly) return
         if (isFocused) {
             showSoftKeyboard()
             st.notifyInteraction()
@@ -606,10 +621,18 @@ constructor(
         if (rows != 0) scrollRows(rows, e.x, e.y)
     }
 
+    /** What a vertical drag does now (a read-only terminal only ever scrolls its scrollback). */
+    private fun dragAction(st: TerminalState): TerminalDragAction =
+        if (readOnly) {
+            if (st.altScreen) TerminalDragAction.None else TerminalDragAction.Scrollback
+        } else {
+            TerminalScrollPolicy.dragAction(st.mouseTracking, st.altScreen, arrowKeysScrollAltScreen)
+        }
+
     /** [rows] > 0: older content (wheel up, scroll back, arrow up). */
     private fun scrollRows(rows: Int, x: Float, y: Float) {
         val st = state ?: return
-        when (TerminalScrollPolicy.dragAction(st.mouseTracking, st.altScreen, arrowKeysScrollAltScreen)) {
+        when (dragAction(st)) {
             TerminalDragAction.WheelReports -> sendWheel(rows, x, y)
             TerminalDragAction.ArrowKeys -> sendScrollArrows(rows)
             TerminalDragAction.Scrollback -> {
@@ -661,7 +684,7 @@ constructor(
                     postInvalidateOnAnimation()
                     return
                 }
-                when (TerminalScrollPolicy.dragAction(st.mouseTracking, st.altScreen, arrowKeysScrollAltScreen)) {
+                when (dragAction(st)) {
                     TerminalDragAction.WheelReports -> startWheelFling(vy, e.x, e.y)
                     TerminalDragAction.Scrollback -> {
                         val lh = m.lineHeight
@@ -949,6 +972,7 @@ constructor(
 
     /** Takes input focus (and shows the soft keyboard). */
     fun requestTerminalFocus(showKeyboard: Boolean) {
+        if (readOnly) return
         focusAllowed = true
         try {
             if (!isFocused) requestFocus()
@@ -1019,7 +1043,7 @@ constructor(
         cursorBlinkOn = true
     }
 
-    override fun onCheckIsTextEditor(): Boolean = true
+    override fun onCheckIsTextEditor(): Boolean = !readOnly
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
         outAttrs.inputType =
@@ -1076,7 +1100,7 @@ constructor(
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        val st = state ?: return super.onKeyDown(keyCode, event)
+        val st = state?.takeUnless { readOnly } ?: return super.onKeyDown(keyCode, event)
         // Terminal copy/paste on a hardware keyboard (Ctrl+C / Ctrl+V go to the program).
         if (event.isCtrlPressed && event.isShiftPressed && !event.isAltPressed) {
             when (keyCode) {
@@ -1101,7 +1125,7 @@ constructor(
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
-        if (state == null || event.isSystem || KeyEvent.isModifierKey(keyCode)) super.onKeyUp(keyCode, event) else true
+        if (state == null || readOnly || event.isSystem || KeyEvent.isModifierKey(keyCode)) super.onKeyUp(keyCode, event) else true
 
     @Suppress("DEPRECATION") // ACTION_MULTIPLE text still arrives from some IMEs and devices.
     override fun onKeyMultiple(keyCode: Int, repeatCount: Int, event: KeyEvent): Boolean {
