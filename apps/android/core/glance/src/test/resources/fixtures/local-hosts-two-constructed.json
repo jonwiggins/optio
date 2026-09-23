@@ -1,0 +1,38 @@
+{
+  "hosts": [
+    {
+      "id": "host-1",
+      "userId": "u1",
+      "workspaceId": "w1",
+      "name": "MacBook Pro",
+      "hostname": "mbp",
+      "platform": "darwin",
+      "arch": "arm64",
+      "daemonVersion": "0.1.0",
+      "dirs": [],
+      "agentLimits": null,
+      "claudeCredentials": true,
+      "state": "online",
+      "lastSeenAt": "2026-09-22T16:39:00.000Z",
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "updatedAt": "2026-09-22T16:39:00.000Z"
+    },
+    {
+      "id": "host-2",
+      "userId": "u1",
+      "workspaceId": "w1",
+      "name": null,
+      "hostname": "studio",
+      "platform": "linux",
+      "arch": "x64",
+      "daemonVersion": "0.1.0",
+      "dirs": [],
+      "agentLimits": null,
+      "claudeCredentials": false,
+      "state": "offline",
+      "lastSeenAt": "2026-09-22T15:00:00.000Z",
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "updatedAt": "2026-09-22T15:00:00.000Z"
+    }
+  ]
+}
