@@ -349,7 +349,7 @@ struct TriggerFormSheet: View {
                         Text(cronValid ? (Self.cronPresets.first { $0.1 == cron }.map { "Runs: \($0.0) (UTC)" } ?? "Five-field cron expression (UTC).") : "Expected five space-separated fields.")
                     }
                 case "webhook":
-                    Section { TextField("Path", text: $webhookPath).autocorrectionDisabled().textInputAutocapitalization(.never) } footer: { Text("POST /api/webhooks/\(webhookPath) fires this trigger; the JSON body becomes {{params}}.") }
+                    Section { TextField("Path", text: $webhookPath).autocorrectionDisabled().textInputAutocapitalization(.never) } footer: { Text("POST /api/hooks/\(webhookPath) fires this trigger; the JSON body becomes {{params}}.") }
                 case "ticket":
                     Section {
                         Picker("Source", selection: $ticketSource) {
