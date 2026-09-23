@@ -1,0 +1,65 @@
+{
+  "hosts": [
+    {
+      "id": "c88b691f-c2f0-4aa3-a48e-b5c8607ae9e1",
+      "userId": null,
+      "workspaceId": null,
+      "name": "E2E laptop",
+      "hostname": "e2e-laptop",
+      "platform": "darwin",
+      "arch": "arm64",
+      "daemonVersion": "0.1.0-devlab-playback",
+      "dirs": [
+        {
+          "path": "/Users/e2e/repos/e2e-repo",
+          "repoUrl": "https://github.com/e2e-org/e2e-repo"
+        },
+        {
+          "path": "/Users/e2e/notes"
+        }
+      ],
+      "agentLimits": null,
+      "claudeCredentials": false,
+      "state": "offline",
+      "lastSeenAt": "2026-09-23T01:19:30.233Z",
+      "createdAt": "2026-09-23T01:19:30.205Z",
+      "updatedAt": "2026-09-23T01:19:31.110Z"
+    },
+    {
+      "id": "f7542ce1-91c3-4b63-97e2-4ff897d41dbf",
+      "userId": null,
+      "workspaceId": null,
+      "name": "devlab-mac",
+      "hostname": "devlab-mac",
+      "platform": "darwin",
+      "arch": "arm64",
+      "daemonVersion": "0.1.0",
+      "dirs": [
+        {
+          "path": "/Users/dev/playground/e2e-repo",
+          "repoUrl": "https://github.com/e2e-org/e2e-repo"
+        },
+        {
+          "path": "/Users/dev/playground/scratch"
+        }
+      ],
+      "agentLimits": {
+        "codex": {
+          "primary": {
+            "usedPercent": 5,
+            "windowMinutes": 10080,
+            "resetsAt": "2026-08-18T07:45:45.000Z"
+          },
+          "secondary": null,
+          "planType": "prolite",
+          "observedAt": "2026-08-11T10:27:17.920Z"
+        }
+      },
+      "claudeCredentials": false,
+      "state": "online",
+      "lastSeenAt": "2026-09-23T01:19:38.318Z",
+      "createdAt": "2026-09-23T01:19:38.286Z",
+      "updatedAt": "2026-09-23T01:19:38.333Z"
+    }
+  ]
+}
