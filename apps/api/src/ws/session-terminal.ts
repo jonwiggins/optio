@@ -9,83 +9,55 @@ import { logger } from "../logger.js";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
 import { authenticateWs } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
-import {
-  getClientIp,
-  trackConnection,
-  releaseConnection,
-  isMessageWithinSizeLimit,
-  WS_CLOSE_CONNECTION_LIMIT,
-  WS_CLOSE_MESSAGE_TOO_LARGE,
-} from "./ws-limits.js";
+import { acceptWs } from "./ws-connection.js";
+import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 
 const PR_URL_REGEX = /https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/g;
 
 export async function sessionTerminalWs(app: FastifyInstance) {
   app.get("/ws/sessions/:sessionId/terminal", { websocket: true }, async (socket, req) => {
-    const clientIp = getClientIp(req);
-
-    if (!trackConnection(clientIp)) {
-      socket.close(WS_CLOSE_CONNECTION_LIMIT, "Too many connections");
-      return;
-    }
+    // Synchronously, before any await: the client's first resize and any
+    // early keystrokes are held until the shell exists (see ws-connection.ts).
+    const conn = acceptWs(socket, req);
+    if (!conn) return;
 
     const user = await authenticateWs(socket, req);
-    if (!user) {
-      releaseConnection(clientIp);
-      return;
-    }
+    if (!user) return conn.discard();
 
     const { sessionId } = z.object({ sessionId: z.string() }).parse(req.params);
     const log = logger.child({ sessionId });
 
-    const session = await getSession(sessionId);
-    if (!session) {
-      socket.send(JSON.stringify({ error: "Session not found" }));
-      releaseConnection(clientIp);
+    const reject = (error: string) => {
+      socket.send(JSON.stringify({ error }));
       socket.close();
-      return;
-    }
+      conn.discard();
+    };
+
+    const session = await getSession(sessionId);
+    if (!session) return reject("Session not found");
 
     if (session.userId && session.userId !== user.id) {
       socket.close(4403, "Not authorized for this session");
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
 
     // The terminal writes straight to a shell in the repo pod — viewers are
     // read-only and must not reach it.
     if (!(await requireWsRole(socket, user, "member", session.workspaceId))) {
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
 
-    if (session.state !== "active") {
-      socket.send(JSON.stringify({ error: "Session is not active" }));
-      releaseConnection(clientIp);
-      socket.close();
-      return;
-    }
-
-    if (!session.podId) {
-      socket.send(JSON.stringify({ error: "Session has no pod assigned" }));
-      releaseConnection(clientIp);
-      socket.close();
-      return;
-    }
+    if (session.state !== "active") return reject("Session is not active");
+    if (!session.podId) return reject("Session has no pod assigned");
 
     // Get pod info
     const [pod] = await db.select().from(repoPods).where(eq(repoPods.id, session.podId));
     if (!pod || !pod.podName) {
-      socket.send(
-        JSON.stringify({
-          error:
-            "Session pod was cleaned up due to inactivity. Please end this session and start a new one.",
-        }),
+      return reject(
+        "Session pod was cleaned up due to inactivity. Please end this session and start a new one.",
       );
-      releaseConnection(clientIp);
-      socket.close();
-      return;
     }
+    if (conn.closed) return;
 
     const rt = getRuntime();
     const handle: ContainerHandle = { id: pod.podId ?? pod.podName, name: pod.podName };
@@ -138,6 +110,13 @@ export async function sessionTerminalWs(app: FastifyInstance) {
 
     try {
       execSession = await rt.exec(handle, ["bash", "-c", setupScript], { tty: true });
+      // Registered before anything else so a client that left while the
+      // shell was starting still gets it closed (right away, in that case).
+      conn.onClose(() => {
+        log.info("Session terminal disconnected");
+        execSession?.close();
+      });
+      if (conn.closed) return;
 
       // Pipe exec stdout → WebSocket + scan for PR URLs
       execSession.stdout.on("data", (chunk: Buffer) => {
@@ -154,8 +133,15 @@ export async function sessionTerminalWs(app: FastifyInstance) {
         scanForPrUrls(chunk);
       });
 
-      // Pipe WebSocket → exec stdin
-      socket.on("message", (data: Buffer | string) => {
+      // Handle exec session end
+      execSession.stdout.on("end", () => {
+        if (socket.readyState === 1) {
+          socket.close();
+        }
+      });
+
+      // Pipe WebSocket → exec stdin, starting with what arrived during setup.
+      conn.ready((data: Buffer | string) => {
         if (!isMessageWithinSizeLimit(data)) {
           socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
           return;
@@ -176,25 +162,9 @@ export async function sessionTerminalWs(app: FastifyInstance) {
 
         execSession?.stdin.write(typeof data === "string" ? data : data);
       });
-
-      // Handle exec session end
-      execSession.stdout.on("end", () => {
-        if (socket.readyState === 1) {
-          socket.close();
-        }
-      });
-
-      // Handle WebSocket close
-      socket.on("close", () => {
-        log.info("Session terminal disconnected");
-        releaseConnection(clientIp);
-        execSession?.close();
-      });
     } catch (err) {
       log.error({ err }, "Failed to start terminal exec session");
-      socket.send(JSON.stringify({ error: "Failed to start terminal" }));
-      releaseConnection(clientIp);
-      socket.close();
+      reject("Failed to start terminal");
     }
   });
 }

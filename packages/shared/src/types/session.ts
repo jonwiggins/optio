@@ -40,12 +40,22 @@ export type SessionChatClientMessage =
   | { type: "interrupt" }
   | { type: "set_model"; model: string };
 
-/** Server → Client message for the session chat WebSocket */
+/**
+ * Server → Client message for the session chat WebSocket.
+ *
+ * On connect: `status` "ready", then the persisted history as `chat_event`
+ * frames flagged `catchUp: true`, then `history_done`; everything after that
+ * is live. Client messages may be sent as soon as the socket opens — the
+ * server queues any that arrive before `history_done` and handles them, in
+ * order, right after it.
+ */
 export type SessionChatServerMessage =
   | { type: "chat_event"; event: SessionChatEvent }
   | { type: "cost_update"; costUsd: number }
   | { type: "status"; status: SessionChatStatus; model?: string; costUsd?: number }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /** End of the history replay; `count` = `chat_event` frames replayed. */
+  | { type: "history_done"; count: number };
 
 export type SessionChatStatus = "ready" | "thinking" | "idle" | "error";
 

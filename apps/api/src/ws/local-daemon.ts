@@ -8,14 +8,8 @@ import type { FastifyInstance } from "fastify";
 import type { LocalDaemonMessage } from "@optio/shared";
 import { logger } from "../logger.js";
 import { authenticateWs } from "./ws-auth.js";
-import {
-  getClientIp,
-  trackConnection,
-  releaseConnection,
-  isMessageWithinSizeLimit,
-  WS_CLOSE_CONNECTION_LIMIT,
-  WS_CLOSE_MESSAGE_TOO_LARGE,
-} from "./ws-limits.js";
+import { acceptWs } from "./ws-connection.js";
+import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 import * as relay from "../services/local-relay.js";
 import {
   canAccessHost,
@@ -34,20 +28,18 @@ const HELLO_TIMEOUT_MS = 10_000;
 
 export async function localDaemonWs(app: FastifyInstance) {
   app.get("/ws/local/daemon", { websocket: true }, async (socket, req) => {
-    const clientIp = getClientIp(req);
-    if (!trackConnection(clientIp)) {
-      socket.close(WS_CLOSE_CONNECTION_LIMIT, "Too many connections");
-      return;
-    }
+    // Synchronously, before any await: the daemon sends `hello` the moment
+    // the socket opens, while authenticateWs is still looking up its PAT.
+    // acceptWs holds those frames until ready() below (see ws-connection.ts).
+    const accepted = acceptWs(socket, req);
+    if (!accepted) return;
+    const conn = accepted; // non-null for the hoisted handleMessage below
 
     const user = await authenticateWs(socket, req);
-    if (!user) {
-      releaseConnection(clientIp);
-      return;
-    }
+    if (!user) return conn.discard();
+    if (conn.closed) return;
 
     let hostId: string | null = null;
-    let closed = false;
     const log = logger.child({ ws: "local-daemon" });
 
     const helloTimer = setTimeout(() => {
@@ -61,7 +53,7 @@ export async function localDaemonWs(app: FastifyInstance) {
     // daemon's frame ordering through the awaits without a global lock.
     let queue: Promise<void> = Promise.resolve();
 
-    socket.on("message", (raw: Buffer | string) => {
+    const onMessage = (raw: Buffer | string) => {
       if (!isMessageWithinSizeLimit(raw)) {
         socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
         return;
@@ -77,7 +69,7 @@ export async function localDaemonWs(app: FastifyInstance) {
           log.warn({ err, type: msg.type }, "local-daemon: message handling failed");
         }),
       );
-    });
+    };
 
     async function handleMessage(msg: LocalDaemonMessage): Promise<void> {
       if (msg.type === "hello") {
@@ -95,7 +87,7 @@ export async function localDaemonWs(app: FastifyInstance) {
         await terminalService.reconcileHello(host.id, msg.terminals ?? [], {
           flushParked: false,
         });
-        if (closed) return;
+        if (conn.closed) return;
         relay.registerDaemon(host.id, host.userId, socket, {
           claudeCredentials: msg.claudeCredentials === true,
         });
@@ -196,11 +188,8 @@ export async function localDaemonWs(app: FastifyInstance) {
       }
     }
 
-    socket.on("close", () => {
-      if (closed) return;
-      closed = true;
+    conn.onClose(() => {
       clearTimeout(helloTimer);
-      releaseConnection(clientIp);
       if (hostId && relay.unregisterDaemon(hostId, socket)) {
         log.info({ hostId }, "local daemon disconnected");
         void terminalService.handleHostDisconnect(hostId).catch((err) => {
@@ -208,5 +197,7 @@ export async function localDaemonWs(app: FastifyInstance) {
         });
       }
     });
+    // Replays the frames that arrived during auth (hello first), in order.
+    conn.ready(onMessage);
   });
 }

@@ -116,6 +116,9 @@ final class SessionChatModel {
                 if status != .error { error = nil }
             case .error(let p):
                 error = p.message
+            case .historyDone:
+                // End of the socket's history replay; REST already loaded it.
+                break
             case .unknown:
                 break
             }

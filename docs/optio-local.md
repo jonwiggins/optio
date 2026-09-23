@@ -282,6 +282,10 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   no terminal content may ever be published there); clients refetch via REST.
 - Daemon auth: the CLI's existing PAT via `Sec-WebSocket-Protocol` (`optio-auth-<pat>`),
   same as every other WS. The hello's `hostId` must belong to the authenticated user.
+  Clients may send the moment the socket opens: every WS route holds frames that
+  arrive while it is still authenticating and setting up, then handles them in order
+  (`ws/ws-connection.ts`; a client that sends more than 256 frames or 4 MB before then
+  is closed with 1008), so the daemon's `hello` can go out on `open`.
 
 ## REST API (all under `/api/local`, member role for mutations, owner-scoped)
 

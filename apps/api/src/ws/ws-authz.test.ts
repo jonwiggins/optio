@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mocks shared by the handler-level tests ──────────────────────────────────
@@ -53,8 +54,18 @@ import { assertWorkspace, requireWsRole, WS_CLOSE_FORBIDDEN } from "./ws-authz.j
 import { workflowRunLogStreamWs } from "./workflow-run-log-stream.js";
 import { persistentAgentStreamWs } from "./persistent-agent-stream.js";
 
+/** Like a `ws` socket: close() moves it to CLOSED and emits `close`. */
 function mockSocket() {
-  return { close: vi.fn(), send: vi.fn(), on: vi.fn() };
+  const socket = Object.assign(new EventEmitter(), {
+    readyState: 1,
+    send: vi.fn(),
+    close: vi.fn(() => {
+      if (socket.readyState === 3) return;
+      socket.readyState = 3;
+      socket.emit("close");
+    }),
+  });
+  return socket;
 }
 
 function fakeSubscriber() {

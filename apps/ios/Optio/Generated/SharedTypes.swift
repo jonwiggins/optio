@@ -6077,12 +6077,19 @@ public enum SessionChatClientMessage: Codable, Hashable, Sendable {
     }
 }
 
-/// Server → Client message for the session chat WebSocket
+/// Server → Client message for the session chat WebSocket.
+///
+/// On connect: `status` "ready", then the persisted history as `chat_event`
+/// frames flagged `catchUp: true`, then `history_done`; everything after that
+/// is live. Client messages may be sent as soon as the socket opens — the
+/// server queues any that arrive before `history_done` and handles them, in
+/// order, right after it.
 public enum SessionChatServerMessage: Codable, Hashable, Sendable {
     case chatEvent(ChatEventPayload)
     case costUpdate(CostUpdatePayload)
     case status(StatusPayload)
     case error(ErrorPayload)
+    case historyDone(HistoryDonePayload)
     /// Fallback for discriminator values this client does not know about yet.
     case unknown(AnyCodable)
 
@@ -6140,6 +6147,18 @@ public enum SessionChatServerMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct HistoryDonePayload: Codable, Hashable, Sendable {
+        public let count: Double
+
+        private enum CodingKeys: String, CodingKey {
+            case count = "count"
+        }
+
+        public init(count: Double) {
+            self.count = count
+        }
+    }
+
     private enum DiscriminatorKey: String, CodingKey {
         case type
     }
@@ -6152,6 +6171,7 @@ public enum SessionChatServerMessage: Codable, Hashable, Sendable {
         case "cost_update": self = .costUpdate(try CostUpdatePayload(from: decoder))
         case "status": self = .status(try StatusPayload(from: decoder))
         case "error": self = .error(try ErrorPayload(from: decoder))
+        case "history_done": self = .historyDone(try HistoryDonePayload(from: decoder))
         default: self = .unknown(try AnyCodable(from: decoder))
         }
     }
@@ -6173,6 +6193,10 @@ public enum SessionChatServerMessage: Codable, Hashable, Sendable {
         case .error(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("error", forKey: .type)
+            try payload.encode(to: encoder)
+        case .historyDone(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("history_done", forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let value):
             try value.encode(to: encoder)

@@ -7,40 +7,27 @@ import { assertWorkspace } from "./ws-authz.js";
 import { getPrReview, getLatestRun } from "../services/pr-review-service.js";
 import { db } from "../db/client.js";
 import { taskLogs } from "../db/schema.js";
-import {
-  getClientIp,
-  trackConnection,
-  releaseConnection,
-  WS_CLOSE_CONNECTION_LIMIT,
-} from "./ws-limits.js";
+import { acceptWs } from "./ws-connection.js";
 
 export async function prReviewLogStreamWs(app: FastifyInstance) {
   app.get("/ws/pr-reviews/:id/logs", { websocket: true }, async (socket, req) => {
-    const clientIp = getClientIp(req);
-
-    if (!trackConnection(clientIp)) {
-      socket.close(WS_CLOSE_CONNECTION_LIMIT, "Too many connections");
-      return;
-    }
+    // Synchronously, before any await (see ws-connection.ts).
+    const conn = acceptWs(socket, req);
+    if (!conn) return;
 
     const user = await authenticateWs(socket, req);
-    if (!user) {
-      releaseConnection(clientIp);
-      return;
-    }
+    if (!user) return conn.discard();
 
     const { id } = z.object({ id: z.string() }).parse(req.params);
 
     const review = await getPrReview(id);
     if (!review) {
       socket.close(4404, "PR review not found");
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
     // Enforce workspace isolation before streaming the review's run output.
     if (!assertWorkspace(socket, user.workspaceId, review.workspaceId)) {
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
 
     // Send catch-up: recent logs from the latest run so reconnecting clients
@@ -73,6 +60,7 @@ export async function prReviewLogStreamWs(app: FastifyInstance) {
     } catch {
       // ignore catch-up errors — still subscribe to live events
     }
+    if (conn.closed) return;
 
     const subscriber = createSubscriber();
     const channel = `optio:pr-review:${id}`;
@@ -94,10 +82,11 @@ export async function prReviewLogStreamWs(app: FastifyInstance) {
       }
     });
 
-    socket.on("close", () => {
-      releaseConnection(clientIp);
+    conn.onClose(() => {
       subscriber.unsubscribe(channel);
       subscriber.disconnect();
     });
+    // Server → client only: client frames are ignored.
+    conn.ready(() => {});
   });
 }

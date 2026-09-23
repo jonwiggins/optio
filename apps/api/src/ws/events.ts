@@ -2,27 +2,16 @@ import type { FastifyInstance } from "fastify";
 import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
 import { getRecentEvents } from "../services/task-service.js";
-import {
-  getClientIp,
-  trackConnection,
-  releaseConnection,
-  WS_CLOSE_CONNECTION_LIMIT,
-} from "./ws-limits.js";
+import { acceptWs } from "./ws-connection.js";
 
 export async function eventsWs(app: FastifyInstance) {
   app.get("/ws/events", { websocket: true }, async (socket, req) => {
-    const clientIp = getClientIp(req);
-
-    if (!trackConnection(clientIp)) {
-      socket.close(WS_CLOSE_CONNECTION_LIMIT, "Too many connections");
-      return;
-    }
+    // Synchronously, before any await (see ws-connection.ts).
+    const conn = acceptWs(socket, req);
+    if (!conn) return;
 
     const user = await authenticateWs(socket, req);
-    if (!user) {
-      releaseConnection(clientIp);
-      return;
-    }
+    if (!user) return conn.discard();
 
     // Send catch-up: recent state-change events so reconnecting clients stay in sync
     try {
@@ -42,6 +31,7 @@ export async function eventsWs(app: FastifyInstance) {
     } catch {
       // ignore catch-up errors — still subscribe to live events
     }
+    if (conn.closed) return;
 
     const subscriber = createSubscriber();
     const channel = "optio:events";
@@ -63,10 +53,11 @@ export async function eventsWs(app: FastifyInstance) {
       socket.send(message);
     });
 
-    socket.on("close", () => {
-      releaseConnection(clientIp);
+    conn.onClose(() => {
       subscriber.unsubscribe(channel);
       subscriber.disconnect();
     });
+    // Server → client only: client frames are ignored.
+    conn.ready(() => {});
   });
 }
