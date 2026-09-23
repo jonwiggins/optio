@@ -3,6 +3,19 @@ package dev.optio.app
 import android.app.Application
 import android.content.Context
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.preferencesDataStoreFile
+import dev.optio.core.data.DevServers
+import dev.optio.core.data.KeystoreTokenCipher
+import dev.optio.core.data.ServerRegistry
+import dev.optio.core.data.SessionStore
+import dev.optio.core.data.TokenStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** Process entry point. Builds the one [AppGraph] (manual DI, PLAN §3). */
 class OptioApplication : Application() {
@@ -17,12 +30,61 @@ class OptioApplication : Application() {
 
 /**
  * App-wide singletons, created once per process in [OptioApplication.onCreate] and handed to
- * Compose through [LocalAppGraph]. No DI framework (PLAN §3).
- *
- * Placeholder: Agent C adds `ServerRegistry`, `TokenStore` and `SessionStore` (which owns the one
- * `ApiClient` + `EventHub`); glance surfaces (Agent A9) read the same instances.
+ * Compose through [LocalAppGraph]. No DI framework (PLAN §3). Widgets, tiles, workers and
+ * notification receivers run in the same process and reach the same [session] through
+ * `context.appGraph`.
  */
-class AppGraph(val application: Application)
+class AppGraph(val application: Application) {
+    /** Outlives every screen: session work, deferred deep links, background timers. */
+    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Paired servers (DataStore) and their tokens (Keystore-encrypted DataStore). */
+    val serverRegistry: ServerRegistry by lazy { registry(application) }
+
+    /** The live session: active server, current user, the one `ApiClient` + `EventHub`. */
+    val session: SessionStore by lazy { SessionStore(serverRegistry, appScope) }
+
+    /** `optio://` links waiting for the signed-in shell (and for a server switch to finish). */
+    val deepLinks = DeepLinkInbox()
+
+    private val startLock = Mutex()
+    private var restored = false
+
+    /**
+     * Restores the session once per process (iOS `OptioApp.task { await session.restore() }`). In
+     * debug builds, launch extras that pair servers ([DevServers]) replace the registry first and
+     * restore again, even when the app is already running.
+     */
+    fun start(devExtras: Map<String, String> = emptyMap()) {
+        appScope.launch {
+            startLock.withLock {
+                val seeded = DevServers.hasServers(devExtras) && session.applyDevServers(devExtras)
+                if (seeded || !restored) {
+                    restored = true
+                    session.restore()
+                }
+            }
+        }
+    }
+
+    private companion object {
+        // One DataStore per file per process, even if the Application is recreated (Robolectric).
+        @Volatile
+        private var sharedRegistry: ServerRegistry? = null
+
+        fun registry(context: Context): ServerRegistry =
+            sharedRegistry ?: synchronized(this) {
+                sharedRegistry ?: ServerRegistry(
+                    store = PreferenceDataStoreFactory.create { context.preferencesDataStoreFile("optio_servers") },
+                    tokens =
+                        TokenStore(
+                            store = PreferenceDataStoreFactory.create { context.preferencesDataStoreFile("optio_tokens") },
+                            cipher = KeystoreTokenCipher(),
+                        ),
+                ).also { sharedRegistry = it }
+            }
+    }
+}
 
 /** The process's [AppGraph], from any [Context]. */
 val Context.appGraph: AppGraph

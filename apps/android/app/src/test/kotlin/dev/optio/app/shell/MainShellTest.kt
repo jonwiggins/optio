@@ -1,5 +1,6 @@
 package dev.optio.app.shell
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -9,7 +10,15 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
+import dev.optio.core.data.LocalSessionStore
+import dev.optio.core.data.ServerRegistry
+import dev.optio.core.data.SessionStore
 import dev.optio.core.ui.theme.OptioTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,9 +33,20 @@ class MainShellTest {
     @get:Rule
     val compose = createComposeRule()
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    @After
+    fun tearDown() = scope.cancel()
+
     @Test
     fun tabsSectionsAndDetailsNavigate() {
-        compose.setContent { OptioTheme { MainShell() } }
+        // Hubs read the session (server switcher); an unpaired one shows no chip.
+        val session = SessionStore(ServerRegistry.inMemory(), scope)
+        compose.setContent {
+            CompositionLocalProvider(LocalSessionStore provides session) {
+                OptioTheme { MainShell() }
+            }
+        }
         compose.onNodeWithTag("hub-overview").assertIsDisplayed()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/MainShell_overview.png")
 
