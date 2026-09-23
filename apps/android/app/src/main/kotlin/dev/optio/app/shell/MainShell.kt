@@ -1,6 +1,9 @@
 package dev.optio.app.shell
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.outlined.BarChart
@@ -9,7 +12,10 @@ import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -51,10 +57,16 @@ import kotlinx.coroutines.flow.filterNotNull
  * shell, and all of that state, is dropped when the root re-keys it on `session.generation` (a
  * server switch).
  *
+ * While the keyboard is up the bottom bar steps aside (it sits behind the keyboard anyway): the
+ * content then reaches the window bottom and a screen's own `imePadding()` lines its composer up
+ * with the keyboard. With the bar still laid out underneath, the keyboard inset was counted from
+ * the window bottom and left a bar-high gap above every composer. The rail on wide screens takes no
+ * height and stays.
+ *
  * [onOpenDeepLink] backs `Navigator.openDeepLink` (the root sends links through its server-aware
  * inbox); the router's `createdToast` goes to the app's toaster (`LocalToaster`).
  */
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun MainShell(
     modifier: Modifier = Modifier,
@@ -80,9 +92,17 @@ fun MainShell(
         }
     }
 
+    val adaptiveType = NavigationSuiteScaffoldDefaults.navigationSuiteType(currentWindowAdaptiveInfo())
+    val bottomBar =
+        adaptiveType == NavigationSuiteType.NavigationBar ||
+            adaptiveType == NavigationSuiteType.ShortNavigationBarCompact ||
+            adaptiveType == NavigationSuiteType.ShortNavigationBarMedium
+    val layoutType = if (bottomBar && WindowInsets.isImeVisible) NavigationSuiteType.None else adaptiveType
+
     CompositionLocalProvider(LocalAppRouter provides router, LocalNavigator provides navigator) {
         NavigationSuiteScaffold(
             modifier = modifier.semantics { testTagsAsResourceId = true },
+            layoutType = layoutType,
             navigationSuiteItems = {
                 Tab.entries.forEach { tab ->
                     item(

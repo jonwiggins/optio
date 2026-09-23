@@ -4,10 +4,13 @@ import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import dev.optio.core.navigation.routes.EditWorkRoute
 import dev.optio.core.navigation.routes.NewWorkRoute
-import dev.optio.core.ui.PlaceholderScreen
 
-/** Registers `:feature:workform`'s routes. Stubs: Agent A2 builds the New / Edit work form. */
+/**
+ * Registers `:feature:workform`'s routes: the one creation form ([NewWorkRoute], optionally
+ * prefilled from an example preset) and the same form reopened on saved recurring work
+ * ([EditWorkRoute]: a scheduled Task, a Job or a Local automation).
+ */
 fun EntryProviderScope<NavKey>.workFormEntries() {
-    entry<NewWorkRoute> { key -> PlaceholderScreen(title = "New work", detail = key.toString()) }
-    entry<EditWorkRoute> { key -> PlaceholderScreen(title = "Edit work", detail = key.toString()) }
+    entry<NewWorkRoute> { key -> NewWorkScreen(preset = key.preset) }
+    entry<EditWorkRoute> { key -> EditWorkScreen(id = key.id) }
 }
