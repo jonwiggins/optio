@@ -1,0 +1,51 @@
+{
+  "provider": "openai",
+  "source": "baseline",
+  "cached": false,
+  "refreshedAt": null,
+  "catalog": {
+    "provider": "openai",
+    "label": "OpenAI Codex",
+    "modelField": "copilotModel",
+    "models": [
+      {
+        "id": "gpt-5",
+        "label": "GPT-5",
+        "family": "gpt-5",
+        "source": "baseline"
+      },
+      {
+        "id": "gpt-5.2",
+        "label": "GPT-5.2",
+        "family": "gpt-5",
+        "source": "baseline"
+      },
+      {
+        "id": "gpt-5.4",
+        "label": "GPT-5.4",
+        "family": "gpt-5",
+        "latest": true,
+        "source": "baseline"
+      },
+      {
+        "id": "gpt-5.4-mini",
+        "label": "GPT-5.4 Mini",
+        "family": "gpt-5-mini",
+        "latest": true,
+        "source": "baseline"
+      },
+      {
+        "id": "claude-sonnet-4.5",
+        "label": "Claude Sonnet 4.5",
+        "family": "sonnet",
+        "source": "baseline"
+      }
+    ],
+    "aliases": {
+      "gpt-5": "gpt-5.4",
+      "gpt-5-mini": "gpt-5.4-mini"
+    },
+    "options": [],
+    "liveRefreshSupported": true
+  }
+}

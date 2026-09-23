@@ -108,15 +108,12 @@ enum class WhenType(val raw: String, val label: String) {
 }
 
 /** Where ticket triggers read from. */
-enum class TicketSource(val raw: String) {
-    GITHUB("github"),
-    LINEAR("linear"),
-    JIRA("jira"),
-    NOTION("notion"),
+enum class TicketSource(val raw: String, val label: String) {
+    GITHUB("github", "GitHub"),
+    LINEAR("linear", "Linear"),
+    JIRA("jira", "Jira"),
+    NOTION("notion", "Notion"),
     ;
-
-    val label: String
-        get() = raw.replaceFirstChar { it.uppercase() }
 
     companion object {
         fun fromRaw(raw: String?): TicketSource? = entries.firstOrNull { it.raw == raw }

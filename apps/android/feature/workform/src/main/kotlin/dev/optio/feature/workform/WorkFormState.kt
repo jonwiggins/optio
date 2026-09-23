@@ -110,8 +110,8 @@ class WorkFormState(
         update { d ->
             val event = w.event
             if (event != null) {
-                val next = if (d.event.type == event) d.event else EventTrigger(event, prefilledEventConfig(event))
-                d.copy(whenType = w, trigger = TriggerConfig.MANUAL, event = next)
+                val next = if (d.event.type == event) d.event else EventTrigger.default(event)
+                d.copy(whenType = w, trigger = TriggerConfig.MANUAL, event = withLoginPrefill(next))
             } else {
                 var t = d.trigger.copy(type = w.trigger ?: TriggerType.MANUAL)
                 if (t.type == TriggerType.SCHEDULE && t.cronExpression == null) t = t.copy(cronExpression = "0 9 * * *")
@@ -124,11 +124,15 @@ class WorkFormState(
         }
     }
 
-    /** A fresh event config, with "you" prefilled from the signed-in GitHub account. */
-    private fun prefilledEventConfig(type: EventTriggerType): JsonObject {
-        val config = defaultEventConfig(type)
+    /**
+     * A GitHub event with "you" prefilled from the signed-in GitHub account while its login is
+     * blank. (The web prefills only a fresh config, so its default draft, already GitHub-typed,
+     * never got one.)
+     */
+    private fun withLoginPrefill(event: EventTrigger): EventTrigger {
         val login = me?.takeIf { it.provider == "github" }?.username
-        return if (type == EventTriggerType.GITHUB && !login.isNullOrEmpty()) config.with("login", JsonPrimitive(login)) else config
+        if (event.type != EventTriggerType.GITHUB || login.isNullOrEmpty() || event.config.string("login").isNotBlank()) return event
+        return event.copy(config = event.config.with("login", JsonPrimitive(login)))
     }
 
     /** A pod defaults to one of your repos; a machine to the directory as it is. An edit keeps the saved answer. */
@@ -244,7 +248,36 @@ class WorkFormState(
     private suspend fun loadRepos() {
         val list = attempt { api.listFormRepos() }
         reposLoading = false
-        if (list == null) return
+        if (list != null) applyRepos(list)
+    }
+
+    /**
+     * Fills the server lists directly, as [load] would (screenshot tests and previews): nothing is
+     * fetched, the catalogs given count as loaded.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun preload(
+        repos: List<FormRepo> = emptyList(),
+        hosts: List<LocalHost> = emptyList(),
+        templates: List<PromptTemplateRow> = emptyList(),
+        existingTasks: List<DependencyTaskRow> = emptyList(),
+        workCount: Int? = null,
+        catalogs: Map<String, CatalogState> = emptyMap(),
+        me: CurrentUser? = null,
+    ) {
+        this.catalogs.putAll(catalogs)
+        this.templates = templates
+        this.existingTasks = existingTasks
+        this.workCount = workCount
+        this.me = me
+        reposLoading = false
+        applyRepos(repos)
+        this.hosts = hosts
+        hostsLoading = false
+        adoptHostIfNeeded()
+    }
+
+    private fun applyRepos(list: List<FormRepo>) {
         repos = list
         // Pre-select the saved repo (by url) or the first one once the list is known.
         if (draft.repoId.isEmpty() && list.isNotEmpty()) {
@@ -270,16 +303,10 @@ class WorkFormState(
     }
 
     private suspend fun loadMe() {
-        val user = attempt { api.currentUser() } ?: return
-        me = user
+        me = attempt { api.currentUser() } ?: return
         // If GitHub was picked before the account loaded, fill the login in now.
-        val login = user.username
         val d = draft
-        if (user.provider == "github" && !login.isNullOrEmpty() && d.whenType == WhenType.GITHUB &&
-            d.event.config.string("login").isBlank()
-        ) {
-            draft = d.copy(event = d.event.copy(config = d.event.config.with("login", JsonPrimitive(login))))
-        }
+        if (d.whenType == WhenType.GITHUB) draft = d.copy(event = withLoginPrefill(d.event))
     }
 
     /** Fetches the catalog for the current runtime's provider (once per provider). */
