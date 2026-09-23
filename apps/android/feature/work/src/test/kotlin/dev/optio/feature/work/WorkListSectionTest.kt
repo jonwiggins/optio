@@ -136,6 +136,15 @@ class WorkListSectionTest {
     }
 
     @Test
+    fun aFailedFirstLoadShowsTheErrorNotAnEmptyState() {
+        // Regression: an unreachable server read "Nothing needs you right now" under the error.
+        show(load = { throw java.io.IOException("Connection refused") })
+        compose.onNodeWithTag("error-row").assertIsDisplayed()
+        compose.onNodeWithText("Nothing needs you right now").assertDoesNotExist()
+        compose.onNodeWithTag("empty-state-action").assertDoesNotExist()
+    }
+
+    @Test
     fun membersKeepTheFab() {
         show(user = Samples.currentUser(role = CurrentUser.ROLE_MEMBER))
         compose.onNodeWithTag("new-work").assertIsDisplayed()
