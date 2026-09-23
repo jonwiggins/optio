@@ -98,6 +98,11 @@ emu.sh http <serial|port> <http://host:port/path> [--token PAT]
   `--gpu swiftshader_indirect` is the software fallback if `host` misbehaves.
 - State and logs: `~/.android/optio-devlab/emulators/<port>/` (`emulator.log`, pid, owner).
 
+**Capacity.** Each instance costs ~7 GB of host RAM (guest RAM defaults to 3 GB via
+`OPTIO_EMU_MEMORY`). `start` refuses with **exit 75** while `OPTIO_EMU_MAX` (default 3) emulators
+already run on the Mac — do your JVM/Robolectric checks and retry later; never stop someone else's
+instance to make room. Keep your emulator up only while you use it.
+
 ### The AVDs
 
 | AVD                | Image                                                                                                                                                   | Hardware                                                                                                                 |
@@ -143,6 +148,13 @@ adb -s $SERIAL logcat -d -t 200 '*:W'
   `am start`, but a screenshot right after `start` may show a half-drawn home screen.
 
 ### Reaching the API from the device
+
+**Android 17 local network protection:** the app needs the runtime permission
+`android.permission.ACCESS_LOCAL_NETWORK` to reach private addresses such as `10.0.2.2` (without it
+its sockets hang and time out, while `emu.sh http` — toybox `nc` from the shell — still works).
+Install with `adb install -r -g app-debug.apk` (pre-grants runtime permissions) or run
+`adb shell pm grant dev.optio.android android.permission.ACCESS_LOCAL_NETWORK`. `adb reverse` +
+`http://127.0.0.1:<port>` needs no permission (loopback is not "local network").
 
 The API listens on 127.0.0.1 only. The emulator maps **`10.0.2.2` to the host's loopback**,
 so `http://10.0.2.2:4961` works with no setup; check it with

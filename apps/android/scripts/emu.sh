@@ -16,7 +16,10 @@
 # an instance another worktree started unless you pass --force.
 #
 # Env: ANDROID_HOME (default ~/Library/Android/sdk), OPTIO_EMU_GPU (default host),
-#      OPTIO_EMU_AVD (default optio), OPTIO_DEVLAB_STATE (default ~/.android/optio-devlab).
+#      OPTIO_EMU_AVD (default optio), OPTIO_DEVLAB_STATE (default ~/.android/optio-devlab),
+#      OPTIO_EMU_MAX (default 3: `start` exits 75 while that many emulators already run on this
+#      machine — each costs ~7 GB, and many agents share the Mac), OPTIO_EMU_MEMORY (guest RAM in
+#      MB, default 3072).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -150,6 +153,15 @@ cmd_start() {
     esac
   done
   need_tools
+  if [ "$reuse" != 1 ] || [ -z "$port" ] || [ -z "$(find_emulator_pid "$port")" ]; then
+    local max="${OPTIO_EMU_MAX:-3}" running
+    running="$(pgrep -f 'qemu-system-' 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$running" -ge "$max" ]; then
+      log "device lab full: $running/$max emulators already running on this Mac (see: emu.sh list)."
+      log "Do JVM/Robolectric checks meanwhile and retry later; never stop another agent's emulator."
+      exit 75
+    fi
+  fi
   "$EMULATOR" -list-avds 2>/dev/null | grep -qx "$avd" ||
     die "AVD '$avd' not found (have: $("$EMULATOR" -list-avds 2>/dev/null | tr '\n' ' '))"
 
@@ -186,7 +198,7 @@ cmd_start() {
   dir="$(state_dir "$port")"
   logf="$dir/emulator.log"
   local args=(-avd "$avd" -read-only -no-snapshot-load -no-snapshot-save -no-audio -no-boot-anim
-    -no-metrics -port "$port" -gpu "$gpu")
+    -no-metrics -port "$port" -gpu "$gpu" -memory "${OPTIO_EMU_MEMORY:-3072}")
   [ "$window" = 1 ] || args+=(-no-window)
 
   # New session (setsid) so the emulator outlives this shell and its process group.
