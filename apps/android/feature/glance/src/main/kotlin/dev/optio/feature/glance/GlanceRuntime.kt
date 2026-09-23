@@ -1,5 +1,6 @@
 package dev.optio.feature.glance
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Context
 import android.os.Handler
@@ -159,6 +160,8 @@ class GlanceRuntime private constructor(
     }
 
     companion object {
+        // Holds the application context only (never an activity): no leak.
+        @SuppressLint("StaticFieldLeak")
         @Volatile
         private var instance: GlanceRuntime? = null
 

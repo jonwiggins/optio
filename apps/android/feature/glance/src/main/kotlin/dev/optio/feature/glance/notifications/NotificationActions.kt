@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.core.app.NotificationCompat
+import androidx.core.net.toUri
 import dev.optio.feature.glance.R
 
 /**
@@ -133,7 +134,7 @@ object NotificationActions {
         Intent(context, NotificationActionReceiver::class.java)
             .setAction(INTENT_PREFIX + action.raw)
             // Distinct data per notification + action: PendingIntents never overwrite each other.
-            .setData(Uri.parse("optio-notification://action/" + Uri.encode(key)))
+            .setData(("optio-notification://action/" + Uri.encode(key)).toUri())
             .putExtras(target.toExtras())
 
     private fun broadcast(

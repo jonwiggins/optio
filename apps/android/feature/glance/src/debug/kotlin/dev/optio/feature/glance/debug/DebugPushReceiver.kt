@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.core.content.edit
 import dev.optio.core.model.OptioJson
 import dev.optio.feature.glance.GlanceRuntime
 import dev.optio.feature.glance.push.FirebaseTokenSource
@@ -44,8 +45,9 @@ class DebugPushReceiver : BroadcastReceiver() {
                     }
                     "dev.optio.android.DEBUG_FCM_TOKEN" -> {
                         val token = intent.getStringExtra("token")
-                        context.getSharedPreferences(FirebaseTokenSource.DEBUG_PREFS, Context.MODE_PRIVATE)
-                            .edit().putString(FirebaseTokenSource.DEBUG_TOKEN, token).commit()
+                        context.getSharedPreferences(FirebaseTokenSource.DEBUG_PREFS, Context.MODE_PRIVATE).edit {
+                            putString(FirebaseTokenSource.DEBUG_TOKEN, token)
+                        }
                         runtime.registrar.sync()
                         Log.i(TAG, "registration → ${runtime.status.state.value.servers}")
                     }

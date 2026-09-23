@@ -5,8 +5,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import dev.optio.core.model.PushDevice
 import dev.optio.core.model.PushPlatform
 import java.time.Instant
@@ -62,7 +64,7 @@ class PushStatus internal constructor(
     /** Records that the system prompt was shown (so a later "not granted" reads as denied). */
     fun markPrompted(context: Context? = appContext) {
         val ctx = context ?: return
-        prefs(ctx).edit().putBoolean(PROMPTED_ONCE, true).apply()
+        prefs(ctx).edit { putBoolean(PROMPTED_ONCE, true) }
         refreshPermission(ctx)
     }
 
@@ -90,7 +92,7 @@ class PushStatus internal constructor(
         val ctx = appContext ?: return
         val now = covered(ctx)
         val next = if (covered) now + serverId else now - serverId
-        if (next != now) prefs(ctx).edit().putStringSet(PUSH_COVERED, next).apply()
+        if (next != now) prefs(ctx).edit { putStringSet(PUSH_COVERED, next) }
     }
 
     private fun covered(context: Context): Set<String> = prefs(context).getStringSet(PUSH_COVERED, null).orEmpty()
@@ -254,6 +256,7 @@ object NotificationPermission {
     const val PERMISSION: String = "android.permission.POST_NOTIFICATIONS"
 
     /** Android 13+ asks at runtime. */
+    @get:ChecksSdkIntAtLeast(api = 33)
     val isRuntime: Boolean
         get() = Build.VERSION.SDK_INT >= 33
 
