@@ -55,6 +55,7 @@ class TasksScreenshotTest : ScreenshotTest() {
         wholeScreen: Boolean = false,
         interact: dev.optio.core.testing.ScreenScope.() -> Unit = {},
         viewer: Boolean = false,
+        followed: Boolean = false,
     ) = captureScreens(name, size = size, clock = clock, wholeScreen = wholeScreen, interact = interact) {
         CompositionLocalProvider(LocalCurrentUser provides if (viewer) Samples.currentUser(role = "viewer") else null) {
             TaskDetailContent(
@@ -65,6 +66,8 @@ class TasksScreenshotTest : ScreenshotTest() {
                 busy = false,
                 actions = TaskDetailActions(),
                 initialSection = section,
+                followed = followed,
+                onToggleFollow = {},
             )
         }
     }
@@ -75,7 +78,16 @@ class TasksScreenshotTest : ScreenshotTest() {
     fun taskPrOpenedLogs() = taskScreen("Task_PrOpened_Logs", TaskSamples.prOpened, logs = TaskSamples.prLogs)
 
     @Test
-    fun taskStalledRunning() = taskScreen("Task_Running_Stalled", TaskSamples.stalledRunning, logs = TaskSamples.transcript)
+    fun taskStalledRunning() = taskScreen("Task_Running_Stalled", TaskSamples.stalledRunning, logs = TaskSamples.transcript, followed = true)
+
+    @Test
+    fun taskRunningMenu() = taskScreen(
+        "Task_Running_Menu",
+        TaskSamples.stalledRunning,
+        logs = TaskSamples.transcript,
+        wholeScreen = true,
+        interact = { onNodeWithTag("overflow").performClick() },
+    )
 
     @Test
     fun taskFailedWithMenu() = taskScreen(

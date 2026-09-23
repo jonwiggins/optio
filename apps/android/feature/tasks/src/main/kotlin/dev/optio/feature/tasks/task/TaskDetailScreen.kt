@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AddTask
 import androidx.compose.material.icons.outlined.Bedtime
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,6 +43,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
@@ -62,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.optio.core.glance.WatchSources
 import dev.optio.core.model.AgentLogEntry
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.LocalTerminalRoute
@@ -91,6 +96,7 @@ import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
+import dev.optio.core.ui.toast.LocalToaster
 import dev.optio.feature.tasks.common.CollectUiMessages
 import dev.optio.feature.tasks.common.DetailScaffold
 import dev.optio.feature.tasks.common.MenuAction
@@ -138,6 +144,16 @@ internal fun TaskDetailScreen(vm: TaskDetailViewModel) {
     }
     CollectUiMessages(vm.messages)
 
+    // "Follow in Watch notification" (iOS "Follow on Lock Screen", `FollowedTasks`).
+    val context = LocalContext.current
+    val toaster = LocalToaster.current
+    val sources = remember(context) { WatchSources.get(context) }
+    val followedIds by sources.followedTasks.collectAsStateWithLifecycle()
+    val followed = vm.taskId in followedIds
+    val finished = state.value?.isTerminal == true
+    // A finished task leaves the Watch (iOS unfollows on load; the Watch also drops it).
+    LaunchedEffect(finished, followed) { if (finished && followed) sources.unfollow(vm.taskId) }
+
     var showCreateSubtask by remember { mutableStateOf(false) }
     var showAddDependency by remember { mutableStateOf(false) }
 
@@ -147,6 +163,11 @@ internal fun TaskDetailScreen(vm: TaskDetailViewModel) {
         logConnected = connected,
         logLoaded = logsLoaded,
         busy = busy,
+        followed = followed,
+        onToggleFollow = {
+            val now = sources.toggle(vm.taskId)
+            toaster.success(if (now) "Following in the Watch notification" else "No longer following")
+        },
         actions = TaskDetailActions(
             retryLoad = vm::load,
             refresh = vm::load,
@@ -212,6 +233,8 @@ fun TaskDetailContent(
     actions: TaskDetailActions,
     modifier: Modifier = Modifier,
     initialSection: TaskSection = TaskSection.LOGS,
+    followed: Boolean = false,
+    onToggleFollow: (() -> Unit)? = null,
 ) {
     val detail = state.value
     val canMutate = Roles.canMutate
@@ -224,9 +247,34 @@ fun TaskDetailContent(
         modifier = modifier.testTag("task-detail"),
         actions = {
             if (detail != null) {
-                OverflowMenu(items = menuItems(detail, canMutate, actions) { title, message, label, act ->
-                    confirm.ask(title, message, label, destructive = true, onConfirm = act)
-                }, busy = busy)
+                val follow = onToggleFollow?.takeIf { !detail.isTerminal }
+                if (follow != null) {
+                    IconButton(onClick = follow, modifier = Modifier.testTag("follow")) {
+                        Icon(
+                            if (followed) Icons.Filled.Visibility else Icons.Outlined.Visibility,
+                            contentDescription = if (followed) "Unfollow in Watch notification" else "Follow in Watch notification",
+                            tint = if (followed) OptioTheme.colors.accent else LocalContentColor.current,
+                        )
+                    }
+                }
+                val items = buildList {
+                    if (follow != null) {
+                        add(
+                            MenuAction(
+                                if (followed) "Unfollow in Watch notification" else "Follow in Watch notification",
+                                if (followed) Icons.Filled.Visibility else Icons.Outlined.Visibility,
+                                testTag = "action-follow",
+                                onClick = follow,
+                            ),
+                        )
+                    }
+                    addAll(
+                        menuItems(detail, canMutate, actions) { title, message, label, act ->
+                            confirm.ask(title, message, label, destructive = true, onConfirm = act)
+                        }.mapIndexed { index, item -> if (index == 0 && follow != null) item.copy(dividerBefore = true) else item },
+                    )
+                }
+                OverflowMenu(items = items, busy = busy)
             }
         },
         bottomBar = {
