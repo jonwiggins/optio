@@ -12,3 +12,11 @@ data class LocalTerminalRoute(val id: String, val compose: Boolean = false) : Na
 /** A Local automation (`local_blueprints` row). */
 @Serializable
 data class LocalAutomationRoute(val id: String) : NavKey
+
+/** A new Local automation ([id] null) or the edit form of an existing one. */
+@Serializable
+data class LocalAutomationFormRoute(val id: String? = null) : NavKey
+
+/** One paired machine (`local_hosts` row): its directories, terminals and automations. */
+@Serializable
+data class LocalHostRoute(val id: String) : NavKey

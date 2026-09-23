@@ -82,7 +82,7 @@ class LocalTerminalViewModel(
     sealed interface Event {
         data class Toast(val message: String, val tone: Tone = Tone.SUCCESS) : Event
 
-        data class Failed(val error: Throwable, val what: String? = null) : Event
+        data class Failed(val error: Throwable, val verb: String) : Event
 
         /** The terminal is gone (deleted): leave the screen. */
         data object Closed : Event
@@ -334,20 +334,20 @@ class LocalTerminalViewModel(
     // region Actions
 
     fun start() =
-        action("start") {
+        action("start the terminal") {
             applyTerminal(api.startLocalTerminal(terminalId))
             toast("Starting terminal…")
         }
 
     fun kill(signal: String? = null) =
-        action("kill") {
+        action("kill the terminal") {
             api.killLocalTerminal(terminalId, signal)
             toast(if (signal == "SIGKILL") "Kill signal sent (SIGKILL)" else "Kill signal sent")
             load(quiet = true)
         }
 
     fun delete() =
-        action("delete") {
+        action("delete the terminal") {
             api.deleteLocalTerminal(terminalId)
             _stream.value?.disconnect()
             _stream.value = null
@@ -356,7 +356,7 @@ class LocalTerminalViewModel(
         }
 
     fun resume() =
-        action("resume") {
+        action("resume the session") {
             val resumed = api.resumeLocalTerminal(terminalId)
             toast("Resuming session in a new terminal")
             eventChannel.send(Event.Open(LocalTerminalRoute(resumed.id)))
@@ -365,13 +365,13 @@ class LocalTerminalViewModel(
     fun rename(title: String) {
         val trimmed = title.trim()
         if (trimmed.isEmpty() || trimmed == _terminal.value.value?.title) return
-        action("rename") { applyTerminal(api.renameLocalTerminal(terminalId, trimmed)) }
+        action("rename the terminal") { applyTerminal(api.renameLocalTerminal(terminalId, trimmed)) }
     }
 
     /** "Later": out of the needs-you queue for 15 minutes (the server's snooze, else this phone's). */
     fun snooze() {
         val store = snoozeStore ?: return
-        action("snooze") {
+        action("snooze it") {
             val outcome = store.snooze(terminalId, api)
             toast(if (outcome == SnoozeStore.Outcome.SERVER) "Snoozed for ${SnoozeStore.DEFAULT_MINUTES} min" else "Snoozed on this phone for ${SnoozeStore.DEFAULT_MINUTES} min")
             load(quiet = true)
@@ -380,7 +380,7 @@ class LocalTerminalViewModel(
 
     fun unsnooze() {
         val store = snoozeStore ?: return
-        action("unsnooze") {
+        action("put it back in the queue") {
             store.unsnooze(terminalId, api)
             toast("Back in the needs-you queue")
             load(quiet = true)
@@ -400,7 +400,7 @@ class LocalTerminalViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                eventChannel.send(Event.Failed(e, "input"))
+                eventChannel.send(Event.Failed(e, "send the text"))
             }
         }
     }
@@ -418,7 +418,7 @@ class LocalTerminalViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                eventChannel.send(Event.Failed(e, "message"))
+                eventChannel.send(Event.Failed(e, "send the message"))
                 return
             }
         }

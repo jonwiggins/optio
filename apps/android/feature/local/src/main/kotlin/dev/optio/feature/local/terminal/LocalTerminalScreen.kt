@@ -79,6 +79,7 @@ import dev.optio.feature.local.model.LocalSessionView
 import dev.optio.feature.local.snooze.SnoozeStore
 import dev.optio.feature.local.stream.LocalTerminalStream
 import dev.optio.feature.local.transcript.LocalTranscriptModel
+import dev.optio.feature.local.ui.actionFailure
 import java.time.Instant
 import kotlinx.coroutines.launch
 
@@ -117,7 +118,7 @@ fun LocalTerminalScreen(
         vm.events.collect { event ->
             when (event) {
                 is LocalTerminalViewModel.Event.Toast -> toaster.toast(event.message, event.tone)
-                is LocalTerminalViewModel.Event.Failed -> toaster.error(event.error, event.what)
+                is LocalTerminalViewModel.Event.Failed -> toaster.error(actionFailure(event.error, event.verb))
                 LocalTerminalViewModel.Event.Closed -> navigator.pop()
                 is LocalTerminalViewModel.Event.Open -> navigator.push(event.route)
             }
