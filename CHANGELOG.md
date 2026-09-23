@@ -7,25 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **One noun: Sessions.** Tasks, Jobs, scheduled blueprints, Local automations, interactive terminals, and Persistent Agents are now presented as one kind of thing — a **session** with five attributes: **When** (now / schedule / webhook / ticket / GitHub · Slack · Linear event / messages), **Where** (an Optio pod with or without a repo, or a directory on your own machine), **Who** (a terminal or an agent runtime + its parameters), **What** (the prompt), and **Then** (exits when done / waits for me / persistent agent). `/sessions` is the unified feed (Active · Recurring · Agents · History) with one status scale; `/sessions/new` is the single creation form, which reads the draft back as a sentence and derives the storage kind from the attributes (`deriveKind`). `/tasks/new`, `/jobs/new`, and `/agents/new` redirect there. The sidebar is now **Work** (Sessions · Reviews · Inbox) and **Library** (Prompts · Repos · Machines · Connections); per-kind pages remain as detail surfaces (#594).
-- **Overview** opens with a sessions board built from the same feed (needs you · live · recurring · agents), then usage limits, recent runs, and activity (#594).
-- **Machines** is a Library page for paired Optio Local hosts (#594).
-- **iOS**: Sessions-first navigation on the unified feed, Machines, an overview board, session widgets, a Live Activity, and Dynamic Island on the session model; usage limits on the Overview and in session headers (#594, #597, #598).
-- **Docs** rewritten around the session model: README, `docs/tasks.md`, `docs/persistent-agents.md`, `docs/optio-local.md`, `examples/`, and the marketing site.
+## [0.6.0] - 2026-09-23
 
 ### Added
 
-- **Run location on every Task and Job** — `runTarget = cluster | local` with a host, directory, and session mode; local runs are dispatched to the daemon as agent terminals and the terminal's frames drive the run state (#589, #590).
-- **Local automations** with GitHub / Slack / Linear event triggers (signed ingress), interactive vs headless session modes, resume of an exited agent session, saved prompts as the command, and hardened event fan-out (#591 and preceding).
-- **Per-model 7-day usage limits** (Claude Fable) in the usage widgets (#592); the Claude OAuth token can be refreshed from a paired machine's daemon (#593).
-- A finished local agent session can be read back as its full conversation (#591).
+- **Optio for iOS** — a native SwiftUI app (`apps/ios`): the Overview board, the Work feed and a native New work form with every option the web form has, Optio Local terminals with Transcript and Screen faces, Insights, persistent agents, and pod sessions. Sign-in pairs the device with a personal access token. Widgets, Controls, App Intents, a Live Activity and Dynamic Island, notifications over APNs, alternate app icons, and two windows on iPad. Its models are generated from the shared TypeScript types (`pnpm gen:swift`, checked in CI) (#597, #598, #600, #603, #606, #613).
+- **Optio for Android** — a native Kotlin + Jetpack Compose app at parity with iOS (`apps/android`), with notifications you can reply to, widgets, Quick Settings tiles, multiple servers, and `optio://` links. The API sends push over **FCM** alongside APNs (optional; see `docs/android-push.md`), and `pnpm gen:kotlin` generates the app's models (#618).
+- **Run Tasks and Jobs on your own machine** — every Task, Job, and scheduled Task has a run location (`cluster`, or `local` with a host, directory, and session mode). Local runs go to the Optio Local daemon as agent terminals, and the terminal drives the run's state (#590).
+- **Local automations on events** — GitHub, Slack, and Linear event triggers with signed ingress, interactive or headless session modes, saved prompts as the command, and resume of an exited agent session.
+- **Personal access tokens** are created and revoked in Settings.
+- **Full agent parameters for every pod run** — Jobs and persistent agents keep `agent_options` (effort, thinking, context window, approval mode, …) the way Tasks do (#599).
+- **Run names from trigger params** — recurring work can name each run from its trigger's `{{params}}`, e.g. `Triage: {{ticketTitle}}` (#617).
+- **Optio Local** (restart `optio local up` on each machine to pick these up):
+  - A finished agent session reads back as its full conversation. Sessions recorded before transcripts existed are backfilled from Claude Code's own log by the machine's daemon (#591, #619).
+  - An exited terminal replays its final screen at its recorded size (#587).
+  - The terminal follows whoever is typing; other viewers see it scaled to fit.
+  - A machine keeps its identity when its hostname changes, and Machines can merge an offline duplicate into the machine it became (#619).
+  - The Claude OAuth token can be refreshed from a paired machine's daemon (#593).
+- **Per-model 7-day usage limits** (Claude Fable) in the usage widgets (#592).
+- The pod session chat is one Claude conversation across turns and reconnects (#602).
+
+### Changed
+
+- **One noun: Work.** Tasks, Jobs, scheduled Tasks, Local automations, terminals, and persistent agents are all presented as **work** with five attributes: **When** (now, a schedule, a webhook, a ticket, a GitHub / Slack / Linear event, or messages), **Where** (an Optio pod, with or without a repo, or a directory on your own machine), **Who** (a terminal or an agent runtime and its parameters), **What** (the prompt), and **Then** (exits when done, waits for me, or a persistent agent). `/work` is the one feed (Active · Recurring · Agents · History) and `/work/new` the one form; recurring work is edited in the same form at `/work/:id/edit`. The sidebar is **Overview · Work · Reviews · Inbox**, then **Library** (Prompts · Repos · Machines · Connections). The per-kind list and creation pages, and the interim `/sessions` pages, redirect; detail pages stay (#594, #599, #601, #615).
+- **One trigger layer.** Every trigger type attaches to every kind of work — a GitHub event can start a Job or a scheduled Task in a pod as well as an automation on your machine — through one CRUD and one dispatcher, and a definition can carry several triggers of one type (#615, #616).
+- **Overview** opens with a board built from the Work feed (needs you, live, recurring, agents), then usage limits, recent runs, and activity (#594).
+- **Machines** is a Library page for paired computers and their automations (#594).
+- A denser sidebar with collapsible groups; admin pages moved to the user menu.
+- The README, docs, examples, and marketing site are rewritten around the work model (#604, #610, #614).
 
 ### Fixed
 
-- Local session and Job run spend now count in Insights costs (#595).
-- The per-IP API rate limit is configurable (`OPTIO_RATE_LIMIT_MAX`, default 600/min) so the iOS app's direct polling no longer trips 429s (#596).
+- Opening a Local session from Work (or any other list page) stuck on "connecting…" until a reload: those pages carried the build-time API URL (#612).
+- **Issues** names the repos and ticket providers it couldn't read, such as a stale `GITHUB_TOKEN`, instead of showing an empty list (#611).
+- GitHub, Slack, and Linear webhooks were rejected with 401 when auth was enabled (#618).
+- WebSocket messages sent before authentication finished were dropped, which kept `optio local up` from connecting to an auth-enabled API (#618).
+- Pod session chat dropped a message sent right after connecting, replayed events out of order, and reset its cost on reconnect (#618).
+- `GET /api/activity`, cost filtering by repo, and deleting a trigger that had started runs returned 500; raw database timestamps reached JSON, which kept iOS from loading an agent with a pending message (#618).
+- **Resume chat** on a finished Local session opens the resume already in progress instead of starting another, and says when the machine is offline (#619).
+- The New work form's answers reach the API intact: pod kinds were rejected, a pod session lost its name, a new branch on a machine was dropped, ticket triggers on Jobs and agents never fired, and unnamed work was always "Session 2" (#599, #601).
+- A revoked Claude token is detected, so the automatic refresh from a paired machine fires (#617).
+- Local terminals: a stale echo of our own resize no longer hides the bottom rows (#588); previews and PR links are read off a screen model, so full-screen agents no longer produce bogus PR badges (#608); the session title no longer runs into the status dot (#589); the usage pill stays visible when the usage read fails (#605).
+- Local session and Job run spend count in Insights costs (#595).
+- The per-IP API rate limit is configurable (`OPTIO_RATE_LIMIT_MAX`, default 600/min), so the mobile apps' polling no longer trips 429s (#596).
+
+### Security
+
+- `/api/webhooks/slack/actions` now verifies Slack's signature. **Deployments that use the Slack action buttons must set `SLACK_SIGNING_SECRET`** (#618).
 
 ## [0.5.0] - 2026-09-18
 

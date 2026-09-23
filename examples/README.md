@@ -1,7 +1,7 @@
 # Optio examples
 
-Working configurations and setup scripts for the kinds of [session](../docs/tasks.md)
-Optio runs — one-shot PR sessions, no-repo jobs, and persistent multi-agent swarms.
+Working configurations and setup scripts for the kinds of [work](../docs/tasks.md)
+Optio runs — one-shot PR runs, no-repo jobs, and persistent multi-agent swarms.
 Each example is **self-contained**, **runnable** against a local Optio cluster,
 and **idempotent** (re-running setup scripts is safe).
 
@@ -25,9 +25,9 @@ examples/
 ```
 
 Pick by what shape of work you have (the folder names are the pre-v0.5 kind names; in
-the UI all of these are sessions):
+the UI all of these are work):
 
-| You want…                                             | Session shape                                  | Folder               |
+| You want…                                             | Shape                                          | Folder               |
 | ----------------------------------------------------- | ---------------------------------------------- | -------------------- |
 | An agent that opens a PR and is done                  | pod + repo, exits when done                    | `repo-tasks/`        |
 | A scheduled or webhook-triggered single-shot job      | pod, no repo, exits when done, cron / webhook  | `standalone-tasks/`  |
@@ -68,17 +68,17 @@ OPTIO_API_TOKEN=$(cat ~/.optio-token) \
   ./examples/persistent-agents/forge/setup.sh
 ```
 
-After provisioning, everything shows up in the unified **Sessions** feed at `/sessions`
+After provisioning, everything shows up in the unified **Work** feed at `/work`
 (persistent agents under the **Agents** view, triggered definitions under **Recurring**,
 runs under **Active** / **History**). The per-kind detail pages still exist:
 
-| Example folder       | Sessions view | Detail page                           |
-| -------------------- | ------------- | ------------------------------------- |
-| `persistent-agents/` | Agents        | `/agents/:id`                         |
-| `repo-tasks/`        | Active        | `/tasks/:id`                          |
-| `standalone-tasks/`  | Recurring     | `/jobs/:id` → `/jobs/:id/runs/:runId` |
+| Example folder       | Work view | Detail page                           |
+| -------------------- | --------- | ------------------------------------- |
+| `persistent-agents/` | Agents    | `/agents/:id`                         |
+| `repo-tasks/`        | Active    | `/tasks/:id`                          |
+| `standalone-tasks/`  | Recurring | `/jobs/:id` → `/jobs/:id/runs/:runId` |
 
-> As of v0.5 the sidebar is **Work** (Sessions · Reviews · Inbox) and **Library** (Prompts · Repos · Machines · Connections). `/tasks/new`, `/jobs/new`, `/agents/new`, and the legacy `/tasks?tab=…` URLs all redirect.
+> As of v0.6 the sidebar is **Overview · Work · Reviews · Inbox**, then **Library** (Prompts · Repos · Machines · Connections). `/tasks/new`, `/jobs/new`, `/agents/new`, `/sessions`, and the legacy `/tasks?tab=…` URLs all redirect.
 
 ## Cleanup
 
