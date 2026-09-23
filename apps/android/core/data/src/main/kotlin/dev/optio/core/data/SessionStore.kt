@@ -50,6 +50,12 @@ class SessionStore(
     private val httpClient: OkHttpClient = OptioHttp.client,
     eventHubFactory: (ApiClient) -> EventHub = { EventHub(it) },
     private val backgroundGrace: Duration = BACKGROUND_GRACE,
+    /**
+     * False when [ServerProfile] cannot be reached at all right now (the app passes "a local server
+     * without the local network permission", `LocalNetworkAccess`): restore and switch then treat it
+     * as unreachable at once instead of waiting out a connect timeout. Call [reconnect] once it can.
+     */
+    private val reachable: suspend (ServerProfile) -> Boolean = { true },
 ) {
     enum class Phase { RESTORING, SIGNED_OUT, SIGNED_IN }
 
@@ -141,6 +147,11 @@ class SessionStore(
                             candidate
                         }
                     } ?: return@inSession
+                if (!reachable(profile)) {
+                    // Known to be unreachable (no local network access): signed in, user unknown.
+                    mutex.withLock { _phase.value = Phase.SIGNED_IN }
+                    break
+                }
                 val verified =
                     try {
                         val me = api.currentUser()
@@ -231,6 +242,8 @@ class SessionStore(
                     _generation.value
                 } ?: return@inSession
             try {
+                val profile = _activeServer.value
+                if (profile != null && !reachable(profile)) return@inSession
                 val me = api.currentUser()
                 mutex.withLock { if (_generation.value == generation) _user.value = me }
             } catch (e: ApiError) {
@@ -294,6 +307,16 @@ class SessionStore(
         } catch (_: ApiError) {
             // Unreachable, or 401 (the onUnauthorized re-check decides whether the server goes).
         }
+    }
+
+    /**
+     * The active server became reachable (e.g. local network access was just granted): reopens the
+     * event socket at once instead of after its pending connect times out, and re-reads the user.
+     */
+    suspend fun reconnect() {
+        if (_phase.value != Phase.SIGNED_IN) return
+        if (events.isRunning) events.restart()
+        refreshUser()
     }
 
     /** Sets the workspace override for the active server (sent as `x-workspace-id`) and persists it. */

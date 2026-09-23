@@ -423,6 +423,44 @@ class SessionStoreTest {
 
     // endregion
 
+    // region Unreachable servers (no local network access)
+
+    @Test
+    fun anUnreachableServerSignsInAtOnceAndReconnectsLater() =
+        runBlocking<Unit> {
+            val api = fake(email = "lan@example.com")
+            val profile = paired(api.url)
+            var reachable = false
+            val session = SessionStore(registry, scope, backgroundGrace = 50.milliseconds, reachable = { reachable })
+            session.restore()
+            assertEquals(Phase.SIGNED_IN, session.phase.value)
+            assertEquals(profile.id, session.activeServer.value?.id)
+            assertNull(session.user.value)
+            assertEquals(0, api.meRequests(), "no probe that could only time out")
+
+            reachable = true // the permission was granted
+            session.reconnect()
+            assertEquals("lan@example.com", session.user.value?.email)
+        }
+
+    @Test
+    fun switchingToAnUnreachableServerSkipsTheProbe() =
+        runBlocking<Unit> {
+            val first = fake()
+            val lan = fake()
+            val session = SessionStore(registry, scope, reachable = { it.url != lan.url })
+            session.restore()
+            session.addServer(first.url, GOOD)
+            val far = paired(lan.url, id = "lan")
+            session.switchTo(far.id)
+            assertEquals(far.id, session.activeServer.value?.id)
+            assertNull(session.user.value)
+            assertFalse(session.switching.value)
+            assertEquals(0, lan.meRequests())
+        }
+
+    // endregion
+
     // region Events and lifecycle
 
     @Test
