@@ -198,6 +198,7 @@ private fun ParamField(
                 onValueChange = { values[field.name] = it },
                 label = label,
                 placeholder = field.defaultText,
+                supportingText = field.defaultText?.let { "Default: $it" },
                 keyboardType = if (field.type == "number" || field.type == "integer") KeyboardType.Decimal else KeyboardType.Text,
                 capitalization = KeyboardCapitalization.None,
                 testTag = "param-${field.name}",

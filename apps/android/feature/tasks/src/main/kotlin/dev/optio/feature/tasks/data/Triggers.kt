@@ -155,10 +155,19 @@ object TriggerText {
     /** Five space-separated fields. */
     fun cronIsValid(expr: String?): Boolean = expr?.trim()?.split(Regex("\\s+"))?.filter { it.isNotEmpty() }?.size == 5
 
-    /** The footer under a cron field (web `TriggerSelector`'s hint). */
+    /** The presets in words (iOS `WorkForm.cronWords`). */
+    private val cronWords: Map<String, String> = mapOf(
+        "0 * * * *" to "every hour",
+        "0 */6 * * *" to "every 6 hours",
+        "0 9 * * *" to "daily at 09:00 UTC",
+        "0 9 * * 1-5" to "weekdays at 09:00 UTC",
+        "0 9 * * 1" to "Mondays at 09:00 UTC",
+    )
+
+    /** The footer under a cron field (iOS `WhenSection` footer, web `TriggerSelector` hint). */
     fun cronHint(expr: String?): String = when {
         !cronIsValid(expr) -> "Expected five space-separated fields."
-        else -> cronPresets.firstOrNull { it.expr == expr!!.trim() }?.let { "Runs: ${it.label} (UTC)" } ?: "Five-field cron expression (UTC)."
+        else -> cronWords[expr!!.trim()]?.let { "Runs $it." } ?: "Five-field cron expression, in UTC."
     }
 
     /** `<server>/api/hooks/<path>`. */

@@ -144,7 +144,7 @@ fun ScheduledFormContent(
                     }
                 }
                 item(key = "limits") {
-                    FormSection {
+                    FormSection(header = "Limits") {
                         FormStepper("Priority", draft.priority, 0..1000, { v -> onChange { it.copy(priority = v) } }, step = 10, testTag = "scheduled-priority")
                         FormStepper("Max retries", draft.maxRetries, 0..10, { v -> onChange { it.copy(maxRetries = v) } }, testTag = "scheduled-max-retries")
                     }

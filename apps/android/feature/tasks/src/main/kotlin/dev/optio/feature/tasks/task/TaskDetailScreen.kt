@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.Redo
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AddTask
 import androidx.compose.material.icons.outlined.Bedtime
@@ -285,11 +287,11 @@ private fun menuItems(
         if (detail.canCancel) add(MenuAction("Cancel task", Icons.Outlined.Cancel, destructive = true, testTag = "action-cancel") { ask("Cancel this task?", null, "Cancel task", actions.cancel) })
         if (detail.canRetry) add(MenuAction("Retry", Icons.Outlined.Replay, testTag = "action-retry", onClick = actions.retry))
         if (detail.canStart) add(MenuAction("Start", Icons.Outlined.PlayArrow, testTag = "action-start", onClick = actions.start))
-        if (detail.canForceRestart) add(MenuAction("Attempt resume", Icons.Outlined.RestartAlt, testTag = "action-attempt-resume", onClick = actions.attemptResume))
+        if (detail.canForceRestart) add(MenuAction("Attempt resume", Icons.AutoMirrored.Outlined.Redo, testTag = "action-attempt-resume", onClick = actions.attemptResume))
         if (detail.canRequestReview) add(MenuAction("Request review", Icons.Outlined.RateReview, testTag = "action-review", onClick = actions.requestReview))
         if (detail.canRunNow) add(MenuAction("Run now", Icons.Outlined.Bolt, testTag = "action-run-now", onClick = actions.runNow))
         add(
-            MenuAction("Force redo", Icons.Outlined.Replay, destructive = true, dividerBefore = true, testTag = "action-force-redo") {
+            MenuAction("Force redo", Icons.Outlined.RestartAlt, destructive = true, dividerBefore = true, testTag = "action-force-redo") {
                 ask("Force redo this task?", "Force redo clears all logs and results and re-runs the task from scratch.", "Force redo", actions.forceRedo)
             },
         )
@@ -482,6 +484,7 @@ private fun ModePicker(mode: MessageMode, onMode: (MessageMode) -> Unit) {
     Box(Modifier.fillMaxWidth().padding(horizontal = Spacing.s)) {
         TextButton(onClick = { open = true }, modifier = Modifier.testTag("message-mode")) {
             Text(mode.label, style = OptioTheme.type.caption)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Change how the message is delivered", modifier = Modifier.size(18.dp))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             MessageMode.entries.forEach { option ->

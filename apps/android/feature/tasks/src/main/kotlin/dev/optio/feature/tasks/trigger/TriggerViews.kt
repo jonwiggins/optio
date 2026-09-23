@@ -107,21 +107,33 @@ fun TriggerRowView(
     val clipboard = LocalClipboard.current
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
-    Row(
+    Column(
         modifier = modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.m).testTag("trigger-${trigger.id}"),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.m),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Box(
-            Modifier.size(32.dp).background(colors.fillTertiary, Radius.smallShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(trigger.kind.icon, contentDescription = null, tint = if (trigger.enabled) colors.label else colors.tertiaryLabel, modifier = Modifier.size(18.dp))
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+        // The type and the controls on one line; what fires it below, full width (a webhook URL
+        // needs the room).
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.m)) {
+            Box(
+                Modifier.size(32.dp).background(colors.fillTertiary, Radius.smallShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(trigger.kind.icon, contentDescription = null, tint = if (trigger.enabled) colors.label else colors.tertiaryLabel, modifier = Modifier.size(18.dp))
+            }
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 Text(trigger.label, style = type.subheadline.semibold(), color = colors.label)
                 if (!trigger.enabled) Text("Paused", style = type.footnote, color = colors.tertiaryLabel)
             }
+            if (onToggle != null) {
+                Switch(checked = trigger.enabled, onCheckedChange = onToggle, modifier = Modifier.testTag("trigger-switch-${trigger.id}"))
+            }
+            if (onDelete != null) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(40.dp).testTag("trigger-delete-${trigger.id}")) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Delete ${trigger.label} trigger", tint = colors.secondaryLabel)
+                }
+            }
+        }
+        Column(Modifier.padding(start = 32.dp + Spacing.m), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             when (trigger.kind) {
                 TriggerKind.SCHEDULE -> {
                     val cron = trigger.cronExpression.orEmpty()
@@ -153,14 +165,6 @@ fun TriggerRowView(
                 trigger.lastFiredAt?.let { "Last ${it.relativeDescription(now)}" },
                 trigger.createdAt?.takeIf { trigger.lastFiredAt == null && trigger.nextFireAt == null }?.let { "Created ${it.relativeDescription(now)}" },
             )?.let { Text(it, style = type.caption, color = colors.tertiaryLabel) }
-        }
-        if (onToggle != null) {
-            Switch(checked = trigger.enabled, onCheckedChange = onToggle, modifier = Modifier.testTag("trigger-switch-${trigger.id}"))
-        }
-        if (onDelete != null) {
-            IconButton(onClick = onDelete, modifier = Modifier.testTag("trigger-delete-${trigger.id}")) {
-                Icon(Icons.Outlined.Delete, contentDescription = "Delete ${trigger.label} trigger", tint = colors.secondaryLabel)
-            }
         }
     }
 }

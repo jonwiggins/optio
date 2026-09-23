@@ -1,5 +1,6 @@
 package dev.optio.feature.tasks.job
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -34,10 +35,10 @@ import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.routes.JobDetailRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.components.ErrorRow
-import dev.optio.core.ui.components.StatusBadge
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.Loadable
 import dev.optio.core.ui.theme.OptioTheme
+import dev.optio.core.ui.theme.Radius
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
 import dev.optio.core.ui.theme.semibold
@@ -85,6 +86,20 @@ fun JobFormScreen(jobId: String?) {
                 }
             }
         },
+    )
+}
+
+/** A detected `{{PARAM}}`, by its exact name (iOS: an accent badge). */
+@Composable
+private fun ParamChip(name: String) {
+    Text(
+        name,
+        style = OptioTheme.type.monoCaption,
+        color = Tone.ACCENT.textColor,
+        modifier = Modifier
+            .background(Tone.ACCENT.color.copy(alpha = 0.14f), Radius.capsuleShape)
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .testTag("param-chip-$name"),
     )
 }
 
@@ -185,7 +200,7 @@ fun JobFormContent(
                         } else if (params.isNotEmpty()) {
                             FormCaption("Detected parameters")
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                                params.forEach { StatusBadge(it, Tone.ACCENT) }
+                                params.forEach { ParamChip(it) }
                             }
                         }
                     }

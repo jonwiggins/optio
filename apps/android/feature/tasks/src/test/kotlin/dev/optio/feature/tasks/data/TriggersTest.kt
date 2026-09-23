@@ -33,8 +33,9 @@ class TriggersTest {
         assertFalse(TriggerText.cronIsValid("0 9 * *"))
         assertFalse(TriggerText.cronIsValid(""))
         assertFalse(TriggerText.cronIsValid(null))
-        assertEquals("Runs: Weekdays 09:00 UTC (UTC)", TriggerText.cronHint("0 9 * * 1-5"))
-        assertEquals("Five-field cron expression (UTC).", TriggerText.cronHint("15 3 * * *"))
+        assertEquals("Runs weekdays at 09:00 UTC.", TriggerText.cronHint("0 9 * * 1-5"))
+        assertEquals("Runs every hour.", TriggerText.cronHint(" 0 * * * * "))
+        assertEquals("Five-field cron expression, in UTC.", TriggerText.cronHint("15 3 * * *"))
         assertEquals("Expected five space-separated fields.", TriggerText.cronHint("0 9"))
     }
 
