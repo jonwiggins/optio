@@ -1,0 +1,35 @@
+{
+  "sessions": [
+    {
+      "id": "f5357591-66cb-46be-849e-728ae45c2628",
+      "repoUrl": "https://github.com/e2e-org/mobile-app",
+      "userId": null,
+      "worktreePath": "/workspace/sessions/b03015db",
+      "branch": "session/anon/b03015db",
+      "title": "Try the new image loader",
+      "state": "ended",
+      "podId": "34bea713-a573-4db4-90c1-f869ead1901f",
+      "costUsd": null,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:46:01.173Z",
+      "endedAt": "2026-09-23T00:46:01.181Z",
+      "agentSessionId": null
+    },
+    {
+      "id": "92236dc9-9510-4e8d-9b7e-2d36eceeaae7",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "userId": null,
+      "worktreePath": "/workspace/sessions/f5035b5a",
+      "branch": "session/anon/f5035b5a",
+      "title": "Investigate slow cold start",
+      "state": "active",
+      "podId": "0eac61ec-4338-4027-b67a-be672aca77c0",
+      "costUsd": "0.0123",
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:46:00.131Z",
+      "endedAt": null,
+      "agentSessionId": "045db2f5-62bd-45bb-b330-ac2405844270"
+    }
+  ],
+  "activeCount": 1
+}
