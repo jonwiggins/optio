@@ -2,17 +2,13 @@ package dev.optio.feature.glance.notifications
 
 import android.util.Log
 import dev.optio.core.data.ServerClient
+import dev.optio.core.glance.GlanceActions
 import dev.optio.core.glance.GlanceStore
 import dev.optio.core.glance.WatchSources
 import dev.optio.feature.glance.controlPersistentAgent
-import dev.optio.feature.glance.resumeTask
-import dev.optio.feature.glance.retryTask
 import dev.optio.feature.glance.sendLocalTerminalInput
 import dev.optio.feature.glance.sendPersistentAgentMessage
 import dev.optio.feature.glance.sendTaskMessage
-import dev.optio.feature.glance.snoozeLocalTerminal
-import java.time.Duration
-import java.time.Instant
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.withTimeoutOrNull
@@ -102,11 +98,8 @@ class NotificationHandler(
 
     /** "Later": a local snooze (so this phone's surfaces agree at once) plus the server-side one for terminals. */
     private suspend fun later(target: ActionTarget): Outcome {
-        val until = Instant.now().plus(Duration.ofMinutes(SNOOZE_MINUTES.toLong()))
-        store.snooze(target.id, until)
-        if (target.kind == "local") {
-            client(target)?.let { c -> runCatching { c.api.snoozeLocalTerminal(target.id, SNOOZE_MINUTES) } }
-        }
+        val client = if (target.kind == "local") client(target) else null
+        GlanceActions.later(store, client, target.kind, target.id, SNOOZE_MINUTES)
         target.tag?.takeIf { target.source == ActionTarget.Source.ALERT }?.let(alerts::cancel)
         return Outcome.DONE
     }
@@ -114,7 +107,7 @@ class NotificationHandler(
     private suspend fun resume(target: ActionTarget): Outcome {
         val client = client(target) ?: return Outcome.NO_SERVER
         when (target.kind) {
-            "task" -> client.api.resumeTask(target.id)
+            "task" -> GlanceActions.resumeTask(client, target.id)
             "agent" -> client.api.controlPersistentAgent(target.id, "resume")
             else -> return Outcome.NOTHING_TO_DO
         }
@@ -125,7 +118,7 @@ class NotificationHandler(
     private suspend fun retry(target: ActionTarget): Outcome {
         if (target.kind != "task") return Outcome.NOTHING_TO_DO
         val client = client(target) ?: return Outcome.NO_SERVER
-        client.api.retryTask(target.id)
+        GlanceActions.retryTask(client, target.id)
         target.tag?.takeIf { target.source == ActionTarget.Source.ALERT }?.let(alerts::cancel)
         return Outcome.DONE
     }
@@ -187,7 +180,7 @@ class NotificationHandler(
 
     companion object {
         /** "Later" snoozes for this long (iOS `SnoozeStore.defaultMinutes`). */
-        const val SNOOZE_MINUTES = 15
+        const val SNOOZE_MINUTES = GlanceActions.SNOOZE_MINUTES
 
         private val PROBE_TIMEOUT = 6.seconds
         private const val TAG = "OptioNotificationActions"

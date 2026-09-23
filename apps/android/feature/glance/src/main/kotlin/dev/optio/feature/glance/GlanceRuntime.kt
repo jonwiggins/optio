@@ -85,10 +85,7 @@ class GlanceRuntime private constructor(
     val notifier = WatchNotifier(context)
     val host: WatchHost = SessionWatchHost(scope)
 
-    val needsYou =
-        NeedsYouNotifier(alerts, NotifiedStore.get(context)) { serverId ->
-            status.state.value.server(serverId)?.receivesPush == true
-        }
+    val needsYou = NeedsYouNotifier(alerts, NotifiedStore.get(context), status::isPushCovered)
 
     val watch =
         WatchManager(

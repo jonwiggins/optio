@@ -74,8 +74,30 @@ class PushStatus internal constructor(
         syncHandler?.invoke()
     }
 
+    /**
+     * Whether [serverId] pushes its own alerts to this device (registered, and the server has FCM
+     * credentials). Remembered across processes, so a background check in a fresh process does
+     * not alert about what the server already pushed.
+     */
+    fun isPushCovered(serverId: String): Boolean =
+        state.value.server(serverId)?.receivesPush ?: (appContext?.let { serverId in covered(it) } ?: false)
+
+    /** Records whether [serverId] pushes to this device (see [isPushCovered]). */
+    fun setPushCovered(
+        serverId: String,
+        covered: Boolean,
+    ) {
+        val ctx = appContext ?: return
+        val now = covered(ctx)
+        val next = if (covered) now + serverId else now - serverId
+        if (next != now) prefs(ctx).edit().putStringSet(PUSH_COVERED, next).apply()
+    }
+
+    private fun covered(context: Context): Set<String> = prefs(context).getStringSet(PUSH_COVERED, null).orEmpty()
+
     companion object {
         private const val PROMPTED_ONCE = "optio.push.promptedOnce"
+        private const val PUSH_COVERED = "optio.push.coveredServers"
 
         @Volatile
         private var shared: PushStatus? = null

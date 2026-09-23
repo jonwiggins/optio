@@ -16,12 +16,6 @@ suspend fun ApiClient.sendLocalTerminalInput(
     data: String,
 ) = post("/api/local/terminals/$id/input", body = InputBody(data))
 
-/** `POST /api/local/terminals/:id/snooze`: "Later" (server-side, so the Watch, widgets and web agree). */
-suspend fun ApiClient.snoozeLocalTerminal(
-    id: String,
-    minutes: Int,
-) = post("/api/local/terminals/$id/snooze", body = SnoozeBody(minutes))
-
 /** `POST /api/persistent-agents/:id/messages`. */
 suspend fun ApiClient.sendPersistentAgentMessage(
     id: String,
@@ -40,12 +34,6 @@ suspend fun ApiClient.sendTaskMessage(
     content: String,
     mode: String = "soft",
 ) = post("/api/tasks/$id/message", body = TaskMessageBody(content, mode))
-
-/** `POST /api/tasks/:id/resume` (no new prompt). */
-suspend fun ApiClient.resumeTask(id: String) = post("/api/tasks/$id/resume", body = emptyMap<String, String>())
-
-/** `POST /api/tasks/:id/retry`. */
-suspend fun ApiClient.retryTask(id: String) = post("/api/tasks/$id/retry")
 
 /** `GET /api/persistent-agents/:id` (the Watch's agent rows). */
 suspend fun ApiClient.getAgentLite(id: String): AgentLite = get<AgentEnvelope>("/api/persistent-agents/$id").agent
@@ -68,11 +56,6 @@ suspend fun ApiClient.sendTestNotification(): Int = post<TestResult>("/api/notif
 @Serializable
 private data class InputBody(
     val data: String,
-)
-
-@Serializable
-private data class SnoozeBody(
-    val minutes: Int,
 )
 
 @Serializable
