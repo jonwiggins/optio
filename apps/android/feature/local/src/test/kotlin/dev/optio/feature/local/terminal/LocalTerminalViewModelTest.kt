@@ -19,6 +19,7 @@ import dev.optio.core.testing.FakeSocket
 import dev.optio.core.testing.Fixtures
 import dev.optio.core.testing.MainDispatcherRule
 import dev.optio.core.testing.Samples
+import dev.optio.core.ui.state.LoadState
 import dev.optio.feature.local.model.LocalSessionView
 import dev.optio.feature.local.snooze.InMemorySnoozePrefs
 import dev.optio.feature.local.snooze.SnoozeStore
@@ -85,7 +86,10 @@ class LocalTerminalViewModelTest {
         }
     }
 
-    private fun TestScope.newVm(snooze: SnoozeStore = SnoozeStore(InMemorySnoozePrefs(), Samples.clock)): LocalTerminalViewModel {
+    private fun TestScope.newVm(
+        snooze: SnoozeStore = SnoozeStore(InMemorySnoozePrefs(), Samples.clock),
+        pollInterval: kotlin.time.Duration = LocalTerminalViewModel.POLL_INTERVAL,
+    ): LocalTerminalViewModel {
         val api = server.client()
         val factory =
             object : ViewModelProvider.Factory {
@@ -94,7 +98,7 @@ class LocalTerminalViewModelTest {
                     extras: CreationExtras,
                 ): T {
                     @Suppress("UNCHECKED_CAST")
-                    return LocalTerminalViewModel(api, id, snoozeStore = snooze) as T
+                    return LocalTerminalViewModel(api, id, snoozeStore = snooze, pollInterval = pollInterval) as T
                 }
             }
         return ViewModelProvider.create(store, factory)[LocalTerminalViewModel::class]
@@ -274,6 +278,33 @@ class LocalTerminalViewModelTest {
             assertEquals("Snoozed on this phone for 15 min", (events.single() as LocalTerminalViewModel.Event.Toast).message)
             assertEquals(Samples.NOW.plusSeconds(15 * 60), snooze.snoozedUntil(id))
             assertNotNull(vm.localSnoozeUntil())
+        }
+
+    @Test
+    fun aTerminalThatFailedToLoadKeepsItsErrorThroughThePolls() =
+        runTest(main.dispatcher) {
+            // QA: every 10 s poll re-ran a full load, flipping the error row to a spinner and back.
+            server.error("GET", "/api/local/terminals/:id", 404, "Not Found")
+            server.get("/api/local/hosts") { FakeResponse.json("""{"hosts":[]}""") }
+            val vm = newVm(pollInterval = kotlin.time.Duration.parse("50ms"))
+            val seen = CopyOnWriteArrayList<LoadState<LocalTerminal>>()
+            backgroundScope.launch { vm.terminal.collect { seen += it } }
+            awaitReal("the failure") { vm.terminal.value is LoadState.Failed }
+            vm.attach()
+            val polled = server.count("GET", "/api/local/terminals/:id")
+            // The poll waits on virtual time: step it while the requests run for real.
+            val deadline = System.currentTimeMillis() + 5_000
+            while (server.count("GET", "/api/local/terminals/:id") < polled + 2) {
+                check(System.currentTimeMillis() < deadline) { "timed out waiting for two polls" }
+                advanceTimeBy(60)
+                awaitReal("a poll to settle", timeoutMs = 1_000) { true }
+                Thread.sleep(20)
+            }
+            awaitReal("the last poll's answer") { vm.terminal.value is LoadState.Failed }
+            vm.detach()
+            val afterFailure = seen.dropWhile { it !is LoadState.Failed }
+            assertTrue(afterFailure.none { it is LoadState.Loading }, "no spinner after the error: $afterFailure")
+            assertTrue(vm.terminal.value is LoadState.Failed)
         }
 
     @Test

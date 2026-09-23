@@ -233,13 +233,16 @@ class LocalTerminalViewModel(
     /** GET the terminal; a quiet reload keeps what's on screen when it fails. */
     suspend fun load(quiet: Boolean = false) {
         val before = _terminal.value.value
-        if (quiet && before != null) {
+        // A quiet reload never shows a spinner: it keeps what's on screen (the row, or the error
+        // row when the first load failed, which the 10 s poll used to flip to a spinner and back).
+        if (quiet && (before != null || _terminal.value is LoadState.Failed)) {
             try {
                 applyTerminal(api.getLocalTerminal(terminalId))
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // Keep the last good row; the next poll retries.
+                if (before == null) _terminal.value = LoadState.Failed(e)
             }
             return
         }
