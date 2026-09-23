@@ -1,11 +1,17 @@
 package dev.optio.app
 
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
@@ -57,7 +63,7 @@ import kotlinx.coroutines.flow.filterNotNull
  * key: it drops its cache itself when the client is re-pointed). The signed-in shell also gets
  * [LocalApiClient], [LocalEventHub] and [LocalCurrentUser].
  */
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun OptioApp(
     session: SessionStore = LocalAppGraph.current.session,
@@ -85,7 +91,15 @@ fun OptioApp(
                         SessionStore.Phase.SIGNED_IN -> SignedIn(session, deepLinks, usage)
                     }
                 }
-                ToastHost(toaster, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp))
+                // Above the tab bar normally; just above the keyboard while it is up (the bar hides then).
+                val imeUp = WindowInsets.isImeVisible
+                ToastHost(
+                    toaster,
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                        .padding(bottom = if (imeUp) 16.dp else 80.dp),
+                )
             }
         }
     }
