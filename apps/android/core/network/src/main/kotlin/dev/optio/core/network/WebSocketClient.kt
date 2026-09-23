@@ -1,6 +1,7 @@
 package dev.optio.core.network
 
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -41,6 +42,11 @@ import okio.ByteString.Companion.toByteString
  * - [disconnect] closes with 1000, emits no [WsFrame.Closed], and completes [frames]; the client
  *   is spent afterwards (create a new one to connect again). Without auto-reconnect, calling
  *   [connect] again after a [WsFrame.Closed] opens a new connection on the same client.
+ * - Sends right after [WsFrame.Opened] are held until the server's first frame arrives, or for
+ *   [sendHold] (300 ms), whichever comes first, then flushed in order. An auth-enabled server
+ *   attaches its message listener only after validating the token, so anything sent before then is
+ *   silently dropped; every Optio stream speaks first (catch-up, `status`, `ready`, history), so
+ *   the hold costs nothing. Sends while no connection is open return false.
  *
  * ```
  * val ws = api.webSocket("/ws/logs/$taskId")
@@ -65,6 +71,7 @@ class WebSocketClient(
     private val httpClient: OkHttpClient = OptioHttp.webSocketClient,
     private val reconnectDelay: Duration = RECONNECT_DELAY,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val sendHold: Duration = SEND_HOLD,
 ) {
     /** [path] on [api]'s server, authenticated with a fresh ws-token (else [api]'s PAT). */
     constructor(api: ApiClient, path: String, autoReconnect: Boolean = true) : this(
@@ -100,6 +107,11 @@ class WebSocketClient(
     private var closed = false
     private var finished = false
 
+    // The send gate of the open connection (see the class doc). Guarded by [lock].
+    private var gateOpen = false
+    private val held = ArrayList<Any>()
+    private var gateJob: Job? = null
+
     /** Every frame, in order, for one collector. Completes after [disconnect]. */
     val frames: Flow<WsFrame> = channel.receiveAsFlow()
 
@@ -125,6 +137,7 @@ class WebSocketClient(
             closed = true
             connectJob?.cancel()
             connectJob = null
+            closeGate()
             socket?.close(CloseCode.NORMAL, null)
             socket = null
             opened = false
@@ -133,22 +146,60 @@ class WebSocketClient(
         scope.cancel()
     }
 
-    /** Sends a text frame; false when not connected. */
-    fun send(text: String): Boolean = currentSocket()?.send(text) ?: false
+    /** Sends a text frame (held until the server has spoken, see above); false when not connected. */
+    fun send(text: String): Boolean = enqueue(text)
 
     /** Sends [json] as a text frame; false when not connected. */
     fun send(json: JsonElement): Boolean = send(json.toString())
 
     /** Sends a binary frame; false when not connected. */
-    fun send(bytes: ByteArray): Boolean = currentSocket()?.send(bytes.toByteString()) ?: false
+    fun send(bytes: ByteArray): Boolean = enqueue(bytes.toByteString())
 
     /** Sends a binary frame; false when not connected. */
-    fun send(bytes: ByteString): Boolean = currentSocket()?.send(bytes) ?: false
+    fun send(bytes: ByteString): Boolean = enqueue(bytes)
 
     /** Sends [value] encoded with the Optio JSON rules as a text frame; false when not connected. */
     inline fun <reified T> sendJson(value: T): Boolean = send(dev.optio.core.model.OptioJson.encodeToString(value))
 
-    private fun currentSocket(): WebSocket? = synchronized(lock) { socket?.takeIf { opened } }
+    /** Transmits [message] now, or holds it while the gate is shut. */
+    private fun enqueue(message: Any): Boolean =
+        synchronized(lock) {
+            val ws = socket?.takeIf { opened } ?: return false
+            if (!gateOpen) {
+                held += message
+                true
+            } else {
+                transmit(ws, message)
+            }
+        }
+
+    private fun transmit(
+        ws: WebSocket,
+        message: Any,
+    ): Boolean =
+        when (message) {
+            is String -> ws.send(message)
+            is ByteString -> ws.send(message)
+            else -> false
+        }
+
+    /** Lets [ws]'s held sends through, in order. Call under [lock]. */
+    private fun openGate(ws: WebSocket) {
+        if (ws !== socket || gateOpen) return
+        gateOpen = true
+        gateJob?.cancel()
+        gateJob = null
+        held.forEach { transmit(ws, it) }
+        held.clear()
+    }
+
+    /** Forgets the connection's gate and anything it held. Call under [lock]. */
+    private fun closeGate() {
+        gateJob?.cancel()
+        gateJob = null
+        gateOpen = false
+        held.clear()
+    }
 
     private suspend fun open() {
         val token =
@@ -184,6 +235,7 @@ class WebSocketClient(
             if (webSocket !== socket) return
             socket = null
             opened = false
+            closeGate()
             emit(WsFrame.Closed(code, reason?.takeIf { it.isNotEmpty() }))
             if (closed || !autoReconnect || code in CloseCode.permanent) return
             connectJob =
@@ -202,6 +254,12 @@ class WebSocketClient(
             synchronized(lock) {
                 if (webSocket !== socket) return
                 opened = true
+                closeGate()
+                gateJob =
+                    scope.launch {
+                        delay(sendHold)
+                        synchronized(lock) { openGate(webSocket) }
+                    }
                 emit(WsFrame.Opened)
             }
         }
@@ -211,14 +269,22 @@ class WebSocketClient(
             text: String,
         ) {
             val frame = textFrame(text)
-            synchronized(lock) { if (webSocket === socket) emit(frame) }
+            synchronized(lock) {
+                if (webSocket !== socket) return
+                openGate(webSocket)
+                emit(frame)
+            }
         }
 
         override fun onMessage(
             webSocket: WebSocket,
             bytes: ByteString,
         ) {
-            synchronized(lock) { if (webSocket === socket) emit(WsFrame.Binary(bytes.toByteArray())) }
+            synchronized(lock) {
+                if (webSocket !== socket) return
+                openGate(webSocket)
+                emit(WsFrame.Binary(bytes.toByteArray()))
+            }
         }
 
         override fun onClosing(
@@ -253,6 +319,9 @@ class WebSocketClient(
 
         /** Delay before an automatic reconnect (web and iOS: 3 s). */
         val RECONNECT_DELAY: Duration = 3.seconds
+
+        /** How long sends wait after open for the server's first frame before they go anyway. */
+        val SEND_HOLD: Duration = 300.milliseconds
 
         private val strictJson = Json
 

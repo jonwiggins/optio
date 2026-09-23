@@ -13,7 +13,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.concurrent.thread
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
@@ -305,6 +307,104 @@ class WebSocketClientTest {
             ws.connect()
             realDelay(200)
             assertEquals(1, server.requestCount, "a disconnected client never connects again")
+        }
+
+    /** Server side that timestamps what arrives and, optionally, speaks first after a delay. */
+    private class TimedServerSocket(
+        private val firstFrameAfterMillis: Long?,
+    ) : WebSocketListener() {
+        val received = LinkedBlockingQueue<Pair<Any, Long>>()
+
+        @Volatile
+        var firstFrameSentAt = 0L
+
+        override fun onOpen(
+            webSocket: WebSocket,
+            response: Response,
+        ) {
+            val delayMillis = firstFrameAfterMillis ?: return
+            // Like an auth-enabled server: busy validating the token for a moment, then speaks.
+            thread {
+                Thread.sleep(delayMillis)
+                firstFrameSentAt = System.nanoTime()
+                webSocket.send("""{"type":"ready"}""")
+            }
+        }
+
+        override fun onMessage(
+            webSocket: WebSocket,
+            text: String,
+        ) {
+            received.put(text to System.nanoTime())
+        }
+
+        override fun onMessage(
+            webSocket: WebSocket,
+            bytes: ByteString,
+        ) {
+            received.put(bytes to System.nanoTime())
+        }
+
+        override fun onClosing(
+            webSocket: WebSocket,
+            code: Int,
+            reason: String,
+        ) {
+            webSocket.close(1000, null)
+        }
+
+        fun next(): Pair<Any, Long> = checkNotNull(received.poll(5, TimeUnit.SECONDS)) { "nothing arrived" }
+    }
+
+    @Test
+    fun sendsRightAfterOpenWaitForTheServersFirstFrameAndKeepTheirOrder() =
+        runTest {
+            val server = TimedServerSocket(firstFrameAfterMillis = 200)
+            enqueueSocket(server)
+            // A long hold: only the server's first frame can let these through in time.
+            val ws = WebSocketClient(url = wsUrl(), tokenProvider = { "tok" }, sendHold = 3.seconds)
+            ws.connect()
+            ws.frames.test {
+                assertEquals(WsFrame.Opened, awaitItem())
+                assertTrue(ws.send("first"))
+                assertTrue(ws.send(byteArrayOf(7)))
+                assertTrue(ws.sendJson(Resize("resize", 80, 24)))
+
+                val first = server.next()
+                assertEquals("first", first.first)
+                assertTrue(first.second >= server.firstFrameSentAt, "held until the server spoke")
+                assertEquals(byteArrayOf(7).toByteString(), server.next().first)
+                assertEquals("""{"type":"resize","cols":80,"rows":24}""", server.next().first)
+                assertIs<WsFrame.Json>(awaitItem())
+
+                // Once the server has spoken, sends go straight out.
+                val sentAt = System.nanoTime()
+                assertTrue(ws.send("later"))
+                val later = server.next()
+                assertEquals("later", later.first)
+                assertTrue(later.second - sentAt < 1_000_000_000L)
+                ws.disconnect()
+                awaitComplete()
+            }
+        }
+
+    @Test
+    fun heldSendsGoAfterTheHoldWhenTheServerStaysQuiet() =
+        runTest {
+            val server = TimedServerSocket(firstFrameAfterMillis = null)
+            enqueueSocket(server)
+            val ws = WebSocketClient(url = wsUrl(), tokenProvider = { "tok" }, sendHold = 300.milliseconds)
+            ws.connect()
+            ws.frames.test {
+                assertEquals(WsFrame.Opened, awaitItem())
+                val sentAt = System.nanoTime()
+                assertTrue(ws.send("hello"))
+                val (message, arrivedAt) = server.next()
+                assertEquals("hello", message)
+                assertTrue(arrivedAt - sentAt >= 250_000_000L, "held for the hold period: ${(arrivedAt - sentAt) / 1_000_000} ms")
+                ws.disconnect()
+                awaitComplete()
+            }
         }
 
     private suspend fun ReceiveTurbine<WsFrame>.expectNoFramesFor(millis: Long) {
