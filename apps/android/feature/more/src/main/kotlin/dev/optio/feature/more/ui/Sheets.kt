@@ -22,8 +22,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.optio.core.ui.theme.OptioTheme
@@ -39,6 +42,7 @@ import dev.optio.core.ui.theme.semibold
  * [dismissible] = false keeps the sheet up against swipes and taps outside (iOS
  * `interactiveDismissDisabled`), e.g. while a new token is on screen.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun MoreSheet(
     title: String,
@@ -64,7 +68,8 @@ fun MoreSheet(
         containerColor = elevated.page,
         // A sheet that can't be swiped away shows no handle.
         dragHandle = if (dismissible) ({ BottomSheetDefaults.DragHandle() }) else null,
-        modifier = modifier.testTag("more-sheet"),
+        // The sheet is its own window: expose test tags as resource ids here too, as the shell does.
+        modifier = modifier.semantics { testTagsAsResourceId = true }.testTag("more-sheet"),
     ) {
         ProvideElevatedSurfaces {
             Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
