@@ -56,8 +56,9 @@ pid_cmd() { ps -o command= -p "$1" 2>/dev/null || true; }
 pid_is_emulator_on_port() {
   local cmd
   cmd="$(pid_cmd "$1")"
-  case "$cmd" in
-    *qemu-system* | *emulator*) ;;
+  # Match the executable (first word), not a shell whose command line merely mentions qemu.
+  case "${cmd%% *}" in
+    *qemu-system* | */emulator) ;;
     *) return 1 ;;
   esac
   case " $cmd " in
@@ -76,7 +77,7 @@ find_emulator_pid() {
   fi
   # Started some other way (Android Studio, a bare `emulator` call): find it by its arguments.
   ps -ax -o pid=,command= 2>/dev/null |
-    awk -v p="$port" '($0 ~ /qemu-system/) && ($0 ~ ("-port " p "( |$)") || $0 ~ ("-ports " p ",")) {print $1; exit}'
+    awk -v p="$port" '($2 ~ /qemu-system/) && ($0 ~ ("-port " p "( |$)") || $0 ~ ("-ports " p ",")) {print $1; exit}'
 }
 
 port_listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t >/dev/null 2>&1; }
@@ -155,7 +156,7 @@ cmd_start() {
   need_tools
   if [ "$reuse" != 1 ] || [ -z "$port" ] || [ -z "$(find_emulator_pid "$port")" ]; then
     local max="${OPTIO_EMU_MAX:-3}" running
-    running="$(pgrep -f 'qemu-system-' 2>/dev/null | wc -l | tr -d ' ')"
+    running="$({ pgrep -f '^[^ ]*qemu-system-' 2>/dev/null || true; } | wc -l | tr -d ' ')"
     if [ "$running" -ge "$max" ]; then
       log "device lab full: $running/$max emulators already running on this Mac (see: emu.sh list)."
       log "Do JVM/Robolectric checks meanwhile and retry later; never stop another agent's emulator."
