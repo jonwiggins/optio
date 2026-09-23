@@ -13,6 +13,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -224,8 +226,13 @@ class ServerRegistryTest {
         return ServerRegistry(profiles, TokenStore(tokens, XorCipher))
     }
 
-    private fun closeStores() {
-        scopes.forEach { it.cancel() }
+    /**
+     * DataStore frees its file only once its scope has completed, so wait for that: opening the
+     * next store on the same file while the old one is still shutting down fails with "multiple
+     * DataStores active for the same file" (seen on slower CI machines).
+     */
+    private suspend fun closeStores() {
+        scopes.forEach { it.coroutineContext.job.cancelAndJoin() }
         scopes.clear()
     }
 
