@@ -962,6 +962,86 @@ public struct UpdateConnectionAssignmentInput: Codable, Hashable, Sendable {
     }
 }
 
+/// A connection as `GET /api/repos/:id/connections` lists it: every enabled
+/// connection with an enabled assignment covering that repo (its own or a
+/// global one), whichever agent types that assignment is limited to.
+public struct RepoConnection: Codable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let providerId: String
+    public let config: [String: AnyCodable]?
+    /// "global" or repo URL
+    public let scope: String
+    public let repoUrl: String?
+    public let workspaceId: String?
+    public let enabled: Bool
+    public let status: ConnectionStatus
+    public let statusMessage: String?
+    public let lastCheckedAt: Date?
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let provider: ConnectionProvider?
+    public let assignments: [ConnectionAssignment]?
+    /// The agent types the connection is injected for on this repo — the union
+    /// over its assignments that cover the repo. Empty = every agent.
+    public let agentTypes: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case name = "name"
+        case providerId = "providerId"
+        case config = "config"
+        case scope = "scope"
+        case repoUrl = "repoUrl"
+        case workspaceId = "workspaceId"
+        case enabled = "enabled"
+        case status = "status"
+        case statusMessage = "statusMessage"
+        case lastCheckedAt = "lastCheckedAt"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+        case provider = "provider"
+        case assignments = "assignments"
+        case agentTypes = "agentTypes"
+    }
+
+    public init(
+        id: String,
+        name: String,
+        providerId: String,
+        config: [String: AnyCodable]? = nil,
+        scope: String,
+        repoUrl: String? = nil,
+        workspaceId: String? = nil,
+        enabled: Bool,
+        status: ConnectionStatus,
+        statusMessage: String? = nil,
+        lastCheckedAt: Date? = nil,
+        createdAt: Date,
+        updatedAt: Date,
+        provider: ConnectionProvider? = nil,
+        assignments: [ConnectionAssignment]? = nil,
+        agentTypes: [String]
+    ) {
+        self.id = id
+        self.name = name
+        self.providerId = providerId
+        self.config = config
+        self.scope = scope
+        self.repoUrl = repoUrl
+        self.workspaceId = workspaceId
+        self.enabled = enabled
+        self.status = status
+        self.statusMessage = statusMessage
+        self.lastCheckedAt = lastCheckedAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.provider = provider
+        self.assignments = assignments
+        self.agentTypes = agentTypes
+    }
+}
+
 public struct ResolvedConnection: Codable, Hashable, Sendable {
     public let connectionId: String
     public let connectionName: String
