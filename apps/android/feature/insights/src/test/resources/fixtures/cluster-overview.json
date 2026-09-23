@@ -1,0 +1,262 @@
+{
+  "nodes": [
+    {
+      "name": "docker-desktop",
+      "status": "Ready",
+      "kubeletVersion": "v1.34.1",
+      "os": "Docker Desktop",
+      "arch": "arm64",
+      "cpu": "10",
+      "memory": "32873152Ki",
+      "containerRuntime": "docker://29.8.0",
+      "cpuPercent": 23,
+      "memoryUsedGi": "8.8",
+      "memoryTotalGi": "31.4"
+    }
+  ],
+  "pods": [
+    {
+      "name": "optio-api-6d9f7c8b5-x2k4p",
+      "phase": "Running",
+      "status": "Running",
+      "ready": true,
+      "restarts": 0,
+      "image": "optio-api:latest",
+      "nodeName": "docker-desktop",
+      "ip": "10.1.0.12",
+      "startedAt": "2026-09-20T00:47:35.155Z",
+      "labels": {
+        "app": "optio-api"
+      },
+      "isOptioManaged": false,
+      "isInfra": false,
+      "cpuMillicores": 23,
+      "memoryMi": 120
+    },
+    {
+      "name": "optio-web-5c7d9b6f4-q8m2n",
+      "phase": "Running",
+      "status": "Running",
+      "ready": true,
+      "restarts": 0,
+      "image": "optio-web:latest",
+      "nodeName": "docker-desktop",
+      "ip": "10.1.0.13",
+      "startedAt": "2026-09-20T00:47:35.155Z",
+      "labels": {
+        "app": "optio-web"
+      },
+      "isOptioManaged": false,
+      "isInfra": false,
+      "cpuMillicores": 46,
+      "memoryMi": 180
+    },
+    {
+      "name": "optio-postgres-0",
+      "phase": "Running",
+      "status": "Running",
+      "ready": true,
+      "restarts": 0,
+      "image": "postgres:16-alpine",
+      "nodeName": "docker-desktop",
+      "ip": "10.1.0.5",
+      "startedAt": "2026-09-14T00:47:35.155Z",
+      "labels": {
+        "app": "postgres"
+      },
+      "isOptioManaged": false,
+      "isInfra": true,
+      "cpuMillicores": 69,
+      "memoryMi": 240
+    },
+    {
+      "name": "optio-redis-0",
+      "phase": "Running",
+      "status": "Running",
+      "ready": true,
+      "restarts": 0,
+      "image": "redis:7-alpine",
+      "nodeName": "docker-desktop",
+      "ip": "10.1.0.6",
+      "startedAt": "2026-09-14T00:47:35.155Z",
+      "labels": {
+        "app": "redis"
+      },
+      "isOptioManaged": false,
+      "isInfra": true,
+      "cpuMillicores": 92,
+      "memoryMi": 300
+    },
+    {
+      "name": "optio-repo-e2e-repo-0",
+      "phase": "Running",
+      "status": "Running",
+      "ready": true,
+      "restarts": 0,
+      "image": "optio-agent-node:latest",
+      "nodeName": "docker-desktop",
+      "ip": "10.1.0.31",
+      "startedAt": "2026-09-22T22:47:35.155Z",
+      "labels": {
+        "managed-by": "optio",
+        "optio.repo": "e2e-org-e2e-repo"
+      },
+      "isOptioManaged": true,
+      "isInfra": false,
+      "cpuMillicores": 115,
+      "memoryMi": 360
+    },
+    {
+      "name": "optio-repo-mobile-app-0",
+      "phase": "Running",
+      "status": "CrashLoopBackOff",
+      "ready": false,
+      "restarts": 4,
+      "image": "optio-agent-node:latest",
+      "nodeName": "docker-desktop",
+      "ip": "10.1.0.32",
+      "startedAt": "2026-09-23T00:07:35.155Z",
+      "labels": {
+        "managed-by": "optio",
+        "optio.repo": "e2e-org-mobile-app"
+      },
+      "isOptioManaged": true,
+      "isInfra": false,
+      "cpuMillicores": 138,
+      "memoryMi": 420
+    }
+  ],
+  "services": [
+    {
+      "name": "optio-api",
+      "type": "ClusterIP",
+      "clusterIP": "10.96.12.34",
+      "ports": [
+        {
+          "port": 4000,
+          "targetPort": 4000,
+          "protocol": "TCP"
+        }
+      ]
+    },
+    {
+      "name": "optio-web",
+      "type": "ClusterIP",
+      "clusterIP": "10.96.12.35",
+      "ports": [
+        {
+          "port": 3000,
+          "targetPort": 3000,
+          "protocol": "TCP"
+        }
+      ]
+    },
+    {
+      "name": "optio-postgres",
+      "type": "ClusterIP",
+      "clusterIP": "10.96.12.36",
+      "ports": [
+        {
+          "port": 5432,
+          "targetPort": 5432,
+          "protocol": "TCP"
+        }
+      ]
+    },
+    {
+      "name": "optio-redis",
+      "type": "ClusterIP",
+      "clusterIP": "10.96.12.37",
+      "ports": [
+        {
+          "port": 6379,
+          "targetPort": 6379,
+          "protocol": "TCP"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "type": "Warning",
+      "reason": "BackOff",
+      "message": "Back-off restarting failed container main",
+      "involvedObject": "optio-repo-mobile-app-0",
+      "count": 4,
+      "lastTimestamp": "2026-09-23T00:44:35.155Z"
+    },
+    {
+      "type": "Normal",
+      "reason": "Pulled",
+      "message": "Container image \"optio-agent-node:latest\" already present on machine",
+      "involvedObject": "optio-repo-e2e-repo-0",
+      "count": 1,
+      "lastTimestamp": "2026-09-22T22:47:35.155Z"
+    },
+    {
+      "type": "Normal",
+      "reason": "Started",
+      "message": "Started container main",
+      "involvedObject": "optio-repo-e2e-repo-0",
+      "count": 1,
+      "lastTimestamp": "2026-09-22T22:47:35.155Z"
+    }
+  ],
+  "repoPods": [
+    {
+      "id": "4fee1b30-8ebf-48a2-a8d2-1f937888c282",
+      "repoUrl": "https://github.com/e2e-org/mobile-app",
+      "workspaceId": null,
+      "repoBranch": "main",
+      "instanceIndex": 0,
+      "podName": "optio-repo-e2e-org-mobile-app-e9b2",
+      "podId": "fake-401f9ac96ffe",
+      "state": "ready",
+      "activeTaskCount": 1,
+      "lastTaskAt": "2026-09-23T00:47:58.223Z",
+      "errorMessage": null,
+      "cachePvcName": null,
+      "cachePvcState": null,
+      "statefulSetName": null,
+      "managedBy": "bare-pod",
+      "createdAt": "2026-09-23T00:47:58.011Z",
+      "updatedAt": "2026-09-23T00:47:58.223Z",
+      "queuedTaskCount": 0,
+      "maxConcurrentTasks": 2,
+      "maxPodInstances": 1,
+      "maxAgentsPerPod": 2
+    },
+    {
+      "id": "765b3ac4-c6d1-44b5-ae35-bb5a831da9f4",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "workspaceId": null,
+      "repoBranch": "main",
+      "instanceIndex": 0,
+      "podName": "optio-repo-e2e-org-e2e-repo-317e",
+      "podId": "fake-6b8d1a7f08c3",
+      "state": "ready",
+      "activeTaskCount": 0,
+      "lastTaskAt": "2026-09-23T00:48:02.196Z",
+      "errorMessage": null,
+      "cachePvcName": null,
+      "cachePvcState": null,
+      "statefulSetName": null,
+      "managedBy": "bare-pod",
+      "createdAt": "2026-09-23T00:47:43.623Z",
+      "updatedAt": "2026-09-23T00:48:02.439Z",
+      "queuedTaskCount": 1,
+      "maxConcurrentTasks": 6,
+      "maxPodInstances": 1,
+      "maxAgentsPerPod": 2
+    }
+  ],
+  "metricsAvailable": true,
+  "summary": {
+    "totalPods": 6,
+    "runningPods": 5,
+    "agentPods": 2,
+    "infraPods": 2,
+    "totalNodes": 1,
+    "readyNodes": 1
+  }
+}

@@ -11,7 +11,9 @@
 import { randomBytes } from "node:crypto";
 import { db } from "../../db/client.js";
 import {
+  interactiveSessions,
   repos,
+  sessionChatEvents,
   tasks,
   taskConfigs,
   workflowRuns,
@@ -105,4 +107,31 @@ export async function insertWorkflowRun(
     .values({ workflowId, ...overrides })
     .returning();
   return row;
+}
+
+/** A session with `n` chat events, one per millisecond: "event 1" … "event n". */
+export async function insertSessionWithChatEvents(
+  n: number,
+  overrides: Insert<typeof interactiveSessions> = {},
+) {
+  const [session] = await db
+    .insert(interactiveSessions)
+    .values({
+      repoUrl: `https://github.com/it-org/chat-${uniq()}`,
+      branch: `session/it/${uniq()}`,
+      ...overrides,
+    })
+    .returning();
+  const start = Date.parse("2026-09-01T00:00:00.000Z");
+  for (let i = 0; i < n; i += 500) {
+    await db.insert(sessionChatEvents).values(
+      Array.from({ length: Math.min(500, n - i) }, (_, k) => ({
+        sessionId: session.id,
+        content: `event ${i + k + 1}`,
+        logType: "text",
+        timestamp: new Date(start + i + k),
+      })),
+    );
+  }
+  return session;
 }

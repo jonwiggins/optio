@@ -1,0 +1,17 @@
+# Gradle / Kotlin / IDE (at any depth: root, build-logic, every module)
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.cxx/
+.externalNativeBuild/
+*.hprof
+
+# Firebase config: added locally once push is approved, never committed
+app/google-services.json
+
+# DevLab runtime state (private test API, isolated daemon, emulator)
+e2e/.run/

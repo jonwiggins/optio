@@ -291,12 +291,12 @@ export async function transitionPersistentAgentState(
     errorMessage: extras.errorMessage ?? undefined,
   });
   if (toState === PersistentAgentState.FAILED) {
-    // iOS: "agent stopped" alert to the creator (no-op unless APNs is configured).
+    // iOS + Android: "agent stopped" alert to the creator (no-op unless APNs or FCM is configured).
     import("./glance-service.js")
       .then(({ onAgentFailed }) =>
         onAgentFailed(current, extras.lastFailureReason ?? extras.errorMessage ?? null),
       )
-      .catch((err) => logger.warn({ err, agentId }, "APNs agent failed hook failed"));
+      .catch((err) => logger.warn({ err, agentId }, "push: agent failed hook failed"));
   }
   return true;
 }
@@ -363,7 +363,11 @@ export async function listInboxSummary(agentId: string) {
   const [row] = await db
     .select({
       pending: count(persistentAgentMessages.id),
-      oldest: sql<Date | null>`MIN(${persistentAgentMessages.receivedAt})`,
+      // mapWith: a bare sql aggregate comes back as Postgres text
+      // ("2026-09-23 01:22:37.388801+00"), not a Date — see utils/pg-timestamp.
+      oldest: sql<Date | null>`MIN(${persistentAgentMessages.receivedAt})`.mapWith(
+        persistentAgentMessages.receivedAt,
+      ),
     })
     .from(persistentAgentMessages)
     .where(
@@ -374,7 +378,7 @@ export async function listInboxSummary(agentId: string) {
     );
   return {
     pending: Number(row?.pending ?? 0),
-    oldest: (row?.oldest as Date | null) ?? null,
+    oldest: row?.oldest ?? null,
   };
 }
 
@@ -506,10 +510,10 @@ export async function haltPersistentAgentTurn(input: HaltTurnInput) {
         summary: input.summary ?? undefined,
         timestamp: new Date().toISOString(),
       });
-      // iOS: reply notification to the users whose messages this turn drained.
+      // iOS + Android: reply notification to the users whose messages this turn drained.
       import("./glance-service.js")
         .then(({ onAgentTurnHalted }) => onAgentTurnHalted(turn, agent))
-        .catch((err) => logger.warn({ err, turnId: turn.id }, "APNs agent reply hook failed"));
+        .catch((err) => logger.warn({ err, turnId: turn.id }, "push: agent reply hook failed"));
     }
   }
   return turn;

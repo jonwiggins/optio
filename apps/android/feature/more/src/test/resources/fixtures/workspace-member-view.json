@@ -1,0 +1,13 @@
+{
+  "workspace": {
+    "id": "35802f88-a258-4eca-9817-be325718ab9e",
+    "name": "Android DevLab",
+    "slug": "android-devlab",
+    "description": "Seeded by apps/android/e2e",
+    "createdBy": "d38f2c32-5be0-48ba-84f6-3138f208f841",
+    "allowDockerInDocker": false,
+    "createdAt": "2026-09-23T00:45:45.518Z",
+    "updatedAt": "2026-09-23T00:45:45.518Z"
+  },
+  "role": "member"
+}

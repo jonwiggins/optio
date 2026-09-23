@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only: lets adb drive the push paths without Firebase (see DebugPushReceiver).
+  Guarded by android.permission.DUMP, which the adb shell holds and apps cannot.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".debug.DebugPushReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="dev.optio.android.DEBUG_PUSH" />
+                <action android:name="dev.optio.android.DEBUG_FCM_TOKEN" />
+                <action android:name="dev.optio.android.DEBUG_GLANCE_CHECK" />
+                <action android:name="dev.optio.android.DEBUG_FOLLOW_TASK" />
+                <action android:name="dev.optio.android.DEBUG_KEEP_WATCHING" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

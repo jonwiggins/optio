@@ -1,0 +1,24 @@
+{
+  "blueprints": [
+    {
+      "id": "8e13eb65-550e-4f3e-bec9-5018a301c23d",
+      "userId": null,
+      "workspaceId": null,
+      "name": "Fix flaky tests",
+      "description": "Runs Claude Code headless on the laptop to fix a named flaky test",
+      "hostId": "74c8d686-426e-4656-b5c4-5d30b0355278",
+      "dir": "/Users/e2e/repos/e2e-repo",
+      "repoUrl": null,
+      "baseBranch": null,
+      "commandTemplate": "Fix the flaky test {{test}} and open a PR",
+      "runTitle": null,
+      "promptTemplateId": null,
+      "agent": "claude-code",
+      "spawnMode": "auto",
+      "sessionMode": "headless",
+      "enabled": true,
+      "createdAt": "2026-09-23T00:46:01.194Z",
+      "updatedAt": "2026-09-23T00:46:01.194Z"
+    }
+  ]
+}

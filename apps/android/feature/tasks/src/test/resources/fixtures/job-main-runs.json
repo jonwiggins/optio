@@ -1,0 +1,93 @@
+{
+  "runs": [
+    {
+      "id": "078d6064-ca59-466d-a5af-908665729862",
+      "workflowId": "3e104330-6a43-45a4-a52d-7cbbf7eb39fd",
+      "triggerId": null,
+      "state": "running",
+      "params": {
+        "mode": "[[mock:hang]]"
+      },
+      "title": null,
+      "output": null,
+      "costUsd": null,
+      "inputTokens": null,
+      "outputTokens": null,
+      "modelUsed": null,
+      "errorMessage": null,
+      "sessionId": "aa337b8e-01da-454e-8315-9407e4dcc02c",
+      "podName": "optio-wf-3e104330-6a43-45a4-a52d-7cbbf7eb39fd-0-8234",
+      "localTerminalId": null,
+      "retryCount": 0,
+      "startedAt": "2026-09-23T00:46:26.698Z",
+      "finishedAt": null,
+      "createdAt": "2026-09-23T00:46:26.671Z",
+      "updatedAt": "2026-09-23T00:46:26.727Z",
+      "podId": "dd84b8d5-8481-4013-8b9d-3e97ba8c4a46",
+      "lastPodId": "dd84b8d5-8481-4013-8b9d-3e97ba8c4a46",
+      "controlIntent": null,
+      "reconcileBackoffUntil": null,
+      "reconcileAttempts": 0
+    },
+    {
+      "id": "ec8480d5-54ad-4b06-ad1b-26d63df0d64e",
+      "workflowId": "3e104330-6a43-45a4-a52d-7cbbf7eb39fd",
+      "triggerId": null,
+      "state": "failed",
+      "params": {
+        "mode": "[[mock:fail]]"
+      },
+      "title": null,
+      "output": null,
+      "costUsd": "0.0123",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "errorMessage": "Mock agent failure",
+      "sessionId": "4e06826c-adb3-45cc-bf97-9f79438dbee6",
+      "podName": "optio-wf-3e104330-6a43-45a4-a52d-7cbbf7eb39fd-0-8234",
+      "localTerminalId": null,
+      "retryCount": 0,
+      "startedAt": "2026-09-23T00:46:26.267Z",
+      "finishedAt": "2026-09-23T00:46:26.285Z",
+      "createdAt": "2026-09-23T00:46:26.249Z",
+      "updatedAt": "2026-09-23T00:46:26.290Z",
+      "podId": null,
+      "lastPodId": "dd84b8d5-8481-4013-8b9d-3e97ba8c4a46",
+      "controlIntent": null,
+      "reconcileBackoffUntil": null,
+      "reconcileAttempts": 0
+    },
+    {
+      "id": "552d11a5-0ebb-4e2f-ba5f-6256da376e86",
+      "workflowId": "3e104330-6a43-45a4-a52d-7cbbf7eb39fd",
+      "triggerId": null,
+      "state": "completed",
+      "params": {
+        "mode": "[[mock:cost:0.0520]]"
+      },
+      "title": null,
+      "output": {
+        "summary": "Mock agent success"
+      },
+      "costUsd": "0.052",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "modelUsed": "fake-model",
+      "errorMessage": null,
+      "sessionId": "bb8549b4-fada-4354-8e05-328e720ba062",
+      "podName": "optio-wf-3e104330-6a43-45a4-a52d-7cbbf7eb39fd-0-8234",
+      "localTerminalId": null,
+      "retryCount": 0,
+      "startedAt": "2026-09-23T00:46:25.853Z",
+      "finishedAt": "2026-09-23T00:46:25.880Z",
+      "createdAt": "2026-09-23T00:46:25.833Z",
+      "updatedAt": "2026-09-23T00:46:25.885Z",
+      "podId": null,
+      "lastPodId": "dd84b8d5-8481-4013-8b9d-3e97ba8c4a46",
+      "controlIntent": null,
+      "reconcileBackoffUntil": null,
+      "reconcileAttempts": 0
+    }
+  ]
+}

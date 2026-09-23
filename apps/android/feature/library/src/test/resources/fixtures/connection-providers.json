@@ -1,0 +1,340 @@
+{
+  "providers": [
+    {
+      "id": "81f51122-98d7-47c4-b0ba-61f1723c307b",
+      "slug": "notion",
+      "name": "Notion",
+      "description": "Search and read Notion pages, databases, and comments",
+      "icon": "notion",
+      "category": "productivity",
+      "type": "mcp",
+      "configSchema": {
+        "type": "object",
+        "required": ["NOTION_API_KEY"],
+        "properties": {
+          "NOTION_API_KEY": {
+            "type": "string",
+            "title": "Notion API Key",
+            "format": "secret"
+          }
+        }
+      },
+      "requiredSecrets": ["NOTION_API_KEY"],
+      "mcpConfig": {
+        "args": ["-y", "@modelcontextprotocol/server-notion"],
+        "command": "npx",
+        "envMapping": {
+          "NOTION_API_KEY": "NOTION_API_KEY"
+        }
+      },
+      "capabilities": ["search_pages", "read_page", "list_databases", "query_database"],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.297Z",
+      "updatedAt": "2026-09-23T00:45:56.297Z"
+    },
+    {
+      "id": "7a31d3ad-bbb9-419d-b33a-dc3d0ee929c6",
+      "slug": "github-enhanced",
+      "name": "GitHub (Enhanced)",
+      "description": "Access GitHub issues, discussions, PRs, and repository content beyond git",
+      "icon": "github",
+      "category": "productivity",
+      "type": "mcp",
+      "configSchema": {
+        "type": "object",
+        "required": ["GITHUB_TOKEN"],
+        "properties": {
+          "GITHUB_TOKEN": {
+            "type": "string",
+            "title": "GitHub Personal Access Token",
+            "format": "secret"
+          }
+        }
+      },
+      "requiredSecrets": ["GITHUB_TOKEN"],
+      "mcpConfig": {
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "command": "npx",
+        "envMapping": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "GITHUB_TOKEN"
+        }
+      },
+      "capabilities": ["search_repos", "read_issues", "create_issue", "read_prs", "read_files"],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.301Z",
+      "updatedAt": "2026-09-23T00:45:56.301Z"
+    },
+    {
+      "id": "c296bbf5-6217-4a9a-a0f4-6e5fd66d945d",
+      "slug": "slack",
+      "name": "Slack",
+      "description": "Search messages, read channels, and post to Slack",
+      "icon": "slack",
+      "category": "productivity",
+      "type": "mcp",
+      "configSchema": {
+        "type": "object",
+        "required": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"],
+        "properties": {
+          "SLACK_TEAM_ID": {
+            "type": "string",
+            "title": "Slack Team ID"
+          },
+          "SLACK_BOT_TOKEN": {
+            "type": "string",
+            "title": "Slack Bot Token",
+            "format": "secret"
+          }
+        }
+      },
+      "requiredSecrets": ["SLACK_BOT_TOKEN"],
+      "mcpConfig": {
+        "args": ["-y", "@anthropic/mcp-server-slack"],
+        "command": "npx",
+        "envMapping": {
+          "SLACK_TEAM_ID": "SLACK_TEAM_ID",
+          "SLACK_BOT_TOKEN": "SLACK_BOT_TOKEN"
+        }
+      },
+      "capabilities": ["search_messages", "read_channel", "post_message", "list_channels"],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.303Z",
+      "updatedAt": "2026-09-23T00:45:56.303Z"
+    },
+    {
+      "id": "093edaa7-f650-4ca0-b031-9a3924e1c402",
+      "slug": "linear",
+      "name": "Linear",
+      "description": "Read and manage Linear issues, projects, and cycles",
+      "icon": "linear",
+      "category": "productivity",
+      "type": "mcp",
+      "configSchema": {
+        "type": "object",
+        "required": ["LINEAR_API_KEY"],
+        "properties": {
+          "LINEAR_API_KEY": {
+            "type": "string",
+            "title": "Linear API Key",
+            "format": "secret"
+          }
+        }
+      },
+      "requiredSecrets": ["LINEAR_API_KEY"],
+      "mcpConfig": {
+        "args": ["-y", "mcp-linear"],
+        "command": "npx",
+        "envMapping": {
+          "LINEAR_API_KEY": "LINEAR_API_KEY"
+        }
+      },
+      "capabilities": [
+        "list_issues",
+        "read_issue",
+        "create_issue",
+        "update_issue",
+        "list_projects"
+      ],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.305Z",
+      "updatedAt": "2026-09-23T00:45:56.305Z"
+    },
+    {
+      "id": "b4dd480b-bfee-46ca-af3c-bdf6112118e1",
+      "slug": "postgres",
+      "name": "PostgreSQL",
+      "description": "Query PostgreSQL databases and inspect schema",
+      "icon": "database",
+      "category": "database",
+      "type": "mcp",
+      "configSchema": {
+        "type": "object",
+        "required": ["POSTGRES_URL"],
+        "properties": {
+          "POSTGRES_URL": {
+            "type": "string",
+            "title": "PostgreSQL Connection URL",
+            "format": "secret"
+          }
+        }
+      },
+      "requiredSecrets": ["POSTGRES_URL"],
+      "mcpConfig": {
+        "args": ["-y", "@modelcontextprotocol/server-postgres"],
+        "command": "npx",
+        "envMapping": {
+          "POSTGRES_CONNECTION_STRING": "POSTGRES_URL"
+        }
+      },
+      "capabilities": ["query", "list_tables", "describe_table"],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.308Z",
+      "updatedAt": "2026-09-23T00:45:56.308Z"
+    },
+    {
+      "id": "cdd3c103-f35d-4728-84aa-65d2005a98bd",
+      "slug": "sentry",
+      "name": "Sentry",
+      "description": "Search errors, read stack traces, and manage issues in Sentry",
+      "icon": "sentry",
+      "category": "cloud",
+      "type": "mcp",
+      "configSchema": {
+        "type": "object",
+        "required": ["SENTRY_AUTH_TOKEN", "SENTRY_ORG"],
+        "properties": {
+          "SENTRY_ORG": {
+            "type": "string",
+            "title": "Sentry Organization Slug"
+          },
+          "SENTRY_AUTH_TOKEN": {
+            "type": "string",
+            "title": "Sentry Auth Token",
+            "format": "secret"
+          }
+        }
+      },
+      "requiredSecrets": ["SENTRY_AUTH_TOKEN"],
+      "mcpConfig": {
+        "args": ["-y", "@sentry/mcp-server"],
+        "command": "npx",
+        "envMapping": {
+          "SENTRY_ORG": "SENTRY_ORG",
+          "SENTRY_AUTH_TOKEN": "SENTRY_AUTH_TOKEN"
+        }
+      },
+      "capabilities": ["search_issues", "read_issue", "list_projects"],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.309Z",
+      "updatedAt": "2026-09-23T00:45:56.309Z"
+    },
+    {
+      "id": "97e738eb-2053-4f30-bc81-dc937593a665",
+      "slug": "filesystem",
+      "name": "Filesystem",
+      "description": "Read and search files from a mounted directory or knowledge base",
+      "icon": "folder",
+      "category": "knowledge",
+      "type": "mcp",
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "ROOT_PATH": {
+            "type": "string",
+            "title": "Root directory path",
+            "default": "/workspace"
+          }
+        }
+      },
+      "requiredSecrets": [],
+      "mcpConfig": {
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "{{ROOT_PATH}}"],
+        "command": "npx",
+        "envMapping": {}
+      },
+      "capabilities": ["read_file", "write_file", "list_directory", "search_files"],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.311Z",
+      "updatedAt": "2026-09-23T00:45:56.311Z"
+    },
+    {
+      "id": "fb5d7a1c-c2a1-4ec5-9289-00c21ba4880c",
+      "slug": "custom-mcp",
+      "name": "Custom MCP Server",
+      "description": "Connect any MCP-compatible server with custom command and configuration",
+      "icon": "terminal",
+      "category": "custom",
+      "type": "mcp",
+      "configSchema": {
+        "type": "object",
+        "required": ["command"],
+        "properties": {
+          "env": {
+            "type": "string",
+            "title": "Environment variables (KEY=VALUE, one per line)"
+          },
+          "args": {
+            "type": "string",
+            "title": "Arguments (one per line)"
+          },
+          "command": {
+            "type": "string",
+            "title": "Command"
+          },
+          "installCommand": {
+            "type": "string",
+            "title": "Install command (optional)"
+          }
+        }
+      },
+      "requiredSecrets": [],
+      "mcpConfig": null,
+      "capabilities": [],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.313Z",
+      "updatedAt": "2026-09-23T00:45:56.313Z"
+    },
+    {
+      "id": "6df4fd9a-6502-4012-be60-9142dae37e23",
+      "slug": "custom-http",
+      "name": "HTTP API",
+      "description": "Connect any REST API endpoint with custom authentication",
+      "icon": "globe",
+      "category": "custom",
+      "type": "http",
+      "configSchema": {
+        "type": "object",
+        "required": ["baseUrl"],
+        "properties": {
+          "baseUrl": {
+            "type": "string",
+            "title": "Base URL"
+          },
+          "authType": {
+            "enum": ["none", "api-key", "bearer"],
+            "type": "string",
+            "title": "Authentication type"
+          },
+          "AUTH_TOKEN": {
+            "type": "string",
+            "title": "Auth token/key",
+            "format": "secret"
+          },
+          "authHeader": {
+            "type": "string",
+            "title": "Auth header name",
+            "default": "Authorization"
+          },
+          "description": {
+            "type": "string",
+            "title": "API description (helps agent understand usage)"
+          }
+        }
+      },
+      "requiredSecrets": [],
+      "mcpConfig": null,
+      "capabilities": [],
+      "docsUrl": null,
+      "builtIn": true,
+      "workspaceId": null,
+      "createdAt": "2026-09-23T00:45:56.315Z",
+      "updatedAt": "2026-09-23T00:45:56.315Z"
+    }
+  ]
+}

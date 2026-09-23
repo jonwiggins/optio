@@ -1,0 +1,13 @@
+{
+  "user": {
+    "id": "2164b975-e49b-4618-8d57-ce49d8786173",
+    "provider": "github",
+    "email": "mia-member@example.com",
+    "displayName": "Mia Member",
+    "username": "mia-member",
+    "avatarUrl": null,
+    "workspaceId": "35802f88-a258-4eca-9817-be325718ab9e",
+    "workspaceRole": "member"
+  },
+  "authDisabled": false
+}

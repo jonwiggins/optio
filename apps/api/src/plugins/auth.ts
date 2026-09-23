@@ -80,10 +80,27 @@ const PUBLIC_ROUTES = new Set([
 ]);
 
 /**
+ * Inbound webhook receivers — public for POST only, by exact path. Their
+ * callers (GitHub, Slack, Linear) can't hold an Optio session; each route
+ * authenticates the delivery itself by the provider's HMAC over the raw body
+ * and rejects it when unsigned, badly signed, stale, or when its secret is
+ * unset. Everything else under /api/webhooks is outbound-webhook management
+ * and stays behind auth — including GET/PATCH/DELETE on these same paths,
+ * which would otherwise reach the management routes' `/api/webhooks/:id`.
+ */
+const PUBLIC_WEBHOOK_RECEIVERS = new Set([
+  "/api/webhooks/github", // routes/tickets.ts: X-Hub-Signature-256, GITHUB_WEBHOOK_SECRET
+  "/api/webhooks/slack/events", // routes/event-ingress.ts: X-Slack-Signature, SLACK_SIGNING_SECRET
+  "/api/webhooks/slack/actions", // routes/slack.ts: X-Slack-Signature, SLACK_SIGNING_SECRET
+  "/api/webhooks/linear", // routes/event-ingress.ts: Linear-Signature, LINEAR_WEBHOOK_SECRET
+]);
+
+/**
  * Prefix-matched routes that are always public.
  *
  * Public prefix routes must be intentionally unauthenticated. Outbound
- * webhook management lives under /api/webhooks and must remain protected.
+ * webhook management lives under /api/webhooks and must remain protected
+ * (the signed inbound receivers there are listed one by one above).
  */
 const PUBLIC_PREFIXES = ["/api/hooks/", "/api/internal/persistent-agents/", "/ws/", "/docs"];
 
@@ -153,9 +170,14 @@ export function resetSetupCompleteCache(): void {
   _setupCompleteCache = null;
 }
 
-export function isPublicRoute(url: string): boolean {
+/**
+ * Whether a request skips session auth. `method` matters only for the
+ * inbound webhook receivers, which are public for POST alone.
+ */
+export function isPublicRoute(url: string, method?: string): boolean {
   const path = url.split("?")[0];
   if (PUBLIC_ROUTES.has(path) || PUBLIC_AUTH_ROUTES.has(path)) return true;
+  if (method?.toUpperCase() === "POST" && PUBLIC_WEBHOOK_RECEIVERS.has(path)) return true;
   return PUBLIC_PREFIXES.some((p) => path.startsWith(p));
 }
 
@@ -176,7 +198,7 @@ async function authPlugin(app: FastifyInstance) {
     if (isAuthDisabled()) return;
 
     // Public routes — no auth needed
-    if (isPublicRoute(req.url)) return;
+    if (isPublicRoute(req.url, req.method)) return;
 
     // Setup routes (other than /status) are public only before initial setup.
     // Once setup is complete they require authentication like any other route.

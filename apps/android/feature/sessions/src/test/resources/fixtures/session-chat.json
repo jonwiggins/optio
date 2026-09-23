@@ -1,0 +1,133 @@
+{
+  "events": [
+    {
+      "id": "c94c482a-c514-4ffb-8eb2-1189c600c296",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdin",
+      "content": "Profile the app's cold start and list the three slowest steps.",
+      "logType": "user_message",
+      "metadata": null,
+      "timestamp": "2026-09-23T00:46:07.221Z"
+    },
+    {
+      "id": "c94dfde6-102e-4764-953a-f63592f61527",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdout",
+      "content": "Mock agent handled: Profile the app",
+      "logType": "text",
+      "metadata": null,
+      "timestamp": "2026-09-23T00:46:07.222Z"
+    },
+    {
+      "id": "5a6d2423-08d1-4233-b685-8b2aac14e526",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdout",
+      "content": "Session started \u00b7 fake-model \u00b7 0 tools",
+      "logType": "system",
+      "metadata": {
+        "model": "fake-model"
+      },
+      "timestamp": "2026-09-23T00:46:07.222Z"
+    },
+    {
+      "id": "fe16b053-fa69-4401-b62a-2d0deea36a5f",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdout",
+      "content": "(1 turns \u00b7 0.0s \u00b7 $0.0123)",
+      "logType": "info",
+      "metadata": {
+        "cost": 0.0123,
+        "turns": 1,
+        "isError": false,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-23T00:46:07.223Z"
+    },
+    {
+      "id": "8db597ea-9ee1-48f5-ad39-3084b0c5e11c",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdin",
+      "content": "List the slowest steps",
+      "logType": "user_message",
+      "metadata": null,
+      "timestamp": "2026-09-23T00:47:31.725Z"
+    },
+    {
+      "id": "1d5c8aec-6488-4c99-b5f6-3e489db4ceee",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdout",
+      "content": "Mock agent handled: List the slowest steps",
+      "logType": "text",
+      "metadata": null,
+      "timestamp": "2026-09-23T00:47:31.725Z"
+    },
+    {
+      "id": "eca5b80c-cba0-4cdc-a1dc-e1085b6d7754",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdout",
+      "content": "Session started \u00b7 fake-model \u00b7 0 tools",
+      "logType": "system",
+      "metadata": {
+        "model": "fake-model"
+      },
+      "timestamp": "2026-09-23T00:47:31.725Z"
+    },
+    {
+      "id": "40051f89-ae2e-424d-b3a2-9d9acaf018d4",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdout",
+      "content": "(1 turns \u00b7 0.0s \u00b7 $0.0123)",
+      "logType": "info",
+      "metadata": {
+        "cost": 0.0123,
+        "turns": 1,
+        "isError": false,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-23T00:47:31.726Z"
+    },
+    {
+      "id": "1ef74310-9a3a-4d98-8533-fa4d8dc92019",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdin",
+      "content": "Which step is slowest?",
+      "logType": "user_message",
+      "metadata": null,
+      "timestamp": "2026-09-23T01:08:17.666Z"
+    },
+    {
+      "id": "79e25115-fd45-4dde-891b-2e3c136a14a6",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdout",
+      "content": "(1 turns \u00b7 0.0s \u00b7 $0.0123)",
+      "logType": "info",
+      "metadata": {
+        "cost": 0.0123,
+        "turns": 1,
+        "isError": false,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-23T01:08:17.667Z"
+    },
+    {
+      "id": "48e73e1c-00a8-40c1-a4ad-c093761561b4",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdout",
+      "content": "Session started \u00b7 fake-model \u00b7 0 tools",
+      "logType": "system",
+      "metadata": {
+        "model": "fake-model"
+      },
+      "timestamp": "2026-09-23T01:08:17.667Z"
+    },
+    {
+      "id": "7f6a3128-89c7-460f-ad81-ce2bb08040ec",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "stream": "stdout",
+      "content": "Mock agent handled: Which step is slowest?",
+      "logType": "text",
+      "metadata": null,
+      "timestamp": "2026-09-23T01:08:17.667Z"
+    }
+  ]
+}

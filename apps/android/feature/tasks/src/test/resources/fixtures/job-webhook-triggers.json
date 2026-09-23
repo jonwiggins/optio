@@ -1,0 +1,20 @@
+{
+  "triggers": [
+    {
+      "id": "e2ef38af-d944-4d5d-a9c2-1215c953f19e",
+      "workflowId": "b8079455-e17a-40cd-9be6-f352e6665275",
+      "targetType": "job",
+      "targetId": "b8079455-e17a-40cd-9be6-f352e6665275",
+      "type": "webhook",
+      "config": {
+        "path": "android-e2e-sentry-4964"
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": "2026-09-23T00:46:27.132Z",
+      "nextFireAt": null,
+      "createdAt": "2026-09-23T00:46:27.107Z",
+      "updatedAt": "2026-09-23T00:46:27.107Z"
+    }
+  ]
+}

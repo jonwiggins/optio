@@ -1,0 +1,118 @@
+{
+  "connections": [
+    {
+      "id": "3aeae480-828b-4fe1-a29a-3c770f3905f7",
+      "name": "Docs filesystem",
+      "providerId": "97e738eb-2053-4f30-bc81-dc937593a665",
+      "config": {
+        "ROOT_PATH": "/workspace/docs"
+      },
+      "scope": "global",
+      "repoUrl": null,
+      "workspaceId": null,
+      "enabled": true,
+      "status": "healthy",
+      "statusMessage": "Connection OK",
+      "lastCheckedAt": "2026-09-23T00:46:17.034Z",
+      "createdAt": "2026-09-23T00:46:17.013Z",
+      "updatedAt": "2026-09-23T00:46:17.034Z",
+      "provider": {
+        "id": "97e738eb-2053-4f30-bc81-dc937593a665",
+        "slug": "filesystem",
+        "name": "Filesystem",
+        "description": "Read and search files from a mounted directory or knowledge base",
+        "icon": "folder",
+        "category": "knowledge",
+        "type": "mcp",
+        "configSchema": {
+          "type": "object",
+          "properties": {
+            "ROOT_PATH": {
+              "type": "string",
+              "title": "Root directory path",
+              "default": "/workspace"
+            }
+          }
+        },
+        "requiredSecrets": [],
+        "mcpConfig": {
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "{{ROOT_PATH}}"],
+          "command": "npx",
+          "envMapping": {}
+        },
+        "capabilities": ["read_file", "write_file", "list_directory", "search_files"],
+        "docsUrl": null,
+        "builtIn": true,
+        "workspaceId": null,
+        "createdAt": "2026-09-23T00:45:56.311Z",
+        "updatedAt": "2026-09-23T00:45:56.311Z"
+      },
+      "assignments": null
+    },
+    {
+      "id": "fc8f92a0-163b-40c6-b163-0106f299c754",
+      "name": "Status page API",
+      "providerId": "6df4fd9a-6502-4012-be60-9142dae37e23",
+      "config": {
+        "baseUrl": "https://status.example.com",
+        "authType": "none"
+      },
+      "scope": "global",
+      "repoUrl": null,
+      "workspaceId": null,
+      "enabled": true,
+      "status": "unknown",
+      "statusMessage": null,
+      "lastCheckedAt": null,
+      "createdAt": "2026-09-23T00:46:17.030Z",
+      "updatedAt": "2026-09-23T00:46:17.030Z",
+      "provider": {
+        "id": "6df4fd9a-6502-4012-be60-9142dae37e23",
+        "slug": "custom-http",
+        "name": "HTTP API",
+        "description": "Connect any REST API endpoint with custom authentication",
+        "icon": "globe",
+        "category": "custom",
+        "type": "http",
+        "configSchema": {
+          "type": "object",
+          "required": ["baseUrl"],
+          "properties": {
+            "baseUrl": {
+              "type": "string",
+              "title": "Base URL"
+            },
+            "authType": {
+              "enum": ["none", "api-key", "bearer"],
+              "type": "string",
+              "title": "Authentication type"
+            },
+            "AUTH_TOKEN": {
+              "type": "string",
+              "title": "Auth token/key",
+              "format": "secret"
+            },
+            "authHeader": {
+              "type": "string",
+              "title": "Auth header name",
+              "default": "Authorization"
+            },
+            "description": {
+              "type": "string",
+              "title": "API description (helps agent understand usage)"
+            }
+          }
+        },
+        "requiredSecrets": [],
+        "mcpConfig": null,
+        "capabilities": [],
+        "docsUrl": null,
+        "builtIn": true,
+        "workspaceId": null,
+        "createdAt": "2026-09-23T00:45:56.315Z",
+        "updatedAt": "2026-09-23T00:45:56.315Z"
+      },
+      "assignments": null
+    }
+  ]
+}

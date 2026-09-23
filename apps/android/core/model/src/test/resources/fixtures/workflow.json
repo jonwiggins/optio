@@ -1,0 +1,33 @@
+{
+  "workflow": {
+    "id": "f6a7b8c9-d0e1-4f2a-9b3c-4d5e6f7a8b92",
+    "name": "Triage new issues",
+    "description": null,
+    "promptTemplate": "Triage {{issue}} and label it.",
+    "runTitle": "Triage {{issue}}",
+    "agentRuntime": "claude-code",
+    "model": null,
+    "maxTurns": 20,
+    "budgetUsd": "2.00",
+    "maxConcurrent": 2,
+    "maxRetries": 1,
+    "warmPoolSize": 0,
+    "maxPodInstances": 1,
+    "maxAgentsPerPod": 2,
+    "runTarget": "local",
+    "localHostId": "9d2e4c6a-8b0f-4a1e-b3c5-d7e9f1a3b5c7",
+    "localDir": "/Users/dev/optio",
+    "localSessionMode": "headless",
+    "enabled": true,
+    "environmentSpec": null,
+    "paramsSchema": {
+      "type": "object",
+      "properties": { "issue": { "type": "string" } },
+      "required": ["issue"]
+    },
+    "workspaceId": "w-1",
+    "createdBy": null,
+    "createdAt": "2026-09-10T09:00:00.000Z",
+    "updatedAt": "2026-09-20T09:00:00Z"
+  }
+}

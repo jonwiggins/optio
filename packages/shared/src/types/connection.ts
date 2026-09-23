@@ -109,6 +109,19 @@ export interface UpdateConnectionAssignmentInput {
   enabled?: boolean;
 }
 
+/**
+ * A connection as `GET /api/repos/:id/connections` lists it: every enabled
+ * connection with an enabled assignment covering that repo (its own or a
+ * global one), whichever agent types that assignment is limited to.
+ */
+export interface RepoConnection extends Connection {
+  /**
+   * The agent types the connection is injected for on this repo — the union
+   * over its assignments that cover the repo. Empty = every agent.
+   */
+  agentTypes: string[];
+}
+
 // ── Resolved connection (for task injection) ───────────────────────────────
 
 export interface ResolvedConnection {

@@ -14,6 +14,7 @@
  * Delivery discipline (mirrors push_subscriptions):
  *   - per-token trailing-edge coalescing of LA updates (≤1 push / s / token)
  *   - content-hash dedupe of LA frames (asOf excluded)
+ *     (both in watch-coalescer.ts, shared with the Android FCM Watch)
  *   - `apns-collapse-id` on alerts so bursts collapse on the device
  *   - 410 / BadDeviceToken / Unregistered → delete the row immediately
  *   - 5 consecutive failures → delete; success resets the counter
@@ -29,7 +30,6 @@ import {
   buildLiveActivityMessage,
   buildLiveActivityStartMessage,
   buildWatchAttributes,
-  watchStateHash,
   type AlertInput,
   type ApnsMessage,
   type LiveActivityAlert,
@@ -43,11 +43,12 @@ import {
   type ApnsTransport,
 } from "./apns-transport.js";
 import { drizzleApnsStore, type ApnsStore, type LiveActivityKind } from "./apns-store.js";
+import { WATCH_COALESCE_MS, WatchCoalescer } from "./watch-coalescer.js";
 
 /** Maximum consecutive failures before a token row is removed. */
 export const APNS_MAX_FAILURE_COUNT = 5;
 /** Minimum spacing between Live Activity pushes to one token. */
-export const LIVE_ACTIVITY_COALESCE_MS = 1000;
+export const LIVE_ACTIVITY_COALESCE_MS = WATCH_COALESCE_MS;
 
 export const DEFAULT_APNS_BUNDLE_ID = "dev.optio.ios";
 
@@ -87,10 +88,11 @@ export interface UpdateWatchOptions {
   alert?: LiveActivityAlert | null;
 }
 
-interface Coalesced {
-  timer: ReturnType<typeof setTimeout>;
-  /** Frame to flush when the timer fires (latest wins). */
-  pending: { state: WatchState; opts: UpdateWatchOptions } | null;
+/** One ActivityKit update token, as the coalescer's delivery target. */
+interface LiveActivityTarget {
+  token: string;
+  environment: ApnsEnvironment;
+  userId: string;
 }
 
 export interface ApnsServiceOptions {
@@ -109,10 +111,12 @@ export class ApnsService {
   readonly defaultEnvironment: ApnsEnvironment;
   private readonly coalesceMs: number;
   private readonly now: () => Date;
-  /** tokenId → coalescing window. */
-  private windows = new Map<string, Coalesced>();
-  /** tokenId → hash of the last frame delivered. */
-  private lastHash = new Map<string, string>();
+  /** Per-token coalescing + dedupe of Live Activity frames (keyed by token row id). */
+  private readonly liveActivities: WatchCoalescer<
+    LiveActivityTarget,
+    LiveActivityAlert,
+    ApnsSendResult
+  >;
 
   constructor(opts: ApnsServiceOptions) {
     this.transport = opts.transport;
@@ -121,6 +125,25 @@ export class ApnsService {
     this.defaultEnvironment = opts.defaultEnvironment ?? "sandbox";
     this.coalesceMs = opts.coalesceMs ?? LIVE_ACTIVITY_COALESCE_MS;
     this.now = opts.now ?? (() => new Date());
+    this.liveActivities = new WatchCoalescer({
+      coalesceMs: this.coalesceMs,
+      send: (t, frame) => {
+        const message = buildLiveActivityMessage(
+          {
+            event: frame.event === "end" ? "end" : "update",
+            state: frame.state,
+            alert: frame.alert,
+            now: this.now(),
+          },
+          { bundleId: this.bundleId },
+        );
+        return this.transport!.send({ ...message, token: t.token, environment: t.environment });
+      },
+      settle: (tokenId, t, result) =>
+        this.settleLiveActivityToken(tokenId, t.token, t.userId, result),
+      onFlushError: (err, t) =>
+        logger.warn({ err, userId: t.userId }, "APNs: coalesced Live Activity push failed"),
+    });
   }
 
   isConfigured(): boolean {
@@ -202,102 +225,42 @@ export class ApnsService {
     if (tokens.length === 0) return;
     await Promise.allSettled(
       tokens.map((t) =>
-        this.scheduleLiveActivity(t.id, t.token, t.environment, userId, state, opts),
+        this.liveActivities.push(
+          t.id,
+          { token: t.token, environment: t.environment, userId },
+          { event: opts.event, state, alert: opts.alert },
+        ),
       ),
     );
   }
 
-  private async scheduleLiveActivity(
-    tokenId: string,
-    token: string,
-    environment: ApnsEnvironment,
-    userId: string,
-    state: WatchState,
-    opts: UpdateWatchOptions,
-  ): Promise<void> {
-    const window = this.windows.get(tokenId);
-    if (window) {
-      // Inside the cooldown: keep only the newest frame. An alerting frame
-      // must not be downgraded by a later silent one within the same window.
-      const alert = opts.alert ?? window.pending?.opts.alert ?? null;
-      const event = opts.event === "end" || window.pending?.opts.event === "end" ? "end" : "update";
-      window.pending = { state, opts: { event, alert } };
-      return;
-    }
-    await this.deliverLiveActivity(tokenId, token, environment, userId, state, opts);
-  }
-
-  private async deliverLiveActivity(
-    tokenId: string,
-    token: string,
-    environment: ApnsEnvironment,
-    userId: string,
-    state: WatchState,
-    opts: UpdateWatchOptions,
-  ): Promise<void> {
-    const hash = `${opts.event}:${watchStateHash(state)}`;
-    if (opts.event === "update" && !opts.alert && this.lastHash.get(tokenId) === hash) return;
-
-    const message = buildLiveActivityMessage(
-      { event: opts.event, state, alert: opts.alert, now: this.now() },
-      { bundleId: this.bundleId },
-    );
-    const result = await this.transport!.send({ ...message, token, environment });
-    this.lastHash.set(tokenId, hash);
-    await this.settleLiveActivityToken(tokenId, token, userId, result);
-    if (opts.event === "end") {
-      this.lastHash.delete(tokenId);
-      return;
-    }
-    this.openWindow(tokenId, token, environment, userId);
-  }
-
-  private openWindow(
-    tokenId: string,
-    token: string,
-    environment: ApnsEnvironment,
-    userId: string,
-  ): void {
-    const timer = setTimeout(() => {
-      const w = this.windows.get(tokenId);
-      this.windows.delete(tokenId);
-      if (!w?.pending) return;
-      const { state, opts } = w.pending;
-      void this.deliverLiveActivity(tokenId, token, environment, userId, state, opts).catch((err) =>
-        logger.warn({ err, userId }, "APNs: coalesced Live Activity push failed"),
-      );
-    }, this.coalesceMs);
-    timer.unref?.();
-    this.windows.set(tokenId, { timer, pending: null });
-  }
-
+  /** Book a Live Activity send; resolves `true` when the token row was dropped. */
   private async settleLiveActivityToken(
     id: string,
     token: string,
     userId: string,
     result: ApnsSendResult,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (result.ok) {
       await this.store.recordLiveActivityResult(id, true);
-      return;
+      return false;
     }
     if (isUnregisteredResult(result)) {
       logger.info({ userId, token: mask(token), reason: result.reason }, "APNs: dropping LA token");
       await this.store.deleteLiveActivityToken(id);
-      this.lastHash.delete(id);
-      return;
+      return true;
     }
     const count = await this.store.recordLiveActivityResult(id, false);
     if (count >= APNS_MAX_FAILURE_COUNT) {
       logger.warn({ userId, token: mask(token), count }, "APNs: dropping LA token after failures");
       await this.store.deleteLiveActivityToken(id);
-      this.lastHash.delete(id);
-    } else {
-      logger.warn(
-        { userId, token: mask(token), status: result.status, reason: result.reason },
-        "APNs: Live Activity push failed",
-      );
+      return true;
     }
+    logger.warn(
+      { userId, token: mask(token), status: result.status, reason: result.reason },
+      "APNs: Live Activity push failed",
+    );
+    return false;
   }
 
   /**
@@ -353,9 +316,7 @@ export class ApnsService {
 
   /** Cancel pending timers and forget dedupe state (tests, shutdown). */
   reset(): void {
-    for (const w of this.windows.values()) clearTimeout(w.timer);
-    this.windows.clear();
-    this.lastHash.clear();
+    this.liveActivities.reset();
   }
 
   async close(): Promise<void> {

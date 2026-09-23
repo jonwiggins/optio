@@ -192,11 +192,25 @@ export function deliverScrollback(attachId: string, data: Buffer): void {
 
 /** Relay a daemon attach failure to the waiting browser. */
 export function deliverAttachError(attachId: string, message: string): void {
+  const pending = takePendingAttach(attachId);
+  if (pending) sendToViewer(pending.socket, { type: "error", message });
+}
+
+/**
+ * Take a browser's pending attach off the books (the daemon answered it with
+ * an error; the caller decides what the browser gets instead). Null when it
+ * was already answered or the browser left.
+ */
+export function takePendingAttach(attachId: string): PendingAttach | null {
   const pending = pendingAttaches.get(attachId);
-  if (!pending) return;
+  if (!pending) return null;
   pendingAttaches.delete(attachId);
-  const msg: LocalStreamServerMessage = { type: "error", message };
-  safeSend(pending.socket, JSON.stringify(msg));
+  return pending;
+}
+
+/** One frame to one viewer: JSON control, or raw terminal bytes. */
+export function sendToViewer(socket: RelaySocket, frame: LocalStreamServerMessage | Buffer): void {
+  safeSend(socket, Buffer.isBuffer(frame) ? frame : JSON.stringify(frame));
 }
 
 /**
@@ -223,11 +237,22 @@ export function forwardSize(hostId: string, terminalId: string, cols: number, ro
   notifyBrowsers(terminalId, { type: "size", cols, rows });
 }
 
-/** Push a JSON control message to every browser viewing a terminal. */
-export function notifyBrowsers(terminalId: string, message: LocalStreamServerMessage): void {
+/**
+ * Push a JSON control message to every browser viewing a terminal — and, by
+ * default, to browsers still waiting on their scrollback. `pending: false`
+ * skips those: after a terminal's exit, a still-pending attach is answered
+ * with attach-error, and the viewer gets the recorded screen (exit included)
+ * then (see handleAttachError).
+ */
+export function notifyBrowsers(
+  terminalId: string,
+  message: LocalStreamServerMessage,
+  opts: { pending?: boolean } = {},
+): void {
   const payload = JSON.stringify(message);
   const set = browsersByTerminal.get(terminalId);
   if (set) for (const socket of set) safeSend(socket, payload);
+  if (opts.pending === false) return;
   // Browsers still waiting on scrollback should hear state changes too.
   for (const pending of pendingAttaches.values()) {
     if (pending.terminalId === terminalId) safeSend(pending.socket, payload);

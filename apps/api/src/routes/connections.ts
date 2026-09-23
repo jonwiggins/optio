@@ -475,7 +475,10 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
         operationId: "listRepoConnections",
         summary: "List connections for a repo",
         description:
-          "Return all connections assigned to a repo (global assignments + repo-specific).",
+          "Return every enabled connection with an enabled assignment covering the " +
+          "repo (repo-specific or global), including ones limited to specific agent " +
+          "types. Each carries its assignments plus `agentTypes`: the agent types it " +
+          "is injected for on this repo (empty = every agent).",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         response: { 200: ConnectionsListResponse, 404: ErrorResponseSchema },
@@ -486,17 +489,8 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       const repo = await getRepo(req.params.id);
       if (!repo) return reply.status(404).send({ error: "Repo not found" });
       const workspaceId = req.user?.workspaceId ?? null;
-      // Use the task resolver to get all matching connections, then return as Connection objects
-      const resolved = await connectionService.getConnectionsForTask(
-        repo.repoUrl,
-        "", // empty agentType matches all
-        workspaceId,
-      );
-      // Fetch full connection objects for each resolved connection
-      const conns = await Promise.all(
-        resolved.map((r) => connectionService.getConnection(r.connectionId)),
-      );
-      reply.send({ connections: conns.filter(Boolean) });
+      const conns = await connectionService.listConnectionsForRepo(repo.repoUrl, workspaceId);
+      reply.send({ connections: conns });
     },
   );
 }

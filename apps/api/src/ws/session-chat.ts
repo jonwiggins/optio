@@ -10,7 +10,7 @@ import {
 import { getSettings } from "../services/optio-settings-service.js";
 import { db } from "../db/client.js";
 import { repoPods, repos, interactiveSessions } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import type { AgentLogEntry, ExecSession } from "@optio/shared";
@@ -23,14 +23,8 @@ import {
 } from "./session-chat-resume.js";
 import { authenticateWs, extractSessionToken } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
-import {
-  getClientIp,
-  trackConnection,
-  releaseConnection,
-  isMessageWithinSizeLimit,
-  WS_CLOSE_CONNECTION_LIMIT,
-  WS_CLOSE_MESSAGE_TOO_LARGE,
-} from "./ws-limits.js";
+import { acceptWs } from "./ws-connection.js";
+import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 
 /**
  * Session chat WebSocket handler.
@@ -50,24 +44,30 @@ import {
  *
  * Server → Client messages:
  *   { type: "chat_event", event: AgentLogEntry }  — parsed agent event
+ *   { type: "history_done", count: number }       — end of the history replay
  *   { type: "cost_update", costUsd: number }      — cumulative cost update
  *   { type: "status", status: string }            — "ready" | "thinking" | "idle" | "error"
  *   { type: "error", message: string }            — error message
+ *
+ * On connect the server sends `status: "ready"` (model, settings), then the
+ * persisted history as `chat_event` frames flagged `catchUp: true`, then
+ * `history_done` with the number of frames replayed; everything after it is
+ * live. Clients may send as soon as the socket opens: messages that arrive
+ * during auth, setup, or the replay are queued and handled in order right
+ * after `history_done`, never dropped. (Clients that load history over REST —
+ * `GET /api/sessions/:id/chat` — skip the `catchUp` frames and can ignore
+ * `history_done`.)
  */
 export async function sessionChatWs(app: FastifyInstance) {
   app.get("/ws/sessions/:sessionId/chat", { websocket: true }, async (socket, req) => {
-    const clientIp = getClientIp(req);
-
-    if (!trackConnection(clientIp)) {
-      socket.close(WS_CLOSE_CONNECTION_LIMIT, "Too many connections");
-      return;
-    }
+    // Synchronously, before any await: a prompt sent right after the socket
+    // opens (or right after `ready`) is held until the replay below is done
+    // and the handler listens (see ws-connection.ts).
+    const conn = acceptWs(socket, req);
+    if (!conn) return;
 
     const user = await authenticateWs(socket, req);
-    if (!user) {
-      releaseConnection(clientIp);
-      return;
-    }
+    if (!user) return conn.discard();
 
     const { sessionId } = z.object({ sessionId: z.string() }).parse(req.params);
     const log = logger.child({ sessionId, ws: "session-chat" });
@@ -77,61 +77,43 @@ export async function sessionChatWs(app: FastifyInstance) {
     // made by the agent carry the user's identity.
     const userSessionToken = extractSessionToken(req);
 
-    const session = await getSession(sessionId);
-    if (!session) {
-      socket.send(JSON.stringify({ type: "error", message: "Session not found" }));
-      releaseConnection(clientIp);
+    const reject = (message: string) => {
+      socket.send(JSON.stringify({ type: "error", message }));
       socket.close();
-      return;
-    }
+      conn.discard();
+    };
+
+    const session = await getSession(sessionId);
+    if (!session) return reject("Session not found");
 
     if (session.userId && session.userId !== user.id) {
       socket.close(4403, "Not authorized for this session");
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
 
     // Chat drives an agent that mutates the workspace — viewers are read-only.
     if (!(await requireWsRole(socket, user, "member", session.workspaceId))) {
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
 
-    if (session.state !== "active") {
-      socket.send(JSON.stringify({ type: "error", message: "Session is not active" }));
-      releaseConnection(clientIp);
-      socket.close();
-      return;
-    }
-
-    if (!session.podId) {
-      socket.send(JSON.stringify({ type: "error", message: "Session has no pod assigned" }));
-      releaseConnection(clientIp);
-      socket.close();
-      return;
-    }
+    if (session.state !== "active") return reject("Session is not active");
+    if (!session.podId) return reject("Session has no pod assigned");
 
     // Get pod info
     const [pod] = await db.select().from(repoPods).where(eq(repoPods.id, session.podId));
     if (!pod || !pod.podName) {
-      socket.send(
-        JSON.stringify({
-          type: "error",
-          message:
-            "Session pod was cleaned up due to inactivity. Please end this session and start a new one.",
-        }),
+      return reject(
+        "Session pod was cleaned up due to inactivity. Please end this session and start a new one.",
       );
-      releaseConnection(clientIp);
-      socket.close();
-      return;
     }
 
     // Get repo config for model defaults
     const [repoConfig] = await db.select().from(repos).where(eq(repos.repoUrl, session.repoUrl));
 
     // Load Optio agent settings (model, system prompt, tool filtering, etc.)
-    const workspaceId = req.user?.workspaceId ?? null;
-    const optioSettings = await getSettings(workspaceId);
+    // for the caller's workspace. (Not req.user: the HTTP auth plugin skips
+    // /ws/ routes, so it is never set here.)
+    const optioSettings = await getSettings(user.workspaceId ?? null);
 
     // Optio settings take precedence, then repo config, then default
     let currentModel = optioSettings.model || repoConfig?.claudeModel || "sonnet";
@@ -141,7 +123,9 @@ export async function sessionChatWs(app: FastifyInstance) {
     const worktreePath = session.worktreePath ?? "/workspace/repo";
 
     let execSession: ExecSession | null = null;
-    let cumulativeCost = 0;
+    // The session's running total, not this socket's: a reconnect (or a
+    // second tab) continues from what the session has already spent.
+    let cumulativeCost = Number.parseFloat(session.costUsd ?? "") || 0;
     let isProcessing = false;
     let outputBuffer = "";
     let promptCount = 0;
@@ -151,6 +135,7 @@ export async function sessionChatWs(app: FastifyInstance) {
 
     // Resolve auth env vars for the claude process
     const authEnv = await buildAuthEnv(log, user.id);
+    if (conn.closed) return;
 
     const send = (msg: Record<string, unknown>) => {
       if (socket.readyState === 1) {
@@ -175,9 +160,11 @@ export async function sessionChatWs(app: FastifyInstance) {
     // the conversation from before the WebSocket dropped. The REST endpoint
     // is the primary loader, but this also helps clients that connect via
     // the WebSocket without first calling the REST endpoint.
+    let replayed = 0;
     try {
       const history = await listSessionChatEvents(sessionId);
       for (const ev of history) {
+        replayed++;
         send({
           type: "chat_event",
           event: {
@@ -203,6 +190,8 @@ export async function sessionChatWs(app: FastifyInstance) {
     } catch (err) {
       log.warn({ err }, "Failed to replay session chat history");
     }
+    // The replay boundary: everything after this frame is live.
+    send({ type: "history_done", count: replayed });
 
     const rememberAgentSessionId = (id: string) => {
       if (id === agentSessionId) return;
@@ -223,17 +212,32 @@ export async function sessionChatWs(app: FastifyInstance) {
       });
     };
 
+    // One insert at a time, in emission order: the stored order (seq) is the
+    // replay order, and concurrent fire-and-forget inserts could land in any
+    // order. Persistence stays off the streaming path.
+    let persistChain: Promise<void> = Promise.resolve();
+    const persist = (input: Parameters<typeof appendSessionChatEvent>[0], what: string) => {
+      persistChain = persistChain
+        .then(() => appendSessionChatEvent(input))
+        .then(
+          () => undefined,
+          (err) => log.warn({ err }, `Failed to persist ${what}`),
+        );
+    };
+
     const emitEntry = (entry: AgentLogEntry) => {
       send({ type: "chat_event", event: entry });
-      persistChatEvent(sessionId, entry, log);
+      persist(chatEventRow(sessionId, entry), "session chat event");
 
       // Extract cost from result events
       if (entry.metadata?.cost && typeof entry.metadata.cost === "number") {
-        cumulativeCost += entry.metadata.cost;
+        const turnCost = entry.metadata.cost;
+        cumulativeCost += turnCost;
         send({ type: "cost_update", costUsd: cumulativeCost });
 
-        // Update session cost in DB
-        updateSessionCost(sessionId, cumulativeCost).catch((err) => {
+        // Add this turn to the stored total (never overwrite it with this
+        // socket's view, which would drop spend from earlier connections).
+        addSessionCost(sessionId, turnCost).catch((err) => {
           log.warn({ err }, "Failed to update session cost");
         });
       }
@@ -316,6 +320,13 @@ export async function sessionChatWs(app: FastifyInstance) {
 
       execSession = await rt.exec(handle, ["bash", "-c", script], { tty: false });
       const thisExec = execSession;
+      // The client left while the exec was starting: closing the socket
+      // interrupts a turn, so don't let this one run unobserved.
+      if (conn.closed) {
+        thisExec.close();
+        execSession = null;
+        return { fallback: false };
+      }
 
       thisExec.stdout.on("data", (chunk: Buffer) => {
         outputBuffer += chunk.toString("utf-8");
@@ -422,8 +433,17 @@ export async function sessionChatWs(app: FastifyInstance) {
       }
     };
 
-    // Handle incoming messages from the client
-    socket.on("message", (data: Buffer | string) => {
+    conn.onClose(() => {
+      log.info("Session chat disconnected");
+      if (execSession) {
+        execSession.close();
+        execSession = null;
+      }
+    });
+
+    // Handle incoming messages from the client — first the ones that arrived
+    // during setup and the replay above, in order, then live ones.
+    conn.ready((data: Buffer | string) => {
       if (!isMessageWithinSizeLimit(data)) {
         socket.close(WS_CLOSE_MESSAGE_TOO_LARGE, "Message too large");
         return;
@@ -448,12 +468,10 @@ export async function sessionChatWs(app: FastifyInstance) {
           // Persist the user's prompt so reconnecting clients see their own
           // side of the conversation, not just the agent's responses. Use
           // logType=user_message so the UI can render it distinctly.
-          appendSessionChatEvent({
-            sessionId,
-            content: msg.content,
-            stream: "stdin",
-            logType: "user_message",
-          }).catch((err) => log.warn({ err }, "Failed to persist user message"));
+          persist(
+            { sessionId, content: msg.content, stream: "stdin", logType: "user_message" },
+            "user message",
+          );
           runPrompt(msg.content).catch((err) => {
             log.error({ err }, "Prompt execution failed");
             send({ type: "error", message: "Prompt failed" });
@@ -485,15 +503,6 @@ export async function sessionChatWs(app: FastifyInstance) {
 
         default:
           send({ type: "error", message: `Unknown message type: ${msg.type}` });
-      }
-    });
-
-    socket.on("close", () => {
-      log.info("Session chat disconnected");
-      releaseConnection(clientIp);
-      if (execSession) {
-        execSession.close();
-        execSession = null;
       }
     });
   });
@@ -545,29 +554,30 @@ async function buildAuthEnv(
   return env;
 }
 
-/** Update the cumulative cost on the session record. */
-async function updateSessionCost(sessionId: string, costUsd: number) {
+/**
+ * Add one turn's cost to the session's stored total. The increment happens in
+ * SQL, so connections that overlap (a reconnect racing the old socket, two
+ * tabs) all add rather than overwrite each other's totals.
+ */
+async function addSessionCost(sessionId: string, turnCostUsd: number) {
   await db
     .update(interactiveSessions)
-    .set({ costUsd: costUsd.toFixed(4) })
+    .set({
+      costUsd: sql`ROUND(COALESCE(NULLIF(${interactiveSessions.costUsd}, ''), '0')::numeric + ${turnCostUsd}::numeric, 4)::text`,
+    })
     .where(eq(interactiveSessions.id, sessionId));
 }
 
-/**
- * Fire-and-forget persistence for an agent chat event. Failures are logged
- * but don't break the live stream — the client still gets the event over
- * the WebSocket; only history-on-reconnect is impacted.
- */
-function persistChatEvent(
+/** The stored row for one agent chat event. */
+function chatEventRow(
   sessionId: string,
   entry: import("@optio/shared").AgentLogEntry,
-  log: { warn: (obj: unknown, msg: string) => void },
-) {
-  appendSessionChatEvent({
+): Parameters<typeof appendSessionChatEvent>[0] {
+  return {
     sessionId,
     content: entry.content,
     logType: entry.type,
     metadata: entry.metadata,
     timestamp: entry.timestamp ? new Date(entry.timestamp) : undefined,
-  }).catch((err) => log.warn({ err }, "Failed to persist session chat event"));
+  };
 }

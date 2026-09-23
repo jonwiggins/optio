@@ -1,0 +1,43 @@
+{
+  "agent": {
+    "id": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+    "workspaceId": null,
+    "slug": "release-captain",
+    "name": "Release Captain",
+    "description": "Coordinates releases and answers questions about what is blocking them",
+    "agentRuntime": "claude-code",
+    "model": null,
+    "agentOptions": null,
+    "systemPrompt": null,
+    "agentsMd": null,
+    "initialPrompt": "You coordinate releases for e2e-org/e2e-repo. Answer questions tersely.",
+    "promptTemplateId": null,
+    "repoId": null,
+    "branch": null,
+    "worktreePath": null,
+    "podLifecycle": "sticky",
+    "idlePodTimeoutMs": 300000,
+    "stickyPodId": "47d1bac7-4fd6-442d-811e-3525d60f0fea",
+    "maxTurnDurationMs": 600000,
+    "maxTurns": 50,
+    "consecutiveFailureLimit": 3,
+    "state": "idle",
+    "enabled": true,
+    "totalCostUsd": "0.036900",
+    "consecutiveFailures": 0,
+    "lastFailureAt": null,
+    "lastFailureReason": null,
+    "lastTurnAt": "2026-09-23T01:08:10.979Z",
+    "sessionId": "96105ed8-d317-41e4-b70e-6c47a94b06d5",
+    "controlIntent": null,
+    "reconcileBackoffUntil": null,
+    "reconcileAttempts": 0,
+    "createdBy": null,
+    "createdAt": "2026-09-23T00:46:04.833Z",
+    "updatedAt": "2026-09-23T01:08:10.981Z"
+  },
+  "inbox": {
+    "pending": 0,
+    "oldest": null
+  }
+}

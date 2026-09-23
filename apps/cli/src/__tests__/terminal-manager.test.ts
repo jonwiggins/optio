@@ -233,6 +233,81 @@ describe("killAll", () => {
   });
 });
 
+describe("a terminal whose process exited", () => {
+  // The final preview waits on the screen model, so the exit frame goes out
+  // a little after the process ends.
+  const settle = () => new Promise((r) => setTimeout(r, 50));
+
+  it("stays attachable until its final frames are out", async () => {
+    const { sent, manager } = setup();
+    spawnTerminal(manager, "t-1");
+    h.spawned[0].dataCb?.("hi\r\n");
+    h.spawned[0].exitCb?.({ exitCode: 0 });
+
+    // A viewer attaching right after the exit (the server still has the row
+    // running) gets the output, not "Unknown terminal".
+    expect(manager.has("t-1")).toBe(true);
+    expect(manager.isLive("t-1")).toBe(false);
+    manager.attach("t-1", "a-1");
+    const scrollback = sent.find((m) => m.type === "scrollback") as
+      | { attachId: string; dataB64: string }
+      | undefined;
+    expect(scrollback?.attachId).toBe("a-1");
+    expect(Buffer.from(scrollback!.dataB64, "base64").toString()).toBe("hi\r\n");
+    expect(sent.some((m) => m.type === "attach-error")).toBe(false);
+    // Still reported running in a reconnect hello until its exit is out.
+    expect(manager.terminalsSync()).toEqual([{ terminalId: "t-1", running: true }]);
+
+    await settle();
+    const types = sent.map((m) => m.type);
+    expect(types.indexOf("scrollback")).toBeLessThan(types.indexOf("snapshot"));
+    expect(types.indexOf("snapshot")).toBeLessThan(types.indexOf("exit"));
+    expect(sent.find((m) => m.type === "exit")).toEqual({
+      type: "exit",
+      terminalId: "t-1",
+      exitCode: 0,
+    });
+
+    // Forgotten only once the exit is out.
+    expect(manager.has("t-1")).toBe(false);
+    expect(manager.terminalsSync()).toEqual([]);
+    manager.attach("t-1", "a-2");
+    expect(sent.at(-1)).toMatchObject({ type: "attach-error", attachId: "a-2" });
+  });
+
+  it("ignores input, resize and kill once the process is gone", async () => {
+    const { sent, manager } = setup();
+    spawnTerminal(manager, "t-1");
+    const pty = h.spawned[0];
+    pty.exitCb?.({ exitCode: 0 });
+    const before = sent.length;
+
+    manager.input("t-1", Buffer.from("ls\r").toString("base64"));
+    manager.resize("t-1", 100, 40);
+    manager.kill("t-1");
+
+    expect(pty.written).toEqual([]);
+    expect(pty.killed).toEqual([]);
+    expect(sent.slice(before).filter((m) => m.type === "size")).toEqual([]);
+    await settle();
+  });
+
+  it("reports its real exit code once when the daemon shuts down mid-flush", async () => {
+    const { sent, manager } = setup();
+    spawnTerminal(manager, "t-1");
+    h.spawned[0].exitCb?.({ exitCode: 3 });
+
+    manager.killAll();
+    await settle();
+
+    expect(sent.filter((m) => m.type === "exit")).toEqual([
+      { type: "exit", terminalId: "t-1", exitCode: 3 },
+    ]);
+    // No signal to a process that is already gone.
+    expect(h.spawned[0].killed).toEqual([]);
+  });
+});
+
 describe("input", () => {
   it("writes to the PTY and signals the attention tracker", () => {
     const { attention, manager } = setup();

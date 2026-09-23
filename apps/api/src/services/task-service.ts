@@ -362,10 +362,10 @@ export async function transitionTask(
     )
     .catch((err) => logger.warn({ err, taskId: id }, "Failed to send push notification"));
 
-  // iOS APNs alert + Live Activity refresh (fire-and-forget; no-op unless configured)
+  // iOS (APNs) + Android (FCM) alert + Watch refresh (fire-and-forget; no-op unless configured)
   import("./glance-service.js")
     .then(({ onTaskTransition }) => onTaskTransition(updated[0], toState))
-    .catch((err) => logger.warn({ err, taskId: id }, "Failed to send APNs notification"));
+    .catch((err) => logger.warn({ err, taskId: id }, "Failed to send native push notification"));
 
   // Handle task dependency graph: unblock dependents on completion, cascade on failure
   if (toState === TaskState.COMPLETED) {
@@ -518,14 +518,23 @@ export async function appendTaskLog(
   logType?: string,
   metadata?: Record<string, unknown>,
 ) {
-  await db.insert(taskLogs).values({ taskId, content, stream, logType, metadata });
+  const [row] = await db
+    .insert(taskLogs)
+    .values({ taskId, content, stream, logType, metadata })
+    .returning();
 
+  // The live frame is the stored row — id, timestamp, type, metadata as
+  // GET /api/tasks/:id/logs returns them — so clients that merge REST
+  // history with the live stream can recognize the same line twice.
   await publishEvent({
     type: "task:log",
     taskId,
-    stream: stream as "stdout" | "stderr",
-    content,
-    timestamp: new Date().toISOString(),
+    id: row.id,
+    stream: row.stream as "stdout" | "stderr",
+    content: row.content,
+    timestamp: row.timestamp.toISOString(),
+    logType: row.logType ?? undefined,
+    metadata: row.metadata ?? undefined,
   });
 }
 

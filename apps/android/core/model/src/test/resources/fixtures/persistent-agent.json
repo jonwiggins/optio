@@ -1,0 +1,61 @@
+{
+  "agent": {
+    "id": "4f5e6d7c-8b9a-4c0d-9e1f-2a3b4c5d6e7f",
+    "workspaceId": "w-1",
+    "slug": "forge",
+    "name": "Forge",
+    "description": "Keeps the release branch green.",
+    "agentRuntime": "claude-code",
+    "model": "sonnet",
+    "systemPrompt": null,
+    "agentsMd": "# Forge\nYou babysit CI.",
+    "initialPrompt": "Introduce yourself, then wait for work.",
+    "promptTemplateId": null,
+    "repoId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+    "branch": "release",
+    "worktreePath": null,
+    "podLifecycle": "sticky",
+    "idlePodTimeoutMs": 600000,
+    "stickyPodId": null,
+    "maxTurnDurationMs": 1800000,
+    "maxTurns": 50,
+    "consecutiveFailureLimit": 3,
+    "state": "idle",
+    "enabled": true,
+    "totalCostUsd": "1.2345",
+    "consecutiveFailures": 0,
+    "lastFailureAt": null,
+    "lastFailureReason": null,
+    "lastTurnAt": "2026-09-22T15:58:03.221Z",
+    "sessionId": "sess_01HZX",
+    "controlIntent": null,
+    "reconcileBackoffUntil": null,
+    "reconcileAttempts": 0,
+    "createdBy": "u-1",
+    "createdAt": "2026-09-01T08:00:00.000Z",
+    "updatedAt": "2026-09-22T15:58:03.221Z"
+  },
+  "inbox": [
+    {
+      "id": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f",
+      "agentId": "4f5e6d7c-8b9a-4c0d-9e1f-2a3b4c5d6e7f",
+      "senderType": "user",
+      "senderId": "u-1",
+      "senderName": "Jon",
+      "body": "Can you rebase the release branch?",
+      "structuredPayload": null,
+      "broadcasted": false,
+      "receivedAt": "2026-09-22T15:57:00.000Z",
+      "processedAt": "2026-09-22T15:57:02Z",
+      "turnId": "d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70"
+    },
+    {
+      "id": "e5f6a7b8-c9d0-4e1f-8a2b-3c4d5e6f7a81",
+      "agentId": "4f5e6d7c-8b9a-4c0d-9e1f-2a3b4c5d6e7f",
+      "senderType": "carrier-pigeon",
+      "body": "coo",
+      "broadcasted": true,
+      "receivedAt": 1790092620000
+    }
+  ]
+}

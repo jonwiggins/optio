@@ -1,0 +1,43 @@
+{
+  "errorMessages": [
+    {
+      "message": "Mock agent failure",
+      "count": 1
+    }
+  ],
+  "failureByRepo": [
+    {
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "total": 8,
+      "failed": 1,
+      "failureRate": 13
+    }
+  ],
+  "failureByAgent": [
+    {
+      "agentType": "claude-code",
+      "total": 9,
+      "failed": 1,
+      "failureRate": 11
+    }
+  ],
+  "failureByModel": [
+    {
+      "model": "fake-model",
+      "total": 6,
+      "failed": 1,
+      "failureRate": 17
+    },
+    {
+      "model": "unknown",
+      "total": 3,
+      "failed": 0,
+      "failureRate": 0
+    }
+  ],
+  "retrySuccessRate": 0,
+  "retriedCount": 0,
+  "retrySucceededCount": 0,
+  "stallCount": 0,
+  "stallRecoveryRate": 0
+}

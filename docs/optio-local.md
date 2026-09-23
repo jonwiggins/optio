@@ -282,6 +282,10 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   no terminal content may ever be published there); clients refetch via REST.
 - Daemon auth: the CLI's existing PAT via `Sec-WebSocket-Protocol` (`optio-auth-<pat>`),
   same as every other WS. The hello's `hostId` must belong to the authenticated user.
+  Clients may send the moment the socket opens: every WS route holds frames that
+  arrive while it is still authenticating and setting up, then handles them in order
+  (`ws/ws-connection.ts`; a client that sends more than 256 frames or 4 MB before then
+  is closed with 1008), so the daemon's `hello` can go out on `open`.
 
 ## REST API (all under `/api/local`, member role for mutations, owner-scoped)
 
@@ -342,7 +346,12 @@ claudeCredentials?}` — first frame; server reconciles DB rows against `termina
 - `{type:"started", terminalId}` / `{type:"spawn-error", terminalId, message}`
 - `{type:"output", terminalId, dataB64}` — only while the server holds a subscription
 - `{type:"scrollback", terminalId, attachId, dataB64}` — snapshot addressed to one
-  viewer's attach; `{type:"attach-error", terminalId, attachId, message}` when unknown
+  viewer's attach; `{type:"attach-error", terminalId, attachId, message}` when unknown.
+  A terminal whose process has exited stays attachable until its final `preview`,
+  `snapshot` and `exit` are sent (a command like `echo hi` is done before its pane
+  opens); it is forgotten only after its `exit`. If the daemon still refuses an attach
+  and the terminal is (or within 3 s becomes) exited, the server sends that viewer the
+  recorded screen instead of the error.
 - `{type:"attention", terminalId, state, reason}`
 - `{type:"preview", terminalId, preview, lastActivityAt}` — throttled (≥2 s)
 - `{type:"session", terminalId, agentSessionId}` — the agent CLI's own session id, once its
@@ -400,7 +409,8 @@ frames are control: `{type:"status", state, attentionState}` | `{type:"size", co
 the server sends `size` (the grid the final screen was recorded at), the screen bytes, then
 `exit` — in that order, so the viewer lays the grid out before painting. The web pane pins
 that grid ("Recorded screen 132×40" strip, no "use this screen"), so a click to select text or
-a window resize can never reflow the replay. Client → server (JSON only — no raw-keystroke frames, which
+a window resize can never reflow the replay. A viewer that was streaming when the terminal
+exited gets `exit` followed by a `size` with that recorded grid, so it pins the same way. Client → server (JSON only — no raw-keystroke frames, which
 eliminates the classic "pasted JSON swallowed as control" bug):
 `{type:"input", data}` | `{type:"resize", cols, rows}`.
 

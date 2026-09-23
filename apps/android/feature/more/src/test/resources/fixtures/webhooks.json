@@ -1,0 +1,16 @@
+{
+  "webhooks": [
+    {
+      "id": "8230ea20-4742-4047-b684-8988723d6c6b",
+      "url": "https://hooks.example.invalid/optio",
+      "workspaceId": "35802f88-a258-4eca-9817-be325718ab9e",
+      "events": ["task.completed", "task.failed", "workflow_run.completed"],
+      "secret": null,
+      "description": "Posts task outcomes to the team's chat bridge",
+      "active": true,
+      "createdBy": "d38f2c32-5be0-48ba-84f6-3138f208f841",
+      "createdAt": "2026-09-23T00:46:15.739Z",
+      "updatedAt": "2026-09-23T00:46:15.739Z"
+    }
+  ]
+}

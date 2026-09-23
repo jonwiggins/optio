@@ -1,0 +1,20 @@
+{
+  "messages": [
+    {
+      "id": "chat-1",
+      "prReviewId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "runId": "run-chat-2",
+      "role": "user",
+      "content": "Is the limit cap really needed?",
+      "createdAt": "2026-09-22T16:32:58.000Z"
+    },
+    {
+      "id": "chat-2",
+      "prReviewId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "runId": "run-chat-2",
+      "role": "assistant",
+      "content": "Yes: the API rejects limit > 200, so the page would 400.",
+      "createdAt": "2026-09-22T16:33:41.000Z"
+    }
+  ]
+}

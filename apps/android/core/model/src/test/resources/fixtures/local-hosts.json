@@ -1,0 +1,51 @@
+{
+  "hosts": [
+    {
+      "id": "9d2e4c6a-8b0f-4a1e-b3c5-d7e9f1a3b5c7",
+      "userId": "u-1",
+      "workspaceId": "w-1",
+      "name": "mbp",
+      "hostname": "jons-mbp.tail1234.ts.net",
+      "platform": "darwin",
+      "arch": "arm64",
+      "daemonVersion": "0.6.3",
+      "dirs": [
+        { "path": "/Users/dev/optio", "repoUrl": "https://github.com/acme/optio" },
+        { "path": "/Users/dev/scratch" }
+      ],
+      "agentLimits": {
+        "codex": {
+          "primary": {
+            "usedPercent": 42.5,
+            "windowMinutes": 300,
+            "resetsAt": "2026-09-22T19:00:00Z"
+          },
+          "secondary": { "usedPercent": 7, "windowMinutes": null, "resetsAt": null },
+          "planType": "pro",
+          "observedAt": "2026-09-22T16:20:00.000Z"
+        }
+      },
+      "claudeCredentials": true,
+      "state": "online",
+      "lastSeenAt": "2026-09-22T16:31:30.000Z",
+      "createdAt": "2026-08-01T10:00:00.000Z",
+      "updatedAt": "2026-09-22T16:31:30.000Z"
+    },
+    {
+      "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "userId": null,
+      "workspaceId": null,
+      "name": "linux-box",
+      "hostname": "devbox",
+      "platform": "linux",
+      "arch": null,
+      "daemonVersion": null,
+      "dirs": [],
+      "agentLimits": null,
+      "state": "offline",
+      "lastSeenAt": null,
+      "createdAt": "2026-08-02T10:00:00Z",
+      "updatedAt": "2026-08-02T10:00:00Z"
+    }
+  ]
+}

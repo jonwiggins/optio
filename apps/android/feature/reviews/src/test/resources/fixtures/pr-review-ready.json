@@ -1,0 +1,37 @@
+{
+  "review": {
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "workspaceId": null,
+    "prUrl": "https://github.com/e2e-org/e2e-repo/pull/138",
+    "prNumber": 138,
+    "repoOwner": "e2e-org",
+    "repoName": "e2e-repo",
+    "repoUrl": "https://github.com/e2e-org/e2e-repo",
+    "headSha": "c41d0a9f2e11",
+    "state": "ready",
+    "verdict": "request_changes",
+    "summary": "The pagination works, but `offset` is never reset when a filter changes, so page 3 of one filter shows an empty list for another.\n\nReset the offset whenever the type or resource filter changes.",
+    "fileComments": [
+      {
+        "path": "apps/web/src/app/activity/page.tsx",
+        "line": 128,
+        "side": "RIGHT",
+        "body": "Reset `offset` to 0 here when the filter changes."
+      },
+      {
+        "path": "apps/api/src/routes/activity.ts",
+        "line": 41,
+        "body": "`limit` should be capped at 200 like the schema says."
+      }
+    ],
+    "origin": "manual",
+    "userEngaged": false,
+    "autoSubmitted": false,
+    "submittedAt": null,
+    "errorMessage": null,
+    "createdBy": null,
+    "controlIntent": null,
+    "createdAt": "2026-09-22T16:05:00.000Z",
+    "updatedAt": "2026-09-22T16:31:12.000Z"
+  }
+}

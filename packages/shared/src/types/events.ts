@@ -3,6 +3,7 @@ import type { InteractiveSessionState } from "./session.js";
 import type { WorkflowRunState } from "./workflow.js";
 import type { PrReviewState, PrReviewRunState } from "./pr-review.js";
 import type { PersistentAgentState, PersistentAgentTurnHaltReason } from "./persistent-agent.js";
+import type { LocalChangedEvent } from "./local.js";
 
 export type WsEvent =
   | TaskStateChangedEvent
@@ -29,7 +30,8 @@ export type WsEvent =
   | PersistentAgentTurnStartedEvent
   | PersistentAgentTurnHaltedEvent
   | PersistentAgentMessageEvent
-  | PersistentAgentLogEvent;
+  | PersistentAgentLogEvent
+  | LocalChangedEvent;
 
 export interface TaskStateChangedEvent {
   type: "task:state_changed";
@@ -46,12 +48,24 @@ export interface TaskStateChangedEvent {
   errorMessage?: string;
 }
 
+/**
+ * A task log line on `/ws/logs/:taskId`. Live frames carry the stored row —
+ * the same `id`, `timestamp`, `logType` and `metadata` that
+ * `GET /api/tasks/:id/logs` returns — so a client merging REST history with
+ * the live stream can drop duplicates. Frames replayed on connect are flagged
+ * `catchUp: true`.
+ */
 export interface TaskLogEvent {
   type: "task:log";
   taskId: string;
+  /** The `task_logs` row id. */
+  id?: string;
   stream: "stdout" | "stderr";
   content: string;
   timestamp: string;
+  logType?: string;
+  metadata?: Record<string, unknown>;
+  catchUp?: boolean;
 }
 
 export interface TaskCreatedEvent {

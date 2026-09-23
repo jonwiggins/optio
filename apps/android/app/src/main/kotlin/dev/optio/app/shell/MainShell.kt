@@ -1,0 +1,170 @@
+package dev.optio.app.shell
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
+import androidx.navigation3.runtime.NavKey
+import androidx.navigation3.runtime.rememberDecoratedNavEntries
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.ui.NavDisplay
+import dev.optio.app.openExternalUrl
+import dev.optio.core.navigation.AppRouter
+import dev.optio.core.navigation.LocalAppRouter
+import dev.optio.core.navigation.LocalNavigator
+import dev.optio.core.navigation.RouterNavigator
+import dev.optio.core.navigation.Tab
+import dev.optio.core.navigation.rememberAppRouter
+import dev.optio.core.ui.toast.LocalToaster
+import kotlinx.coroutines.flow.filterNotNull
+
+/**
+ * The signed-in shell (PLAN §4): a `NavigationSuiteScaffold` (bottom bar on phones, rail on wide
+ * screens) with Overview · Work · Library · Insights · More, and one Navigation 3 back stack per
+ * tab. Re-selecting the tab on screen pops it to its hub; Back at a hub other than Overview
+ * returns to Overview.
+ *
+ * Every tab's entries stay decorated (saveable state + entry-scoped ViewModels) while another
+ * tab is on screen, so switching tabs keeps each stack exactly as it was (like iOS). The whole
+ * shell, and all of that state, is dropped when the root re-keys it on `session.generation` (a
+ * server switch).
+ *
+ * While the keyboard is up the bottom bar steps aside (it sits behind the keyboard anyway): the
+ * content then reaches the window bottom and a screen's own `imePadding()` lines its composer up
+ * with the keyboard. With the bar still laid out underneath, the keyboard inset was counted from
+ * the window bottom and left a bar-high gap above every composer. The rail on wide screens takes no
+ * height and stays.
+ *
+ * [onOpenDeepLink] backs `Navigator.openDeepLink` (the root sends links through its server-aware
+ * inbox); the router's `createdToast` goes to the app's toaster (`LocalToaster`).
+ */
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalLayoutApi::class)
+@Composable
+fun MainShell(
+    modifier: Modifier = Modifier,
+    router: AppRouter = rememberAppRouter(),
+    onOpenDeepLink: (url: String) -> Unit = { router.handle(it) },
+) {
+    val context = LocalContext.current
+    val currentOnOpenDeepLink by rememberUpdatedState(onOpenDeepLink)
+    val navigator =
+        remember(router, context) {
+            RouterNavigator(
+                router = router,
+                onOpenDeepLink = { url -> currentOnOpenDeepLink(url) },
+                onOpenExternal = { url -> context.openExternalUrl(url) },
+            )
+        }
+    val entryProvider = remember { appEntryProvider() }
+    val toaster = LocalToaster.current
+    LaunchedEffect(router, toaster) {
+        snapshotFlow { router.createdToast }.filterNotNull().collect { toast ->
+            router.consumeCreatedToast()
+            toaster.success(toast)
+        }
+    }
+
+    val adaptiveType = NavigationSuiteScaffoldDefaults.navigationSuiteType(currentWindowAdaptiveInfo())
+    val bottomBar =
+        adaptiveType == NavigationSuiteType.NavigationBar ||
+            adaptiveType == NavigationSuiteType.ShortNavigationBarCompact ||
+            adaptiveType == NavigationSuiteType.ShortNavigationBarMedium
+    val layoutType = if (bottomBar && WindowInsets.isImeVisible) NavigationSuiteType.None else adaptiveType
+    // A bottom bar draws over the gesture-bar inset, so the content above it must not pad for it
+    // again: every Scaffold's content padding and composer's insets left a 24 dp gap between the bar
+    // and a screen's bottom row (the terminal key bar, the chat composers). A rail takes no height,
+    // and a hidden bar leaves the content at the window bottom: both keep the inset.
+    val contentModifier =
+        if (bottomBar && layoutType != NavigationSuiteType.None) {
+            Modifier.consumeWindowInsets(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+        } else {
+            Modifier
+        }
+
+    CompositionLocalProvider(LocalAppRouter provides router, LocalNavigator provides navigator) {
+        NavigationSuiteScaffold(
+            modifier = modifier.semantics { testTagsAsResourceId = true },
+            layoutType = layoutType,
+            navigationSuiteItems = {
+                Tab.entries.forEach { tab ->
+                    item(
+                        selected = tab == router.selectedTab,
+                        onClick = { router.select(tab) },
+                        icon = { Icon(tab.icon, contentDescription = null) },
+                        label = { Text(tab.label) },
+                        modifier = Modifier.testTag("tab-${tab.name.lowercase()}"),
+                    )
+                }
+            },
+        ) {
+            val entriesByTab =
+                Tab.entries.associateWith { tab ->
+                    key(tab) {
+                        rememberDecoratedNavEntries(
+                            backStack = router.backStack(tab),
+                            entryDecorators =
+                                listOf(
+                                    rememberSaveableStateHolderNavEntryDecorator<NavKey>(),
+                                    rememberViewModelStoreNavEntryDecorator<NavKey>(),
+                                ),
+                            entryProvider = entryProvider,
+                        )
+                    }
+                }
+            val tab = router.selectedTab
+            BackHandler(enabled = tab != Tab.OVERVIEW && router.backStack(tab).size == 1) {
+                router.select(Tab.OVERVIEW)
+            }
+            key(tab) {
+                NavDisplay(
+                    entries = entriesByTab.getValue(tab),
+                    modifier = contentModifier,
+                    onBack = { router.pop(tab) },
+                )
+            }
+        }
+    }
+}
+
+/** Bottom bar / rail icon (iOS SF Symbols: square.grid.2x2, terminal, books.vertical, chart.bar, ellipsis). */
+private val Tab.icon: ImageVector
+    get() =
+        when (this) {
+            Tab.OVERVIEW -> Icons.Outlined.GridView
+            Tab.WORK -> Icons.Outlined.Terminal
+            Tab.LIBRARY -> Icons.AutoMirrored.Outlined.LibraryBooks
+            Tab.INSIGHTS -> Icons.Outlined.BarChart
+            Tab.MORE -> Icons.Outlined.MoreHoriz
+        }

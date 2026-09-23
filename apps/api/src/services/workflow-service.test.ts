@@ -282,10 +282,11 @@ describe("workflow-service", () => {
           enabled: true,
           environment_spec: null,
           created_by: "u-1",
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
+          // Raw SQL hands timestamps back as Postgres text, not ISO.
+          created_at: "2026-01-01 00:00:00+00",
+          updated_at: "2026-01-02 03:04:05.678901+00",
           run_count: "3",
-          last_run_at: "2026-01-15T00:00:00Z",
+          last_run_at: "2026-01-15 00:00:00+00",
           total_cost_usd: "4.5000",
         },
       ]);
@@ -299,7 +300,10 @@ describe("workflow-service", () => {
       expect(db.execute).toHaveBeenCalled();
       expect(result).toHaveLength(1);
       expect(result[0].runCount).toBe(3);
-      expect(result[0].lastRunAt).toBe("2026-01-15T00:00:00Z");
+      // Converted to Dates, so they serialize as ISO-8601 like drizzle rows.
+      expect(result[0].lastRunAt).toEqual(new Date("2026-01-15T00:00:00Z"));
+      expect(result[0].createdAt).toEqual(new Date("2026-01-01T00:00:00Z"));
+      expect(JSON.stringify(result[0].updatedAt)).toBe('"2026-01-02T03:04:05.678Z"');
       expect(result[0].totalCostUsd).toBe("4.5000");
       expect(result[0].name).toBe("Deploy Pipeline");
       expect(result[0].triggerTypes).toEqual(["manual", "schedule"]);
@@ -377,7 +381,7 @@ describe("workflow-service", () => {
       (db.execute as any) = vi.fn().mockResolvedValue([
         {
           run_count: "5",
-          last_run_at: "2026-01-20T00:00:00Z",
+          last_run_at: "2026-01-20 00:00:00+00",
           total_cost_usd: "10.0000",
         },
       ]);
@@ -386,7 +390,7 @@ describe("workflow-service", () => {
 
       expect(result).not.toBeNull();
       expect(result!.runCount).toBe(5);
-      expect(result!.lastRunAt).toBe("2026-01-20T00:00:00Z");
+      expect(result!.lastRunAt).toEqual(new Date("2026-01-20T00:00:00Z"));
       expect(result!.totalCostUsd).toBe("10.0000");
       expect(result!.name).toBe("Deploy");
     });

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Run widget: 2×2, one target chosen when it is placed (and again via Reconfigure). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:configure="dev.optio.feature.widgets.config.RunWidgetConfigActivity"
+    android:description="@string/widget_run_description"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:maxResizeHeight="220dp"
+    android:maxResizeWidth="220dp"
+    android:minHeight="110dp"
+    android:minResizeHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minWidth="110dp"
+    android:previewImage="@drawable/widget_preview_run"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellHeight="2"
+    android:targetCellWidth="2"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen"
+    android:widgetFeatures="reconfigurable" />

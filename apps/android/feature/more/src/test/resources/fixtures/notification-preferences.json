@@ -1,0 +1,37 @@
+{
+  "preferences": {
+    "task.pr_opened": {
+      "push": true
+    },
+    "task.completed": {
+      "push": true
+    },
+    "task.failed": {
+      "push": true
+    },
+    "task.needs_attention": {
+      "push": true
+    },
+    "task.stalled": {
+      "push": true
+    },
+    "task.review_requested": {
+      "push": false
+    },
+    "task.commented": {
+      "push": false
+    },
+    "local.needs_you": {
+      "push": true
+    },
+    "local.host_offline": {
+      "push": true
+    },
+    "agent.turn_completed": {
+      "push": false
+    },
+    "agent.failed": {
+      "push": true
+    }
+  }
+}

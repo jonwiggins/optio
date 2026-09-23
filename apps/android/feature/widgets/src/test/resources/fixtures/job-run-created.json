@@ -1,0 +1,29 @@
+{
+  "run": {
+    "id": "c9b8234c-b9a7-4348-866a-0fcabb774fe7",
+    "workflowId": "0f3351b4-402c-4caa-bd89-0ee8391f614b",
+    "triggerId": null,
+    "state": "queued",
+    "params": null,
+    "title": null,
+    "output": null,
+    "costUsd": null,
+    "inputTokens": null,
+    "outputTokens": null,
+    "modelUsed": null,
+    "errorMessage": null,
+    "sessionId": null,
+    "podName": null,
+    "localTerminalId": null,
+    "retryCount": 0,
+    "startedAt": null,
+    "finishedAt": null,
+    "createdAt": "2026-09-23T01:15:24.289Z",
+    "updatedAt": "2026-09-23T01:15:24.289Z",
+    "podId": null,
+    "lastPodId": null,
+    "controlIntent": null,
+    "reconcileBackoffUntil": null,
+    "reconcileAttempts": 0
+  }
+}

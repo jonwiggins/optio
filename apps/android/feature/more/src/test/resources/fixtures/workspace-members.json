@@ -1,0 +1,34 @@
+{
+  "members": [
+    {
+      "id": "34f3fd06-1c23-4889-b925-122ca49461cc",
+      "workspaceId": "35802f88-a258-4eca-9817-be325718ab9e",
+      "userId": "d38f2c32-5be0-48ba-84f6-3138f208f841",
+      "role": "admin",
+      "createdAt": "2026-09-23T00:45:45.520Z",
+      "email": "ada-admin@example.com",
+      "displayName": "Ada Admin",
+      "avatarUrl": null
+    },
+    {
+      "id": "4c055085-5e22-4528-a574-369a16715ddd",
+      "workspaceId": "35802f88-a258-4eca-9817-be325718ab9e",
+      "userId": "2164b975-e49b-4618-8d57-ce49d8786173",
+      "role": "member",
+      "createdAt": "2026-09-23T00:45:45.535Z",
+      "email": "mia-member@example.com",
+      "displayName": "Mia Member",
+      "avatarUrl": null
+    },
+    {
+      "id": "c9e3cdac-3ac9-4168-92ed-58991c22283d",
+      "workspaceId": "35802f88-a258-4eca-9817-be325718ab9e",
+      "userId": "04a8d693-d05c-4f8d-8d07-3889eb925a07",
+      "role": "viewer",
+      "createdAt": "2026-09-23T00:45:45.542Z",
+      "email": "vic-viewer@example.com",
+      "displayName": "Vic Viewer",
+      "avatarUrl": null
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only: pin a widget from adb (the launcher's add dialog then needs one tap), with an
+  optional configuration applied when it lands.
+
+    adb shell am start -n dev.optio.android/dev.optio.feature.widgets.debug.PinWidgetActivity
+      with string extras kind (work | run), server (a server id, Work), target + name (Run), and the
+      boolean extra confirm (Run, default true). See PinWidgetActivity.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".debug.PinWidgetActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.OptioWidgets.Translucent" />
+        <receiver
+            android:name=".debug.PinnedWidgetReceiver"
+            android:exported="false" />
+    </application>
+</manifest>

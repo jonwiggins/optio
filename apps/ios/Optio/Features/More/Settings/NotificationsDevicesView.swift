@@ -18,7 +18,8 @@ struct NotificationsDevicesView: View {
     enum DevicesState: Equatable { case loading, loaded, unsupported, failed(String) }
 
     struct DeviceRow: Decodable, Identifiable, Hashable {
-        var id: String { token }
+        /// The server's row id: what a delete takes, since the list masks `token`.
+        let id: String
         let token: String
         let platform: String?
         let environment: String?
@@ -28,12 +29,13 @@ struct NotificationsDevicesView: View {
         let lastSeenAt: Date?
 
         private enum CodingKeys: String, CodingKey {
-            case token, deviceToken, platform, environment, bundleEnv, deviceName, appVersion, createdAt, lastSeenAt
+            case id, token, deviceToken, platform, environment, bundleEnv, deviceName, appVersion, createdAt, lastSeenAt
         }
 
         init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             token = try c.decodeIfPresent(String.self, forKey: .token) ?? c.decode(String.self, forKey: .deviceToken)
+            id = try c.decodeIfPresent(String.self, forKey: .id) ?? token
             platform = try c.decodeIfPresent(String.self, forKey: .platform)
             environment = try c.decodeIfPresent(String.self, forKey: .environment) ?? c.decodeIfPresent(String.self, forKey: .bundleEnv)
             deviceName = try c.decodeIfPresent(String.self, forKey: .deviceName)
@@ -163,7 +165,7 @@ struct NotificationsDevicesView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(d.deviceName ?? "Unnamed device")
-                            if d.token == registrar.deviceToken {
+                            if isThisPhone(d) {
                                 Text("this iPhone").font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
                                     .background(AppTheme.accent.opacity(0.15), in: Capsule()).foregroundStyle(AppTheme.accent)
                             }
@@ -267,10 +269,18 @@ struct NotificationsDevicesView: View {
         }
     }
 
+    /// The list masks tokens (first 6 … last 4), so this iPhone's row is the one its own token masks to.
+    private func isThisPhone(_ d: DeviceRow) -> Bool {
+        registrar.maskedToken.map { d.token == $0 } ?? false
+    }
+
     private func remove(_ d: DeviceRow) async {
+        // By row id. This iPhone's own row goes by its raw APNs token instead, which servers from
+        // before Android push (they reject ids) accept too.
+        let ref = isThisPhone(d) ? (registrar.deviceToken ?? d.id) : d.id
         do {
-            try await api.delete("/api/notifications/devices/\(d.token)")
-            devices.removeAll { $0.token == d.token }
+            try await api.delete("/api/notifications/devices/\(ref)")
+            devices.removeAll { $0.id == d.id }
         } catch {
             errorMessage = error.moreDescription
         }

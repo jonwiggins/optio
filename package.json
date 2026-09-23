@@ -20,7 +20,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky",
-    "gen:swift": "pnpm --filter @optio/shared gen:swift"
+    "gen:swift": "pnpm --filter @optio/shared gen:swift",
+    "gen:kotlin": "pnpm --filter @optio/shared gen:kotlin"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.0",

@@ -1,0 +1,32 @@
+{
+  "devices": [
+    {
+      "id": "e8336eb9-582c-4733-8bf2-ea61e02dc453",
+      "token": "f66053…a79a",
+      "platform": "ios",
+      "environment": "sandbox",
+      "bundleId": "dev.optio.ios",
+      "appVersion": "1.0 (devlab)",
+      "deviceName": "Ada's iPhone",
+      "failureCount": 0,
+      "lastSeenAt": "2026-09-23T00:46:18.382Z",
+      "createdAt": "2026-09-23T00:46:18.382Z"
+    },
+    {
+      "id": "57db64ed-20d6-47ed-8613-6b5d32f050ca",
+      "token": "fake-a…cdef",
+      "platform": "android",
+      "appId": "dev.optio.android",
+      "serverId": "dev-server",
+      "appVersion": "0.1.0 (1)",
+      "deviceName": "Pixel 10 (emulator)",
+      "failureCount": 0,
+      "lastSeenAt": "2026-09-23T00:47:43.599Z",
+      "createdAt": "2026-09-23T00:47:43.599Z"
+    }
+  ],
+  "push": {
+    "apns": false,
+    "fcm": false
+  }
+}

@@ -7,6 +7,7 @@ import { handleSlackAction, sendSlackNotification } from "../services/slack-serv
 import { logger } from "../logger.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
+import { captureRawBody, rawBodyOf, verifySlackSignature } from "../utils/webhook-signature.js";
 
 const slackTestBodySchema = z
   .object({
@@ -44,25 +45,45 @@ const SlackActionResponseSchema = z
 export async function slackRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
+  // Public (no Optio session — Slack is the caller), so the Slack signing
+  // secret is its only authentication: the buttons retry and cancel tasks.
   app.post(
     "/api/webhooks/slack/actions",
     {
+      config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
       schema: {
         hide: true,
         operationId: "slackWebhookActions",
         summary: "Slack interactive components receiver",
         description:
           "Inbound endpoint for Slack button clicks. Slack POSTs a form-encoded " +
-          "body with a single `payload` field containing JSON. Hidden from the " +
-          "public spec since Slack is the only caller.",
+          "body with a single `payload` field containing JSON. Verified with " +
+          "SLACK_SIGNING_SECRET (X-Slack-Signature v0 over the raw body). Hidden " +
+          "from the public spec since Slack is the only caller.",
         tags: ["Repos & Integrations"],
+        security: [],
         response: {
           200: SlackActionResponseSchema,
           400: ErrorResponseSchema,
+          401: ErrorResponseSchema,
         },
       },
+      preParsing: captureRawBody,
     },
     async (req, reply) => {
+      const secret = process.env.SLACK_SIGNING_SECRET;
+      if (!secret) {
+        logger.error("SLACK_SIGNING_SECRET is not set — rejecting Slack action");
+        return reply.status(401).send({ error: "Slack signing secret not configured" });
+      }
+      const signed = verifySlackSignature(
+        rawBodyOf(req),
+        req.headers["x-slack-request-timestamp"] as string | undefined,
+        req.headers["x-slack-signature"] as string | undefined,
+        secret,
+      );
+      if (!signed) return reply.status(401).send({ error: "Invalid Slack signature" });
+
       try {
         // Slack can send three shapes here: raw JSON string, a form-encoded
         // object with a JSON `payload` field, or plain JSON. The body type

@@ -1,0 +1,60 @@
+{
+  "phase": "waiting",
+  "head": {
+    "kind": "local",
+    "id": "0b7e6f4a-2c1d-4e9b-8a3f-5d6c7b8a9e01",
+    "title": "claude-code · web",
+    "mono": "web",
+    "reason": "Waiting on a permission",
+    "preview": "Allow Bash(pnpm test)?",
+    "since": 811787459,
+    "state": "needs_you",
+    "link": "optio://local/0b7e6f4a-2c1d-4e9b-8a3f-5d6c7b8a9e01?compose=1",
+    "snoozedUntil": null,
+    "source": "local-terminal",
+    "when": "now",
+    "where": { "target": "machine", "detail": "mbp · ~/optio/apps/web" },
+    "who": "claude-code",
+    "then": "waits-for-me",
+    "statusLabel": "needs you"
+  },
+  "others": [
+    {
+      "kind": "task",
+      "id": "5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10",
+      "title": "Fix flaky login test",
+      "mono": "fix/login",
+      "reason": "PR #42 open",
+      "since": 811787467,
+      "state": "pr_opened",
+      "link": "optio://tasks/5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10",
+      "prUrl": "https://github.com/acme/web/pull/42",
+      "source": "repo-task",
+      "when": "on a trigger",
+      "where": { "target": "pod", "detail": "acme/web" },
+      "who": "codex",
+      "then": "exits",
+      "statusLabel": "PR open"
+    },
+    {
+      "kind": "drone",
+      "id": "x-1",
+      "title": "From a newer server",
+      "mono": "",
+      "since": 811787470,
+      "state": "hovering",
+      "link": "optio://drones/x-1",
+      "source": "drone-fleet",
+      "where": { "target": "orbit", "detail": null },
+      "then": "waits-forever"
+    }
+  ],
+  "needsYouCount": 3,
+  "runningCount": 1,
+  "waitingCount": 2,
+  "recurringCount": 5,
+  "agentCount": 1,
+  "offlineSince": null,
+  "summary": null,
+  "asOf": 811787490
+}

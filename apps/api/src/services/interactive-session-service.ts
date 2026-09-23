@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, and, desc, asc, gte, isNull, lte, sql } from "drizzle-orm";
+import { eq, and, desc, gte, isNull, lte, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   interactiveSessions,
@@ -280,7 +280,7 @@ export async function appendSessionChatEvent(input: AppendSessionChatEventInput)
       .select({ ts: sessionChatEvents.timestamp })
       .from(sessionChatEvents)
       .where(eq(sessionChatEvents.sessionId, input.sessionId))
-      .orderBy(desc(sessionChatEvents.timestamp))
+      .orderBy(desc(sessionChatEvents.timestamp), desc(sessionChatEvents.seq))
       .limit(1)
       .offset(MAX_SESSION_CHAT_EVENTS);
     if (cutoff?.ts) {
@@ -300,14 +300,22 @@ export async function appendSessionChatEvent(input: AppendSessionChatEventInput)
   return event;
 }
 
+/**
+ * A session's chat history: the newest `limit` events (default 1000, at most
+ * the retention cap), oldest first. A long session keeps up to
+ * MAX_SESSION_CHAT_EVENTS; a shorter window must be its latest stretch, the
+ * part a replay or a history view has to show.
+ */
 export async function listSessionChatEvents(sessionId: string, opts?: { limit?: number }) {
   const limit = Math.min(opts?.limit ?? 1000, MAX_SESSION_CHAT_EVENTS);
-  return db
+  const newestFirst = await db
     .select()
     .from(sessionChatEvents)
     .where(eq(sessionChatEvents.sessionId, sessionId))
-    .orderBy(asc(sessionChatEvents.timestamp))
+    // seq breaks ties: several events share one millisecond.
+    .orderBy(desc(sessionChatEvents.timestamp), desc(sessionChatEvents.seq))
     .limit(limit);
+  return newestFirst.reverse();
 }
 
 /**

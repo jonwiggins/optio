@@ -1,0 +1,64 @@
+{
+  "templates": [
+    {
+      "id": "905f46e3-7a1b-4a0f-bd75-823d8dfb8d2f",
+      "name": "Explain a failing test",
+      "template": "Explain why {{test}} fails and propose the smallest fix.",
+      "isDefault": false,
+      "repoUrl": null,
+      "autoMerge": false,
+      "workspaceId": null,
+      "kind": "prompt",
+      "paramsSchema": null,
+      "defaultAgentType": null,
+      "description": "Ask an agent to diagnose one failing test",
+      "createdAt": "2026-09-23T00:45:57.075Z",
+      "updatedAt": "2026-09-23T00:45:57.075Z"
+    },
+    {
+      "id": "e05074fb-50b7-4739-9a33-97351b21603c",
+      "name": "Add a feature flag",
+      "template": "Add a feature flag named {{flag}}{{#if owner}} owned by {{owner}}{{/if}}, default off, and open a PR.",
+      "isDefault": false,
+      "repoUrl": null,
+      "autoMerge": false,
+      "workspaceId": null,
+      "kind": "task",
+      "paramsSchema": null,
+      "defaultAgentType": null,
+      "description": "Repo task: wire a new flag end to end",
+      "createdAt": "2026-09-23T00:45:57.078Z",
+      "updatedAt": "2026-09-23T00:45:57.078Z"
+    },
+    {
+      "id": "60bc87ac-0ebe-4bec-b9c5-39dc057af7de",
+      "name": "Weekly dependency report",
+      "template": "List outdated dependencies in {{repo}} and summarize the risk of each upgrade.",
+      "isDefault": false,
+      "repoUrl": null,
+      "autoMerge": false,
+      "workspaceId": null,
+      "kind": "job",
+      "paramsSchema": null,
+      "defaultAgentType": null,
+      "description": "Standalone job: summarize outdated dependencies",
+      "createdAt": "2026-09-23T00:45:57.081Z",
+      "updatedAt": "2026-09-23T00:45:57.081Z"
+    },
+    {
+      "id": "2ae8cd69-5ee1-455d-b5c1-3251a234517d",
+      "name": "Strict code review",
+      "template": "Review the PR for correctness, tests and naming. Be concise; flag blockers first.",
+      "isDefault": false,
+      "repoUrl": null,
+      "autoMerge": false,
+      "workspaceId": null,
+      "kind": "review",
+      "paramsSchema": null,
+      "defaultAgentType": null,
+      "description": "Reviewer instructions that flag blockers first",
+      "createdAt": "2026-09-23T00:45:57.084Z",
+      "updatedAt": "2026-09-23T00:45:57.084Z"
+    }
+  ]
+}

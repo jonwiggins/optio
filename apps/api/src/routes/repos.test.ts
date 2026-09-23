@@ -195,6 +195,41 @@ describe("PATCH /api/repos/:id", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it("clears reviewModel back to the default with null", async () => {
+    mockGetRepo.mockResolvedValue({ ...mockRepoData, reviewModel: "opus" });
+    mockUpdateRepo.mockResolvedValue({ ...mockRepoData, reviewModel: null });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/repos/repo-1",
+      payload: { reviewModel: null },
+    });
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(mockUpdateRepo).toHaveBeenCalledWith(
+      "repo-1",
+      expect.objectContaining({ reviewModel: null }),
+    );
+    expect(res.json().repo.reviewModel).toBeNull();
+  });
+
+  it("clears reviewModel while changing the review agent", async () => {
+    mockGetRepo.mockResolvedValue({ ...mockRepoData, reviewModel: "sonnet" });
+    mockUpdateRepo.mockResolvedValue({ ...mockRepoData, reviewModel: null });
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/repos/repo-1",
+      payload: { reviewAgentType: "gemini", reviewModel: null },
+    });
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect(mockUpdateRepo).toHaveBeenCalledWith(
+      "repo-1",
+      expect.objectContaining({ reviewAgentType: "gemini", reviewModel: null }),
+    );
+  });
+
   it("accepts openclaw as the default agent type", async () => {
     mockGetRepo.mockResolvedValue(mockRepoData);
     mockUpdateRepo.mockResolvedValue({ ...mockRepoData, defaultAgentType: "openclaw" });

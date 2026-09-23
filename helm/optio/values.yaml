@@ -338,8 +338,12 @@ auth:
 # GitHub webhook signature validation
 # ──────────────────────────────────────────────────────────────────────────────
 webhook:
+  # The receivers (/api/webhooks/github, /api/webhooks/slack/events,
+  # /api/webhooks/slack/actions, /api/webhooks/linear) take no Optio session;
+  # each rejects every delivery until its secret below is set.
   githubSecret: ""  # Generate with: openssl rand -hex 32. Must match GitHub's webhook config.
-  # Optio Local automations: signed event ingress for Slack and Linear.
+  # Slack event triggers and the retry/cancel buttons on Slack notifications,
+  # plus Linear event triggers.
   slackSigningSecret: ""  # Slack app → Basic Information → Signing Secret
   linearSecret: ""  # Linear → Settings → API → Webhooks → signing secret
 
@@ -470,6 +474,17 @@ notifications:
     # Name of a pre-created Secret carrying OPTIO_APNS_KEY_ID, OPTIO_APNS_TEAM_ID,
     # OPTIO_APNS_KEY (and optionally OPTIO_APNS_BUNDLE_ID / OPTIO_APNS_ENVIRONMENT)
     # for clusters that keep the key out of values. When set, keyId/teamId/key above are ignored.
+    existingSecret: ""
+  # ── Android push (Firebase Cloud Messaging, HTTP v1) — see docs/android-push.md ──
+  # Leave serviceAccount empty to disable. Firebase console → Project settings →
+  # Service accounts → Generate new private key; paste the downloaded JSON
+  # (or `--set-file notifications.fcm.serviceAccount=sa.json`).
+  fcm:
+    serviceAccount: ""   # the service-account key JSON (multi-line ok)
+    projectId: ""        # optional; defaults to the key's project_id
+    # Name of a pre-created Secret carrying OPTIO_FCM_SERVICE_ACCOUNT (and optionally
+    # OPTIO_FCM_PROJECT_ID) for clusters that keep the key out of values. When set,
+    # serviceAccount / projectId above are ignored.
     existingSecret: ""
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Optio purple (#6d28d9): the shortcut icons' background, like the launcher icon. -->
+    <color name="optio_widgets_purple">#FF6D28D9</color>
+    <!-- The widget card (iOS secondarySystemGroupedBackground) and its tiles (fill.quaternary). -->
+    <color name="optio_widgets_surface">#FFFFFFFF</color>
+    <color name="optio_widgets_tile">#14747480</color>
+</resources>

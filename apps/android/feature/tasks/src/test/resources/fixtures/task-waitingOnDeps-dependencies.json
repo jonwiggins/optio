@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    {
+      "id": "9a609bec-91e2-4d5f-898f-fea8c5cfc788",
+      "title": "Tidy up the config loader",
+      "state": "needs_attention",
+      "dependencyId": "3f0d85a8-743e-4951-b936-74983f2cc8ab"
+    }
+  ]
+}

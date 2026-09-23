@@ -30,5 +30,8 @@ export default defineConfig({
     stdout: "pipe",
     stderr: "pipe",
     timeout: 300_000,
+    // SIGTERM, not the default SIGKILL: launch-stack.ts must stop the API,
+    // which runs in its own process group, or it outlives the run on 4931.
+    gracefulShutdown: { signal: "SIGTERM", timeout: 30_000 },
   },
 });

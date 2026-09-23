@@ -13,38 +13,27 @@ import {
   listPersistentAgentTurns,
   listTurnLogs,
 } from "../services/persistent-agent-service.js";
-import {
-  getClientIp,
-  trackConnection,
-  releaseConnection,
-  WS_CLOSE_CONNECTION_LIMIT,
-} from "./ws-limits.js";
+import { acceptWs } from "./ws-connection.js";
 
 export async function persistentAgentStreamWs(app: FastifyInstance) {
   app.get("/ws/persistent-agents/:agentId/events", { websocket: true }, async (socket, req) => {
-    const clientIp = getClientIp(req);
-    if (!trackConnection(clientIp)) {
-      socket.close(WS_CLOSE_CONNECTION_LIMIT, "Too many connections");
-      return;
-    }
+    // Synchronously, before any await (see ws-connection.ts).
+    const conn = acceptWs(socket, req);
+    if (!conn) return;
+
     const user = await authenticateWs(socket, req);
-    if (!user) {
-      releaseConnection(clientIp);
-      return;
-    }
+    if (!user) return conn.discard();
 
     const { agentId } = z.object({ agentId: z.string() }).parse(req.params);
     const agent = await getPersistentAgentUnscoped(agentId);
     if (!agent) {
       socket.close(4404, "Persistent agent not found");
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
 
     // Enforce workspace isolation before streaming the agent's turn output.
     if (!assertWorkspace(socket, user.workspaceId, agent.workspaceId)) {
-      releaseConnection(clientIp);
-      return;
+      return conn.discard();
     }
 
     // Catch-up: send the most recent turn's logs so reconnecting clients see
@@ -73,6 +62,7 @@ export async function persistentAgentStreamWs(app: FastifyInstance) {
     } catch {
       // ignore catch-up errors
     }
+    if (conn.closed) return;
 
     const subscriber = createSubscriber();
     const channel = `optio:persistent-agent:${agentId}`;
@@ -95,10 +85,11 @@ export async function persistentAgentStreamWs(app: FastifyInstance) {
       }
     });
 
-    socket.on("close", () => {
-      releaseConnection(clientIp);
+    conn.onClose(() => {
       subscriber.unsubscribe(channel);
       subscriber.disconnect();
     });
+    // Server → client only: client frames are ignored.
+    conn.ready(() => {});
   });
 }

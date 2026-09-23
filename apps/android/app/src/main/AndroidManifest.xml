@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+      Android 17 local network protection: needed to reach servers on the LAN (and the emulator
+      host 10.0.2.2). Runtime ("Nearby devices"); requested by sign-in and after launch.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <!--
+      allowBackup=false + dataExtractionRules: nothing (profiles, Keystore-encrypted tokens) is
+      backed up or moved to another device. networkSecurityConfig permits cleartext HTTP for
+      tailnet addresses (mirrors iOS NSAllowsArbitraryLoads).
+    -->
+    <application
+        android:name=".OptioApplication"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Optio">
+
+        <!-- The launcher entry is an alias below (one per app icon), not this activity. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <!-- optio:// deep links (widgets, notifications, shortcuts, other apps). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="optio" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Launcher icons (More › Settings › App icon; :feature:more AppIcons): one alias of
+          MainActivity per icon, each with the MAIN/LAUNCHER filter; exactly one is enabled at a
+          time (PackageManager.setComponentEnabledSetting). Static shortcuts meta-data, if added,
+          belongs on every alias, since launchers read it from the launcher component.
+        -->
+        <activity-alias
+            android:name=".LauncherDefault"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherMidnight"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_midnight"
+            android:roundIcon="@mipmap/ic_launcher_midnight"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherTerminal"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_terminal"
+            android:roundIcon="@mipmap/ic_launcher_terminal"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherBlueprint"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_blueprint"
+            android:roundIcon="@mipmap/ic_launcher_blueprint"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherSticker"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_sticker"
+            android:roundIcon="@mipmap/ic_launcher_sticker"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherRetro"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_retro"
+            android:roundIcon="@mipmap/ic_launcher_retro"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherSunrise"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_sunrise"
+            android:roundIcon="@mipmap/ic_launcher_sunrise"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherChip"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_chip"
+            android:roundIcon="@mipmap/ic_launcher_chip"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
+        </activity-alias>
+    </application>
+</manifest>

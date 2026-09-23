@@ -118,15 +118,13 @@ final class PushRegistrar {
             switch event {
             case .taskStateChanged(let e) where e.toState == .needsAttention:
                 self.noteNeedsYouObserved()
-            case .unknown(let payload):
+            case .localChanged:
                 // `local:changed` is a content-free nudge; look up whether anything needs us.
-                if case .object(let obj) = payload, obj["type"]?.stringValue == "local:changed" {
-                    Task { [weak self] in
-                        guard let self, self.authorization == .notDetermined, !self.promptedForNeedsYou else { return }
-                        if let terms = try? await api.listLocalTerminals(state: "running"),
-                           terms.contains(where: { $0.attentionState == .needsYou }) {
-                            self.noteNeedsYouObserved()
-                        }
+                Task { [weak self] in
+                    guard let self, self.authorization == .notDetermined, !self.promptedForNeedsYou else { return }
+                    if let terms = try? await api.listLocalTerminals(state: "running"),
+                       terms.contains(where: { $0.attentionState == .needsYou }) {
+                        self.noteNeedsYouObserved()
                     }
                 }
             default:

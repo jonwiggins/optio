@@ -1,0 +1,64 @@
+{
+  "turn": {
+    "id": "18e1993e-43e4-47fa-8c0f-9bda14c44230",
+    "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+    "turnNumber": 3,
+    "wakeSource": "system",
+    "wakePayload": {
+      "messageIds": ["949cc540-2d07-4eb4-a9bf-45cd476640f1"],
+      "isFirstTurn": false
+    },
+    "promptUsed": "# Inbox (1 new message)\nRead carefully \u2014 these messages contain instructions, requests, or status updates from teammates and users. Respond using the optio-agents MCP server (see operator manual).\n\n---BEGIN OPTIO MESSAGE---\n{\"version\":1,\"timestamp\":\"2026-09-23T01:08:10.900Z\",\"sender\":\"user:unknown\",\"type\":\"instruction\",\"broadcasted\":false,\"body\":\"Is the 2.4 changelog ready?\"}\n---END OPTIO MESSAGE---",
+    "podId": "47d1bac7-4fd6-442d-811e-3525d60f0fea",
+    "podName": "optio-pa-release-captain-47d1bac7",
+    "haltReason": "natural",
+    "errorMessage": null,
+    "costUsd": "0.0123",
+    "inputTokens": 100,
+    "outputTokens": 25,
+    "sessionId": "96105ed8-d317-41e4-b70e-6c47a94b06d5",
+    "summary": "Mock agent success",
+    "startedAt": "2026-09-23T01:08:10.942Z",
+    "finishedAt": "2026-09-23T01:08:10.969Z",
+    "createdAt": "2026-09-23T01:08:10.942Z"
+  },
+  "logs": [
+    {
+      "id": "023dad5d-7c0d-49f0-a76c-206b750c47f8",
+      "turnId": "18e1993e-43e4-47fa-8c0f-9bda14c44230",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "stream": "stdout",
+      "content": "Session started \u00b7 fake-model \u00b7 0 tools",
+      "logType": "system",
+      "metadata": {
+        "model": "fake-model"
+      },
+      "timestamp": "2026-09-23T01:08:10.955Z"
+    },
+    {
+      "id": "c3150a2f-8783-4c01-a1e3-a5c56990f098",
+      "turnId": "18e1993e-43e4-47fa-8c0f-9bda14c44230",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "stream": "stdout",
+      "content": "Mock agent handled: # Inbox (1 new message)\nRead carefully \u2014 these messages contain instructions, requests, or status updates from teammates",
+      "logType": "text",
+      "metadata": null,
+      "timestamp": "2026-09-23T01:08:10.960Z"
+    },
+    {
+      "id": "f455009a-618f-4b7e-bbe4-0c93723186dd",
+      "turnId": "18e1993e-43e4-47fa-8c0f-9bda14c44230",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "stream": "stdout",
+      "content": "(1 turns \u00b7 0.0s \u00b7 $0.0123)",
+      "logType": "info",
+      "metadata": {
+        "cost": 0.0123,
+        "turns": 1,
+        "isError": false,
+        "durationMs": 5
+      },
+      "timestamp": "2026-09-23T01:08:10.963Z"
+    }
+  ]
+}

@@ -17,7 +17,13 @@ import { requireRole } from "../plugins/auth.js";
 
 const sessionChatQuerySchema = z
   .object({
-    limit: z.coerce.number().int().min(1).max(5000).default(1000).describe("Max events to return"),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(5000)
+      .default(1000)
+      .describe("How many of the newest events to return (oldest first)"),
   })
   .describe("Query parameters for session chat history");
 
@@ -331,7 +337,8 @@ export async function sessionRoutes(rawApp: FastifyInstance) {
         operationId: "getSessionChat",
         summary: "Get persisted chat history for a session",
         description:
-          "Returns the persisted chat events for a session in chronological " +
+          "Returns the newest `limit` persisted chat events for a session " +
+          "(default 1000, up to the 5000 a session keeps), in chronological " +
           "order. Used by the web UI to rehydrate the conversation when the " +
           "session detail page mounts, so navigating away and back doesn't " +
           "lose history. The session WebSocket also replays history on " +

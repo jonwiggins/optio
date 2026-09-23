@@ -1,0 +1,20 @@
+{
+  "triggers": [
+    {
+      "id": "8f9604b9-d236-4b2e-a637-0d1615464733",
+      "workflowId": null,
+      "targetType": "persistent_agent",
+      "targetId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "type": "schedule",
+      "config": {
+        "cronExpression": "0 8 * * *"
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": "2026-09-23T14:00:00.000Z",
+      "createdAt": "2026-09-23T00:46:05.281Z",
+      "updatedAt": "2026-09-23T00:46:05.281Z"
+    }
+  ]
+}

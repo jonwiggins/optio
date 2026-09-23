@@ -87,7 +87,14 @@ const loggerConfig =
 export async function buildServer() {
   assertMinOpenSSL(process.versions.openssl);
 
-  const app = Fastify({ logger: loggerConfig });
+  const app = Fastify({
+    logger: loggerConfig,
+    // FCM registration tokens (~150–200 chars) ride in path params
+    // (`DELETE /api/notifications/devices/:token`); find-my-way's default of
+    // 100 would 404 them. No route uses a regex param, so the ReDoS guard the
+    // default exists for doesn't apply. Mirrored in test-utils/build-route-test-app.ts.
+    routerOptions: { maxParamLength: 1024 },
+  });
 
   // Wire the Zod type provider's validator + serializer compilers.
   // - validatorCompiler: validates req.body / req.query / req.params / req.headers

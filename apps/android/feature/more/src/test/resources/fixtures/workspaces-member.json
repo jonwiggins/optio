@@ -1,0 +1,10 @@
+{
+  "workspaces": [
+    {
+      "id": "35802f88-a258-4eca-9817-be325718ab9e",
+      "name": "Android DevLab",
+      "slug": "android-devlab",
+      "role": "member"
+    }
+  ]
+}

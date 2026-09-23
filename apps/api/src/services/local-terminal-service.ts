@@ -119,7 +119,7 @@ async function notifyChanged(row: LocalTerminalRow): Promise<void> {
       .then(({ syncLinkedRun }) => syncLinkedRun(row))
       .catch((err) => logger.warn({ err, terminalId: row.id }, "local: run sync failed"));
   }
-  // iOS: Watch Live Activity + needs-you alerts (no-op unless APNs is configured).
+  // iOS + Android: the Watch + needs-you alerts (no-op unless APNs or FCM is configured).
   import("./glance-service.js")
     .then(({ onLocalTerminalChanged }) => onLocalTerminalChanged(row))
     .catch((err) => logger.warn({ err, terminalId: row.id }, "local: glance hook failed"));
@@ -457,7 +457,77 @@ export async function handleExit(
     },
     { hostId },
   );
-  if (updated) relay.notifyBrowsers(terminalId, { type: "exit", exitCode });
+  if (updated) {
+    // Viewers streaming it: the exit, then the grid its final screen was
+    // recorded at, so they pin it the way a viewer opening the exited
+    // terminal would ("Recorded screen", no "Use this screen"). A viewer
+    // whose attach is still pending gets all of that from the replay instead.
+    relay.notifyBrowsers(terminalId, { type: "exit", exitCode }, { pending: false });
+    const grid = await getSnapshotGrid(terminalId);
+    if (grid) relay.notifyBrowsers(terminalId, { type: "size", ...grid }, { pending: false });
+  }
+}
+
+const isDeadState = (state: string) => state === "exited" || state === "error";
+
+/** How long a refused attach waits for its terminal's exit to land. */
+const ATTACH_REFUSED_EXIT_GRACE_MS = 3_000;
+const ATTACH_REFUSED_POLL_MS = 100;
+
+/**
+ * Send one viewer a finished terminal's recorded screen: the grid it was
+ * drawn at, the screen bytes, then `exit` (preceded by a `status` when
+ * `withStatus`) — the order a viewer lays it out and pins it in.
+ */
+export async function replayRecordedScreen(
+  socket: relay.RelaySocket,
+  row: LocalTerminalRow,
+  opts: { withStatus: boolean },
+): Promise<void> {
+  if (opts.withStatus) {
+    relay.sendToViewer(socket, {
+      type: "status",
+      state: row.state,
+      attentionState: row.attentionState,
+    });
+  }
+  const snapshot = await getSnapshot(row.id);
+  if (snapshot) {
+    relay.sendToViewer(socket, { type: "size", cols: snapshot.cols, rows: snapshot.rows });
+    relay.sendToViewer(socket, snapshot.data);
+  }
+  relay.sendToViewer(socket, { type: "exit", exitCode: row.exitCode });
+}
+
+/**
+ * The daemon refused a viewer's attach: it has no PTY for the terminal.
+ * Usually the process already finished — a command like `echo hi` is done
+ * before its pane opens — and the daemon's snapshot + exit reach us around
+ * the same time (a daemon that forgets the terminal before sending them
+ * answers the attach first). So once the row is dead, the viewer gets the
+ * recorded screen, as it would opening the exited terminal fresh, instead of
+ * "Unknown terminal" over a finished session. Only a terminal that stays
+ * running past the grace gets the daemon's error.
+ *
+ * Must run off the daemon socket's frame queue: the exit it may wait for
+ * arrives on that same socket.
+ */
+export async function handleAttachError(attachId: string, message: string): Promise<void> {
+  const pending = relay.takePendingAttach(attachId);
+  if (!pending) return;
+  const deadline = Date.now() + ATTACH_REFUSED_EXIT_GRACE_MS;
+  for (let waited = false; ; waited = true) {
+    const row = await getTerminal(pending.terminalId);
+    if (row && isDeadState(row.state)) {
+      // Dead already: the exit landed while this attach was pending, so the
+      // viewer heard the state change then. Died while we waited: tell it now.
+      await replayRecordedScreen(pending.socket, row, { withStatus: waited });
+      return;
+    }
+    if (!row || pending.socket.readyState !== 1 || Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, ATTACH_REFUSED_POLL_MS));
+  }
+  relay.sendToViewer(pending.socket, { type: "error", message });
 }
 
 /**
@@ -618,6 +688,15 @@ export async function handleSnapshot(
 }
 
 /** The recorded final screen of an exited terminal, if the daemon sent one. */
+/** Just the grid a terminal's final screen was recorded at. */
+async function getSnapshotGrid(terminalId: string): Promise<{ cols: number; rows: number } | null> {
+  const [row] = await db
+    .select({ cols: localTerminalSnapshots.cols, rows: localTerminalSnapshots.rows })
+    .from(localTerminalSnapshots)
+    .where(eq(localTerminalSnapshots.terminalId, terminalId));
+  return row ?? null;
+}
+
 export async function getSnapshot(terminalId: string): Promise<LocalTerminalSnapshot | null> {
   const [row] = await db
     .select({

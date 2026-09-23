@@ -12,6 +12,8 @@ import {
   registerDaemon,
   resetRelayForTests,
   sendToHost,
+  sendToViewer,
+  takePendingAttach,
   unregisterDaemon,
   type RelaySocket,
 } from "./local-relay.js";
@@ -160,6 +162,43 @@ describe("local-relay", () => {
     const expected = JSON.stringify({ type: "exit", exitCode: 0 });
     expect(enrolled.sent.map(String)).toContain(expected);
     expect(pending.sent.map(String)).toContain(expected);
+  });
+
+  it("notifyBrowsers can skip viewers still waiting on their attach", () => {
+    const daemon = new FakeSocket();
+    registerDaemon("h1", null, daemon);
+    const enrolled = new FakeSocket();
+    const pending = new FakeSocket();
+    attachBrowser("h1", "t1", enrolled);
+    const attach = daemon.jsonSent().find((m) => m.type === "attach") as { attachId: string };
+    deliverScrollback(attach.attachId, Buffer.alloc(0));
+    attachBrowser("h1", "t1", pending);
+
+    notifyBrowsers("t1", { type: "exit", exitCode: 0 }, { pending: false });
+    expect(enrolled.sent.map(String)).toContain(JSON.stringify({ type: "exit", exitCode: 0 }));
+    expect(pending.sent).toEqual([]);
+  });
+
+  it("takePendingAttach hands a refused attach to the caller exactly once", () => {
+    const daemon = new FakeSocket();
+    registerDaemon("h1", null, daemon);
+    const viewer = new FakeSocket();
+    attachBrowser("h1", "t1", viewer);
+    const attach = daemon.jsonSent().find((m) => m.type === "attach") as { attachId: string };
+
+    const pending = takePendingAttach(attach.attachId);
+    expect(pending).toMatchObject({ terminalId: "t1", socket: viewer });
+    expect(takePendingAttach(attach.attachId)).toBeNull();
+    // Answered: a late scrollback or error for it goes nowhere.
+    deliverAttachError(attach.attachId, "Unknown terminal");
+    expect(viewer.sent).toEqual([]);
+
+    sendToViewer(viewer, { type: "exit", exitCode: 0 });
+    sendToViewer(viewer, Buffer.from("screen"));
+    expect(viewer.sent).toEqual([
+      JSON.stringify({ type: "exit", exitCode: 0 }),
+      Buffer.from("screen"),
+    ]);
   });
 
   it("forwardSize reaches every viewer, only from the host that owns the terminal", () => {

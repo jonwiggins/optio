@@ -46,6 +46,46 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/check-swift-types.sh
 
+  kotlin-types:
+    name: Kotlin Types In Sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/check-kotlin-types.sh
+
+  android:
+    name: Android (build + unit tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      # The action's default packages include the legacy `tools`, which the SDK repository no
+      # longer has (sdkmanager exits 1); AGP downloads the platform it needs itself.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      # Android modules run `testDebugUnitTest`; :core:model and :core:network are pure JVM (`test`).
+      - run: ./gradlew assembleDebug testDebugUnitTest :core:model:test :core:network:test --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-test-reports
+          path: apps/android/**/build/reports/tests/
+          retention-days: 7
+
   test:
     name: Test
     runs-on: ubuntu-latest

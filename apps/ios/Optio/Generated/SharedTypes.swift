@@ -962,6 +962,86 @@ public struct UpdateConnectionAssignmentInput: Codable, Hashable, Sendable {
     }
 }
 
+/// A connection as `GET /api/repos/:id/connections` lists it: every enabled
+/// connection with an enabled assignment covering that repo (its own or a
+/// global one), whichever agent types that assignment is limited to.
+public struct RepoConnection: Codable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let providerId: String
+    public let config: [String: AnyCodable]?
+    /// "global" or repo URL
+    public let scope: String
+    public let repoUrl: String?
+    public let workspaceId: String?
+    public let enabled: Bool
+    public let status: ConnectionStatus
+    public let statusMessage: String?
+    public let lastCheckedAt: Date?
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let provider: ConnectionProvider?
+    public let assignments: [ConnectionAssignment]?
+    /// The agent types the connection is injected for on this repo — the union
+    /// over its assignments that cover the repo. Empty = every agent.
+    public let agentTypes: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case name = "name"
+        case providerId = "providerId"
+        case config = "config"
+        case scope = "scope"
+        case repoUrl = "repoUrl"
+        case workspaceId = "workspaceId"
+        case enabled = "enabled"
+        case status = "status"
+        case statusMessage = "statusMessage"
+        case lastCheckedAt = "lastCheckedAt"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+        case provider = "provider"
+        case assignments = "assignments"
+        case agentTypes = "agentTypes"
+    }
+
+    public init(
+        id: String,
+        name: String,
+        providerId: String,
+        config: [String: AnyCodable]? = nil,
+        scope: String,
+        repoUrl: String? = nil,
+        workspaceId: String? = nil,
+        enabled: Bool,
+        status: ConnectionStatus,
+        statusMessage: String? = nil,
+        lastCheckedAt: Date? = nil,
+        createdAt: Date,
+        updatedAt: Date,
+        provider: ConnectionProvider? = nil,
+        assignments: [ConnectionAssignment]? = nil,
+        agentTypes: [String]
+    ) {
+        self.id = id
+        self.name = name
+        self.providerId = providerId
+        self.config = config
+        self.scope = scope
+        self.repoUrl = repoUrl
+        self.workspaceId = workspaceId
+        self.enabled = enabled
+        self.status = status
+        self.statusMessage = statusMessage
+        self.lastCheckedAt = lastCheckedAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.provider = provider
+        self.assignments = assignments
+        self.agentTypes = agentTypes
+    }
+}
+
 public struct ResolvedConnection: Codable, Hashable, Sendable {
     public let connectionId: String
     public let connectionName: String
@@ -1333,6 +1413,7 @@ public enum WsEvent: Codable, Hashable, Sendable {
     case persistentAgentTurnHalted(PersistentAgentTurnHaltedEvent)
     case persistentAgentMessage(PersistentAgentMessageEvent)
     case persistentAgentLog(PersistentAgentLogEvent)
+    case localChanged(LocalChangedEvent)
     /// Fallback for discriminator values this client does not know about yet.
     case unknown(AnyCodable)
 
@@ -1369,6 +1450,7 @@ public enum WsEvent: Codable, Hashable, Sendable {
         case "persistent_agent:turn_halted": self = .persistentAgentTurnHalted(try PersistentAgentTurnHaltedEvent(from: decoder))
         case "persistent_agent:message": self = .persistentAgentMessage(try PersistentAgentMessageEvent(from: decoder))
         case "persistent_agent:log": self = .persistentAgentLog(try PersistentAgentLogEvent(from: decoder))
+        case "local:changed": self = .localChanged(try LocalChangedEvent(from: decoder))
         default: self = .unknown(try AnyCodable(from: decoder))
         }
     }
@@ -1424,6 +1506,8 @@ public enum WsEvent: Codable, Hashable, Sendable {
         case .persistentAgentMessage(let payload):
             try payload.encode(to: encoder)
         case .persistentAgentLog(let payload):
+            try payload.encode(to: encoder)
+        case .localChanged(let payload):
             try payload.encode(to: encoder)
         case .unknown(let value):
             try value.encode(to: encoder)
@@ -1483,6 +1567,11 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
     }
 }
 
+/// A task log line on `/ws/logs/:taskId`. Live frames carry the stored row —
+/// the same `id`, `timestamp`, `logType` and `metadata` that
+/// `GET /api/tasks/:id/logs` returns — so a client merging REST history with
+/// the live stream can drop duplicates. Frames replayed on connect are flagged
+/// `catchUp: true`.
 public struct TaskLogEvent: Codable, Hashable, Sendable {
     public enum Stream: String, Codable, Hashable, Sendable, CaseIterable {
         case stdout = "stdout"
@@ -1500,24 +1589,47 @@ public struct TaskLogEvent: Codable, Hashable, Sendable {
 
     public let type: String
     public let taskId: String
+    /// The `task_logs` row id.
+    public let id: String?
     public let stream: Stream
     public let content: String
     public let timestamp: String
+    public let logType: String?
+    public let metadata: [String: AnyCodable]?
+    public let catchUp: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case type = "type"
         case taskId = "taskId"
+        case id = "id"
         case stream = "stream"
         case content = "content"
         case timestamp = "timestamp"
+        case logType = "logType"
+        case metadata = "metadata"
+        case catchUp = "catchUp"
     }
 
-    public init(type: String, taskId: String, stream: Stream, content: String, timestamp: String) {
+    public init(
+        type: String,
+        taskId: String,
+        id: String? = nil,
+        stream: Stream,
+        content: String,
+        timestamp: String,
+        logType: String? = nil,
+        metadata: [String: AnyCodable]? = nil,
+        catchUp: Bool? = nil
+    ) {
         self.type = type
         self.taskId = taskId
+        self.id = id
         self.stream = stream
         self.content = content
         self.timestamp = timestamp
+        self.logType = logType
+        self.metadata = metadata
+        self.catchUp = catchUp
     }
 }
 
@@ -5825,6 +5937,387 @@ public struct PrReviewFileComment: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - push.ts
+
+/// Which push service a device registered with.
+public enum PushPlatform: String, Codable, Hashable, Sendable, CaseIterable {
+    case ios = "ios"
+    case android = "android"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [PushPlatform] = [.ios, .android]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = PushPlatform(rawValue: raw) ?? .unknown
+    }
+}
+
+/// One registered device in `GET /api/notifications/devices`. The token is
+/// masked (`abcdef…wxyz`), so delete a listed device by its `id`, or your own
+/// by the raw token you hold. iOS rows carry `environment` + `bundleId`,
+/// Android rows `appId` (+ `serverId` when the app sent one).
+public struct PushDevice: Codable, Hashable, Sendable {
+    public enum Environment: String, Codable, Hashable, Sendable, CaseIterable {
+        case sandbox = "sandbox"
+        case production = "production"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Environment] = [.sandbox, .production]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Environment(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let id: String
+    /// Masked token.
+    public let token: String
+    public let platform: PushPlatform
+    /// iOS only: the APNs host the token belongs to.
+    public let environment: Environment?
+    /// iOS only.
+    public let bundleId: String?
+    /// Android only: the application id, e.g. `dev.optio.android`.
+    public let appId: String?
+    /// Android only: the app's own id for this server, as sent at registration.
+    public let serverId: String?
+    public let appVersion: String?
+    public let deviceName: String?
+    /// Consecutive failed sends; the row is dropped at 5.
+    public let failureCount: Double
+    public let lastSeenAt: String
+    public let createdAt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case token = "token"
+        case platform = "platform"
+        case environment = "environment"
+        case bundleId = "bundleId"
+        case appId = "appId"
+        case serverId = "serverId"
+        case appVersion = "appVersion"
+        case deviceName = "deviceName"
+        case failureCount = "failureCount"
+        case lastSeenAt = "lastSeenAt"
+        case createdAt = "createdAt"
+    }
+
+    public init(
+        id: String,
+        token: String,
+        platform: PushPlatform,
+        environment: Environment? = nil,
+        bundleId: String? = nil,
+        appId: String? = nil,
+        serverId: String? = nil,
+        appVersion: String? = nil,
+        deviceName: String? = nil,
+        failureCount: Double,
+        lastSeenAt: String,
+        createdAt: String
+    ) {
+        self.id = id
+        self.token = token
+        self.platform = platform
+        self.environment = environment
+        self.bundleId = bundleId
+        self.appId = appId
+        self.serverId = serverId
+        self.appVersion = appVersion
+        self.deviceName = deviceName
+        self.failureCount = failureCount
+        self.lastSeenAt = lastSeenAt
+        self.createdAt = createdAt
+    }
+}
+
+/// Which native push providers this server holds credentials for.
+public struct PushProviderStatus: Codable, Hashable, Sendable {
+    /// iOS (APNs key configured).
+    public let apns: Bool
+    /// Android (FCM service account configured).
+    public let fcm: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case apns = "apns"
+        case fcm = "fcm"
+    }
+
+    public init(apns: Bool, fcm: Bool) {
+        self.apns = apns
+        self.fcm = fcm
+    }
+}
+
+/// `GET /api/notifications/devices`: both platforms, plus what the server can send.
+public struct PushDevicesResponse: Codable, Hashable, Sendable {
+    public let devices: [PushDevice]
+    public let push: PushProviderStatus
+
+    private enum CodingKeys: String, CodingKey {
+        case devices = "devices"
+        case push = "push"
+    }
+
+    public init(devices: [PushDevice], push: PushProviderStatus) {
+        self.devices = devices
+        self.push = push
+    }
+}
+
+/// `POST /api/notifications/devices` body for an Android device (upsert by token).
+public struct RegisterAndroidDeviceRequest: Codable, Hashable, Sendable {
+    public let platform: String
+    /// FCM registration token (opaque, case-sensitive).
+    public let token: String
+    /// Application id, e.g. `dev.optio.android`.
+    public let appId: String
+    public let appVersion: String?
+    public let deviceName: String?
+    /// The app's own id for this server; echoed as `serverId` in every message.
+    public let serverId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case platform = "platform"
+        case token = "token"
+        case appId = "appId"
+        case appVersion = "appVersion"
+        case deviceName = "deviceName"
+        case serverId = "serverId"
+    }
+
+    public init(
+        platform: String,
+        token: String,
+        appId: String,
+        appVersion: String? = nil,
+        deviceName: String? = nil,
+        serverId: String? = nil
+    ) {
+        self.platform = platform
+        self.token = token
+        self.appId = appId
+        self.appVersion = appVersion
+        self.deviceName = deviceName
+        self.serverId = serverId
+    }
+}
+
+/// Alert categories (iOS `aps.category`, Android `data.category`); the apps attach actions per category.
+public enum PushAlertCategory: String, Codable, Hashable, Sendable, CaseIterable {
+    case localNeedsYou = "LOCAL_NEEDS_YOU"
+    case localExit = "LOCAL_EXIT"
+    case hostOffline = "HOST_OFFLINE"
+    case taskAttention = "TASK_ATTENTION"
+    case taskPrOpened = "TASK_PR_OPENED"
+    case agentReply = "AGENT_REPLY"
+    case agentFailed = "AGENT_FAILED"
+    case test = "TEST"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [PushAlertCategory] = [.localNeedsYou, .localExit, .hostOffline, .taskAttention, .taskPrOpened, .agentReply, .agentFailed, .test]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = PushAlertCategory(rawValue: raw) ?? .unknown
+    }
+}
+
+/// What an alert is about (`kind` in both payloads).
+public enum PushSubjectKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case local = "local"
+    case host = "host"
+    case task = "task"
+    case agent = "agent"
+    case test = "test"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [PushSubjectKind] = [.local, .host, .task, .agent, .test]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = PushSubjectKind(rawValue: raw) ?? .unknown
+    }
+}
+
+/// FCM data message `type: "alert"`: a notification the app posts itself.
+/// Data-only (no `notification` block), so it reaches the app's
+/// FirebaseMessagingService in the background too. Every value is a string.
+public struct AndroidPushAlert: Codable, Hashable, Sendable {
+    public enum Sound: String, Codable, Hashable, Sendable, CaseIterable {
+        case `default` = "default"
+        case none = "none"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Sound] = [.default, .none]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Sound(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let type: String
+    public let category: PushAlertCategory
+    public let title: String
+    public let subtitle: String?
+    public let body: String
+    /// Deep link, e.g. `optio://local/<id>?compose=1`.
+    public let url: String
+    public let kind: PushSubjectKind
+    /// Subject id (terminal / host / task / agent).
+    public let id: String
+    /// Group key (APNs `thread-id`), e.g. the terminal id or `task-<id>`.
+    public let threadId: String
+    /// `default` plays the channel's sound; `none` posts silently.
+    public let sound: Sound
+    /// `"1"` when the alert should break through (iOS `time-sensitive`).
+    public let timeSensitive: String?
+    /// Pull request URL (`TASK_PR_OPENED`).
+    public let prUrl: String?
+    /// Replace key (APNs `apns-collapse-id`, e.g. `task-<id>`): use it as the notification tag.
+    public let collapseId: String?
+    /// The app's id for this server, when it sent one at registration.
+    public let serverId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "type"
+        case category = "category"
+        case title = "title"
+        case subtitle = "subtitle"
+        case body = "body"
+        case url = "url"
+        case kind = "kind"
+        case id = "id"
+        case threadId = "threadId"
+        case sound = "sound"
+        case timeSensitive = "timeSensitive"
+        case prUrl = "prUrl"
+        case collapseId = "collapseId"
+        case serverId = "serverId"
+    }
+
+    public init(
+        type: String,
+        category: PushAlertCategory,
+        title: String,
+        subtitle: String? = nil,
+        body: String,
+        url: String,
+        kind: PushSubjectKind,
+        id: String,
+        threadId: String,
+        sound: Sound,
+        timeSensitive: String? = nil,
+        prUrl: String? = nil,
+        collapseId: String? = nil,
+        serverId: String? = nil
+    ) {
+        self.type = type
+        self.category = category
+        self.title = title
+        self.subtitle = subtitle
+        self.body = body
+        self.url = url
+        self.kind = kind
+        self.id = id
+        self.threadId = threadId
+        self.sound = sound
+        self.timeSensitive = timeSensitive
+        self.prUrl = prUrl
+        self.collapseId = collapseId
+        self.serverId = serverId
+    }
+}
+
+/// Lifecycle of the Watch as the server sees it.
+public enum AndroidPushWatchEvent: String, Codable, Hashable, Sendable, CaseIterable {
+    case start = "start"
+    case update = "update"
+    case end = "end"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [AndroidPushWatchEvent] = [.start, .update, .end]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AndroidPushWatchEvent(rawValue: raw) ?? .unknown
+    }
+}
+
+/// FCM data message `type: "watch"`: one frame of the ongoing Watch
+/// notification (the iOS Live Activity). `start` and `update` carry the same
+/// full state; `end` carries the final `done` frame.
+public struct AndroidPushWatch: Codable, Hashable, Sendable {
+    public let type: String
+    public let event: AndroidPushWatchEvent
+    /// JSON-encoded `WatchState` (glance.ts); dates are Apple reference-date seconds.
+    public let state: String
+    /// The app's id for this server, when it sent one at registration.
+    public let serverId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case type = "type"
+        case event = "event"
+        case state = "state"
+        case serverId = "serverId"
+    }
+
+    public init(
+        type: String,
+        event: AndroidPushWatchEvent,
+        state: String,
+        serverId: String? = nil
+    ) {
+        self.type = type
+        self.event = event
+        self.state = state
+        self.serverId = serverId
+    }
+}
+
+/// Every FCM data message the API sends, discriminated by `type`.
+public enum AndroidPushMessage: Codable, Hashable, Sendable {
+    case alert(AndroidPushAlert)
+    case watch(AndroidPushWatch)
+    /// Fallback for discriminator values this client does not know about yet.
+    case unknown(AnyCodable)
+
+    private enum DiscriminatorKey: String, CodingKey {
+        case type
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: DiscriminatorKey.self)
+        let discriminator = try container.decodeIfPresent(String.self, forKey: .type) ?? ""
+        switch discriminator {
+        case "alert": self = .alert(try AndroidPushAlert(from: decoder))
+        case "watch": self = .watch(try AndroidPushWatch(from: decoder))
+        default: self = .unknown(try AnyCodable(from: decoder))
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        switch self {
+        case .alert(let payload):
+            try payload.encode(to: encoder)
+        case .watch(let payload):
+            try payload.encode(to: encoder)
+        case .unknown(let value):
+            try value.encode(to: encoder)
+        }
+    }
+}
+
 // MARK: - secret.ts
 
 public struct SecretRef: Codable, Hashable, Sendable {
@@ -6077,12 +6570,19 @@ public enum SessionChatClientMessage: Codable, Hashable, Sendable {
     }
 }
 
-/// Server → Client message for the session chat WebSocket
+/// Server → Client message for the session chat WebSocket.
+///
+/// On connect: `status` "ready", then the persisted history as `chat_event`
+/// frames flagged `catchUp: true`, then `history_done`; everything after that
+/// is live. Client messages may be sent as soon as the socket opens — the
+/// server queues any that arrive before `history_done` and handles them, in
+/// order, right after it.
 public enum SessionChatServerMessage: Codable, Hashable, Sendable {
     case chatEvent(ChatEventPayload)
     case costUpdate(CostUpdatePayload)
     case status(StatusPayload)
     case error(ErrorPayload)
+    case historyDone(HistoryDonePayload)
     /// Fallback for discriminator values this client does not know about yet.
     case unknown(AnyCodable)
 
@@ -6140,6 +6640,18 @@ public enum SessionChatServerMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct HistoryDonePayload: Codable, Hashable, Sendable {
+        public let count: Double
+
+        private enum CodingKeys: String, CodingKey {
+            case count = "count"
+        }
+
+        public init(count: Double) {
+            self.count = count
+        }
+    }
+
     private enum DiscriminatorKey: String, CodingKey {
         case type
     }
@@ -6152,6 +6664,7 @@ public enum SessionChatServerMessage: Codable, Hashable, Sendable {
         case "cost_update": self = .costUpdate(try CostUpdatePayload(from: decoder))
         case "status": self = .status(try StatusPayload(from: decoder))
         case "error": self = .error(try ErrorPayload(from: decoder))
+        case "history_done": self = .historyDone(try HistoryDonePayload(from: decoder))
         default: self = .unknown(try AnyCodable(from: decoder))
         }
     }
@@ -6173,6 +6686,10 @@ public enum SessionChatServerMessage: Codable, Hashable, Sendable {
         case .error(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("error", forKey: .type)
+            try payload.encode(to: encoder)
+        case .historyDone(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("history_done", forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let value):
             try value.encode(to: encoder)
@@ -7312,10 +7829,12 @@ public enum WorkflowRunState: String, Codable, Hashable, Sendable, CaseIterable 
     case running = "running"
     case completed = "completed"
     case failed = "failed"
+    /// Documented by the API (`WorkflowRunSchema`); a user's cancel is stored as `failed` today.
+    case cancelled = "cancelled"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [WorkflowRunState] = [.queued, .running, .completed, .failed]
+    public static let allCases: [WorkflowRunState] = [.queued, .running, .completed, .failed, .cancelled]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

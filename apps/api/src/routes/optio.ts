@@ -7,6 +7,7 @@ import { db } from "../db/client.js";
 import * as optioActionService from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
+import { pgIso } from "../utils/pg-timestamp.js";
 
 const NAMESPACE = "optio";
 const POD_ROLE_LABEL = "optio.pod-role=optio";
@@ -290,7 +291,7 @@ export async function optioRoutes(rawApp: FastifyInstance) {
         const alerts = alertRows.map((row) => ({
           type: row.event_type,
           message: row.message || `Pod ${row.pod_name} ${row.event_type.replace("_", " ")}`,
-          timestamp: row.created_at,
+          timestamp: pgIso(row.created_at) ?? row.created_at,
         }));
 
         const response: SystemStatusResponse = {

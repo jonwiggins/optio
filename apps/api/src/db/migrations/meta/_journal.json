@@ -694,6 +694,27 @@
       "when": 1790900000000,
       "tag": "1790900000_run_title_templates",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1791000000000,
+      "tag": "1791000000_workflow_runs_trigger_set_null",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1791100000000,
+      "tag": "1791100000_session_chat_events_seq",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1791200000000,
+      "tag": "1791200000_android_fcm_devices",
+      "breakpoints": true
     }
   ]
 }

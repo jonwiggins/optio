@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "gen:swift": "tsx scripts/gen-swift.ts"
+    "gen:swift": "tsx scripts/gen-swift.ts",
+    "gen:kotlin": "tsx scripts/gen-kotlin.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

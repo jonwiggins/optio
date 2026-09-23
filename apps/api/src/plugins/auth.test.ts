@@ -334,6 +334,88 @@ describe("authPlugin viewer read-only baseline", () => {
   });
 });
 
+describe("authPlugin inbound webhook receivers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authDisabled = false;
+    mockValidateSession.mockResolvedValue(null);
+    mockValidateApiKey.mockResolvedValue(null);
+  });
+
+  /** Stub every route a receiver path could reach, receiver or management. */
+  async function buildWebhookApp(): Promise<FastifyInstance> {
+    const app = Fastify({ logger: false });
+    await app.register(authPlugin);
+    const reached = (route: string) => async () => ({ reached: route });
+    app.post("/api/webhooks/github", reached("github receiver"));
+    app.post("/api/webhooks/slack/events", reached("slack events receiver"));
+    app.post("/api/webhooks/slack/actions", reached("slack actions receiver"));
+    app.post("/api/webhooks/linear", reached("linear receiver"));
+    app.get("/api/webhooks", reached("list outbound"));
+    app.post("/api/webhooks", reached("create outbound"));
+    app.get("/api/webhooks/:id", reached("get outbound"));
+    app.patch("/api/webhooks/:id", reached("update outbound"));
+    app.delete("/api/webhooks/:id", reached("delete outbound"));
+    app.post("/api/webhooks/:id/test", reached("test outbound"));
+    app.get("/api/webhooks/:id/deliveries", reached("outbound deliveries"));
+    await app.ready();
+    return app;
+  }
+
+  it("lets unauthenticated deliveries reach the receivers (they verify signatures)", async () => {
+    const app = await buildWebhookApp();
+    for (const url of [
+      "/api/webhooks/github",
+      "/api/webhooks/slack/events",
+      "/api/webhooks/slack/actions",
+      "/api/webhooks/linear",
+    ]) {
+      const res = await app.inject({ method: "POST", url, payload: {} });
+      expect(res.statusCode, url).toBe(200);
+      expect(res.json().reached).toMatch(/receiver$/);
+    }
+    expect(mockValidateSession).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("still requires auth for outbound webhook management", async () => {
+    const app = await buildWebhookApp();
+    for (const [method, url] of [
+      ["GET", "/api/webhooks"],
+      ["POST", "/api/webhooks"],
+      ["GET", "/api/webhooks/0b6c3c2e-1111-4d4d-8e8e-000000000001"],
+      ["PATCH", "/api/webhooks/0b6c3c2e-1111-4d4d-8e8e-000000000001"],
+      ["DELETE", "/api/webhooks/0b6c3c2e-1111-4d4d-8e8e-000000000001"],
+      ["POST", "/api/webhooks/0b6c3c2e-1111-4d4d-8e8e-000000000001/test"],
+      ["GET", "/api/webhooks/0b6c3c2e-1111-4d4d-8e8e-000000000001/deliveries"],
+      // Receiver paths under another method land on the management routes.
+      ["GET", "/api/webhooks/github"],
+      ["PATCH", "/api/webhooks/github"],
+      ["DELETE", "/api/webhooks/linear"],
+      ["POST", "/api/webhooks/github/test"],
+    ] as const) {
+      const res = await app.inject({ method, url, payload: method === "GET" ? undefined : {} });
+      expect(res.statusCode, `${method} ${url}`).toBe(401);
+    }
+    await app.close();
+  });
+
+  it("rejects a bad session on management routes but not on receivers", async () => {
+    const app = await buildWebhookApp();
+    const headers = { authorization: "Bearer not-a-session" };
+    const mgmt = await app.inject({ method: "POST", url: "/api/webhooks", headers, payload: {} });
+    expect(mgmt.statusCode).toBe(401);
+    const receiver = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/github",
+      headers,
+      payload: {},
+    });
+    expect(receiver.statusCode).toBe(200);
+    await app.close();
+  });
+});
+
 describe("isPublicRoute", () => {
   // ─── Non-auth public routes ───
 
@@ -349,6 +431,54 @@ describe("isPublicRoute", () => {
     expect(isPublicRoute("/api/webhooks")).toBe(false);
     expect(isPublicRoute("/api/webhooks/some-id")).toBe(false);
     expect(isPublicRoute("/api/webhooks/some-id/deliveries")).toBe(false);
+    for (const method of ["GET", "POST", "PATCH", "DELETE"]) {
+      expect(isPublicRoute("/api/webhooks", method), method).toBe(false);
+      expect(isPublicRoute("/api/webhooks/some-id", method), method).toBe(false);
+      expect(isPublicRoute("/api/webhooks/some-id/test", method), method).toBe(false);
+      expect(isPublicRoute("/api/webhooks/some-id/deliveries", method), method).toBe(false);
+    }
+  });
+
+  const RECEIVERS = [
+    "/api/webhooks/github",
+    "/api/webhooks/slack/events",
+    "/api/webhooks/slack/actions",
+    "/api/webhooks/linear",
+  ];
+
+  it("allows POST to the signed inbound webhook receivers", () => {
+    for (const path of RECEIVERS) {
+      expect(isPublicRoute(path, "POST"), path).toBe(true);
+      expect(isPublicRoute(path, "post"), path).toBe(true);
+      expect(isPublicRoute(`${path}?foo=bar`, "POST"), path).toBe(true);
+    }
+  });
+
+  it("keeps other methods on the receiver paths protected", () => {
+    // GET/PATCH/DELETE /api/webhooks/github would reach /api/webhooks/:id.
+    for (const path of RECEIVERS) {
+      expect(isPublicRoute(path), path).toBe(false);
+      for (const method of ["GET", "HEAD", "PUT", "PATCH", "DELETE"]) {
+        expect(isPublicRoute(path, method), `${method} ${path}`).toBe(false);
+      }
+    }
+  });
+
+  it("does not treat lookalike receiver paths as public", () => {
+    for (const path of [
+      "/api/webhooks/github/extra",
+      "/api/webhooks/github-extra",
+      "/api/webhooks/githubx",
+      "/api/webhooks/slack",
+      "/api/webhooks/slack/",
+      "/api/webhooks/slack/events/extra",
+      "/api/webhooks/slack/actionsx",
+      "/api/webhooks/linear/extra",
+      "/api/webhooks/linearx",
+      "/api/webhooks/GITHUB",
+    ]) {
+      expect(isPublicRoute(path, "POST"), path).toBe(false);
+    }
   });
 
   it("allows inbound /api/hooks/ prefix", () => {

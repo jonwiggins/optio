@@ -52,7 +52,7 @@ struct PersistentAgentTrigger: Decodable, Hashable, Identifiable, Sendable {
     var summary: String {
         switch type {
         case "schedule": return config?["cronExpression"]?.stringValue ?? "cron"
-        case "webhook": return config?["path"]?.stringValue.map { "/api/webhooks/\($0)" } ?? "webhook"
+        case "webhook": return config?["path"]?.stringValue.map { "/api/hooks/\($0)" } ?? "webhook"
         case "ticket": return config?["providerId"]?.stringValue ?? "ticket"
         default: return "manual"
         }

@@ -1,0 +1,21 @@
+{
+  "usage": {
+    "available": true,
+    "stale": true,
+    "error": "upstream 429",
+    "fiveHour": {
+      "utilization": 64,
+      "resetsAt": "2026-09-22T18:10:00+00:00"
+    },
+    "sevenDay": {
+      "utilization": 81,
+      "resetsAt": "2026-09-25T21:00:00+00:00"
+    },
+    "asOf": "2026-09-22T15:55:00.000Z",
+    "hasRecentAuthFailure": false,
+    "authFailures": {
+      "claude": false,
+      "github": false
+    }
+  }
+}

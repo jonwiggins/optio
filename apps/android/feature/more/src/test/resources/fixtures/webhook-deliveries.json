@@ -1,0 +1,52 @@
+{
+  "deliveries": [
+    {
+      "id": "2058b508-ce9b-43f7-b70d-e8ad9e468972",
+      "webhookId": "8230ea20-4742-4047-b684-8988723d6c6b",
+      "event": "task.failed",
+      "payload": {
+        "data": {
+          "test": true,
+          "taskId": "test-task-00000000",
+          "repoUrl": "https://github.com/example/repo",
+          "toState": "failed",
+          "fromState": "running",
+          "taskTitle": "Test Task",
+          "repoBranch": "main"
+        },
+        "event": "task.failed",
+        "timestamp": "2026-09-23T00:47:56.140Z"
+      },
+      "statusCode": null,
+      "responseBody": null,
+      "success": false,
+      "attempt": 1,
+      "error": "fetch failed",
+      "deliveredAt": "2026-09-23T00:47:56.156Z"
+    },
+    {
+      "id": "71495de7-4336-48ae-b076-05c0c5501fc8",
+      "webhookId": "8230ea20-4742-4047-b684-8988723d6c6b",
+      "event": "task.completed",
+      "payload": {
+        "data": {
+          "test": true,
+          "taskId": "test-task-00000000",
+          "repoUrl": "https://github.com/example/repo",
+          "toState": "completed",
+          "fromState": "running",
+          "taskTitle": "Test Task",
+          "repoBranch": "main"
+        },
+        "event": "task.completed",
+        "timestamp": "2026-09-23T00:46:15.760Z"
+      },
+      "statusCode": null,
+      "responseBody": null,
+      "success": false,
+      "attempt": 1,
+      "error": "fetch failed",
+      "deliveredAt": "2026-09-23T00:46:15.765Z"
+    }
+  ]
+}

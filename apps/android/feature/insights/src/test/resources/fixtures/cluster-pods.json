@@ -1,0 +1,116 @@
+{
+  "pods": [
+    {
+      "id": "4fee1b30-8ebf-48a2-a8d2-1f937888c282",
+      "repoUrl": "https://github.com/e2e-org/mobile-app",
+      "workspaceId": null,
+      "repoBranch": "main",
+      "instanceIndex": 0,
+      "podName": "optio-repo-e2e-org-mobile-app-e9b2",
+      "podId": "fake-401f9ac96ffe",
+      "state": "ready",
+      "activeTaskCount": 1,
+      "lastTaskAt": "2026-09-23T00:47:58.223Z",
+      "errorMessage": null,
+      "cachePvcName": null,
+      "cachePvcState": null,
+      "statefulSetName": null,
+      "managedBy": "bare-pod",
+      "createdAt": "2026-09-23T00:47:58.011Z",
+      "updatedAt": "2026-09-23T00:47:58.223Z",
+      "recentTasks": [
+        {
+          "id": "bf67376d-4e7f-4eee-9265-327f3090171d",
+          "title": "Migrate the image cache to Coil 3",
+          "state": "running",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:47:57.938Z"
+        }
+      ]
+    },
+    {
+      "id": "765b3ac4-c6d1-44b5-ae35-bb5a831da9f4",
+      "repoUrl": "https://github.com/e2e-org/e2e-repo",
+      "workspaceId": null,
+      "repoBranch": "main",
+      "instanceIndex": 0,
+      "podName": "optio-repo-e2e-org-e2e-repo-317e",
+      "podId": "fake-6b8d1a7f08c3",
+      "state": "ready",
+      "activeTaskCount": 0,
+      "lastTaskAt": "2026-09-23T00:48:02.196Z",
+      "errorMessage": null,
+      "cachePvcName": null,
+      "cachePvcState": null,
+      "statefulSetName": null,
+      "managedBy": "bare-pod",
+      "createdAt": "2026-09-23T00:47:43.623Z",
+      "updatedAt": "2026-09-23T00:48:02.439Z",
+      "recentTasks": [
+        {
+          "id": "d1d14b66-c192-4879-bca8-b7d2582fce1c",
+          "title": "Fix the Safari date picker",
+          "state": "queued",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:48:06.462Z"
+        },
+        {
+          "id": "cdae1418-e285-4cf2-9fba-6b50bfcdd0f9",
+          "title": "Bump minor dependency versions",
+          "state": "pr_opened",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:48:01.883Z"
+        },
+        {
+          "id": "e9e5dad0-94b3-4445-85ba-6f1ab16b9494",
+          "title": "Review: Add a dark mode toggle to Settings",
+          "state": "completed",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:47:58.898Z"
+        },
+        {
+          "id": "44673bb1-bf9e-4c90-bc4c-c3d7541ef1c9",
+          "title": "Document the config loader cleanup",
+          "state": "waiting_on_deps",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:47:58.855Z"
+        },
+        {
+          "id": "611ebddd-1267-4871-a93f-683f2786eb4f",
+          "title": "Refactor analytics events",
+          "state": "cancelled",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:47:58.383Z"
+        },
+        {
+          "id": "9e3aa8d5-3178-4cd0-bb5d-26aebcb409f7",
+          "title": "Tidy up the config loader",
+          "state": "needs_attention",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:47:43.553Z"
+        },
+        {
+          "id": "e7ffcb16-87ad-45d7-9515-d8063a89f5ac",
+          "title": "Upgrade the payments SDK",
+          "state": "failed",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:47:43.503Z"
+        },
+        {
+          "id": "6241d1e4-cb9e-4876-bc33-3c7b8e787251",
+          "title": "Paginate the activity feed",
+          "state": "completed",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:47:43.464Z"
+        },
+        {
+          "id": "e5a0e85e-ba35-4175-99f9-6ec9597ad5a7",
+          "title": "Add a dark mode toggle to Settings",
+          "state": "pr_opened",
+          "agentType": "claude-code",
+          "createdAt": "2026-09-23T00:47:43.407Z"
+        }
+      ]
+    }
+  ]
+}

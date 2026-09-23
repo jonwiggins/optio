@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Home-screen widgets (iOS WorkWidget / RunWidget). -->
+    <string name="widget_work_label">Work</string>
+    <string name="widget_work_description">What needs you, what\'s running, and the rest of the board. Tap a row to jump in.</string>
+    <string name="widget_run_label">Run</string>
+    <string name="widget_run_description">Fire a recurring item, a Local automation or a Job, with one tap.</string>
+
+    <!-- Quick Settings tiles (iOS Control Center controls). -->
+    <string name="tile_needs_you">Needs you</string>
+    <string name="tile_new_work">New work</string>
+    <string name="tile_run">Run</string>
+
+    <!-- Static launcher shortcuts. -->
+    <string name="shortcut_new_work_short">New work</string>
+    <string name="shortcut_new_work_long">Start new work</string>
+    <string name="shortcut_needs_you_short">Needs you</string>
+    <string name="shortcut_needs_you_long">Jump to what needs me</string>
+</resources>
