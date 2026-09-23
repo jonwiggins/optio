@@ -49,11 +49,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -583,12 +587,18 @@ private fun SendTextDialog(
 
 /** Rename in place (web `title-editor.tsx`, `PATCH /api/local/terminals/:id`). */
 @Composable
-private fun RenameDialog(
+internal fun RenameDialog(
     current: String,
     onDismiss: () -> Unit,
     onRename: (String) -> Unit,
 ) {
-    var title by rememberSaveable { mutableStateOf(current) }
+    // Opens focused with the old title selected: typing replaces it, a tap places the cursor.
+    var field by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(current, selection = TextRange(0, current.length)))
+    }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val title = field.text
     val save = {
         onDismiss()
         onRename(title)
@@ -599,12 +609,12 @@ private fun RenameDialog(
         title = { Text("Rename terminal") },
         text = {
             OutlinedTextField(
-                value = title,
-                onValueChange = { title = it.take(200) },
+                value = field,
+                onValueChange = { field = if (it.text.length > 200) it.copy(text = it.text.take(200)) else it },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (title.isNotBlank()) save() }),
-                modifier = Modifier.fillMaxWidth().testTag("rename-field"),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("rename-field"),
             )
         },
         confirmButton = { TextButton(onClick = save, enabled = title.isNotBlank()) { Text("Save") } },
