@@ -167,12 +167,26 @@ class InsightsScreenshotTest : ScreenshotTest() {
         )
     }
 
-    /** A repo filter the API fails on (`repoUrl` 500s on current main): the old numbers stay, flagged. */
+    /**
+     * A repo filter the API fails on (`repoUrl` 500s on current main): only the error, since the
+     * all-repos numbers would read as the repo's under the active filter.
+     */
     @Test
     fun costsStale() = captureScreens("CostsStale") {
         CostsContent(
             state = LoadState.Failed(ApiError(500, "Internal Server Error"), previous = costs),
             filter = CostsViewModel.Filter(repoUrl = "https://github.com/acme/api"),
+            contentPadding = padding,
+            shownFilter = CostsViewModel.Filter(),
+        )
+    }
+
+    /** A failed refresh of the same filter (pull to refresh offline): the old numbers stay, flagged. */
+    @Test
+    fun costsStaleSameFilter() = captureScreens("CostsStaleSameFilter") {
+        CostsContent(
+            state = LoadState.Failed(ApiError(0, "offline"), previous = costs),
+            filter = CostsViewModel.Filter(),
             contentPadding = padding,
             shownFilter = CostsViewModel.Filter(),
         )
