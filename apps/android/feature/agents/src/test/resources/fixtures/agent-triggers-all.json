@@ -1,0 +1,118 @@
+{
+  "triggers": [
+    {
+      "id": "afa5d03d-e2cc-45e5-a238-e4cdadc51f79",
+      "workflowId": null,
+      "targetType": "persistent_agent",
+      "targetId": "ce8a0c53-e62d-42c2-a023-1d42e5704b16",
+      "type": "manual",
+      "config": {},
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": null,
+      "createdAt": "2026-09-23T01:08:41.507Z",
+      "updatedAt": "2026-09-23T01:08:41.507Z"
+    },
+    {
+      "id": "e8fcd329-7443-4a6f-a0e7-88c6a37cbd36",
+      "workflowId": null,
+      "targetType": "persistent_agent",
+      "targetId": "ce8a0c53-e62d-42c2-a023-1d42e5704b16",
+      "type": "linear",
+      "config": {
+        "events": ["created", "labeled"]
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": null,
+      "createdAt": "2026-09-23T01:08:41.489Z",
+      "updatedAt": "2026-09-23T01:08:41.489Z"
+    },
+    {
+      "id": "389e4562-15a7-4bdd-861d-14be80b7c618",
+      "workflowId": null,
+      "targetType": "persistent_agent",
+      "targetId": "ce8a0c53-e62d-42c2-a023-1d42e5704b16",
+      "type": "slack",
+      "config": {
+        "keyword": "docs",
+        "channelId": "C0123ABCD",
+        "mentionOnly": true
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": null,
+      "createdAt": "2026-09-23T01:08:41.466Z",
+      "updatedAt": "2026-09-23T01:08:41.466Z"
+    },
+    {
+      "id": "f2ac7f49-fa65-4779-9d61-52e18bfb68b1",
+      "workflowId": null,
+      "targetType": "persistent_agent",
+      "targetId": "ce8a0c53-e62d-42c2-a023-1d42e5704b16",
+      "type": "github",
+      "config": {
+        "login": "octocat",
+        "events": ["review_requested", "mentioned"]
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": null,
+      "createdAt": "2026-09-23T01:08:41.450Z",
+      "updatedAt": "2026-09-23T01:08:41.450Z"
+    },
+    {
+      "id": "b4b74276-692a-4028-b7db-fbc97fd7d41c",
+      "workflowId": null,
+      "targetType": "persistent_agent",
+      "targetId": "ce8a0c53-e62d-42c2-a023-1d42e5704b16",
+      "type": "ticket",
+      "config": {
+        "labels": ["docs", "cleanup"],
+        "source": "linear"
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": null,
+      "createdAt": "2026-09-23T01:08:41.434Z",
+      "updatedAt": "2026-09-23T01:08:41.434Z"
+    },
+    {
+      "id": "c303339b-f68e-4893-a413-4b7f48083180",
+      "workflowId": null,
+      "targetType": "persistent_agent",
+      "targetId": "ce8a0c53-e62d-42c2-a023-1d42e5704b16",
+      "type": "webhook",
+      "config": {
+        "path": "docs-gardener-hook"
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": null,
+      "createdAt": "2026-09-23T01:08:41.418Z",
+      "updatedAt": "2026-09-23T01:08:41.418Z"
+    },
+    {
+      "id": "1d360a51-f9ea-4fed-bf2c-8a645ae1c113",
+      "workflowId": null,
+      "targetType": "persistent_agent",
+      "targetId": "ce8a0c53-e62d-42c2-a023-1d42e5704b16",
+      "type": "schedule",
+      "config": {
+        "cronExpression": "0 9 * * 1-5"
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": "2026-09-23T15:00:00.000Z",
+      "createdAt": "2026-09-23T01:08:41.400Z",
+      "updatedAt": "2026-09-23T01:08:41.400Z"
+    }
+  ]
+}

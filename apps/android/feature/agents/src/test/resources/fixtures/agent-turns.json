@@ -1,0 +1,76 @@
+{
+  "turns": [
+    {
+      "id": "18e1993e-43e4-47fa-8c0f-9bda14c44230",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "turnNumber": 3,
+      "wakeSource": "system",
+      "wakePayload": {
+        "messageIds": ["949cc540-2d07-4eb4-a9bf-45cd476640f1"],
+        "isFirstTurn": false
+      },
+      "promptUsed": "# Inbox (1 new message)\nRead carefully \u2014 these messages contain instructions, requests, or status updates from teammates and users. Respond using the optio-agents MCP server (see operator manual).\n\n---BEGIN OPTIO MESSAGE---\n{\"version\":1,\"timestamp\":\"2026-09-23T01:08:10.900Z\",\"sender\":\"user:unknown\",\"type\":\"instruction\",\"broadcasted\":false,\"body\":\"Is the 2.4 changelog ready?\"}\n---END OPTIO MESSAGE---",
+      "podId": "47d1bac7-4fd6-442d-811e-3525d60f0fea",
+      "podName": "optio-pa-release-captain-47d1bac7",
+      "haltReason": "natural",
+      "errorMessage": null,
+      "costUsd": "0.0123",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "sessionId": "96105ed8-d317-41e4-b70e-6c47a94b06d5",
+      "summary": "Mock agent success",
+      "startedAt": "2026-09-23T01:08:10.942Z",
+      "finishedAt": "2026-09-23T01:08:10.969Z",
+      "createdAt": "2026-09-23T01:08:10.942Z"
+    },
+    {
+      "id": "bf2e6032-d5a3-4def-b8ba-e607aec4fca0",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "turnNumber": 2,
+      "wakeSource": "system",
+      "wakePayload": {
+        "messageIds": ["b892dd7d-1b3e-48bc-81bf-0c1aeb43bf4b"],
+        "isFirstTurn": false
+      },
+      "promptUsed": "# Inbox (1 new message)\nRead carefully \u2014 these messages contain instructions, requests, or status updates from teammates and users. Respond using the optio-agents MCP server (see operator manual).\n\n---BEGIN OPTIO MESSAGE---\n{\"version\":1,\"timestamp\":\"2026-09-23T00:47:14.916Z\",\"sender\":\"user:unknown\",\"type\":\"instruction\",\"broadcasted\":false,\"body\":\"Status of the 2.4 release?\"}\n---END OPTIO MESSAGE---",
+      "podId": "b4b937c5-b61d-4723-993a-470a420cd37e",
+      "podName": "optio-pa-release-captain-b4b937c5",
+      "haltReason": "natural",
+      "errorMessage": null,
+      "costUsd": "0.0123",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "sessionId": "eac9ba18-c8a2-43fe-bf13-345e3dcee504",
+      "summary": "Mock agent success",
+      "startedAt": "2026-09-23T00:47:14.955Z",
+      "finishedAt": "2026-09-23T00:47:14.976Z",
+      "createdAt": "2026-09-23T00:47:14.955Z"
+    },
+    {
+      "id": "34072715-a0d5-46d7-8e8d-081ab9363845",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "turnNumber": 1,
+      "wakeSource": "system",
+      "wakePayload": {
+        "messageIds": [
+          "85ca9875-ff78-498e-b1ce-b782622a2d60",
+          "e3843e6e-22d0-4e32-bb7c-db7c0e7ad8dd"
+        ],
+        "isFirstTurn": true
+      },
+      "promptUsed": "# Initial mission\nYou coordinate releases for e2e-org/e2e-repo. Answer questions tersely.\n\n---\n\n# Inbox (2 new messages)\nRead carefully \u2014 these messages contain instructions, requests, or status updates from teammates and users. Respond using the optio-agents MCP server (see operator manual).\n\n---BEGIN OPTIO MESSAGE---\n{\"version\":1,\"timestamp\":\"2026-09-23T00:46:04.841Z\",\"sender\":\"system:optio-init\",\"type\":\"instruction\",\"broadcasted\":false,\"body\":\"You coordinate releases for e2e-org/e2e-repo. Answer questions tersely.\"}\n---END OPTIO MESSAGE---\n\n---BEGIN OPTIO MESSAGE---\n{\"version\":1,\"timestamp\":\"2026-09-23T00:46:04.852Z\",\"sender\":\"user:unknown\",\"type\":\"instruction\",\"broadcasted\":false,\"body\":\"What's blocking the 2.4 release?\"}\n---END OPTIO MESSAGE---",
+      "podId": "b4b937c5-b61d-4723-993a-470a420cd37e",
+      "podName": "optio-pa-release-captain-b4b937c5",
+      "haltReason": "natural",
+      "errorMessage": null,
+      "costUsd": "0.0123",
+      "inputTokens": 100,
+      "outputTokens": 25,
+      "sessionId": "9bb5da1f-2e91-4548-8214-5aa455499557",
+      "summary": "Mock agent success",
+      "startedAt": "2026-09-23T00:46:04.894Z",
+      "finishedAt": "2026-09-23T00:46:04.924Z",
+      "createdAt": "2026-09-23T00:46:04.894Z"
+    }
+  ]
+}
