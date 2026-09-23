@@ -64,27 +64,33 @@ export const prReviewRunQueue = new Queue("pr-review-runs", { connection: connec
 
 // ── Log helpers (writes to task_logs keyed by pr_review_run_id) ────────────
 
-async function appendRunLog(
+/** Exported for tests. */
+export async function appendRunLog(
   run: typeof prReviewRuns.$inferSelect,
   content: string,
   stream: "stdout" | "stderr" = "stdout",
   logType?: string,
   metadata?: Record<string, unknown>,
 ) {
-  await db.insert(taskLogs).values({
-    prReviewRunId: run.id,
-    content,
-    stream,
-    logType,
-    metadata,
-  });
+  const [row] = await db
+    .insert(taskLogs)
+    .values({
+      prReviewRunId: run.id,
+      content,
+      stream,
+      logType,
+      metadata,
+    })
+    .returning();
   await publishEvent({
     type: "pr_review_run:log",
     prReviewId: run.prReviewId,
     runId: run.id,
     stream,
     content,
-    timestamp: new Date().toISOString(),
+    // The stored row's timestamp, not this process's clock, so the live
+    // frame matches the same row in the catch-up / REST history.
+    timestamp: row.timestamp.toISOString(),
     logType,
     metadata,
   });

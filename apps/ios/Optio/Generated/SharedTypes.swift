@@ -1483,6 +1483,11 @@ public struct TaskStateChangedEvent: Codable, Hashable, Sendable {
     }
 }
 
+/// A task log line on `/ws/logs/:taskId`. Live frames carry the stored row —
+/// the same `id`, `timestamp`, `logType` and `metadata` that
+/// `GET /api/tasks/:id/logs` returns — so a client merging REST history with
+/// the live stream can drop duplicates. Frames replayed on connect are flagged
+/// `catchUp: true`.
 public struct TaskLogEvent: Codable, Hashable, Sendable {
     public enum Stream: String, Codable, Hashable, Sendable, CaseIterable {
         case stdout = "stdout"
@@ -1500,24 +1505,47 @@ public struct TaskLogEvent: Codable, Hashable, Sendable {
 
     public let type: String
     public let taskId: String
+    /// The `task_logs` row id.
+    public let id: String?
     public let stream: Stream
     public let content: String
     public let timestamp: String
+    public let logType: String?
+    public let metadata: [String: AnyCodable]?
+    public let catchUp: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case type = "type"
         case taskId = "taskId"
+        case id = "id"
         case stream = "stream"
         case content = "content"
         case timestamp = "timestamp"
+        case logType = "logType"
+        case metadata = "metadata"
+        case catchUp = "catchUp"
     }
 
-    public init(type: String, taskId: String, stream: Stream, content: String, timestamp: String) {
+    public init(
+        type: String,
+        taskId: String,
+        id: String? = nil,
+        stream: Stream,
+        content: String,
+        timestamp: String,
+        logType: String? = nil,
+        metadata: [String: AnyCodable]? = nil,
+        catchUp: Bool? = nil
+    ) {
         self.type = type
         self.taskId = taskId
+        self.id = id
         self.stream = stream
         self.content = content
         self.timestamp = timestamp
+        self.logType = logType
+        self.metadata = metadata
+        self.catchUp = catchUp
     }
 }
 

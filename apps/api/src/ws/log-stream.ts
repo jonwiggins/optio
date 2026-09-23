@@ -35,6 +35,7 @@ export async function logStreamWs(app: FastifyInstance) {
           JSON.stringify({
             type: "task:log",
             taskId,
+            id: log.id,
             content: log.content,
             stream: log.stream,
             timestamp: log.timestamp,
