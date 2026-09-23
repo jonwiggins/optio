@@ -34,11 +34,66 @@ const assignIssueSchema = z
   })
   .describe("Body for assigning an issue to Optio");
 
+const IssueSourceErrorSchema = z
+  .object({
+    source: z.string().describe("`github` | `gitlab` | external provider source"),
+    name: z.string().describe("Repo full name or provider label"),
+    repoId: z.string().nullable(),
+    status: z.number().nullable().describe("Upstream HTTP status, when the failure was one"),
+    message: z.string().describe("What went wrong, in words a user can act on"),
+  })
+  .describe("A repo or ticket provider whose issues could not be fetched");
+
 const IssueListResponseSchema = z
   .object({
     issues: z.array(IssueSummarySchema),
+    errors: z
+      .array(IssueSourceErrorSchema)
+      .describe(
+        "Sources that failed. Issues from the others are still returned, so an " +
+          "empty list with errors means 'could not look', not 'nothing there'.",
+      ),
   })
   .describe("List of issues aggregated across configured repos");
+
+/**
+ * Turn an upstream failure into something the Issues page can show. A 401
+ * from GitHub is by far the most common ("the stored token expired") and
+ * deserves a pointer at the fix rather than the raw JSON body.
+ */
+export function describeIssueSourceError(
+  err: unknown,
+  source: string,
+): { status: number | null; message: string } {
+  const status =
+    err && typeof err === "object" && typeof (err as { status?: unknown }).status === "number"
+      ? (err as { status: number }).status
+      : null;
+  const label = source === "gitlab" ? "GitLab" : source === "github" ? "GitHub" : source;
+  const tokenName = source === "gitlab" ? "GITLAB_TOKEN" : "GITHUB_TOKEN";
+  if (status === 401) {
+    return {
+      status,
+      message: `${label} rejected the stored token (401). Update the ${tokenName} secret (Setup → Git Provider) or reconnect your ${label} account.`,
+    };
+  }
+  if (status === 403) {
+    return {
+      status,
+      message: `${label} refused access (403) — the token may lack the repo scope, or the API rate limit is exhausted.`,
+    };
+  }
+  if (status === 404) {
+    return {
+      status,
+      message: `${label} returned 404 — the repo may be private to a different account, renamed, or deleted.`,
+    };
+  }
+  const raw = err instanceof Error ? err.message : String(err);
+  // Upstream bodies are multi-line JSON; keep the first line so it fits a banner.
+  const firstLine = raw.split(/\r?\n/)[0].trim();
+  return { status, message: firstLine || `${label} request failed` };
+}
 
 const TaskResponseSchema = z
   .object({
@@ -75,9 +130,9 @@ export async function issueRoutes(rawApp: FastifyInstance) {
       let repoList;
       if (query.repoId) {
         const [repo] = await db.select().from(repos).where(eq(repos.id, query.repoId));
-        if (!repo) return reply.send({ issues: [] });
+        if (!repo) return reply.send({ issues: [], errors: [] });
         if (wsId && repo.workspaceId !== wsId) {
-          return reply.send({ issues: [] });
+          return reply.send({ issues: [], errors: [] });
         }
         repoList = [repo];
       } else if (wsId) {
@@ -129,17 +184,27 @@ export async function issueRoutes(rawApp: FastifyInstance) {
       );
 
       const allIssues: Array<Record<string, unknown>> = [];
+      const errors: Array<z.infer<typeof IssueSourceErrorSchema>> = [];
 
       for (const repo of repoList) {
+        const ri = parseRepoUrl(repo.repoUrl);
+        if (!ri) continue;
+        const repoSourceName = ri.platform === "gitlab" ? "gitlab" : "github";
         try {
-          const ri = parseRepoUrl(repo.repoUrl);
-          if (!ri) continue;
-
           const { platform } = await getGitPlatformForRepo(repo.repoUrl, {
             userId: req.user?.id,
             server: !req.user,
           }).catch(() => ({ platform: null }));
-          if (!platform) continue;
+          if (!platform) {
+            errors.push({
+              source: repoSourceName,
+              name: repo.fullName,
+              repoId: repo.id,
+              status: null,
+              message: `No ${repoSourceName === "gitlab" ? "GitLab" : "GitHub"} token is configured for this repo. Add a ${repoSourceName === "gitlab" ? "GITLAB_TOKEN" : "GITHUB_TOKEN"} secret or connect your account.`,
+            });
+            continue;
+          }
 
           const issueState = query.state ?? "open";
           const issues = await platform.listIssues(ri, { state: issueState, perPage: 50 });
@@ -179,6 +244,12 @@ export async function issueRoutes(rawApp: FastifyInstance) {
           }
         } catch (err) {
           logger.warn({ err, repo: repo.fullName }, "Error fetching issues");
+          errors.push({
+            source: repoSourceName,
+            name: repo.fullName,
+            repoId: repo.id,
+            ...describeIssueSourceError(err, repoSourceName),
+          });
         }
       }
 
@@ -253,6 +324,12 @@ export async function issueRoutes(rawApp: FastifyInstance) {
               { err, providerSource: providerRow.source, providerId: providerRow.id },
               "Error fetching tickets from external provider",
             );
+            errors.push({
+              source: providerRow.source,
+              name: `${providerRow.source} provider`,
+              repoId: null,
+              ...describeIssueSourceError(err, providerRow.source),
+            });
           }
         }
       }
@@ -265,7 +342,7 @@ export async function issueRoutes(rawApp: FastifyInstance) {
         );
       });
 
-      reply.send({ issues: allIssues });
+      reply.send({ issues: allIssues, errors });
     },
   );
 

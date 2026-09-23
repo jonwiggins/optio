@@ -179,6 +179,85 @@ describe("GET /api/issues", () => {
     expect(issues[0].number).toBe(42);
   });
 
+  it("reports a repo whose issues could not be fetched instead of silently dropping it", async () => {
+    mockGetGitPlatformForRepo.mockResolvedValue({
+      platform: mockPlatform,
+      ri: {
+        platform: "github",
+        host: "github.com",
+        owner: "org",
+        repo: "repo",
+        apiBaseUrl: "https://api.github.com",
+      },
+    });
+    const repoChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([
+        {
+          id: "repo-1",
+          repoUrl: "https://github.com/org/repo",
+          fullName: "org/repo",
+          workspaceId: "ws-1",
+        },
+      ]),
+    };
+    const taskChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([]),
+    };
+    mockDbSelect.mockReturnValueOnce(repoChain).mockReturnValueOnce(taskChain);
+    const err = Object.assign(
+      new Error('GitHub API error 401: {\n  "message": "Bad credentials"\n}'),
+      {
+        status: 401,
+      },
+    );
+    mockPlatform.listIssues.mockRejectedValue(err);
+
+    const res = await app.inject({ method: "GET", url: "/api/issues" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.issues).toEqual([]);
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors[0]).toMatchObject({
+      source: "github",
+      name: "org/repo",
+      repoId: "repo-1",
+      status: 401,
+    });
+    expect(body.errors[0].message).toContain("GITHUB_TOKEN");
+    expect(body.errors[0].message).not.toContain("Bad credentials");
+  });
+
+  it("reports a repo with no git token configured", async () => {
+    mockGetGitPlatformForRepo.mockRejectedValue(new Error("no token"));
+    const repoChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([
+        {
+          id: "repo-1",
+          repoUrl: "https://github.com/org/repo",
+          fullName: "org/repo",
+          workspaceId: "ws-1",
+        },
+      ]),
+    };
+    const taskChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue([]),
+    };
+    mockDbSelect.mockReturnValueOnce(repoChain).mockReturnValueOnce(taskChain);
+
+    const res = await app.inject({ method: "GET", url: "/api/issues" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().errors).toEqual([
+      expect.objectContaining({ name: "org/repo", status: null }),
+    ]);
+    expect(res.json().errors[0].message).toMatch(/No GitHub token/);
+  });
+
   it("returns null author when issue has no user", async () => {
     mockGetGitPlatformForRepo.mockResolvedValue({
       platform: mockPlatform,

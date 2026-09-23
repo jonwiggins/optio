@@ -28,8 +28,18 @@ ensure_container() {
     running) echo "   $name already running" ;;
     absent)
       # Tolerate losing a create race against a concurrent `start` by
-      # falling back to starting the winner's container.
-      docker run -d --name "$name" "$@" >/dev/null 2>&1 || docker start "$name" >/dev/null
+      # falling back to starting the winner's container — but only when the
+      # container now exists. Otherwise (image pull failed, port taken, …)
+      # show docker's own error instead of a misleading "No such container".
+      if ! err=$(docker run -d --name "$name" "$@" 2>&1 >/dev/null); then
+        if docker inspect "$name" >/dev/null 2>&1; then
+          docker start "$name" >/dev/null
+        else
+          echo "❌ could not create $name:" >&2
+          echo "$err" >&2
+          exit 1
+        fi
+      fi
       echo "   $name started"
       ;;
     *)

@@ -3,11 +3,20 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api-client";
+import { api, type IssueSourceError } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { normalizeRepoUrl } from "@optio/shared";
-import { Loader2, Zap, GitBranch, CircleDot, Check, Terminal } from "lucide-react";
+import {
+  Loader2,
+  Zap,
+  GitBranch,
+  CircleDot,
+  Check,
+  Terminal,
+  AlertTriangle,
+  RefreshCw,
+} from "lucide-react";
 
 /**
  * Browser of GitHub Issues across the workspace's connected repos.
@@ -21,6 +30,11 @@ export function IssuesBrowser() {
   const [repos, setRepos] = useState<any[]>([]);
   const [localHosts, setLocalHosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Sources the API could not read (stale token, 403, …); the page must say so. */
+  const [sourceErrors, setSourceErrors] = useState<IssueSourceError[]>([]);
+  /** The listing request itself failed (API down, 5xx). */
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [selectedRepo, setSelectedRepo] = useState("");
   const [assigning, setAssigning] = useState<number | null>(null);
   const [workingLocally, setWorkingLocally] = useState<string | null>(null);
@@ -47,18 +61,38 @@ export function IssuesBrowser() {
 
   useEffect(() => {
     setLoading(true);
+    setLoadError(null);
     api
       .listIssues({ repoId: selectedRepo || undefined })
-      .then((res) => setIssues(res.issues))
-      .catch(() => {})
+      .then((res) => {
+        setIssues(res.issues);
+        setSourceErrors(res.errors ?? []);
+      })
+      .catch((err) => {
+        setIssues([]);
+        setSourceErrors([]);
+        setLoadError(err instanceof Error ? err.message : "Failed to load issues");
+      })
       .finally(() => setLoading(false));
-  }, [selectedRepo]);
+  }, [selectedRepo, reloadKey]);
 
   // External-tracker tickets (Linear/Jira/Notion) flow into Optio via the
   // ticket-sync worker — they can't be manually assigned from this UI.
   const isAssignable = (i: any) =>
     (i.source === "github" || i.source === "gitlab" || !i.source) && i.repo?.id;
   const unassignedIssues = issues.filter((i: any) => !i.optioTask && isAssignable(i));
+
+  // One stale token fails every repo with the same message; say it once and
+  // list who it hit rather than repeating the sentence per repo.
+  const groupedSourceErrors = Object.values(
+    sourceErrors.reduce<
+      Record<string, { key: string; message: string; status: number | null; names: string[] }>
+    >((acc, e) => {
+      const key = `${e.status ?? ""}:${e.message}`;
+      (acc[key] ??= { key, message: e.message, status: e.status, names: [] }).names.push(e.name);
+      return acc;
+    }, {}),
+  );
 
   /** Online local host advertising a dir whose git remote matches the issue's repo. */
   const findLocalHost = (issue: any): any | null => {
@@ -174,6 +208,63 @@ export function IssuesBrowser() {
         </div>
       )}
 
+      {!loading && (loadError || sourceErrors.length > 0) && (
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              {loadError ? (
+                <p className="text-text">Couldn&apos;t load issues: {loadError}</p>
+              ) : (
+                <>
+                  <p className="text-text">
+                    Couldn&apos;t fetch issues from{" "}
+                    {sourceErrors.length === 1
+                      ? sourceErrors[0].name
+                      : `${sourceErrors.length} sources`}
+                    {issues.length > 0 ? " — showing the rest." : "."}
+                  </p>
+                  <ul className="mt-1.5 space-y-1 text-xs text-text-muted">
+                    {groupedSourceErrors.map((g) => (
+                      <li key={g.key} className="flex gap-1.5">
+                        <span className="font-mono text-text shrink-0" title={g.names.join(", ")}>
+                          {g.names.length <= 2
+                            ? g.names.join(", ")
+                            : `${g.names[0]} +${g.names.length - 1} more`}
+                        </span>
+                        <span className="min-w-0">
+                          {g.message}
+                          {g.status === 401 && (
+                            <>
+                              {" "}
+                              <Link href="/setup" className="text-primary hover:underline">
+                                Open setup
+                              </Link>
+                            </>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setReloadKey((k) => k + 1)}
+              className="flex items-center gap-1 text-xs text-text-muted hover:text-text shrink-0"
+              title="Retry"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+
       {!loading && unassignedIssues.length > 0 && (
         <div className="mb-4">
           <button
@@ -199,11 +290,15 @@ export function IssuesBrowser() {
       ) : issues.length === 0 ? (
         <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
           <CircleDot className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>No open issues found</p>
+          <p>
+            {loadError || sourceErrors.length > 0 ? "No issues to show" : "No open issues found"}
+          </p>
           <p className="text-xs mt-1">
-            {repos.length === 0
-              ? "Add a repo first in the Repos settings."
-              : "Issues will appear here from your configured repos."}
+            {loadError || sourceErrors.length > 0
+              ? "Fix the problem above and retry — there may be issues Optio can't see yet."
+              : repos.length === 0
+                ? "Add a repo first in the Repos settings."
+                : "Issues will appear here from your configured repos."}
           </p>
         </div>
       ) : (
