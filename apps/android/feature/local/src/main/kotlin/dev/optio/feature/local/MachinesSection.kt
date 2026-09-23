@@ -243,7 +243,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.automationsSection(
                         Box {
                             AutomationRow(
                                 automation = bp,
-                                triggers = triggers[bp.id].orEmpty(),
+                                triggers = triggers[bp.id],
                                 hosts = hosts,
                                 onClick = { navigator.push(LocalAutomationRoute(bp.id)) },
                                 onLongClick = if (canMutate) ({ menu = true }) else null,

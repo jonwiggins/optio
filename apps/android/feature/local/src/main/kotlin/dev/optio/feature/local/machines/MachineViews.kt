@@ -166,7 +166,8 @@ internal fun whereText(
 @Composable
 internal fun AutomationRow(
     automation: LocalBlueprint,
-    triggers: List<LocalTrigger>,
+    /** Null while they are unknown (not loaded yet, or the fetch failed): then no trigger line. */
+    triggers: List<LocalTrigger>?,
     hosts: List<LocalHost>,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -189,10 +190,10 @@ internal fun AutomationRow(
             whereText(bp, host),
         )
     val triggerLine =
-        if (triggers.isEmpty()) {
-            "Runs when you press Run"
-        } else {
-            triggers.joinToString("  ·  ") { t -> "${Triggers.label(t)}: ${Triggers.summary(t)}" + if (!t.enabled) " (paused)" else "" }
+        when {
+            triggers == null -> null
+            triggers.isEmpty() -> "Runs when you press Run"
+            else -> triggers.joinToString("  ·  ") { t -> "${Triggers.label(t)}: ${Triggers.summary(t)}" + if (!t.enabled) " (paused)" else "" }
         }
     OptioRow(
         title = bp.name,
