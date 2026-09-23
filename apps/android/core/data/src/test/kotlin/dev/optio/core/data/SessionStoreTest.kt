@@ -180,7 +180,8 @@ class SessionStoreTest {
             assertEquals(ServerColor.BLUE, b.color, "the next unused hue")
             assertEquals(b.id, session.activeServer.value?.id)
             assertEquals(listOf(b.id, a.id), session.servers.value.map { it.id }, "active first")
-            assertTrue(session.hasMultipleServers.value)
+            // Derived from the server list (map + stateIn): it follows a dispatch later.
+            eventually("hasMultipleServers") { session.hasMultipleServers.value }
             assertEquals("second@example.com", session.user.value?.email)
         }
 

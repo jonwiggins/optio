@@ -73,6 +73,19 @@ function getFreePort(): Promise<number> {
 }
 
 export async function startApiServer(opts: StartApiServerOptions = {}): Promise<ApiServerHandle> {
+  // An ephemeral port is free when picked but a parallel test file can take it before the server
+  // binds (EADDRINUSE): pick another and retry. A fixed port is the caller's to manage.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await startApiServerOnce(opts);
+    } catch (err) {
+      const portTaken = err instanceof Error && err.message.includes("EADDRINUSE");
+      if (opts.port !== undefined || !portTaken || attempt >= 3) throw err;
+    }
+  }
+}
+
+async function startApiServerOnce(opts: StartApiServerOptions): Promise<ApiServerHandle> {
   const port = opts.port ?? (await getFreePort());
   const baseUrl = `http://127.0.0.1:${port}`;
   const lines: string[] = [];

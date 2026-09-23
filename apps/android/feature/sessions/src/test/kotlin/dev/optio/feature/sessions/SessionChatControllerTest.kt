@@ -100,7 +100,7 @@ class SessionChatControllerTest {
         assertEquals("Which step is slowest?", frame["content"]?.stringValue)
         assertEquals(SessionChatRow.User(chat.rows.value.last().id, "Which step is slowest?"), chat.rows.value.last())
         assertEquals(SessionChatConnection.THINKING, chat.status.value)
-        assertFalse(chat.canSend.value)
+        eventually { !chat.canSend.value } // derived from status: lags a send by a dispatch
     }
 
     @Test
@@ -136,7 +136,7 @@ class SessionChatControllerTest {
         assertEquals(listOf(AgentLogEntry.TypeValue.SYSTEM, AgentLogEntry.TypeValue.TEXT), tail.map { it.type })
         assertEquals("Mock agent handled: go", tail.last().content)
         assertEquals(0.0246, chat.costUsd.value)
-        assertTrue(chat.canSend.value)
+        eventually { chat.canSend.value }
     }
 
     @Test
@@ -194,7 +194,7 @@ class SessionChatControllerTest {
         val historyLoads = server.count("GET", "/api/sessions/$id/chat")
         first.close(1011, "restart")
         eventually { chat.status.value == SessionChatConnection.DISCONNECTED }
-        assertFalse(chat.canSend.value)
+        eventually { !chat.canSend.value }
         val second = endpoint.awaitConnection(15_000)
         eventually { server.count("GET", "/api/sessions/$id/chat") > historyLoads }
         second.ready()

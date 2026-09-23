@@ -167,6 +167,8 @@ class TaskDetailViewModelTest {
         vm.requestReview()
         assertEquals(UiMessage.Success("Review agent launched"), vm.messages.first())
         eventually { server.count("GET", "/api/tasks/t1") > before }
+        // The review action stays busy until its refresh lands, and a busy page ignores new actions.
+        eventually { !vm.busy.value }
 
         server.error("POST", "/api/tasks/:id/retry", 409, "Cannot retry task in pr_opened state")
         vm.retry()
