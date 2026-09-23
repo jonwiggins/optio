@@ -711,7 +711,8 @@ export const workflowRuns = pgTable(
     workflowId: uuid("workflow_id")
       .notNull()
       .references(() => workflows.id, { onDelete: "cascade" }),
-    triggerId: uuid("trigger_id").references(() => workflowTriggers.id),
+    // SET NULL: deleting a trigger keeps the runs it started (1791000000).
+    triggerId: uuid("trigger_id").references(() => workflowTriggers.id, { onDelete: "set null" }),
     params: jsonb("params").$type<Record<string, unknown>>(),
     // workflows.run_title rendered with this run's params; null = no template.
     title: text("title"),
