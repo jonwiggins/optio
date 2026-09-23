@@ -4,15 +4,19 @@ import android.content.Context
 import dev.optio.core.data.ServerClient
 import dev.optio.core.glance.GlanceLoader
 import dev.optio.core.glance.GlanceRefresh
+import dev.optio.core.glance.NeedsYouSnapshot
 import dev.optio.feature.widgets.Host
+import dev.optio.feature.widgets.OptioWidgets
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Keeps the widgets and tiles current (iOS: the widget timeline provider plus
@@ -34,13 +38,19 @@ internal object WidgetRefresh {
     private val lastTasks = AtomicReference<Instant>(Instant.EPOCH)
     private val loading = Mutex()
 
-    /** New data was cached elsewhere: re-render; on a poll or the app returning, refresh task rows too. */
+    /**
+     * New data was cached elsewhere: re-render now; on a poll or the app returning, also reload the
+     * task rows, in this module's scope so a slow server never holds up the caller (the Watch, the
+     * background check), then render again.
+     */
     suspend fun onGlanceRefresh(
         context: Context,
         reason: GlanceRefresh.Reason,
     ) {
-        if (reason == GlanceRefresh.Reason.POLL || reason == GlanceRefresh.Reason.APP) refreshTasks(context, Host.clients(), throttle = true)
         render(context)
+        if (reason == GlanceRefresh.Reason.POLL || reason == GlanceRefresh.Reason.APP) {
+            OptioWidgets.scope.launch { if (refreshTasks(context, Host.clients(), throttle = true)) render(context) }
+        }
     }
 
     /**
@@ -55,22 +65,29 @@ internal object WidgetRefresh {
         render(context)
     }
 
-    /** Reloads the in-flight Repo Tasks of [clients] into the cache (at most once a minute with [throttle]). */
+    /**
+     * Reloads the in-flight Repo Tasks of [clients] into the cache (at most once a minute with
+     * [throttle]; each server bounded by the snapshot timeout). False when it did not run.
+     */
     suspend fun refreshTasks(
         context: Context,
         clients: List<ServerClient>,
         throttle: Boolean = false,
-    ) {
-        if (clients.isEmpty()) return
+    ): Boolean {
+        if (clients.isEmpty()) return false
         val now = Instant.now()
-        if (throttle && Duration.between(lastTasks.get(), now) < TASKS_EVERY) return
+        if (throttle && Duration.between(lastTasks.get(), now) < TASKS_EVERY) return false
         lastTasks.set(now)
         val store = Host.store(context)
         coroutineScope {
             clients.map { client ->
-                async { GlanceLoader.loadTasks(client.api, client.server)?.let { store.setCachedTasks(it, client.server.id) } }
+                async {
+                    withTimeoutOrNull(NeedsYouSnapshot.SERVER_TIMEOUT) { GlanceLoader.loadTasks(client.api, client.server) }
+                        ?.let { store.setCachedTasks(it, client.server.id) }
+                }
             }.awaitAll()
         }
+        return true
     }
 
     /** Re-renders every surface from the cache and schedules the stale-footer flip. */
