@@ -1,0 +1,27 @@
+task-47d85b88-e286-4b82-b6ba-6b2755aa1ff8 | needs_you | needs attention | Tidy up the config loader | now | pod | e2e-org/e2e-repo | claude-code | exits |  |  | 2026-09-23T00:45:53.433Z | false | false
+task-7efbec04-9492-4ba2-bf5e-f02691248983 | running | running | Migrate the image cache to Coil 3 | now | pod | e2e-org/mobile-app | claude-code | exits |  |  | 2026-09-23T00:45:54.263Z | false | false
+task-cc36f5e3-783c-4d90-9a9c-80482ee99677 | queued | queued | Fix the Safari date picker | now | machine | E2E laptop · ~/repos/e2e-repo | claude-code | exits |  |  | 2026-09-23T00:46:02.506Z | false | false
+terminal-d67370f7-b439-46df-85aa-d7dfb994e421 | queued | host offline | Notes shell | now | machine | E2E laptop · ~/notes | terminal | waits-for-me |  |  | 2026-09-23T00:46:02.479Z | false | false
+task-050d2bc1-e58a-4cf1-98df-1b1bdbb26df3 | queued | waiting on deps | Document the config loader cleanup | now | pod | e2e-org/e2e-repo | claude-code | exits |  |  | 2026-09-23T00:45:54.887Z | false | false
+session-92236dc9-9510-4e8d-9b7e-2d36eceeaae7 | waiting | open | Investigate slow cold start | now | pod | e2e-org/e2e-repo | terminal | waits-for-me |  |  | 2026-09-23T00:46:00.131Z | false | false
+agent-56bdf662-094b-42c0-85b3-df3628f95428 | waiting | idle | Release Captain | messages | pod | @release-captain | claude-code | waits-for-messages |  |  | 2026-09-23T00:45:58.813Z | false | false
+task-311fc6b5-df0f-4c0e-893a-46083cb79743 | waiting | PR open | Bump minor dependency versions | on a trigger | pod | e2e-org/e2e-repo | claude-code | exits | PR 4 | https://github.com/e2e-org/e2e-repo/pull/4 | 2026-09-23T00:45:58.381Z | false | true
+task-24a0b270-ae72-481f-bbc7-8b230113b112 | waiting | PR open | Add a dark mode toggle to Settings | now | pod | e2e-org/e2e-repo | claude-code | exits | PR 1 | https://github.com/e2e-org/e2e-repo/pull/1 | 2026-09-23T00:45:41.484Z | false | false
+automation-8e13eb65-550e-4f3e-bec9-5018a301c23d | scheduled | armed | Fix flaky tests | on an event | machine | E2E laptop · ~/repos/e2e-repo | claude-code | exits |  |  | 2026-09-23T00:46:01.194Z | true | false
+blueprint-b97a740c-bc5f-4497-a5c5-f591e5f48e30 | scheduled | armed | Weekly dependency bump | on a trigger | pod | e2e-org/e2e-repo | claude-code | exits | opens a PR each run |  | 2026-09-23T00:45:57.842Z | true | false
+job-0d35390c-0ad5-4cb5-954a-5af54e4efeed | scheduled | armed | Triage Sentry alerts | on a trigger | pod |  | claude-code | exits |  |  | 2026-09-23T00:45:57.416Z | true | false
+job-3ff369ec-bd60-4242-924c-68e504bcaed8 | scheduled | armed | Nightly release notes | on a trigger | pod |  | claude-code | exits |  |  | 2026-09-23T00:45:56.161Z | true | false
+agent-a60c6efa-37f7-47a4-b4d5-0c758e4cda7b | paused | paused | Docs Gardener | messages | pod | @docs-gardener | claude-code | waits-for-messages |  |  | 2026-09-23T00:45:59.248Z | false | false
+task-0de0c968-fed4-40cf-a14a-5b9b2d327216 | failed | failed | Upgrade the payments SDK | now | pod | e2e-org/e2e-repo | claude-code | exits |  |  | 2026-09-23T00:45:53.691Z | false | false
+terminal-6df8ee55-1846-4b82-8e16-3cb4ea8ebf7d | done | exited | npm run build | now | machine | E2E laptop · ~/repos/e2e-repo | terminal | waits-for-me |  |  | 2026-09-23T00:46:01.675Z | false | false
+terminal-79a9d6d0-f1ac-4cbe-ba83-b07bdfb526e9 | done | exited | Fix flaky tests | blueprint | machine | E2E laptop · ~/repos/e2e-repo | claude-code | exits | done |  | 2026-09-23T00:46:01.244Z | false | true
+session-f5357591-66cb-46be-849e-728ae45c2628 | done | ended | Try the new image loader | now | pod | e2e-org/mobile-app | terminal | waits-for-me |  |  | 2026-09-23T00:46:01.181Z | false | false
+task-d55d8a0b-dda3-49d9-8b2e-49c0ef3524ce | done | completed | Review: Add a dark mode toggle to Settings | now | pod | e2e-org/e2e-repo | claude-code | exits | PR 3 | https://github.com/e2e-org/e2e-repo/pull/3 | 2026-09-23T00:45:55.915Z | false | false
+task-f1538cdd-438a-480b-a744-f3f79c4a4836 | done | cancelled | Refactor analytics events | now | pod | e2e-org/e2e-repo | claude-code | exits |  |  | 2026-09-23T00:45:54.871Z | false | false
+task-4d845432-41bb-4abe-a0f1-fcb40b485157 | done | completed | Paginate the activity feed | now | pod | e2e-org/e2e-repo | claude-code | exits | PR 2 | https://github.com/e2e-org/e2e-repo/pull/2 | 2026-09-23T00:45:53.891Z | false | false
+{"needsYou":1,"running":4,"waiting":3,"recurring":4,"agents":2}
+active 9
+recurring 4
+agents 2
+history 7
+all 21
