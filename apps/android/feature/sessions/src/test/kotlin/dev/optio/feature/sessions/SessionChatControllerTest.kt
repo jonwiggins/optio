@@ -104,6 +104,21 @@ class SessionChatControllerTest {
     }
 
     @Test
+    fun historyDoneOpensTheGateWithoutWaitingForQuiet() {
+        // A settle delay far longer than the test: only `history_done` can open the gate.
+        chat = SessionChatController(id, server.client(), scope, fastSockets(), settleDelay = 60_000.milliseconds)
+        val socket = start()
+        eventually { chat.historyLoaded.value }
+        socket.ready()
+        eventually { chat.status.value == SessionChatConnection.READY }
+        socket.event("text", "old", catchUp = true)
+        Thread.sleep(100)
+        assertFalse(chat.canSend.value, "still replaying")
+        socket.sendText("""{"type":"history_done","count":1}""")
+        eventually { chat.canSend.value }
+    }
+
+    @Test
     fun theConversationStreamsIn() {
         val socket = start()
         eventually { chat.historyLoaded.value }

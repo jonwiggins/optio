@@ -56,9 +56,10 @@ enum class SessionChatConnection(val label: String) {
  *
  * Sending waits for the server to be ready **and** for its history replay to finish: the server
  * says `ready`, then replays the stored conversation (`catchUp` frames, which the REST history
- * already covers and are skipped), and only then listens, with no end-of-replay marker; a message
- * sent inside that window can be lost. [settled] turns true after [settleDelay] without a replayed
- * frame, and [canSend] needs it.
+ * already covers and are skipped). Current servers end the replay with `history_done`, which opens
+ * the gate at once; older ones have no end-of-replay marker and could drop a message sent inside
+ * that window, so [settled] also turns true after [settleDelay] without a replayed frame. [canSend]
+ * needs it.
  *
  * A socket that dies before `ready` with an `error` frame ("Session is not active", the pod was
  * cleaned up) is not retried: [fatal] turns true and the screen reloads the session. A reconnect
@@ -261,6 +262,13 @@ class SessionChatController(
                 _error.value = message.message
                 // An error before `ready` is the server refusing the chat; the close follows.
                 if (!sawReady) pendingFatal = true
+            }
+            is SessionChatServerMessage.HistoryDone -> {
+                // The server marks the end of its replay: no need to wait for it to go quiet.
+                if (sawReady) {
+                    settleJob?.cancel()
+                    _settled.value = true
+                }
             }
             is SessionChatServerMessage.Unknown -> Unit
         }
