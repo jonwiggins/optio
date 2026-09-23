@@ -15,6 +15,6 @@ import dev.optio.feature.local.terminal.LocalTerminalScreen
 fun EntryProviderScope<NavKey>.localEntries() {
     entry<LocalTerminalRoute> { key -> LocalTerminalScreen(terminalId = key.id, compose = key.compose) }
     entry<LocalAutomationRoute> { key -> AutomationScreen(automationId = key.id) }
-    entry<LocalAutomationFormRoute> { key -> AutomationFormScreen(automationId = key.id) }
+    entry<LocalAutomationFormRoute> { AutomationFormScreen() }
     entry<LocalHostRoute> { key -> LocalHostScreen(hostId = key.id) }
 }

@@ -2,7 +2,6 @@ package dev.optio.feature.local.automations
 
 import dev.optio.core.model.LocalAgentKind
 import dev.optio.core.model.LocalAgentSessionMode
-import dev.optio.core.model.LocalBlueprint
 import dev.optio.core.model.LocalBlueprintSpawnMode
 import dev.optio.feature.local.api.LocalBlueprintBody
 
@@ -52,12 +51,8 @@ data class AutomationForm(
                 else -> null
             }
 
-    /**
-     * The request body. Creating omits what's unset; [editing] also sends explicit nulls for what
-     * was cleared (any host, no description, the other location field, a shell command), so the
-     * PATCH really moves the row.
-     */
-    fun body(editing: Boolean): LocalBlueprintBody =
+    /** The create request's body: only what's set. */
+    fun body(): LocalBlueprintBody =
         LocalBlueprintBody(
             name = name.trim(),
             description = description.trim().ifEmpty { null },
@@ -68,33 +63,9 @@ data class AutomationForm(
             agent = agent,
             spawnMode = spawnMode,
             sessionMode = if (agent != null) sessionMode else null,
-            clearAgent = editing && agent == null,
-            clearHost = editing && hostId.isEmpty(),
-            clearDescription = editing && description.isBlank(),
-            clearLocation = editing,
         )
 
     companion object {
-        /** The form for an existing automation (iOS `onAppear`, web `formFromBlueprint`). */
-        fun from(bp: LocalBlueprint): AutomationForm =
-            AutomationForm(
-                name = bp.name,
-                description = bp.description.orEmpty(),
-                hostId = bp.hostId.orEmpty(),
-                location =
-                    when {
-                        bp.dir != null -> Location.DIR
-                        bp.repoUrl != null -> Location.REPO
-                        else -> Location.EVENT
-                    },
-                dir = bp.dir.orEmpty(),
-                repoUrl = bp.repoUrl.orEmpty(),
-                agent = bp.agent?.takeIf { it != LocalAgentKind.UNKNOWN },
-                commandTemplate = bp.commandTemplate,
-                sessionMode = if (bp.sessionMode == LocalAgentSessionMode.HEADLESS) LocalAgentSessionMode.HEADLESS else LocalAgentSessionMode.INTERACTIVE,
-                spawnMode = if (bp.spawnMode == LocalBlueprintSpawnMode.AUTO) LocalBlueprintSpawnMode.AUTO else LocalBlueprintSpawnMode.HOLD,
-            )
-
         /** iOS placeholder for the template field. */
         fun placeholder(agent: LocalAgentKind?): String = if (agent == null) "claude {{prompt}}" else "Investigate {{ticketTitle}}"
 

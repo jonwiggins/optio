@@ -69,30 +69,25 @@ import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.mono
 import dev.optio.core.ui.toast.LocalToaster
 import dev.optio.feature.local.api.createLocalBlueprint
-import dev.optio.feature.local.api.getLocalBlueprint
 import dev.optio.feature.local.api.listLocalHosts
-import dev.optio.feature.local.api.updateLocalBlueprint
 import dev.optio.feature.local.model.LocalPresentation
 import kotlin.coroutines.cancellation.CancellationException
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
-/** New / Edit automation: the hosts for the pickers, the automation being edited, and the save. */
+/** New automation: the hosts for the pickers, and the save. */
 class AutomationFormViewModel(
     private val api: ApiClient,
-    val automationId: String?,
 ) : ViewModel() {
-    data class Loaded(val hosts: List<LocalHost>, val existing: LocalBlueprint?)
+    data class Loaded(val hosts: List<LocalHost>)
 
     sealed interface Event {
-        /** Saved: [created] is true for a new automation (the screen then opens it). */
-        data class Saved(val automation: LocalBlueprint, val created: Boolean) : Event
+        /** Created (the screen then opens it). */
+        data class Saved(val automation: LocalBlueprint) : Event
     }
 
     private val _loaded = MutableStateFlow<LoadState<Loaded>>(LoadState.Loading())
@@ -117,20 +112,8 @@ class AutomationFormViewModel(
     fun load() {
         viewModelScope.launch {
             _loaded.value = LoadState.Loading(_loaded.value.value)
-            _loaded.value =
-                try {
-                    coroutineScope {
-                        val hosts = async { runCatching { api.listLocalHosts() }.getOrDefault(emptyList()) }
-                        val existing = automationId?.let { id -> async { api.getLocalBlueprint(id) } }
-                        val bp = existing?.await()
-                        if (bp != null) _form.value = AutomationForm.from(bp)
-                        LoadState.Loaded(Loaded(hosts.await(), bp))
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    LoadState.Failed(e)
-                }
+            // Without the hosts (an older server, a hiccup) the pickers fall back to typing a path.
+            _loaded.value = LoadState.Loaded(Loaded(runCatching { api.listLocalHosts() }.getOrDefault(emptyList())))
         }
     }
 
@@ -146,9 +129,7 @@ class AutomationFormViewModel(
             _saving.value = true
             _error.value = null
             try {
-                val id = automationId
-                val saved = if (id == null) api.createLocalBlueprint(form.body(editing = false)) else api.updateLocalBlueprint(id, form.body(editing = true))
-                eventChannel.send(Event.Saved(saved, created = id == null))
+                eventChannel.send(Event.Saved(api.createLocalBlueprint(form.body())))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -163,22 +144,21 @@ class AutomationFormViewModel(
 /**
  * `LocalAutomationFormRoute`: New automation (iOS `BlueprintFormSheet`, a full screen here; the web's
  * Machines page editor). Editing an existing automation goes to the one Work form
- * (`EditWorkRoute`), like every recurring definition; with an id this screen still edits the row
- * directly.
+ * (`EditWorkRoute`), like every recurring definition.
  */
 @Composable
-fun AutomationFormScreen(automationId: String?) {
+fun AutomationFormScreen() {
     val api = LocalApiClient.current
-    val vm: AutomationFormViewModel = viewModel(key = "local-automation-form-${automationId ?: "new"}") { AutomationFormViewModel(api, automationId) }
+    val vm: AutomationFormViewModel = viewModel(key = "local-automation-form") { AutomationFormViewModel(api) }
     val navigator = LocalNavigator.current
     val toaster = LocalToaster.current
     LaunchedEffect(vm) {
         vm.events.collect { event ->
             when (event) {
                 is AutomationFormViewModel.Event.Saved -> {
-                    toaster.success(if (event.created) "Automation created" else "Saved")
+                    toaster.success("Automation created")
                     navigator.pop()
-                    if (event.created) navigator.push(LocalAutomationRoute(event.automation.id))
+                    navigator.push(LocalAutomationRoute(event.automation.id))
                 }
             }
         }
@@ -188,7 +168,6 @@ fun AutomationFormScreen(automationId: String?) {
     val saving by vm.saving.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     AutomationFormContent(
-        editing = automationId != null,
         loaded = loaded,
         form = form,
         saving = saving,
@@ -202,7 +181,6 @@ fun AutomationFormScreen(automationId: String?) {
 
 @Composable
 internal fun AutomationFormContent(
-    editing: Boolean,
     loaded: LoadState<AutomationFormViewModel.Loaded>,
     form: AutomationForm,
     saving: Boolean,
@@ -220,10 +198,10 @@ internal fun AutomationFormContent(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel")
                     }
                 },
-                title = { Text(if (editing) "Edit automation" else "New automation") },
+                title = { Text("New automation") },
                 actions = {
                     TextButton(onClick = onSave, enabled = form.canSave && !saving && loaded.value != null, modifier = Modifier.testTag("automation-save")) {
-                        if (saving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text(if (editing) "Save" else "Create")
+                        if (saving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Create")
                     }
                 },
             )
