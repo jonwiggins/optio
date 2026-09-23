@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  :feature:widgets merges into the app: the Work and Run home-screen widgets (Glance), their
+  setup screens, the Quick Settings tiles, run shortcuts, and the static launcher shortcuts
+  (attached to the app's launcher activity below).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <!-- Static shortcuts (New work, Needs you) belong to the launcher activity, declared by :app. -->
+        <activity
+            android:name="dev.optio.app.MainActivity"
+            tools:ignore="MissingClass">
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
+        </activity>
+
+        <!-- Home-screen widgets. -->
+        <receiver
+            android:name=".work.WorkWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_work_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/optio_widget_work" />
+        </receiver>
+        <receiver
+            android:name=".run.RunWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_run_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/optio_widget_run" />
+        </receiver>
+
+        <!-- Widget setup (launched by the launcher when placing / reconfiguring). -->
+        <activity
+            android:name=".config.WorkWidgetConfigActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.OptioWidgets">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".config.RunWidgetConfigActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.OptioWidgets">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <!-- Quick Settings tiles. The Run tile is an active tile: it updates when it fires. -->
+        <service
+            android:name=".tiles.NeedsYouTileService"
+            android:exported="true"
+            android:icon="@drawable/widget_ic_bot"
+            android:label="@string/tile_needs_you"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".tiles.NewWorkTileService"
+            android:exported="true"
+            android:icon="@drawable/widget_ic_new_work"
+            android:label="@string/tile_new_work"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".tiles.RunTargetTileService"
+            android:exported="true"
+            android:icon="@drawable/widget_ic_play"
+            android:label="@string/tile_run"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
+
+        <!-- A tile's settings (long-press): the Run tile's target. -->
+        <activity
+            android:name=".tiles.TilePreferencesActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.OptioWidgets">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+        </activity>
+
+        <!-- A run shortcut's confirmation (launched only by our own shortcuts: not exported). -->
+        <activity
+            android:name=".shortcuts.RunShortcutActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.OptioWidgets.Translucent" />
+    </application>
+</manifest>

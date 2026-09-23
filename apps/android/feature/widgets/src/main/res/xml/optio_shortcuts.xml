@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Static launcher shortcuts, attached to the app's launcher activity by this module's manifest.
+  Both open optio:// links in MainActivity (targetPackage is the applicationId).
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/shortcut_new_work"
+        android:shortcutId="new-work"
+        android:shortcutLongLabel="@string/shortcut_new_work_long"
+        android:shortcutShortLabel="@string/shortcut_new_work_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="optio://work/new"
+            android:targetClass="dev.optio.app.MainActivity"
+            android:targetPackage="dev.optio.android" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/shortcut_needs_you"
+        android:shortcutId="needs-you"
+        android:shortcutLongLabel="@string/shortcut_needs_you_long"
+        android:shortcutShortLabel="@string/shortcut_needs_you_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="optio://needs-you"
+            android:targetClass="dev.optio.app.MainActivity"
+            android:targetPackage="dev.optio.android" />
+    </shortcut>
+</shortcuts>

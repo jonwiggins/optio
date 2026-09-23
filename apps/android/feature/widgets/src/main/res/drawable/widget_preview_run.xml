@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder picker preview; replaced by a rendered PNG (drawable-nodpi). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/optio_widgets_purple" />
+    <item android:drawable="@drawable/widget_ic_bot" android:gravity="center" />
+</layer-list>

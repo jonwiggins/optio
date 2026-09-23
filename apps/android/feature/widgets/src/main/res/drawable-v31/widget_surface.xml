@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A widget's card (day/night colour resources), at the system's widget corner radius. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/optio_widgets_surface" />
+    <corners android:radius="@android:dimen/system_app_widget_background_radius" />
+</shape>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A filled circle: status and server dots (tinted per row; works below API 31, where Glance cannot round corners). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="8dp"
+    android:height="8dp"
+    android:viewportWidth="8"
+    android:viewportHeight="8">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,0 A4,4 0 1,1 4,8 A4,4 0 1,1 4,0 Z" />
+</vector>

@@ -1,0 +1,24 @@
+{
+  "hosts": [
+    {
+      "id": "1f4dd03f-8128-4e02-8ef3-3caa13f0960f",
+      "userId": "a58f04a1-9cee-49b5-8e32-29ee16b8332f",
+      "workspaceId": "08446742-03ab-4c6a-b18f-35272bad7cfa",
+      "name": "E2E laptop",
+      "hostname": "e2e-laptop",
+      "platform": "darwin",
+      "arch": "arm64",
+      "daemonVersion": "0.1.0-devlab-playback",
+      "dirs": [
+        { "path": "/Users/e2e/repos/e2e-repo", "repoUrl": "https://github.com/e2e-org/e2e-repo" },
+        { "path": "/Users/e2e/notes" }
+      ],
+      "agentLimits": null,
+      "claudeCredentials": false,
+      "state": "offline",
+      "lastSeenAt": "2026-09-23T01:13:40.732Z",
+      "createdAt": "2026-09-23T01:13:40.188Z",
+      "updatedAt": "2026-09-23T01:13:41.624Z"
+    }
+  ]
+}

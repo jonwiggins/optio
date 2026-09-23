@@ -64,4 +64,5 @@ include(
     ":feature:library",
     ":feature:more",
     ":feature:glance",
+    ":feature:widgets",
 )
