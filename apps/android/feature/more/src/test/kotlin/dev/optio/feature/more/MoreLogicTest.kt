@@ -1,5 +1,6 @@
 package dev.optio.feature.more
 
+import androidx.compose.runtime.saveable.SaverScope
 import dev.optio.core.data.ServerColor
 import dev.optio.core.data.ServerProfile
 import dev.optio.core.glance.FcmAvailability
@@ -22,6 +23,7 @@ import dev.optio.feature.more.secrets.saveNotice
 import dev.optio.feature.more.secrets.scopeFilters
 import dev.optio.feature.more.secrets.secretScopes
 import dev.optio.feature.more.servers.ServerDraft
+import dev.optio.feature.more.servers.ServerDraftSaver
 import dev.optio.feature.more.settings.AgentSettingsForm
 import dev.optio.feature.more.settings.AppIconOption
 import dev.optio.feature.more.settings.NotificationEvents
@@ -33,6 +35,7 @@ import dev.optio.feature.more.ui.MoreAgentTypes
 import dev.optio.feature.more.ui.MoreWebhookEvents
 import dev.optio.feature.more.ui.moreErrorText
 import dev.optio.feature.more.webhooks.WebhookDraft
+import dev.optio.feature.more.webhooks.WebhookDraftSaver
 import dev.optio.feature.more.webhooks.deliveryNotice
 import dev.optio.feature.more.webhooks.eventsSummary
 import dev.optio.feature.more.webhooks.prettyJson
@@ -196,6 +199,19 @@ class MoreLogicTest {
         assertEquals("ws-2", edited.workspaceId)
         assertNull(ServerDraft.of(profile).copy(urlText = "  ").editedUrl)
         assertEquals("s", edited.id)
+    }
+
+    @Test
+    fun draftsSurviveProcessDeathWithoutSecrets() {
+        val saverScope = SaverScope { true }
+        val draft = WebhookDraft(url = "https://hooks.example.com/x", description = "Chat", events = setOf("task.failed", "review.completed"))
+        val saved = with(WebhookDraftSaver) { saverScope.save(draft) }!!
+        assertEquals(draft, WebhookDraftSaver.restore(saved))
+        assertFalse(saved.toString().contains("secret"), "the signing secret is not a draft field")
+
+        val server = ServerDraft("Studio", "https://studio.tail.ts.net", ServerColor.ROSE, "ws-2")
+        assertEquals(server, ServerDraftSaver.restore(with(ServerDraftSaver) { saverScope.save(server) }!!))
+        assertEquals(ServerDraft("", "", ServerColor.SLATE, null), ServerDraftSaver.restore(listOf(null, null, "no-such-colour", null)))
     }
 
     @Test
