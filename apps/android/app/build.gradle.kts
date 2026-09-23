@@ -3,6 +3,13 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Server push (FCM, PLAN §8) is optional at build time: a build with app/google-services.json
+// (never committed) gets the google-services plugin, which initialises Firebase; without it the
+// app's FCM paths are no-ops and it relies on the on-device baseline (docs/android-push.md).
+if (file("google-services.json").exists()) {
+    apply(plugin = libs.plugins.google.services.get().pluginId)
+}
+
 android {
     namespace = "dev.optio.app"
 

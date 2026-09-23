@@ -2,13 +2,15 @@
 # Private Optio API for Android dev and tests: the REAL API server with the fake container
 # runtime, auth disabled by default, a private Postgres database and Redis DB, and seeded data.
 #
-#   test-api.sh start  [--auth] [--port N] [--no-seed] [--timeout SECS] [--log-level LEVEL]
+#   test-api.sh start  [--auth] [--port N] [--no-seed] [--fcm-fake] [--timeout SECS] [--log-level LEVEL]
 #   test-api.sh stop   [--auth] [--port N] [--force]
 #   test-api.sh status [--auth] [--port N | --all]
 #
 # Port 4961 is the shared instance; use 4962-4979 for a private one. --auth runs the API with
 # authentication ENABLED (real users, a workspace, personal access tokens; see seed.json `auth`)
-# and defaults to port 4980, the shared auth-enabled instance. The host reaches it at
+# and defaults to port 4980, the shared auth-enabled instance. --fcm-fake turns Android push
+# (FCM) on with a recording transport: every message the server would send is appended to
+# .run/<port>/fcm-outbox.jsonl (docs/android-push.md, "Testing"). The host reaches it at
 # http://127.0.0.1:<port>, an emulator at http://10.0.2.2:<port> (it listens on loopback only).
 # State lives in apps/android/e2e/.run/<port>/: api.log, launcher.pid, api.pid, server.json and
 # seed.json (the seeded ids). `start` returns once the API is healthy AND seeding finished.
@@ -111,13 +113,14 @@ kill_group_or_pid() { # <pid> <signal>
 default_port() { [ "$1" = 1 ] && echo 4980 || echo 4961; }
 
 cmd_start() {
-  local port="" seed=1 timeout=420 level="warn" auth=0
+  local port="" seed=1 timeout=420 level="warn" auth=0 fcm=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --port) port="${2:-}"; shift 2 ;;
       --port=*) port="${1#*=}"; shift ;;
       --auth) auth=1; shift ;;
       --no-seed) seed=0; shift ;;
+      --fcm-fake) fcm=1; shift ;;
       --timeout) timeout="${2:-}"; shift 2 ;;
       --log-level) level="${2:-}"; shift 2 ;;
       -h | --help) usage; exit 0 ;;
@@ -158,6 +161,7 @@ cmd_start() {
   local args=("$E2E_DIR/launch-api.ts" --port "$port" --run-dir "$dir" --log-level "$level")
   [ "$seed" = 1 ] || args+=(--no-seed)
   [ "$auth" = 1 ] && args+=(--auth)
+  [ "$fcm" = 1 ] && args+=(--fcm-fake)
   # New session so the launcher (and the API it spawns) outlive this shell. `exec` keeps one pid
   # from the subshell through nohup and perl to tsx, so $! is the launcher itself.
   (cd "$REPO_ROOT/apps/api" && exec nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec failed: $!\n"' \

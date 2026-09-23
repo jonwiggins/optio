@@ -12,6 +12,7 @@ import dev.optio.core.data.ServerRegistry
 import dev.optio.core.data.SessionStore
 import dev.optio.core.data.TokenStore
 import dev.optio.core.ui.theme.AppearanceStore
+import dev.optio.feature.glance.OptioGlance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,6 +32,9 @@ class OptioApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         graph = AppGraph(this)
+        // Notifications, the Watch, push and the background check (`:feature:glance`); widgets,
+        // tiles and workers reach the session through GlanceHost from here on.
+        OptioGlance.install(this, session = { graph.session }, start = { graph.start() })
     }
 }
 
