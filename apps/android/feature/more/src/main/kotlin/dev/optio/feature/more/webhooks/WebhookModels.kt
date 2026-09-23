@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -55,7 +56,11 @@ internal fun successRate(deliveries: List<WebhookDeliveryRow>): Int? {
     return (ok.toDouble() / deliveries.size * 100).roundToInt()
 }
 
-private val prettyJson = Json { prettyPrint = true }
+@OptIn(ExperimentalSerializationApi::class)
+private val prettyJson = Json {
+    prettyPrint = true
+    prettyPrintIndent = "  "
+}
 
 /** A payload pretty-printed with sorted keys (iOS `prettyJSON`). */
 internal fun prettyJson(value: JsonElement): String = prettyJson.encodeToString(JsonElement.serializer(), sortKeys(value))

@@ -219,7 +219,7 @@ private fun ApiKeyItem(
             )
         }
         IconButton(onClick = onRevoke, modifier = Modifier.testTag("revoke-${key.id}")) {
-            Icon(Icons.Outlined.Delete, contentDescription = "Revoke", tint = colors.red)
+            Icon(Icons.Outlined.Delete, contentDescription = "Revoke", tint = colors.secondaryLabel)
         }
     }
 }
@@ -285,7 +285,8 @@ fun CreateApiKeyForm(
         OutlinedTextField(
             value = name,
             onValueChange = onName,
-            placeholder = { Text("Name (e.g. Pixel 9)") },
+            label = { Text("Name") },
+            placeholder = { Text("e.g. Pixel 9") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.s).testTag("token-name"),
         )

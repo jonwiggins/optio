@@ -224,6 +224,7 @@ fun WorkspaceSettingsContent(
                             OutlinedTextField(
                                 value = inviteEmail,
                                 onValueChange = { inviteEmail = it },
+                                label = { Text("Email") },
                                 placeholder = { Text("user@example.com") },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Email),

@@ -96,6 +96,7 @@ fun NewWebhookForm(
                 OutlinedTextField(
                     value = draft.url,
                     onValueChange = { onDraft(draft.copy(url = it)) },
+                    label = { Text("URL") },
                     placeholder = { Text("https://example.com/webhook") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
@@ -104,14 +105,14 @@ fun NewWebhookForm(
                 OutlinedTextField(
                     value = draft.description,
                     onValueChange = { onDraft(draft.copy(description = it)) },
-                    placeholder = { Text("Description (optional)") },
+                    label = { Text("Description (optional)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("webhook-description"),
                 )
                 OutlinedTextField(
                     value = secret,
                     onValueChange = onSecret,
-                    placeholder = { Text("Secret (optional, HMAC-SHA256)") },
+                    label = { Text("Secret (optional, HMAC-SHA256)") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),

@@ -149,6 +149,9 @@ class NotificationDevicesViewModel(private val api: ApiClient) : NoticeViewModel
                 notify(if (sent == 1) "Sent a test to 1 device." else "Sent a test to $sent devices.")
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: ApiError) {
+                // 503 = neither APNs nor FCM configured: the server's sentence says exactly that.
+                if (e.status == 503) fail(e.message) else fail(e)
             } catch (e: Exception) {
                 fail(e)
             } finally {
@@ -521,7 +524,7 @@ private fun DeviceRow(
         }
         if (canRemove) {
             IconButton(onClick = onRemove, modifier = Modifier.testTag("remove-device-${device.listKey}")) {
-                Icon(Icons.Outlined.Delete, contentDescription = "Remove", tint = colors.red)
+                Icon(Icons.Outlined.Delete, contentDescription = "Remove", tint = colors.secondaryLabel)
             }
         }
     }

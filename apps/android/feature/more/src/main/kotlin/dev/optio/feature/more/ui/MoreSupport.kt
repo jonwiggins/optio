@@ -65,15 +65,16 @@ import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * Plain-language copy for a failed action (iOS `Error.moreDescription`): a 403 gets the "you don't
- * have permission" hint plus the server's reason; everything else goes through core:ui's
- * [ErrorText.humanize] (server message for 4xx, friendly sentences for transport / 5xx).
+ * have permission" hint plus the server's reason, other 4xx answers show the server's own sentence
+ * ("User not found", "User is already a member of this workspace"), and transport failures, 5xx,
+ * 401 and 429 get core:ui's friendly [ErrorText.humanize] copy.
  */
-fun moreErrorText(error: Throwable): String =
-    if (error is ApiError && error.status == ApiError.FORBIDDEN) {
-        "You don't have permission to do that. ${error.message}"
-    } else {
-        ErrorText.humanize(error)
-    }
+fun moreErrorText(error: Throwable): String = when {
+    error is ApiError && error.status == ApiError.FORBIDDEN -> "You don't have permission to do that. ${error.message}"
+    error is ApiError && error.status in 400..499 && error.status != ApiError.UNAUTHORIZED && error.status != ApiError.TOO_MANY_REQUESTS ->
+        error.message
+    else -> ErrorText.humanize(error)
+}
 
 /** One transient message from a ViewModel, shown as a toast. */
 data class Notice(val text: String, val tone: Tone)
@@ -148,14 +149,24 @@ fun LazyListScope.bottomSpacer(height: androidx.compose.ui.unit.Dp = 32.dp) {
     item(key = "bottom-spacer") { Spacer(Modifier.height(height)) }
 }
 
-/** A [GroupedSection] as one lazy item. */
+/**
+ * A [GroupedSection] as one lazy item. A section without a header gets the air a header would
+ * have given it (iOS inset-grouped sections are always apart).
+ */
 fun LazyListScope.groupedItem(
     key: String,
     header: String? = null,
     footer: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    item(key = key) { GroupedSection(header = header, footer = footer, content = content) }
+    item(key = key) {
+        GroupedSection(
+            modifier = if (header == null) Modifier.padding(top = Spacing.l + Spacing.xs) else Modifier,
+            header = header,
+            footer = footer,
+            content = content,
+        )
+    }
 }
 
 // endregion
@@ -304,19 +315,22 @@ fun ChipCloud(
     }
 }
 
-/** Footnote text inside a card (explanations, "No devices registered."). */
+/** Footnote text inside a card (explanations, "No devices registered."), with an optional symbol. */
 @Composable
 fun CardNote(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = OptioTheme.colors.secondaryLabel,
+    icon: ImageVector? = null,
 ) {
-    Text(
-        text,
-        style = OptioTheme.type.footnote,
-        color = color,
-        modifier = modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.m),
-    )
+    Row(
+        modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.m),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+        Text(text, style = OptioTheme.type.footnote, color = color)
+    }
 }
 
 // endregion

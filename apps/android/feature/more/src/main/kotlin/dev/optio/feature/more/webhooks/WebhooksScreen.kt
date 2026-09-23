@@ -12,7 +12,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Webhook
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -153,6 +152,10 @@ internal val DELIVERY_DETAILS = listOf(
     "Failed deliveries retry up to 3 times (5s, 10s, 20s) with a 10s timeout per attempt.",
 )
 
+/**
+ * One webhook row: tap opens it; for members a long-press offers Send test and Delete (iOS swipe
+ * actions; the detail screen has every action too).
+ */
 @Composable
 private fun WebhookItem(
     webhook: WebhookRow,
@@ -163,44 +166,35 @@ private fun WebhookItem(
     onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    OptioRow(
-        title = webhook.description?.takeIf { it.isNotEmpty() } ?: webhook.url ?: webhook.id,
-        meta = mono(webhook.url ?: webhook.id),
-        trailing = trailing,
-        trailingTone = if (webhook.isPaused) Tone.IDLE else null,
-        footer = eventsSummary(webhook.events.orEmpty())?.let(::mono),
-        titleMaxLines = 1,
-        onClick = onOpen,
-        onLongClick = if (canMutate) ({ menu = true }) else null,
-        modifier = Modifier.testTag("webhook-${webhook.id}"),
-        trailingContent = if (canMutate) {
-            {
-                Box {
-                    IconButton(onClick = { menu = true }, modifier = Modifier.testTag("webhook-menu-${webhook.id}")) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = "Webhook actions", tint = OptioTheme.colors.secondaryLabel)
-                    }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Send test") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null) },
-                            onClick = {
-                                menu = false
-                                onTest()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete", color = OptioTheme.colors.red) },
-                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = OptioTheme.colors.red) },
-                            onClick = {
-                                menu = false
-                                onDelete()
-                            },
-                        )
-                    }
-                }
-            }
-        } else {
-            null
-        },
-    )
+    Box {
+        OptioRow(
+            title = webhook.description?.takeIf { it.isNotEmpty() } ?: webhook.url ?: webhook.id,
+            meta = mono(webhook.url ?: webhook.id),
+            trailing = trailing,
+            trailingTone = if (webhook.isPaused) Tone.IDLE else null,
+            footer = eventsSummary(webhook.events.orEmpty())?.let(::mono),
+            titleMaxLines = 1,
+            onClick = onOpen,
+            onLongClick = if (canMutate) ({ menu = true }) else null,
+            modifier = Modifier.testTag("webhook-${webhook.id}"),
+        )
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.testTag("webhook-menu-${webhook.id}")) {
+            DropdownMenuItem(
+                text = { Text("Send test") },
+                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null) },
+                onClick = {
+                    menu = false
+                    onTest()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Delete", color = OptioTheme.colors.red) },
+                leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = OptioTheme.colors.red) },
+                onClick = {
+                    menu = false
+                    onDelete()
+                },
+            )
+        }
+    }
 }

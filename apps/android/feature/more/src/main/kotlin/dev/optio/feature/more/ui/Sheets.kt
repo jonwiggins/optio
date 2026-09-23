@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetValue
@@ -61,6 +62,8 @@ fun MoreSheet(
         onDismissRequest = { if (dismissible) onDismiss() },
         sheetState = sheetState,
         containerColor = elevated.page,
+        // A sheet that can't be swiped away shows no handle.
+        dragHandle = if (dismissible) ({ BottomSheetDefaults.DragHandle() }) else null,
         modifier = modifier.testTag("more-sheet"),
     ) {
         ProvideElevatedSurfaces {

@@ -71,6 +71,7 @@ import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.feature.more.api.AuthProviders
 import dev.optio.feature.more.api.ClaudeAuthStatus
+import dev.optio.feature.more.ui.CardNote
 import dev.optio.feature.more.ui.CollectNotices
 import dev.optio.feature.more.ui.MoreScaffold
 import dev.optio.feature.more.ui.SettingsRow
@@ -187,11 +188,7 @@ fun SettingsContent(
                 footer = "OAuth providers are detected from <PROVIDER>_OAUTH_CLIENT_ID / _SECRET on the server.",
             ) {
                 if (providers?.authDisabled == true) {
-                    SettingsRow(
-                        "Authentication is disabled on this server (OPTIO_AUTH_DISABLED).",
-                        icon = Icons.Outlined.RemoveModerator,
-                        chevron = false,
-                    )
+                    CardNote("Authentication is disabled on this server (OPTIO_AUTH_DISABLED).", icon = Icons.Outlined.RemoveModerator)
                     InsetDivider()
                 }
                 SIGN_IN_PROVIDERS.forEachIndexed { index, (name, label) ->

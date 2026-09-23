@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -218,7 +219,7 @@ private fun SecretItem(
         }
         if (canDelete) {
             IconButton(onClick = onDelete, modifier = Modifier.testTag("delete-${secret.name}")) {
-                Icon(Icons.Outlined.Delete, contentDescription = "Delete ${secret.name}", tint = colors.red)
+                Icon(Icons.Outlined.Delete, contentDescription = "Delete ${secret.name}", tint = colors.secondaryLabel)
             }
         }
     }
@@ -319,8 +320,8 @@ fun SecretForm(
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                         .selectable(selected = key == scope, role = Role.RadioButton, onClick = { onScope(key) })
-                        .padding(vertical = 2.dp)
                         .testTag("scope-$key"),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

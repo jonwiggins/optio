@@ -279,7 +279,7 @@ fun OptioAgentSettingsContent(
                     value = form.reviewModel,
                     onValueChange = { text -> onEdit { it.copy(reviewModel = text) } },
                     enabled = isAdmin,
-                    placeholder = { Text("Review model (optional)") },
+                    label = { Text("Review model (optional)") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                     modifier = Modifier.fillMaxWidth().padding(Spacing.m).testTag("review-model"),
