@@ -2,7 +2,7 @@
 <!--
   :feature:widgets merges into the app: the Work and Run home-screen widgets (Glance), their
   setup screens, the Quick Settings tiles, run shortcuts, and the static launcher shortcuts
-  (attached to the app's launcher activity below).
+  (their XML lives here; :app attaches it to every launcher activity-alias).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
@@ -19,14 +19,8 @@
                 android:value="androidx.startup" />
         </provider>
 
-        <!-- Static shortcuts (New work, Needs you) belong to the launcher activity, declared by :app. -->
-        <activity
-            android:name="dev.optio.app.MainActivity"
-            tools:ignore="MissingClass">
-            <meta-data
-                android:name="android.app.shortcuts"
-                android:resource="@xml/optio_shortcuts" />
-        </activity>
+        <!-- The static shortcuts (@xml/optio_shortcuts: New work, Needs you) are attached by :app to
+             each launcher activity-alias (the app-icon picker switches between them). -->
 
         <!-- Home-screen widgets. -->
         <receiver

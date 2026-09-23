@@ -58,6 +58,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
         </activity-alias>
         <activity-alias
             android:name=".LauncherMidnight"
@@ -70,6 +73,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
         </activity-alias>
         <activity-alias
             android:name=".LauncherTerminal"
@@ -82,6 +88,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
         </activity-alias>
         <activity-alias
             android:name=".LauncherBlueprint"
@@ -94,6 +103,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
         </activity-alias>
         <activity-alias
             android:name=".LauncherSticker"
@@ -106,6 +118,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
         </activity-alias>
         <activity-alias
             android:name=".LauncherRetro"
@@ -118,6 +133,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
         </activity-alias>
         <activity-alias
             android:name=".LauncherSunrise"
@@ -130,6 +148,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
         </activity-alias>
         <activity-alias
             android:name=".LauncherChip"
@@ -142,6 +163,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/optio_shortcuts" />
         </activity-alias>
     </application>
 </manifest>
