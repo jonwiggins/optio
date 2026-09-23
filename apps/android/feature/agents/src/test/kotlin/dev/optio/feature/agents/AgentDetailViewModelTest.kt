@@ -280,6 +280,8 @@ class AgentDetailViewModelTest {
         server.error("POST", "/api/persistent-agents/:id/triggers", 409, "Webhook path \"x\" is already in use")
         val created = main.onMain { vm.createTrigger(AgentTriggerDraft(type = AgentTriggerType.WEBHOOK, webhookPath = "x")) }
         assertEquals(false, created)
+        // The event collector runs on its own coroutine: wait for it rather than racing it.
+        eventually { events.any { it is AgentDetailViewModel.Event.Failure } }
         val failure = events.filterIsInstance<AgentDetailViewModel.Event.Failure>().single()
         assertEquals("Webhook path \"x\" is already in use", failure.error.message)
     }
