@@ -1,5 +1,9 @@
 package dev.optio.core.ui.components
 
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -48,6 +52,9 @@ fun <T> ChipPicker(
     ) {
         options.forEach { (value, label) ->
             val isSelected = selection == value
+            // A selection made elsewhere (a deep link picking "All") scrolls its chip into view.
+            val requester = remember { BringIntoViewRequester() }
+            LaunchedEffect(isSelected) { if (isSelected) requester.bringIntoView() }
             FilterChip(
                 selected = isSelected,
                 onClick = {
@@ -69,7 +76,7 @@ fun <T> ChipPicker(
                     selectedLabelColor = colors.page,
                 ),
                 border = null,
-                modifier = Modifier.testTag("chip-$label"),
+                modifier = Modifier.bringIntoViewRequester(requester).testTag("chip-$label"),
             )
         }
     }
