@@ -152,6 +152,9 @@ export async function activityRoutes(rawApp: FastifyInstance) {
         }
 
         // task_events are always about tasks; skip when filtering other types.
+        // from_state / to_state are the `task_state` enum: cast before mixing
+        // them with text (COALESCE(enum, 'new') makes Postgres parse 'new' as
+        // a task_state and fail the whole feed with a 500).
         if (typeFilters.includes("task_event") && (!resourceType || resourceType === "task")) {
           const conds: SQL[] = [sql`te.created_at >= ${since}`];
           const wsCond = scopeTo(sql`t.workspace_id`);
@@ -165,11 +168,11 @@ export async function activityRoutes(rawApp: FastifyInstance) {
               te.user_id AS user_id,
               u.display_name AS user_display_name,
               u.avatar_url AS user_avatar_url,
-              'task:' || COALESCE(te.from_state, 'new') || '→' || te.to_state AS action,
+              'task:' || COALESCE(te.from_state::text, 'new') || '→' || te.to_state::text AS action,
               'task' AS resource_type,
               te.task_id::text AS resource_id,
-              'Task transitioned to ' || te.to_state || ' via ' || te.trigger AS summary,
-              jsonb_build_object('fromState', te.from_state, 'toState', te.to_state, 'trigger', te.trigger) AS details
+              'Task transitioned to ' || te.to_state::text || ' via ' || te.trigger AS summary,
+              jsonb_build_object('fromState', te.from_state::text, 'toState', te.to_state::text, 'trigger', te.trigger) AS details
             FROM task_events te
             JOIN tasks t ON te.task_id = t.id
             LEFT JOIN users u ON te.user_id = u.id
@@ -227,11 +230,12 @@ export async function activityRoutes(rawApp: FastifyInstance) {
 
         const unionQuery = sql.join(parts, sql` UNION ALL `);
 
-        // Get paginated results
+        // Get paginated results. `id` breaks timestamp ties (rows written by
+        // one statement share created_at) so LIMIT/OFFSET pages are stable.
         const [rows, countRows, statsRows] = await Promise.all([
           db.execute(sql`
             SELECT * FROM (${unionQuery}) AS activity
-            ORDER BY timestamp DESC
+            ORDER BY timestamp DESC, id DESC
             LIMIT ${limit} OFFSET ${offset}
           `),
           db.execute(sql`
