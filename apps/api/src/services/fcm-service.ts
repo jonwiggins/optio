@@ -275,7 +275,8 @@ function buildDefaultService(): FcmService {
     return new FcmService({
       transport: new FakeFcmTransport({
         outboxFile,
-        onSend: (req) => logger.debug({ fcm: req }, "FCM (fake): recorded send"),
+        onSend: (req) =>
+          logger.debug({ fcm: { ...req, token: mask(req.token) } }, "FCM (fake): recorded send"),
       }),
       store: drizzleFcmStore,
     });
