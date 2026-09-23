@@ -5,6 +5,10 @@
  * ./setup.ts), with the container runtime faked (OPTIO_RUNTIME=fake) so agent
  * runs are deterministic scripted NDJSON instead of pods + LLM calls.
  *
+ * The server is hermetic by default (./hermetic-env.ts): a fake read-only
+ * Kubernetes API instead of this machine's kubeconfig, no access to its
+ * Claude login, and none of the shell's credentials or OPTIO_* settings.
+ *
  * Usage:
  *   let server: ApiServerHandle;
  *   beforeAll(async () => { server = await startApiServer(); }, 120_000);
@@ -15,6 +19,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  createHermeticEnv,
+  hermeticBaseEnv,
+  withStubsFirst,
+  type HermeticEnv,
+} from "./hermetic-env.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const API_DIR = join(HERE, "..", "..", "..");
@@ -39,6 +49,11 @@ export interface StartApiServerOptions {
   readyTimeoutMs?: number;
   /** Fixed port (default: an ephemeral free port). */
   port?: number;
+  /**
+   * Isolate the server from this machine (default true): see hermetic-env.ts.
+   * Pass false only for a server that must see the caller's environment.
+   */
+  hermetic?: boolean;
 }
 
 function getFreePort(): Promise<number> {
@@ -61,6 +76,29 @@ export async function startApiServer(opts: StartApiServerOptions = {}): Promise<
   const port = opts.port ?? (await getFreePort());
   const baseUrl = `http://127.0.0.1:${port}`;
   const lines: string[] = [];
+  const hermetic: HermeticEnv | null = opts.hermetic === false ? null : await createHermeticEnv();
+
+  const env: Record<string, string | undefined> = {
+    ...(hermetic ? { ...hermeticBaseEnv(process.env), ...hermetic.env } : process.env),
+    API_PORT: String(port),
+    API_HOST: "127.0.0.1",
+    OPTIO_RUNTIME: "fake",
+    OPTIO_ALLOW_FAKE_RUNTIME: "1",
+    OPTIO_STATEFULSET_ENABLED: "false",
+    OPTIO_AUTH_DISABLED: "true",
+    LOG_LEVEL: opts.logLevel ?? "warn",
+    // Keep periodic workers quick enough that e2e scenarios never wait on a
+    // production-scale interval — EXCEPT the PR watcher: seeded pr_opened
+    // tasks point at fake github.com repos, and a fast watcher would hammer
+    // the real GitHub API with dummy credentials. Park it; tests that need
+    // it can override.
+    OPTIO_PR_WATCH_INTERVAL: "3600000",
+    OPTIO_EXTERNAL_PR_POLL_INTERVAL_MS: "3600000",
+    OPTIO_WORKFLOW_TRIGGER_INTERVAL: "2000",
+    OPTIO_HEALTH_CHECK_INTERVAL: "5000",
+    OPTIO_STALL_CHECK_INTERVAL: "2000",
+    ...opts.env,
+  };
 
   const proc = spawn(TSX_BIN, ["src/index.ts"], {
     cwd: API_DIR,
@@ -68,27 +106,8 @@ export async function startApiServer(opts: StartApiServerOptions = {}): Promise<
     // process, and SIGKILL to the wrapper alone orphans the actual server.
     // Group-kill (negative pid) reaches both.
     detached: true,
-    env: {
-      ...process.env,
-      API_PORT: String(port),
-      API_HOST: "127.0.0.1",
-      OPTIO_RUNTIME: "fake",
-      OPTIO_ALLOW_FAKE_RUNTIME: "1",
-      OPTIO_STATEFULSET_ENABLED: "false",
-      OPTIO_AUTH_DISABLED: "true",
-      LOG_LEVEL: opts.logLevel ?? "warn",
-      // Keep periodic workers quick enough that e2e scenarios never wait on a
-      // production-scale interval — EXCEPT the PR watcher: seeded pr_opened
-      // tasks point at fake github.com repos, and a fast watcher would hammer
-      // the real GitHub API with dummy credentials. Park it; tests that need
-      // it can override.
-      OPTIO_PR_WATCH_INTERVAL: "3600000",
-      OPTIO_EXTERNAL_PR_POLL_INTERVAL_MS: "3600000",
-      OPTIO_WORKFLOW_TRIGGER_INTERVAL: "2000",
-      OPTIO_HEALTH_CHECK_INTERVAL: "5000",
-      OPTIO_STALL_CHECK_INTERVAL: "2000",
-      ...opts.env,
-    },
+    // A caller's own PATH (shims) must not push the stubs back out of reach.
+    env: hermetic ? withStubsFirst(env, hermetic) : env,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -107,6 +126,7 @@ export async function startApiServer(opts: StartApiServerOptions = {}): Promise<
   proc.on("exit", (code) => {
     exited = true;
     exitCode = code;
+    void hermetic?.stop().catch(() => {});
   });
 
   const killGroup = (signal: NodeJS.Signals) => {
