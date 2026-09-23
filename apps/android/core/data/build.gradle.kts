@@ -10,7 +10,9 @@ android {
 dependencies {
     api(projects.core.model)
     api(projects.core.network)
-    implementation(libs.androidx.datastore.preferences)
+    api(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.okhttp.mockwebserver)
 }
