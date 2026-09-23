@@ -75,6 +75,8 @@ class WatchNotifier(
         state: GlanceWatchState,
         multiServer: Boolean,
         keepWatching: Boolean = false,
+        /** Android shows it as a Live Update (its template drops inline-reply buttons). */
+        promoted: Boolean = canPromote(context),
     ): Notification {
         val head = state.head
         val builder = base(state.phase, keepWatching)
@@ -82,7 +84,6 @@ class WatchNotifier(
         builder.setContentTitle(headline)
         builder.setContentIntent(DeepLinkIntents.viewPending(context, WatchCopy.url(state), "watch|tap"))
         builder.setDeleteIntent(dismissIntent())
-        builder.setSubText(WatchCopy.shortHeadline(state))
 
         when (state.phase) {
             WatchPhase.WAITING, WatchPhase.WORKING -> {
@@ -94,7 +95,7 @@ class WatchNotifier(
                     val lines = bodyLines(state, head, multiServer)
                     builder.setStyle(NotificationCompat.BigTextStyle().setBigContentTitle(headline).bigText(lines.joinToString("\n")))
                     builder.setPublicVersion(publicVersion(state, head, multiServer, keepWatching))
-                    for (action in actions(state, head)) builder.addAction(action)
+                    for (action in actions(state, head, promoted)) builder.addAction(action)
                 }
                 builder.setOngoing(true)
                 builder.setShortCriticalText(chipText(state))
@@ -176,11 +177,11 @@ class WatchNotifier(
             WatchCopy.countsLine(state).takeIf { it.isNotEmpty() }?.let(::add)
         }
 
-    /** "now · MacBook · ~/repos/optio/apps/web · Claude Code · waits for me". */
+    /** "now · MacBook · web · Claude Code · waits for me" (Where trimmed to host · leaf, like the island). */
     internal fun chips(head: GlanceItem): String =
         listOf(
             head.whenLabel,
-            GlanceCopy.whereLabel(head.whereValue.detail, head.whereValue.target.raw, short = false).ifEmpty { head.whereValue.label },
+            GlanceCopy.whereLabel(head.whereValue.detail, head.whereValue.target.raw, short = true),
             GlanceCopy.whoLabel(head.whoValue),
             head.thenValue.label,
         ).joinToString(" · ")
@@ -210,10 +211,15 @@ class WatchNotifier(
      * The head's buttons (iOS `WatchButtons`), at most three. Waiting: Resume / Retry for a task
      * needing attention, Reply (Message for a persistent agent), Open PR, Later, then Open.
      * Working: Open PR for a task at an open PR, nothing otherwise (no filler).
+     *
+     * Reply answers inline (RemoteInput) — except on a promoted Watch, whose Live Update template
+     * drops inline-reply buttons: there it opens the head's composer (`?compose=1`), which is what
+     * the iOS Watch's "Reply…" does, and Open (the same place) is left out.
      */
     internal fun actions(
         state: GlanceWatchState,
         head: GlanceItem,
+        promoted: Boolean = false,
     ): List<NotificationCompat.Action> {
         val target = target(head)
         val wanted = mutableListOf<Pair<NotificationAction, String>>()
@@ -225,11 +231,14 @@ class WatchNotifier(
             }
             if (WatchCopy.prUrl(head) != null) wanted += NotificationAction.OPEN_PR to NotificationAction.OPEN_PR.title
             wanted += NotificationAction.LATER to NotificationAction.LATER.title
-            wanted += NotificationAction.OPEN to NotificationAction.OPEN.title
+            if (!promoted) wanted += NotificationAction.OPEN to NotificationAction.OPEN.title
         } else if (state.phase == WatchPhase.WORKING && WatchCopy.prUrl(head) != null) {
             wanted += NotificationAction.OPEN_PR to NotificationAction.OPEN_PR.title
         }
-        return wanted.take(MAX_ACTIONS).mapNotNull { (action, title) -> NotificationActions.build(context, action, target, title) }
+        return wanted.take(MAX_ACTIONS).mapNotNull { (action, title) ->
+            val opens = if (action == NotificationAction.REPLY && promoted) NotificationAction.OPEN else action
+            NotificationActions.build(context, opens, target, title)
+        }
     }
 
     private fun target(head: GlanceItem): ActionTarget =
@@ -280,20 +289,33 @@ class WatchNotifier(
 
         private const val TAG = "OptioWatch"
 
-        /** The status chip (Live Update): the head's short name and "+N", "offline", else nothing. */
+        /**
+         * The status chip (Live Update; iOS compact trailing): the head's short name and "+N" while
+         * waiting ("web +2"), its name while working, "offline". At most [CHIP_MAX] characters:
+         * Android drops longer text and shows only the icon, so a long name is cut ("Sec… +1").
+         */
         fun chipText(state: GlanceWatchState): String? {
+            if (state.phase == WatchPhase.OFFLINE) return "offline"
             val head = state.head ?: return null
-            val name = head.rowName.take(CHIP_NAME_MAX)
-            val more = GlanceCopy.compactTrailing(state.phase, state.needsYouCount, state.runningCount)
+            val more = if (state.phase == WatchPhase.WAITING) GlanceCopy.compactTrailing(state.phase, state.needsYouCount, state.runningCount) else ""
             return when (state.phase) {
-                WatchPhase.WAITING -> if (more.isEmpty()) name else "$name $more"
-                WatchPhase.WORKING -> name
-                WatchPhase.OFFLINE -> "offline"
+                WatchPhase.WAITING, WatchPhase.WORKING -> fitChip(head.rowName, more)
                 else -> null
             }
         }
 
-        private const val CHIP_NAME_MAX = 12
+        /** [name] (cut with "…" when needed) and [suffix], within [CHIP_MAX] characters. */
+        internal fun fitChip(
+            name: String,
+            suffix: String,
+        ): String {
+            val room = CHIP_MAX - if (suffix.isEmpty()) 0 else suffix.length + 1
+            val fitted = if (name.length <= room) name else name.take(maxOf(1, room - 1)) + "…"
+            return if (suffix.isEmpty()) fitted else "$fitted $suffix"
+        }
+
+        /** Longest status-chip text Android shows (its guideline; longer text is dropped). */
+        const val CHIP_MAX = 7
 
         /** Phase → accent: yellow needs you, purple working, grey otherwise (iOS `WatchCopy.tint`). */
         fun tint(phase: WatchPhase): Int =

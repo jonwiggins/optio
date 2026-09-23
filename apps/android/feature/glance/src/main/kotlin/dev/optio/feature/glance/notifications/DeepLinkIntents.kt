@@ -4,7 +4,7 @@ import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import androidx.core.net.toUri
 import dev.optio.core.data.DeepLink
 
 /**
@@ -63,13 +63,13 @@ object DeepLinkIntents {
         context: Context,
         url: String,
     ): Intent =
-        Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        Intent(Intent.ACTION_VIEW, url.toUri())
             .setPackage(context.packageName)
             .apply { launcherComponent(context)?.let(::setComponent) }
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 
     /** Opens [url] (an https PR link) in the browser. */
-    fun browser(url: String): Intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    fun browser(url: String): Intent = Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     /** A notification content / action intent that opens [url] in the app. */
     fun viewPending(

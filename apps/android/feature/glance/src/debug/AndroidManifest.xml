@@ -14,6 +14,7 @@
                 <action android:name="dev.optio.android.DEBUG_FCM_TOKEN" />
                 <action android:name="dev.optio.android.DEBUG_GLANCE_CHECK" />
                 <action android:name="dev.optio.android.DEBUG_FOLLOW_TASK" />
+                <action android:name="dev.optio.android.DEBUG_KEEP_WATCHING" />
             </intent-filter>
         </receiver>
     </application>

@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.core.content.edit
 import dev.optio.core.model.OptioJson
 import dev.optio.feature.glance.GlanceRuntime
 import dev.optio.feature.glance.push.FirebaseTokenSource
@@ -24,6 +25,8 @@ import kotlinx.serialization.json.jsonObject
  * adb shell am broadcast -a dev.optio.android.DEBUG_GLANCE_CHECK
  * # Follow a task on the Watch:
  * adb shell am broadcast -a dev.optio.android.DEBUG_FOLLOW_TASK --es id <taskId>
+ * # "Keep watching" on / off (with the app on screen: Android only starts the service from the foreground):
+ * adb shell am broadcast -a dev.optio.android.DEBUG_KEEP_WATCHING --ez on true
  * ```
  */
 class DebugPushReceiver : BroadcastReceiver() {
@@ -44,14 +47,19 @@ class DebugPushReceiver : BroadcastReceiver() {
                     }
                     "dev.optio.android.DEBUG_FCM_TOKEN" -> {
                         val token = intent.getStringExtra("token")
-                        context.getSharedPreferences(FirebaseTokenSource.DEBUG_PREFS, Context.MODE_PRIVATE)
-                            .edit().putString(FirebaseTokenSource.DEBUG_TOKEN, token).commit()
+                        context.getSharedPreferences(FirebaseTokenSource.DEBUG_PREFS, Context.MODE_PRIVATE).edit {
+                            putString(FirebaseTokenSource.DEBUG_TOKEN, token)
+                        }
                         runtime.registrar.sync()
                         Log.i(TAG, "registration → ${runtime.status.state.value.servers}")
                     }
                     "dev.optio.android.DEBUG_GLANCE_CHECK" -> {
                         GlanceWork.runNow(context)
                         Log.i(TAG, "background check enqueued")
+                    }
+                    "dev.optio.android.DEBUG_KEEP_WATCHING" -> {
+                        runtime.keepWatching.set(intent.getBooleanExtra("on", true))
+                        Log.i(TAG, "keep watching → ${runtime.status.state.value.keepWatching}")
                     }
                     "dev.optio.android.DEBUG_FOLLOW_TASK" -> {
                         val id = intent.getStringExtra("id") ?: return@launch

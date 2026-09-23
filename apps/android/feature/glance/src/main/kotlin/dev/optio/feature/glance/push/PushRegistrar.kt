@@ -96,6 +96,7 @@ class PushRegistrar(
             val availability = tokens.availability()
             if (availability == FcmAvailability.NotConfigured) {
                 status.update { it.copy(fcm = FcmAvailability.NotConfigured, servers = idle(paired, it)) }
+                paired.forEach { status.setPushCovered(it.server.id, false) }
                 return
             }
             val token =
@@ -157,12 +158,14 @@ class PushRegistrar(
                 ServerPushState(id, PushRegistration.FAILED, error = e.message, updatedAt = Instant.now())
             }
         status.update { s -> s.copy(servers = s.servers + (id to next)) }
+        if (next.registration != PushRegistration.REGISTERING) status.setPushCovered(id, next.receivesPush)
     }
 
     private suspend fun forgetRemoved(known: Set<String>) {
         for ((id, creds) in registeredWith.toMap()) {
             if (id in known) continue
             registeredWith.remove(id)
+            status.setPushCovered(id, false)
             runCatching { ApiClient(creds.baseUrl, creds.pat, creds.workspaceId).delete("/api/notifications/devices/${creds.token}") }
                 .onFailure { Log.w(TAG, "unregistering from $id failed", it) }
         }

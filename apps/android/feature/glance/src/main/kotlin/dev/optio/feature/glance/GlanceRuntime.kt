@@ -1,5 +1,6 @@
 package dev.optio.feature.glance
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Context
 import android.os.Handler
@@ -85,10 +86,7 @@ class GlanceRuntime private constructor(
     val notifier = WatchNotifier(context)
     val host: WatchHost = SessionWatchHost(scope)
 
-    val needsYou =
-        NeedsYouNotifier(alerts, NotifiedStore.get(context)) { serverId ->
-            status.state.value.server(serverId)?.receivesPush == true
-        }
+    val needsYou = NeedsYouNotifier(alerts, NotifiedStore.get(context), status::isPushCovered)
 
     val watch =
         WatchManager(
@@ -162,6 +160,8 @@ class GlanceRuntime private constructor(
     }
 
     companion object {
+        // Holds the application context only (never an activity): no leak.
+        @SuppressLint("StaticFieldLeak")
         @Volatile
         private var instance: GlanceRuntime? = null
 
