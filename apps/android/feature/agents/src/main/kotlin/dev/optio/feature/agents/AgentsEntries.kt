@@ -4,10 +4,11 @@ import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import dev.optio.core.navigation.routes.AgentDetailRoute
 import dev.optio.core.navigation.routes.AgentFormRoute
-import dev.optio.core.ui.PlaceholderScreen
+import dev.optio.core.navigation.routes.AgentTurnRoute
 
-/** Registers `:feature:agents`'s routes. Stubs: Agent A6 builds agent chat and the agent form. */
+/** Registers `:feature:agents`'s routes: the agent (chat, turns, triggers, config), one turn, the form. */
 fun EntryProviderScope<NavKey>.agentsEntries() {
-    entry<AgentDetailRoute> { key -> PlaceholderScreen(title = "Agent", detail = key.toString()) }
-    entry<AgentFormRoute> { key -> PlaceholderScreen(title = if (key.id == null) "New agent" else "Edit agent", detail = key.toString()) }
+    entry<AgentDetailRoute> { key -> AgentDetailScreen(agentId = key.id, compose = key.compose) }
+    entry<AgentTurnRoute> { key -> AgentTurnScreen(agentId = key.agentId, turnId = key.turnId, turnNumber = key.turnNumber) }
+    entry<AgentFormRoute> { key -> AgentFormScreen(agentId = key.id) }
 }

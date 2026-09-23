@@ -1,0 +1,15 @@
+{
+  "prs": [
+    {
+      "id": "dca33cd6-e0b2-4d75-b132-bf88a204a2ce",
+      "sessionId": "d95d4894-5728-4125-8700-fca98c9a2166",
+      "prUrl": "https://github.com/e2e-org/e2e-repo/pull/77",
+      "prNumber": 77,
+      "createdAt": "2026-09-23T00:46:06.202Z",
+      "prState": "open",
+      "prChecksStatus": "pending",
+      "prReviewStatus": "none",
+      "updatedAt": "2026-09-23T00:46:06.202Z"
+    }
+  ]
+}

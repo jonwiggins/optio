@@ -1,0 +1,22 @@
+{
+  "session": {
+    "id": "165a1e17-3dd5-42ba-aa99-57b698945ea6",
+    "repoUrl": "https://github.com/e2e-org/mobile-app",
+    "userId": null,
+    "worktreePath": "/workspace/sessions/c65bafa6",
+    "branch": "session/anon/c65bafa6",
+    "title": "Try the new image loader",
+    "state": "ended",
+    "podId": "f8d355b6-cab1-4d61-a04e-12d0ddbb8bd0",
+    "costUsd": null,
+    "workspaceId": null,
+    "createdAt": "2026-09-23T00:46:07.245Z",
+    "endedAt": "2026-09-23T00:46:07.260Z",
+    "agentSessionId": null,
+    "podName": "optio-repo-e2e-org-mobile-app-2ec3"
+  },
+  "modelConfig": {
+    "claudeModel": "opus",
+    "availableModels": ["haiku", "sonnet", "opus"]
+  }
+}

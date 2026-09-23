@@ -1,0 +1,43 @@
+{
+  "agent": {
+    "id": "ce8a0c53-e62d-42c2-a023-1d42e5704b16",
+    "workspaceId": null,
+    "slug": "docs-gardener",
+    "name": "Docs Gardener",
+    "description": "Keeps the docs in sync with the code; paused",
+    "agentRuntime": "claude-code",
+    "model": null,
+    "agentOptions": null,
+    "systemPrompt": null,
+    "agentsMd": null,
+    "initialPrompt": "You keep docs/ in sync with the code. Wait for instructions.",
+    "promptTemplateId": null,
+    "repoId": null,
+    "branch": null,
+    "worktreePath": null,
+    "podLifecycle": "on-demand",
+    "idlePodTimeoutMs": 300000,
+    "stickyPodId": "8a1846b5-c578-480c-a842-a9702e33ec4c",
+    "maxTurnDurationMs": 600000,
+    "maxTurns": 50,
+    "consecutiveFailureLimit": 3,
+    "state": "paused",
+    "enabled": true,
+    "totalCostUsd": "0.012300",
+    "consecutiveFailures": 0,
+    "lastFailureAt": null,
+    "lastFailureReason": null,
+    "lastTurnAt": "2026-09-23T00:46:05.370Z",
+    "sessionId": "42bbbf1d-c059-437c-88a5-1e78745a17f1",
+    "controlIntent": null,
+    "reconcileBackoffUntil": null,
+    "reconcileAttempts": 0,
+    "createdBy": null,
+    "createdAt": "2026-09-23T00:46:05.285Z",
+    "updatedAt": "2026-09-23T00:46:05.716Z"
+  },
+  "inbox": {
+    "pending": 0,
+    "oldest": null
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "messages": [
+    {
+      "id": "949cc540-2d07-4eb4-a9bf-45cd476640f1",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "senderType": "user",
+      "senderId": "user:unknown",
+      "senderName": null,
+      "body": "Is the 2.4 changelog ready?",
+      "structuredPayload": null,
+      "broadcasted": false,
+      "receivedAt": "2026-09-23T01:08:10.900Z",
+      "processedAt": "2026-09-23T01:08:10.945Z",
+      "turnId": "18e1993e-43e4-47fa-8c0f-9bda14c44230"
+    },
+    {
+      "id": "b892dd7d-1b3e-48bc-81bf-0c1aeb43bf4b",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "senderType": "user",
+      "senderId": "user:unknown",
+      "senderName": null,
+      "body": "Status of the 2.4 release?",
+      "structuredPayload": null,
+      "broadcasted": false,
+      "receivedAt": "2026-09-23T00:47:14.916Z",
+      "processedAt": "2026-09-23T00:47:14.958Z",
+      "turnId": "bf2e6032-d5a3-4def-b8ba-e607aec4fca0"
+    },
+    {
+      "id": "e3843e6e-22d0-4e32-bb7c-db7c0e7ad8dd",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "senderType": "user",
+      "senderId": "user:unknown",
+      "senderName": null,
+      "body": "What's blocking the 2.4 release?",
+      "structuredPayload": null,
+      "broadcasted": false,
+      "receivedAt": "2026-09-23T00:46:04.852Z",
+      "processedAt": "2026-09-23T00:46:04.898Z",
+      "turnId": "34072715-a0d5-46d7-8e8d-081ab9363845"
+    },
+    {
+      "id": "85ca9875-ff78-498e-b1ce-b782622a2d60",
+      "agentId": "63cf2f4a-7616-4cec-8ee7-7585aa370f75",
+      "senderType": "system",
+      "senderId": "system:optio-init",
+      "senderName": "Optio",
+      "body": "You coordinate releases for e2e-org/e2e-repo. Answer questions tersely.",
+      "structuredPayload": null,
+      "broadcasted": false,
+      "receivedAt": "2026-09-23T00:46:04.841Z",
+      "processedAt": "2026-09-23T00:46:04.898Z",
+      "turnId": "34072715-a0d5-46d7-8e8d-081ab9363845"
+    }
+  ]
+}
