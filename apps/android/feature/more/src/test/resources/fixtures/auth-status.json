@@ -1,0 +1,8 @@
+{
+  "subscription": {
+    "available": false,
+    "error": "No Claude subscription credentials found on this host",
+    "expired": false,
+    "lastValidated": null
+  }
+}

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Alternate launcher icon "sunrise" (activity-alias .LauncherSunrise). The artwork is one layer, rendered
+  from apps/ios/Design/icons/sunrise.svg by feature/more/scripts/render-app-icons.mjs; the themed
+  (monochrome) variant reuses the default bot glyph.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_alt_sunrise" />
+    <foreground android:drawable="@android:color/transparent" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

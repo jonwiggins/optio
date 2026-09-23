@@ -1,0 +1,13 @@
+{
+  "user": {
+    "id": "04a8d693-d05c-4f8d-8d07-3889eb925a07",
+    "provider": "github",
+    "email": "vic-viewer@example.com",
+    "displayName": "Vic Viewer",
+    "username": "vic-viewer",
+    "avatarUrl": null,
+    "workspaceId": "35802f88-a258-4eca-9817-be325718ab9e",
+    "workspaceRole": "viewer"
+  },
+  "authDisabled": false
+}

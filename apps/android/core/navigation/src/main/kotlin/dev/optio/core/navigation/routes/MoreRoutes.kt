@@ -39,3 +39,11 @@ data object WorkspaceSettingsRoute : NavKey
 /** Paired servers: rename, recolour, forget, add. */
 @Serializable
 data object ServersRoute : NavKey
+
+/** New outbound webhook: URL, description, signing secret, events (iOS `NewWebhookSheet`). */
+@Serializable
+data object NewWebhookRoute : NavKey
+
+/** Rename, recolour, re-address or forget one paired server (iOS `ServerEditView`). */
+@Serializable
+data class ServerEditRoute(val id: String) : NavKey
