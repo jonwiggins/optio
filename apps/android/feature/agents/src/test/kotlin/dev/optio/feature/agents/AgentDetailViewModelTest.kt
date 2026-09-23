@@ -220,6 +220,24 @@ class AgentDetailViewModelTest {
     }
 
     @Test
+    fun aSendOutlivesTheComposerThatStartedIt() {
+        // QA: the send ran in the composer's scope; switching tabs mid-POST cancelled it and left
+        // the pending bubble behind for good.
+        loadAll()
+        server.post("/api/persistent-agents/:id/messages") { FakeResponse.json("""{"ok":true}""", 202).delayed(300) }
+        main.onMain {
+            coroutineScope {
+                val composer = launch { vm.send("Still there?") }
+                delay(50)
+                composer.cancel() // the Chat tab left composition
+            }
+        }
+        server.awaitRequest("POST", "/api/persistent-agents/$id/messages")
+        eventually(message = { "the stored list replaced the pending bubble" }) { vm.messages.value.value!!.none { it.id.startsWith("local-") } }
+        eventually(message = { "send recorded" }) { sources.isRecentAgentSend(id) }
+    }
+
+    @Test
     fun aFailedSendTakesTheBubbleBackAndSaysWhy() {
         loadAll()
         server.error("POST", "/api/persistent-agents/:id/messages", 403, "Forbidden")

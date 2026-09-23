@@ -263,19 +263,23 @@ class AgentDetailViewModel(
                 receivedAt = clock.instant(),
             )
         _messages.update { state -> LoadState.Loaded(state.value.orEmpty() + optimistic) }
-        return try {
-            api.sendPersistentAgentMessage(agentId, text)
-            // The turn it wakes joins the Watch for an hour (iOS `RecentAgentSends.record`).
-            watchSources?.recordAgentSend(agentId)
-            request(Part.AGENT, Part.MESSAGES)
-            true
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            _messages.update { state -> LoadState.Loaded(state.value.orEmpty().filterNot { it.id == optimistic.id }) }
-            _events.send(Event.Failure(e))
-            false
-        }
+        // In the ViewModel's scope, not the composer's: switching to another tab (or leaving) while
+        // the POST is in flight must neither cancel the send nor strand its pending bubble.
+        return viewModelScope.async {
+            try {
+                api.sendPersistentAgentMessage(agentId, text)
+                // The turn it wakes joins the Watch for an hour (iOS `RecentAgentSends.record`).
+                watchSources?.recordAgentSend(agentId)
+                request(Part.AGENT, Part.MESSAGES)
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.update { state -> LoadState.Loaded(state.value.orEmpty().filterNot { it.id == optimistic.id }) }
+                _events.send(Event.Failure(e))
+                false
+            }
+        }.await()
     }
 
     override fun control(intent: PersistentAgentControlIntent) {
