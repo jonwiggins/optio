@@ -1,0 +1,18 @@
+{
+  "trigger": {
+    "id": "f09a259e-a2c8-487b-a11c-34e8b5b50152",
+    "targetType": "job",
+    "targetId": "72f6b823-fb5b-448d-93a8-f00e72df6bb8",
+    "type": "schedule",
+    "config": {
+      "cronExpression": "0 9 * * *"
+    },
+    "paramMapping": null,
+    "enabled": true,
+    "lastFiredAt": null,
+    "nextFireAt": "2026-09-23T15:00:00.000Z",
+    "createdAt": "2026-09-23T01:08:34.254Z",
+    "updatedAt": "2026-09-23T01:08:34.254Z",
+    "workflowId": "72f6b823-fb5b-448d-93a8-f00e72df6bb8"
+  }
+}
