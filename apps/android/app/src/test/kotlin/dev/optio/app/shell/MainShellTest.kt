@@ -2,9 +2,9 @@ package dev.optio.app.shell
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -13,12 +13,18 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import dev.optio.core.data.LocalSessionStore
 import dev.optio.core.data.ServerRegistry
 import dev.optio.core.data.SessionStore
+import dev.optio.core.navigation.AppRouter
+import dev.optio.core.navigation.Section
+import dev.optio.core.navigation.Tab
+import dev.optio.core.navigation.routes.NewWorkRoute
+import dev.optio.core.navigation.routes.RepoDetailRoute
 import dev.optio.core.ui.theme.OptioTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -40,45 +46,49 @@ class MainShellTest {
 
     @Test
     fun tabsSectionsAndDetailsNavigate() {
-        // Hubs read the session (server switcher); an unpaired one shows no chip.
+        // Drives navigation through the router and the shell's own tags only (tab-*, hub-*,
+        // section-*), so the feature screens behind the routes can change freely.
         val session = SessionStore(ServerRegistry.inMemory(), scope)
+        val router = AppRouter()
         compose.setContent {
             CompositionLocalProvider(LocalSessionStore provides session) {
-                OptioTheme { MainShell() }
+                OptioTheme { MainShell(router = router) }
             }
         }
         compose.onNodeWithTag("hub-overview").assertIsDisplayed()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/MainShell_overview.png")
 
-        // Library › Repos: a sample detail pushes onto the Library stack, Back pops it.
+        // Library › Repos via the bar and the segmented switcher.
         compose.onNodeWithTag("tab-library").performClick()
         compose.onNodeWithTag("section-repos").performClick()
-        compose.onNodeWithText("Push RepoDetailRoute(id=sample-repo)").performClick()
-        compose.onNodeWithText("RepoDetailRoute(id=sample-repo)").assertIsDisplayed()
-        compose.onNodeWithTag("back").performClick()
+        compose.onNodeWithTag("hub-library").assertIsDisplayed()
+        compose.onNodeWithTag("section-repos").assertIsSelected()
+
+        // A detail pushes onto the Library stack and covers the hub; popping returns to it.
+        compose.runOnIdle { router.push(RepoDetailRoute("sample-repo"), Tab.LIBRARY) }
+        compose.onNodeWithTag("hub-library").assertDoesNotExist()
+        compose.runOnIdle { router.pop(Tab.LIBRARY) }
         compose.onNodeWithTag("hub-library").assertIsDisplayed()
 
-        // The Repos section contributed a top-bar action through the hub slot API.
-        compose.onNodeWithTag("add-repo").performClick()
-        compose.onNodeWithText("Add repo").assertIsDisplayed()
-
-        // Each tab keeps its own stack; re-selecting the tab on screen pops it to its hub.
+        // Each tab keeps its own stack: a detail on Work survives a trip to Library and back…
         compose.onNodeWithTag("tab-work").performClick()
         compose.onNodeWithTag("hub-work").assertIsDisplayed()
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/MainShell_work.png")
-        compose.onNodeWithTag("new-work").performClick()
-        compose.onNodeWithTag("work-form-close").assertIsDisplayed()
-        compose.onNodeWithTag("tab-library").performClick()
-        compose.onNodeWithText("NewRepoRoute").assertIsDisplayed()
+        compose.runOnIdle { router.push(NewWorkRoute(), Tab.WORK) }
+        compose.onNodeWithTag("hub-work").assertDoesNotExist()
         compose.onNodeWithTag("tab-library").performClick()
         compose.onNodeWithTag("hub-library").assertIsDisplayed()
         compose.onNodeWithTag("tab-work").performClick()
-        compose.onNodeWithTag("work-form-close").assertIsDisplayed()
+        compose.onNodeWithTag("hub-work").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(2, router.backStack(Tab.WORK).size) }
+        // …and re-selecting the tab on screen pops it to its hub.
+        compose.onNodeWithTag("tab-work").performClick()
+        compose.onNodeWithTag("hub-work").assertIsDisplayed()
 
-        // Cross-tab: Overview › "Open Library › Machines" lands on the Machines section.
+        // Cross-tab: opening Library › Machines selects that tab and section.
         compose.onNodeWithTag("tab-overview").performClick()
-        compose.onNodeWithTag("open-machines").performClick()
+        compose.runOnIdle { router.open(Section.MACHINES) }
         compose.onNodeWithTag("hub-library").assertIsDisplayed()
-        compose.onNodeWithText("Push LocalTerminalRoute(id=sample-terminal, compose=false)").assertIsDisplayed()
+        compose.onNodeWithTag("section-machines").assertIsSelected()
     }
 }
