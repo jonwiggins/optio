@@ -195,6 +195,8 @@ class NotificationBuildingTest {
         assertTrue("“Allow Bash(pnpm test)? (y/n)”" in body, "the private version has the preview")
         assertTrue("now · MacBook Pro · web · Claude Code · waits for me" in body, body)
         assertTrue("2 more need you · 2 running" in body, body)
+        // QA: the shade shows ~5 lines; the counts must not be the line that gets cut.
+        assertTrue(body.indexOf("2 more need you") < body.indexOf("waits for me"), body)
         assertTrue(n.flags and Notification.FLAG_ONGOING_EVENT != 0)
         assertTrue(n.extras.getBoolean(NotificationCompat.EXTRA_REQUEST_PROMOTED_ONGOING), "asks to be a Live Update")
         assertEquals("web +2", n.extras.getString(NotificationCompat.EXTRA_SHORT_CRITICAL_TEXT) ?: WatchNotifier.chipText(state))

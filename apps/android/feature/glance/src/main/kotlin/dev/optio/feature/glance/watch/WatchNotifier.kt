@@ -161,7 +161,12 @@ class WatchNotifier(
                 if (keepWatching) setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             }
 
-    /** Expanded body: `name [server]`, the preview or `status · reason`, the chips, the counts. */
+    /**
+     * Expanded body: `name [server]`, `status · reason`, the preview, the counts, the chips. The
+     * counts come before the chips (iOS has them last): the shade shows about five lines of a
+     * promoted notification, and "1 more needs you · 2 running" matters more than the head's
+     * when · where · who · then, which is the line that wraps.
+     */
     internal fun bodyLines(
         state: GlanceWatchState,
         head: GlanceItem,
@@ -173,8 +178,8 @@ class WatchNotifier(
             val preview = head.preview?.takeIf { includePreview && state.phase == WatchPhase.WAITING && it.isNotBlank() }
             add(WatchCopy.statusLine(head))
             if (preview != null) add("“$preview”")
-            add(chips(head))
             WatchCopy.countsLine(state).takeIf { it.isNotEmpty() }?.let(::add)
+            add(chips(head))
         }
 
     /** "now · MacBook · web · Claude Code · waits for me" (Where trimmed to host · leaf, like the island). */
