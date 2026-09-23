@@ -12,8 +12,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -33,6 +37,8 @@ import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.navigation.RouterNavigator
 import dev.optio.core.navigation.Tab
 import dev.optio.core.navigation.rememberAppRouter
+import dev.optio.core.ui.toast.LocalToaster
+import kotlinx.coroutines.flow.filterNotNull
 
 /**
  * The signed-in shell (PLAN §4): a `NavigationSuiteScaffold` (bottom bar on phones, rail on wide
@@ -42,17 +48,37 @@ import dev.optio.core.navigation.rememberAppRouter
  *
  * Every tab's entries stay decorated (saveable state + entry-scoped ViewModels) while another
  * tab is on screen, so switching tabs keeps each stack exactly as it was (like iOS). The whole
- * shell, and all of that state, is dropped when C keys it on `session.generation`.
+ * shell, and all of that state, is dropped when the root re-keys it on `session.generation` (a
+ * server switch).
+ *
+ * [onOpenDeepLink] backs `Navigator.openDeepLink` (the root sends links through its server-aware
+ * inbox); the router's `createdToast` goes to the app's toaster (`LocalToaster`).
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun MainShell(
     modifier: Modifier = Modifier,
     router: AppRouter = rememberAppRouter(),
+    onOpenDeepLink: (url: String) -> Unit = { router.handle(it) },
 ) {
     val context = LocalContext.current
-    val navigator = remember(router, context) { RouterNavigator(router) { url -> context.openExternalUrl(url) } }
+    val currentOnOpenDeepLink by rememberUpdatedState(onOpenDeepLink)
+    val navigator =
+        remember(router, context) {
+            RouterNavigator(
+                router = router,
+                onOpenDeepLink = { url -> currentOnOpenDeepLink(url) },
+                onOpenExternal = { url -> context.openExternalUrl(url) },
+            )
+        }
     val entryProvider = remember { appEntryProvider() }
+    val toaster = LocalToaster.current
+    LaunchedEffect(router, toaster) {
+        snapshotFlow { router.createdToast }.filterNotNull().collect { toast ->
+            router.consumeCreatedToast()
+            toaster.success(toast)
+        }
+    }
 
     CompositionLocalProvider(LocalAppRouter provides router, LocalNavigator provides navigator) {
         NavigationSuiteScaffold(

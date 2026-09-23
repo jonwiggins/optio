@@ -1,0 +1,34 @@
+{
+  "usage": {
+    "available": true,
+    "fiveHour": {
+      "utilization": 31,
+      "resetsAt": "2026-09-22T18:10:00.601836+00:00"
+    },
+    "sevenDay": {
+      "utilization": 52,
+      "resetsAt": "2026-09-25T21:00:00.601859+00:00"
+    },
+    "sevenDayOpus": null,
+    "sevenDayModels": [
+      {
+        "model": "Fable",
+        "utilization": 88,
+        "resetsAt": "2026-09-26T09:00:00+00:00",
+        "severity": "warning"
+      }
+    ],
+    "extraUsage": {
+      "isEnabled": false,
+      "monthlyLimit": 16500,
+      "usedCredits": 0,
+      "utilization": 0
+    },
+    "asOf": "2026-09-22T16:38:13.942Z",
+    "hasRecentAuthFailure": false,
+    "authFailures": {
+      "claude": false,
+      "github": false
+    }
+  }
+}

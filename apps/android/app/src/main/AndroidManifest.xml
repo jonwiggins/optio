@@ -3,6 +3,11 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+      Android 17 local network protection: needed to reach servers on the LAN (and the emulator
+      host 10.0.2.2). Runtime ("Nearby devices"); requested by sign-in and after launch.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
     <!--
       allowBackup=false + dataExtractionRules: nothing (profiles, Keystore-encrypted tokens) is

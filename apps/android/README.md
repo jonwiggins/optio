@@ -219,12 +219,16 @@ The hub side uses `rememberHubController()`, provides it through `LocalHubContro
 
 - `LocalNavigator.current` is what features use. `push(route)` and `pop()` act on the current tab.
   `open(section, view)` switches to the tab that owns the section, pops it to its hub and selects
-  the section. `openExternal(url)` opens a Custom Tab. The default is `Navigator.None`, so previews
-  and screenshots need no setup.
+  the section. `openExternal(url)` opens a Custom Tab. `openDeepLink(url)` routes an `optio://`
+  link like a notification tap (a `?server=<id>` for another paired server switches first).
+  `showCreatedWork(route, toast)` is the New/Edit work form's "done": it closes the form, lands on
+  Work › All with `route` pushed and shows `toast`. The default is `Navigator.None`, so previews and
+  screenshots need no setup.
 - `LocalAppRouter.current` (the shell and the hubs) holds the selected tab, one
   `SnapshotStateList<NavKey>` back stack per tab, the section selected in each hub, and
   `pendingWorkView`. Tapping the selected tab pops it to its hub, and Back at the hub of any tab
   other than Overview returns to Overview. The router's state survives rotation and process death.
+  `handle(url)` / `handle(DeepLink)` route `optio://` links (details push onto the Work tab).
 
 ### Tests
 
@@ -261,8 +265,16 @@ approved.
 - Termux artifacts resolve only from JitPack (an exclusive content filter on
   `com.github.termux.*`); nothing else is fetched from JitPack.
 - `MainShell` keeps every tab's entries decorated (`rememberDecoratedNavEntries`), so switching tabs
-  preserves scroll positions and ViewModels. A new `key(...)` around `MainShell`, such as the planned
-  server-switch `session.generation`, drops all of it.
+  preserves scroll positions and ViewModels. The root keys it on `session.generation`, so a server
+  switch drops all of it (every screen restarts for the new server, like iOS).
+- Android 17 (API 37) blocks local-network addresses (a LAN laptop, the emulator's `10.0.2.2`)
+  without the runtime permission `ACCESS_LOCAL_NETWORK` ("Nearby devices"): requests just time
+  out. The app asks when you connect to a local address (`LocalNetworkAccess` in `:core:data`). For
+  scripted runs, install with `adb install -r -g` (grants it) or
+  `adb shell pm grant dev.optio.android android.permission.ACCESS_LOCAL_NETWORK`.
+- Debug builds read `OPTIO_DEV_*` launch extras (servers, `OPTIO_DEV_SECTION`,
+  `OPTIO_DEV_OPEN_URL`, `OPTIO_DEV_TOAST`); see `apps/android/e2e/README.md`. `adb shell` splits
+  arguments on spaces, so quote values that contain them twice: `--es OPTIO_DEV_TOAST "'Hello there'"`.
 
 ## App icon
 

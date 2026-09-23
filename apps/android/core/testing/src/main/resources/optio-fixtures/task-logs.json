@@ -1,0 +1,55 @@
+{
+  "logs": [
+    {
+      "id": "9b8404ef-2014-41c8-ae0e-6e6c17488024",
+      "taskId": "0f02b2fe-b5f6-4432-8523-8203163e54cc",
+      "stream": "stdout",
+      "content": "Session started · fake-model · 0 tools",
+      "logType": "system",
+      "metadata": {
+        "model": "fake-model"
+      },
+      "workflowRunId": null,
+      "prReviewRunId": null,
+      "timestamp": "2026-09-22T23:57:45.192Z"
+    },
+    {
+      "id": "24cf9520-dd22-4636-bfa3-0290c0a4b9d5",
+      "taskId": "0f02b2fe-b5f6-4432-8523-8203163e54cc",
+      "stream": "stdout",
+      "content": "Mock agent handled: You are an autonomous coding agent. Your job is to WRITE CODE and open a pull request.\n\n## Your Task\n\nRead your task fil",
+      "logType": "text",
+      "metadata": null,
+      "workflowRunId": null,
+      "prReviewRunId": null,
+      "timestamp": "2026-09-22T23:57:45.196Z"
+    },
+    {
+      "id": "fd126dec-02d3-4bf4-bd1b-7d5f271bb821",
+      "taskId": "0f02b2fe-b5f6-4432-8523-8203163e54cc",
+      "stream": "stdout",
+      "content": "Opened pull request: https://github.com/e2e-org/e2e-repo/pull/1",
+      "logType": "text",
+      "metadata": null,
+      "workflowRunId": null,
+      "prReviewRunId": null,
+      "timestamp": "2026-09-22T23:57:45.201Z"
+    },
+    {
+      "id": "e633c840-1a1b-45bb-9bae-224cc4810127",
+      "taskId": "0f02b2fe-b5f6-4432-8523-8203163e54cc",
+      "stream": "stdout",
+      "content": "(1 turns · 0.0s · $0.4213)",
+      "logType": "info",
+      "metadata": {
+        "cost": 0.4213,
+        "turns": 1,
+        "isError": false,
+        "durationMs": 5
+      },
+      "workflowRunId": null,
+      "prReviewRunId": null,
+      "timestamp": "2026-09-22T23:57:45.206Z"
+    }
+  ]
+}

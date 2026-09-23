@@ -12,10 +12,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.optio.core.data.LocalSessionStore
 import dev.optio.core.navigation.LocalAppRouter
 import dev.optio.core.navigation.Section
 import dev.optio.core.navigation.Tab
@@ -37,25 +40,28 @@ import dev.optio.feature.work.WorkListSection
 
 /**
  * A tab's hub: the root entry of its back stack (`HubRoute(tab)`). Chrome: a top app bar with the
- * tab's title and the section's actions, the segmented section switcher (Work, Library,
+ * tab's title, the server switcher (always on Overview; on the other hubs when more than one
+ * server is paired) and the section's actions, the segmented section switcher (Work, Library,
  * Insights), and the section's FAB, all contributed through the hub slot API
  * (`dev.optio.core.ui.hub`). The body is the selected section's composable from its feature.
- *
- * TODO(C/U): `ServerSwitcherChip` in the top bar (always on Overview; on other hubs when more
- * than one server is paired).
  */
 @Composable
 internal fun HubScreen(tab: Tab) {
     val router = LocalAppRouter.current
     val controller = rememberHubController()
     val section = router.section(tab)
+    val multipleServers by LocalSessionStore.current.hasMultipleServers.collectAsStateWithLifecycle()
+    val showSwitcher = tab == Tab.OVERVIEW || multipleServers
     Scaffold(
         modifier = Modifier.testTag("hub-${tab.name.lowercase()}"),
         topBar = {
             Column {
                 TopAppBar(
                     title = { Text(tab.label) },
-                    actions = { controller.actions?.invoke(this) },
+                    actions = {
+                        if (showSwitcher) HubServerSwitcher()
+                        controller.actions?.invoke(this)
+                    },
                 )
                 if (section != null) {
                     HubSwitcher(sections = tab.sections, selected = section, onSelect = router::selectSection)
