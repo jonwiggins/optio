@@ -185,14 +185,14 @@ class NotificationBuildingTest {
                 runningCount = 2,
                 asOf = GlanceTestEnv.now,
             )
-        val n = watch.build(state, multiServer = true)
+        val n = watch.build(state, multiServer = true, promoted = false)
         assertEquals("optio.watch", n.channelId)
         assertEquals("3 sessions need you", title(n))
         assertEquals("claude-code · web · needs you · Waiting on a permission", text(n))
         val body = bigText(n)!!
         assertTrue(body.startsWith("claude-code · web  ·  SRV-1"), body)
         assertTrue("“Allow Bash(pnpm test)? (y/n)”" in body, "the private version has the preview")
-        assertTrue("now · MacBook Pro · ~/repos/optio/apps/web · Claude Code · waits for me" in body, body)
+        assertTrue("now · MacBook Pro · web · Claude Code · waits for me" in body, body)
         assertTrue("2 more need you · 2 running" in body, body)
         assertTrue(n.flags and Notification.FLAG_ONGOING_EVENT != 0)
         assertTrue(n.extras.getBoolean(NotificationCompat.EXTRA_REQUEST_PROMOTED_ONGOING), "asks to be a Live Update")
@@ -206,6 +206,13 @@ class NotificationBuildingTest {
         val public = assertNotNull(n.publicVersion)
         assertFalse(bigText(public)!!.contains("Allow Bash"), "the lock screen never shows the prompt")
         assertTrue(n.extras.getBoolean(NotificationCompat.EXTRA_SHOW_WHEN))
+        assertNull(n.extras.getCharSequence(NotificationCompat.EXTRA_SUB_TEXT), "the headline says it all")
+
+        // Promoted (a Live Update): its template drops inline replies, so Reply opens the composer.
+        val promoted = watch.build(state, multiServer = true, promoted = true)
+        assertEquals(listOf("Reply", "Later"), actions(promoted))
+        assertEquals(emptyList(), remoteInputs(promoted))
+        assertEquals("optio://local/t1?compose=1&server=srv-1", url(promoted.actions[0].actionIntent))
     }
 
     @Test
@@ -213,7 +220,7 @@ class NotificationBuildingTest {
         fun actionsFor(
             phase: WatchPhase,
             head: dev.optio.core.glance.GlanceItem,
-        ) = actions(watch.build(GlanceWatchState(phase, head = head, needsYouCount = 1, runningCount = 1, asOf = GlanceTestEnv.now), multiServer = false))
+        ) = actions(watch.build(GlanceWatchState(phase, head = head, needsYouCount = 1, runningCount = 1, asOf = GlanceTestEnv.now), multiServer = false, promoted = false))
         val attention = item("k", kind = WatchItemKind.TASK, state = "needs_attention", prUrl = "https://x/pull/1")
         assertEquals(listOf("Resume", "Reply", "Open PR"), actionsFor(WatchPhase.WAITING, attention))
         val failed = item("k2", kind = WatchItemKind.TASK, state = "failed")
@@ -243,6 +250,11 @@ class NotificationBuildingTest {
         assertEquals("Machine unreachable", title(offline))
         assertTrue(text(offline)!!.startsWith("Machine unreachable since"))
         assertEquals("offline", WatchNotifier.chipText(GlanceWatchState(WatchPhase.OFFLINE, head = item("x"), asOf = GlanceTestEnv.now)))
+        // Android drops status-chip text past ~7 characters (seen on an API 37 emulator): cut the name.
+        assertEquals("Sec… +1", WatchNotifier.fitChip("Second bell", "+1"))
+        assertEquals("Second…", WatchNotifier.fitChip("Second bell", ""))
+        assertEquals("web +12", WatchNotifier.fitChip("web", "+12"))
+        assertEquals("w… +123", WatchNotifier.fitChip("web", "+123"))
     }
 
     @Test

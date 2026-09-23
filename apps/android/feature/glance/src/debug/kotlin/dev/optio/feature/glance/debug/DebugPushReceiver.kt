@@ -25,6 +25,8 @@ import kotlinx.serialization.json.jsonObject
  * adb shell am broadcast -a dev.optio.android.DEBUG_GLANCE_CHECK
  * # Follow a task on the Watch:
  * adb shell am broadcast -a dev.optio.android.DEBUG_FOLLOW_TASK --es id <taskId>
+ * # "Keep watching" on / off (with the app on screen: Android only starts the service from the foreground):
+ * adb shell am broadcast -a dev.optio.android.DEBUG_KEEP_WATCHING --ez on true
  * ```
  */
 class DebugPushReceiver : BroadcastReceiver() {
@@ -54,6 +56,10 @@ class DebugPushReceiver : BroadcastReceiver() {
                     "dev.optio.android.DEBUG_GLANCE_CHECK" -> {
                         GlanceWork.runNow(context)
                         Log.i(TAG, "background check enqueued")
+                    }
+                    "dev.optio.android.DEBUG_KEEP_WATCHING" -> {
+                        runtime.keepWatching.set(intent.getBooleanExtra("on", true))
+                        Log.i(TAG, "keep watching → ${runtime.status.state.value.keepWatching}")
                     }
                     "dev.optio.android.DEBUG_FOLLOW_TASK" -> {
                         val id = intent.getStringExtra("id") ?: return@launch
