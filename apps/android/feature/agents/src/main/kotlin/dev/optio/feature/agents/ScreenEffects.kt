@@ -19,6 +19,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import dev.optio.core.ui.format.relativeDescription
+import java.time.Instant
 import kotlin.math.roundToInt
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -92,3 +94,9 @@ internal fun Modifier.imePaddingInWindow(): Modifier {
             gapBelow = (windowHeight - coordinates.boundsInWindow().bottom).roundToInt().coerceAtLeast(0)
         }.padding(bottom = with(density) { padding.toDp() })
 }
+
+/**
+ * A server timestamp that is in the past, relative to [now]. A device clock a little behind the
+ * server's would otherwise read "in 16 sec." for something that just happened: those read "now".
+ */
+internal fun Instant.sinceDescription(now: Instant): String = (if (isAfter(now)) now else this).relativeDescription(now)

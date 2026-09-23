@@ -56,7 +56,6 @@ import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.Cost
 import dev.optio.core.ui.format.InsightsFormat
 import dev.optio.core.ui.format.rememberNow
-import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
@@ -281,8 +280,10 @@ fun SessionDetailContent(
                         when (section) {
                             SessionSection.CHAT -> SessionChatView(ui.chat, envelope.modelConfig, actions, body)
                             SessionSection.TERMINAL -> {
+                                // One emulator per showing of the chip (the ViewModel hands out the same one).
+                                val shell = remember { terminal() }
                                 LaunchedEffect(Unit) { actions.openShell() }
-                                SessionTerminalView(terminal(), ui.terminal, onReconnect = actions::reconnectShell, modifier = body)
+                                SessionTerminalView(shell, ui.terminal, onReconnect = actions::reconnectShell, modifier = body)
                             }
                             SessionSection.PRS ->
                                 SessionPrList(
@@ -330,7 +331,7 @@ internal fun SessionHeaderView(
         line =
             metaText(
                 InsightsFormat.repoShortName(session.repoUrl),
-                "started ${session.createdAt.relativeDescription(now)}",
+                "started ${session.createdAt.sinceDescription(now)}",
                 Cost.formatIfNonZero(cost),
                 if (prCount == 0) null else "$prCount PR${if (prCount == 1) "" else "s"}",
                 chatState,
@@ -387,7 +388,7 @@ private fun EndedBody(
         EmptyState(
             title = "Session ended",
             icon = Icons.Outlined.Terminal,
-            message = session.endedAt?.let { "Ended ${it.relativeDescription(now)}" },
+            message = session.endedAt?.let { "Ended ${it.sinceDescription(now)}" },
         )
         if (cost > 0) {
             Text(

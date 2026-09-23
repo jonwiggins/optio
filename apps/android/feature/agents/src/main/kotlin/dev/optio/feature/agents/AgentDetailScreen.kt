@@ -66,7 +66,6 @@ import dev.optio.core.ui.components.mono
 import dev.optio.core.ui.components.rememberConfirmState
 import dev.optio.core.ui.format.Cost
 import dev.optio.core.ui.format.rememberNow
-import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.Tone
 import dev.optio.core.ui.toast.LocalToaster
@@ -229,14 +228,19 @@ fun AgentDetailContent(
                 }
             }
             if (section == AgentSection.CHAT && canMutate) {
+                val composerEnabled = agent != null && agent.state != PersistentAgentState.ARCHIVED
                 ChatComposer(
+                    // iOS also records the send so this agent's next turn joins the Watch for an hour
+                    // (`RecentAgentSends.record`). Android: `WatchSources.get(context).recordAgentSend(id)`
+                    // from :core:glance (agent A9), wired at integration once that module is merged here.
                     onSend = { text -> actions.send(text) },
                     placeholder = "Message ${agent?.name ?: "agent"}…",
-                    enabled = agent != null && agent.state != PersistentAgentState.ARCHIVED,
-                    autofocus = pendingFocus,
+                    enabled = composerEnabled,
+                    // A disabled field can't take focus: hold the request until the agent has loaded.
+                    autofocus = pendingFocus && composerEnabled,
                     windowInsets = WindowInsets(0, 0, 0, 0),
                 )
-                LaunchedEffect(Unit) { pendingFocus = false }
+                LaunchedEffect(composerEnabled) { if (composerEnabled) pendingFocus = false }
             }
         }
     }
@@ -281,7 +285,7 @@ internal fun AgentHeaderView(
                 mono("@${agent.slug}"),
                 agent.agentRuntime,
                 agent.podLifecycle.raw.takeUnless { agent.podLifecycle.isUnknown },
-                agent.lastTurnAt?.let { "last turn ${it.relativeDescription(now)}" },
+                agent.lastTurnAt?.let { "last turn ${it.sinceDescription(now)}" },
                 Cost.formatIfNonZero(agent.totalCostUsd),
             ),
         // DetailHeader sets its second line in mono (paths, branches); a description is prose.

@@ -150,7 +150,7 @@ internal fun AgentTriggerRow(
             val timing =
                 listOfNotNull(
                     trigger.nextFireAt?.let { "Next ${it.relativeDescription(now)}" },
-                    trigger.lastFiredAt?.let { "Last ${it.relativeDescription(now)}" },
+                    trigger.lastFiredAt?.let { "Last ${it.sinceDescription(now)}" },
                 )
             if (timing.isNotEmpty()) {
                 Text(timing.joinToString("   "), style = OptioTheme.type.caption2, color = colors.secondaryLabel)

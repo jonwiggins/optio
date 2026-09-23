@@ -20,9 +20,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -37,13 +39,13 @@ import dev.optio.core.ui.components.MessageRole
 import dev.optio.core.ui.components.PullRefresh
 import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.format.rememberNow
-import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.log.AgentLogRow
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.semibold
 import java.time.Instant
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /**
@@ -142,7 +144,7 @@ internal fun AgentMessageBubble(
         listOfNotNull(
             sender,
             "broadcast".takeIf { message.broadcasted },
-            message.receivedAt.relativeDescription(now),
+            message.receivedAt.sinceDescription(now),
             "pending".takeIf { message.processedAt == null },
         ).joinToString(" · ")
     MessageBubble(
@@ -155,8 +157,9 @@ internal fun AgentMessageBubble(
 }
 
 /**
- * Keeps [state] at the bottom as [count] grows, but only while the reader could see the previous
- * last item (scrolling up stops following until they come back). The first content jumps there.
+ * Keeps [state] at the bottom as [count] grows, but only while the reader is there (scrolling up
+ * stops following until they come back). The first content jumps there, and while following, the
+ * viewport shrinking (the keyboard coming up) keeps the end in view.
  */
 @Composable
 internal fun FollowBottom(
@@ -164,13 +167,23 @@ internal fun FollowBottom(
     count: Int,
 ) {
     var lastTotal by remember(state) { mutableIntStateOf(0) }
+    var following by remember(state) { mutableStateOf(true) }
+    // Whether we follow is decided where a scroll (the reader's, or ours) comes to rest.
+    LaunchedEffect(state) {
+        snapshotFlow { state.isScrollInProgress }.collect { scrolling -> if (!scrolling) following = !state.canScrollForward }
+    }
+    LaunchedEffect(state) {
+        snapshotFlow { state.layoutInfo.viewportSize.height }.distinctUntilChanged().collect {
+            if (following && lastTotal > 0) state.scrollToEnd(animated = false)
+        }
+    }
     LaunchedEffect(state, count) {
         if (count == 0) return@LaunchedEffect
         val info = state.layoutInfo
         val total = info.totalItemsCount
         val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
         val first = lastTotal == 0
-        val follow = first || lastVisible >= lastTotal - 1
+        val follow = first || following || lastVisible >= lastTotal - 1
         lastTotal = total
         if (total > 0 && follow) state.scrollToEnd(animated = !first)
     }

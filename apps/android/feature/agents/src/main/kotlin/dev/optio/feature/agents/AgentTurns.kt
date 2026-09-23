@@ -54,7 +54,6 @@ import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.format.Cost
 import dev.optio.core.ui.format.rememberNow
-import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.log.AgentLogView
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.Loadable
@@ -133,7 +132,7 @@ internal fun AgentTurnRow(
             metaText(
                 "#$number",
                 turn.wakeSource.label,
-                (turn.startedAt ?: turn.createdAt).relativeDescription(now),
+                (turn.startedAt ?: turn.createdAt).sinceDescription(now),
                 Cost.formatIfNonZero(turn.costUsd),
                 tokens,
             ),
