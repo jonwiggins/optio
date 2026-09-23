@@ -23,6 +23,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.Rule
@@ -190,6 +191,42 @@ class InsightsViewModelTest {
         live.emit(ActivityNewEvent(type = "activity:new", action = "task.retry", summary = "task.retry succeeded", timestamp = "2026-09-22T16:39:30.000Z"))
         testScheduler.runCurrent()
         assertFalse(vm.state.value.value!!.items.any { it.isLive })
+        vm.stopLive()
+        vm.viewModelScope.cancel()
+    }
+
+    @Test
+    fun theReconcileIsQuietAndAFailureKeepsTheLiveRow() = runTest(main.dispatcher) {
+        server.fixture("/api/activity", "activity.json")
+        val live = MutableSharedFlow<ActivityNewEvent>(extraBufferCapacity = 8)
+        val vm = activityModel(live)
+        vm.reload()
+        vm.startLive()
+        testScheduler.runCurrent()
+        val seen = mutableListOf<LoadState<ActivityViewModel.Page>>()
+        backgroundScope.launch { vm.state.collect { seen += it } }
+
+        // The reload after a live row fails: the row stays and the feed isn't flagged.
+        server.on("GET", "/api/activity") { FakeResponse.fixture("activity-error.json", 500) }
+        server.clearRequests()
+        live.emit(ActivityNewEvent(type = "activity:new", action = "repo.update", resourceType = "repo", summary = "repo.update succeeded", timestamp = "2026-09-22T16:39:00.000Z"))
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(2_001)
+        server.next("GET", "/api/activity")
+        repeat(30) {
+            withContext(Dispatchers.IO) { Thread.sleep(10) }
+            testScheduler.advanceUntilIdle()
+        }
+        val kept = assertIs<LoadState.Loaded<ActivityViewModel.Page>>(vm.state.value)
+        assertTrue(kept.value.items.first().isLive)
+
+        // The next one succeeds and swaps in the server's rows.
+        server.fixture("/api/activity", "activity.json")
+        live.emit(ActivityNewEvent(type = "activity:new", action = "repo.update", resourceType = "repo", summary = "repo.update succeeded", timestamp = "2026-09-22T16:39:30.000Z"))
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(2_001)
+        vm.state.first { it is LoadState.Loaded && it.value.items.none { item -> item.isLive } }
+        assertTrue(seen.none { it.isLoading }, "no dimming or spinner for either reload")
         vm.stopLive()
         vm.viewModelScope.cancel()
     }

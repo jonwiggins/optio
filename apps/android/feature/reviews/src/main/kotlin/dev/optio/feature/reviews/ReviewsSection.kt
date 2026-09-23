@@ -179,7 +179,8 @@ internal fun ReviewsContent(
     val now = rememberNow()
     PullRefresh(onRefresh = onRefresh, modifier = modifier.testTag("reviews-list")) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize().readableWidth().dimmedWhileLoading(state.isLoading && data != null && !state.isRefreshing),
+            // Dims PRs from an earlier load while a refetch (a repo filter, a pull) runs, like the Inbox.
+            modifier = Modifier.fillMaxSize().readableWidth().dimmedWhileLoading(state.isLoading && data != null),
             contentPadding = contentPadding,
         ) {
             if (canMutate) {

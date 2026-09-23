@@ -86,6 +86,7 @@ import java.time.ZoneId
 import java.util.UUID
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -144,10 +145,28 @@ internal class ActivityViewModel(
 
     private suspend fun fetch() {
         val f = _filter.value
-        _state.load {
-            val feed = api.activityFeed(days = f.days, type = f.type, resourceType = f.resource, limit = LIMIT, offset = f.offset)
-            Page(feed.items, feed.total, feed.stats ?: ActivityStats())
+        _state.load { fetchPage(f) }
+    }
+
+    private suspend fun fetchPage(f: Filter): Page {
+        val feed = api.activityFeed(days = f.days, type = f.type, resourceType = f.resource, limit = LIMIT, offset = f.offset)
+        return Page(feed.items, feed.total, feed.stats ?: ActivityStats())
+    }
+
+    /**
+     * The reload after a live row: swaps in the server's rows without dimming the list or showing
+     * the spinner (iOS dims it on every live event). A failure keeps the live rows as they are.
+     */
+    private suspend fun reconcile() {
+        val f = _filter.value
+        val page = try {
+            fetchPage(f)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return
         }
+        if (_filter.value == f) _state.value = LoadState.Loaded(page)
     }
 
     private fun setFilter(change: (Filter) -> Filter) {
@@ -211,7 +230,7 @@ internal class ActivityViewModel(
         reconcileJob?.cancel()
         reconcileJob = viewModelScope.launch {
             delay(reconcileDelay)
-            fetch()
+            reconcile()
         }
     }
 
