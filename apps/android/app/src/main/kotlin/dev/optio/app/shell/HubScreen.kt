@@ -1,5 +1,6 @@
 package dev.optio.app.shell
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,6 +11,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -55,7 +57,9 @@ internal fun HubScreen(tab: Tab) {
     Scaffold(
         modifier = Modifier.testTag("hub-${tab.name.lowercase()}"),
         topBar = {
-            Column {
+            // One opaque bar: the switcher row sits under the app bar's container colour, so a
+            // list scrolled beneath it never shows through the segmented buttons.
+            Column(Modifier.background(TopAppBarDefaults.topAppBarColors().containerColor)) {
                 TopAppBar(
                     title = { Text(tab.label) },
                     actions = {
