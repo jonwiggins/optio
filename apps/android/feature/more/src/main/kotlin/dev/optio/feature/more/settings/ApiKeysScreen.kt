@@ -241,17 +241,24 @@ fun CreateApiKeySheet(
     var expires by rememberSaveable { mutableStateOf(false) }
     val defaultDay = remember(clock) { LocalDate.now(clock).plusDays(90) }
     var expiresOn by rememberSaveable { mutableLongStateOf(defaultDay.toEpochDay()) }
-    if (created == null) {
-        MoreSheet(
-            title = "New Token",
-            onDismiss = onCancel,
-            confirmLabel = "Create",
-            busy = creating,
-            onConfirm = {
+    // One sheet throughout: the form, then the token with no way out but Done.
+    MoreSheet(
+        title = if (created == null) "New Token" else "Token Created",
+        onDismiss = if (created == null) onCancel else onDone,
+        dismissLabel = if (created == null) "Cancel" else null,
+        confirmLabel = if (created == null) "Create" else "Done",
+        busy = creating,
+        dismissible = created == null,
+        onConfirm = {
+            if (created != null) {
+                onDone()
+            } else {
                 val expiry = if (expires) LocalDate.ofEpochDay(expiresOn).atTime(LocalTime.now(clock)).atZone(clock.zone).toInstant() else null
                 onCreate(name, expiry)
-            },
-        ) {
+            }
+        },
+    ) {
+        if (created == null) {
             CreateApiKeyForm(
                 name = name,
                 onName = { name = it },
@@ -260,9 +267,7 @@ fun CreateApiKeySheet(
                 expiresOn = LocalDate.ofEpochDay(expiresOn),
                 onExpiresOn = { expiresOn = it.toEpochDay() },
             )
-        }
-    } else {
-        MoreSheet(title = "Token Created", onDismiss = onDone, dismissLabel = null, confirmLabel = "Done", onConfirm = onDone, dismissible = false) {
+        } else {
             CreatedTokenView(created)
         }
     }

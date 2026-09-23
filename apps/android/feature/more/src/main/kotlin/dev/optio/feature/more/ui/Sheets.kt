@@ -68,7 +68,8 @@ fun MoreSheet(
     ) {
         ProvideElevatedSurfaces {
             Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
-                Box(Modifier.fillMaxWidth().padding(horizontal = Spacing.s)) {
+                // Without the drag handle, the title row takes its place at the top.
+                Box(Modifier.fillMaxWidth().padding(start = Spacing.s, end = Spacing.s, top = if (dismissible) 0.dp else Spacing.l)) {
                     if (dismissLabel != null) {
                         TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterStart).testTag("sheet-dismiss")) {
                             Text(dismissLabel)

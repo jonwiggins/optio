@@ -210,6 +210,20 @@ class FixtureDecodeTest {
     }
 
     @Test
+    fun anAuthDisabledServer() {
+        // The synthetic dev user: no role, but everything is allowed (CurrentUser / iOS MoreContext).
+        val me = Fixtures.decode<Me>("auth-me-auth-disabled.json")
+        assertTrue(me.authDisabled)
+        val user = me.user.copy(authDisabled = me.authDisabled)
+        assertNull(user.role)
+        assertTrue(user.isAdmin)
+        assertTrue(user.canMutate)
+        // Without a workspace filter the global secrets do show there.
+        val secrets = Fixtures.decode<Secrets>("secrets-auth-disabled.json").secrets
+        assertEquals(listOf("GITHUB_TOKEN", "ANTHROPIC_API_KEY"), normalizeSecrets(secrets, "global").map { it.name })
+    }
+
+    @Test
     fun olderDeviceRowsWithoutIdOrPlatformStillDecode() {
         val legacy = OptioJson.decodeFromString<PushDevices>(
             """{"devices":[{"deviceToken":"abcdef0123456789abcdef","bundleEnv":"production","deviceName":"Old iPhone"}]}""",
