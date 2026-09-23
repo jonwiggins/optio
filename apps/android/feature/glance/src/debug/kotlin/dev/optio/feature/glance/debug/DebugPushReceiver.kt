@@ -15,18 +15,19 @@ import kotlinx.serialization.json.jsonObject
 
 /**
  * Debug builds: drives the push paths from adb, without Firebase (no project exists for dev).
+ * Always pass `-p dev.optio.android`: manifest receivers do not get implicit broadcasts.
  *
  * ```
  * # A data message exactly as FCM would deliver it (e.g. a line of OPTIO_FCM_FAKE_OUTBOX's `data`):
- * adb shell am broadcast -a dev.optio.android.DEBUG_PUSH --es data '{"type":"alert",…}'
+ * adb shell am broadcast -p dev.optio.android -a dev.optio.android.DEBUG_PUSH --es data '{"type":"alert",…}'
  * # A fake registration token, then register it with every paired server:
- * adb shell am broadcast -a dev.optio.android.DEBUG_FCM_TOKEN --es token fake-token-…
+ * adb shell am broadcast -p dev.optio.android -a dev.optio.android.DEBUG_FCM_TOKEN --es token fake-token-…
  * # One background check now (the WorkManager job):
- * adb shell am broadcast -a dev.optio.android.DEBUG_GLANCE_CHECK
+ * adb shell am broadcast -p dev.optio.android -a dev.optio.android.DEBUG_GLANCE_CHECK
  * # Follow a task on the Watch:
- * adb shell am broadcast -a dev.optio.android.DEBUG_FOLLOW_TASK --es id <taskId>
+ * adb shell am broadcast -p dev.optio.android -a dev.optio.android.DEBUG_FOLLOW_TASK --es id <taskId>
  * # "Keep watching" on / off (with the app on screen: Android only starts the service from the foreground):
- * adb shell am broadcast -a dev.optio.android.DEBUG_KEEP_WATCHING --ez on true
+ * adb shell am broadcast -p dev.optio.android -a dev.optio.android.DEBUG_KEEP_WATCHING --ez on true
  * ```
  */
 class DebugPushReceiver : BroadcastReceiver() {

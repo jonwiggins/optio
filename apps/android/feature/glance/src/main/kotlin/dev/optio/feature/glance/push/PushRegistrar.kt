@@ -74,7 +74,14 @@ class PushRegistrar(
             servers.map { list -> list.map { it.id }.toSet() }.distinctUntilChanged().drop(1).collect { sync() }
         }
         scope.launch {
-            status.state.map { it.permission }.distinctUntilChanged().drop(1).collect { if (it == NotificationPermissionState.GRANTED) sync() }
+            status.state.map { it.permission }.distinctUntilChanged().drop(1).collect {
+                when (it) {
+                    NotificationPermissionState.GRANTED -> sync()
+                    // Pushes the phone may not show count against the app with FCM: stop them.
+                    NotificationPermissionState.DENIED -> withdraw()
+                    NotificationPermissionState.NOT_DETERMINED -> Unit
+                }
+            }
         }
         scope.launch { sync() }
     }
@@ -121,6 +128,22 @@ class PushRegistrar(
     /** DELETEs this device from every server it registered with (sign-out of the last server). */
     suspend fun unregisterAll() {
         mutex.withLock { forgetRemoved(emptySet()) }
+    }
+
+    /**
+     * Notifications were turned off: DELETEs this device's token from every paired server (they
+     * would keep sending high-priority pushes it cannot show). Re-registers when they come back.
+     */
+    suspend fun withdraw() {
+        mutex.withLock {
+            val token = status.state.value.token ?: runCatching { tokens.token() }.getOrNull() ?: return
+            for (c in clients()) {
+                runCatching { c.api.delete("/api/notifications/devices/$token") }
+                status.setPushCovered(c.server.id, false)
+            }
+            registeredWith.clear()
+            status.update { s -> s.copy(servers = s.servers.mapValues { (id, _) -> ServerPushState(id) }) }
+        }
     }
 
     private suspend fun register(

@@ -384,6 +384,23 @@ class PushAndActionsTest {
             assertEquals(PushRegistration.UNSUPPORTED, status.state.value.server("srv-1")!!.registration, "an older server")
         }
 
+    @Test
+    fun turningNotificationsOffWithdrawsTheToken(): Unit =
+        runBlocking {
+            server.post("/api/notifications/devices") { FakeResponse.json(deviceJson("dev-1"), 201) }
+            server.json("/api/notifications/devices", """{"devices":[],"push":{"apns":false,"fcm":true}}""")
+            server.delete("/api/notifications/devices/:ref") { FakeResponse(status = 204) }
+            val one = GlanceTestEnv.client(server, "srv-1")
+            val status = PushStatus.detached()
+            status.update { it.copy(permission = NotificationPermissionState.GRANTED) }
+            val registrar = PushRegistrar(context, scope, status, FakeTokens(), { listOf(one) }, MutableStateFlow(listOf(one.server)))
+            registrar.sync()
+            assertTrue(status.state.value.server("srv-1")!!.receivesPush)
+            registrar.withdraw()
+            assertTrue(server.lastRequest("DELETE", "/api/notifications/devices/:ref")!!.path.endsWith("x".repeat(40)))
+            assertEquals(PushRegistration.IDLE, status.state.value.server("srv-1")!!.registration)
+        }
+
     private fun deviceJson(id: String) =
         """{"device":{"id":"$id","token":"fcm-to…xxxx","platform":"android","appId":"dev.optio.android","failureCount":0,"lastSeenAt":"2026-09-22T16:40:00Z","createdAt":"2026-09-22T16:40:00Z"}}"""
 
