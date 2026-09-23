@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Status-bar icon for Optio's notifications: the lucide "bot" glyph (ISC licence), the same glyph
+  as the launcher icon (apps/ios/Design/app-icon.svg), on the 24dp grid. White on transparent;
+  the system tints it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M12,8V4H8"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M6.4,8H17.6A2.4,2.4 0,0 1,20 10.4V17.6A2.4,2.4 0,0 1,17.6 20H6.4A2.4,2.4 0,0 1,4 17.6V10.4A2.4,2.4 0,0 1,6.4 8Z"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M2,14H4M20,14H22"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M15,13V15M9,13V15"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

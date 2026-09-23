@@ -75,6 +75,7 @@ androidx-datastore-preferences = { module = "androidx.datastore:datastore-prefer
 androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "androidxGlance" }
 androidx-glance-material3 = { module = "androidx.glance:glance-material3", version.ref = "androidxGlance" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "androidxWork" }
+androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "androidxWork" }
 
 # --- Kotlin ---
 kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }

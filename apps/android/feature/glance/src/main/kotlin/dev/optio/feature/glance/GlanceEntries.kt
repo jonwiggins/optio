@@ -3,7 +3,7 @@ package dev.optio.feature.glance
 import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
 import dev.optio.core.navigation.routes.WatchSettingsRoute
-import dev.optio.core.ui.PlaceholderScreen
+import dev.optio.feature.glance.settings.WatchSettingsScreen
 
 /**
  * Registers `:feature:glance`'s routes: the Watch and notification settings. Everything else in
@@ -11,5 +11,5 @@ import dev.optio.core.ui.PlaceholderScreen
  * the app through `optio://` deep links rather than routes.
  */
 fun EntryProviderScope<NavKey>.glanceEntries() {
-    entry<WatchSettingsRoute> { PlaceholderScreen(title = "Watch & notifications") }
+    entry<WatchSettingsRoute> { WatchSettingsScreen() }
 }
