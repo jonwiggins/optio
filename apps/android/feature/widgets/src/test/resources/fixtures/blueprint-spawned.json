@@ -1,0 +1,42 @@
+{
+  "terminal": {
+    "id": "bfa1d73f-358c-4ac9-bee3-55e9f66cd7de",
+    "hostId": "9a7b3cf1-f604-4359-88dc-ac4324171a97",
+    "userId": null,
+    "workspaceId": null,
+    "title": "Fix flaky tests",
+    "dir": "/Users/e2e/repos/e2e-repo",
+    "command": "claude -p \"Fix the flaky test {{test}} and open a PR\"",
+    "spec": {
+      "kind": "agent",
+      "mode": "headless",
+      "agent": "claude-code",
+      "prompt": "Fix the flaky test {{test}} and open a PR"
+    },
+    "state": "pending",
+    "pendingReason": "host_offline",
+    "exitCode": null,
+    "errorMessage": null,
+    "attentionState": "idle",
+    "attentionReason": null,
+    "spawnedBy": "blueprint",
+    "blueprintId": "e6afb078-06c6-4480-aba6-6a68f2ebcc94",
+    "triggerId": null,
+    "ticketSource": null,
+    "ticketExternalId": null,
+    "ticketUrl": null,
+    "agentSessionId": null,
+    "workflowRunId": null,
+    "taskId": null,
+    "preview": null,
+    "links": [],
+    "usage": null,
+    "costUsd": null,
+    "lastActivityAt": null,
+    "snoozedUntil": null,
+    "createdAt": "2026-09-23T01:15:24.316Z",
+    "updatedAt": "2026-09-23T01:15:24.319Z",
+    "startedAt": null,
+    "endedAt": null
+  }
+}

@@ -54,6 +54,7 @@ dependencies {
     implementation(projects.feature.library)
     implementation(projects.feature.more)
     implementation(projects.feature.glance)
+    implementation(projects.feature.widgets)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

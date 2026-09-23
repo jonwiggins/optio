@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A board tile's inset fill (day/night colour resources), 8 dp corners on every API level. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/optio_widgets_tile" />
+    <corners android:radius="8dp" />
+</shape>
