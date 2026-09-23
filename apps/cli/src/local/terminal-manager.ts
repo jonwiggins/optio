@@ -60,6 +60,13 @@ interface ManagedTerminal {
   /** Normalized git remote of the dir (for bare `#N` refs), when known. */
   repoUrl?: string;
   killTimer: NodeJS.Timeout | null;
+  /**
+   * The process has exited. The terminal stays known — attachable, listed in
+   * hello — until its final preview, screen and `exit` frame are sent (see
+   * handleExit); only then is it forgotten.
+   */
+  exited: boolean;
+  exitCode: number | null;
 }
 
 export interface TerminalManagerOptions {
@@ -83,11 +90,23 @@ export class TerminalManager {
 
   constructor(private readonly opts: TerminalManagerOptions) {}
 
+  /** Known: running, or exited with its final frames not yet sent. */
   has(terminalId: string): boolean {
     return this.terminals.has(terminalId);
   }
 
-  /** Running terminals for the hello frame. */
+  /** Known and its process still running. */
+  isLive(terminalId: string): boolean {
+    const term = this.terminals.get(terminalId);
+    return term !== undefined && !term.exited;
+  }
+
+  /**
+   * Running terminals for the hello frame. One whose process exited but whose
+   * final frames are still going out counts as running: if hello told the
+   * server otherwise, it would close the row as a daemon restart and then
+   * refuse the screen and exit code that follow.
+   */
   terminalsSync(): LocalDaemonTerminalSync[] {
     return [...this.terminals.keys()].map((terminalId) => ({ terminalId, running: true }));
   }
@@ -169,6 +188,8 @@ export class TerminalManager {
         lastLinksKey: "",
         repoUrl: normalizeOptional(this.opts.getRepoUrlForDir?.(dir)),
         killTimer: null,
+        exited: false,
+        exitCode: null,
       };
       this.terminals.set(msg.terminalId, term);
       if (msg.spec.kind === "agent") this.opts.attention.markAgent(msg.terminalId);
@@ -188,7 +209,7 @@ export class TerminalManager {
 
   input(terminalId: string, dataB64: string): void {
     const term = this.terminals.get(terminalId);
-    if (!term) return;
+    if (!term || term.exited) return;
     term.pty.write(Buffer.from(dataB64, "base64").toString("utf-8"));
     // The human responded — clears a sticky needs_you back to working.
     this.opts.attention.onInput(terminalId);
@@ -196,7 +217,7 @@ export class TerminalManager {
 
   resize(terminalId: string, cols: number, rows: number): void {
     const term = this.terminals.get(terminalId);
-    if (!term) return;
+    if (!term || term.exited) return;
     try {
       term.pty.resize(
         clampDimension(cols, LOCAL_DEFAULT_COLS),
@@ -240,7 +261,7 @@ export class TerminalManager {
 
   kill(terminalId: string, signal?: string): void {
     const term = this.terminals.get(terminalId);
-    if (!term) return;
+    if (!term || term.exited) return;
     try {
       term.pty.kill(signal ?? "SIGTERM");
     } catch {
@@ -263,7 +284,9 @@ export class TerminalManager {
   /**
    * Snapshot the ring buffer and enable live output atomically (in that
    * order): frames go out on one socket, so the viewer sees scrollback
-   * followed by every subsequent byte — no gap.
+   * followed by every subsequent byte — no gap. An exited terminal whose
+   * final frames are still going out attaches the same way: its scrollback,
+   * then the snapshot and `exit` that follow on this socket.
    */
   attach(terminalId: string, attachId: string): void {
     const term = this.terminals.get(terminalId);
@@ -314,12 +337,20 @@ export class TerminalManager {
       if (term.previewTimer) clearTimeout(term.previewTimer);
       if (term.killTimer) clearTimeout(term.killTimer);
       this.sendSnapshot(term);
-      this.opts.send({ type: "exit", terminalId: term.terminalId, exitCode: null });
+      // A terminal already exiting reports its own code (handleExit's
+      // pending flush sees it's gone and sends nothing more).
+      this.opts.send({
+        type: "exit",
+        terminalId: term.terminalId,
+        exitCode: term.exited ? term.exitCode : null,
+      });
       this.opts.attention.remove(term.terminalId);
-      try {
-        term.pty.kill("SIGTERM");
-      } catch {
-        // already dead
+      if (!term.exited) {
+        try {
+          term.pty.kill("SIGTERM");
+        } catch {
+          // already dead
+        }
       }
       term.screen.dispose();
     }
@@ -330,8 +361,12 @@ export class TerminalManager {
     const chunk = Buffer.from(data, "utf-8");
     term.ring.append(chunk);
     term.screen.write(chunk);
-    this.opts.attention.feed(term.terminalId, chunk);
-    this.schedulePreview(term);
+    // Output trailing the exit still lands in the ring (and so the final
+    // screen); the exit path sends the last preview itself.
+    if (!term.exited) {
+      this.opts.attention.feed(term.terminalId, chunk);
+      this.schedulePreview(term);
+    }
     if (term.subscribed) {
       this.opts.send({
         type: "output",
@@ -342,7 +377,8 @@ export class TerminalManager {
   }
 
   private handleExit(term: ManagedTerminal, exitCode: number | undefined): void {
-    if (!this.terminals.has(term.terminalId)) return; // killAll already cleaned up
+    // killAll already cleaned up, or a second exit event.
+    if (this.terminals.get(term.terminalId) !== term || term.exited) return;
     if (term.previewTimer) {
       clearTimeout(term.previewTimer);
       term.previewTimer = null;
@@ -352,14 +388,21 @@ export class TerminalManager {
       term.killTimer = null;
     }
     this.opts.attention.remove(term.terminalId);
-    this.terminals.delete(term.terminalId);
+    // Stay known until the final frames are out: the server still has the
+    // row running, and a viewer attaching now (a command like `echo hi`
+    // exits before its pane even opens) must get the output, not "Unknown
+    // terminal".
+    term.exited = true;
+    term.exitCode = exitCode ?? null;
     // Final preview so the wall shows the last output, and the final screen
     // so the pane can replay it — then the exit, so the server sees the
     // session's last words before it marks the row exited.
     const timeout = new Promise<void>((resolve) => setTimeout(resolve, EXIT_FLUSH_MS));
     void Promise.race([this.emitPreview(term), timeout]).then(() => {
+      if (this.terminals.get(term.terminalId) !== term) return; // killAll reported it
       this.sendSnapshot(term);
-      this.opts.send({ type: "exit", terminalId: term.terminalId, exitCode: exitCode ?? null });
+      this.opts.send({ type: "exit", terminalId: term.terminalId, exitCode: term.exitCode });
+      this.terminals.delete(term.terminalId);
       this.opts.onStatus?.(`terminal ${term.terminalId} exited (code ${exitCode ?? "unknown"})`);
       term.screen.dispose();
     });

@@ -19,7 +19,11 @@ import { requireWsRole } from "./ws-authz.js";
 import { acceptWs } from "./ws-connection.js";
 import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 import * as relay from "../services/local-relay.js";
-import { canAccessTerminal, getSnapshot, getTerminal } from "../services/local-terminal-service.js";
+import {
+  canAccessTerminal,
+  getTerminal,
+  replayRecordedScreen,
+} from "../services/local-terminal-service.js";
 
 export async function localTerminalStreamWs(app: FastifyInstance) {
   app.get("/ws/local/terminals/:terminalId/stream", { websocket: true }, async (socket, req) => {
@@ -70,12 +74,7 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
       // at exit, announcing its grid first so the viewer lays it out at the
       // size it was drawn for. Older rows have no snapshot and get only the
       // exit frame (the pane shows its text preview instead).
-      const snapshot = await getSnapshot(terminal.id);
-      if (snapshot) {
-        socket.send(JSON.stringify({ type: "size", cols: snapshot.cols, rows: snapshot.rows }));
-        socket.send(snapshot.data, { binary: true });
-      }
-      socket.send(JSON.stringify({ type: "exit", exitCode: terminal.exitCode }));
+      await replayRecordedScreen(socket, terminal, { withStatus: false });
     }
 
     conn.onClose(() => log.debug("local terminal viewer disconnected"));

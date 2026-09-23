@@ -178,7 +178,10 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
 
   const hookServer = await startHookServer((terminalId, eventName, payload) => {
     if (!manager.has(terminalId)) return;
-    attention.hookEvent(terminalId, eventName);
+    // A hook from a terminal whose process just exited (the final Stop) still
+    // carries its session id, usage and transcript, sent ahead of its `exit`;
+    // attention is over for it.
+    if (manager.isLive(terminalId)) attention.hookEvent(terminalId, eventName);
     // The agent's own session id makes the run resumable (`claude --resume`).
     if (payload.sessionId && reportedSessions.get(terminalId) !== payload.sessionId) {
       reportedSessions.set(terminalId, payload.sessionId);

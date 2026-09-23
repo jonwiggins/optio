@@ -126,7 +126,11 @@ export async function localDaemonWs(app: FastifyInstance) {
           relay.deliverScrollback(msg.attachId, Buffer.from(msg.dataB64, "base64"));
           return;
         case "attach-error":
-          relay.deliverAttachError(msg.attachId, msg.message);
+          // Off the frame queue: it may wait for this terminal's `exit`,
+          // which arrives on this same socket behind it.
+          void terminalService.handleAttachError(msg.attachId, msg.message).catch((err) => {
+            log.warn({ err, attachId: msg.attachId }, "local-daemon: attach-error handling failed");
+          });
           return;
         case "size":
           if (Number.isInteger(msg.cols) && Number.isInteger(msg.rows)) {
