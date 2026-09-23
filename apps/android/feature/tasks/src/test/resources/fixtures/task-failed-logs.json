@@ -1,0 +1,44 @@
+{
+  "logs": [
+    {
+      "id": "b645f9af-fd82-4fd2-b8c9-f38eaae9f21b",
+      "taskId": "22ea28fa-6f6d-4b47-9d56-e9d370558d43",
+      "stream": "stdout",
+      "content": "Session started \u00b7 fake-model \u00b7 0 tools",
+      "logType": "system",
+      "metadata": {
+        "model": "fake-model"
+      },
+      "workflowRunId": null,
+      "prReviewRunId": null,
+      "timestamp": "2026-09-23T00:46:23.086Z"
+    },
+    {
+      "id": "8b1546f4-6026-4ed0-aa48-29a0209b0313",
+      "taskId": "22ea28fa-6f6d-4b47-9d56-e9d370558d43",
+      "stream": "stdout",
+      "content": "Mock agent handled: You are an autonomous coding agent. Your job is to WRITE CODE and open a pull request.\n\n## Your Task\n\nRead your task fil",
+      "logType": "text",
+      "metadata": null,
+      "workflowRunId": null,
+      "prReviewRunId": null,
+      "timestamp": "2026-09-23T00:46:23.089Z"
+    },
+    {
+      "id": "04e444e4-f40c-4d56-806c-7d74321518b0",
+      "taskId": "22ea28fa-6f6d-4b47-9d56-e9d370558d43",
+      "stream": "stdout",
+      "content": "(1 turns \u00b7 0.0s \u00b7 $0.0310)",
+      "logType": "info",
+      "metadata": {
+        "cost": 0.031,
+        "turns": 1,
+        "isError": true,
+        "durationMs": 5
+      },
+      "workflowRunId": null,
+      "prReviewRunId": null,
+      "timestamp": "2026-09-23T00:46:23.091Z"
+    }
+  ]
+}

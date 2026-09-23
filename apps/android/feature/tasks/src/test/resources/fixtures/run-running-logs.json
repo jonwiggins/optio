@@ -1,0 +1,15 @@
+{
+  "logs": [
+    {
+      "id": "8a4b7874-89d5-4698-92eb-044629c772a3",
+      "workflowRunId": "078d6064-ca59-466d-a5af-908665729862",
+      "content": "Session started \u00b7 fake-model \u00b7 0 tools",
+      "logType": "system",
+      "metadata": {
+        "model": "fake-model"
+      },
+      "timestamp": "2026-09-23T00:46:26.720Z",
+      "stream": "stdout"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "workflow": {
+    "id": "b8079455-e17a-40cd-9be6-f352e6665275",
+    "name": "Triage Sentry alerts",
+    "description": null,
+    "promptTemplate": "Triage this Sentry alert and suggest an owner: {{title}} ({{url}})",
+    "runTitle": null,
+    "agentRuntime": "claude-code",
+    "model": null,
+    "maxTurns": null,
+    "budgetUsd": null,
+    "maxConcurrent": 2,
+    "maxRetries": 1,
+    "warmPoolSize": 0,
+    "maxPodInstances": 1,
+    "maxAgentsPerPod": 2,
+    "runTarget": "cluster",
+    "localHostId": null,
+    "localDir": null,
+    "localSessionMode": "headless",
+    "enabled": true,
+    "environmentSpec": null,
+    "paramsSchema": null,
+    "workspaceId": null,
+    "createdBy": null,
+    "createdAt": "2026-09-23T00:46:27.096Z",
+    "updatedAt": "2026-09-23T00:46:27.096Z",
+    "agentOptions": null,
+    "runCount": 1,
+    "lastRunAt": "2026-09-23 00:46:27.121173+00",
+    "totalCostUsd": "0.0123"
+  }
+}

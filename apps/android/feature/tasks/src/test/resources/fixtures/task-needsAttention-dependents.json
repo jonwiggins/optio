@@ -1,0 +1,10 @@
+{
+  "dependents": [
+    {
+      "id": "3125dee1-0bd3-420e-97aa-037412806f49",
+      "title": "Document the config loader cleanup",
+      "state": "waiting_on_deps",
+      "dependencyId": "3f0d85a8-743e-4951-b936-74983f2cc8ab"
+    }
+  ]
+}

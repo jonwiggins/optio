@@ -1,0 +1,19 @@
+{
+  "templates": [
+    {
+      "id": "5260fa88-2f7d-4374-ab9a-5c628a952a85",
+      "name": "Add a feature flag",
+      "template": "Add a feature flag named {{flag}}{{#if owner}} owned by {{owner}}{{/if}}, default off, and open a PR.",
+      "isDefault": false,
+      "repoUrl": null,
+      "autoMerge": false,
+      "workspaceId": null,
+      "kind": "task",
+      "paramsSchema": null,
+      "defaultAgentType": null,
+      "description": "Repo task: wire a new flag end to end",
+      "createdAt": "2026-09-23T00:46:10.186Z",
+      "updatedAt": "2026-09-23T00:46:10.186Z"
+    }
+  ]
+}

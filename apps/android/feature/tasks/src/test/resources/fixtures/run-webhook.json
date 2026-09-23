@@ -1,0 +1,34 @@
+{
+  "run": {
+    "id": "f27b04d0-4d70-48d4-a14e-be5e2c986f00",
+    "workflowId": "b8079455-e17a-40cd-9be6-f352e6665275",
+    "triggerId": "e2ef38af-d944-4d5d-a9c2-1215c953f19e",
+    "state": "completed",
+    "params": {
+      "url": "https://sentry.example.invalid/issues/4242",
+      "title": "TypeError: cannot read 'amount' of undefined in checkout"
+    },
+    "title": null,
+    "output": {
+      "summary": "Mock agent success"
+    },
+    "costUsd": "0.0123",
+    "inputTokens": 100,
+    "outputTokens": 25,
+    "modelUsed": "fake-model",
+    "errorMessage": null,
+    "sessionId": "196e79a8-8b37-4aaf-9248-69ec88b4bc8d",
+    "podName": "optio-wf-b8079455-e17a-40cd-9be6-f352e6665275-0-69d8",
+    "localTerminalId": null,
+    "retryCount": 0,
+    "startedAt": "2026-09-23T00:46:27.142Z",
+    "finishedAt": "2026-09-23T00:46:27.169Z",
+    "createdAt": "2026-09-23T00:46:27.121Z",
+    "updatedAt": "2026-09-23T00:46:27.174Z",
+    "podId": null,
+    "lastPodId": "e3f8cc24-b4f7-4d13-bbdc-9e42852e6a90",
+    "controlIntent": null,
+    "reconcileBackoffUntil": null,
+    "reconcileAttempts": 0
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "workflow": {
+    "id": "3e104330-6a43-45a4-a52d-7cbbf7eb39fd",
+    "name": "Nightly release notes",
+    "description": "Drafts release notes from yesterday's merged PRs",
+    "promptTemplate": "Draft release notes for everything merged yesterday. {{mode}}",
+    "runTitle": null,
+    "agentRuntime": "claude-code",
+    "model": null,
+    "maxTurns": null,
+    "budgetUsd": null,
+    "maxConcurrent": 2,
+    "maxRetries": 0,
+    "warmPoolSize": 0,
+    "maxPodInstances": 1,
+    "maxAgentsPerPod": 2,
+    "runTarget": "cluster",
+    "localHostId": null,
+    "localDir": null,
+    "localSessionMode": "headless",
+    "enabled": true,
+    "environmentSpec": null,
+    "paramsSchema": null,
+    "workspaceId": null,
+    "createdBy": null,
+    "createdAt": "2026-09-23T00:46:25.825Z",
+    "updatedAt": "2026-09-23T00:46:25.825Z",
+    "agentOptions": null,
+    "runCount": 3,
+    "lastRunAt": "2026-09-23 00:46:26.671658+00",
+    "totalCostUsd": "0.0643"
+  }
+}

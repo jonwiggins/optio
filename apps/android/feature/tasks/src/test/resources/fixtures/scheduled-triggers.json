@@ -1,0 +1,20 @@
+{
+  "triggers": [
+    {
+      "id": "1f28373d-2f49-4e64-9597-2c2d5aa9406f",
+      "targetType": "task_config",
+      "targetId": "27856ec6-ee1d-4bd0-a28f-2c84937dbdaf",
+      "type": "schedule",
+      "config": {
+        "cronExpression": "0 9 * * 1"
+      },
+      "paramMapping": null,
+      "enabled": true,
+      "lastFiredAt": null,
+      "nextFireAt": "2026-09-28T15:00:00.000Z",
+      "createdAt": "2026-09-23T00:46:27.548Z",
+      "updatedAt": "2026-09-23T00:46:27.548Z",
+      "workflowId": null
+    }
+  ]
+}

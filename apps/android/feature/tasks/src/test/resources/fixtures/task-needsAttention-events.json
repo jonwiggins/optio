@@ -1,0 +1,44 @@
+{
+  "events": [
+    {
+      "id": "788f45d2-0db7-462a-8ab8-dd586936c1f6",
+      "taskId": "9a609bec-91e2-4d5f-898f-fea8c5cfc788",
+      "fromState": "pending",
+      "toState": "queued",
+      "trigger": "task_submitted",
+      "message": null,
+      "userId": null,
+      "createdAt": "2026-09-23T00:46:10.492Z"
+    },
+    {
+      "id": "37746056-f35a-4fc5-9a2f-fd251055c74e",
+      "taskId": "9a609bec-91e2-4d5f-898f-fea8c5cfc788",
+      "fromState": "queued",
+      "toState": "provisioning",
+      "trigger": "worker_pickup",
+      "message": null,
+      "userId": null,
+      "createdAt": "2026-09-23T00:46:22.093Z"
+    },
+    {
+      "id": "ff80b086-d9e7-42ee-97fd-7d9e81fc7b6f",
+      "taskId": "9a609bec-91e2-4d5f-898f-fea8c5cfc788",
+      "fromState": "provisioning",
+      "toState": "running",
+      "trigger": "worktree_created",
+      "message": null,
+      "userId": null,
+      "createdAt": "2026-09-23T00:46:22.146Z"
+    },
+    {
+      "id": "8bb952d4-fead-4287-b812-768450046983",
+      "taskId": "9a609bec-91e2-4d5f-898f-fea8c5cfc788",
+      "fromState": "running",
+      "toState": "needs_attention",
+      "trigger": "completed_without_pr",
+      "message": "Agent completed successfully but did not open a pull request. The work may need to be committed and pushed manually, or the agent can be restarted to open a PR.",
+      "userId": null,
+      "createdAt": "2026-09-23T00:46:22.646Z"
+    }
+  ]
+}
