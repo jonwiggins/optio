@@ -1,0 +1,24 @@
+{
+  "agents": [
+    {
+      "agentType": "claude-code",
+      "taskCount": 10,
+      "successRate": 40,
+      "avgDuration": 4,
+      "avgCost": "0.3428",
+      "avgRetries": 0,
+      "models": [
+        {
+          "model": "fake-model",
+          "taskCount": 6,
+          "avgCost": "0.3428"
+        },
+        {
+          "model": "unknown",
+          "taskCount": 4,
+          "avgCost": "0.0000"
+        }
+      ]
+    }
+  ]
+}

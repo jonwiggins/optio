@@ -1,0 +1,115 @@
+{
+  "issues": [
+    {
+      "id": 2331907401,
+      "number": 7,
+      "externalId": "7",
+      "source": "github",
+      "title": "Crash when the settings screen opens offline",
+      "body": "Steps: turn on airplane mode, open **Settings**.\n\nThe app crashes with a `NullPointerException` in `SettingsViewModel`.",
+      "state": "open",
+      "url": "https://github.com/e2e-org/e2e-repo/issues/7",
+      "labels": ["bug", "android"],
+      "hasOptioLabel": false,
+      "author": "vic-viewer",
+      "assignee": null,
+      "repo": {
+        "id": "e3ae92d2-e09c-4e1e-b51f-7803685a1e72",
+        "fullName": "e2e-org/e2e-repo",
+        "repoUrl": "https://github.com/e2e-org/e2e-repo"
+      },
+      "createdAt": "2026-09-21T10:00:00Z",
+      "updatedAt": "2026-09-22T15:40:00Z",
+      "optioTask": null
+    },
+    {
+      "id": 2331907390,
+      "number": 5,
+      "externalId": "5",
+      "source": "github",
+      "title": "Dark mode: code blocks are unreadable",
+      "body": "",
+      "state": "open",
+      "url": "https://github.com/e2e-org/mobile-app/issues/5",
+      "labels": [],
+      "hasOptioLabel": false,
+      "author": "mia-member",
+      "assignee": "ada-admin",
+      "repo": {
+        "id": "142e78f2-2b76-4205-a498-51a404d04776",
+        "fullName": "e2e-org/mobile-app",
+        "repoUrl": "https://github.com/e2e-org/mobile-app"
+      },
+      "createdAt": "2026-09-20T09:00:00Z",
+      "updatedAt": "2026-09-22T12:00:00Z",
+      "optioTask": null
+    },
+    {
+      "id": "linear:ENG-123",
+      "number": "ENG-123",
+      "externalId": "ENG-123",
+      "source": "linear",
+      "title": "Export costs as CSV",
+      "body": "Finance wants a monthly CSV export of the costs page.",
+      "state": "open",
+      "url": "https://linear.app/acme/issue/ENG-123",
+      "labels": ["optio"],
+      "hasOptioLabel": true,
+      "author": null,
+      "assignee": "ada",
+      "repo": {
+        "id": null,
+        "fullName": "linear provider",
+        "repoUrl": null,
+        "providerId": "tp-1"
+      },
+      "createdAt": "2026-09-19T08:00:00.000Z",
+      "updatedAt": "2026-09-22T09:30:00.000Z",
+      "optioTask": null
+    },
+    {
+      "id": 2331907355,
+      "number": 3,
+      "externalId": "3",
+      "source": "github",
+      "title": "Flaky login e2e test",
+      "body": "Fails about one run in five.",
+      "state": "open",
+      "url": "https://github.com/e2e-org/e2e-repo/issues/3",
+      "labels": ["optio", "tests"],
+      "hasOptioLabel": true,
+      "author": "ada-admin",
+      "assignee": null,
+      "repo": {
+        "id": "e3ae92d2-e09c-4e1e-b51f-7803685a1e72",
+        "fullName": "e2e-org/e2e-repo",
+        "repoUrl": "https://github.com/e2e-org/e2e-repo"
+      },
+      "createdAt": "2026-09-18T08:00:00Z",
+      "updatedAt": "2026-09-22T16:10:00Z",
+      "optioTask": { "taskId": "5f1c2a9e-8d7b-4c3e-9a1f-2b6d8e4c7a10", "state": "needs_attention" }
+    },
+    {
+      "id": 2331907300,
+      "number": 1,
+      "externalId": "1",
+      "source": "github",
+      "title": "Add a CONTRIBUTING guide",
+      "body": null,
+      "state": "open",
+      "url": "https://github.com/e2e-org/e2e-repo/issues/1",
+      "labels": ["optio", "docs"],
+      "hasOptioLabel": true,
+      "author": "ada-admin",
+      "assignee": null,
+      "repo": {
+        "id": "e3ae92d2-e09c-4e1e-b51f-7803685a1e72",
+        "fullName": "e2e-org/e2e-repo",
+        "repoUrl": "https://github.com/e2e-org/e2e-repo"
+      },
+      "createdAt": "2026-09-10T08:00:00Z",
+      "updatedAt": "2026-09-21T08:00:00Z",
+      "optioTask": { "taskId": "0a1b2c3d-4e5f-4061-8293-a4b5c6d7e8f9", "state": "completed" }
+    }
+  ]
+}

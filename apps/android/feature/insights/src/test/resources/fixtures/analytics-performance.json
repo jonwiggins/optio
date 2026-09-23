@@ -1,0 +1,22 @@
+{
+  "durations": {
+    "avgWallClock": 8,
+    "p50WallClock": 8,
+    "p95WallClock": 14,
+    "avgExecution": 7,
+    "p50Execution": 7,
+    "p95Execution": 14,
+    "avgQueueWait": 1,
+    "taskCount": 2
+  },
+  "successRate": 44,
+  "successRateTrend": 0,
+  "tasksPerDay": [
+    {
+      "date": "2026-09-23",
+      "total": 10,
+      "succeeded": 4,
+      "failed": 1
+    }
+  ]
+}

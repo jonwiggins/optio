@@ -1,0 +1,40 @@
+{
+  "runs": [
+    {
+      "id": "run-chat-2",
+      "prReviewId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "kind": "chat",
+      "state": "completed",
+      "prompt": "Is the limit cap really needed?",
+      "sessionId": "sess-1",
+      "resultSummary": "Yes: the API rejects limit > 200, so the page would 400.",
+      "errorMessage": null,
+      "costUsd": "0.0312",
+      "inputTokens": 5120,
+      "outputTokens": 410,
+      "modelUsed": "claude-sonnet-4-5",
+      "startedAt": "2026-09-22T16:33:00.000Z",
+      "completedAt": "2026-09-22T16:33:41.000Z",
+      "createdAt": "2026-09-22T16:32:58.000Z",
+      "updatedAt": "2026-09-22T16:33:41.000Z"
+    },
+    {
+      "id": "run-initial-1",
+      "prReviewId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "kind": "initial",
+      "state": "completed",
+      "prompt": null,
+      "sessionId": "sess-1",
+      "resultSummary": "Requested changes: offset not reset on filter change.",
+      "errorMessage": null,
+      "costUsd": "0.4213",
+      "inputTokens": 48211,
+      "outputTokens": 2210,
+      "modelUsed": "claude-sonnet-4-5",
+      "startedAt": "2026-09-22T16:06:10.000Z",
+      "completedAt": "2026-09-22T16:31:05.000Z",
+      "createdAt": "2026-09-22T16:05:00.000Z",
+      "updatedAt": "2026-09-22T16:31:05.000Z"
+    }
+  ]
+}
