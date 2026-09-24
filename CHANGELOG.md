@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-24
+
 ### Added
 
 - **Codex's own models and effort levels** — each machine's daemon asks its Codex which models it offers (`codex debug models`) and reports them with their reasoning efforts, so the New work form lists the latest Codex models (GPT-5.6-Sol, -Terra, -Luna, …) as Codex does, and a **Reasoning effort** picker shows only the levels the chosen model takes. A run on a machine uses that machine's list. Codex runs in pods now get the model and effort too; they used to run Codex's default model. Restart `optio local up` to pick this up.
@@ -17,7 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Claude Code agents on your machine start in **auto** permission mode (`--permission-mode auto`): Claude's classifier approves routine edits and commands and blocks risky ones, so an agent no longer stalls on permission prompts. A headless run could previously do nothing that needed approval. Choose **Skip all checks** (`--dangerously-skip-permissions`) or **Ask first** per run in the New work form. A Claude Code too old for auto mode starts in its own default. Restart `optio local up` to pick this up.
-
 - A session started by a trigger names its source on its badge (GitHub, Slack, Linear, schedule, webhook) instead of "trigger".
 - PR and ticket badges are a size larger.
 
