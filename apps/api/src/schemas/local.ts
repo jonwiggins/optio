@@ -43,6 +43,12 @@ export const LocalHostSchema = z
       .describe(
         "The connected daemon can hand Optio a fresh Claude OAuth token from the machine's own Claude Code login (false while offline)",
       ),
+    manageDirs: z
+      .boolean()
+      .optional()
+      .describe(
+        "The connected daemon adds / removes allowlisted directories when asked from Optio (false while offline)",
+      ),
     state: z.enum(["online", "offline"]),
     lastSeenAt: z.date().nullable(),
     createdAt: z.date(),

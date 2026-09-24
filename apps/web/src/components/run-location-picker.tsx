@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { toast } from "sonner";
 import { GitBranch, Laptop, Loader2, MessageSquare, Server, Square } from "lucide-react";
 import { normalizeRepoUrl, toLocalAgentKind } from "@optio/shared";
 import { cn } from "@/lib/utils";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
+import { PairMachineGuide } from "@/components/local/pair-machine";
+import { AddDirForm, dirsLockedReason } from "@/components/local/host-dirs";
 
 /**
  * Where a Task / Job runs: an Optio-managed pod, or a directory on one of the
@@ -16,7 +20,14 @@ import { useLocalHosts } from "@/hooks/use-local-hosts";
  * repo (Tasks) or nothing (Jobs); a machine needs a directory — and for a
  * Task that directory *is* the repo: its git remote, as the daemon detected
  * it, becomes the task's `repoUrl` (reported through `onRepoUrlChange`).
+ *
+ * Nothing to pick is never a dead end: with no machine paired the panel
+ * shows how to pair one (and adopts it when it connects), and a machine's
+ * directories can be added right here, through its daemon.
  */
+
+/** The Directory select's "add one" entry (never a real path: those are absolute). */
+const ADD_DIR = "__add__";
 
 export type RunTarget = "cluster" | "local";
 export type LocalSessionMode = "headless" | "interactive";
@@ -151,14 +162,22 @@ export function RunLocationPicker({
   /** Rendered inside a card: the machine panel sits on the page background. */
   inset?: boolean;
 }) {
-  const { hosts, loading } = useLocalHosts();
+  const isLocal = value.runTarget === "local";
+  // While "My machine" is picked and none is paired, poll faster so the
+  // machine being paired shows up as it connects.
+  const [waitingForHost, setWaitingForHost] = useState(false);
+  const { hosts, loading, replaceHost } = useLocalHosts({
+    pollMs: waitingForHost ? 3000 : undefined,
+  });
   const host = useMemo(
     () => hosts.find((h) => h.id === value.localHostId),
     [hosts, value.localHostId],
   );
   const dirs: HostDir[] = host?.dirs ?? [];
-  const isLocal = value.runTarget === "local";
   const noHosts = !loading && hosts.length === 0;
+  useEffect(() => setWaitingForHost(isLocal && noHosts), [isLocal, noHosts]);
+  const [addingDir, setAddingDir] = useState(false);
+  const dirsLocked = host ? dirsLockedReason(host) : null;
   const selectedDir = dirs.find((d) => d.path === value.localDir);
   const localRepoUrl = isLocal ? repoUrlFromRemote(selectedDir?.repoUrl) : null;
 
@@ -186,6 +205,23 @@ export function RunLocationPicker({
 
   const agentBlocked = isLocal && !!agentType && !agentRunsLocally(agentType);
   const noCheckout = kind === "task" && !!host && dirs.length > 0 && !dirs.some((d) => d.repoUrl);
+  const showAddDir = !!host && !dirsLocked && (addingDir || dirs.length === 0);
+
+  // A directory just added through the daemon: take the host row it
+  // answered with and select the directory in the same render, so the
+  // adoption effect above sees both.
+  const onDirAdded = (next: any, path: string) => {
+    replaceHost(next);
+    setAddingDir(false);
+    const added = (next.dirs as HostDir[] | undefined)?.find((d) => d.path === path);
+    if (added && usableDir(kind, added)) {
+      onChange({ ...value, localHostId: next.id, localDir: path });
+    } else if (added) {
+      toast.warning("That directory isn't a git checkout", {
+        description: "Work that opens a PR needs one. Pick Current directory to use it as it is.",
+      });
+    }
+  };
 
   return (
     <div className={cn("space-y-3", className)}>
@@ -213,15 +249,12 @@ export function RunLocationPicker({
               ? "A git checkout on a paired machine, with your local agent CLI and its login. The agent works on a branch there and opens the PR."
               : "A directory on a paired machine, with your local agent CLI and its login. The session shows up under Local too."
           }
-          disabled={noHosts || !!localDisabled}
+          disabled={!!localDisabled}
           hint={
             localDisabled ? (
               localDisabled
-            ) : noHosts ? (
-              <>
-                No paired machines. Run <code className="font-mono">optio login</code> then{" "}
-                <code className="font-mono">optio local up</code> on your machine.
-              </>
+            ) : noHosts && !isLocal ? (
+              "None paired yet — pick it to see how."
             ) : loading && hosts.length === 0 ? (
               <span className="inline-flex items-center gap-1">
                 <Loader2 className="w-3 h-3 animate-spin" /> Looking for your machines…
@@ -231,7 +264,28 @@ export function RunLocationPicker({
         />
       </div>
 
-      {isLocal && (
+      {isLocal && noHosts && (
+        <div
+          className={cn(
+            "p-4 rounded-lg border border-border space-y-3",
+            inset ? "bg-bg" : "bg-bg-card/60",
+          )}
+        >
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-sm text-text">No machine is paired yet — pair this computer:</p>
+            <Link
+              href="/machines?pair=1"
+              className="text-[11px] text-primary hover:underline shrink-0"
+              target="_blank"
+            >
+              Machines ↗
+            </Link>
+          </div>
+          <PairMachineGuide hosts={hosts} loading={loading} compact />
+        </div>
+      )}
+
+      {isLocal && hosts.length > 0 && (
         <div
           className={cn(
             "p-4 rounded-lg border border-border space-y-3",
@@ -265,12 +319,20 @@ export function RunLocationPicker({
               </label>
               <select
                 value={value.localDir}
-                onChange={(e) => onChange({ ...value, localDir: e.target.value })}
+                onChange={(e) =>
+                  e.target.value === ADD_DIR
+                    ? setAddingDir(true)
+                    : onChange({ ...value, localDir: e.target.value })
+                }
                 className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary"
               >
                 {!value.localDir && (
                   <option value="">
-                    {kind === "task" ? "Pick a checkout…" : "Pick a directory…"}
+                    {dirs.length === 0
+                      ? "No directories yet"
+                      : kind === "task"
+                        ? "Pick a checkout…"
+                        : "Pick a directory…"}
                   </option>
                 )}
                 {dirs.map((d) => (
@@ -279,21 +341,44 @@ export function RunLocationPicker({
                     {usableDir(kind, d) ? "" : " (not a git checkout)"}
                   </option>
                 ))}
+                {host && !dirsLocked && <option value={ADD_DIR}>+ Add a directory…</option>}
               </select>
-              {host && dirs.length === 0 && (
+              {host && dirs.length === 0 && dirsLocked && (
                 <p className="text-[11px] text-text-muted/80 mt-1">
-                  No directories on this machine — run{" "}
-                  <code className="font-mono">optio local add &lt;dir&gt;</code> there.
+                  No directories on this machine. {dirsLocked}
                 </p>
               )}
-              {noCheckout && (
+              {noCheckout && !showAddDir && (
                 <p className="text-[11px] text-warning mt-1">
-                  None of this machine's directories is a git checkout — add one with{" "}
-                  <code className="font-mono">optio local add &lt;repo-dir&gt;</code>.
+                  None of this machine's directories is a git checkout —{" "}
+                  {dirsLocked ? (
+                    <>
+                      add one with{" "}
+                      <code className="font-mono">optio local add &lt;repo-dir&gt;</code> there.
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setAddingDir(true)}
+                      className="underline underline-offset-2 hover:text-text"
+                    >
+                      add one
+                    </button>
+                  )}
                 </p>
               )}
             </div>
           </div>
+
+          {showAddDir && host && (
+            <AddDirForm
+              key={host.id}
+              host={host}
+              autoFocus={addingDir}
+              onAdded={onDirAdded}
+              onCancel={dirs.length > 0 ? () => setAddingDir(false) : undefined}
+            />
+          )}
 
           {kind === "task" && localRepoUrl && (
             <div className="flex items-center gap-2 text-xs text-text-muted">

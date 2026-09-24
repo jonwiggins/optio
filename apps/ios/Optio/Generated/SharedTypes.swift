@@ -3089,6 +3089,11 @@ public struct LocalHost: Codable, Hashable, Sendable {
     /// from the machine's own Claude Code login (Keychain / credentials file).
     /// Live (from the daemon's hello), so false whenever the host is offline.
     public let claudeCredentials: Bool?
+    /// Whether the connected daemon adds and removes allowlisted directories
+    /// when asked from Optio (the Machines page, the New work form) — the same
+    /// as `optio local add|remove` on the machine. Live (from the daemon's
+    /// hello), so false whenever the host is offline.
+    public let manageDirs: Bool?
     public let state: LocalHostState
     public let lastSeenAt: String?
     public let createdAt: String
@@ -3106,6 +3111,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         case dirs = "dirs"
         case agentLimits = "agentLimits"
         case claudeCredentials = "claudeCredentials"
+        case manageDirs = "manageDirs"
         case state = "state"
         case lastSeenAt = "lastSeenAt"
         case createdAt = "createdAt"
@@ -3124,6 +3130,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         dirs: [LocalHostDir],
         agentLimits: LocalHostAgentLimits? = nil,
         claudeCredentials: Bool? = nil,
+        manageDirs: Bool? = nil,
         state: LocalHostState,
         lastSeenAt: String? = nil,
         createdAt: String,
@@ -3140,6 +3147,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         self.dirs = dirs
         self.agentLimits = agentLimits
         self.claudeCredentials = claudeCredentials
+        self.manageDirs = manageDirs
         self.state = state
         self.lastSeenAt = lastSeenAt
         self.createdAt = createdAt
@@ -3756,6 +3764,7 @@ public struct LocalDaemonTerminalSync: Codable, Hashable, Sendable {
 
 public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case hello(HelloPayload)
+    case dirsResult(DirsResultPayload)
     case credentialsResult(CredentialsResultPayload)
     case started(StartedPayload)
     case spawnError(SpawnErrorPayload)
@@ -3786,6 +3795,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         public let claudeCredentials: Bool?
         /// The daemon answers `transcript-request` (reads a finished session's conversation off disk).
         public let transcriptBackfill: Bool?
+        /// The daemon answers `dirs` (adds / removes an allowlisted directory when asked from Optio).
+        public let manageDirs: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case hostId = "hostId"
@@ -3794,6 +3805,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             case terminals = "terminals"
             case claudeCredentials = "claudeCredentials"
             case transcriptBackfill = "transcriptBackfill"
+            case manageDirs = "manageDirs"
         }
 
         public init(
@@ -3802,7 +3814,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             dirs: [LocalHostDir],
             terminals: [LocalDaemonTerminalSync],
             claudeCredentials: Bool? = nil,
-            transcriptBackfill: Bool? = nil
+            transcriptBackfill: Bool? = nil,
+            manageDirs: Bool? = nil
         ) {
             self.hostId = hostId
             self.daemonVersion = daemonVersion
@@ -3810,6 +3823,33 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             self.terminals = terminals
             self.claudeCredentials = claudeCredentials
             self.transcriptBackfill = transcriptBackfill
+            self.manageDirs = manageDirs
+        }
+    }
+
+    public struct DirsResultPayload: Codable, Hashable, Sendable {
+        public let requestId: String
+        public let dirs: [LocalHostDir]?
+        public let path: String?
+        public let error: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case requestId = "requestId"
+            case dirs = "dirs"
+            case path = "path"
+            case error = "error"
+        }
+
+        public init(
+            requestId: String,
+            dirs: [LocalHostDir]? = nil,
+            path: String? = nil,
+            error: String? = nil
+        ) {
+            self.requestId = requestId
+            self.dirs = dirs
+            self.path = path
+            self.error = error
         }
     }
 
@@ -4118,6 +4158,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         let discriminator = try container.decodeIfPresent(String.self, forKey: .type) ?? ""
         switch discriminator {
         case "hello": self = .hello(try HelloPayload(from: decoder))
+        case "dirs-result": self = .dirsResult(try DirsResultPayload(from: decoder))
         case "credentials-result": self = .credentialsResult(try CredentialsResultPayload(from: decoder))
         case "started": self = .started(try StartedPayload(from: decoder))
         case "spawn-error": self = .spawnError(try SpawnErrorPayload(from: decoder))
@@ -4145,6 +4186,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case .hello(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("hello", forKey: .type)
+            try payload.encode(to: encoder)
+        case .dirsResult(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("dirs-result", forKey: .type)
             try payload.encode(to: encoder)
         case .credentialsResult(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
@@ -4232,6 +4277,7 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
     case detach(DetachPayload)
     case credentials(CredentialsPayload)
     case transcriptRequest(TranscriptRequestPayload)
+    case dirs(DirsPayload)
     case pong
     /// Fallback for discriminator values this client does not know about yet.
     case unknown(AnyCodable)
@@ -4379,6 +4425,24 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct DirsPayload: Codable, Hashable, Sendable {
+        public let requestId: String
+        public let op: LocalDirOp
+        public let path: String
+
+        private enum CodingKeys: String, CodingKey {
+            case requestId = "requestId"
+            case op = "op"
+            case path = "path"
+        }
+
+        public init(requestId: String, op: LocalDirOp, path: String) {
+            self.requestId = requestId
+            self.op = op
+            self.path = path
+        }
+    }
+
     private enum DiscriminatorKey: String, CodingKey {
         case type
     }
@@ -4395,6 +4459,7 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         case "detach": self = .detach(try DetachPayload(from: decoder))
         case "credentials": self = .credentials(try CredentialsPayload(from: decoder))
         case "transcript-request": self = .transcriptRequest(try TranscriptRequestPayload(from: decoder))
+        case "dirs": self = .dirs(try DirsPayload(from: decoder))
         case "pong": self = .pong
         default: self = .unknown(try AnyCodable(from: decoder))
         }
@@ -4434,12 +4499,30 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("transcript-request", forKey: .type)
             try payload.encode(to: encoder)
+        case .dirs(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("dirs", forKey: .type)
+            try payload.encode(to: encoder)
         case .pong:
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("pong", forKey: .type)
         case .unknown(let value):
             try value.encode(to: encoder)
         }
+    }
+}
+
+public enum LocalDirOp: String, Codable, Hashable, Sendable, CaseIterable {
+    case add = "add"
+    case remove = "remove"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalDirOp] = [.add, .remove]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalDirOp(rawValue: raw) ?? .unknown
     }
 }
 
@@ -5234,7 +5317,8 @@ public struct OptioAction: Codable, Hashable, Sendable {
 
 public struct OptioSettings: Codable, Hashable, Sendable {
     public let id: String
-    /// "opus" | "sonnet" | "haiku"
+    /// An alias ("opus", "sonnet", "haiku", "fable": always the newest of that
+    /// family) or a specific model id, pinned.
     public let model: String
     public let systemPrompt: String
     public let enabledTools: [String]

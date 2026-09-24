@@ -4,13 +4,15 @@ import { authenticateWs, extractSessionToken } from "./ws-auth.js";
 import { requireWsRole } from "./ws-authz.js";
 import { logger } from "../logger.js";
 import {
+  ANTHROPIC_CATALOG,
+  DEFAULT_OPTIO_AGENT_MODEL,
   OPTIO_TOOL_SCHEMAS,
   OPTIO_TOOL_CATEGORIES,
-  resolveModelId,
   type OptioToolDefinition,
   type OptioToolSchema,
 } from "@optio/shared";
 import { executeToolCall, truncateToolResult } from "../services/optio-tool-executor.js";
+import { resolveLiveModelId } from "../services/agent-options-service.js";
 import { acceptWs } from "./ws-connection.js";
 import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 
@@ -19,11 +21,10 @@ import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limit
 const ANTHROPIC_API_URL = process.env.ANTHROPIC_API_BASE_URL ?? "https://api.anthropic.com";
 
 /**
- * Fallback when the stored model ID is unrecognised (not a known alias, not a
- * cataloged dated id). Kept as a concrete dated id so an Anthropic API call
- * never sends a stale alias.
+ * Fallback when no model resolves at all. A concrete id (the baseline's
+ * newest Opus) so an Anthropic API call never sends a bare alias.
  */
-const DEFAULT_MODEL = "claude-sonnet-4-6";
+const DEFAULT_MODEL = ANTHROPIC_CATALOG.aliases[DEFAULT_OPTIO_AGENT_MODEL];
 const DEFAULT_MAX_TURNS = 10;
 
 // ─── Per-user concurrency tracking ──────────────────────────────────────────
@@ -364,6 +365,18 @@ async function getAnthropicAuth(
   return {};
 }
 
+/**
+ * The model to call: an alias ("opus") is the newest model of its family on
+ * the live model list, so the assistant moves to a new release without a
+ * settings change; a pinned id is sent as-is.
+ */
+function resolveOptioModel(
+  stored: string | null | undefined,
+  workspaceId: string | null | undefined,
+): Promise<string | undefined> {
+  return resolveLiveModelId("anthropic", stored || DEFAULT_OPTIO_AGENT_MODEL, { workspaceId });
+}
+
 function buildAnthropicHeaders(auth: {
   apiKey?: string;
   oauthToken?: string;
@@ -618,7 +631,7 @@ export async function optioChatWs(app: FastifyInstance) {
 
       // Load settings
       const settings = await getSettings(user.workspaceId);
-      const model = resolveModelId("anthropic", settings.model) ?? DEFAULT_MODEL;
+      const model = (await resolveOptioModel(settings.model, user.workspaceId)) ?? DEFAULT_MODEL;
       const maxTurns = settings.maxTurns || DEFAULT_MAX_TURNS;
 
       // Build system prompt (tool definitions are passed separately to the API)
@@ -669,7 +682,7 @@ export async function optioChatWs(app: FastifyInstance) {
       }
 
       const settings = await getSettings(user.workspaceId);
-      const model = resolveModelId("anthropic", settings.model) ?? DEFAULT_MODEL;
+      const model = (await resolveOptioModel(settings.model, user.workspaceId)) ?? DEFAULT_MODEL;
       const maxTurns = settings.maxTurns || DEFAULT_MAX_TURNS;
       const systemPrompt = buildSystemPrompt({
         systemPrompt: settings.systemPrompt,

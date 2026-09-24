@@ -26,6 +26,7 @@ import * as hostService from "../services/local-host-service.js";
 import * as relay from "../services/local-relay.js";
 import * as terminalService from "../services/local-terminal-service.js";
 import * as blueprintService from "../services/local-blueprint-service.js";
+import { HostDirError, changeHostDir } from "../services/local-dirs-service.js";
 import * as triggerService from "../services/trigger-service.js";
 import {
   CreateTriggerBodySchema,
@@ -115,6 +116,18 @@ const blueprintBodySchema = z
   })
   .describe("Local automation (blueprint) definition");
 
+/**
+ * A directory to add / remove, as the person typed it: absolute or under `~`
+ * (the daemon resolves it on the machine). No NULs, no newlines.
+ */
+const HostDirPath = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1000)
+  .regex(/^[/~][^\0\n\r]*$/, "Give an absolute path, or one under ~")
+  .describe("Directory on the machine: absolute, or under ~");
+
 const HostResponse = z.object({ host: LocalHostSchema });
 const HostsResponse = z.object({ hosts: z.array(LocalHostSchema) });
 const TerminalResponse = z.object({ terminal: LocalTerminalSchema });
@@ -158,6 +171,15 @@ async function checkBlueprintBody(
   return null;
 }
 
+/** A host row plus what its connected daemon can do right now. */
+function withLiveCapabilities<T extends { id: string }>(host: T) {
+  return {
+    ...host,
+    claudeCredentials: relay.hostHasClaudeCredentials(host.id),
+    manageDirs: relay.hostCanManageDirs(host.id),
+  };
+}
+
 export async function localRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
   const member = { preHandler: [requireRole("member")] };
@@ -176,12 +198,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const hosts = await hostService.listHosts(req.user?.id ?? null);
-      reply.send({
-        hosts: hosts.map((h) => ({
-          ...h,
-          claudeCredentials: relay.hostHasClaudeCredentials(h.id),
-        })),
-      });
+      reply.send({ hosts: hosts.map(withLiveCapabilities) });
     },
   );
 
@@ -284,10 +301,96 @@ export async function localRoutes(rawApp: FastifyInstance) {
       const moved = await hostService.mergeHosts(source.id, target.id);
       await terminalService.flushParkedTerminals(target.id);
       const host = (await hostService.getHost(target.id))!;
-      reply.send({
-        host: { ...host, claudeCredentials: relay.hostHasClaudeCredentials(host.id) },
-        moved,
-      });
+      reply.send({ host: withLiveCapabilities(host), moved });
+    },
+  );
+
+  // A directory added or removed here goes through the machine's daemon,
+  // which owns the allowlist (see services/local-dirs-service.ts).
+  const HostDirResponse = z.object({
+    host: LocalHostSchema,
+    path: z
+      .string()
+      .describe("The directory as the machine resolved it (~ expanded, symlinks followed)"),
+  });
+
+  app.post(
+    "/api/local/hosts/:id/dirs",
+    {
+      ...member,
+      schema: {
+        operationId: "addLocalHostDir",
+        summary: "Add a directory to a machine's allowlist",
+        description:
+          "Asks the machine's daemon to add the directory — what `optio local add <dir>` " +
+          "does there. The daemon checks it exists and detects its git remote; the host's " +
+          "`dirs` follow its answer. 409 while the machine is offline or its daemon can't " +
+          "take the request (`--no-remote-dirs`, or an older CLI); 400 with the daemon's " +
+          "reason when it refuses.",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        body: z.object({ path: HostDirPath }),
+        response: {
+          200: HostDirResponse,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+          504: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const host = await hostService.getHost(req.params.id);
+      if (!host || !hostService.canAccessHost(host, req.user?.id)) {
+        return reply.status(404).send({ error: "Host not found" });
+      }
+      try {
+        const changed = await changeHostDir(host, "add", req.body.path);
+        reply.send({ host: withLiveCapabilities(changed.host), path: changed.path });
+      } catch (err) {
+        if (err instanceof HostDirError)
+          return reply.status(err.status).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  app.delete(
+    "/api/local/hosts/:id/dirs",
+    {
+      ...member,
+      schema: {
+        operationId: "removeLocalHostDir",
+        summary: "Remove a directory from a machine's allowlist",
+        description:
+          "Asks the machine's daemon to drop the directory — what `optio local remove <dir>` " +
+          "does there. Running terminals keep going; new work can't start in it. Same " +
+          "errors as adding.",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        querystring: z.object({ path: HostDirPath }),
+        response: {
+          200: HostDirResponse,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+          504: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const host = await hostService.getHost(req.params.id);
+      if (!host || !hostService.canAccessHost(host, req.user?.id)) {
+        return reply.status(404).send({ error: "Host not found" });
+      }
+      try {
+        const changed = await changeHostDir(host, "remove", req.query.path);
+        reply.send({ host: withLiveCapabilities(changed.host), path: changed.path });
+      } catch (err) {
+        if (err instanceof HostDirError)
+          return reply.status(err.status).send({ error: err.message });
+        throw err;
+      }
     },
   );
 

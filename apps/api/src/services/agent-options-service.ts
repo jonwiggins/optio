@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   PROVIDER_CATALOGS,
   mergeLiveModels,
+  resolveModelId,
   type AgentProviderId,
   type LiveModel,
   type ProviderCatalog,
@@ -31,6 +32,13 @@ type LiveProbe = (credential: ProbeCredential) => Promise<LiveModel[]>;
 /** Safety bound on list-models pagination — well above any real model count. */
 const MAX_PROBE_PAGES = 10;
 
+/**
+ * Per-request bound on an upstream list-models call. The Optio assistant
+ * resolves its model through this list on a cache miss, so a hung upstream
+ * must fall back to the baseline instead of stalling the chat.
+ */
+const PROBE_TIMEOUT_MS = 8_000;
+
 /** Anthropic: GET /v1/models → data[].{id,display_name}, paginated via after_id. */
 async function probeAnthropic(credential: ProbeCredential): Promise<LiveModel[]> {
   const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
@@ -47,7 +55,7 @@ async function probeAnthropic(credential: ProbeCredential): Promise<LiveModel[]>
     const url = new URL("https://api.anthropic.com/v1/models");
     url.searchParams.set("limit", "100");
     if (afterId) url.searchParams.set("after_id", afterId);
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`Anthropic /v1/models returned ${res.status}`);
     const body = (await res.json()) as {
       data?: Array<{ id?: string; display_name?: string }>;
@@ -67,6 +75,7 @@ async function probeAnthropic(credential: ProbeCredential): Promise<LiveModel[]>
 async function probeOpenAI(credential: ProbeCredential): Promise<LiveModel[]> {
   const res = await fetch("https://api.openai.com/v1/models", {
     headers: { Authorization: `Bearer ${credential.value}` },
+    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`OpenAI /v1/models returned ${res.status}`);
   const body = (await res.json()) as { data?: Array<{ id?: string }> };
@@ -77,6 +86,7 @@ async function probeOpenAI(credential: ProbeCredential): Promise<LiveModel[]> {
 async function probeGemini(credential: ProbeCredential): Promise<LiveModel[]> {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(credential.value)}`,
+    { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) },
   );
   if (!res.ok) throw new Error(`Gemini /v1beta/models returned ${res.status}`);
   const body = (await res.json()) as {
@@ -290,6 +300,29 @@ export async function getProviderOptions(
       refreshedAt: null,
       error,
     };
+  }
+}
+
+/**
+ * Resolve a stored model (an alias like "opus", or a specific id) to the id
+ * to send upstream, against the live catalog: an alias means the newest
+ * model of its family the workspace's credential can see (see
+ * `mergeLiveModels`), falling back to the baseline when there is no probe.
+ * A specific id passes through.
+ */
+export async function resolveLiveModelId(
+  provider: AgentProviderId,
+  input: string | null | undefined,
+  opts: Pick<GetOptions, "workspaceId"> = {},
+): Promise<string | undefined> {
+  const wanted = input?.trim() || undefined;
+  if (wanted && !Object.hasOwn(PROVIDER_CATALOGS[provider].aliases, wanted)) return wanted;
+  try {
+    const { catalog } = await getProviderOptions(provider, { workspaceId: opts.workspaceId });
+    if (wanted) return catalog.aliases[wanted] ?? resolveModelId(provider, wanted);
+    return catalog.models.find((m) => m.latest)?.id ?? resolveModelId(provider, undefined);
+  } catch {
+    return resolveModelId(provider, wanted);
   }
 }
 

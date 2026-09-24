@@ -3,16 +3,31 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as optioSettingsService from "../services/optio-settings-service.js";
 import { logAction } from "../services/optio-action-service.js";
-import { AGENT_TYPES, modelBelongsToAgentCatalog } from "@optio/shared";
+import { AGENT_TYPES, ANTHROPIC_CATALOG, modelBelongsToAgentCatalog } from "@optio/shared";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import { requireRole } from "../plugins/auth.js";
+
+const MODEL_ALIASES = Object.keys(ANTHROPIC_CATALOG.aliases).join(" / ");
+
+/**
+ * An alias, or any Claude model id — not just the baseline's: the live model
+ * list offers models the baseline catalog hasn't heard of yet.
+ */
+const isOptioModel = (m: string) =>
+  Object.hasOwn(ANTHROPIC_CATALOG.aliases, m) || /^claude-[a-z0-9][a-z0-9.-]*$/.test(m);
 
 const updateSettingsSchema = z
   .object({
     model: z
-      .enum(["opus", "sonnet", "haiku"])
+      .string()
+      .trim()
+      .max(128)
+      .refine(isOptioModel, { message: `Expected ${MODEL_ALIASES} or a Claude model id` })
       .optional()
-      .describe("Claude model for the Optio assistant"),
+      .describe(
+        `Claude model for the Optio assistant: an alias (${MODEL_ALIASES}) that always ` +
+          "means the newest model of that family, or a specific model id",
+      ),
     systemPrompt: z.string().optional(),
     enabledTools: z
       .array(z.string())

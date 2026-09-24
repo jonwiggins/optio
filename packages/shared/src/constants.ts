@@ -7,6 +7,12 @@ export const DEFAULT_MAX_TURNS_CODING = 250;
 export const DEFAULT_MAX_TURNS_REVIEW = 30;
 export const DEFAULT_MAX_TICKET_PAGES = 20;
 
+/**
+ * The Optio assistant's model until someone picks another: an alias, so it
+ * is always the newest Opus (resolved against the live model list).
+ */
+export const DEFAULT_OPTIO_AGENT_MODEL: string = "opus";
+
 // ── Shared directory (cache) defaults ─────────────────────────────────────────
 export const DEFAULT_CACHE_SIZE_GI = 10;
 export const MAX_CACHE_SIZE_PER_DIR_GI = 100;

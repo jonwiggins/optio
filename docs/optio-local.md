@@ -21,6 +21,15 @@ server never ships secrets to your machine.
 - **Host** (`local_hosts`) — one paired machine, bound to the registering **user** (hosts
   are personal, never workspace-shared compute). Carries an allowlist of directories, each
   with an auto-detected git remote. Online/offline tracked via daemon heartbeat.
+  **Directories** live in the machine's `local.json` and belong to its daemon: the CLI's
+  `optio local add|remove` edit them there, and the Machines page / New work form edit
+  them through the daemon (`POST|DELETE /api/local/hosts/:id/dirs` → a `dirs` frame; the
+  daemon resolves `~` and symlinks, checks the directory exists, detects its remote,
+  saves, and answers with the whole new list, which the row mirrors). From Optio a path must be absolute or under `~`,
+  and `/` is refused. `optio local up --no-remote-dirs` keeps the list local-only (the hello
+  then doesn't set `manageDirs`, and the server never asks). A shell in any allowlisted
+  directory can already reach the rest of the account, so the list scopes where work runs
+  rather than fencing the machine off from its owner.
   **Identity**: the daemon keeps the host id each server gave it (`local.json`, per server
   URL) and sends it back on every registration, so a machine keeps its row — terminals,
   automations, resumable sessions — when its hostname changes (macOS renames itself as it
@@ -318,7 +327,13 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   (its id from last time), else upsert by `(userId, hostname)`; body
   `{hostId?, name?, hostname, platform, arch, daemonVersion, dirs: [{path, repoUrl?}]}` →
   `{host}` (see "Identity" under Host)
-- `GET /api/local/hosts` / `DELETE /api/local/hosts/:id`
+- `GET /api/local/hosts` / `DELETE /api/local/hosts/:id` — each host carries the live
+  `claudeCredentials` and `manageDirs` of its connected daemon (false while offline)
+- `POST /api/local/hosts/:id/dirs` `{path}` / `DELETE /api/local/hosts/:id/dirs?path=` —
+  add / remove an allowlisted directory through the machine's daemon (see Host above) →
+  `{host, path}` with `path` as the machine resolved it; 400 with the daemon's reason (no
+  such directory, not in the list, a relative path), 409 while the machine is offline or its
+  daemon didn't offer `manageDirs`, 504 when it doesn't answer within 10 s
 - `POST /api/local/hosts/:id/merge` — `{intoHostId}`: one computer registered twice;
   moves this (offline) host's terminals, automations, and run locations to `intoHostId`,
   removes it, and starts terminals that were waiting for it → `{host, moved: {terminals,
@@ -374,7 +389,7 @@ single quoted argv element, never interpolated into shell syntax; a prompt that 
 Daemon → server:
 
 - `{type:"hello", hostId, daemonVersion, dirs, terminals:[{terminalId, running}],
-claudeCredentials?, transcriptBackfill?}` — first frame; server reconciles DB rows against `terminals` (rows believed running that
+claudeCredentials?, transcriptBackfill?, manageDirs?}` — first frame; server reconciles DB rows against `terminals` (rows believed running that
   the daemon doesn't have → `exited`, reason `daemon_restart`) and flushes
   `pending/host_offline` spawns.
 - `{type:"started", terminalId}` / `{type:"spawn-error", terminalId, message}`
@@ -409,6 +424,9 @@ toolUseId, isError, at}]}` — new conversation entries distilled from the agent
   session runs, and flushed once more just before `exit`. Accepted only from the owning host
   while the row is live; the server bounds text (16 KB) / detail (8 KB) and caps a terminal
   at 20 000 entries
+- `{type:"dirs-result", requestId, dirs?, path?, error?}` — answer to `dirs`: the whole
+  allowlist after the change (stored as the host's `dirs`) and the directory as resolved, or
+  why the daemon refused
 - `{type:"transcript-backfill", requestId, terminalId, entries, done, error?}` — answer to
   `transcript-request`: a finished session's whole conversation read off disk, batched
   (40 per frame) with `seq` from 1; `done` on the last frame, `error` when there was
@@ -436,6 +454,9 @@ Server → daemon:
 - `{type:"credentials", requestId}` — ask for the machine's Claude OAuth access token
 - `{type:"transcript-request", requestId, terminalId, agent, agentSessionId}` — read a
   finished session's conversation off disk (see "Backfill" above)
+- `{type:"dirs", requestId, op:"add"|"remove", path}` — change the allowlist, as
+  `optio local add|remove` would on the machine; only sent to daemons whose hello set
+  `manageDirs` (`services/local-dirs-service.ts`, `cli/src/local/dir-allowlist.ts`)
 - `{type:"pong"}`
 
 Host liveness: sweeper marks hosts offline after 90 s without a ping and fails
@@ -459,7 +480,14 @@ eliminates the classic "pasted JSON swallowed as control" bug):
 
 - `/sessions` — local terminals are rows in the unified sessions list (the old `/local`
   cockpit redirects here; `/local?new=1` redirects to `/sessions/new`). Paired hosts, their
-  directories, and the **Automations** (blueprints) editor live on `/machines`.
+  directories, and the **Automations** (blueprints) editor live on `/machines`. **Add
+  machine** there (and "My machine" in the New work form while none is paired) shows the
+  pairing steps with this server's own commands — `--server` is the API as the page reaches
+  it, sign-in is skipped when auth is off — and watches for the machine to connect
+  (`components/local/pair-machine.tsx`). Each machine's directories are added and removed
+  there, and the form's Directory list has "+ Add a directory…"
+  (`components/local/host-dirs.tsx`); a machine that can't take the request shows the
+  `optio local add` command instead.
 - `/local/[id]` — focus view: full xterm.js terminal + header (title, host, dir, state,
   attention, PR / ticket badges, Kill / Start / Delete). Agent sessions with a recorded
   conversation get a **Transcript / Screen** toggle (`components/local/session-view-toggle.tsx`,
@@ -553,6 +581,7 @@ eliminates the classic "pasted JSON swallowed as control" bug):
 ## CLI
 
 - `optio local up` — register host (name defaults to `os.hostname()`), connect, serve.
+  `--no-remote-dirs`: Optio can't add or remove this machine's directories.
 - `optio local add <dir>` / `optio local remove <dir>` / `optio local dirs`
 - `optio local status` — host + terminal summary.
 - Dir list and the host id each server gave this machine persist in

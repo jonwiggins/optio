@@ -105,7 +105,7 @@ for (const { path, marker } of [
   { path: "/work", marker: /E2E: opens a PR|Work/i },
   { path: "/work?view=all", marker: /E2E: opens a PR/ },
   { path: "/work/new", marker: /New work/ },
-  { path: "/machines", marker: /No machines paired|Machines/i },
+  { path: "/machines", marker: /E2E laptop/ },
   { path: "/costs", marker: /cost/i },
   { path: "/repos", marker: /e2e-org\/e2e-repo/ },
   { path: "/connections", marker: /connection/i },

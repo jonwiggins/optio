@@ -23,6 +23,7 @@ import {
   deliverCredentialsResult,
   maybeRefreshOnHello,
 } from "../services/local-auth-refresh-service.js";
+import { deliverDirsResult } from "../services/local-dirs-service.js";
 
 const HELLO_TIMEOUT_MS = 10_000;
 
@@ -91,6 +92,7 @@ export async function localDaemonWs(app: FastifyInstance) {
         relay.registerDaemon(host.id, host.userId, socket, {
           claudeCredentials: msg.claudeCredentials === true,
           transcriptBackfill: msg.transcriptBackfill === true,
+          manageDirs: msg.manageDirs === true,
         });
         await markHostOnline(host.id, {
           dirs: msg.dirs,
@@ -182,6 +184,9 @@ export async function localDaemonWs(app: FastifyInstance) {
           return;
         case "credentials-result":
           deliverCredentialsResult(hostId, msg);
+          return;
+        case "dirs-result":
+          deliverDirsResult(hostId, msg);
           return;
         case "preview":
           await terminalService.handlePreview(

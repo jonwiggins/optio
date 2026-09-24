@@ -1,7 +1,11 @@
 import { eq, and, or, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { optioSettings } from "../db/schema.js";
-import type { OptioSettings, UpdateOptioSettingsInput } from "@optio/shared";
+import {
+  DEFAULT_OPTIO_AGENT_MODEL,
+  type OptioSettings,
+  type UpdateOptioSettingsInput,
+} from "@optio/shared";
 
 /**
  * Get settings for a workspace. Returns the settings row or sensible defaults
@@ -32,7 +36,7 @@ export async function getSettings(workspaceId?: string | null): Promise<OptioSet
   // Return defaults (no row in DB yet)
   return {
     id: "",
-    model: "sonnet",
+    model: DEFAULT_OPTIO_AGENT_MODEL,
     systemPrompt: "",
     enabledTools: [],
     confirmWrites: true,
@@ -86,7 +90,7 @@ export async function upsertSettings(
     const [row] = await db
       .insert(optioSettings)
       .values({
-        model: input.model ?? "sonnet",
+        model: input.model ?? DEFAULT_OPTIO_AGENT_MODEL,
         systemPrompt: input.systemPrompt ?? "",
         enabledTools: input.enabledTools ?? [],
         confirmWrites: input.confirmWrites ?? true,

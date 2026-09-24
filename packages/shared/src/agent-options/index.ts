@@ -153,6 +153,12 @@ export function resolveModelId(
  * and assigned to a baseline family when their id contains one (longest match
  * wins), so they slot into the UI's grouped dropdown instead of each forming
  * a single-model group.
+ *
+ * Anthropic ids carry their version, so for Anthropic the merge also keeps
+ * the aliases honest: a family's `latest` — and the alias that names it —
+ * moves to the newest model the live list has, and each family reads
+ * newest-first. "opus" is the newest Opus the key can see the day it ships,
+ * not whatever the baseline was last edited to say.
  */
 export function mergeLiveModels(
   catalog: ProviderCatalog,
@@ -170,16 +176,116 @@ export function mergeLiveModels(
     const family = families.find((f) => model.id.includes(f));
     additions.push({
       id: model.id,
-      label: model.displayName || model.id,
+      label: liveLabel(catalog.provider, model),
       ...(family ? { family } : {}),
       source: "live",
     });
   }
   if (additions.length === 0) return catalog;
-  return {
-    ...catalog,
-    models: [...catalog.models, ...additions],
-  };
+  const merged = { ...catalog, models: [...catalog.models, ...additions] };
+  return catalog.provider === "anthropic" ? promoteNewestInFamily(merged) : merged;
+}
+
+/**
+ * The UI label for a live model. Anthropic's display names repeat the brand
+ * ("Claude Opus 5"); the baseline's labels don't ("Opus 4.8"), so a family
+ * reads as one list.
+ */
+function liveLabel(provider: AgentProviderId, model: LiveModel): string {
+  if (!model.displayName) return model.id;
+  return provider === "anthropic"
+    ? model.displayName.replace(/^Claude\s+/i, "") || model.displayName
+    : model.displayName;
+}
+
+/**
+ * An Anthropic model id's version: `claude-opus-5-5` → [5, 5],
+ * `claude-sonnet-5` → [5], the older `claude-3-5-haiku-20241022` → [3, 5].
+ * Date stamps are skipped. Null when the id carries no version.
+ */
+export function anthropicModelVersion(id: string): number[] | null {
+  const parts = id
+    .toLowerCase()
+    .split("-")
+    .filter((p) => /^\d{1,2}$/.test(p));
+  return parts.length > 0 ? parts.map(Number) : null;
+}
+
+function compareVersions(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * Point each family's `latest` flag, and the aliases that named the old
+ * latest, at the family's highest version (previews never win), and sort
+ * each family newest-first. A family whose baseline latest is already the
+ * newest keeps it, so an equal-version live twin (an undated id next to its
+ * dated one) doesn't churn the default.
+ */
+function promoteNewestInFamily(catalog: ProviderCatalog): ProviderCatalog {
+  const newest = new Map<string, { id: string; version: number[] }>();
+  for (const m of catalog.models) {
+    const version = anthropicModelVersion(m.id);
+    if (!m.family || !version || m.preview) continue;
+    const best = newest.get(m.family);
+    if (!best || compareVersions(version, best.version) > 0) {
+      newest.set(m.family, { id: m.id, version });
+    }
+  }
+
+  const promoted = new Map<string, string>(); // family → new latest id
+  for (const [family, best] of newest) {
+    const current = catalog.models.find((m) => m.family === family && m.latest);
+    const currentVersion = current ? anthropicModelVersion(current.id) : null;
+    if (current && currentVersion && compareVersions(currentVersion, best.version) >= 0) continue;
+    promoted.set(family, best.id);
+  }
+
+  const models = catalog.models.map((m) => {
+    const winner = m.family ? promoted.get(m.family) : undefined;
+    if (!winner) return m;
+    const latest = m.id === winner;
+    if (Boolean(m.latest) === latest) return m;
+    if (latest) return { ...m, latest: true };
+    const demoted = { ...m };
+    delete demoted.latest;
+    return demoted;
+  });
+
+  const familyOf = new Map(catalog.models.map((m) => [m.id, m.family]));
+  const aliases = Object.fromEntries(
+    Object.entries(catalog.aliases).map(([alias, target]) => {
+      const family = familyOf.get(target);
+      return [alias, (family && promoted.get(family)) ?? target];
+    }),
+  );
+
+  // Newest-first within a family; families keep their first-seen order.
+  const firstSeen = new Map<string, number>();
+  models.forEach((m, i) => {
+    const key = m.family ?? m.id;
+    if (!firstSeen.has(key)) firstSeen.set(key, i);
+  });
+  const sorted = models
+    .map((m, i) => ({ m, i, v: anthropicModelVersion(m.id) }))
+    .sort((a, b) => {
+      const byFamily = firstSeen.get(a.m.family ?? a.m.id)! - firstSeen.get(b.m.family ?? b.m.id)!;
+      if (byFamily !== 0) return byFamily;
+      if (a.v && b.v) {
+        const byVersion = compareVersions(b.v, a.v);
+        if (byVersion !== 0) return byVersion;
+      } else if (a.v || b.v) {
+        return a.v ? -1 : 1;
+      }
+      return a.i - b.i;
+    })
+    .map(({ m }) => m);
+
+  return { ...catalog, models: sorted, aliases };
 }
 
 /**

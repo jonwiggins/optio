@@ -27,6 +27,11 @@ interface Props {
   hideRefresh?: boolean;
   /** Render only the model control (e.g. a local run, where the daemon takes just `--model`). */
   modelOnly?: boolean;
+  /**
+   * Offer each alias ("opus") as an "always the latest" choice and keep a
+   * stored alias as the alias, instead of showing the model it names today.
+   */
+  latestAliases?: boolean;
 }
 
 const DEFAULT_INPUT_CLASS =
@@ -67,6 +72,7 @@ export function AgentOptionsPicker({
   inputClass = DEFAULT_INPUT_CLASS,
   hideRefresh = false,
   modelOnly = false,
+  latestAliases = false,
 }: Props) {
   const baseline = getProviderCatalog(provider);
 
@@ -116,10 +122,17 @@ export function AgentOptionsPicker({
 
   const catalog = live?.catalog ?? baseline;
   // A stored alias ("opus") shows as the model it resolves to, so the select
-  // matches an option instead of silently displaying the first one.
+  // matches an option instead of silently displaying the first one — unless
+  // the aliases are choices of their own.
   const rawModel = String(values[catalog.modelField] ?? "");
-  const modelValue = catalog.aliases[rawModel] ?? rawModel;
+  const isAlias = Object.hasOwn(catalog.aliases, rawModel);
+  const modelValue = isAlias && !latestAliases ? catalog.aliases[rawModel] : rawModel;
   const canRefresh = catalog.liveRefreshSupported && !hideRefresh;
+  const labelOf = (id: string) => catalog.models.find((m) => m.id === id)?.label ?? id;
+  // A saved model the list doesn't offer (the live list is down, or it was
+  // retired) still shows as itself rather than as whichever option is first.
+  const unlisted =
+    !!modelValue && !(latestAliases && isAlias) && !catalog.models.some((m) => m.id === modelValue);
 
   const setField = (key: string, value: string | boolean) => {
     onChange({ ...values, [key]: value });
@@ -169,6 +182,16 @@ export function AgentOptionsPicker({
               className={inputClass}
             >
               {!modelValue && <option value="">Default</option>}
+              {unlisted && <option value={modelValue}>{modelValue}</option>}
+              {latestAliases && Object.keys(catalog.aliases).length > 0 && (
+                <optgroup label="Always the latest">
+                  {Object.entries(catalog.aliases).map(([alias, id]) => (
+                    <option key={alias} value={alias}>
+                      {alias.charAt(0).toUpperCase() + alias.slice(1)} · now {labelOf(id)}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
               {modelGroups.length === 1 && modelGroups[0].family === modelGroups[0].models[0].id
                 ? modelGroups[0].models.map((m) => (
                     <option key={m.id} value={m.id}>
@@ -190,6 +213,12 @@ export function AgentOptionsPicker({
                     </optgroup>
                   ))}
             </select>
+          )}
+          {latestAliases && !catalog.modelIsFreeText && (
+            <p className="text-[11px] text-text-muted mt-1">
+              &ldquo;Always the latest&rdquo; moves to each new release on its own; a specific
+              version stays put.
+            </p>
           )}
         </div>
 

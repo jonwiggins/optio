@@ -1,13 +1,18 @@
 # @optio/cli
 
 Terminal-first client for the Optio API. Ships as a standalone `optio` command
-installable via `npm install -g @optio/cli` (Node >= 20).
+(Node >= 20).
 
 ## Install
 
+`@optio/cli` isn't published to npm yet — build it from a checkout of this repo:
+
 ```bash
-npm install -g @optio/cli
+pnpm install --filter "@optio/cli..." && pnpm --filter @optio/cli build
+alias optio="node $PWD/apps/cli/dist/optio.js"   # from the repo root
 ```
+
+The web UI's **Machines → Add machine** shows these steps with your server's URL filled in.
 
 ## Quickstart
 

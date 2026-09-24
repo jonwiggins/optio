@@ -1441,6 +1441,13 @@ data class LocalHost(
      * Live (from the daemon's hello), so false whenever the host is offline.
      */
     val claudeCredentials: Boolean? = null,
+    /**
+     * Whether the connected daemon adds and removes allowlisted directories
+     * when asked from Optio (the Machines page, the New work form) — the same
+     * as `optio local add|remove` on the machine. Live (from the daemon's
+     * hello), so false whenever the host is offline.
+     */
+    val manageDirs: Boolean? = null,
     val state: LocalHostState,
     val lastSeenAt: String? = null,
     val createdAt: String,
@@ -1781,6 +1788,16 @@ sealed interface LocalDaemonMessage {
         val claudeCredentials: Boolean? = null,
         /** The daemon answers `transcript-request` (reads a finished session's conversation off disk). */
         val transcriptBackfill: Boolean? = null,
+        /** The daemon answers `dirs` (adds / removes an allowlisted directory when asked from Optio). */
+        val manageDirs: Boolean? = null,
+    ) : LocalDaemonMessage
+
+    @Serializable
+    data class DirsResult(
+        val requestId: String,
+        val dirs: List<LocalHostDir>? = null,
+        val path: String? = null,
+        val error: String? = null,
     ) : LocalDaemonMessage
 
     @Serializable
@@ -1903,6 +1920,7 @@ sealed interface LocalDaemonMessage {
     object Serializer : DiscriminatedUnionSerializer<LocalDaemonMessage>("dev.optio.core.model.LocalDaemonMessage", "type") {
         override fun decode(tag: String, element: JsonObject, json: Json): LocalDaemonMessage? = when (tag) {
             "hello" -> json.decodeFromJsonElement(Hello.serializer(), element.withoutDiscriminator())
+            "dirs-result" -> json.decodeFromJsonElement(DirsResult.serializer(), element.withoutDiscriminator())
             "credentials-result" -> json.decodeFromJsonElement(CredentialsResult.serializer(), element.withoutDiscriminator())
             "started" -> json.decodeFromJsonElement(Started.serializer(), element.withoutDiscriminator())
             "spawn-error" -> json.decodeFromJsonElement(SpawnError.serializer(), element.withoutDiscriminator())
@@ -1926,6 +1944,7 @@ sealed interface LocalDaemonMessage {
 
         override fun encode(value: LocalDaemonMessage, json: Json): JsonElement = when (value) {
             is Hello -> tagged("hello", json.encodeToJsonElement(Hello.serializer(), value))
+            is DirsResult -> tagged("dirs-result", json.encodeToJsonElement(DirsResult.serializer(), value))
             is CredentialsResult -> tagged("credentials-result", json.encodeToJsonElement(CredentialsResult.serializer(), value))
             is Started -> tagged("started", json.encodeToJsonElement(Started.serializer(), value))
             is SpawnError -> tagged("spawn-error", json.encodeToJsonElement(SpawnError.serializer(), value))
@@ -2005,6 +2024,13 @@ sealed interface LocalServerMessage {
         val agentSessionId: String,
     ) : LocalServerMessage
 
+    @Serializable
+    data class Dirs(
+        val requestId: String,
+        val op: LocalDirOp,
+        val path: String,
+    ) : LocalServerMessage
+
     data object Pong : LocalServerMessage
 
     /** Fallback for discriminator values this client does not know about yet. */
@@ -2020,6 +2046,7 @@ sealed interface LocalServerMessage {
             "detach" -> json.decodeFromJsonElement(Detach.serializer(), element.withoutDiscriminator())
             "credentials" -> json.decodeFromJsonElement(Credentials.serializer(), element.withoutDiscriminator())
             "transcript-request" -> json.decodeFromJsonElement(TranscriptRequest.serializer(), element.withoutDiscriminator())
+            "dirs" -> json.decodeFromJsonElement(Dirs.serializer(), element.withoutDiscriminator())
             "pong" -> Pong
             else -> null
         }
@@ -2033,12 +2060,23 @@ sealed interface LocalServerMessage {
             is Detach -> tagged("detach", json.encodeToJsonElement(Detach.serializer(), value))
             is Credentials -> tagged("credentials", json.encodeToJsonElement(Credentials.serializer(), value))
             is TranscriptRequest -> tagged("transcript-request", json.encodeToJsonElement(TranscriptRequest.serializer(), value))
+            is Dirs -> tagged("dirs", json.encodeToJsonElement(Dirs.serializer(), value))
             is Pong -> tagged("pong")
             is Unknown -> value.raw
         }
 
         override fun unknown(raw: JsonElement): LocalServerMessage = Unknown(raw)
     }
+}
+
+@Serializable(with = LocalDirOp.Companion::class)
+enum class LocalDirOp(override val raw: String) : RawEnum {
+    ADD("add"),
+    REMOVE("remove"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<LocalDirOp>("dev.optio.core.model.LocalDirOp", entries, UNKNOWN)
 }
 
 @Serializable(with = LocalStreamServerMessage.Serializer::class)
@@ -2350,7 +2388,10 @@ data class OptioAction(
 @Serializable
 data class OptioSettings(
     val id: String,
-    /** "opus" | "sonnet" | "haiku" */
+    /**
+     * An alias ("opus", "sonnet", "haiku", "fable": always the newest of that
+     * family) or a specific model id, pinned.
+     */
     val model: String,
     val systemPrompt: String,
     val enabledTools: List<String>,

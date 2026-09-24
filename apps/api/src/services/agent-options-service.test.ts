@@ -25,7 +25,7 @@ vi.mock("./event-bus.js", () => ({
   }),
 }));
 
-import { getProviderOptions } from "./agent-options-service.js";
+import { getProviderOptions, resolveLiveModelId } from "./agent-options-service.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -119,8 +119,20 @@ describe("getProviderOptions", () => {
 
     const result = await getProviderOptions("anthropic");
     const added = result.catalog.models.find((m) => m.id === "claude-opus-5");
-    expect(added?.label).toBe("Claude Opus 5");
+    // Brand prefix dropped so it reads like the baseline's "Opus 4.8".
+    expect(added?.label).toBe("Opus 5");
     expect(added?.family).toBe("opus");
+  });
+
+  it("gives up on a hung upstream and serves the baseline", async () => {
+    mockRetrieveSecret.mockResolvedValueOnce("sk-ant-xxx");
+    const fetchSpy = vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const result = await getProviderOptions("anthropic");
+    expect(result.source).toBe("baseline");
+    expect(result.error).toMatch(/timed out/);
+    expect(fetchSpy.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
   });
 
   it("probes upstream and merges when no cache entry exists", async () => {
@@ -225,5 +237,51 @@ describe("getProviderOptions", () => {
     // already in the baseline — not duplicated
     const geminiThreeProEntries = result.catalog.models.filter((m) => m.id === "gemini-3-pro");
     expect(geminiThreeProEntries.length).toBe(1);
+  });
+});
+
+describe("resolveLiveModelId", () => {
+  beforeEach(() => {
+    mockRetrieveSecret.mockReset();
+    mockRedisGet.mockReset();
+    mockRedisSet.mockReset();
+    mockRedisGet.mockResolvedValue(null);
+    mockRedisSet.mockResolvedValue("OK");
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const liveList = (ids: string[]) =>
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: ids.map((id) => ({ id })) }),
+    }) as unknown as typeof fetch;
+
+  it("resolves an alias to the newest live model of its family", async () => {
+    mockRetrieveSecret.mockResolvedValueOnce("sk-ant-xxx");
+    globalThis.fetch = liveList(["claude-opus-5-5", "claude-opus-4-8"]);
+    expect(await resolveLiveModelId("anthropic", "opus")).toBe("claude-opus-5-5");
+  });
+
+  it("falls back to the baseline alias without a live list", async () => {
+    mockRetrieveSecret.mockRejectedValue(new Error("Secret not found"));
+    expect(await resolveLiveModelId("anthropic", "opus")).toBe("claude-opus-4-8");
+  });
+
+  it("passes a pinned id through without probing", async () => {
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    expect(await resolveLiveModelId("anthropic", "claude-sonnet-4-5")).toBe("claude-sonnet-4-5");
+    expect(await resolveLiveModelId("anthropic", "constructor")).toBe("constructor");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockRetrieveSecret).not.toHaveBeenCalled();
+  });
+
+  it("picks the newest latest model when nothing is stored", async () => {
+    mockRetrieveSecret.mockResolvedValueOnce("sk-ant-xxx");
+    globalThis.fetch = liveList(["claude-opus-5-5"]);
+    expect(await resolveLiveModelId("anthropic", "  ")).toBe("claude-opus-5-5");
   });
 });

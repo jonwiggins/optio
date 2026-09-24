@@ -244,6 +244,24 @@ export async function markHostOnline(
   if (row) await notifyHostChanged(row);
 }
 
+/**
+ * The allowlist the daemon reported after changing it on Optio's request
+ * (see local-dirs-service.ts). Returns the updated row, or null when the
+ * host is gone.
+ */
+export async function setHostDirs(id: string, dirs: LocalHostDir[]): Promise<LocalHostRow | null> {
+  const [row] = await db
+    .update(localHosts)
+    .set({ dirs: sanitizeDirs(dirs), updatedAt: new Date() })
+    .where(eq(localHosts.id, id))
+    .returning();
+  if (!row) return null;
+  await publishLocalChanged({ terminalId: null, hostId: row.id, userId: row.userId }).catch((err) =>
+    logger.warn({ err, hostId: row.id }, "local: failed to publish host dirs change"),
+  );
+  return row;
+}
+
 export async function markHostOffline(id: string): Promise<void> {
   const [row] = await db
     .update(localHosts)

@@ -1,29 +1,44 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ExternalLink, FolderGit2, Laptop, Merge, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderPlus, Laptop, Merge, Plus, RefreshCw, X } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
 import { PageHeader } from "@/components/page-header";
-import { EmptyState } from "@/components/empty-state";
-import { shortDir } from "@/lib/work-feed";
 import { AutomationsSection } from "@/components/local/automations-section";
 import { likelySameComputer, mergeTargets } from "@/components/local/host-merge";
+import { PairMachineGuide } from "@/components/local/pair-machine";
+import { AddDirForm, HostDirList, dirsLockedReason } from "@/components/local/host-dirs";
 
 /**
  * Your paired machines (Optio Local hosts) and the directories each one
  * offers as a place to run work. Pairing is setup, not daily work, so
- * this lives in the Library next to Repos. Local Automations (agent /
- * terminal specs that fire on events in one of these directories) are
- * edited here too — they're per-machine configuration, not live work.
+ * this lives in the Library next to Repos. "Add machine" walks through
+ * pairing another computer; each machine's directories are added and
+ * removed here, through its daemon. Local Automations (agent / terminal
+ * specs that fire on events in one of these directories) are edited here
+ * too — they're per-machine configuration, not live work.
  */
 export default function MachinesPage() {
   usePageTitle("Machines");
-  const { hosts, loading, refetch } = useLocalHosts();
+  const [pairing, setPairing] = useState(false);
+  // Poll faster while someone is pairing a machine, so it shows up as it connects.
+  const [fastPoll, setFastPoll] = useState(false);
+  const { hosts, loading, refetch, replaceHost } = useLocalHosts({
+    pollMs: fastPoll ? 3000 : undefined,
+  });
+  const noHosts = !loading && hosts.length === 0;
+  const showGuide = pairing || noHosts;
+  useEffect(() => setFastPoll(showGuide), [showGuide]);
+
+  // `/machines?pair=1` (the New work form links here) opens the guide.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("pair") === "1") setPairing(true);
+  }, []);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -32,31 +47,51 @@ export default function MachinesPage() {
         title="Machines"
         description="Computers paired with Optio Local. A session that runs “on my machine” runs in one of these directories, with that machine's own agent CLI and login."
         actions={
-          <button
-            onClick={refetch}
-            className="p-2 rounded-lg hover:bg-bg-hover text-text-muted transition-all btn-press hover:text-text"
-            title="Refresh"
-          >
-            <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
-          </button>
+          <div className="flex items-center gap-1">
+            {!showGuide && (
+              <button
+                onClick={() => setPairing(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-sm hover:bg-primary/20 transition-colors btn-press"
+              >
+                <Plus className="w-4 h-4" />
+                Add machine
+              </button>
+            )}
+            <button
+              onClick={refetch}
+              className="p-2 rounded-lg hover:bg-bg-hover text-text-muted transition-all btn-press hover:text-text"
+              title="Refresh"
+            >
+              <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+            </button>
+          </div>
         }
       />
 
+      {showGuide && (
+        <section className="rounded-xl border border-border/70 bg-bg-card/40 p-5 mb-6">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <h2 className="text-sm font-medium text-text-heading">
+              {noHosts ? "Pair your first machine" : "Pair another machine"}
+            </h2>
+            {!noHosts && (
+              <button
+                onClick={() => setPairing(false)}
+                className="p-1 -m-1 rounded text-text-muted hover:text-text"
+                title="Close"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <PairMachineGuide hosts={hosts} loading={loading} />
+        </section>
+      )}
+
       {loading && hosts.length === 0 ? (
         <div className="h-32 skeleton-shimmer rounded-lg" />
-      ) : hosts.length === 0 ? (
-        <EmptyState
-          icon={Laptop}
-          title="No machines paired"
-          description={
-            <>
-              On the computer you want to use, run <code className="font-mono">optio login</code>{" "}
-              then <code className="font-mono">optio local up</code>, and add directories with{" "}
-              <code className="font-mono">optio local add &lt;dir&gt;</code>.
-            </>
-          }
-        />
-      ) : (
+      ) : hosts.length === 0 ? null : (
         <div className="grid gap-4 md:grid-cols-2">
           {hosts.map((h: any) => (
             <div key={h.id} className="rounded-xl border border-border/70 bg-bg-card/40 p-4">
@@ -85,33 +120,10 @@ export default function MachinesPage() {
                   Work <ExternalLink className="w-3 h-3" />
                 </Link>
               </div>
-              <ul className="mt-3 space-y-1">
-                {(h.dirs ?? []).length === 0 ? (
-                  <li className="text-xs text-text-muted">
-                    No directories — run{" "}
-                    <code className="font-mono">optio local add &lt;dir&gt;</code> on this machine.
-                  </li>
-                ) : (
-                  h.dirs.map((d: any) => (
-                    <li key={d.path} className="flex items-center gap-2 text-xs">
-                      <FolderGit2
-                        className={cn(
-                          "w-3.5 h-3.5 shrink-0",
-                          d.repoUrl ? "text-primary" : "text-text-muted/50",
-                        )}
-                      />
-                      <span className="font-mono text-text truncate">{shortDir(d.path)}</span>
-                      {d.repoUrl && (
-                        <span className="text-text-muted truncate">
-                          {d.repoUrl
-                            .replace(/^(https?:\/\/[^/]+\/|git@[^:]+:)/, "")
-                            .replace(/\.git$/, "")}
-                        </span>
-                      )}
-                    </li>
-                  ))
-                )}
-              </ul>
+              <div className="mt-3">
+                <HostDirList host={h} onChanged={replaceHost} />
+                <HostDirAdder host={h} onAdded={replaceHost} />
+              </div>
               {h.state !== "online" && likelySameComputer(h, hosts) && (
                 <MergeInto source={h} hosts={hosts} onMerged={refetch} />
               )}
@@ -126,6 +138,52 @@ export default function MachinesPage() {
 }
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
+/**
+ * "Add a directory" under a machine's list — open straight away when it has
+ * none. A machine that can't take the request says what to run on it.
+ */
+function HostDirAdder({ host, onAdded }: { host: any; onAdded: (host: any) => void }) {
+  const empty = (host.dirs ?? []).length === 0;
+  const [open, setOpen] = useState(false);
+  const locked = dirsLockedReason(host);
+
+  if (locked) {
+    return (
+      <p className="text-xs text-text-muted mt-2">
+        {empty ? "No directories yet. " : ""}
+        {locked}
+      </p>
+    );
+  }
+  if (!open && !empty) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-2 inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-primary transition-colors"
+      >
+        <FolderPlus className="w-3.5 h-3.5" />
+        Add a directory
+      </button>
+    );
+  }
+  return (
+    <div className="mt-2">
+      {empty && (
+        <p className="text-xs text-text-muted mb-2">No directories yet — add one it may work in.</p>
+      )}
+      <AddDirForm
+        host={host}
+        autoFocus={open}
+        onAdded={(next) => {
+          onAdded(next);
+          setOpen(false);
+        }}
+        onCancel={empty ? undefined : () => setOpen(false)}
+      />
+    </div>
+  );
+}
 
 /**
  * A computer whose hostname changed under an older daemon shows up twice:

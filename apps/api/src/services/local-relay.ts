@@ -34,6 +34,8 @@ interface DaemonConn {
   claudeCredentials: boolean;
   /** From the hello: the daemon answers `transcript-request`. */
   transcriptBackfill: boolean;
+  /** From the hello: the daemon adds / removes allowlisted dirs on request (`dirs`). */
+  manageDirs: boolean;
 }
 
 interface PendingAttach {
@@ -65,7 +67,11 @@ export function registerDaemon(
   hostId: string,
   userId: string | null,
   socket: RelaySocket,
-  capabilities: { claudeCredentials?: boolean; transcriptBackfill?: boolean } = {},
+  capabilities: {
+    claudeCredentials?: boolean;
+    transcriptBackfill?: boolean;
+    manageDirs?: boolean;
+  } = {},
 ): void {
   const existing = daemonsByHost.get(hostId);
   if (existing && existing.socket !== socket) {
@@ -81,6 +87,7 @@ export function registerDaemon(
     socket,
     claudeCredentials: capabilities.claudeCredentials === true,
     transcriptBackfill: capabilities.transcriptBackfill === true,
+    manageDirs: capabilities.manageDirs === true,
   });
 }
 
@@ -94,6 +101,12 @@ export function hostHasClaudeCredentials(hostId: string): boolean {
 export function hostCanBackfillTranscripts(hostId: string): boolean {
   const conn = daemonsByHost.get(hostId);
   return conn !== undefined && conn.socket.readyState === WS_OPEN && conn.transcriptBackfill;
+}
+
+/** Whether the host's connected daemon adds / removes allowlisted dirs on request (false when offline). */
+export function hostCanManageDirs(hostId: string): boolean {
+  const conn = daemonsByHost.get(hostId);
+  return conn !== undefined && conn.socket.readyState === WS_OPEN && conn.manageDirs;
 }
 
 /** Online hosts whose daemon advertised Claude credentials. */

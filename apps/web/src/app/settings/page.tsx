@@ -28,13 +28,13 @@ import {
 import {
   OPTIO_TOOL_CATEGORIES,
   ALL_OPTIO_TOOL_NAMES,
-  ANTHROPIC_CATALOG,
-  resolveModelId,
+  DEFAULT_OPTIO_AGENT_MODEL,
   type AgentType,
 } from "@optio/shared";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 import { ApiKeysManager } from "@/components/settings/api-keys-manager";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
+import { AgentOptionsPicker } from "@/components/agent-options-picker";
 
 function PromptTemplateEditor() {
   const [template, setTemplate] = useState("");
@@ -1227,7 +1227,7 @@ function AuthenticationSettings() {
 }
 
 function OptioAgentSettings() {
-  const [model, setModel] = useState("sonnet");
+  const [model, setModel] = useState(DEFAULT_OPTIO_AGENT_MODEL);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [enabledTools, setEnabledTools] = useState<string[]>([...ALL_OPTIO_TOOL_NAMES]);
   const [confirmWrites, setConfirmWrites] = useState(true);
@@ -1299,25 +1299,14 @@ function OptioAgentSettings() {
 
   return (
     <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-5">
-      {/* Model Selection */}
-      <div>
-        <label className="block text-xs font-medium text-text-muted mb-1">Model</label>
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-        >
-          {Object.keys(ANTHROPIC_CATALOG.aliases).map((alias) => {
-            const id = resolveModelId("anthropic", alias);
-            const label = ANTHROPIC_CATALOG.models.find((m) => m.id === id)?.label ?? alias;
-            return (
-              <option key={alias} value={alias}>
-                {label}
-              </option>
-            );
-          })}
-        </select>
-      </div>
+      {/* Model: the live list, with each family's "always the latest" alias */}
+      <AgentOptionsPicker
+        provider="anthropic"
+        values={{ claudeModel: model }}
+        onChange={(v) => setModel(String(v.claudeModel || DEFAULT_OPTIO_AGENT_MODEL))}
+        modelOnly
+        latestAliases
+      />
 
       {/* System Prompt */}
       <div>

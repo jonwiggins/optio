@@ -21,6 +21,7 @@ import {
 } from "../config/local-store.js";
 import { dim, green, red, yellow } from "../output/colors.js";
 import { AttentionTracker } from "./attention.js";
+import { DirAllowlistError, addAllowedDir, removeAllowedDir } from "./dir-allowlist.js";
 import { detectRepoUrl } from "./git-remote.js";
 import {
   startHookServer,
@@ -64,8 +65,13 @@ interface RememberedAttention {
   acked: boolean;
 }
 
-export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
+export async function runDaemon(opts: {
+  client: ApiClient;
+  /** Optio may add / remove allowlisted directories (`--no-remote-dirs` turns it off). */
+  remoteDirs?: boolean;
+}): Promise<void> {
   const { client } = opts;
+  const remoteDirs = opts.remoteDirs !== false;
 
   const hookSettingsPath = claudeHookSettingsPath();
   writeClaudeHookSettings(hookSettingsPath);
@@ -240,8 +246,49 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
       case "transcript-request":
         answerTranscriptRequest(msg);
         return;
+      case "dirs":
+        void answerDirsRequest(msg);
+        return;
       case "pong":
         return;
+    }
+  }
+
+  /**
+   * Optio asked to add or remove an allowlisted directory (from the Machines
+   * page or the New work form) — what `optio local add|remove` does here.
+   * The answer carries the whole new list, which becomes the host's dirs.
+   */
+  async function answerDirsRequest(
+    msg: Extract<LocalServerMessage, { type: "dirs" }>,
+  ): Promise<void> {
+    const { requestId, op, path } = msg;
+    if (!remoteDirs) {
+      sendRaw({
+        type: "dirs-result",
+        requestId,
+        error:
+          "This machine's daemon runs with --no-remote-dirs — use `optio local add|remove` on it",
+      });
+      return;
+    }
+    try {
+      const change =
+        op === "add"
+          ? await addAllowedDir(path, { remote: true })
+          : removeAllowedDir(path, { remote: true });
+      sendRaw({ type: "dirs-result", requestId, dirs: change.dirs, path: change.path });
+      status(
+        op === "add"
+          ? `${change.alreadyAdded ? "refreshed" : "added"} ${change.path} (asked by Optio)`
+          : `removed ${change.path} (asked by Optio)`,
+      );
+    } catch (err) {
+      const message =
+        err instanceof DirAllowlistError
+          ? err.message
+          : `Couldn't ${op} ${path}: ${err instanceof Error ? err.message : String(err)}`;
+      sendRaw({ type: "dirs-result", requestId, error: message });
     }
   }
 
@@ -365,6 +412,7 @@ export async function runDaemon(opts: { client: ApiClient }): Promise<void> {
           terminals: manager.terminalsSync(),
           claudeCredentials,
           transcriptBackfill: true,
+          manageDirs: remoteDirs,
         };
         socket.send(JSON.stringify(hello));
         status(green(`connected to ${client.serverUrl} as host "${host.name}" (${host.id})`));

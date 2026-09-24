@@ -878,4 +878,109 @@ describe("optio local e2e: machine identity, resume, and backfill", () => {
     expect(page.backfilling).toBe(false);
     expect(page.entries.map((e) => e.text)).toEqual(["Triage PR #607", "…", "Do not merge."]);
   });
+  it("adds and removes a machine's directories through its daemon", async () => {
+    type HostDirs = HostBody["host"] & { dirs: Json[]; manageDirs?: boolean };
+    type DirBody = { host: HostDirs; path: string };
+    const hostDirs = async (id: string) => {
+      const { body } = await api<{ hosts: HostDirs[] }>("/api/local/hosts");
+      return body.hosts.find((h) => h.id === id)!;
+    };
+
+    // A daemon that didn't offer (an older CLI, or --no-remote-dirs) is never asked.
+    const older = await register({ hostname: "e2e-dirs-older" });
+    const olderDaemon = new FakeDaemon();
+    cleanups.push(() => olderDaemon.close());
+    await olderDaemon.connect(older.id, DIRS);
+    await waitFor(async () => ((await hostDirs(older.id)).state === "online" ? true : null));
+    const refused = await api<{ error: string }>(`/api/local/hosts/${older.id}/dirs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "~/src/app" }),
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/optio local add/);
+    expect((await hostDirs(older.id)).manageDirs).toBe(false);
+
+    const host = await register({ hostname: "e2e-dirs" });
+    const daemon = new FakeDaemon();
+    cleanups.push(() => daemon.close());
+    await daemon.connect(host.id, DIRS, [], { manageDirs: true });
+    await waitFor(async () => ((await hostDirs(host.id)).manageDirs ? true : null));
+
+    // Add: the daemon resolves the path and answers with its whole new list.
+    const app = { path: "/Users/e2e/src/app", repoUrl: "git@github.com:acme/app.git" };
+    const adding = api<DirBody>(`/api/local/hosts/${host.id}/dirs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "~/src/app" }),
+    });
+    const addReq = await daemon.next((m) => m.type === "dirs");
+    expect(addReq).toMatchObject({ op: "add", path: "~/src/app" });
+    daemon.send({
+      type: "dirs-result",
+      requestId: addReq.requestId,
+      path: app.path,
+      dirs: [...DIRS, app],
+    });
+    const added = await adding;
+    expect(added.status).toBe(200);
+    expect(added.body.path).toBe(app.path);
+    expect(added.body.host.dirs).toEqual([...DIRS, app]);
+    expect((await hostDirs(host.id)).dirs).toEqual([...DIRS, app]);
+
+    // Work can start there straight away.
+    const spawned = await api<TerminalBody>("/api/local/terminals", {
+      method: "POST",
+      body: JSON.stringify({ hostId: host.id, dir: app.path, spec: { kind: "shell" } }),
+    });
+    expect(spawned.body.terminal.state).not.toBe("error");
+    await daemon.next((m) => m.type === "spawn" && m.dir === app.path);
+
+    // The machine's refusal is the answer; the list doesn't change.
+    const missing = api<{ error: string }>(`/api/local/hosts/${host.id}/dirs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "/nope" }),
+    });
+    const missingReq = await daemon.next((m) => m.type === "dirs" && m.path === "/nope");
+    daemon.send({
+      type: "dirs-result",
+      requestId: missingReq.requestId,
+      error: "No such directory on this machine: /nope",
+    });
+    expect((await missing).status).toBe(400);
+    expect((await missing).body.error).toMatch(/No such directory/);
+    expect((await hostDirs(host.id)).dirs).toEqual([...DIRS, app]);
+
+    // A relative path never reaches the machine.
+    const relative = await api<{ error: string }>(`/api/local/hosts/${host.id}/dirs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "src/app" }),
+    });
+    expect(relative.status).toBe(400);
+
+    // Remove (a bodiless DELETE, the path in the query).
+    const removing = fetch(
+      `${server.baseUrl}/api/local/hosts/${host.id}/dirs?path=${encodeURIComponent(app.path)}`,
+      { method: "DELETE" },
+    );
+    const removeReq = await daemon.next((m) => m.type === "dirs" && m.op === "remove");
+    expect(removeReq.path).toBe(app.path);
+    daemon.send({
+      type: "dirs-result",
+      requestId: removeReq.requestId,
+      path: app.path,
+      dirs: DIRS,
+    });
+    const removed = await removing;
+    expect(removed.status).toBe(200);
+    expect(((await removed.json()) as DirBody).host.dirs).toEqual(DIRS);
+
+    // Offline: a clear 409, not a hang.
+    daemon.close();
+    await waitFor(async () => ((await hostDirs(host.id)).manageDirs ? null : true));
+    const offline = await api<{ error: string }>(`/api/local/hosts/${host.id}/dirs`, {
+      method: "POST",
+      body: JSON.stringify({ path: "~/src/app" }),
+    });
+    expect(offline.status).toBe(409);
+    expect(offline.body.error).toMatch(/offline/);
+  });
 });

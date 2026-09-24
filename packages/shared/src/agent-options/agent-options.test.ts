@@ -8,6 +8,7 @@ import {
   OPENCLAW_CATALOG,
   OPENCODE_CATALOG,
   PROVIDER_CATALOGS,
+  anthropicModelVersion,
   getProviderCatalog,
   groupModelsByFamily,
   mergeLiveModels,
@@ -164,8 +165,16 @@ describe("mergeLiveModels", () => {
       { id: "claude-opus-5", displayName: "Claude Opus 5" },
       { id: "claude-mystery-1" },
     ]);
-    expect(merged.models.find((m) => m.id === "claude-opus-5")!.label).toBe("Claude Opus 5");
+    // Anthropic's "Claude " prefix is dropped to match the baseline's labels.
+    expect(merged.models.find((m) => m.id === "claude-opus-5")!.label).toBe("Opus 5");
     expect(merged.models.find((m) => m.id === "claude-mystery-1")!.label).toBe("claude-mystery-1");
+  });
+
+  it("keeps other providers' display names as they are", () => {
+    const merged = mergeLiveModels(GEMINI_CATALOG, [
+      { id: "gemini-9-pro", displayName: "Gemini 9 Pro" },
+    ]);
+    expect(merged.models.find((m) => m.id === "gemini-9-pro")!.label).toBe("Gemini 9 Pro");
   });
 
   it("assigns live models to a baseline family when the id contains one", () => {
@@ -184,6 +193,92 @@ describe("mergeLiveModels", () => {
     const groups = groupModelsByFamily(merged);
     const opusGroup = groups.find((g) => g.family === "opus")!;
     expect(opusGroup.models.some((m) => m.id === "claude-opus-5")).toBe(true);
+  });
+
+  describe("Anthropic aliases follow the live list", () => {
+    const live = [
+      { id: "claude-opus-5-5", displayName: "Claude Opus 5.5" },
+      { id: "claude-sonnet-5", displayName: "Claude Sonnet 5" },
+      { id: "claude-fable-5-1", displayName: "Claude Fable 5.1" },
+      { id: "claude-3-opus-20240229", displayName: "Claude Opus 3" },
+      { id: "claude-3-5-haiku-20241022", displayName: "Claude Haiku 3.5" },
+    ];
+
+    it("moves each family's alias to its newest live model", () => {
+      const merged = mergeLiveModels(ANTHROPIC_CATALOG, live);
+      expect(merged.aliases).toEqual({
+        opus: "claude-opus-5-5",
+        sonnet: "claude-sonnet-5",
+        haiku: "claude-haiku-4-5-20251001", // Haiku 3.5 is older than the baseline's 4.5
+        fable: "claude-fable-5-1",
+      });
+    });
+
+    it("keeps exactly one latest per family, on the newest", () => {
+      const merged = mergeLiveModels(ANTHROPIC_CATALOG, live);
+      const latest = merged.models.filter((m) => m.latest).map((m) => m.id);
+      expect(latest.sort()).toEqual(
+        [
+          "claude-fable-5-1",
+          "claude-haiku-4-5-20251001",
+          "claude-opus-5-5",
+          "claude-sonnet-5",
+        ].sort(),
+      );
+    });
+
+    it("orders each family newest-first", () => {
+      const merged = mergeLiveModels(ANTHROPIC_CATALOG, live);
+      const opus = groupModelsByFamily(merged).find((g) => g.family === "opus")!;
+      expect(opus.models.map((m) => m.id)).toEqual([
+        "claude-opus-5-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-3-opus-20240229",
+      ]);
+      // Families keep their order.
+      expect(groupModelsByFamily(merged).map((g) => g.family)).toEqual([
+        "opus",
+        "sonnet",
+        "haiku",
+        "fable",
+      ]);
+    });
+
+    it("keeps the baseline's latest when the live list has nothing newer", () => {
+      const merged = mergeLiveModels(ANTHROPIC_CATALOG, [
+        "claude-3-opus-20240229",
+        "claude-opus-4-1-20250805",
+      ]);
+      expect(merged.aliases.opus).toBe("claude-opus-4-8");
+      expect(merged.models.find((m) => m.id === "claude-opus-4-8")!.latest).toBe(true);
+    });
+
+    it("doesn't touch the baseline catalog", () => {
+      mergeLiveModels(ANTHROPIC_CATALOG, live);
+      expect(ANTHROPIC_CATALOG.aliases.opus).toBe("claude-opus-4-8");
+      expect(ANTHROPIC_CATALOG.models.find((m) => m.id === "claude-opus-4-8")!.latest).toBe(true);
+    });
+
+    it("leaves other providers' aliases alone", () => {
+      const merged = mergeLiveModels(GEMINI_CATALOG, ["gemini-9-pro"]);
+      expect(merged.aliases).toEqual(GEMINI_CATALOG.aliases);
+    });
+  });
+});
+
+describe("anthropicModelVersion", () => {
+  it("reads current and legacy id shapes, skipping date stamps", () => {
+    expect(anthropicModelVersion("claude-opus-5-5")).toEqual([5, 5]);
+    expect(anthropicModelVersion("claude-sonnet-5")).toEqual([5]);
+    expect(anthropicModelVersion("claude-haiku-4-5-20251001")).toEqual([4, 5]);
+    expect(anthropicModelVersion("claude-3-5-haiku-20241022")).toEqual([3, 5]);
+    expect(anthropicModelVersion("claude-opus-4-20250514")).toEqual([4]);
+  });
+
+  it("is null for an id with no version", () => {
+    expect(anthropicModelVersion("claude-mystery")).toBeNull();
   });
 });
 

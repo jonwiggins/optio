@@ -300,10 +300,11 @@ Open the web UI and the setup wizard will walk you through configuring GitHub ac
 
 ```bash
 pnpm --filter @optio/cli build
-optio local up            # one outbound WebSocket; advertises a directory allowlist
+alias optio="node $PWD/apps/cli/dist/optio.js"   # the CLI isn't on npm yet
+optio --server http://localhost:30400 local up   # one outbound WebSocket; leave it running
 ```
 
-Your machine shows up under **Library → Machines**, and "your machine" becomes an option for **Where** on every new session.
+Your machine shows up under **Library → Machines**, and "your machine" becomes an option for **Where** on all new work. Add the directories it may work in from its card there (or `optio local add <dir>` on the machine). **Add machine** on that page shows the same steps with your server's URL filled in, including signing in when auth is on.
 
 ### Updating
 

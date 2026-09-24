@@ -1889,6 +1889,24 @@ export const api = {
 
   deleteLocalHost: (id: string) => request<{}>(`/api/local/hosts/${id}`, { method: "DELETE" }),
 
+  /**
+   * Add a directory (absolute, or under ~) to a machine's allowlist — its
+   * daemon does what `optio local add` would there. `path` in the answer is
+   * the directory as the machine resolved it.
+   */
+  addLocalHostDir: (hostId: string, path: string) =>
+    request<{ host: any; path: string }>(`/api/local/hosts/${hostId}/dirs`, {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    }),
+
+  /** Take a directory off a machine's allowlist (`optio local remove` there). */
+  removeLocalHostDir: (hostId: string, path: string) =>
+    request<{ host: any; path: string }>(
+      `/api/local/hosts/${hostId}/dirs?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
+    ),
+
   /** One computer registered twice (its hostname changed): fold `id` (offline) into `intoHostId`. */
   mergeLocalHost: (id: string, intoHostId: string) =>
     request<{

@@ -55,6 +55,13 @@ export interface LocalHost {
    * Live (from the daemon's hello), so false whenever the host is offline.
    */
   claudeCredentials?: boolean;
+  /**
+   * Whether the connected daemon adds and removes allowlisted directories
+   * when asked from Optio (the Machines page, the New work form) — the same
+   * as `optio local add|remove` on the machine. Live (from the daemon's
+   * hello), so false whenever the host is offline.
+   */
+  manageDirs?: boolean;
   state: LocalHostState;
   lastSeenAt: string | null;
   createdAt: string;
@@ -311,6 +318,21 @@ export type LocalDaemonMessage =
       claudeCredentials?: boolean;
       /** The daemon answers `transcript-request` (reads a finished session's conversation off disk). */
       transcriptBackfill?: boolean;
+      /** The daemon answers `dirs` (adds / removes an allowlisted directory when asked from Optio). */
+      manageDirs?: boolean;
+    }
+  /**
+   * Answer to `dirs`: the allowlist after the change (the host's `dirs` from
+   * then on) and the directory as the daemon resolved it (`~` expanded,
+   * symlinks followed) — or why it refused (no such directory, not in the
+   * list, …).
+   */
+  | {
+      type: "dirs-result";
+      requestId: string;
+      dirs?: LocalHostDir[];
+      path?: string;
+      error?: string;
     }
   /**
    * Answer to the server's `credentials` request: the machine's current
@@ -402,7 +424,16 @@ export type LocalServerMessage =
       agent: LocalAgentKind;
       agentSessionId: string;
     }
+  /**
+   * Add a directory to the machine's allowlist, or remove one — what
+   * `optio local add|remove <dir>` does there. `path` is absolute or under
+   * `~`. Only sent to daemons whose hello set `manageDirs`; answered with
+   * `dirs-result`.
+   */
+  | { type: "dirs"; requestId: string; op: LocalDirOp; path: string }
   | { type: "pong" };
+
+export type LocalDirOp = "add" | "remove";
 
 // ── Browser ⇄ server stream protocol (/ws/local/terminals/:id/stream) ──────
 // Server → client: binary frames are raw terminal bytes; JSON text frames are

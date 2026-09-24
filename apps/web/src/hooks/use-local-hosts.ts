@@ -23,6 +23,15 @@ export function useLocalHosts(opts: { pollMs?: number } = {}) {
     }
   }, []);
 
+  /**
+   * Take a host row an API call just returned (e.g. after adding a
+   * directory) without waiting for the next poll, so a selection made in
+   * the same breath finds it.
+   */
+  const replaceHost = useCallback((host: any) => {
+    setHosts((prev) => prev.map((h) => (h.id === host.id ? { ...h, ...host } : h)));
+  }, []);
+
   useEffect(() => {
     refetch();
     const interval = setInterval(() => {
@@ -31,5 +40,5 @@ export function useLocalHosts(opts: { pollMs?: number } = {}) {
     return () => clearInterval(interval);
   }, [refetch, opts.pollMs]);
 
-  return { hosts, loading, refetch };
+  return { hosts, loading, refetch, replaceHost };
 }

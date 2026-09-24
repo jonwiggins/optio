@@ -155,13 +155,27 @@ describe("PUT /api/optio/settings", () => {
   });
 
   it("rejects invalid model", async () => {
-    const res = await app.inject({
-      method: "PUT",
-      url: "/api/optio/settings",
-      payload: { model: "gpt-4" },
-    });
+    for (const model of ["gpt-4", "claude opus", "", "constructor"]) {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/optio/settings",
+        payload: { model },
+      });
+      expect(res.statusCode, model).toBe(400);
+    }
+  });
 
-    expect(res.statusCode).toBe(400);
+  it("accepts every alias and a pinned Claude id the baseline doesn't list", async () => {
+    mockUpsertSettings.mockResolvedValue(defaultSettings);
+    for (const model of ["opus", "sonnet", "haiku", "fable", "claude-opus-5-5"]) {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/optio/settings",
+        payload: { model },
+      });
+      expect(res.statusCode, model).toBe(200);
+      expect(mockUpsertSettings).toHaveBeenLastCalledWith({ model }, "ws-1");
+    }
   });
 
   it("rejects maxTurns below 5", async () => {

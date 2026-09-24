@@ -1,6 +1,10 @@
 export interface OptioSettings {
   id: string;
-  model: string; // "opus" | "sonnet" | "haiku"
+  /**
+   * An alias ("opus", "sonnet", "haiku", "fable": always the newest of that
+   * family) or a specific model id, pinned.
+   */
+  model: string;
   systemPrompt: string;
   enabledTools: string[];
   confirmWrites: boolean;
