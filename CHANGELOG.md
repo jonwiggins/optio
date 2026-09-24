@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-24
+
+### Added
+
+- **Add machine** on the Machines page walks through pairing a computer with Optio Local: the commands come with this server's URL filled in (sign-in is skipped when auth is off), and the page says when the machine connects. `@optio/cli` isn't on npm yet, so the steps — and the READMEs — build it from a checkout.
+- **Directories from the UI** — add and remove a machine's directories from its card on the Machines page, or with **+ Add a directory…** in the New work form. The machine's daemon makes the change, as `optio local add` would there (it expands `~`, checks the directory exists, and detects its git remote); `optio local up --no-remote-dirs` keeps a machine's list local-only. Restart `optio local up` on each machine to pick this up.
+- **"Always the latest" models** — the Optio agent's model picker reads the live model list and offers each family's alias ("Opus · now Opus 5.5") above the specific versions.
+
+### Changed
+
+- The Optio agent defaults to **Opus** — the newest one — instead of Sonnet. Settings you've already saved keep their model.
+- Model aliases follow the live model list: "opus", "sonnet", and "fable" mean the newest model of that family the configured key can see, and each family lists newest first, so "(latest)" is right in every model picker.
+
+### Fixed
+
+- "My machine" in the New work form dead-ended in an empty Machine list and a "Pick a directory…" placeholder when no machine was paired (the Interactive chat and Terminal examples picked it anyway); it now shows how to pair one and picks the machine up when it connects.
+- The Optio agent's model could only be saved as opus, sonnet, or haiku — picking Fable failed to save; any Claude model id is accepted now.
+- A provider's list-models probe times out instead of holding a request open when the provider doesn't answer.
+
 ## [0.6.0] - 2026-09-23
 
 ### Added
