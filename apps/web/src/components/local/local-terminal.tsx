@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { installTerminalLinks } from "@/lib/terminal-links";
 import { Maximize2 } from "lucide-react";
 import {
   BASE_FONT_PX,
@@ -13,7 +14,6 @@ import {
   type Grid,
   type SizingMode,
 } from "./sizing";
-import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
 import { getWsTokenProvider } from "@/lib/ws-auth";
@@ -99,7 +99,7 @@ export function LocalTerminal({
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon());
+    installTerminalLinks(term);
 
     // Shift+Enter → newline in agent REPLs (see SHIFT_ENTER_SEQUENCE). Only
     // the bare Shift chord: Ctrl/⌘+Shift+Enter belongs to the rail.

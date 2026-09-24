@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Links in a session open on **⌘-click** (Ctrl-click off a Mac), straight into a new tab. Clicking a link no longer asks "Do you want to navigate to…?" every time, and a plain click stays a click in the terminal. On a touch screen a tap still opens it.
+
 ## [0.6.2] - 2026-09-24
 
 ### Added

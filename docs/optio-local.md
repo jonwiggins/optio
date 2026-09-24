@@ -563,7 +563,11 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   rail header and the ⊞ button in the terminal header; persisted in `localStorage`,
   wide screens only — `components/local/rail-store.ts`). Inside the terminal,
   `Shift+↵` sends `ESC CR` (what `claude /terminal-setup` installs) so Claude Code inserts
-  a newline instead of submitting; `components/local/conn-state.ts`. On a Mac, Option
+  a newline instead of submitting; `components/local/conn-state.ts`. Links in the
+  terminal — OSC 8 hyperlinks (Claude Code and gh print PR links that way) and URLs in
+  the text — open on ⌘-click (Ctrl-click off a Mac), straight into a new tab with no
+  "Do you want to navigate to…?" prompt; a plain click stays a click in the terminal, and
+  a tap opens on a touch screen (`lib/terminal-links.ts`, every web terminal). On a Mac, Option
   keys reach the agent as a Mac terminal sends them (`⌥↑` is `ESC[1;3A`, Codex's key for
   answering a question or editing a queued message). This relies on
   `apps/web/next.config.ts` including xterm.js unparsed: webpack's `process` polyfill

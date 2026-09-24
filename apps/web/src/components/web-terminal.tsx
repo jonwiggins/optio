@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
+import { installTerminalLinks } from "@/lib/terminal-links";
 import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
 
@@ -35,7 +35,7 @@ export function WebTerminal({ taskId }: { taskId: string }) {
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon());
+    installTerminalLinks(term);
     term.open(containerRef.current);
     fitAddon.fit();
     termRef.current = term;
