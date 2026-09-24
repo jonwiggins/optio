@@ -1779,14 +1779,23 @@ export const api = {
     }),
 
   // Agent Options — per-provider model & runtime-option catalog
-  getAgentProviderOptions: (provider: string, opts?: { refresh?: boolean }) => {
-    const qs = opts?.refresh ? "?refresh=true" : "";
+  /**
+   * `hostId`: a run on that machine — Codex's models as that machine's Codex
+   * lists them (otherwise the freshest list any of your machines reported).
+   */
+  getAgentProviderOptions: (provider: string, opts?: { refresh?: boolean; hostId?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.refresh) params.set("refresh", "true");
+    if (opts?.hostId) params.set("hostId", opts.hostId);
+    const qs = params.size ? `?${params}` : "";
     return request<{
       provider: string;
       source: "baseline" | "live";
       cached: boolean;
       refreshedAt: number | null;
       error?: string;
+      /** Where a machine-reported list came from ("Codex on MacBook-Pro"). */
+      liveFrom?: string;
       catalog: unknown;
     }>(`/api/agents/${provider}/options${qs}`);
   },
@@ -1970,7 +1979,17 @@ export const api = {
     spec?:
       | { kind: "shell" }
       | { kind: "command"; command: string }
-      | { kind: "agent"; agent: string; prompt?: string; model?: string; baseBranch?: string };
+      | {
+          kind: "agent";
+          agent: string;
+          prompt?: string;
+          model?: string;
+          /** Claude Code `--effort` / Codex reasoning effort. */
+          effort?: string;
+          /** Claude Code's `--permission-mode` (the daemon's default is auto). */
+          permissionMode?: "auto" | "bypassPermissions" | "default";
+          baseBranch?: string;
+        };
     ticket?: {
       repoId: string;
       issueNumber: number;
@@ -2026,6 +2045,8 @@ export const api = {
     spawnMode?: "auto" | "hold";
     /** Agent spawns: stay open for chat (default) or exit when the turn is done. */
     sessionMode?: "interactive" | "headless";
+    /** Agent spawns: model, effort, permission mode (keyed like the catalog); null = the machine's own. */
+    agentOptions?: Record<string, string | boolean> | null;
   }) =>
     request<{ blueprint: any }>("/api/local/blueprints", {
       method: "POST",
@@ -2050,6 +2071,7 @@ export const api = {
       agent: "claude-code" | "codex" | "cursor" | "gemini" | "opencode" | null;
       spawnMode: "auto" | "hold";
       sessionMode: "interactive" | "headless";
+      agentOptions: Record<string, string | boolean> | null;
       enabled: boolean;
     }>,
   ) =>

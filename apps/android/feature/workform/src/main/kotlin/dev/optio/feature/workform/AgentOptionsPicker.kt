@@ -50,8 +50,10 @@ internal fun AgentOptionsPicker(
         )
     }
     if (modelOnly || catalog == null) return
+    // Every field here goes to a pod run (a run on a machine is model-only).
+    val fields = catalog.options.filter { it.appliesToPods }
 
-    catalog.options.filter { it.kind == "select" }.forEach { field ->
+    fields.filter { it.kind == "select" }.forEach { field ->
         RowDivider()
         val current = values[field.key]?.stringValue ?: field.defaultString
         val choices = field.choices.orEmpty()
@@ -64,7 +66,7 @@ internal fun AgentOptionsPicker(
             }
         }
     }
-    catalog.options.filter { it.kind == "boolean" }.forEach { field ->
+    fields.filter { it.kind == "boolean" }.forEach { field ->
         RowDivider()
         SwitchRow(
             title = field.label,
@@ -73,7 +75,7 @@ internal fun AgentOptionsPicker(
             onCheckedChange = { onChange(field.key, OptionValue.Bool(it)) },
         )
     }
-    catalog.options.filter { it.kind == "text" }.forEach { field ->
+    fields.filter { it.kind == "text" }.forEach { field ->
         RowDivider()
         ValueField(
             label = field.label,

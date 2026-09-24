@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Codex's own models and effort levels** — each machine's daemon asks its Codex which models it offers (`codex debug models`) and reports them with their reasoning efforts, so the New work form lists the latest Codex models (GPT-5.6-Sol, -Terra, -Luna, …) as Codex does, and a **Reasoning effort** picker shows only the levels the chosen model takes. A run on a machine uses that machine's list. Codex runs in pods now get the model and effort too; they used to run Codex's default model. Restart `optio local up` to pick this up.
+- **Codex limits in sessions** — a Codex session's header shows Codex's 5-hour and weekly limits (from its session log, updated after each turn). A plain terminal on a machine where Codex ran recently shows them next to Claude's.
+- Runs on a machine can set the **effort** (Claude Code and Codex) and, for Claude Code, the **permission mode**.
+- A **Sessions** button on the Work list opens the session screen at the session that has waited on you longest, else the most recently active one.
+
+### Changed
+
+- Claude Code agents on your machine start in **auto** permission mode (`--permission-mode auto`): Claude's classifier approves routine edits and commands and blocks risky ones, so an agent no longer stalls on permission prompts. A headless run could previously do nothing that needed approval. Choose **Skip all checks** (`--dangerously-skip-permissions`) or **Ask first** per run in the New work form. A Claude Code too old for auto mode starts in its own default. Restart `optio local up` to pick this up.
+
+- A session started by a trigger names its source on its badge (GitHub, Slack, Linear, schedule, webhook) instead of "trigger".
+- PR and ticket badges are a size larger.
+
+### Fixed
+
+- **Killing a session** leaves it in Finished. Its last hook or shutdown output used to put it back under Working, and an automation's session landed in Needs you on exit. The run behind a killed session now ends cleanly: an interactive run completes (closing it is how it ends), and a headless run stops without a retry. Before, the kill's non-zero exit failed the run, which could retry.
+- The same PR no longer shows as two badges (a bare `#607` and its URL, or the PR a review-request automation started for), and a PR URL ending a line no longer picks up digits from the next one (`#612` showing up again as `#61219`).
+- Codex runs no longer pick up the repo's Copilot model and effort, which share its settings columns.
+- **⌥↑ / ⌥↓ in the web terminal on a Mac** reached the program as Ctrl+↑ / Ctrl+↓, so Codex's "answer the question" key (⌥↑) did nothing. xterm.js mistook the web bundle for Node and dropped all its Mac key handling, which also sent Option-typed characters as Esc+letter.
+
 ## [0.6.1] - 2026-09-24
 
 ### Added

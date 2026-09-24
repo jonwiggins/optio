@@ -21,6 +21,7 @@ import {
   handleSpawnError,
   handleStarted,
   handleUsage,
+  killTerminal,
 } from "./local-terminal-service.js";
 import {
   cancelWorkflowRun,
@@ -251,6 +252,88 @@ describe("local job runs", () => {
     const after = (await getWorkflowRun(run.id))!;
     expect(after.state).toBe(WorkflowRunState.FAILED);
     expect(after.errorMessage).toBe("Cancelled by user");
+  });
+});
+
+describe("killing a local run's session", () => {
+  it("finishes an interactive job run: closing the session is how it ends", async () => {
+    const { host, daemon } = await makeHost();
+    const workflow = await makeLocalJob(host.id, { localSessionMode: "interactive" });
+    const run = await createWorkflowRun(workflow.id, { params: { name: "Ada" } });
+    const t = (await dispatchLocalWorkflowRun(run, workflow, "hi"))!;
+    await handleStarted(host.id, t.id);
+    await killTerminal((await getTerminal(t.id))!);
+    expect(daemon.sent.some((m) => m.includes('"kill"'))).toBe(true);
+    await handleExit(host.id, t.id, 129);
+    const fresh = (await getWorkflowRun(run.id))!;
+    expect(fresh.state).toBe(WorkflowRunState.COMPLETED);
+    expect(fresh.errorMessage).toBeNull();
+  });
+
+  it("stops a headless job run for good: no retry", async () => {
+    const { host } = await makeHost();
+    const workflow = await makeLocalJob(host.id, { maxRetries: 3 });
+    const run = await createWorkflowRun(workflow.id, { params: { name: "Ada" } });
+    const t = (await dispatchLocalWorkflowRun(run, workflow, "hi"))!;
+    await handleStarted(host.id, t.id);
+    await killTerminal((await getTerminal(t.id))!);
+    await handleExit(host.id, t.id, 143);
+    const fresh = (await getWorkflowRun(run.id))!;
+    expect(fresh.state).toBe(WorkflowRunState.FAILED);
+    expect(fresh.errorMessage).toBe("Stopped by user");
+    // The retry budget is spent, as a cancel leaves it.
+    expect(fresh.retryCount).toBe(3);
+  });
+
+  it("cancels a headless task without a PR instead of failing it", async () => {
+    const { host } = await makeHost();
+    const task = await makeLocalTask(host.id);
+    const t = (await dispatchLocalTask(task))!;
+    await handleStarted(host.id, t.id);
+    await killTerminal((await getTerminal(t.id))!);
+    await handleExit(host.id, t.id, 143);
+    expect((await taskService.getTask(task.id))!.state).toBe(TaskState.CANCELLED);
+  });
+});
+
+describe("local run agent parameters", () => {
+  it("hands a Codex job its model and reasoning effort", async () => {
+    const { host, daemon } = await makeHost();
+    const workflow = await makeLocalJob(host.id, {
+      agentRuntime: "codex",
+      agentOptions: { copilotModel: "gpt-5.6-sol", copilotEffort: "xhigh" },
+    });
+    const run = await createWorkflowRun(workflow.id, { params: { name: "Ada" } });
+    await dispatchLocalWorkflowRun(run, workflow, "Say hello to Ada");
+    const [spawn] = daemon.spawns();
+    expect(spawn.spec).toMatchObject({
+      kind: "agent",
+      agent: "codex",
+      model: "gpt-5.6-sol",
+      effort: "xhigh",
+    });
+    expect(spawn.spec).not.toHaveProperty("permissionMode");
+  });
+
+  it("hands a Claude Code task its model, effort and permission mode", async () => {
+    const { host, daemon } = await makeHost();
+    const task = await makeLocalTask(host.id, {
+      metadata: {
+        agentOptions: {
+          claudeModel: "sonnet",
+          claudeEffort: "low",
+          claudePermissionMode: "default",
+          claudeThinking: false,
+        },
+      },
+    });
+    await dispatchLocalTask(task);
+    const [spawn] = daemon.spawns();
+    expect(spawn.spec).toMatchObject({
+      model: "sonnet",
+      effort: "low",
+      permissionMode: "default",
+    });
   });
 });
 

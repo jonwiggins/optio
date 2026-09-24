@@ -16,6 +16,7 @@ import {
   LOCAL_TRANSCRIPT_MAX_ENTRIES,
   LOCAL_TRANSCRIPT_TEXT_MAX,
   MAX_WORK_LINKS,
+  dedupeWorkLinks,
   type WorkLink,
   type LocalTranscriptEntry,
   type LocalTranscriptKind,
@@ -28,7 +29,12 @@ import {
 } from "@optio/shared";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/client.js";
-import { localTerminalSnapshots, localTerminalTranscripts, localTerminals } from "../db/schema.js";
+import {
+  localTerminalSnapshots,
+  localTerminalTranscripts,
+  localTerminals,
+  workflowTriggers,
+} from "../db/schema.js";
 import { logger } from "../logger.js";
 import { publishLocalChanged } from "./event-bus.js";
 import { isAuthDisabled } from "./oauth/index.js";
@@ -183,10 +189,13 @@ async function transitionTerminal(
   id: string,
   from: LocalTerminalRow["state"][],
   set: Partial<typeof localTerminals.$inferInsert>,
-  opts: { hostId?: string } = {},
+  opts: { hostId?: string; notKilled?: boolean } = {},
 ): Promise<LocalTerminalRow | null> {
   const conds = [eq(localTerminals.id, id), inArray(localTerminals.state, from)];
   if (opts.hostId) conds.push(eq(localTerminals.hostId, opts.hostId));
+  if (opts.notKilled) {
+    conds.push(sql`${localTerminals.attentionReason} is distinct from ${KILLED_REASON}`);
+  }
   const [row] = await db
     .update(localTerminals)
     .set({ ...set, updatedAt: new Date() })
@@ -331,6 +340,13 @@ export async function startTerminal(row: LocalTerminalRow): Promise<LocalTermina
   return updated;
 }
 
+/**
+ * The attention reason of a terminal someone killed. On its way out the
+ * process may still print, fire a last hook, or exit non-zero; none of that
+ * puts a session you ended back in front of you — it's finished.
+ */
+export const KILLED_REASON = "killed";
+
 export async function killTerminal(row: LocalTerminalRow, signal?: string): Promise<void> {
   if (row.state === "pending") {
     await updateTerminal(row.id, {
@@ -343,6 +359,12 @@ export async function killTerminal(row: LocalTerminalRow, signal?: string): Prom
   if (row.state !== "running" && row.state !== "launching") {
     throw new Error(`Terminal is ${row.state}`);
   }
+  // Marked before the daemon hears of it, so everything the kill causes
+  // (its exit included) lands after the mark.
+  await transitionTerminal(row.id, ["running", "launching"], {
+    attentionState: "idle",
+    attentionReason: KILLED_REASON,
+  });
   const sent = relay.sendToHost(row.hostId, {
     type: "kill",
     terminalId: row.id,
@@ -358,9 +380,34 @@ export async function killTerminal(row: LocalTerminalRow, signal?: string): Prom
       errorMessage: "Killed while the host was offline",
       endedAt: new Date(),
       attentionState: "idle",
-      attentionReason: null,
+      attentionReason: KILLED_REASON,
     });
   }
+}
+
+/**
+ * Rows as the API returns them: each with the type of the trigger that
+ * started it (`github`, `schedule`, …), so its badge can say where it came
+ * from (one lookup for the whole list), and one link per PR / ticket — rows
+ * stored before links were deduped still carry a PR twice.
+ */
+export async function presentTerminals<
+  T extends { triggerId: string | null; links: WorkLink[] | null },
+>(rows: T[]): Promise<Array<T & { triggerType: string | null }>> {
+  const ids = [...new Set(rows.map((r) => r.triggerId).filter((id): id is string => !!id))];
+  const types = new Map<string, string>();
+  if (ids.length > 0) {
+    const found = await db
+      .select({ id: workflowTriggers.id, type: workflowTriggers.type })
+      .from(workflowTriggers)
+      .where(inArray(workflowTriggers.id, ids));
+    for (const t of found) types.set(t.id, t.type);
+  }
+  return rows.map((r) => ({
+    ...r,
+    links: r.links ? dedupeWorkLinks(r.links) : r.links,
+    triggerType: r.triggerId ? (types.get(r.triggerId) ?? null) : null,
+  }));
 }
 
 export async function getTerminal(id: string): Promise<LocalTerminalRow | null> {
@@ -536,9 +583,13 @@ export async function handleAttachError(attachId: string, message: string): Prom
  * `exit`); a shell you typed `exit` into does not demand attention.
  */
 export function exitAttention(
-  row: Pick<LocalTerminalRow, "spawnedBy" | "spec">,
+  row: Pick<LocalTerminalRow, "spawnedBy" | "spec" | "attentionReason">,
   exitCode: number | null,
 ): { attentionState: LocalAttentionState; attentionReason: string | null } {
+  // You ended it yourself: finished, not waiting for a review.
+  if (row.attentionReason === KILLED_REASON) {
+    return { attentionState: "idle", attentionReason: KILLED_REASON };
+  }
   if (row.spawnedBy === "manual" || row.spawnedBy === "resume") {
     return { attentionState: "idle", attentionReason: null };
   }
@@ -603,7 +654,16 @@ export async function resumeTerminal(
     userId: row.userId,
     workspaceId: row.workspaceId,
     dir: row.dir,
-    spec: { kind: "agent", agent: spec.agent, resumeSessionId: row.agentSessionId },
+    // The resumed chat runs the way the session did: same model, effort and
+    // permission mode.
+    spec: {
+      kind: "agent",
+      agent: spec.agent,
+      resumeSessionId: row.agentSessionId,
+      ...(spec.model ? { model: spec.model } : {}),
+      ...(spec.effort ? { effort: spec.effort } : {}),
+      ...(spec.permissionMode ? { permissionMode: spec.permissionMode } : {}),
+    },
     title: row.title.startsWith("↺ ") ? row.title : `↺ ${row.title}`,
     spawnedBy: "resume",
     blueprintId: row.blueprintId ?? undefined,
@@ -629,7 +689,10 @@ export async function handleAttention(
   const row = await getTerminal(terminalId);
   if (!row || row.hostId !== hostId || row.state !== "running") return;
   if (row.attentionState === state && row.attentionReason === reason) return;
-  // CAS on state="running" so an exit landing first wins the row.
+  // A killed session is on its way out: what it reports now isn't news.
+  if (row.attentionReason === KILLED_REASON) return;
+  // CAS on state="running" so an exit landing first wins the row, and on
+  // not-killed so a kill landing first wins it too.
   await transitionTerminal(
     terminalId,
     ["running"],
@@ -637,7 +700,7 @@ export async function handleAttention(
       attentionState: state,
       attentionReason: reason.slice(0, 100),
     },
-    { hostId },
+    { hostId, notKilled: true },
   );
 }
 
@@ -1004,7 +1067,9 @@ export async function handleLinks(
   terminalId: string,
   links: unknown,
 ): Promise<void> {
-  const clean = sanitizeWorkLinks(links);
+  // Deduped here too: a daemon from before dedupeWorkLinks sends a PR once
+  // as a bare "#607" and again as its URL.
+  const clean = dedupeWorkLinks(sanitizeWorkLinks(links));
   const [row] = await db
     .update(localTerminals)
     .set({ links: clean, updatedAt: new Date() })

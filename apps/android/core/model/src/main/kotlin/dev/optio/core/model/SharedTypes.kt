@@ -1015,6 +1015,13 @@ data class ExtractWorkLinksOptions(
      * repo, bare `#123` mentions resolve to that repo (kind `ref`).
      */
     val repoUrl: String? = null,
+    /**
+     * Columns the text was laid out at. Only a line that runs (nearly) to it
+     * is a hard wrap to heal; a short line ends where it ends, so a PR URL at
+     * the end of one is never glued to digits opening the next ("…/pull/612"
+     * + "19 files changed" is not PR 61219). Unset: every break is healed.
+     */
+    val wrapWidth: Double? = null,
 )
 
 // endregion
@@ -1421,6 +1428,55 @@ data class LocalHostAgentLimits(
     )
 }
 
+/** One model as an agent CLI on the machine lists it (Codex's model catalog). */
+@Serializable
+data class LocalAgentModel(
+    val id: String,
+    val label: String,
+    val description: String? = null,
+    /** Reasoning efforts the model accepts, in order. */
+    val efforts: List<String>,
+    /** The effort the CLI uses when none is set. */
+    val defaultEffort: String? = null,
+)
+
+/**
+ * The models an agent CLI on the machine offers, read by the daemon (no
+ * tokens leave the laptop). Codex: `codex debug models` — its current model
+ * catalog, refreshed the way Codex refreshes it — so the model and effort
+ * pickers track Codex releases without an Optio update.
+ */
+@Serializable
+data class LocalHostAgentModels(
+    val codex: Codex? = null,
+) {
+    @Serializable
+    data class Codex(
+        val models: List<LocalAgentModel>,
+        /** When the daemon read the catalog. */
+        val fetchedAt: String,
+    )
+}
+
+/**
+ * How a local Claude Code agent handles permission prompts — its
+ * `--permission-mode`. `auto` (the daemon's default): Claude's classifier
+ * approves routine actions and blocks risky ones, so an unattended run
+ * doesn't stall on a prompt. `bypassPermissions`: skip every check
+ * (`--dangerously-skip-permissions`). `default`: ask first (a headless run
+ * can't ask, so those actions are denied).
+ */
+@Serializable(with = LocalAgentPermissionMode.Companion::class)
+enum class LocalAgentPermissionMode(override val raw: String) : RawEnum {
+    AUTO("auto"),
+    BYPASS_PERMISSIONS("bypassPermissions"),
+    DEFAULT("default"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<LocalAgentPermissionMode>("dev.optio.core.model.LocalAgentPermissionMode", entries, UNKNOWN)
+}
+
 @Serializable
 data class LocalHost(
     val id: String,
@@ -1553,6 +1609,13 @@ sealed interface LocalTerminalSpec {
         val resumeSessionId: String? = null,
         /** Model override passed to the agent CLI (`--model` / `-m`), when set. */
         val model: String? = null,
+        /**
+         * Reasoning effort passed to the agent CLI, when set: Claude Code
+         * `--effort`, Codex `-c model_reasoning_effort=…`.
+         */
+        val effort: String? = null,
+        /** Claude Code only: its `--permission-mode`. The daemon's default is `auto`. */
+        val permissionMode: LocalAgentPermissionMode? = null,
         /**
          * "Work on a new branch that becomes a PR": the server wraps the prompt
          * with branch-and-PR instructions off this base before the spawn.
@@ -1698,6 +1761,11 @@ data class LocalTerminal(
     val spawnedBy: LocalSpawnSource,
     val blueprintId: String? = null,
     val triggerId: String? = null,
+    /**
+     * The type of the trigger that started it (`github`, `schedule`, …), for
+     * its source badge. Null when no trigger did, or the trigger is gone.
+     */
+    val triggerType: TriggerType? = null,
     val ticketSource: String? = null,
     val ticketExternalId: String? = null,
     val ticketUrl: String? = null,
@@ -1765,6 +1833,13 @@ data class LocalBlueprint(
     val spawnMode: LocalBlueprintSpawnMode,
     /** Agent spawns only: stay open for chat, or exit when the turn is done. */
     val sessionMode: LocalAgentSessionMode,
+    /**
+     * Agent spawns: per-run agent parameters keyed like the provider catalog
+     * (`claudeModel`, `claudeEffort`, `claudePermissionMode`, `copilotModel`,
+     * `copilotEffort`; string or boolean values) — the fields that apply to a
+     * run on a machine. Null = the machine's own defaults.
+     */
+    val agentOptions: Map<String, JsonElement>? = null,
     val enabled: Boolean,
     val createdAt: String,
     val updatedAt: String,
@@ -1892,6 +1967,11 @@ sealed interface LocalDaemonMessage {
     ) : LocalDaemonMessage
 
     @Serializable
+    data class AgentModels(
+        val models: LocalHostAgentModels,
+    ) : LocalDaemonMessage
+
+    @Serializable
     data class Size(
         val terminalId: String,
         val cols: Double,
@@ -1935,6 +2015,7 @@ sealed interface LocalDaemonMessage {
             "transcript-backfill" -> json.decodeFromJsonElement(TranscriptBackfill.serializer(), element.withoutDiscriminator())
             "session" -> json.decodeFromJsonElement(Session.serializer(), element.withoutDiscriminator())
             "agent-limits" -> json.decodeFromJsonElement(AgentLimits.serializer(), element.withoutDiscriminator())
+            "agent-models" -> json.decodeFromJsonElement(AgentModels.serializer(), element.withoutDiscriminator())
             "size" -> json.decodeFromJsonElement(Size.serializer(), element.withoutDiscriminator())
             "snapshot" -> json.decodeFromJsonElement(Snapshot.serializer(), element.withoutDiscriminator())
             "exit" -> json.decodeFromJsonElement(Exit.serializer(), element.withoutDiscriminator())
@@ -1959,6 +2040,7 @@ sealed interface LocalDaemonMessage {
             is TranscriptBackfill -> tagged("transcript-backfill", json.encodeToJsonElement(TranscriptBackfill.serializer(), value))
             is Session -> tagged("session", json.encodeToJsonElement(Session.serializer(), value))
             is AgentLimits -> tagged("agent-limits", json.encodeToJsonElement(AgentLimits.serializer(), value))
+            is AgentModels -> tagged("agent-models", json.encodeToJsonElement(AgentModels.serializer(), value))
             is Size -> tagged("size", json.encodeToJsonElement(Size.serializer(), value))
             is Snapshot -> tagged("snapshot", json.encodeToJsonElement(Snapshot.serializer(), value))
             is Exit -> tagged("exit", json.encodeToJsonElement(Exit.serializer(), value))

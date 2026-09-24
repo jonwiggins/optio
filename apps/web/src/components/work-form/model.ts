@@ -418,7 +418,9 @@ export function optionsFromRepo(
   runtime: string,
   repo: Record<string, unknown> | null | undefined,
 ): AgentOptionsValues {
-  if (!repo || runtime === TERMINAL) return {};
+  // Codex shares Copilot's copilotModel / copilotEffort columns, but a repo's
+  // values there are Copilot's settings — Codex has none per repo.
+  if (!repo || runtime === TERMINAL || runtime === "codex") return {};
   const catalog = getProviderCatalog(providerForAgentType(runtime));
   if (!catalog) return {};
   const keys = [catalog.modelField, ...catalog.options.map((o) => o.key)];

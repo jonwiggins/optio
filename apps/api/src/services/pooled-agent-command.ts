@@ -1,3 +1,5 @@
+import { shellQuote } from "@optio/shared";
+
 /**
  * The shell command that runs one agent turn in a pooled pod — a Job run
  * (`workflow-worker`) or a Persistent Agent turn (`persistent-agent-worker`).
@@ -51,7 +53,7 @@ export function buildPooledAgentCommand(
     case "codex": {
       return [
         `echo "[optio] Running ${label} (Codex)..."`,
-        `codex exec --full-auto "$OPTIO_PROMPT" --json`,
+        `codex exec --full-auto${codexModelFlags(env)} "$OPTIO_PROMPT" --json`,
       ];
     }
     case "copilot": {
@@ -93,4 +95,20 @@ export function buildPooledAgentCommand(
     default:
       return [`echo "Unknown agent type: ${agentType}"`, `exit 1`];
   }
+}
+
+/**
+ * Codex's model and reasoning effort, as `codex exec` flags: `-m` and a
+ * `model_reasoning_effort` config override. Shared by the pooled pods here
+ * and the Repo Task pods (task-worker). Values are shell-quoted; an effort
+ * that isn't a plain word is dropped rather than written into the override.
+ */
+export function codexModelFlags(env: Record<string, string>): string {
+  let flags = "";
+  if (env.OPTIO_CODEX_MODEL) flags += ` -m ${shellQuote(env.OPTIO_CODEX_MODEL)}`;
+  const effort = env.OPTIO_CODEX_EFFORT;
+  if (effort && /^[A-Za-z0-9_-]{1,32}$/.test(effort)) {
+    flags += ` -c ${shellQuote(`model_reasoning_effort="${effort}"`)}`;
+  }
+  return flags;
 }

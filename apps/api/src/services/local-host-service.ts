@@ -3,7 +3,9 @@ import {
   normalizeRepoUrl,
   LOCAL_HOST_OFFLINE_AFTER_MS,
   type AgentLimitWindow,
+  type LocalAgentModel,
   type LocalHostAgentLimits,
+  type LocalHostAgentModels,
   type LocalHostDir,
 } from "@optio/shared";
 import { db } from "../db/client.js";
@@ -334,6 +336,82 @@ export async function handleAgentLimits(hostId: string, limits: unknown): Promis
       (err) => logger.warn({ err }, "local: failed to publish host limits change"),
     );
   }
+}
+
+const EFFORT_NAME = /^[A-Za-z0-9_-]{1,32}$/;
+const MAX_AGENT_MODELS = 50;
+
+/** Validate a daemon-supplied model catalog report; unknown agents are dropped. */
+export function sanitizeAgentModels(input: unknown): LocalHostAgentModels {
+  const out: LocalHostAgentModels = {};
+  const codex = (input as { codex?: unknown } | null)?.codex as
+    | { models?: unknown; fetchedAt?: unknown }
+    | undefined;
+  if (!codex || typeof codex !== "object" || !Array.isArray(codex.models)) return out;
+  const models: LocalAgentModel[] = [];
+  const seen = new Set<string>();
+  for (const raw of codex.models.slice(0, MAX_AGENT_MODELS)) {
+    const m = raw as Record<string, unknown>;
+    const id = typeof m?.id === "string" ? m.id.trim() : "";
+    if (!id || id.length > 100 || !/^[\w.:/-]+$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    const label = typeof m.label === "string" ? m.label.trim().slice(0, 100) : "";
+    const description = typeof m.description === "string" ? m.description.trim().slice(0, 300) : "";
+    const efforts = Array.isArray(m.efforts)
+      ? [
+          ...new Set(
+            m.efforts.filter((e): e is string => typeof e === "string" && EFFORT_NAME.test(e)),
+          ),
+        ]
+      : [];
+    const def = m.defaultEffort;
+    models.push({
+      id,
+      label: label || id,
+      ...(description ? { description } : {}),
+      efforts: efforts.slice(0, 12),
+      defaultEffort: typeof def === "string" && EFFORT_NAME.test(def) ? def : null,
+    });
+  }
+  const fetchedAt =
+    typeof codex.fetchedAt === "string" && !isNaN(Date.parse(codex.fetchedAt))
+      ? new Date(codex.fetchedAt).toISOString()
+      : new Date().toISOString();
+  if (models.length > 0) out.codex = { models, fetchedAt };
+  return out;
+}
+
+export async function handleAgentModels(hostId: string, models: unknown): Promise<void> {
+  const clean = sanitizeAgentModels(models);
+  if (!clean.codex) return;
+  await db
+    .update(localHosts)
+    .set({ agentModels: clean, updatedAt: new Date() })
+    .where(eq(localHosts.id, hostId));
+}
+
+/**
+ * The Codex model catalog to offer a user: the one `hostId`'s daemon last
+ * reported (a run on that machine uses its Codex), else the most recently
+ * read among the user's machines. Null when no machine has reported one.
+ */
+export async function codexModelsFor(
+  userId: string | null | undefined,
+  hostId?: string | null,
+): Promise<{ host: LocalHostRow; codex: NonNullable<LocalHostAgentModels["codex"]> } | null> {
+  const hosts = await listHosts(userId);
+  const pick = (h: LocalHostRow) => (h.agentModels as LocalHostAgentModels | null)?.codex;
+  if (hostId) {
+    const host = hosts.find((h) => h.id === hostId);
+    const codex = host ? pick(host) : undefined;
+    if (host && codex) return { host, codex };
+  }
+  let best: { host: LocalHostRow; codex: NonNullable<LocalHostAgentModels["codex"]> } | null = null;
+  for (const host of hosts) {
+    const codex = pick(host);
+    if (codex && (!best || codex.fetchedAt > best.codex.fetchedAt)) best = { host, codex };
+  }
+  return best;
 }
 
 /** Mark hosts offline whose daemon stopped pinging. Returns affected ids. */

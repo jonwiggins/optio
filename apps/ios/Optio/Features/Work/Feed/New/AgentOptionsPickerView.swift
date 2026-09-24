@@ -31,8 +31,10 @@ struct AgentOptionsPickerView: View {
     var body: some View {
         modelRow
         if !modelOnly, let catalog {
-            ForEach(catalog.options.filter { $0.kind == "select" }) { field in selectRow(field) }
-            ForEach(catalog.options.filter { $0.kind == "boolean" }) { field in
+            // Every field here goes to a pod run (a run on a machine is model-only).
+            let fields = catalog.options.filter(\.appliesToPods)
+            ForEach(fields.filter { $0.kind == "select" }) { field in selectRow(field) }
+            ForEach(fields.filter { $0.kind == "boolean" }) { field in
                 Toggle(isOn: Binding(get: { values[field.key]?.boolValue ?? field.defaultBool }, set: { onChange(field.key, .bool($0)) })) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(field.label)
@@ -40,7 +42,7 @@ struct AgentOptionsPickerView: View {
                     }
                 }
             }
-            ForEach(catalog.options.filter { $0.kind == "text" }) { field in
+            ForEach(fields.filter { $0.kind == "text" }) { field in
                 ValueField(label: field.label, placeholder: field.placeholder ?? "Default",
                            text: Binding(get: { values[field.key]?.stringValue ?? "" }, set: { onChange(field.key, .string($0)) }))
             }

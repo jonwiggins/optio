@@ -42,11 +42,17 @@ export function agentOptionsEnv(
       if (Object.keys(settings).length) env.OPTIO_CLAUDE_SETTINGS_JSON = JSON.stringify(settings);
       break;
     }
-    case "copilot":
-    case "codex": {
+    case "copilot": {
       if (model) env.COPILOT_MODEL = model;
       const effort = str("copilotEffort");
       if (effort) env.COPILOT_EFFORT = effort;
+      break;
+    }
+    case "codex": {
+      // Codex shares Copilot's columns (copilotModel / copilotEffort).
+      if (model) env.OPTIO_CODEX_MODEL = model;
+      const effort = str("copilotEffort");
+      if (effort) env.OPTIO_CODEX_EFFORT = effort;
       break;
     }
     case "opencode": {

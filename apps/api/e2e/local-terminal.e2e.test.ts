@@ -983,4 +983,73 @@ describe("optio local e2e: machine identity, resume, and backfill", () => {
     expect(offline.status).toBe(409);
     expect(offline.body.error).toMatch(/offline/);
   });
+
+  it("offers the models the machine's Codex lists and hands an agent its effort and permissions", async () => {
+    type Options = {
+      source: string;
+      liveFrom?: string;
+      catalog: { models: Array<{ id: string; latest?: boolean; efforts?: string[] }> };
+    };
+    const host = await register({ hostname: "e2e-codex-models" });
+    const daemon = new FakeDaemon();
+    cleanups.push(() => daemon.close());
+    await daemon.connect(host.id, DIRS);
+
+    // What `codex debug models` said on the machine, as the daemon reports it.
+    daemon.send({
+      type: "agent-models",
+      models: {
+        codex: {
+          fetchedAt: new Date().toISOString(),
+          models: [
+            {
+              id: "gpt-5.7",
+              label: "GPT-5.7",
+              efforts: ["low", "medium", "high", "max"],
+              defaultEffort: "medium",
+            },
+          ],
+        },
+      },
+    });
+    const options = await waitFor(async () => {
+      const { body } = await api<Options>(`/api/agents/openai/options?hostId=${host.id}`);
+      return body.liveFrom ? body : null;
+    });
+    expect(options.liveFrom).toBe("Codex on e2e-codex-models");
+    expect(options.catalog.models[0]).toMatchObject({
+      id: "gpt-5.7",
+      latest: true,
+      efforts: ["low", "medium", "high", "max"],
+    });
+
+    // The picks ride the spawn to the machine.
+    const { body } = await api<TerminalBody>("/api/local/terminals", {
+      method: "POST",
+      body: JSON.stringify({
+        hostId: host.id,
+        dir: "/tmp/e2e-repo",
+        spec: {
+          kind: "agent",
+          agent: "claude-code",
+          prompt: "Tidy up",
+          effort: "high",
+          permissionMode: "bypassPermissions",
+        },
+      }),
+    });
+    const spawn = await daemon.next((m) => m.type === "spawn" && m.terminalId === body.terminal.id);
+    expect(spawn.spec).toMatchObject({ effort: "high", permissionMode: "bypassPermissions" });
+
+    // A permission mode Claude Code doesn't have is refused at the door.
+    const bad = await api<{ error: string }>("/api/local/terminals", {
+      method: "POST",
+      body: JSON.stringify({
+        hostId: host.id,
+        dir: "/tmp/e2e-repo",
+        spec: { kind: "agent", agent: "claude-code", permissionMode: "yolo" },
+      }),
+    });
+    expect(bad.status).toBe(400);
+  });
 });

@@ -78,6 +78,8 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
       label: "Effort Level",
       kind: "select",
       default: "high",
+      runsOn: ["pod", "local"],
+      localParam: "effort",
       choices: [
         { value: "low", label: "Low" },
         { value: "medium", label: "Medium" },
@@ -89,6 +91,35 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
       label: "Extended Thinking",
       kind: "boolean",
       default: true,
+    },
+    {
+      // Pods always skip permission checks (the pod is the sandbox); on your
+      // own machine the daemon passes `--permission-mode`.
+      key: "claudePermissionMode",
+      label: "Permissions",
+      kind: "select",
+      default: "auto",
+      runsOn: ["local"],
+      localParam: "permissionMode",
+      choices: [
+        {
+          value: "auto",
+          label: "Auto",
+          description: "Claude's classifier approves routine actions and blocks risky ones",
+        },
+        {
+          value: "bypassPermissions",
+          label: "Skip all checks",
+          description: "--dangerously-skip-permissions: nothing is asked or blocked",
+        },
+        {
+          value: "default",
+          label: "Ask first",
+          description: "Asks before edits and commands; a run that exits when done can't ask",
+        },
+      ],
+      helpText:
+        "Auto keeps the agent moving without prompts and still blocks risky actions; Skip all checks runs everything it tries.",
     },
   ],
   liveRefreshSupported: true,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { agentOptionsEnv } from "./agent-options-env.js";
-import { buildPooledAgentCommand } from "./pooled-agent-command.js";
+import { buildPooledAgentCommand, codexModelFlags } from "./pooled-agent-command.js";
 
 describe("agentOptionsEnv", () => {
   it("maps Claude Code options onto model, context window, and settings JSON", () => {
@@ -41,9 +41,13 @@ describe("agentOptionsEnv", () => {
       COPILOT_MODEL: "gpt-5",
       COPILOT_EFFORT: "high",
     });
+    // Codex shares Copilot's columns but has its own env names.
     expect(agentOptionsEnv("codex", { copilotModel: "gpt-5-codex" })).toEqual({
-      COPILOT_MODEL: "gpt-5-codex",
+      OPTIO_CODEX_MODEL: "gpt-5-codex",
     });
+    expect(
+      agentOptionsEnv("codex", { copilotModel: "gpt-5.6-sol", copilotEffort: "xhigh" }),
+    ).toEqual({ OPTIO_CODEX_MODEL: "gpt-5.6-sol", OPTIO_CODEX_EFFORT: "xhigh" });
     expect(
       agentOptionsEnv("opencode", {
         opencodeModel: "anthropic/claude-sonnet-4",
@@ -104,5 +108,22 @@ describe("buildPooledAgentCommand", () => {
 
   it("labels the echo line with the caller's label", () => {
     expect(buildPooledAgentCommand("codex", {}, opts)[0]).toContain("Running test run (Codex)");
+  });
+
+  it("passes Codex its model and reasoning effort", () => {
+    const env = agentOptionsEnv("codex", { copilotModel: "gpt-5.6-sol", copilotEffort: "high" });
+    expect(buildPooledAgentCommand("codex", env, opts)[1]).toBe(
+      `codex exec --full-auto -m 'gpt-5.6-sol' -c 'model_reasoning_effort="high"' "$OPTIO_PROMPT" --json`,
+    );
+    // Nothing set: Codex's own defaults, as before.
+    expect(buildPooledAgentCommand("codex", {}, opts)[1]).toBe(
+      `codex exec --full-auto "$OPTIO_PROMPT" --json`,
+    );
+  });
+
+  it("shell-quotes the Codex model and drops an effort that isn't a word", () => {
+    expect(
+      codexModelFlags({ OPTIO_CODEX_MODEL: "x'; rm -rf / #", OPTIO_CODEX_EFFORT: 'hi" y="z' }),
+    ).toBe(` -m 'x'\\''; rm -rf / #'`);
   });
 });

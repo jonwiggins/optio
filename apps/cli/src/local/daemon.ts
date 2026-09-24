@@ -7,6 +7,7 @@ import type {
   LocalTranscriptEntry,
   LocalHost,
   LocalHostAgentLimits,
+  LocalHostAgentModels,
   LocalHostDir,
   LocalServerMessage,
 } from "@optio/shared";
@@ -33,6 +34,7 @@ import { UsageTracker } from "./usage-tracker.js";
 import { TranscriptTracker } from "./transcript-tracker.js";
 import { readSessionTranscript } from "./transcript-backfill.js";
 import { readAgentLimits } from "./codex-limits.js";
+import { probeClaudeCli, probeCodexModels, type ClaudeCliCaps } from "./cli-probes.js";
 import { hasClaudeCredentials, readClaudeCredentials } from "./claude-credentials.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
 
@@ -47,6 +49,14 @@ import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager
 
 const PING_INTERVAL_MS = 30_000;
 const AGENT_LIMITS_INTERVAL_MS = 3 * 60_000;
+// A turn that just ended wrote its rate limits to Codex's session log; read
+// them a moment later so the limits pill moves with the session.
+const LIMITS_AFTER_TURN_MS = 2000;
+// How often the agent CLIs are asked what they accept / offer. Claude Code
+// updates itself, so its flags are re-read hourly; Codex's model catalog
+// changes with its releases.
+const CLAUDE_PROBE_INTERVAL_MS = 60 * 60_000;
+const AGENT_MODELS_INTERVAL_MS = 6 * 60 * 60_000;
 const BACKOFF_INITIAL_MS = 1000;
 const BACKOFF_MAX_MS = 30_000;
 // How often a running agent's transcript is re-read between hook events, so
@@ -95,6 +105,46 @@ export async function runDaemon(opts: {
     lastLimitsKey = key;
     send({ type: "agent-limits", limits });
   };
+  let limitsSoon: NodeJS.Timeout | null = null;
+  const readLimitsSoon = () => {
+    if (limitsSoon) return;
+    limitsSoon = setTimeout(() => {
+      limitsSoon = null;
+      sendAgentLimits();
+    }, LIMITS_AFTER_TURN_MS);
+    limitsSoon.unref();
+  };
+
+  // What this machine's `claude` accepts, so a spawn never passes a flag an
+  // older Claude Code would refuse to start with (see buildAgentCommand).
+  let claudeCaps: ClaudeCliCaps | null = null;
+  const refreshClaudeCaps = async () => {
+    claudeCaps = (await probeClaudeCli().catch(() => null)) ?? claudeCaps;
+  };
+  void refreshClaudeCaps();
+  setInterval(() => void refreshClaudeCaps(), CLAUDE_PROBE_INTERVAL_MS).unref();
+
+  // The models this machine's Codex offers, for Optio's model and effort
+  // pickers. Read once at start and every few hours; re-sent on reconnect.
+  let agentModels: LocalHostAgentModels | null = null;
+  let modelsProbe: Promise<void> | null = null;
+  const sendAgentModels = () => {
+    if (agentModels) send({ type: "agent-models", models: agentModels });
+  };
+  const refreshAgentModels = (): Promise<void> => {
+    modelsProbe ??= (async () => {
+      const codex = await probeCodexModels().catch(() => null);
+      if (codex) {
+        agentModels = { codex: { models: codex, fetchedAt: new Date().toISOString() } };
+        sendAgentModels();
+      }
+    })().finally(() => {
+      modelsProbe = null;
+    });
+    return modelsProbe;
+  };
+  void refreshAgentModels();
+  setInterval(() => void refreshAgentModels(), AGENT_MODELS_INTERVAL_MS).unref();
   let shuttingDown = false;
   let backoff = BACKOFF_INITIAL_MS;
 
@@ -159,13 +209,16 @@ export async function runDaemon(opts: {
   };
 
   const attention = new AttentionTracker({
-    onEvent: (event) =>
+    onEvent: (event) => {
       send({
         type: "attention",
         terminalId: event.terminalId,
         state: event.state,
         reason: event.reason,
-      }),
+      });
+      // A turn ended (or started): Codex may have logged fresh limits.
+      readLimitsSoon();
+    },
   });
 
   const manager = new TerminalManager({
@@ -182,6 +235,7 @@ export async function runDaemon(opts: {
     shimDir,
     zdotDir,
     getHookServerPort: () => hookServer.port,
+    getClaudeCaps: () => claudeCaps,
     onStatus: status,
   });
 
@@ -428,6 +482,8 @@ export async function runDaemon(opts: {
         // touches file tails so this is cheap.
         sendAgentLimits();
         limitsTimer = setInterval(sendAgentLimits, AGENT_LIMITS_INTERVAL_MS);
+        // The server keeps the last catalog per host; a reconnect re-sends it.
+        sendAgentModels();
       });
 
       socket.on("message", (raw) => {

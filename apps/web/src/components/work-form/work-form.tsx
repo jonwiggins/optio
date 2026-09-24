@@ -784,7 +784,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   </span>
                   <span className="text-[11px] text-text-muted/70">
                     {local
-                      ? "Only the model — the rest comes from the machine's own config"
+                      ? "What the machine's CLI takes — the rest comes from its own config"
                       : draft.withRepo
                         ? "Starts from the repo's defaults; applies to this run only"
                         : "Blank means the runtime's default"}
@@ -795,7 +795,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   provider={providerForAgentType(draft.runtime)}
                   values={draft.agentOptions}
                   onChange={(agentOptions) => setDraft({ agentOptions })}
-                  modelOnly={!fullOptionsApply(draft)}
+                  runsOn={fullOptionsApply(draft) ? "pod" : "local"}
+                  hostId={local ? draft.location.localHostId || undefined : undefined}
                   hideRefresh
                 />
               </div>

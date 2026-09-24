@@ -27,11 +27,10 @@ import {
   TASK_BRANCH_PREFIX,
   TaskState,
   WorkflowRunState,
-  getProviderCatalog,
+  localAgentParams,
   normalizeRepoUrl,
   parsePrUrl,
   parseRepoUrl,
-  providerForAgentType,
   toLocalAgentKind,
   type LocalAgentKind,
   type LocalAgentSessionMode,
@@ -45,6 +44,7 @@ import { tasks, workflowRuns, workflows } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { canAccessHost, getHost, isDirAllowed, type LocalHostRow } from "./local-host-service.js";
 import {
+  KILLED_REASON,
   createTerminal,
   getTerminal,
   killTerminal,
@@ -163,17 +163,14 @@ export async function validateRunLocation(
 
 /**
  * The model a local run should pass to its CLI (`--model`), from the run's
- * per-run agent options. The daemon only takes a model — the other provider
- * options (effort, context window, …) apply to pod runs.
+ * per-run agent options. See `localAgentParams` for everything a run on a
+ * machine takes (model, effort, Claude Code's permission mode).
  */
 export function localModelFor(
   agentType: string,
   agentOptions: Record<string, unknown> | null | undefined,
 ): string | undefined {
-  if (!agentOptions) return undefined;
-  const catalog = getProviderCatalog(providerForAgentType(agentType));
-  const v = catalog ? agentOptions[catalog.modelField] : undefined;
-  return typeof v === "string" && v !== "" ? v : undefined;
+  return localAgentParams(agentType, agentOptions).model;
 }
 
 interface ResolvedLocalHost {
@@ -277,7 +274,10 @@ export async function dispatchLocalWorkflowRun(
         agent: resolved.agent,
         prompt: renderedPrompt.trim() || undefined,
         mode: workflow.localSessionMode ?? "headless",
+        // The legacy single `model` column, then whatever the job's agent
+        // options set for a run on a machine (model, effort, permissions).
         ...(workflow.model ? { model: workflow.model } : {}),
+        ...localAgentParams(workflow.agentRuntime, workflow.agentOptions),
       },
       title: run.title ?? `${workflow.name} · ${run.id.slice(0, 8)}`,
       spawnedBy: "job",
@@ -368,14 +368,13 @@ export async function dispatchLocalTask(
     opts.resumeSessionId && (resolved.agent === "claude-code" || resolved.agent === "codex")
       ? opts.resumeSessionId
       : undefined;
-  const model = localModelFor(task.agentType, (task.metadata as any)?.agentOptions);
   const spec: LocalTerminalSpec = {
     kind: "agent",
     agent: resolved.agent,
     prompt: buildLocalTaskPrompt(task, opts.resumePrompt),
     mode: task.localSessionMode ?? "headless",
     ...(resumeSessionId ? { resumeSessionId } : {}),
-    ...(model ? { model } : {}),
+    ...localAgentParams(task.agentType, (task.metadata as any)?.agentOptions),
   };
   const ticketUrl = (task.metadata as Record<string, unknown> | null)?.ticketUrl;
 
@@ -486,6 +485,26 @@ function exitMessage(terminal: LocalTerminalRow): string {
   return terminal.errorMessage ?? `Agent exited with code ${terminal.exitCode ?? "unknown"}`;
 }
 
+async function maxRetriesOf(workflowId: string): Promise<number> {
+  const [wf] = await db
+    .select({ maxRetries: workflows.maxRetries })
+    .from(workflows)
+    .where(eq(workflows.id, workflowId));
+  return wf?.maxRetries ?? 0;
+}
+
+/**
+ * How a session someone killed ends its run. Closing an interactive session
+ * is how its run finishes, so that's a success whatever the exit code the
+ * kill caused; killing a headless run mid-flight stops it, and nothing
+ * retries a run you stopped. Null when the terminal wasn't killed.
+ */
+function killedOutcome(terminal: LocalTerminalRow): "finished" | "stopped" | null {
+  if (terminal.attentionReason !== KILLED_REASON) return null;
+  const spec = terminal.spec as unknown as LocalTerminalSpec;
+  return spec.kind === "agent" && spec.mode === "headless" ? "stopped" : "finished";
+}
+
 /**
  * Called after every terminal update. Maps the terminal's state onto the
  * Job run / Repo Task it executes. Safe to call repeatedly; a terminal that
@@ -526,10 +545,20 @@ async function syncWorkflowRun(terminal: LocalTerminalRow): Promise<void> {
     case "exited":
     case "error": {
       if (state !== WorkflowRunState.QUEUED && state !== WorkflowRunState.RUNNING) return;
-      const ok = terminal.state === "exited" && terminal.exitCode === 0;
+      const killed = killedOutcome(terminal);
+      const ok = killed === "finished" || (terminal.state === "exited" && terminal.exitCode === 0);
+      // A stopped run is a cancel: no retry budget left, like cancelWorkflowRun.
+      const stopped =
+        killed === "stopped"
+          ? {
+              errorMessage: "Stopped by user",
+              retryCount: Math.max(run.retryCount ?? 0, await maxRetriesOf(run.workflowId)),
+            }
+          : {};
       const fields = {
         finishedAt: terminal.endedAt ?? new Date(),
         errorMessage: ok ? null : exitMessage(terminal),
+        ...stopped,
         output: {
           ...(terminal.preview ? { summary: terminal.preview } : {}),
           ...(terminal.agentSessionId ? { agentSessionId: terminal.agentSessionId } : {}),
@@ -644,6 +673,7 @@ async function syncTask(terminal: LocalTerminalRow): Promise<void> {
         return; // pr_opened / cancelled / already terminal: the exit changes nothing
       }
       const prUrl = task.prUrl ?? prLinkForTask(task, terminal.links)?.url ?? null;
+      const killed = killedOutcome(terminal);
       const ok = terminal.state === "exited" && terminal.exitCode === 0;
       if (prUrl) {
         // A PR exists: the task is waiting on CI / review, whatever the exit
@@ -658,10 +688,20 @@ async function syncTask(terminal: LocalTerminalRow): Promise<void> {
         }
         return;
       }
-      if (ok) {
+      if (ok || killed === "finished") {
         if (await climbToRunning(state)) {
-          await step(TaskState.COMPLETED, "local_exit", "Agent finished (exit 0) without a PR");
+          await step(
+            TaskState.COMPLETED,
+            "local_exit",
+            ok ? "Agent finished (exit 0) without a PR" : "Session closed without a PR",
+          );
         }
+        return;
+      }
+      if (killed === "stopped") {
+        // Cancelled, not failed: a failed task would be retried.
+        if (state === TaskState.PROVISIONING && !(await climbToRunning(state))) return;
+        await step(TaskState.CANCELLED, "local_killed", "Stopped by user");
         return;
       }
       const message = exitMessage(terminal);

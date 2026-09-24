@@ -14,6 +14,13 @@ const refreshQuerySchema = z.object({
   refresh: z
     .union([z.literal("true"), z.literal("false"), z.literal("1"), z.literal("0")])
     .optional(),
+  hostId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "A run on this paired machine: offer the models its agent CLI lists (Codex); otherwise the freshest list any of the caller's machines reported",
+    ),
 });
 
 const ProviderOptionsResponseSchema = z
@@ -23,6 +30,10 @@ const ProviderOptionsResponseSchema = z
     cached: z.boolean(),
     refreshedAt: z.number().nullable(),
     error: z.string().optional(),
+    liveFrom: z
+      .string()
+      .optional()
+      .describe('Where a machine-reported model list came from ("Codex on MacBook-Pro")'),
     catalog: z.unknown(),
   })
   .describe("Provider options catalog, optionally augmented by a live probe");
@@ -76,7 +87,9 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
           "Return the catalog for a single provider. If `refresh=true`, bypass " +
           "the Redis cache and reprobe the provider's list-models API. " +
           "Providers without a public list-models endpoint (Copilot, OpenCode, " +
-          "OpenClaw) always return the hardcoded baseline.",
+          "OpenClaw) always return the hardcoded baseline. OpenAI (Codex) also " +
+          "merges the model catalog the caller's Optio Local machines read from " +
+          "Codex itself — its models and each one's reasoning efforts.",
         tags: ["Setup & Settings"],
         params: providerParamsSchema,
         querystring: refreshQuerySchema,
@@ -99,6 +112,7 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
       const result = await getProviderOptions(provider, {
         workspaceId,
         forceRefresh,
+        machines: { userId: req.user?.id, hostId: req.query.hostId },
       });
 
       reply.send({
@@ -107,6 +121,7 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
         cached: result.cached,
         refreshedAt: result.refreshedAt,
         ...(result.error ? { error: result.error } : {}),
+        ...(result.liveFrom ? { liveFrom: result.liveFrom } : {}),
         catalog: result.catalog,
       });
     },
@@ -139,6 +154,7 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
       const result = await getProviderOptions(provider, {
         workspaceId,
         forceRefresh: true,
+        machines: { userId: req.user?.id },
       });
       reply.send({
         provider,
@@ -146,6 +162,7 @@ export async function agentOptionsRoutes(rawApp: FastifyInstance) {
         cached: result.cached,
         refreshedAt: result.refreshedAt,
         ...(result.error ? { error: result.error } : {}),
+        ...(result.liveFrom ? { liveFrom: result.liveFrom } : {}),
         catalog: result.catalog,
       });
     },

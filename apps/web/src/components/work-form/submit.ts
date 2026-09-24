@@ -1,4 +1,4 @@
-import { getProviderCatalog, providerForAgentType } from "@optio/shared";
+import { getProviderCatalog, localAgentParams, providerForAgentType } from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { runLocationPayload } from "@/components/run-location-picker";
 import { defaultAgentsMd } from "@/lib/persistent-agent-defaults";
@@ -216,6 +216,8 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
               agent: d.runtime === TERMINAL ? null : (d.runtime as "claude-code"),
               spawnMode: "auto",
               sessionMode: d.then === "waits-for-me" ? "interactive" : "headless",
+              // Model, effort, permissions: what a run on a machine takes.
+              agentOptions: d.runtime === TERMINAL ? null : options,
             })
           ).blueprint,
         (b) => (trigger ? api.createLocalBlueprintTrigger(b.id, trigger) : Promise.resolve()),
@@ -236,7 +238,8 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
                 kind: "agent",
                 agent: d.runtime,
                 ...(prompt ? { prompt } : {}),
-                ...(model ? { model } : {}),
+                // Model, effort, and (Claude Code) the permission mode.
+                ...localAgentParams(d.runtime, options),
                 // "New branch": the server wraps the prompt with branch + PR
                 // instructions off this base.
                 ...(d.withRepo ? { baseBranch: d.repoBranch || "main" } : {}),
@@ -389,6 +392,7 @@ export async function updateWork(
         runTitle: runName,
         agent: d.runtime === TERMINAL ? null : (d.runtime as "claude-code"),
         sessionMode: d.then === "waits-for-me" ? "interactive" : "headless",
+        agentOptions: d.runtime === TERMINAL ? null : options,
       });
       await syncTrigger(target, wanted, {
         create: (t) =>

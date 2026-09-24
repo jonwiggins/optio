@@ -5,14 +5,24 @@ import { Coins, Gauge, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import { formatTokens, formatUsd, type LocalTerminalUsage } from "@optio/shared";
+import {
+  formatTokens,
+  formatUsd,
+  type AgentLimitWindow,
+  type LocalHostAgentLimits,
+  type LocalTerminalUsage,
+} from "@optio/shared";
+import { windowLabel } from "@/components/dashboard/limits-panel";
 import { HoverCard, HoverRow } from "./hover-card";
 
 /**
- * Two header chips:
+ * Header chips:
  *  - AccountUsagePill: the Claude subscription's 5-hour / 7-day limit
  *    utilization (account-wide — the number that decides whether you can
  *    start another session). Polled; the server caches the upstream call.
+ *  - CodexLimitsPill: the same for Codex, from the snapshot the machine's
+ *    daemon read out of Codex's session log (it moves after each turn).
+ *    SessionLimitsPills picks which of the two a session shows.
  *  - SessionUsageChip: this terminal's own tokens + estimated spend, summed
  *    by the daemon from the agent's transcript.
  */
@@ -212,6 +222,7 @@ export function AccountUsagePill({
       >
         <span
           title={`Claude usage unavailable — ${unavailable}`}
+          data-usage-provider="claude"
           data-usage-state="unavailable"
           className="inline-flex items-center gap-1.5 h-6 px-1.5 @2xl:px-2 rounded-md border border-dashed border-border/70 bg-bg-card/60 text-[11px] font-mono text-text-muted/70 shrink-0"
         >
@@ -265,6 +276,7 @@ export function AccountUsagePill({
     <HoverCard content={card} className={className} interactive>
       <span
         title={usage.stale ? "Showing last known usage — the latest read failed" : undefined}
+        data-usage-provider="claude"
         className={cn(
           "inline-flex items-center gap-1.5 @2xl:gap-2 h-6 px-1.5 @2xl:px-2 rounded-md border text-[11px] font-mono shrink-0",
           usage.stale && "opacity-60 border-dashed",
@@ -290,6 +302,151 @@ export function AccountUsagePill({
         </span>
       </span>
     </HoverCard>
+  );
+}
+
+type CodexLimits = NonNullable<LocalHostAgentLimits["codex"]>;
+
+/**
+ * Codex's windows as the pill shows them, labelled by length ("5h", "7d"). A
+ * window that has reset since the snapshot reads 0%: the log only moves
+ * when Codex runs.
+ */
+export function codexBuckets(limits: CodexLimits, now = Date.now()): Array<[string, Bucket]> {
+  const out: Array<[string, Bucket]> = [];
+  const add = (w: AgentLimitWindow | null, fallback: string) => {
+    if (!w) return;
+    const reset = !!w.resetsAt && Date.parse(w.resetsAt) <= now;
+    out.push([
+      windowLabel(w.windowMinutes, fallback),
+      { utilization: reset ? 0 : w.usedPercent, resetsAt: reset ? null : w.resetsAt },
+    ]);
+  };
+  add(limits.primary, "5h");
+  add(limits.secondary, "7d");
+  return out;
+}
+
+/** Codex ran on the machine inside its current short window, so its limits are live. */
+export function codexRecentlyUsed(limits: CodexLimits, now = Date.now()): boolean {
+  const minutes = limits.primary?.windowMinutes ?? 300;
+  return now - Date.parse(limits.observedAt) < minutes * 60_000;
+}
+
+function windowName(label: string): string {
+  const unit = label.at(-1);
+  const n = label.slice(0, -1);
+  if (unit === "h") return `${n}-hour window`;
+  if (unit === "d") return `${n}-day window`;
+  return `${label} window`;
+}
+
+/**
+ * Codex's plan limits for the machine a session runs on. `collapsible` (in
+ * an `@container`): below @2xl just the gauge and the worse percentage.
+ */
+export function CodexLimitsPill({
+  limits,
+  hostName,
+  className,
+  collapsible,
+}: {
+  limits: CodexLimits;
+  hostName?: string;
+  className?: string;
+  collapsible?: boolean;
+}) {
+  const buckets = codexBuckets(limits);
+  if (buckets.length === 0) return null;
+  const worst = Math.max(...buckets.map(([, b]) => b.utilization ?? 0));
+  const plan = limits.planType
+    ? limits.planType.charAt(0).toUpperCase() + limits.planType.slice(1)
+    : null;
+  const card = (
+    <>
+      <span className="block font-medium text-text mb-1">Codex usage limits</span>
+      {buckets.map(([l, b]) => {
+        const pct = Math.round(b.utilization ?? 0);
+        const r = resetsIn(b.resetsAt);
+        return (
+          <span key={l} className="block">
+            <HoverRow label={windowName(l)} value={<span className={pctTone(pct)}>{pct}%</span>} />
+            {r && (
+              <span className="block text-[10px] text-text-muted/70 -mt-0.5">resets in {r}</span>
+            )}
+          </span>
+        );
+      })}
+      <span className="block mt-1 text-[10px] text-text-muted/70">
+        {plan ? `${plan} plan · ` : ""}as of {staleAge(limits.observedAt)} ago — Codex logs these
+        after each turn{hostName ? ` on ${hostName}` : ""}
+      </span>
+    </>
+  );
+  return (
+    <HoverCard content={card} className={className}>
+      <span
+        data-usage-provider="codex"
+        className={cn(
+          "inline-flex items-center gap-1.5 @2xl:gap-2 h-6 px-1.5 @2xl:px-2 rounded-md border text-[11px] font-mono shrink-0",
+          worst >= 95
+            ? "border-error/40 bg-error/10"
+            : worst >= 80
+              ? "border-warning/40 bg-warning/10"
+              : "border-border/70 bg-bg-card/60",
+        )}
+      >
+        <Gauge className={cn("w-3 h-3 shrink-0", pctTone(worst))} />
+        <span className="font-sans text-text-muted/80">Codex</span>
+        {collapsible && (
+          <span className={cn("@2xl:hidden tabular-nums font-medium", pctTone(worst))}>
+            {Math.round(worst)}%
+          </span>
+        )}
+        <span
+          className={cn("inline-flex items-center gap-2", collapsible && "hidden @2xl:inline-flex")}
+        >
+          {buckets.map(([l, b]) => (
+            <Meter key={l} label={l} bucket={b} />
+          ))}
+        </span>
+      </span>
+    </HoverCard>
+  );
+}
+
+/**
+ * The limits a session header shows: Codex's in a Codex session; Claude's
+ * everywhere else, plus Codex's in a plain terminal on a machine where Codex
+ * ran inside its current window (the numbers are live, so it may be running
+ * there now).
+ */
+export function SessionLimitsPills({
+  terminal,
+  host,
+  className,
+  collapsible,
+}: {
+  terminal: { spec?: { kind?: string; agent?: string } | null } | null | undefined;
+  host: { name?: string; agentLimits?: LocalHostAgentLimits | null } | null | undefined;
+  className?: string;
+  collapsible?: boolean;
+}) {
+  const agent = terminal?.spec?.kind === "agent" ? terminal.spec.agent : null;
+  const codex = host?.agentLimits?.codex ?? null;
+  const showCodex = !!codex && (agent === "codex" || (agent == null && codexRecentlyUsed(codex)));
+  return (
+    <>
+      {agent !== "codex" && <AccountUsagePill collapsible={collapsible} className={className} />}
+      {showCodex && (
+        <CodexLimitsPill
+          limits={codex}
+          hostName={host?.name}
+          collapsible={collapsible}
+          className={className}
+        />
+      )}
+    </>
   );
 }
 

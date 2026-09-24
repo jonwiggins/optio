@@ -8,6 +8,19 @@ const nextConfig: NextConfig = {
     config.resolve.extensionAlias = {
       ".js": [".ts", ".tsx", ".js"],
     };
+    // xterm.js decides it runs under Node when a `process` object with a
+    // `title` exists, and webpack injects Next's browser `process` polyfill
+    // ({ title: "browser" }) into every module that mentions `process`. That
+    // turns off every Mac rule in the terminal: ⌥↑/⌥↓ go out as Ctrl+↑/↓ (so
+    // Codex's "answer the question" key never arrives), ⌥←/→ lose their word
+    // jumps, and Option-typed characters arrive as Esc+letter. The prebuilt
+    // bundle imports nothing, so include it unparsed: no polyfill, and xterm
+    // sees the real browser. (Fixed upstream after @xterm/xterm 6.0.)
+    const noParse = config.module.noParse;
+    config.module.noParse = [
+      ...(noParse ? (Array.isArray(noParse) ? noParse : [noParse]) : []),
+      /[\\/]@xterm[\\/]xterm[\\/]lib[\\/]xterm\.js$/,
+    ];
     return config;
   },
   async headers() {

@@ -159,7 +159,7 @@ export function draftFromRow(kind: EditableKind, row: any, trigger: any | null):
         repoUrl: String(row.repoUrl ?? ""),
         repoBranch: String(row.baseBranch ?? "main"),
         runtime: row.agent ? String(row.agent) : TERMINAL,
-        agentOptions: {},
+        agentOptions: row.agent ? { ...(row.agentOptions ?? {}) } : {},
         prompt: String(row.commandTemplate ?? ""),
         then: interactive ? "waits-for-me" : "exits",
       });

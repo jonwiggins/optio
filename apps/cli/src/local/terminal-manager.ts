@@ -6,6 +6,7 @@ import { basename, dirname, join, sep } from "node:path";
 import {
   LOCAL_DEFAULT_COLS,
   LOCAL_DEFAULT_ROWS,
+  dedupeWorkLinks,
   extractHyperlinkUrls,
   extractWorkLinks,
   MAX_WORK_LINKS,
@@ -18,6 +19,7 @@ import {
 } from "@optio/shared";
 import type { AttentionTracker } from "./attention.js";
 import { buildAgentCommand } from "./agent-command.js";
+import type { ClaudeCliCaps } from "./cli-probes.js";
 import { buildPreview } from "./preview.js";
 import { RingBuffer } from "./ring-buffer.js";
 import { ScreenModel } from "./screen.js";
@@ -82,6 +84,8 @@ export interface TerminalManagerOptions {
   /** ZDOTDIR wrapper (see writeZshDotDir) that keeps the shim first for zsh. */
   zdotDir?: string;
   getHookServerPort: () => number;
+  /** What this machine's `claude` accepts (see probeClaudeCli), once probed. */
+  getClaudeCaps?: () => ClaudeCliCaps | null;
   onStatus?: (line: string) => void;
 }
 
@@ -136,6 +140,9 @@ export class TerminalManager {
               mode: msg.spec.mode,
               resumeSessionId: msg.spec.resumeSessionId,
               model: msg.spec.model,
+              effort: msg.spec.effort,
+              permissionMode: msg.spec.permissionMode,
+              claudeCaps: this.opts.getClaudeCaps?.(),
             }),
           ];
           break;
@@ -444,11 +451,16 @@ export class TerminalManager {
     // it cannot be corrupted by cursor moves.
     const hyperlinks = extractHyperlinkUrls(term.ring.toBuffer().toString("utf-8"));
     const text = `${hyperlinks.join("\n")}\n${term.screen.allText()}`;
-    for (const link of extractWorkLinks(text, { repoUrl: term.repoUrl })) {
+    for (const link of extractWorkLinks(text, {
+      repoUrl: term.repoUrl,
+      wrapWidth: term.pty.cols,
+    })) {
       if (term.seenLinks.size >= MAX_WORK_LINKS) break;
       if (!term.seenLinks.has(link.url)) term.seenLinks.set(link.url, link);
     }
-    const links = [...term.seenLinks.values()];
+    // One badge per PR / ticket: a bare "#607" seen early and the PR's URL
+    // printed later are the same PR.
+    const links = dedupeWorkLinks([...term.seenLinks.values()]);
     const key = workLinksKey(links);
     if (key === term.lastLinksKey) return;
     term.lastLinksKey = key;

@@ -60,7 +60,13 @@ data class ProviderCatalog(
         val default: JsonElement? = null,
         val placeholder: String? = null,
         val helpText: String? = null,
+        /** Where the field applies: "pod" and/or "local" (a run on a machine); null = pods only. */
+        val runsOn: List<String>? = null,
     ) {
+        /** The field reaches a run in an Optio pod (a machine-only one, like Claude's permissions, doesn't). */
+        val appliesToPods: Boolean
+            get() = runsOn?.contains("pod") ?: true
+
         val defaultString: String
             get() = default?.stringValue.orEmpty()
 

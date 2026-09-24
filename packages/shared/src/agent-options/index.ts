@@ -5,7 +5,15 @@ import { COPILOT_CATALOG } from "./copilot.js";
 import { OPENCODE_CATALOG } from "./opencode.js";
 import { OPENCLAW_CATALOG } from "./openclaw.js";
 import { CURSOR_CATALOG } from "./cursor.js";
-import type { AgentProviderId, LiveModel, ModelOption, ProviderCatalog } from "./types.js";
+import type {
+  AgentProviderId,
+  LiveModel,
+  ModelOption,
+  OptionChoice,
+  OptionField,
+  ProviderCatalog,
+} from "./types.js";
+import { LOCAL_AGENT_PERMISSION_MODES, type LocalAgentPermissionMode } from "../types/local.js";
 
 export type {
   AgentProviderId,
@@ -286,6 +294,105 @@ function promoteNewestInFamily(catalog: ProviderCatalog): ProviderCatalog {
     .map(({ m }) => m);
 
   return { ...catalog, models: sorted, aliases };
+}
+
+/**
+ * Merge Codex's own model catalog (what `codex debug models` lists on a
+ * machine, reported by its Optio Local daemon) into the OpenAI catalog.
+ * Codex's models lead, in Codex's order, with its labels, descriptions and
+ * per-model reasoning efforts, and the first one — Codex's default — is the
+ * latest. Baseline models Codex no longer lists follow, so a saved choice
+ * keeps its label.
+ */
+export function mergeCodexModels(catalog: ProviderCatalog, codex: LiveModel[]): ProviderCatalog {
+  const baseline = new Map(catalog.models.map((m) => [m.id, m]));
+  const seen = new Set<string>();
+  const lead: ModelOption[] = [];
+  for (const live of codex) {
+    if (!live.id || seen.has(live.id)) continue;
+    seen.add(live.id);
+    const entry: ModelOption = {
+      ...baseline.get(live.id),
+      id: live.id,
+      label: live.displayName || baseline.get(live.id)?.label || live.id,
+      source: "live",
+    };
+    delete entry.latest;
+    if (live.description) entry.description = live.description;
+    if (live.efforts?.length) entry.efforts = [...live.efforts];
+    if (live.defaultEffort) entry.defaultEffort = live.defaultEffort;
+    lead.push(entry);
+  }
+  if (lead.length === 0) return catalog;
+  lead[0] = { ...lead[0], latest: true };
+  const rest = catalog.models
+    .filter((m) => !seen.has(m.id))
+    .map((m) => {
+      if (!m.latest) return m;
+      const demoted = { ...m };
+      delete demoted.latest;
+      return demoted;
+    });
+  return { ...catalog, models: [...lead, ...rest] };
+}
+
+/**
+ * Whether an option field applies to a run in an Optio pod or on the user's
+ * machine (see `OptionField.runsOn`; unmarked fields are pod-only).
+ */
+export function optionRunsOn(field: OptionField, where: "pod" | "local"): boolean {
+  return (field.runsOn ?? ["pod"]).includes(where);
+}
+
+/**
+ * What a run on a machine passes to its agent CLI, from per-run agent
+ * options keyed like the provider catalog: the model, and every field with a
+ * `localParam` (effort, Claude Code's permission mode). Blank values are
+ * left out, so the machine's own defaults apply.
+ */
+export function localAgentParams(
+  agentType: string,
+  agentOptions: Record<string, unknown> | null | undefined,
+): { model?: string; effort?: string; permissionMode?: LocalAgentPermissionMode } {
+  const out: { model?: string; effort?: string; permissionMode?: LocalAgentPermissionMode } = {};
+  const catalog = agentOptions ? getProviderCatalog(providerForAgentType(agentType)) : undefined;
+  if (!agentOptions || !catalog) return out;
+  const str = (key: string): string | undefined => {
+    const v = agentOptions[key];
+    return typeof v === "string" && v.trim() ? v.trim() : undefined;
+  };
+  const model = str(catalog.modelField);
+  if (model) out.model = model;
+  for (const field of catalog.options) {
+    const value = field.localParam ? str(field.key) : undefined;
+    if (!value) continue;
+    if (field.localParam === "effort") out.effort = value;
+    else if ((LOCAL_AGENT_PERMISSION_MODES as readonly string[]).includes(value)) {
+      out.permissionMode = value as LocalAgentPermissionMode;
+    }
+  }
+  return out;
+}
+
+/**
+ * The choices a select field offers with `model` selected. A `modelEfforts`
+ * field narrows to the model's own efforts, in its order (one the field
+ * doesn't know by name is labelled by its value); any other field, or a
+ * model that lists no efforts, gets the field's static choices.
+ */
+export function optionChoicesFor(
+  field: OptionField,
+  model: ModelOption | undefined,
+): OptionChoice[] {
+  const choices = field.choices ?? [];
+  if (!field.modelEfforts || !model?.efforts?.length) return choices;
+  return model.efforts.map(
+    (effort) =>
+      choices.find((c) => c.value === effort) ?? {
+        value: effort,
+        label: effort.charAt(0).toUpperCase() + effort.slice(1),
+      },
+  );
 }
 
 /**

@@ -131,6 +131,25 @@ function taskStatus(state: string): [WorkStatus, string] {
   }
 }
 
+/**
+ * Where the session screen (`/local/:id`, the terminal with every session in
+ * its rail) should open from the Work list: the session that has waited on
+ * you longest, else the most recently active one still running, else the
+ * latest. Null when there are no sessions on your machines.
+ */
+export function sessionScreenTarget(rows: WorkRow[]): WorkRow | null {
+  const sessions = rows.filter((r) => r.source === "local-terminal");
+  const at = (r: WorkRow) => (r.lastActivity ? Date.parse(r.lastActivity) : 0);
+  const oldestFirst = (a: WorkRow, b: WorkRow) => at(a) - at(b);
+  const newestFirst = (a: WorkRow, b: WorkRow) => at(b) - at(a);
+  return (
+    sessions.filter((r) => r.status === "needs_you").sort(oldestFirst)[0] ??
+    sessions.filter((r) => r.status === "running" || r.status === "waiting").sort(newestFirst)[0] ??
+    [...sessions].sort(newestFirst)[0] ??
+    null
+  );
+}
+
 function terminalStatus(t: any): [WorkStatus, string] {
   if (t.state === "error") return ["failed", "error"];
   if (t.state === "exited") return ["done", "exited"];

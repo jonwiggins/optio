@@ -390,6 +390,38 @@ describe("hostile prompt/argument shell-quoting regression", () => {
     }
   });
 
+  it("passes Codex its model and reasoning effort as literal argv elements", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "optio-shellquote-"));
+    try {
+      const { argsFile } = makeFakeBin(tmp, "codex");
+
+      const env = {
+        OPTIO_PROMPT: "Fix the build",
+        OPTIO_CODEX_MODEL: HOSTILE,
+        OPTIO_CODEX_EFFORT: "xhigh",
+      };
+      const cmds = buildAgentCommand("codex", env);
+      const result = runGeneratedCommand(
+        cmds,
+        {
+          PATH: `${tmp}:${process.env.PATH}`,
+          OPTIO_TEST_ARGS_FILE: argsFile,
+          OPTIO_TEST_STDIN_FILE: path.join(tmp, "codex-stdin.bin"),
+          OPTIO_PROMPT: env.OPTIO_PROMPT,
+        },
+        "",
+      );
+      expect(result.status).toBe(0);
+
+      const argv = fs.readFileSync(argsFile, "utf8").split("\0").slice(0, -1);
+      expect(argv[argv.indexOf("-m") + 1]).toBe(HOSTILE);
+      expect(argv[argv.indexOf("-c") + 1]).toBe('model_reasoning_effort="xhigh"');
+      expect(argv).toContain("Fix the build");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("passes a hostile --session id to opencode literally", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "optio-shellquote-"));
     try {

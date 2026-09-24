@@ -80,6 +80,19 @@ export const LocalTerminalSpecSchema = z
         .max(100)
         .optional()
         .describe("Model override passed to the agent CLI (--model / -m)"),
+      effort: z
+        .string()
+        .regex(/^[A-Za-z0-9_-]{1,32}$/)
+        .optional()
+        .describe(
+          "Reasoning effort passed to the agent CLI (Claude Code --effort, Codex model_reasoning_effort)",
+        ),
+      permissionMode: z
+        .enum(["auto", "bypassPermissions", "default"])
+        .optional()
+        .describe(
+          "Claude Code's --permission-mode: auto (the default — its classifier approves routine actions, blocks risky ones), bypassPermissions (skip every check), default (ask first)",
+        ),
       baseBranch: z
         .string()
         .max(200)
@@ -124,6 +137,11 @@ export const LocalTerminalSchema = z
     spawnedBy: z.string(),
     blueprintId: z.string().nullable(),
     triggerId: z.string().nullable(),
+    triggerType: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Type of the trigger that started it (github, slack, schedule, …), when one did"),
     ticketSource: z.string().nullable(),
     ticketExternalId: z.string().nullable(),
     ticketUrl: z.string().nullable(),
@@ -211,6 +229,13 @@ export const LocalBlueprintSchema = z
     sessionMode: z
       .enum(["interactive", "headless"])
       .describe("Agent spawns: stay open for chat, or exit when the turn is done"),
+    agentOptions: z
+      .record(z.union([z.string(), z.boolean()]))
+      .nullable()
+      .optional()
+      .describe(
+        "Agent spawns: per-run agent parameters keyed like the provider catalog (model, effort, Claude Code permission mode); null = the machine's own",
+      ),
     enabled: z.boolean(),
     createdAt: z.date(),
     updatedAt: z.date(),

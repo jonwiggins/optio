@@ -1,4 +1,11 @@
-import { shellQuote, type LocalAgentKind, type LocalAgentSessionMode } from "@optio/shared";
+import {
+  LOCAL_AGENT_PERMISSION_MODES,
+  shellQuote,
+  type LocalAgentKind,
+  type LocalAgentPermissionMode,
+  type LocalAgentSessionMode,
+} from "@optio/shared";
+import type { ClaudeCliCaps } from "./cli-probes.js";
 
 export interface AgentCommandOptions {
   /** `interactive` (default) stays at the agent's prompt; `headless` runs one turn and exits. */
@@ -11,6 +18,16 @@ export interface AgentCommandOptions {
   resumeSessionId?: string;
   /** Model override for the agent CLI (`--model` / `-m`). */
   model?: string;
+  /** Reasoning effort: Claude Code `--effort`, Codex `-c model_reasoning_effort="…"`. */
+  effort?: string;
+  /** Claude Code's `--permission-mode`; `auto` when unset. */
+  permissionMode?: LocalAgentPermissionMode;
+  /**
+   * What this machine's `claude` accepts (see `probeClaudeCli`), once known.
+   * A Claude Code too old for auto mode or `--effort` would refuse to start
+   * with them, so they are left out; unknown = pass them.
+   */
+  claudeCaps?: ClaudeCliCaps | null;
 }
 
 /**
@@ -23,6 +40,11 @@ export interface AgentCommandOptions {
  * `codex exec`, …): the process prints its result and exits, which is the
  * "exit when done" automation shape. Claude Code still fires hooks in `-p`
  * mode, so the session id is captured and the run can be resumed later.
+ *
+ * Claude Code starts in auto mode unless told otherwise: `-p` would
+ * otherwise start in Manual, where every edit and command is denied because
+ * nobody can answer the prompt, and a fresh install's first interactive
+ * session would stop at each one.
  */
 export function buildAgentCommand(
   agent: LocalAgentKind,
@@ -35,6 +57,11 @@ export function buildAgentCommand(
   // interactive prompt.
   const headless = opts.mode === "headless" && (!resume || agent === "claude-code");
   const model = opts.model?.trim() ? shellQuote(opts.model.trim()) : null;
+  // Effort names are short words ("xhigh"); anything else is dropped rather
+  // than handed to a CLI flag or a Codex config override.
+  const effort = /^[A-Za-z0-9_-]{1,32}$/.test(opts.effort?.trim() ?? "")
+    ? opts.effort!.trim()
+    : null;
   // A prompt that starts with "-" (a template that opens with an event param,
   // and a PR comment reading "--dangerously-skip-permissions …") would parse as
   // a CLI flag. A leading space keeps it a positional for every CLI here.
@@ -42,16 +69,22 @@ export function buildAgentCommand(
   switch (agent) {
     case "claude-code": {
       let base = `claude --settings ${shellQuote(hookSettingsPath)}`;
+      const permission = LOCAL_AGENT_PERMISSION_MODES.includes(opts.permissionMode!)
+        ? opts.permissionMode!
+        : "auto";
+      base += claudePermissionFlag(permission, opts.claudeCaps);
       if (model) base += ` --model ${model}`;
+      if (effort && opts.claudeCaps?.effort !== false) base += ` --effort ${shellQuote(effort)}`;
       if (headless) base += " -p";
       if (resume) base += ` --resume ${resume}`;
       return base + (p ? ` ${p}` : "");
     }
     case "codex": {
-      const m = model ? ` -m ${model}` : "";
-      if (resume) return `codex resume${m} ${resume}` + (p ? ` ${p}` : "");
-      if (headless) return `codex exec${m}` + (p ? ` ${p}` : "");
-      return `codex${m}` + (p ? ` ${p}` : "");
+      let flags = model ? ` -m ${model}` : "";
+      if (effort) flags += ` -c ${shellQuote(`model_reasoning_effort="${effort}"`)}`;
+      if (resume) return `codex resume${flags} ${resume}` + (p ? ` ${p}` : "");
+      if (headless) return `codex exec${flags}` + (p ? ` ${p}` : "");
+      return `codex${flags}` + (p ? ` ${p}` : "");
     }
     case "cursor": {
       const m = model ? ` --model ${model}` : "";
@@ -69,4 +102,19 @@ export function buildAgentCommand(
       return `opencode${m}` + (p ? ` --prompt ${p}` : "");
     }
   }
+}
+
+/**
+ * Claude Code's permission flag. Skipping checks uses the long-standing
+ * `--dangerously-skip-permissions`; a mode this `claude` doesn't list (auto
+ * mode on an older release) is left out, so it starts in its own default
+ * rather than refusing to start.
+ */
+function claudePermissionFlag(
+  mode: LocalAgentPermissionMode,
+  caps: ClaudeCliCaps | null | undefined,
+): string {
+  if (mode === "bypassPermissions") return " --dangerously-skip-permissions";
+  if (caps?.permissionModes && !caps.permissionModes.includes(mode)) return "";
+  return ` --permission-mode ${mode}`;
 }

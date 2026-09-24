@@ -11,7 +11,11 @@ import {
   anthropicModelVersion,
   getProviderCatalog,
   groupModelsByFamily,
+  localAgentParams,
+  mergeCodexModels,
   mergeLiveModels,
+  optionChoicesFor,
+  optionRunsOn,
   resolveModelId,
 } from "./index.js";
 
@@ -311,5 +315,111 @@ describe("getProviderCatalog", () => {
 
   it("returns undefined for an unknown provider", () => {
     expect(getProviderCatalog("nonexistent")).toBeUndefined();
+  });
+});
+
+describe("mergeCodexModels", () => {
+  const codex = [
+    {
+      id: "gpt-5.7",
+      displayName: "GPT-5.7",
+      description: "Newest.",
+      efforts: ["low", "medium", "high", "max"],
+      defaultEffort: "medium",
+    },
+    {
+      id: "gpt-5.6-sol",
+      displayName: "GPT-5.6-Sol",
+      efforts: ["low", "ultra"],
+      defaultEffort: "low",
+    },
+  ];
+
+  it("leads with Codex's models in its order, the first one latest", () => {
+    const merged = mergeCodexModels(OPENAI_CATALOG, codex);
+    expect(merged.models.slice(0, 2).map((m) => m.id)).toEqual(["gpt-5.7", "gpt-5.6-sol"]);
+    expect(merged.models.filter((m) => m.latest).map((m) => m.id)).toEqual(["gpt-5.7"]);
+    expect(merged.models[0]).toMatchObject({
+      label: "GPT-5.7",
+      description: "Newest.",
+      efforts: ["low", "medium", "high", "max"],
+      defaultEffort: "medium",
+      source: "live",
+    });
+  });
+
+  it("takes Codex's efforts over the baseline's, and keeps models it no longer lists", () => {
+    const merged = mergeCodexModels(OPENAI_CATALOG, codex);
+    expect(merged.models.find((m) => m.id === "gpt-5.6-sol")?.efforts).toEqual(["low", "ultra"]);
+    // Saved rows still find their label.
+    expect(merged.models.find((m) => m.id === "gpt-5.4")?.source).toBe("baseline");
+  });
+
+  it("is the catalog itself when Codex lists nothing", () => {
+    expect(mergeCodexModels(OPENAI_CATALOG, [])).toBe(OPENAI_CATALOG);
+  });
+
+  it("doesn't mutate the baseline", () => {
+    const before = JSON.stringify(OPENAI_CATALOG);
+    mergeCodexModels(OPENAI_CATALOG, codex);
+    expect(JSON.stringify(OPENAI_CATALOG)).toBe(before);
+  });
+});
+
+describe("optionRunsOn / optionChoicesFor", () => {
+  const field = (key: string) => {
+    const all = [...ANTHROPIC_CATALOG.options, ...OPENAI_CATALOG.options];
+    return all.find((f) => f.key === key)!;
+  };
+
+  it("keeps pod-only fields off a run on a machine", () => {
+    expect(optionRunsOn(field("claudeContextWindow"), "local")).toBe(false);
+    expect(optionRunsOn(field("claudeEffort"), "local")).toBe(true);
+    expect(optionRunsOn(field("claudePermissionMode"), "local")).toBe(true);
+    // Pods always skip permission checks: the choice is a machine's only.
+    expect(optionRunsOn(field("claudePermissionMode"), "pod")).toBe(false);
+    expect(optionRunsOn(field("copilotEffort"), "pod")).toBe(true);
+  });
+
+  it("narrows a model's reasoning efforts, labelling ones it doesn't know", () => {
+    const effort = field("copilotEffort");
+    const model = { id: "m", label: "M", efforts: ["low", "ultra", "turbo"] };
+    expect(optionChoicesFor(effort, model)).toEqual([
+      { value: "low", label: "Low" },
+      { value: "ultra", label: "Ultra" },
+      { value: "turbo", label: "Turbo" },
+    ]);
+    // No model (or one that lists nothing): the field's own choices.
+    expect(optionChoicesFor(effort, undefined)).toBe(effort.choices);
+    expect(optionChoicesFor(field("claudeEffort"), model)).toBe(field("claudeEffort").choices);
+  });
+});
+
+describe("localAgentParams", () => {
+  it("reads the model, effort and permission mode a run on a machine takes", () => {
+    expect(
+      localAgentParams("claude-code", {
+        claudeModel: "opus",
+        claudeEffort: "high",
+        claudePermissionMode: "bypassPermissions",
+        claudeContextWindow: "1m",
+        claudeThinking: true,
+      }),
+    ).toEqual({ model: "opus", effort: "high", permissionMode: "bypassPermissions" });
+    expect(
+      localAgentParams("codex", { copilotModel: "gpt-5.6-sol", copilotEffort: "xhigh" }),
+    ).toEqual({ model: "gpt-5.6-sol", effort: "xhigh" });
+  });
+
+  it("leaves out blanks and unknown permission modes", () => {
+    expect(
+      localAgentParams("claude-code", { claudeModel: " ", claudePermissionMode: "yolo" }),
+    ).toEqual({});
+    expect(localAgentParams("codex", null)).toEqual({});
+    expect(
+      localAgentParams("gemini", { geminiModel: "gemini-3-pro", geminiApprovalMode: "yolo" }),
+    ).toEqual({
+      model: "gemini-3-pro",
+    });
   });
 });

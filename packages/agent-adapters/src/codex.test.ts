@@ -123,6 +123,20 @@ describe("CodexAdapter", () => {
       const config = adapter.buildContainerConfig(baseInput);
       expect(config.env.OPTIO_CODEX_AUTH_MODE).toBe("api-key");
     });
+
+    it("hands the task worker the model and reasoning effort", () => {
+      const config = adapter.buildContainerConfig({
+        ...baseInput,
+        copilotModel: "gpt-5.6-sol",
+        copilotEffort: "high",
+      });
+      expect(config.env.OPTIO_CODEX_MODEL).toBe("gpt-5.6-sol");
+      expect(config.env.OPTIO_CODEX_EFFORT).toBe("high");
+      // Unset: Codex's own defaults.
+      const plain = adapter.buildContainerConfig(baseInput);
+      expect(plain.env).not.toHaveProperty("OPTIO_CODEX_MODEL");
+      expect(plain.env).not.toHaveProperty("OPTIO_CODEX_EFFORT");
+    });
   });
 
   describe("parseResult", () => {

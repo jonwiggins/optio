@@ -77,6 +77,7 @@ describe("GET /api/agents/:provider/options", () => {
     expect(mockGetProviderOptions).toHaveBeenCalledWith("anthropic", {
       workspaceId: "ws-1",
       forceRefresh: false,
+      machines: { userId: expect.anything(), hostId: undefined },
     });
   });
 
@@ -106,6 +107,7 @@ describe("GET /api/agents/:provider/options", () => {
     expect(mockGetProviderOptions).toHaveBeenCalledWith("anthropic", {
       workspaceId: "ws-1",
       forceRefresh: true,
+      machines: expect.objectContaining({ userId: expect.anything() }),
     });
   });
 
@@ -143,6 +145,43 @@ describe("GET /api/agents/:provider/options", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().error).toBe("Anthropic /v1/models returned 401");
   });
+
+  it("asks for one machine's Codex list and says where it came from", async () => {
+    mockGetProviderOptions.mockResolvedValue({
+      catalog: {
+        provider: "openai",
+        models: [{ id: "gpt-5.6-sol", label: "GPT-5.6-Sol", efforts: ["low", "ultra"] }],
+        aliases: {},
+        options: [],
+        liveRefreshSupported: true,
+        label: "OpenAI Codex",
+        modelField: "copilotModel",
+      },
+      source: "live",
+      cached: false,
+      refreshedAt: 1700000000,
+      liveFrom: "Codex on MacBook-Pro",
+    });
+    const hostId = "6c95f3f7-577f-4d98-8766-27dc670de253";
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/agents/openai/options?hostId=${hostId}`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().liveFrom).toBe("Codex on MacBook-Pro");
+    expect(res.json().catalog.models[0].efforts).toEqual(["low", "ultra"]);
+    expect(mockGetProviderOptions).toHaveBeenCalledWith(
+      "openai",
+      expect.objectContaining({ machines: expect.objectContaining({ hostId }) }),
+    );
+  });
+
+  it("rejects a hostId that isn't a uuid", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/agents/openai/options?hostId=x" });
+    expect(res.statusCode).toBe(400);
+  });
 });
 
 describe("POST /api/agents/:provider/options/refresh", () => {
@@ -179,6 +218,7 @@ describe("POST /api/agents/:provider/options/refresh", () => {
     expect(mockGetProviderOptions).toHaveBeenCalledWith("gemini", {
       workspaceId: "ws-1",
       forceRefresh: true,
+      machines: expect.objectContaining({ userId: expect.anything() }),
     });
   });
 

@@ -2544,13 +2544,20 @@ public struct ExtractWorkLinksOptions: Codable, Hashable, Sendable {
     /// Git remote of the terminal's directory. When it is a GitHub / GitLab
     /// repo, bare `#123` mentions resolve to that repo (kind `ref`).
     public let repoUrl: String?
+    /// Columns the text was laid out at. Only a line that runs (nearly) to it
+    /// is a hard wrap to heal; a short line ends where it ends, so a PR URL at
+    /// the end of one is never glued to digits opening the next ("…/pull/612"
+    /// + "19 files changed" is not PR 61219). Unset: every break is healed.
+    public let wrapWidth: Double?
 
     private enum CodingKeys: String, CodingKey {
         case repoUrl = "repoUrl"
+        case wrapWidth = "wrapWidth"
     }
 
-    public init(repoUrl: String? = nil) {
+    public init(repoUrl: String? = nil, wrapWidth: Double? = nil) {
         self.repoUrl = repoUrl
+        self.wrapWidth = wrapWidth
     }
 }
 
@@ -3072,6 +3079,92 @@ public struct LocalHostAgentLimits: Codable, Hashable, Sendable {
     }
 }
 
+/// One model as an agent CLI on the machine lists it (Codex's model catalog).
+public struct LocalAgentModel: Codable, Hashable, Sendable {
+    public let id: String
+    public let label: String
+    public let description: String?
+    /// Reasoning efforts the model accepts, in order.
+    public let efforts: [String]
+    /// The effort the CLI uses when none is set.
+    public let defaultEffort: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case label = "label"
+        case description = "description"
+        case efforts = "efforts"
+        case defaultEffort = "defaultEffort"
+    }
+
+    public init(
+        id: String,
+        label: String,
+        description: String? = nil,
+        efforts: [String],
+        defaultEffort: String? = nil
+    ) {
+        self.id = id
+        self.label = label
+        self.description = description
+        self.efforts = efforts
+        self.defaultEffort = defaultEffort
+    }
+}
+
+/// The models an agent CLI on the machine offers, read by the daemon (no
+/// tokens leave the laptop). Codex: `codex debug models` — its current model
+/// catalog, refreshed the way Codex refreshes it — so the model and effort
+/// pickers track Codex releases without an Optio update.
+public struct LocalHostAgentModels: Codable, Hashable, Sendable {
+    public struct Codex: Codable, Hashable, Sendable {
+        public let models: [LocalAgentModel]
+        /// When the daemon read the catalog.
+        public let fetchedAt: String
+
+        private enum CodingKeys: String, CodingKey {
+            case models = "models"
+            case fetchedAt = "fetchedAt"
+        }
+
+        public init(models: [LocalAgentModel], fetchedAt: String) {
+            self.models = models
+            self.fetchedAt = fetchedAt
+        }
+    }
+
+    public let codex: Codex?
+
+    private enum CodingKeys: String, CodingKey {
+        case codex = "codex"
+    }
+
+    public init(codex: Codex? = nil) {
+        self.codex = codex
+    }
+}
+
+/// How a local Claude Code agent handles permission prompts — its
+/// `--permission-mode`. `auto` (the daemon's default): Claude's classifier
+/// approves routine actions and blocks risky ones, so an unattended run
+/// doesn't stall on a prompt. `bypassPermissions`: skip every check
+/// (`--dangerously-skip-permissions`). `default`: ask first (a headless run
+/// can't ask, so those actions are denied).
+public enum LocalAgentPermissionMode: String, Codable, Hashable, Sendable, CaseIterable {
+    case auto = "auto"
+    case bypassPermissions = "bypassPermissions"
+    case `default` = "default"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalAgentPermissionMode] = [.auto, .bypassPermissions, .default]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalAgentPermissionMode(rawValue: raw) ?? .unknown
+    }
+}
+
 public struct LocalHost: Codable, Hashable, Sendable {
     public let id: String
     /// Null only in auth-disabled dev installs.
@@ -3277,6 +3370,11 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
         public let resumeSessionId: String?
         /// Model override passed to the agent CLI (`--model` / `-m`), when set.
         public let model: String?
+        /// Reasoning effort passed to the agent CLI, when set: Claude Code
+        /// `--effort`, Codex `-c model_reasoning_effort=…`.
+        public let effort: String?
+        /// Claude Code only: its `--permission-mode`. The daemon's default is `auto`.
+        public let permissionMode: LocalAgentPermissionMode?
         /// "Work on a new branch that becomes a PR": the server wraps the prompt
         /// with branch-and-PR instructions off this base before the spawn.
         public let baseBranch: String?
@@ -3287,6 +3385,8 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
             case mode = "mode"
             case resumeSessionId = "resumeSessionId"
             case model = "model"
+            case effort = "effort"
+            case permissionMode = "permissionMode"
             case baseBranch = "baseBranch"
         }
 
@@ -3296,6 +3396,8 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
             mode: LocalAgentSessionMode? = nil,
             resumeSessionId: String? = nil,
             model: String? = nil,
+            effort: String? = nil,
+            permissionMode: LocalAgentPermissionMode? = nil,
             baseBranch: String? = nil
         ) {
             self.agent = agent
@@ -3303,6 +3405,8 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
             self.mode = mode
             self.resumeSessionId = resumeSessionId
             self.model = model
+            self.effort = effort
+            self.permissionMode = permissionMode
             self.baseBranch = baseBranch
         }
     }
@@ -3517,6 +3621,9 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
     public let spawnedBy: LocalSpawnSource
     public let blueprintId: String?
     public let triggerId: String?
+    /// The type of the trigger that started it (`github`, `schedule`, …), for
+    /// its source badge. Null when no trigger did, or the trigger is gone.
+    public let triggerType: TriggerType?
     public let ticketSource: String?
     public let ticketExternalId: String?
     public let ticketUrl: String?
@@ -3560,6 +3667,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         case spawnedBy = "spawnedBy"
         case blueprintId = "blueprintId"
         case triggerId = "triggerId"
+        case triggerType = "triggerType"
         case ticketSource = "ticketSource"
         case ticketExternalId = "ticketExternalId"
         case ticketUrl = "ticketUrl"
@@ -3596,6 +3704,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         spawnedBy: LocalSpawnSource,
         blueprintId: String? = nil,
         triggerId: String? = nil,
+        triggerType: TriggerType? = nil,
         ticketSource: String? = nil,
         ticketExternalId: String? = nil,
         ticketUrl: String? = nil,
@@ -3630,6 +3739,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         self.spawnedBy = spawnedBy
         self.blueprintId = blueprintId
         self.triggerId = triggerId
+        self.triggerType = triggerType
         self.ticketSource = ticketSource
         self.ticketExternalId = ticketExternalId
         self.ticketUrl = ticketUrl
@@ -3687,6 +3797,11 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
     public let spawnMode: LocalBlueprintSpawnMode
     /// Agent spawns only: stay open for chat, or exit when the turn is done.
     public let sessionMode: LocalAgentSessionMode
+    /// Agent spawns: per-run agent parameters keyed like the provider catalog
+    /// (`claudeModel`, `claudeEffort`, `claudePermissionMode`, `copilotModel`,
+    /// `copilotEffort`; string or boolean values) — the fields that apply to a
+    /// run on a machine. Null = the machine's own defaults.
+    public let agentOptions: [String: AnyCodable]?
     public let enabled: Bool
     public let createdAt: String
     public let updatedAt: String
@@ -3705,6 +3820,7 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
         case agent = "agent"
         case spawnMode = "spawnMode"
         case sessionMode = "sessionMode"
+        case agentOptions = "agentOptions"
         case enabled = "enabled"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
@@ -3724,6 +3840,7 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
         agent: LocalAgentKind? = nil,
         spawnMode: LocalBlueprintSpawnMode,
         sessionMode: LocalAgentSessionMode,
+        agentOptions: [String: AnyCodable]? = nil,
         enabled: Bool,
         createdAt: String,
         updatedAt: String
@@ -3741,6 +3858,7 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
         self.agent = agent
         self.spawnMode = spawnMode
         self.sessionMode = sessionMode
+        self.agentOptions = agentOptions
         self.enabled = enabled
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -3779,6 +3897,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case transcriptBackfill(TranscriptBackfillPayload)
     case session(SessionPayload)
     case agentLimits(AgentLimitsPayload)
+    case agentModels(AgentModelsPayload)
     case size(SizePayload)
     case snapshot(SnapshotPayload)
     case exit(ExitPayload)
@@ -4095,6 +4214,18 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct AgentModelsPayload: Codable, Hashable, Sendable {
+        public let models: LocalHostAgentModels
+
+        private enum CodingKeys: String, CodingKey {
+            case models = "models"
+        }
+
+        public init(models: LocalHostAgentModels) {
+            self.models = models
+        }
+    }
+
     public struct SizePayload: Codable, Hashable, Sendable {
         public let terminalId: String
         public let cols: Double
@@ -4173,6 +4304,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case "transcript-backfill": self = .transcriptBackfill(try TranscriptBackfillPayload(from: decoder))
         case "session": self = .session(try SessionPayload(from: decoder))
         case "agent-limits": self = .agentLimits(try AgentLimitsPayload(from: decoder))
+        case "agent-models": self = .agentModels(try AgentModelsPayload(from: decoder))
         case "size": self = .size(try SizePayload(from: decoder))
         case "snapshot": self = .snapshot(try SnapshotPayload(from: decoder))
         case "exit": self = .exit(try ExitPayload(from: decoder))
@@ -4246,6 +4378,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case .agentLimits(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("agent-limits", forKey: .type)
+            try payload.encode(to: encoder)
+        case .agentModels(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("agent-models", forKey: .type)
             try payload.encode(to: encoder)
         case .size(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)

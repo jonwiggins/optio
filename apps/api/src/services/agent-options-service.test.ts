@@ -25,6 +25,11 @@ vi.mock("./event-bus.js", () => ({
   }),
 }));
 
+const mockCodexModelsFor = vi.fn();
+vi.mock("./local-host-service.js", () => ({
+  codexModelsFor: (...args: unknown[]) => mockCodexModelsFor(...args),
+}));
+
 import { getProviderOptions, resolveLiveModelId } from "./agent-options-service.js";
 
 const originalFetch = globalThis.fetch;
@@ -283,5 +288,106 @@ describe("resolveLiveModelId", () => {
     mockRetrieveSecret.mockResolvedValueOnce("sk-ant-xxx");
     globalThis.fetch = liveList(["claude-opus-5-5"]);
     expect(await resolveLiveModelId("anthropic", "  ")).toBe("claude-opus-5-5");
+  });
+});
+
+describe("getProviderOptions for Codex", () => {
+  beforeEach(() => {
+    mockRetrieveSecret.mockReset();
+    mockRedisGet.mockReset();
+    mockRedisSet.mockReset();
+    mockCodexModelsFor.mockReset();
+    mockRedisGet.mockResolvedValue(null);
+    mockRedisSet.mockResolvedValue("OK");
+    mockRetrieveSecret.mockRejectedValue(new Error("Secret not found"));
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const reported = {
+    host: { id: "h1", name: "MacBook-Pro" },
+    codex: {
+      fetchedAt: "2026-09-24T10:00:00.000Z",
+      models: [
+        {
+          id: "gpt-5.7",
+          label: "GPT-5.7",
+          efforts: ["low", "medium", "high", "max"],
+          defaultEffort: "medium",
+        },
+      ],
+    },
+  };
+
+  it("leads with the Codex catalog a machine reported, and says whose", async () => {
+    mockCodexModelsFor.mockResolvedValue(reported);
+    const result = await getProviderOptions("openai", {
+      machines: { userId: "u1", hostId: "h1" },
+    });
+    expect(mockCodexModelsFor).toHaveBeenCalledWith("u1", "h1");
+    expect(result.source).toBe("live");
+    expect(result.liveFrom).toBe("Codex on MacBook-Pro");
+    expect(result.refreshedAt).toBe(Date.parse("2026-09-24T10:00:00.000Z") / 1000);
+    expect(result.catalog.models[0]).toMatchObject({
+      id: "gpt-5.7",
+      latest: true,
+      efforts: ["low", "medium", "high", "max"],
+      defaultEffort: "medium",
+    });
+  });
+
+  it("is the baseline when no machine reported a list, or none was asked for", async () => {
+    mockCodexModelsFor.mockResolvedValue(null);
+    const none = await getProviderOptions("openai", { machines: { userId: "u1" } });
+    expect(none.source).toBe("baseline");
+    expect(none.liveFrom).toBeUndefined();
+
+    mockCodexModelsFor.mockResolvedValue(reported);
+    const unasked = await getProviderOptions("openai");
+    expect(unasked.liveFrom).toBeUndefined();
+    expect(mockCodexModelsFor).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an API key's list to the models Codex can drive", async () => {
+    mockRetrieveSecret.mockImplementation((name: unknown) =>
+      name === "OPENAI_API_KEY"
+        ? Promise.resolve("sk-test")
+        : Promise.reject(new Error("Secret not found")),
+    );
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          data: [
+            { id: "gpt-5.7-codex" },
+            { id: "gpt-5.7" },
+            { id: "text-embedding-3-large" },
+            { id: "gpt-5-audio-preview" },
+            { id: "dall-e-3" },
+          ],
+        }),
+    }) as unknown as typeof fetch;
+    const result = await getProviderOptions("openai");
+    const ids = result.catalog.models.map((m) => m.id);
+    expect(ids).toEqual(expect.arrayContaining(["gpt-5.7-codex", "gpt-5.7"]));
+    expect(ids).not.toContain("text-embedding-3-large");
+    expect(ids).not.toContain("gpt-5-audio-preview");
+    expect(ids).not.toContain("dall-e-3");
+  });
+
+  it("filters a list cached before the filter existed too", async () => {
+    mockRetrieveSecret.mockImplementation((name: unknown) =>
+      name === "OPENAI_API_KEY"
+        ? Promise.resolve("sk-test")
+        : Promise.reject(new Error("Secret not found")),
+    );
+    mockRedisGet.mockResolvedValue(
+      JSON.stringify({ models: [{ id: "whisper-1" }, { id: "gpt-5.9" }], refreshedAt: 1 }),
+    );
+    const ids = (await getProviderOptions("openai")).catalog.models.map((m) => m.id);
+    expect(ids).toContain("gpt-5.9");
+    expect(ids).not.toContain("whisper-1");
   });
 });

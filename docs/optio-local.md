@@ -135,7 +135,9 @@ back via `local_terminal_id`). The pipeline, in `services/local-run-service.ts`:
    daemon can launch — Claude Code / Codex / Cursor / Gemini / OpenCode), claims a terminal
    id on the run under CAS (so a worker + reconciler race can't spawn twice), and
    `createTerminal`s an `{kind: "agent"}` spec: the rendered prompt, the session mode, and
-   the Job's `model` (`--model` / `-m`). A Task's prompt is wrapped with "work on
+   what the run's agent options set for a run on a machine (`localAgentParams` in
+   `@optio/shared`): the model (`--model` / `-m`), the reasoning effort, and Claude Code's
+   permission mode — see "Launching agents" below. A Task's prompt is wrapped with "work on
    `optio/task-<id>` off `<base>`, push, open a PR, print its URL"; a resume (CI failure /
    review feedback) carries the resume prompt and, for Claude Code, `-p --resume <session>`.
    Host offline → the terminal parks and the run stays `queued` until the daemon's next
@@ -260,6 +262,15 @@ The decay applies to hook-owned terminals too.
 Exit: `spawnedBy != "manual"` → `needs_you` (reason `exit`) so automation results land in
 the queue for review; manual shells exit to `idle`.
 
+Kill: `POST /api/local/terminals/:id/kill` marks the terminal `idle` with reason `killed`
+before the daemon hears of it. Whatever the process does on its way out (a last `Stop`
+hook, shutdown output, a non-zero exit) changes nothing, and it lands in **Finished**:
+you ended it, so there's nothing to review. A run behind the terminal ends too
+(`killedOutcome` in `local-run-service.ts`). An interactive run **completes**, because
+closing its session is how it ends. A headless run killed mid-flight **stops** without a
+retry: a Task is cancelled, and a Job run is marked "Stopped by user" with its retry
+budget spent, like a cancel. A Task that already opened a PR follows its PR.
+
 ## Architecture
 
 ```
@@ -356,7 +367,8 @@ automations, runLocations}}`; 409 while the host is connected
   own session (`agentSessionId`) → 201 `{terminal, reused: false}`, or 200
   `{terminal, reused: true}` with a resume of that session that hasn't ended; 409 when the
   session never reported an id
-- `POST /api/local/terminals/:id/kill` — `{signal?}` (default SIGTERM)
+- `POST /api/local/terminals/:id/kill` — `{signal?}` (default SIGTERM); the session
+  finishes (see "Kill" under Attention detection)
 - `POST /api/local/terminals/:id/input` — `{data}` (fallback for non-WS input; primary
   input path is the stream WS)
 - `DELETE /api/local/terminals/:id` — delete a non-running record
@@ -383,6 +395,38 @@ substituted value is shell-single-quoted before insertion (`{{#if}}` blocks are 
 the raw values first, so an empty param drops its block). Agent prompts are passed as a
 single quoted argv element, never interpolated into shell syntax; a prompt that starts with
 `-` gets a leading space so an event payload can't smuggle in a CLI flag.
+
+## Launching agents
+
+`cli/src/local/agent-command.ts` builds each agent's command line; every value in it is a
+single shell-quoted argv element.
+
+- **Permissions (Claude Code).** Agents start with `--permission-mode auto` unless the
+  spawn asks for another mode: Claude's classifier approves routine actions (edits and
+  commands in the working directory) and blocks risky ones. Without a flag, a headless
+  `claude -p` starts in Manual mode, where every action that needs approval is denied
+  because nobody can answer the prompt, and a fresh install's first interactive session
+  stops at each one. The spec's `permissionMode` picks `bypassPermissions` ("Skip all
+  checks": `--dangerously-skip-permissions`) or `default` ("Ask first"); it is the
+  `claudePermissionMode` catalog field, shown only for runs on a machine (pods always skip
+  checks). Claude Code falls back to Manual on its own when auto mode isn't available to
+  the account or model.
+- **Effort.** The spec's `effort` becomes Claude Code's `--effort` and Codex's
+  `-c model_reasoning_effort="…"`. The New work form offers it for runs on a machine as
+  well as in pods.
+- **What the CLI accepts.** The daemon reads `claude --help` at start and hourly
+  (`cli/src/local/cli-probes.ts`). An older Claude Code without auto mode or `--effort`
+  would refuse to start with them, so they're left out for it.
+- **Codex's models.** On connect and every 6 hours the daemon runs `codex debug models`
+  (Codex's own catalog, refreshed the way Codex refreshes it, else the list its release
+  ships with; `~/.codex/models_cache.json` as a fallback) and sends the models Codex lists
+  in its picker, each with its reasoning efforts and default, in an `agent-models` frame.
+  The server keeps it on `local_hosts.agent_models`, and `GET /api/agents/openai/options`
+  merges it ahead of the baseline (`mergeCodexModels`): `?hostId=` for a run on that
+  machine, else the freshest list any of the caller's machines reported. The picker narrows
+  the effort field to the chosen model's own efforts, and says "Models from Codex on
+  <machine>". Codex runs in pods get the same model and effort (`-m`,
+  `model_reasoning_effort`).
 
 ## Daemon WebSocket protocol (`/ws/local/daemon`, JSON text frames)
 
@@ -412,12 +456,17 @@ claudeCredentials?, transcriptBackfill?, manageDirs?}` — first frame; server r
   before — a full-screen agent scrolls its own history off the screen, but a PR printed
   ten minutes ago still identifies the session (`extractWorkLinks` in `@optio/shared`:
   GitHub PRs/issues, GitLab MRs/issues, Linear, Jira; soft wraps are healed by the
-  emulator, hard-wrapped URLs by the scanner; URLs inside OSC 8 hyperlinks are harvested
+  emulator, hard-wrapped URLs by the scanner — only after lines that reach the terminal's
+  width, so a URL ending a short line isn't glued to digits opening the next; URLs inside OSC 8 hyperlinks are harvested
   from the raw bytes since Claude Code / gh print `#581` with the URL only in the escape;
-  bare `#N` mentions resolve to the dir's GitHub/GitLab remote as kind `ref`). Rides the
-  preview throttle, sent only when the set changes; the server
-  sanitizes (https only, known kinds/providers, ≤50) and stores it in
-  `local_terminals.links`
+  bare `#N` mentions resolve to the dir's GitHub/GitLab remote as kind `ref`). One link
+  per PR / ticket (`dedupeWorkLinks`): a bare `#607` seen early and the PR's URL printed
+  later are one PR, and so are owner / repo spellings that differ in case; the most telling
+  link wins. Rides the preview throttle, sent only when the set changes; the server
+  sanitizes (https only, known kinds/providers, ≤50), dedupes again for older daemons, and
+  stores it in `local_terminals.links`. Terminal responses dedupe once more, for rows
+  stored before, and carry `triggerType` (`github`, `schedule`, …) so a trigger-started
+  session's badge names its source instead of "trigger"
 - `{type:"transcript", terminalId, entries:[{seq, role, kind, text, detail, toolName,
 toolUseId, isError, at}]}` — new conversation entries distilled from the agent's transcript
   (Claude Code), batched (40 per frame), in `seq` order; sent on hooks, every 3 s while the
@@ -439,13 +488,20 @@ toolUseId, isError, at}]}` — new conversation entries distilled from the agent
 - `{type:"exit", terminalId, exitCode}`
 - `{type:"credentials-result", requestId, token?, expiresAt?, error?}` — answer to the
   server's `credentials` request (see "Claude token refresh from your machine")
+- `{type:"agent-limits", limits:{codex?}}` — Codex's newest rate-limit snapshot (see
+  "Usage limits" under Web UI); on connect, every 3 minutes, and a moment after any
+  attention change (a turn ending logs fresh limits)
+- `{type:"agent-models", models:{codex?:{models:[{id, label, description?, efforts,
+defaultEffort}], fetchedAt}}}` — the models the machine's Codex offers (see "Launching
+  agents"); sanitized and stored per host
 - `{type:"ping"}` every 30 s (server updates `lastSeenAt`, replies `{type:"pong"}`)
 
 Server → daemon:
 
 - `{type:"spawn", terminalId, dir, cols, rows, spec}` (spec as in REST; agent specs may
-  carry `model`, passed to the CLI as `--model` / `-m`, and `mode: "headless"` combined with
-  `resumeSessionId` runs `claude -p --resume` for Claude Code)
+  carry `model`, passed to the CLI as `--model` / `-m`, `effort`, and `permissionMode`
+  (Claude Code; `auto` when absent) — see "Launching agents" — and `mode: "headless"`
+  combined with `resumeSessionId` runs `claude -p --resume` for Claude Code)
 - `{type:"input", terminalId, dataB64}` / `{type:"resize", terminalId, cols, rows}`
 - `{type:"kill", terminalId, signal}`
 - `{type:"attach", terminalId, attachId}` / `{type:"detach", terminalId}` — daemon
@@ -489,7 +545,10 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   (`components/local/host-dirs.tsx`); a machine that can't take the request shows the
   `optio local add` command instead.
 - `/local/[id]` — focus view: full xterm.js terminal + header (title, host, dir, state,
-  attention, PR / ticket badges, Kill / Start / Delete). Agent sessions with a recorded
+  attention, PR / ticket badges, where it came from — GitHub, Slack, Linear, a schedule, …
+  for a trigger-started one — Kill / Start / Delete). **Sessions** on the Work list
+  (`/work`) opens it at the session that has waited on you longest, else the most recently
+  active one (`sessionScreenTarget` in `lib/work-feed.ts`). Agent sessions with a recorded
   conversation get a **Transcript / Screen** toggle (`components/local/session-view-toggle.tsx`,
   rule in `session-view.ts`): a session opened after it finished lands on the transcript
   (`components/local/transcript-view.tsx` — prompts, markdown replies, tool calls with
@@ -504,7 +563,12 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   rail header and the ⊞ button in the terminal header; persisted in `localStorage`,
   wide screens only — `components/local/rail-store.ts`). Inside the terminal,
   `Shift+↵` sends `ESC CR` (what `claude /terminal-setup` installs) so Claude Code inserts
-  a newline instead of submitting; `components/local/conn-state.ts`.
+  a newline instead of submitting; `components/local/conn-state.ts`. On a Mac, Option
+  keys reach the agent as a Mac terminal sends them (`⌥↑` is `ESC[1;3A`, Codex's key for
+  answering a question or editing a queued message). This relies on
+  `apps/web/next.config.ts` including xterm.js unparsed: webpack's `process` polyfill
+  otherwise makes xterm.js believe it runs under Node and drop its Mac key handling
+  (`e2e/terminal-keys.spec.ts`).
 - **Attention from another tab** (`components/local/attention-watcher.tsx`, mounted on
   every `/local*` route): the favicon gets a status dot — yellow = a session needs you,
   green = agents working, grey = quiet — and the tab title a `(N)` needs-you count. The
@@ -572,7 +636,11 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   `rate_limits` snapshot from `~/.codex/sessions/**/rollout-*.jsonl` (no token leaves the
   laptop; `cli/src/local/codex-limits.ts`), reports it in an `agent-limits` frame every few
   minutes, and it lands on `local_hosts.agent_limits`; the panel labels it "as of <when>"
-  since it only moves when Codex runs, and zeroes a window whose reset has passed.
+  since it only moves when Codex runs, and zeroes a window whose reset has passed. A
+  session's header shows the same numbers (`SessionLimitsPills` in
+  `components/local/usage-chips.tsx`): Codex's in a Codex session, Claude's otherwise,
+  and both in a plain terminal on a machine where Codex ran inside its current 5-hour
+  window.
   **Live** (`live-panel.tsx`) is one grid of every open local terminal, interactive
   session, and awake persistent agent, each linking into its view. **Recent**
   (`recent-runs.tsx`) is a newest-first feed of repo tasks, job runs, and agent turns from

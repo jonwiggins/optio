@@ -1660,6 +1660,20 @@ export const localHosts = pgTable(
         observedAt: string;
       };
     } | null>(),
+    // The models the machine's agent CLIs offer (Codex's own catalog), read by
+    // the daemon; merged into the model and effort pickers.
+    agentModels: jsonb("agent_models").$type<{
+      codex?: {
+        models: Array<{
+          id: string;
+          label: string;
+          description?: string;
+          efforts: string[];
+          defaultEffort: string | null;
+        }>;
+        fetchedAt: string;
+      };
+    } | null>(),
     state: localHostStateEnum("state").notNull().default("offline"),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1844,6 +1858,9 @@ export const localBlueprints = pgTable(
       .$type<"interactive" | "headless">()
       .notNull()
       .default("interactive"),
+    // Agent spawns: per-run agent parameters keyed like the provider catalog
+    // (model, effort, Claude Code's permission mode). Null = the machine's own.
+    agentOptions: jsonb("agent_options").$type<Record<string, string | boolean>>(),
     enabled: boolean("enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

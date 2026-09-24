@@ -10,7 +10,10 @@ import { SESSION_DOT, sessionTone } from "./attention";
 import {
   Bot,
   Briefcase,
+  Clock,
   GitPullRequest,
+  Github,
+  Hash,
   Layers,
   Loader2,
   Play,
@@ -20,6 +23,7 @@ import {
   User,
   Webhook,
   XCircle,
+  Zap,
 } from "lucide-react";
 
 /** Last two path segments of an absolute dir — enough to recognize a checkout. */
@@ -191,8 +195,27 @@ const SPAWN_SOURCE: Record<string, { label: string; icon: any }> = {
   task: { label: "task", icon: GitPullRequest },
 };
 
-export function SpawnSourceBadge({ spawnedBy }: { spawnedBy: string }) {
-  const src = SPAWN_SOURCE[spawnedBy] ?? SPAWN_SOURCE.manual;
+/** A trigger-started session names its source: GitHub, Slack, a schedule, … */
+const TRIGGER_SOURCE: Record<string, { label: string; icon: any }> = {
+  github: { label: "GitHub", icon: Github },
+  slack: { label: "Slack", icon: Hash },
+  linear: { label: "Linear", icon: Zap },
+  schedule: { label: "schedule", icon: Clock },
+  webhook: { label: "webhook", icon: Webhook },
+  ticket: { label: "ticket", icon: Ticket },
+};
+
+export function SpawnSourceBadge({
+  spawnedBy,
+  triggerType,
+}: {
+  spawnedBy: string;
+  triggerType?: string | null;
+}) {
+  const src =
+    (spawnedBy === "trigger" && triggerType ? TRIGGER_SOURCE[triggerType] : undefined) ??
+    SPAWN_SOURCE[spawnedBy] ??
+    SPAWN_SOURCE.manual;
   const Icon = src.icon;
   return (
     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-bg text-[10px] text-text-muted uppercase tracking-wide">
@@ -309,7 +332,7 @@ export function TerminalCard({
       </div>
 
       <div className="flex items-center gap-1.5">
-        <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
+        <SpawnSourceBadge spawnedBy={terminal.spawnedBy} triggerType={terminal.triggerType} />
         {terminal.state === "exited" && terminal.exitCode != null && (
           <span
             className={cn(

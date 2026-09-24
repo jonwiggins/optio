@@ -39,15 +39,30 @@ export interface ModelOption {
   preview?: boolean;
   /** Where this option came from — hardcoded baseline or live API probe. */
   source?: "baseline" | "live";
+  /** One-line description, when the source gives one (Codex's model catalog does). */
+  description?: string;
+  /**
+   * The reasoning efforts this model accepts, in order, for providers that
+   * scope effort per model (Codex). An effort field with `modelEfforts`
+   * offers only these while this model is selected.
+   */
+  efforts?: string[];
+  /** The effort the CLI uses for this model when none is set. */
+  defaultEffort?: string;
 }
 
 /**
  * A model entry returned by a provider's list-models API. `displayName` is
  * the provider's human-readable label (e.g. Anthropic's `display_name`).
+ * Codex's own catalog (read by the Optio Local daemon) also carries a
+ * description and the model's reasoning efforts.
  */
 export interface LiveModel {
   id: string;
   displayName?: string;
+  description?: string;
+  efforts?: string[];
+  defaultEffort?: string;
 }
 
 export interface OptionChoice {
@@ -71,6 +86,22 @@ export interface OptionField {
   placeholder?: string;
   /** Supplementary help text shown beneath the control. */
   helpText?: string;
+  /**
+   * Where the field applies: `pod` (a run in an Optio pod) and/or `local`
+   * (a run on the user's machine, where the Optio Local daemon passes it to
+   * the agent CLI). Default `["pod"]` — most fields only reach pod runs.
+   */
+  runsOn?: Array<"pod" | "local">;
+  /**
+   * For fields that reach a run on a machine: the agent spec field the value
+   * becomes there (`LocalTerminalSpec`'s `effort` / `permissionMode`).
+   */
+  localParam?: "effort" | "permissionMode";
+  /**
+   * An effort field whose choices depend on the model: while a model with
+   * `efforts` is selected, only those are offered (see `ModelOption.efforts`).
+   */
+  modelEfforts?: boolean;
 }
 
 export interface ProviderCatalog {

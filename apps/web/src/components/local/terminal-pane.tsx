@@ -36,7 +36,7 @@ import { useBellStore } from "./bell-store";
 import { ensureNotificationPermission } from "./attention-watcher";
 import { type ConnState } from "./conn-state";
 import { TitleEditor } from "./title-editor";
-import { AccountUsagePill, SessionUsageChip } from "./usage-chips";
+import { SessionLimitsPills, SessionUsageChip } from "./usage-chips";
 import { useTitleFit } from "./use-title-fit";
 import { useLocalTranscript } from "./use-transcript";
 import { TranscriptView } from "./transcript-view";
@@ -591,9 +591,14 @@ export function TerminalPane({
             <WorkLinkBadges links={links} size="xs" max={4} />
           </span>
           <SessionUsageChip usage={terminal.usage} collapsible className="hidden @md:inline-flex" />
-          <AccountUsagePill collapsible className="hidden @lg:inline-flex" />
+          <SessionLimitsPills
+            terminal={terminal}
+            host={host}
+            collapsible
+            className="hidden @lg:inline-flex"
+          />
           <span className="hidden @4xl:inline-flex">
-            <SpawnSourceBadge spawnedBy={terminal.spawnedBy} />
+            <SpawnSourceBadge spawnedBy={terminal.spawnedBy} triggerType={terminal.triggerType} />
           </span>
           {viewToggle}
           {bellButton}
@@ -624,7 +629,12 @@ export function TerminalPane({
           )}
         </div>
         <SessionUsageChip usage={terminal.usage} collapsible className="hidden @sm:inline-flex" />
-        <AccountUsagePill collapsible className="hidden @md:inline-flex" />
+        <SessionLimitsPills
+          terminal={terminal}
+          host={host}
+          collapsible
+          className="hidden @md:inline-flex"
+        />
         <div
           className="ml-auto flex items-center gap-1 shrink-0"
           onClick={(e) => e.stopPropagation()}

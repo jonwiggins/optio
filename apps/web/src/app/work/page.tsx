@@ -3,7 +3,15 @@
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Plus, RefreshCw, RotateCcw, Search, Terminal, XCircle } from "lucide-react";
+import {
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  SquareTerminal,
+  Terminal,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -12,7 +20,7 @@ import { useWorkFeed } from "@/hooks/use-work-feed";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { WorkRowView } from "@/components/work-row";
-import { countWork, inView, type WorkView } from "@/lib/work-feed";
+import { countWork, inView, sessionScreenTarget, type WorkView } from "@/lib/work-feed";
 
 /**
  * The one list. Every kind of work — PR tasks, jobs, automations, terminals,
@@ -73,6 +81,10 @@ function WorkList() {
     });
 
   const counts = useMemo(() => countWork(rows), [rows]);
+  const sessionScreen = useMemo(() => sessionScreenTarget(rows), [rows]);
+  const sessionsWaiting = rows.filter(
+    (r) => r.source === "local-terminal" && r.status === "needs_you",
+  ).length;
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows.filter(
@@ -123,6 +135,27 @@ function WorkList() {
             >
               <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
             </button>
+            {sessionScreen && (
+              <Link
+                href={sessionScreen.href}
+                title={
+                  sessionScreen.status === "needs_you"
+                    ? `Open the session screen at "${sessionScreen.name}", which is waiting on you`
+                    : "Open the session screen — every session on your machines, one click apart"
+                }
+                className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-bg-card text-sm font-medium text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
+              >
+                <SquareTerminal className="w-4 h-4" /> Sessions
+                {sessionsWaiting > 0 && (
+                  <span
+                    title={`${sessionsWaiting} waiting on you`}
+                    className="min-w-[1.25rem] px-1 rounded-full bg-warning/15 text-warning text-[11px] tabular-nums text-center"
+                  >
+                    {sessionsWaiting}
+                  </span>
+                )}
+              </Link>
+            )}
             <Link
               href="/work/new"
               className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"

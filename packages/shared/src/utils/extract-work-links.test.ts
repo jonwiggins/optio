@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { extractHyperlinkUrls, extractWorkLinks, MAX_WORK_LINKS } from "./extract-work-links.js";
+import {
+  dedupeWorkLinks,
+  extractHyperlinkUrls,
+  extractWorkLinks,
+  MAX_WORK_LINKS,
+  workLinkIdentity,
+  type WorkLink,
+} from "./extract-work-links.js";
 
 describe("extractWorkLinks", () => {
   it("finds GitHub PRs and issues with owner/repo#N labels", () => {
@@ -45,6 +52,21 @@ describe("extractWorkLinks", () => {
     const wrapped =
       "  ⏺ PR opened: https://github.com/jonwiggins/optio/pull/\n    581 — CI running";
     expect(extractWorkLinks(wrapped).map((l) => l.label)).toEqual(["jonwiggins/optio#581"]);
+  });
+
+  it("heals only lines long enough to have wrapped when the width is known", () => {
+    // "…/pull/612" ends a short line; the next opens with a count, not more PR number.
+    const stat =
+      "https://github.com/jonwiggins/optio/pull/612\n19 files changed, 300 insertions(+)";
+    expect(extractWorkLinks(stat, { wrapWidth: 120 }).map((l) => l.label)).toEqual([
+      "jonwiggins/optio#612",
+    ]);
+    // A line that ran to the edge (48 columns here) is a hard wrap: healed.
+    const wrapped =
+      "  ⏺ PR opened: https://github.com/jonwiggins/optio/pull/\n    581 — CI running";
+    expect(extractWorkLinks(wrapped, { wrapWidth: 48 }).map((l) => l.label)).toEqual([
+      "jonwiggins/optio#581",
+    ]);
   });
 
   it("dedupes by URL, keeps first-seen order, ignores trailing punctuation and query strings", () => {
@@ -96,5 +118,75 @@ describe("extractWorkLinks", () => {
   it("ignores bare #N when the remote is not GitHub/GitLab or absent", () => {
     expect(extractWorkLinks("fix #12", { repoUrl: "https://bitbucket.org/a/b" })).toEqual([]);
     expect(extractWorkLinks("fix #12")).toEqual([]);
+  });
+});
+
+describe("dedupeWorkLinks", () => {
+  const pr: WorkLink = {
+    url: "https://github.com/acme/app/pull/607",
+    kind: "pr",
+    provider: "github",
+    label: "acme/app#607",
+  };
+  const ref: WorkLink = {
+    url: "https://github.com/acme/app/issues/607",
+    kind: "ref",
+    provider: "github",
+    label: "#607",
+  };
+
+  it("keeps one badge per PR: a bare #607 seen first gives way to its PR, in its place", () => {
+    const other: WorkLink = {
+      ...pr,
+      url: "https://github.com/acme/app/pull/9",
+      label: "acme/app#9",
+    };
+    expect(dedupeWorkLinks([ref, other, pr])).toEqual([pr, other]);
+  });
+
+  it("matches owner and repo whatever their case, and PR vs issue URLs of one number", () => {
+    const shouty: WorkLink = {
+      ...pr,
+      url: "https://github.com/Acme/App/pull/607",
+      label: "Acme/App#607",
+    };
+    const asIssue: WorkLink = {
+      ...pr,
+      url: "https://github.com/acme/app/issues/607",
+      kind: "issue",
+    };
+    expect(dedupeWorkLinks([pr, shouty, asIssue])).toHaveLength(1);
+  });
+
+  it("prefers the fuller label between two of a kind", () => {
+    const ticket: WorkLink = { ...pr, label: "#607" };
+    expect(dedupeWorkLinks([ticket, pr])).toEqual([pr]);
+  });
+
+  it("keeps GitLab merge requests and issues of one number apart", () => {
+    const mr: WorkLink = {
+      url: "https://gitlab.com/g/p/-/merge_requests/5",
+      kind: "pr",
+      provider: "gitlab",
+      label: "g/p!5",
+    };
+    const issue: WorkLink = {
+      url: "https://gitlab.com/g/p/-/issues/5",
+      kind: "issue",
+      provider: "gitlab",
+      label: "g/p#5",
+    };
+    expect(dedupeWorkLinks([mr, issue])).toEqual([mr, issue]);
+  });
+
+  it("goes by the key for Linear and Jira", () => {
+    const a: WorkLink = {
+      url: "https://linear.app/acme/issue/ENG-12",
+      kind: "issue",
+      provider: "linear",
+      label: "ENG-12",
+    };
+    expect(workLinkIdentity(a)).toBe("linear:ENG-12");
+    expect(dedupeWorkLinks([a, { ...a, url: `${a.url}/fix-the-thing` }])).toHaveLength(1);
   });
 });

@@ -61,6 +61,7 @@ import { withSpan, injectTraceContextIntoJob } from "../telemetry/spans.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
+import { codexModelFlags } from "../services/pooled-agent-command.js";
 
 const connectionOpts = getBullMQConnectionOptions();
 
@@ -380,12 +381,20 @@ export function startTaskWorker() {
           string,
           string | boolean | undefined
         >;
-        const opt = <K extends string>(key: K): string | undefined => {
+        const runOpt = (key: string): string | undefined => {
           const v = agentOptions[key];
-          if (typeof v === "string" && v !== "") return v;
+          return typeof v === "string" && v !== "" ? v : undefined;
+        };
+        const opt = <K extends string>(key: K): string | undefined => {
+          const v = runOpt(key);
+          if (v) return v;
           const fromRepo = (repoConfig as Record<string, unknown> | null | undefined)?.[key];
           return typeof fromRepo === "string" ? fromRepo : undefined;
         };
+        // Codex shares Copilot's copilotModel / copilotEffort, but a repo's
+        // values there are Copilot's settings (Codex has none per repo): a
+        // Codex run takes only its own.
+        const copilotOpt = (key: string) => (task.agentType === "codex" ? runOpt(key) : opt(key));
         const finalClaudeModel = reviewOverride?.claudeModel ?? opt("claudeModel");
 
         const agentConfig = adapter.buildContainerConfig({
@@ -407,8 +416,8 @@ export function startTaskWorker() {
               ? agentOptions.claudeThinking
               : (repoConfig?.claudeThinking ?? undefined),
           claudeEffort: opt("claudeEffort"),
-          copilotModel: opt("copilotModel"),
-          copilotEffort: opt("copilotEffort"),
+          copilotModel: copilotOpt("copilotModel"),
+          copilotEffort: copilotOpt("copilotEffort"),
           opencodeModel: opt("opencodeModel") ?? opencodeDefaultModel,
           opencodeAgent: opt("opencodeAgent"),
           opencodeBaseUrl: opt("opencodeBaseUrl") ?? opencodeDefaultBaseUrl,
@@ -1893,7 +1902,7 @@ export function buildAgentCommand(
           : "";
       return [
         `echo "[optio] Running OpenAI Codex${appServerFlag ? " (app-server)" : ""}..."`,
-        `codex exec --full-auto "$OPTIO_PROMPT"${appServerFlag} --json`,
+        `codex exec --full-auto${codexModelFlags(env)} "$OPTIO_PROMPT"${appServerFlag} --json`,
       ];
     }
     case "copilot": {

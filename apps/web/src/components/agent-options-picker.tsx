@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { RefreshCw, AlertCircle } from "lucide-react";
 import {
   getProviderCatalog,
   groupModelsByFamily,
+  optionChoicesFor,
+  optionRunsOn,
   type AgentProviderId,
   type ProviderCatalog,
 } from "@optio/shared";
@@ -25,8 +27,19 @@ interface Props {
   inputClass?: string;
   /** Hide the Refresh button (e.g. in wizards). */
   hideRefresh?: boolean;
-  /** Render only the model control (e.g. a local run, where the daemon takes just `--model`). */
+  /** Render only the model control (e.g. the Optio agent, which takes just a model). */
   modelOnly?: boolean;
+  /**
+   * Where the run executes: an Optio pod (default, every field) or the
+   * user's machine, which takes only the fields the daemon passes to the
+   * agent CLI (model, effort, Claude Code's permission mode).
+   */
+  runsOn?: "pod" | "local";
+  /**
+   * A run on this paired machine: offer the models its own agent CLI lists
+   * (Codex), rather than the freshest list any machine reported.
+   */
+  hostId?: string;
   /**
    * Offer each alias ("opus") as an "always the latest" choice and keep a
    * stored alias as the alias, instead of showing the model it names today.
@@ -43,6 +56,8 @@ interface LiveState {
   cached: boolean;
   refreshedAt: number | null;
   error?: string;
+  /** Where a machine-reported list came from ("Codex on MacBook-Pro"). */
+  liveFrom?: string;
 }
 
 function formatRefreshed(unixSeconds: number | null): string {
@@ -73,14 +88,18 @@ export function AgentOptionsPicker({
   hideRefresh = false,
   modelOnly = false,
   latestAliases = false,
+  runsOn = "pod",
+  hostId,
 }: Props) {
   const baseline = getProviderCatalog(provider);
+  const idBase = useId();
+  const controlId = (key: string) => `${idBase}-${key}`;
 
   const [live, setLive] = useState<LiveState | null>(
     baseline ? { catalog: baseline, source: "baseline", cached: false, refreshedAt: null } : null,
   );
   const [refreshing, setRefreshing] = useState(false);
-  const didFetchForProvider = useRef<AgentProviderId | null>(null);
+  const didFetchFor = useRef<string | null>(null);
 
   const fetchOptions = useCallback(
     async (forceRefresh = false) => {
@@ -89,6 +108,7 @@ export function AgentOptionsPicker({
       try {
         const res = await api.getAgentProviderOptions(provider, {
           refresh: forceRefresh,
+          hostId,
         });
         setLive({
           catalog: res.catalog as ProviderCatalog,
@@ -96,6 +116,7 @@ export function AgentOptionsPicker({
           cached: res.cached,
           refreshedAt: res.refreshedAt,
           error: res.error,
+          liveFrom: res.liveFrom,
         });
       } catch (err) {
         setLive((prev) =>
@@ -105,16 +126,18 @@ export function AgentOptionsPicker({
         setRefreshing(false);
       }
     },
-    [baseline, provider],
+    [baseline, provider, hostId],
   );
 
-  // Auto-fetch once per provider change. For providers that don't support
-  // live refresh the backend just echoes the baseline, which is cheap.
+  // Auto-fetch once per provider (and machine) change. For providers that
+  // don't support live refresh the backend just echoes the baseline, which
+  // is cheap.
   useEffect(() => {
-    if (didFetchForProvider.current === provider) return;
-    didFetchForProvider.current = provider;
+    const key = `${provider}:${hostId ?? ""}`;
+    if (didFetchFor.current === key) return;
+    didFetchFor.current = key;
     fetchOptions(false).catch(() => {});
-  }, [provider, fetchOptions]);
+  }, [provider, hostId, fetchOptions]);
 
   if (!baseline) {
     return <div className="text-xs text-text-muted italic">Unknown provider: {provider}</div>;
@@ -134,18 +157,39 @@ export function AgentOptionsPicker({
   const unlisted =
     !!modelValue && !(latestAliases && isAlias) && !catalog.models.some((m) => m.id === modelValue);
 
+  const selectedModel = catalog.models.find((m) => m.id === modelValue);
+  // Fields this run takes: all of them in a pod; on a machine, only what the
+  // daemon hands the agent CLI.
+  const fields = modelOnly ? [] : catalog.options.filter((f) => optionRunsOn(f, runsOn));
+
   const setField = (key: string, value: string | boolean) => {
-    onChange({ ...values, [key]: value });
+    const next = { ...values, [key]: value };
+    if (key === catalog.modelField) {
+      // A reasoning effort the newly picked model doesn't take goes back to
+      // its default rather than riding along into a run it would fail.
+      const model = catalog.models.find((m) => m.id === value);
+      for (const f of catalog.options) {
+        const v = next[f.key];
+        if (f.modelEfforts && model?.efforts && typeof v === "string" && v) {
+          if (!model.efforts.includes(v)) next[f.key] = "";
+        }
+      }
+    }
+    onChange(next);
   };
 
   const modelGroups = groupModelsByFamily(catalog);
+  // A catalog without families (Codex) reads as one list, in its own order.
+  const flat = catalog.models.every((m) => !m.family);
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-4">
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="block text-xs text-text-muted">Model</label>
+            <label htmlFor={controlId("model")} className="block text-xs text-text-muted">
+              Model
+            </label>
             {canRefresh && (
               <button
                 type="button"
@@ -166,6 +210,7 @@ export function AgentOptionsPicker({
           {catalog.modelIsFreeText ? (
             <>
               <input
+                id={controlId("model")}
                 value={modelValue}
                 onChange={(e) => setField(catalog.modelField, e.target.value)}
                 placeholder={catalog.modelPlaceholder ?? ""}
@@ -177,6 +222,7 @@ export function AgentOptionsPicker({
             </>
           ) : (
             <select
+              id={controlId("model")}
               value={modelValue}
               onChange={(e) => setField(catalog.modelField, e.target.value)}
               className={inputClass}
@@ -192,10 +238,11 @@ export function AgentOptionsPicker({
                   ))}
                 </optgroup>
               )}
-              {modelGroups.length === 1 && modelGroups[0].family === modelGroups[0].models[0].id
-                ? modelGroups[0].models.map((m) => (
-                    <option key={m.id} value={m.id}>
+              {flat
+                ? catalog.models.map((m) => (
+                    <option key={m.id} value={m.id} title={m.description}>
                       {m.label}
+                      {m.latest && catalog.models.length > 1 ? " (latest)" : ""}
                       {m.preview ? " (Preview)" : ""}
                       {m.source === "live" ? " •" : ""}
                     </option>
@@ -220,68 +267,100 @@ export function AgentOptionsPicker({
               version stays put.
             </p>
           )}
+          {live?.liveFrom && (
+            <p className="text-[11px] text-text-muted mt-1">
+              Models from {live.liveFrom}
+              {live.refreshedAt ? ` · ${formatRefreshed(live.refreshedAt)}` : ""}
+            </p>
+          )}
         </div>
 
-        {!modelOnly &&
-          catalog.options
-            .filter((f) => f.kind === "select")
-            .map((field) => {
-              const v = values[field.key];
-              const val = typeof v === "string" ? v : String(field.default ?? "");
-              return (
-                <div key={field.key}>
-                  <label className="block text-xs text-text-muted mb-1">{field.label}</label>
-                  <select
-                    value={val}
-                    onChange={(e) => setField(field.key, e.target.value)}
-                    className={inputClass}
-                  >
-                    {field.choices?.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
-                  {field.helpText && (
-                    <p className="text-xs text-text-muted mt-1">{field.helpText}</p>
+        {fields
+          .filter((f) => f.kind === "select")
+          .map((field) => {
+            const choices = optionChoicesFor(field, selectedModel);
+            // A field shared with pods carries the pod default; on a machine,
+            // unset means the machine's own config (no flag is passed).
+            const fieldDefault =
+              runsOn === "local" && optionRunsOn(field, "pod") ? undefined : field.default;
+            const v = values[field.key];
+            const val = typeof v === "string" ? v : String(fieldDefault ?? "");
+            // Blank means the CLI's default — for effort per model, the model's own.
+            const modelDefault = field.modelEfforts ? selectedModel?.defaultEffort : undefined;
+            const defaultLabel =
+              fieldDefault === undefined
+                ? modelDefault
+                  ? `Default (${choices.find((c) => c.value === modelDefault)?.label ?? modelDefault})`
+                  : "Default"
+                : null;
+            const help = choices.find((c) => c.value === val)?.description ?? field.helpText;
+            return (
+              <div key={field.key}>
+                <label
+                  htmlFor={controlId(field.key)}
+                  className="block text-xs text-text-muted mb-1"
+                >
+                  {field.label}
+                </label>
+                <select
+                  id={controlId(field.key)}
+                  value={val}
+                  onChange={(e) => setField(field.key, e.target.value)}
+                  className={inputClass}
+                >
+                  {defaultLabel && <option value="">{defaultLabel}</option>}
+                  {val && !choices.some((c) => c.value === val) && (
+                    <option value={val}>{val}</option>
                   )}
-                </div>
-              );
-            })}
+                  {choices.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                {help && <p className="text-xs text-text-muted mt-1">{help}</p>}
+              </div>
+            );
+          })}
 
-        {!modelOnly &&
-          catalog.options
-            .filter((f) => f.kind === "boolean")
-            .map((field) => {
-              const v = values[field.key];
-              const checked = typeof v === "boolean" ? v : Boolean(field.default);
-              return (
-                <div key={field.key} className="flex items-end pb-1">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => setField(field.key, e.target.checked)}
-                      className="w-4 h-4 rounded"
-                    />
-                    <span className="text-sm">{field.label}</span>
-                  </label>
-                </div>
-              );
-            })}
+        {fields
+          .filter((f) => f.kind === "boolean")
+          .map((field) => {
+            const v = values[field.key];
+            const checked = typeof v === "boolean" ? v : Boolean(field.default);
+            return (
+              <div key={field.key} className="flex items-end pb-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => setField(field.key, e.target.checked)}
+                    className="w-4 h-4 rounded"
+                  />
+                  <span className="text-sm">{field.label}</span>
+                </label>
+              </div>
+            );
+          })}
       </div>
 
-      {!modelOnly && catalog.options.some((f) => f.kind === "text") && (
+      {fields.some((f) => f.kind === "text") && (
         <div className="space-y-3">
-          {catalog.options
+          {fields
             .filter((f) => f.kind === "text")
             .map((field) => {
               const v = values[field.key];
               const val = typeof v === "string" ? v : "";
               return (
                 <div key={field.key}>
-                  <label className="block text-xs text-text-muted mb-1">{field.label}</label>
+                  <label
+                    htmlFor={controlId(field.key)}
+                    className="block text-xs text-text-muted mb-1"
+                  >
+                    {field.label}
+                  </label>
                   <input
+                    id={controlId(field.key)}
                     value={val}
                     onChange={(e) => setField(field.key, e.target.value)}
                     placeholder={field.placeholder ?? ""}

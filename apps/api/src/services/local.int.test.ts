@@ -12,8 +12,10 @@ import { db } from "../db/client.js";
 import { localTerminals, taskConfigs, tasks, users, workflows } from "../db/schema.js";
 import * as relay from "./local-relay.js";
 import {
+  codexModelsFor,
   findHostDirForRepo,
   getHost,
+  handleAgentModels,
   isDirAllowed,
   listHosts,
   mergeHosts,
@@ -37,6 +39,7 @@ import {
   handleSpawnError,
   handleStarted,
   killTerminal,
+  presentTerminals,
   reconcileHello,
   startTerminal,
   sweepStuckLaunching,
@@ -333,6 +336,71 @@ describe("local hosts", () => {
   });
 });
 
+describe("local agent models (Codex's catalog, reported by the daemon)", () => {
+  const codex = (id: string, fetchedAt: string) => ({
+    codex: {
+      fetchedAt,
+      models: [
+        { id, label: id.toUpperCase(), efforts: ["low", "high"], defaultEffort: "low" },
+        // Junk the daemon should never send is dropped rather than stored.
+        { id: "bad id; rm", label: "x", efforts: [], defaultEffort: null },
+        { id: "gpt-x", label: "X", efforts: ["$(id)", "max"], defaultEffort: "$(id)" },
+      ],
+    },
+  });
+
+  it("stores a sanitized catalog per host", async () => {
+    const host = await makeHost();
+    await handleAgentModels(host.id, codex("gpt-5.6-sol", "2026-09-24T10:00:00Z"));
+    const row = await getHost(host.id);
+    expect(row?.agentModels?.codex?.models).toEqual([
+      { id: "gpt-5.6-sol", label: "GPT-5.6-SOL", efforts: ["low", "high"], defaultEffort: "low" },
+      { id: "gpt-x", label: "X", efforts: ["max"], defaultEffort: null },
+    ]);
+    // A report with nothing usable leaves the last good catalog alone.
+    await handleAgentModels(host.id, { codex: { models: [] } });
+    expect((await getHost(host.id))?.agentModels?.codex?.models).toHaveLength(2);
+  });
+
+  it("offers the machine the run is on, else the freshest of the caller's machines", async () => {
+    const older = await makeHost();
+    const newer = await makeHost();
+    // Later than any other host in this file's database.
+    await handleAgentModels(older.id, codex("from-older", "2090-01-01T00:00:00Z"));
+    await handleAgentModels(newer.id, codex("from-newer", "2091-01-01T00:00:00Z"));
+
+    const pinned = await codexModelsFor(null, older.id);
+    expect(pinned?.host.id).toBe(older.id);
+    expect(pinned?.codex.models[0].id).toBe("from-older");
+
+    const freshest = await codexModelsFor(null);
+    expect(freshest?.codex.models[0].id).toBe("from-newer");
+  });
+
+  it("never offers another user's machine", async () => {
+    const [user] = await db
+      .insert(users)
+      .values({
+        provider: "github",
+        externalId: `ext-${Math.random().toString(36).slice(2)}`,
+        email: "someone@example.com",
+        displayName: "Someone",
+      })
+      .returning();
+    const theirs = await registerHost({
+      userId: user.id,
+      workspaceId: null,
+      hostname: `their-host-${Math.random().toString(36).slice(2, 8)}`,
+      platform: "darwin",
+      dirs: DIRS,
+    });
+    await handleAgentModels(theirs.id, codex("theirs", "2099-01-01T00:00:00Z"));
+    // Even asked for by id, and even though it's the freshest anywhere.
+    const mine = await codexModelsFor(null, theirs.id);
+    expect(mine?.host.id).not.toBe(theirs.id);
+  });
+});
+
 describe("local terminals", () => {
   it("parks spawns while the host is offline and flushes on hello", async () => {
     const host = await makeHost();
@@ -525,6 +593,66 @@ describe("local terminals", () => {
     expect(row?.exitCode).toBe(1);
   });
 
+  it("a session you kill finishes: nothing on its way out puts it back in front of you", async () => {
+    const host = await makeHost();
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, null, daemon);
+    // An automation's session, which would otherwise land in "needs you" on exit.
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "agent", agent: "claude-code", prompt: "review the PR" },
+      spawnedBy: "trigger",
+    });
+    await handleStarted(host.id, t.id);
+    await handleAttention(host.id, t.id, "needs_you", "stop");
+
+    await killTerminal((await getTerminal(t.id))!);
+    let row = await getTerminal(t.id);
+    expect(row).toMatchObject({
+      state: "running",
+      attentionState: "idle",
+      attentionReason: "killed",
+    });
+    expect(daemon.messages().some((m) => m.type === "kill" && m.terminalId === t.id)).toBe(true);
+
+    // The agent's last hook and its shutdown output change nothing...
+    await handleAttention(host.id, t.id, "needs_you", "stop");
+    await handleAttention(host.id, t.id, "working", "output");
+    row = await getTerminal(t.id);
+    expect(row).toMatchObject({ attentionState: "idle", attentionReason: "killed" });
+
+    // ...and the exit the kill caused lands it in Finished, not "needs you".
+    await handleExit(host.id, t.id, 143);
+    row = await getTerminal(t.id);
+    expect(row).toMatchObject({
+      state: "exited",
+      attentionState: "idle",
+      attentionReason: "killed",
+    });
+  });
+
+  it("an automation session that exits on its own still asks for a review", async () => {
+    const host = await makeHost();
+    relay.registerDaemon(host.id, null, new FakeDaemonSocket());
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "agent", agent: "claude-code", prompt: "review the PR" },
+      spawnedBy: "trigger",
+    });
+    await handleStarted(host.id, t.id);
+    await handleExit(host.id, t.id, 1);
+    expect(await getTerminal(t.id)).toMatchObject({
+      attentionState: "needs_you",
+      attentionReason: "exit",
+    });
+  });
+
   it("force-exits a running terminal when killed on an offline host", async () => {
     const host = await makeHost();
     relay.registerDaemon(host.id, null, new FakeDaemonSocket());
@@ -650,6 +778,88 @@ describe("local terminal links", () => {
     expect((await getTerminal(t.id))!.links).toEqual([good]);
   });
 
+  it("stores one link per PR, however many ways the daemon saw it", async () => {
+    const host = await makeHost();
+    relay.registerDaemon(host.id, host.userId, new FakeDaemonSocket());
+    const t = await createTerminal({
+      host,
+      userId: null,
+      workspaceId: null,
+      dir: "/home/dev/optio",
+      spec: { kind: "shell" },
+    });
+    const pr = {
+      url: "https://github.com/acme/optio/pull/7",
+      kind: "pr",
+      provider: "github",
+      label: "acme/optio#7",
+    };
+    // An older daemon: the bare "#7" it saw first, then the PR's URL.
+    await handleLinks(host.id, t.id, [
+      {
+        url: "https://github.com/acme/optio/issues/7",
+        kind: "ref",
+        provider: "github",
+        label: "#7",
+      },
+      pr,
+    ]);
+    expect((await getTerminal(t.id))!.links).toEqual([pr]);
+  });
+
+  it("tells the API which trigger started a terminal, and dedupes stored links", async () => {
+    const host = await makeHost();
+    relay.registerDaemon(host.id, host.userId, new FakeDaemonSocket());
+    const blueprint = await createBlueprint({
+      userId: null,
+      workspaceId: null,
+      name: `bp-src-${Math.random().toString(36).slice(2, 8)}`,
+      hostId: host.id,
+      dir: "/home/dev/optio",
+      agent: "claude-code",
+      commandTemplate: "Review {{url}}",
+    });
+    const trigger = await createTrigger({
+      targetType: "local_blueprint",
+      targetId: blueprint.id,
+      type: "github",
+      config: { events: ["review_requested"], login: "octocat" },
+    });
+    const t = await spawnFromBlueprint(blueprint, { triggerId: trigger.id, params: { url: "x" } });
+    // A row stored before links were deduped.
+    const pr = {
+      url: "https://github.com/acme/optio/pull/7",
+      kind: "pr",
+      provider: "github",
+      label: "acme/optio#7",
+    };
+    await db
+      .update(localTerminals)
+      .set({
+        links: [
+          { ...pr, url: "https://github.com/acme/optio/issues/7", kind: "ref", label: "#7" },
+          pr,
+        ] as never,
+      })
+      .where(eq(localTerminals.id, t.id));
+
+    const [shown] = await presentTerminals([(await getTerminal(t.id))!]);
+    expect(shown.spawnedBy).toBe("trigger");
+    expect(shown.triggerType).toBe("github");
+    expect(shown.links).toEqual([pr]);
+
+    const [manual] = await presentTerminals([
+      await createTerminal({
+        host,
+        userId: null,
+        workspaceId: null,
+        dir: "/home/dev/optio",
+        spec: { kind: "shell" },
+      }),
+    ]);
+    expect(manual.triggerType).toBeNull();
+  });
+
   it("stores sanitized usage from the owning host only", async () => {
     const host = await makeHost();
     const other = await makeHost();
@@ -758,6 +968,45 @@ describe("local blueprints", () => {
     // Raw substitution — the daemon quotes the whole prompt as one argv element.
     expect(spawn.spec.prompt).toBe(`Review PR: fix "it's" broken`);
     expect(terminal.command).toContain("claude");
+  });
+
+  it("spawns with the automation's model, effort and permission mode", async () => {
+    const host = await makeHost();
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, null, daemon);
+
+    const blueprint = await createBlueprint({
+      userId: null,
+      workspaceId: null,
+      name: `bp-opts-${Math.random().toString(36).slice(2, 8)}`,
+      hostId: host.id,
+      dir: "/home/dev/optio",
+      agent: "claude-code",
+      commandTemplate: "Tidy up",
+      agentOptions: {
+        claudeModel: "opus",
+        claudeEffort: "high",
+        claudePermissionMode: "bypassPermissions",
+        // Pod-only fields and blanks never reach the machine.
+        claudeContextWindow: "1m",
+        claudeThinking: true,
+        copilotModel: "",
+      },
+    });
+    expect(blueprint.agentOptions).not.toHaveProperty("copilotModel");
+
+    await spawnFromBlueprint(blueprint, {});
+    const spawn = daemon.messages().find((m) => m.type === "spawn") as {
+      spec: Record<string, unknown>;
+    };
+    expect(spawn.spec).toMatchObject({
+      kind: "agent",
+      agent: "claude-code",
+      model: "opus",
+      effort: "high",
+      permissionMode: "bypassPermissions",
+    });
+    expect(spawn.spec).not.toHaveProperty("claudeContextWindow");
   });
 
   it("titles the terminal from the blueprint's run-title template", async () => {

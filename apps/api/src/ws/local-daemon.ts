@@ -15,6 +15,7 @@ import {
   canAccessHost,
   getHost,
   handleAgentLimits,
+  handleAgentModels,
   markHostOnline,
   touchHost,
 } from "../services/local-host-service.js";
@@ -181,6 +182,9 @@ export async function localDaemonWs(app: FastifyInstance) {
           return;
         case "agent-limits":
           await handleAgentLimits(hostId, msg.limits);
+          return;
+        case "agent-models":
+          await handleAgentModels(hostId, msg.models);
           return;
         case "credentials-result":
           deliverCredentialsResult(hostId, msg);

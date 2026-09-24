@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
-import { ANTHROPIC_CATALOG, mergeLiveModels } from "@optio/shared";
+import {
+  ANTHROPIC_CATALOG,
+  OPENAI_CATALOG,
+  mergeCodexModels,
+  mergeLiveModels,
+} from "@optio/shared";
 
 const getAgentProviderOptions = vi.fn();
 vi.mock("@/lib/api-client", () => ({
@@ -90,5 +95,119 @@ describe("AgentOptionsPicker latestAliases", () => {
     );
     expect(screen.getByRole("combobox")).toHaveValue("claude-opus-9");
     expect(screen.getByRole("option", { name: "claude-opus-9" })).toBeInTheDocument();
+  });
+});
+
+/** What a machine whose Codex lists a newer model reports. */
+const codexCatalog = mergeCodexModels(OPENAI_CATALOG, [
+  {
+    id: "gpt-5.7",
+    displayName: "GPT-5.7",
+    efforts: ["low", "medium", "high", "max"],
+    defaultEffort: "medium",
+  },
+  {
+    id: "gpt-5.6-sol",
+    displayName: "GPT-5.6-Sol",
+    efforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    defaultEffort: "low",
+  },
+]);
+
+describe("AgentOptionsPicker on a machine", () => {
+  it("offers Claude Code's effort and permissions, not the pod-only fields", () => {
+    render(
+      <AgentOptionsPicker provider="anthropic" values={{}} onChange={vi.fn()} runsOn="local" />,
+    );
+    // Unset effort on a machine is the machine's own default, not the pods' "high".
+    const effort = screen.getByRole("combobox", { name: "Effort Level" });
+    expect(effort).toHaveValue("");
+    expect(within(effort).getByRole("option", { name: "Default" })).toBeInTheDocument();
+    const permissions = screen.getByRole("combobox", { name: "Permissions" });
+    expect(permissions).toHaveValue("auto");
+    expect(within(permissions).getByRole("option", { name: "Skip all checks" })).toHaveValue(
+      "bypassPermissions",
+    );
+    expect(screen.queryByRole("combobox", { name: "Context Window" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Extended Thinking" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the permissions choice off a run in a pod", () => {
+    render(<AgentOptionsPicker provider="anthropic" values={{}} onChange={vi.fn()} />);
+    expect(screen.getByRole("combobox", { name: "Context Window" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Permissions" })).not.toBeInTheDocument();
+  });
+
+  it("asks for the machine's own Codex list and says where it came from", async () => {
+    getAgentProviderOptions.mockResolvedValue({
+      catalog: codexCatalog,
+      source: "live",
+      cached: false,
+      refreshedAt: Math.floor(Date.now() / 1000),
+      liveFrom: "Codex on MacBook-Pro",
+    });
+    render(
+      <AgentOptionsPicker
+        provider="openai"
+        values={{}}
+        onChange={vi.fn()}
+        runsOn="local"
+        hostId="host-1"
+      />,
+    );
+    expect(getAgentProviderOptions).toHaveBeenCalledWith("openai", {
+      refresh: false,
+      hostId: "host-1",
+    });
+    expect(await screen.findByText(/Models from Codex on MacBook-Pro/)).toBeInTheDocument();
+    const model = screen.getByRole("combobox", { name: "Model" });
+    // One list in Codex's order, its default first.
+    expect(within(model).getAllByRole("option")[1]).toHaveTextContent("GPT-5.7 (latest)");
+    expect(within(model).queryAllByRole("group")).toHaveLength(0);
+  });
+
+  it("narrows the reasoning effort to the picked model's own", async () => {
+    getAgentProviderOptions.mockResolvedValue({
+      catalog: codexCatalog,
+      source: "live",
+      cached: false,
+      refreshedAt: 1,
+    });
+    render(
+      <AgentOptionsPicker
+        provider="openai"
+        values={{ copilotModel: "gpt-5.7" }}
+        onChange={vi.fn()}
+      />,
+    );
+    await screen.findByRole("option", { name: /GPT-5.7/ });
+    const effort = screen.getByRole("combobox", { name: "Reasoning effort" });
+    expect(
+      within(effort)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Default (Medium)", "Low", "Medium", "High", "Max"]);
+  });
+
+  it("drops an effort the newly picked model doesn't take", async () => {
+    getAgentProviderOptions.mockResolvedValue({
+      catalog: codexCatalog,
+      source: "live",
+      cached: false,
+      refreshedAt: 1,
+    });
+    const onChange = vi.fn();
+    render(
+      <AgentOptionsPicker
+        provider="openai"
+        values={{ copilotModel: "gpt-5.6-sol", copilotEffort: "ultra" }}
+        onChange={onChange}
+      />,
+    );
+    await screen.findByRole("option", { name: /GPT-5.7/ });
+    fireEvent.change(screen.getByRole("combobox", { name: "Model" }), {
+      target: { value: "gpt-5.7" },
+    });
+    expect(onChange).toHaveBeenLastCalledWith({ copilotModel: "gpt-5.7", copilotEffort: "" });
   });
 });

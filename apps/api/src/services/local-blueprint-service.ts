@@ -11,6 +11,7 @@
  */
 import { and, desc, eq, isNull } from "drizzle-orm";
 import {
+  localAgentParams,
   shellQuote,
   type LocalAgentKind,
   type LocalAgentSessionMode,
@@ -68,6 +69,11 @@ export interface CreateBlueprintInput {
   spawnMode?: "auto" | "hold";
   /** Agent spawns only: stay open for chat (default) or exit when the turn is done. */
   sessionMode?: LocalAgentSessionMode;
+  /**
+   * Agent spawns: per-run agent parameters keyed like the provider catalog
+   * (model, effort, Claude Code's permission mode). Null = the machine's own.
+   */
+  agentOptions?: Record<string, string | boolean> | null;
 }
 
 /**
@@ -93,9 +99,21 @@ export async function createBlueprint(input: CreateBlueprintInput): Promise<Loca
       agent: input.agent ?? null,
       spawnMode: input.spawnMode ?? "auto",
       sessionMode: input.sessionMode ?? "interactive",
+      agentOptions: cleanAgentOptions(input.agentOptions),
     })
     .returning();
   return row;
+}
+
+/** Drop blank values; an empty map is stored as null (the machine's own defaults). */
+function cleanAgentOptions(
+  options: Record<string, string | boolean> | null | undefined,
+): Record<string, string | boolean> | null {
+  if (!options) return null;
+  const out = Object.fromEntries(
+    Object.entries(options).filter(([, v]) => typeof v === "boolean" || v.trim() !== ""),
+  );
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 export async function getBlueprint(id: string): Promise<LocalBlueprintRow | null> {
@@ -126,6 +144,7 @@ export async function updateBlueprint(
       | "spawnMode"
       | "sessionMode"
       | "baseBranch"
+      | "agentOptions"
     > & {
       description: string | null;
       hostId: string | null;
@@ -137,6 +156,8 @@ export async function updateBlueprint(
 ): Promise<LocalBlueprintRow | null> {
   const set = { ...updates, updatedAt: new Date() };
   if (updates.runTitle !== undefined) set.runTitle = updates.runTitle?.trim() || null;
+  if (updates.agentOptions !== undefined)
+    set.agentOptions = cleanAgentOptions(updates.agentOptions);
   const [row] = await db
     .update(localBlueprints)
     .set(set)
@@ -267,6 +288,7 @@ export async function spawnFromBlueprint(
       agent: blueprint.agent,
       prompt: prompt || undefined,
       mode: blueprint.sessionMode ?? "interactive",
+      ...localAgentParams(blueprint.agent, blueprint.agentOptions),
       ...(blueprint.baseBranch ? { baseBranch: blueprint.baseBranch } : {}),
     };
   } else {

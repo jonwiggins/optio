@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   PROVIDER_CATALOGS,
+  mergeCodexModels,
   mergeLiveModels,
   resolveModelId,
   type AgentProviderId,
@@ -8,6 +9,7 @@ import {
   type ProviderCatalog,
 } from "@optio/shared";
 import { getRedisClient } from "./event-bus.js";
+import { codexModelsFor } from "./local-host-service.js";
 import { retrieveSecret } from "./secret-service.js";
 
 /** Cache TTL for live-probed model lists. ~1h matches the task spec. */
@@ -71,7 +73,7 @@ async function probeAnthropic(credential: ProbeCredential): Promise<LiveModel[]>
   return models;
 }
 
-/** OpenAI: GET /v1/models → data[].id. */
+/** OpenAI: GET /v1/models → data[].id (see `keep` in its PROBE_CONFIG entry). */
 async function probeOpenAI(credential: ProbeCredential): Promise<LiveModel[]> {
   const res = await fetch("https://api.openai.com/v1/models", {
     headers: { Authorization: `Bearer ${credential.value}` },
@@ -80,6 +82,12 @@ async function probeOpenAI(credential: ProbeCredential): Promise<LiveModel[]> {
   if (!res.ok) throw new Error(`OpenAI /v1/models returned ${res.status}`);
   const body = (await res.json()) as { data?: Array<{ id?: string }> };
   return (body.data ?? []).flatMap((m) => (m.id ? [{ id: m.id }] : []));
+}
+
+/** A model id Codex can run: GPT-5.x (not its audio / image / realtime variants) or a Codex model. */
+export function isCodexModelId(id: string): boolean {
+  if (/(audio|image|realtime|transcribe|tts|search|embedding)/i.test(id)) return false;
+  return /^gpt-5/i.test(id) || /codex/i.test(id);
 }
 
 /** Gemini: GET /v1beta/models?key=... → models[].{name,displayName} (strip "models/" prefix). */
@@ -106,6 +114,8 @@ interface ProbeConfig {
   secretCandidates: Array<{ name: string; kind: ProbeCredential["kind"] }>;
   /** Probe function that returns a list of upstream models. */
   probe: LiveProbe;
+  /** Which listed models the picker offers (applied to cached lists too). */
+  keep?: (model: LiveModel) => boolean;
 }
 
 const PROBE_CONFIG: Partial<Record<AgentProviderId, ProbeConfig>> = {
@@ -123,6 +133,9 @@ const PROBE_CONFIG: Partial<Record<AgentProviderId, ProbeConfig>> = {
     probeKey: "openai",
     secretCandidates: [{ name: "OPENAI_API_KEY", kind: "api-key" }],
     probe: probeOpenAI,
+    // The account's list also holds embeddings, TTS, image and realtime
+    // models; offer the ones Codex can drive.
+    keep: (m) => isCodexModelId(m.id),
   },
   gemini: {
     probeKey: "gemini",
@@ -130,6 +143,10 @@ const PROBE_CONFIG: Partial<Record<AgentProviderId, ProbeConfig>> = {
     probe: probeGemini,
   },
 };
+
+function offered(config: ProbeConfig, models: LiveModel[]): LiveModel[] {
+  return config.keep ? models.filter(config.keep) : models;
+}
 
 /**
  * Build a short hash of the key used for the probe — lets us invalidate the
@@ -154,6 +171,8 @@ export interface ProviderOptionsResult {
   refreshedAt: number | null;
   /** User-visible error if the live probe failed (cache-miss fallback to baseline). */
   error?: string;
+  /** Where a machine-reported list came from ("Codex on MacBook-Pro"), when one was merged. */
+  liveFrom?: string;
 }
 
 interface GetOptions {
@@ -161,6 +180,12 @@ interface GetOptions {
   workspaceId?: string | null;
   /** If true, skip the Redis cache and always probe upstream. */
   forceRefresh?: boolean;
+  /**
+   * OpenAI (Codex): merge the model catalog these machines' daemons read
+   * from Codex — `hostId`'s when given (a run on that machine uses its
+   * Codex), else the freshest of the user's. Absent = no machine lists.
+   */
+  machines?: { userId: string | null | undefined; hostId?: string | null };
 }
 
 async function readLiveModelsFromCache(
@@ -214,11 +239,41 @@ async function writeLiveModelsToCache(
 /**
  * Load the options catalog for a provider, optionally merging in a live
  * list-models probe. For providers without `liveRefreshSupported`, this
- * just returns the hardcoded baseline.
+ * just returns the hardcoded baseline. For OpenAI (Codex) with `machines`,
+ * Codex's own model catalog as a paired machine reported it leads the list
+ * (see `mergeCodexModels`): the models and reasoning efforts Codex offers
+ * today, which an API key's list can't say.
  */
 export async function getProviderOptions(
   provider: AgentProviderId,
   opts: GetOptions = {},
+): Promise<ProviderOptionsResult> {
+  const result = await probeProviderOptions(provider, opts);
+  if (provider !== "openai" || !opts.machines) return result;
+  const found = await codexModelsFor(opts.machines.userId, opts.machines.hostId).catch(() => null);
+  if (!found) return result;
+  const fetchedAt = Math.floor(Date.parse(found.codex.fetchedAt) / 1000);
+  return {
+    catalog: mergeCodexModels(
+      result.catalog,
+      found.codex.models.map((m) => ({
+        id: m.id,
+        displayName: m.label,
+        ...(m.description ? { description: m.description } : {}),
+        efforts: m.efforts,
+        ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}),
+      })),
+    ),
+    source: "live",
+    cached: result.cached,
+    refreshedAt: Math.max(result.refreshedAt ?? 0, fetchedAt) || null,
+    liveFrom: `Codex on ${found.host.name}`,
+  };
+}
+
+async function probeProviderOptions(
+  provider: AgentProviderId,
+  opts: GetOptions,
 ): Promise<ProviderOptionsResult> {
   const baseline = PROVIDER_CATALOGS[provider];
   if (!baseline) {
@@ -274,7 +329,7 @@ export async function getProviderOptions(
     const cached = await readLiveModelsFromCache(provider, keyHash);
     if (cached) {
       return {
-        catalog: mergeLiveModels(baseline, cached.models),
+        catalog: mergeLiveModels(baseline, offered(probeConfig, cached.models)),
         source: "live",
         cached: true,
         refreshedAt: cached.refreshedAt,
@@ -286,7 +341,7 @@ export async function getProviderOptions(
     const models = await probeConfig.probe(credential);
     const refreshedAt = await writeLiveModelsToCache(provider, keyHash, models);
     return {
-      catalog: mergeLiveModels(baseline, models),
+      catalog: mergeLiveModels(baseline, offered(probeConfig, models)),
       source: "live",
       cached: false,
       refreshedAt,

@@ -86,10 +86,16 @@ describe("draftFromRow — the row round-trips to its own kind", () => {
         commandTemplate: "Review PR {{number}}",
         agent: "claude-code",
         sessionMode: "interactive",
+        agentOptions: { claudeModel: "opus", claudePermissionMode: "bypassPermissions" },
       },
       { type: "github", config: { events: ["review_requested"], login: "octocat" } },
     );
     expect(deriveKind(d)).toBe("local-blueprint");
+    // The automation's own model and permission mode come back to edit.
+    expect(d.agentOptions).toEqual({
+      claudeModel: "opus",
+      claudePermissionMode: "bypassPermissions",
+    });
     expect(d.when).toBe("github");
     expect(d.event).toEqual({
       type: "github",

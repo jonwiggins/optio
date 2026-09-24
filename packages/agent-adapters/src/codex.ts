@@ -64,6 +64,10 @@ export class CodexAdapter implements AgentAdapter {
       OPTIO_AGENT_TYPE: "codex",
       OPTIO_BRANCH_NAME: `${TASK_BRANCH_PREFIX}${input.taskId}`,
     };
+    // Model and reasoning effort (Codex shares Copilot's copilotModel /
+    // copilotEffort settings); the task worker turns them into flags.
+    if (input.copilotModel) env.OPTIO_CODEX_MODEL = input.copilotModel;
+    if (input.copilotEffort) env.OPTIO_CODEX_EFFORT = input.copilotEffort;
 
     const requiredSecrets: string[] = [];
 

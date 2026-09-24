@@ -113,6 +113,12 @@ const blueprintBodySchema = z
       .enum(["interactive", "headless"])
       .optional()
       .describe("Agent spawns: stay open for chat (default) or exit when the turn is done"),
+    agentOptions: z
+      .record(z.string().max(64), z.union([z.string().max(200), z.boolean()]))
+      .nullish()
+      .describe(
+        "Agent spawns: per-run agent parameters keyed like the provider catalog (claudeModel, claudeEffort, claudePermissionMode, copilotModel, copilotEffort); null = the machine's own",
+      ),
   })
   .describe("Local automation (blueprint) definition");
 
@@ -412,7 +418,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const terminals = await terminalService.listTerminals(req.user?.id ?? null, req.query);
-      reply.send({ terminals });
+      reply.send({ terminals: await terminalService.presentTerminals(terminals) });
     },
   );
 
@@ -545,7 +551,8 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
         return reply.status(404).send({ error: "Terminal not found" });
       }
-      reply.send({ terminal });
+      const [withType] = await terminalService.presentTerminals([terminal]);
+      reply.send({ terminal: withType });
     },
   );
 

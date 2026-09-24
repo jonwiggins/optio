@@ -299,8 +299,13 @@ export function startPrReviewWorker() {
         // available when an adapter happens to consume them.
         const claudeModel =
           agentType === "claude-code" ? resolvedModel : (repoConfig.claudeModel ?? undefined);
+        // Codex shares Copilot's copilotModel / copilotEffort, but a repo's
+        // values there are Copilot's settings (Codex has none per repo), so a
+        // Codex review gets only its resolved review model.
         const copilotModel =
-          agentType === "copilot" ? resolvedModel : (repoConfig.copilotModel ?? undefined);
+          agentType === "copilot" || agentType === "codex"
+            ? resolvedModel
+            : (repoConfig.copilotModel ?? undefined);
         const opencodeModel =
           agentType === "opencode"
             ? resolvedModel
@@ -327,7 +332,8 @@ export function startPrReviewWorker() {
           claudeThinking: repoConfig.claudeThinking ?? undefined,
           claudeEffort: repoConfig.claudeEffort ?? undefined,
           copilotModel,
-          copilotEffort: repoConfig.copilotEffort ?? undefined,
+          copilotEffort:
+            agentType === "codex" ? undefined : (repoConfig.copilotEffort ?? undefined),
           opencodeModel,
           opencodeAgent: repoConfig.opencodeAgent ?? undefined,
           opencodeBaseUrl: repoConfig.opencodeBaseUrl ?? opencodeDefaultBaseUrl,

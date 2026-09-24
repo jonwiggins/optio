@@ -3,6 +3,7 @@ import { render, screen, cleanup } from "@testing-library/react";
 import {
   TerminalCard,
   LocalStateBadge,
+  SpawnSourceBadge,
   dirTail,
   attentionLabel,
   statusDescriptor,
@@ -170,5 +171,24 @@ describe("TerminalCard", () => {
   it("shows a Kill button while running", () => {
     render(<TerminalCard terminal={makeTerminal()} onStart={noop} onKill={noop} onDelete={noop} />);
     expect(screen.getByText("Kill")).toBeInTheDocument();
+  });
+});
+
+describe("SpawnSourceBadge", () => {
+  it("names a trigger-started session's source", () => {
+    render(<SpawnSourceBadge spawnedBy="trigger" triggerType="github" />);
+    expect(screen.getByText("GitHub")).toBeInTheDocument();
+    cleanup();
+    render(<SpawnSourceBadge spawnedBy="trigger" triggerType="schedule" />);
+    expect(screen.getByText("schedule")).toBeInTheDocument();
+  });
+
+  it("falls back to 'trigger' when the trigger is gone, and ignores it for other sources", () => {
+    render(<SpawnSourceBadge spawnedBy="trigger" triggerType={null} />);
+    expect(screen.getByText("trigger")).toBeInTheDocument();
+    cleanup();
+    // A job run started by a GitHub event is still a job run.
+    render(<SpawnSourceBadge spawnedBy="job" triggerType="github" />);
+    expect(screen.getByText("job")).toBeInTheDocument();
   });
 });

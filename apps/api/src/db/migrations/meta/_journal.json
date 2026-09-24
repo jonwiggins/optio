@@ -722,6 +722,13 @@
       "when": 1791300000000,
       "tag": "1791300000_optio_settings_default_opus",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1791400000000,
+      "tag": "1791400000_local_agent_models_and_blueprint_options",
+      "breakpoints": true
     }
   ]
 }

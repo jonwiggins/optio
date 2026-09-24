@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { accountBuckets, pctTone, resetsIn, usageUnavailableReason } from "./usage-chips";
+import {
+  accountBuckets,
+  codexBuckets,
+  codexRecentlyUsed,
+  pctTone,
+  resetsIn,
+  usageUnavailableReason,
+} from "./usage-chips";
 import { formatTokens, formatUsd, priceForModel, costForTokens } from "@optio/shared";
 
 describe("usage chips", () => {
@@ -85,5 +92,36 @@ describe("usageUnavailableReason", () => {
     expect(usageUnavailableReason({ available: false, error: "unreachable" })).toBe("unreachable");
     expect(usageUnavailableReason({ available: false })).toBe("usage unavailable");
     expect(usageUnavailableReason({ available: true })).toBe("no usage limits reported");
+  });
+});
+
+describe("Codex limits", () => {
+  const now = Date.parse("2026-09-24T12:00:00Z");
+  const limits = {
+    primary: { usedPercent: 42, windowMinutes: 300, resetsAt: "2026-09-24T14:00:00Z" },
+    secondary: { usedPercent: 17.6, windowMinutes: 10080, resetsAt: "2026-09-28T00:00:00Z" },
+    planType: "pro",
+    observedAt: "2026-09-24T11:30:00Z",
+  };
+
+  it("labels each window by its length", () => {
+    expect(codexBuckets(limits, now)).toEqual([
+      ["5h", { utilization: 42, resetsAt: "2026-09-24T14:00:00Z" }],
+      ["7d", { utilization: 17.6, resetsAt: "2026-09-28T00:00:00Z" }],
+    ]);
+  });
+
+  it("reads a window that reset since the snapshot as 0%", () => {
+    const later = Date.parse("2026-09-24T15:00:00Z");
+    expect(codexBuckets(limits, later)[0]).toEqual(["5h", { utilization: 0, resetsAt: null }]);
+  });
+
+  it("skips a window Codex didn't report", () => {
+    expect(codexBuckets({ ...limits, secondary: null }, now)).toHaveLength(1);
+  });
+
+  it("counts Codex as in use while its last turn is inside the short window", () => {
+    expect(codexRecentlyUsed(limits, now)).toBe(true);
+    expect(codexRecentlyUsed(limits, Date.parse("2026-09-24T17:00:00Z"))).toBe(false);
   });
 });

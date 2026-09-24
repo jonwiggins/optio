@@ -9,6 +9,7 @@ import {
   eventGaps,
   missingFields,
   normalize,
+  optionsFromRepo,
   runtimeOptions,
   slugify,
   thenOptions,
@@ -245,5 +246,29 @@ suite("presets and params", () => {
   it("slugifies names for agents", () => {
     expect(slugify("Release Manager!")).toBe("release-manager");
     expect(slugify("Session 12")).toBe("session-12");
+  });
+});
+
+suite("optionsFromRepo", () => {
+  const repo = {
+    claudeModel: "opus",
+    claudeEffort: "low",
+    copilotModel: "claude-sonnet-4.5",
+    copilotEffort: "high",
+  };
+
+  it("seeds a runtime's options from the repo's columns", () => {
+    expect(optionsFromRepo("claude-code", repo)).toMatchObject({
+      claudeModel: "opus",
+      claudeEffort: "low",
+    });
+    expect(optionsFromRepo("copilot", repo)).toEqual({
+      copilotModel: "claude-sonnet-4.5",
+      copilotEffort: "high",
+    });
+  });
+
+  it("never seeds Codex from Copilot's shared columns", () => {
+    expect(optionsFromRepo("codex", repo)).toEqual({});
   });
 });

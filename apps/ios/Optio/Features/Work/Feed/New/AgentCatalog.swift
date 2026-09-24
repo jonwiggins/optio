@@ -38,7 +38,12 @@ struct ProviderCatalog: Decodable, Hashable, Sendable {
         let `default`: AnyCodable?
         let placeholder: String?
         let helpText: String?
+        /// Where the field applies: "pod" and/or "local" (a run on a machine); nil = pods only.
+        let runsOn: [String]?
         var id: String { key }
+
+        /// The field reaches a run in an Optio pod (a machine-only one, like Claude's permissions, doesn't).
+        var appliesToPods: Bool { runsOn?.contains("pod") ?? true }
 
         var defaultString: String { `default`?.stringValue ?? "" }
         var defaultBool: Bool { `default`?.boolValue ?? false }

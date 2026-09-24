@@ -3,6 +3,7 @@
 
 import type { WorkLink } from "../utils/extract-work-links.js";
 import type { LocalTerminalUsage } from "../utils/agent-usage.js";
+import type { TriggerType } from "./triggers.js";
 
 export type LocalHostState = "online" | "offline";
 
@@ -35,6 +36,47 @@ export interface LocalHostAgentLimits {
     observedAt: string;
   };
 }
+
+/** One model as an agent CLI on the machine lists it (Codex's model catalog). */
+export interface LocalAgentModel {
+  id: string;
+  label: string;
+  description?: string;
+  /** Reasoning efforts the model accepts, in order. */
+  efforts: string[];
+  /** The effort the CLI uses when none is set. */
+  defaultEffort: string | null;
+}
+
+/**
+ * The models an agent CLI on the machine offers, read by the daemon (no
+ * tokens leave the laptop). Codex: `codex debug models` — its current model
+ * catalog, refreshed the way Codex refreshes it — so the model and effort
+ * pickers track Codex releases without an Optio update.
+ */
+export interface LocalHostAgentModels {
+  codex?: {
+    models: LocalAgentModel[];
+    /** When the daemon read the catalog. */
+    fetchedAt: string;
+  };
+}
+
+/**
+ * How a local Claude Code agent handles permission prompts — its
+ * `--permission-mode`. `auto` (the daemon's default): Claude's classifier
+ * approves routine actions and blocks risky ones, so an unattended run
+ * doesn't stall on a prompt. `bypassPermissions`: skip every check
+ * (`--dangerously-skip-permissions`). `default`: ask first (a headless run
+ * can't ask, so those actions are denied).
+ */
+export type LocalAgentPermissionMode = "auto" | "bypassPermissions" | "default";
+
+export const LOCAL_AGENT_PERMISSION_MODES: readonly LocalAgentPermissionMode[] = [
+  "auto",
+  "bypassPermissions",
+  "default",
+];
 
 export interface LocalHost {
   id: string;
@@ -119,6 +161,13 @@ export type LocalTerminalSpec =
       resumeSessionId?: string;
       /** Model override passed to the agent CLI (`--model` / `-m`), when set. */
       model?: string;
+      /**
+       * Reasoning effort passed to the agent CLI, when set: Claude Code
+       * `--effort`, Codex `-c model_reasoning_effort=…`.
+       */
+      effort?: string;
+      /** Claude Code only: its `--permission-mode`. The daemon's default is `auto`. */
+      permissionMode?: LocalAgentPermissionMode;
       /**
        * "Work on a new branch that becomes a PR": the server wraps the prompt
        * with branch-and-PR instructions off this base before the spawn.
@@ -232,6 +281,11 @@ export interface LocalTerminal {
   spawnedBy: LocalSpawnSource;
   blueprintId: string | null;
   triggerId: string | null;
+  /**
+   * The type of the trigger that started it (`github`, `schedule`, …), for
+   * its source badge. Null when no trigger did, or the trigger is gone.
+   */
+  triggerType?: TriggerType | null;
   ticketSource: string | null;
   ticketExternalId: string | null;
   ticketUrl: string | null;
@@ -290,6 +344,13 @@ export interface LocalBlueprint {
   spawnMode: LocalBlueprintSpawnMode;
   /** Agent spawns only: stay open for chat, or exit when the turn is done. */
   sessionMode: LocalAgentSessionMode;
+  /**
+   * Agent spawns: per-run agent parameters keyed like the provider catalog
+   * (`claudeModel`, `claudeEffort`, `claudePermissionMode`, `copilotModel`,
+   * `copilotEffort`; string or boolean values) — the fields that apply to a
+   * run on a machine. Null = the machine's own defaults.
+   */
+  agentOptions?: Record<string, unknown> | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -378,6 +439,8 @@ export type LocalDaemonMessage =
   /** The agent CLI's own session id, once its hooks report it (sent once). */
   | { type: "session"; terminalId: string; agentSessionId: string }
   | { type: "agent-limits"; limits: LocalHostAgentLimits }
+  /** The models the machine's agent CLIs offer (on connect, then every few hours). */
+  | { type: "agent-models"; models: LocalHostAgentModels }
   /** The PTY's current grid — sent on spawn, after every resize, and to each new attach. */
   | { type: "size"; terminalId: string; cols: number; rows: number }
   /**

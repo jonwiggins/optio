@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   updateLocalBlueprint: vi.fn(),
   updateLocalBlueprintTrigger: vi.fn(),
   deleteLocalBlueprintTrigger: vi.fn(),
+  createLocalTerminal: vi.fn(),
 }));
 vi.mock("@/lib/api-client", () => ({ api }));
 vi.mock("@/lib/persistent-agent-defaults", () => ({ defaultAgentsMd: () => "" }));
@@ -86,6 +87,63 @@ describe("createWork", () => {
       type: "repo-blueprint",
       name: "Linear triage",
       title: "Triage: {{ticketTitle}}",
+    });
+  });
+
+  const onMachine = {
+    runTarget: "local" as const,
+    localHostId: "h1",
+    localDir: "/Users/dev/app",
+    localSessionMode: "interactive" as const,
+  };
+
+  it("hands a session on a machine its model, effort and permission mode", async () => {
+    api.createLocalTerminal.mockResolvedValue({ terminal: { id: "t-9" } });
+    const session: WorkDraft = normalize({
+      ...EMPTY_DRAFT,
+      withRepo: false,
+      runtime: "claude-code",
+      agentOptions: {
+        claudeModel: "opus",
+        claudeEffort: "high",
+        claudePermissionMode: "bypassPermissions",
+        // Pod-only: never reaches the machine.
+        claudeThinking: true,
+      },
+      location: onMachine,
+      prompt: "Tidy up",
+      then: "waits-for-me",
+    });
+    const created = await createWork(session, { repoUrl: "", autoName: "Session 1" });
+    expect(created.href).toBe("/local/t-9");
+    expect(api.createLocalTerminal.mock.calls[0][0].spec).toEqual({
+      kind: "agent",
+      agent: "claude-code",
+      prompt: "Tidy up",
+      model: "opus",
+      effort: "high",
+      permissionMode: "bypassPermissions",
+    });
+  });
+
+  it("saves a Local automation's agent options", async () => {
+    api.createLocalBlueprint.mockResolvedValue({ blueprint: { id: "b-2" } });
+    api.createLocalBlueprintTrigger.mockResolvedValue({});
+    const auto: WorkDraft = normalize({
+      ...EMPTY_DRAFT,
+      withRepo: false,
+      runtime: "codex",
+      agentOptions: { copilotModel: "gpt-5.6-sol", copilotEffort: "xhigh" },
+      location: onMachine,
+      prompt: "Nightly cleanup",
+      then: "waits-for-me",
+      when: "schedule",
+      trigger: { type: "schedule", cronExpression: "0 9 * * *" },
+    });
+    await createWork(auto, { repoUrl: "", autoName: "Automation 1" });
+    expect(api.createLocalBlueprint.mock.calls[0][0]).toMatchObject({
+      agent: "codex",
+      agentOptions: { copilotModel: "gpt-5.6-sol", copilotEffort: "xhigh" },
     });
   });
 
