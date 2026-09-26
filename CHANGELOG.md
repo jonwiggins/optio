@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-09-26
+
 ### Added
 
 - **Slack bots can start work.** A Slack trigger's new **Posted by** setting takes bots (apps, integrations, incoming webhooks: an alerting tool, say) or anyone, not just people, and **Bot** narrows it to one bot by the name on its posts or its id. So "when the alert bot posts in #alerts, start a Codex session to debug it" is a Slack trigger with the channel, **Posted by: Bots** and the bot's name. A bot's `{{text}}` includes what its attachments and blocks say, where alerting tools put the details, and `{{botName}}` names the bot. Posts by Optio's own Slack app never start anything. Triggers keep firing only for people unless you change the setting.
