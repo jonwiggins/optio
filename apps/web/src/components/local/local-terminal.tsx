@@ -4,13 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { installTerminalLinks } from "@/lib/terminal-links";
+import { installTerminalClipboard } from "@/lib/terminal-clipboard";
 import { Maximize2 } from "lucide-react";
 import {
   BASE_FONT_PX,
+  VIEW_REFRESH_MS,
   ackSentGrid,
   onGridAnnounced,
+  onGridAssigned,
   passiveFontPx,
   pushSentGrid,
+  sameGrid,
   type Grid,
   type SizingMode,
 } from "./sizing";
@@ -18,7 +22,7 @@ import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
 import { getWsTokenProvider } from "@/lib/ws-auth";
 import { cn } from "@/lib/utils";
-import { closeAction, isTerminalStateDead } from "./stream-policy";
+import { closeAction, isPointerReport, isQueryReply, isTerminalStateDead } from "./stream-policy";
 import {
   CONN_DOT,
   CONN_LABEL,
@@ -26,16 +30,23 @@ import {
   isShiftEnter,
   type ConnState,
 } from "./conn-state";
-import type { LocalAttentionState, LocalTerminalState } from "@optio/shared";
+import {
+  LOCAL_VIEW_IN_USE_MS,
+  type LocalAttentionState,
+  type LocalTerminalState,
+} from "@optio/shared";
 
 const RECONNECT_DELAY_MS = 2000;
+/** How long a connection's replay waits for the daemon's closing `size` (iOS / Android: 1.5 s). */
+const REPLAY_CLOSE_MS = 1500;
 
 /**
  * xterm.js viewer for an Optio Local terminal (/ws/local/terminals/:id/stream).
  *
  * Protocol: server → client binary frames are raw terminal bytes (scrollback
- * replay first, then live); JSON text frames are {type:"status"|"exit"|"error"}.
- * Client → server is JSON only: {type:"input",data} | {type:"resize",cols,rows}.
+ * replay first, then live); JSON text frames are {type:"status"|"size"|"exit"|"error"}.
+ * Client → server is JSON only: {type:"input",data} | {type:"resize",cols,rows}
+ * | {type:"view",cols,rows,visible,idleMs,open?}.
  */
 export function LocalTerminal({
   terminalId,
@@ -70,6 +81,7 @@ export function LocalTerminal({
   // was recorded at, pinned so it reads the way it ran (no "use this screen").
   const [recorded, setRecorded] = useState(false);
   const claimRef = useRef<() => void>(() => {});
+  const stripRef = useRef<HTMLDivElement>(null);
   const setConnState = (next: ConnState) => {
     setConnStateRaw(next);
     onConnRef.current?.(next);
@@ -128,15 +140,32 @@ export function LocalTerminal({
     // because the sizing closures consult it.
     let terminalDead = false;
 
-    // ── Who owns the PTY grid ────────────────────────────────────────────
-    // One PTY, one grid. Attaching never resizes it; interacting (pointer
-    // down in the terminal, typing) claims it for this screen. A viewer that
-    // hasn't claimed it renders the announced grid shrunk to fit its width,
-    // so a phone glancing at a laptop session sees the laptop's layout
-    // small rather than forcing the laptop down to phone width.
+    // ── Which screen the PTY is sized for ────────────────────────────────
+    // One PTY, one grid, and the server gives it to the screen in use
+    // (apps/api/src/services/local-grid.ts). This pane reports the grid that
+    // fits it, whether it's on screen, and how long since it was touched
+    // (`view`). Opening it, bringing its tab to the front, or coming back to
+    // it after a minute away asks for the grid (`open`) — granted unless
+    // another screen showing the session was used in the last minute, so a
+    // phone glancing at a laptop you're working at sees the laptop's layout
+    // small rather than forcing it down to phone width. A click or keystroke
+    // here, or "Use this screen", takes the grid outright (`resize`). `size`
+    // frames say whether the grid is ours; a server that doesn't say leaves
+    // us inferring it from the echoes of our own resizes.
     let mode: SizingMode = { kind: "unclaimed" };
-    // Grids we've asked for and not yet heard echoed, oldest first.
+    // Grids we've asked for and not yet heard echoed, oldest first (servers
+    // that don't say whose the grid is).
     let sent: Grid[] = [];
+    // The server says whose the grid is.
+    let arbitrated = false;
+    // When this pane was last touched; opening it counts.
+    let lastUsed = Date.now();
+    // The last `view` sent on this connection.
+    let lastView: { grid: Grid; at: number } | null = null;
+    // A `view` held until the pane can be measured; true when it asks for the grid.
+    let heldOpen: boolean | null = null;
+    let opened = false;
+    let everConnected = false;
 
     const sendResize = (grid: Grid) => {
       sent = pushSentGrid(sent, grid);
@@ -156,13 +185,90 @@ export function LocalTerminal({
       return 0.6;
     };
 
-    /** What a fit to our own screen would produce at the base font. */
+    /**
+     * What a fit to our own screen would produce at the base font — laid out
+     * the way it will be once the grid is ours, without the "sized for
+     * another device" strip. Measured with the strip, a screen would ask for
+     * a row less than it ends up with (a second resize once the strip goes)
+     * and would never recognise its own size in another screen's grid.
+     */
     const naturalGrid = (): Grid => {
       const prev = term.options.fontSize;
       if (prev !== BASE_FONT_PX) term.options.fontSize = BASE_FONT_PX;
-      const d = fitAddon.proposeDimensions();
-      if (prev !== BASE_FONT_PX) term.options.fontSize = prev;
-      return d ? { cols: d.cols, rows: d.rows } : { cols: term.cols, rows: term.rows };
+      try {
+        const d = fitAddon.proposeDimensions();
+        if (!d) return { cols: term.cols, rows: term.rows };
+        const strip = stripRef.current?.offsetHeight ?? 0;
+        const cellHeight = (term as any)._core?._renderService?.dimensions?.css?.cell?.height;
+        if (strip > 0 && cellHeight > 0 && term.element) {
+          // FitAddon's arithmetic (the parent's height less .xterm's own
+          // padding), with the strip's height given back.
+          const style = getComputedStyle(term.element);
+          const padding = parseInt(style.paddingTop) + parseInt(style.paddingBottom);
+          const height = parseInt(getComputedStyle(container).height) - padding + strip;
+          return { cols: d.cols, rows: Math.max(1, Math.floor(height / cellHeight)) };
+        }
+        return { cols: d.cols, rows: d.rows };
+      } finally {
+        if (prev !== BASE_FONT_PX) term.options.fontSize = prev;
+      }
+    };
+
+    /** Our natural grid, or null while the pane can't be measured (not laid out, no size). */
+    const measure = (): Grid | null =>
+      opened && container.clientWidth >= 40 && container.clientHeight >= 20 ? naturalGrid() : null;
+
+    const onScreen = () => document.visibilityState === "visible";
+
+    /** Tell the server how this pane sees the terminal; `open` asks for the grid. */
+    const sendView = (open: boolean) => {
+      if (disposed || terminalDead || ws?.readyState !== WebSocket.OPEN) return;
+      const grid = measure();
+      if (!grid) {
+        heldOpen = (heldOpen ?? false) || open;
+        return;
+      }
+      heldOpen = null;
+      const visible = onScreen();
+      const now = Date.now();
+      ws.send(
+        JSON.stringify({
+          type: "view",
+          cols: grid.cols,
+          rows: grid.rows,
+          visible,
+          idleMs: Math.max(0, now - lastUsed),
+          ...(open && visible ? { open: true } : {}),
+        }),
+      );
+      lastView = { grid, at: now };
+    };
+
+    /** Our grid may have changed (a window resize, the strip coming or going): say so. */
+    const reportGrid = () => {
+      if (heldOpen !== null) {
+        sendView(heldOpen);
+        return;
+      }
+      const grid = lastView && measure();
+      if (grid && !sameGrid(grid, lastView!.grid)) sendView(false);
+    };
+
+    /** The user touched this pane. */
+    const touched = () => {
+      const now = Date.now();
+      const back = now - lastUsed >= LOCAL_VIEW_IN_USE_MS;
+      lastUsed = now;
+      // Back after a minute away: ask for the grid. Otherwise keep the
+      // server's "last used" clock fresh.
+      if (back) sendView(true);
+      else if (lastView && now - lastView.at >= VIEW_REFRESH_MS) sendView(false);
+    };
+
+    const onVisibility = () => {
+      // Bringing this tab to the front is using it.
+      if (onScreen()) lastUsed = Date.now();
+      sendView(onScreen());
     };
 
     const renderPassive = (grid: Grid) => {
@@ -195,24 +301,43 @@ export function LocalTerminal({
       // select text must not reflow a replayed screen out of its recorded
       // grid.
       if (terminalDead) return;
+      lastUsed = Date.now();
       mode = { kind: "owner" };
       applyMode();
       // Always tell the daemon, even if our grid is what we last sent:
       // another viewer may have resized the PTY in between (a click is one
-      // cheap frame, and typing only lands here when we were demoted).
-      sendResize({ cols: term.cols, rows: term.rows });
+      // cheap frame, and typing only lands here when we were demoted). Our
+      // natural grid, not the fit just made: the strip is still on screen
+      // until React's next render.
+      const grid = measure() ?? { cols: term.cols, rows: term.rows };
+      sendResize(grid);
+      lastView = { grid, at: Date.now() };
     };
     claimRef.current = claim;
 
-    const onGrid = (grid: Grid) => {
-      mode = onGridAnnounced(mode, grid, naturalGrid(), sent, terminalDead);
-      sent = ackSentGrid(sent, grid) ?? sent;
+    const onGrid = (grid: Grid, yours: boolean | undefined) => {
+      if (yours === undefined || terminalDead) {
+        // No say from the server (or an exited terminal's recorded grid).
+        mode = onGridAnnounced(mode, grid, naturalGrid(), sent, terminalDead);
+        sent = ackSentGrid(sent, grid) ?? sent;
+      } else {
+        arbitrated = true;
+        sent = [];
+        mode = onGridAssigned(grid, yours, measure());
+      }
       if (terminalDead) setRecorded(true);
       applyMode();
     };
 
-    const resizeObserver = new ResizeObserver(() => applyMode());
+    const resizeObserver = new ResizeObserver(() => {
+      applyMode();
+      reportGrid();
+    });
     container.addEventListener("pointerdown", claim);
+    // Moving over, scrolling, or touching the terminal is using this screen.
+    const activity = ["pointermove", "wheel", "touchstart"] as const;
+    for (const type of activity) container.addEventListener(type, touched, { passive: true });
+    document.addEventListener("visibilitychange", onVisibility);
     // Open on the next frame, after React's commit has been laid out: WebKit
     // otherwise syncs xterm's viewport against a renderer that doesn't exist
     // yet ("this._renderer.value.dimensions" TypeError) on a 0-height box.
@@ -220,7 +345,9 @@ export function LocalTerminal({
       if (disposed) return;
       term.open(container);
       safeFit();
+      opened = true;
       resizeObserver.observe(container);
+      reportGrid();
     });
 
     let ws: WebSocket | null = null;
@@ -236,6 +363,27 @@ export function LocalTerminal({
     // while the daemon is down — print each distinct message once.
     let lastErrorShown: string | null = null;
     let outputSeen = false;
+    // Each connection opens with the scrollback replay. Until xterm has
+    // parsed it, its answers to the queries in it (a cursor position, its
+    // identity) go nowhere: the program asked long ago, and a stray answer
+    // would land in its input. The daemon closes the replay with a `size`.
+    let replaying = false;
+    let replayWrites = 0;
+    let replayClosed = false;
+    let replayTimer: ReturnType<typeof setTimeout> | null = null;
+    const closeReplay = () => {
+      if (replayTimer) clearTimeout(replayTimer);
+      replayTimer = null;
+      replayClosed = true;
+      if (replayWrites === 0) replaying = false;
+    };
+    // ⌥-drag selects over a program that tracks the mouse, and what the
+    // program copies (OSC 52: Claude Code's copy-on-select) reaches this
+    // browser's clipboard — never from the replay, which would re-copy
+    // something from long ago.
+    const uninstallClipboard = installTerminalClipboard(term, container, {
+      replaying: () => replaying,
+    });
 
     const connect = async () => {
       // Tokens go in the Sec-WebSocket-Protocol header (never the URL), same
@@ -257,9 +405,24 @@ export function LocalTerminal({
 
       socket.onopen = () => {
         setConnState("connected");
-        // Attaching never resizes the PTY. If we already own it (reconnect
-        // after a blip), re-assert our grid; otherwise wait for `size`.
-        if (mode.kind === "owner") sendResize({ cols: term.cols, rows: term.rows });
+        replaying = true;
+        replayWrites = 0;
+        replayClosed = false;
+        if (replayTimer) clearTimeout(replayTimer);
+        // A daemon that never says the size: don't hold answers back for good.
+        replayTimer = setTimeout(closeReplay, REPLAY_CLOSE_MS);
+        lastView = null;
+        heldOpen = null;
+        const first = !everConnected;
+        everConnected = true;
+        const wasOurs = mode.kind === "owner";
+        // Opening the pane asks for the grid. A reconnect asks only when the
+        // grid was ours or we're in use: a blip must not hand it to
+        // whichever screen happens to reconnect first.
+        sendView(first || wasOurs || Date.now() - lastUsed < LOCAL_VIEW_IN_USE_MS);
+        // A server that doesn't say whose the grid is never sizes it for
+        // us: re-assert ours after a blip.
+        if (!arbitrated && wasOurs) sendResize({ cols: term.cols, rows: term.rows });
       };
 
       socket.onmessage = (msg) => {
@@ -275,8 +438,12 @@ export function LocalTerminal({
             else liveOnThisConnection = true;
             onStatusRef.current?.(parsed.state, parsed.attentionState);
           } else if (parsed.type === "size") {
+            if (!replayClosed) closeReplay();
             if (Number.isInteger(parsed.cols) && Number.isInteger(parsed.rows)) {
-              onGrid({ cols: parsed.cols, rows: parsed.rows });
+              onGrid(
+                { cols: parsed.cols, rows: parsed.rows },
+                typeof parsed.yours === "boolean" ? parsed.yours : undefined,
+              );
             }
           } else if (parsed.type === "exit") {
             terminalDead = true;
@@ -308,7 +475,14 @@ export function LocalTerminal({
             outputSeen = true;
             onOutputRef.current?.();
           }
-          term.write(new Uint8Array(msg.data));
+          if (replaying && !replayClosed) {
+            replayWrites++;
+            term.write(new Uint8Array(msg.data), () => {
+              if (--replayWrites === 0 && replayClosed) replaying = false;
+            });
+          } else {
+            term.write(new Uint8Array(msg.data));
+          }
         }
       };
 
@@ -338,9 +512,17 @@ export function LocalTerminal({
     connect();
 
     term.onData((data) => {
-      // Typing here means this is the screen in use — take the grid first so
-      // the program lays out for it before it processes the keystroke.
-      if (mode.kind !== "owner") claim();
+      if (isQueryReply(data)) {
+        // xterm answering a program's query, not someone typing. An answer
+        // to a query from the replay (or a finished process) goes nowhere.
+        if (replaying || terminalDead) return;
+      } else if (!isPointerReport(data)) {
+        // Typing here means this is the screen in use — take the grid first
+        // so the program lays out for it before it processes the keystroke.
+        // (Clicks and pointer moves are counted by the pane's own listeners.)
+        if (mode.kind !== "owner") claim();
+        else touched();
+      }
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "input", data }));
       }
@@ -348,15 +530,20 @@ export function LocalTerminal({
 
     term.onResize(({ cols, rows }) => {
       // Passive renders call term.resize() too; only the owner tells the PTY.
-      if (mode.kind === "owner") sendResize({ cols, rows });
+      // (With a server that says whose the grid is, `view` carries it.)
+      if (!arbitrated && mode.kind === "owner") sendResize({ cols, rows });
     });
 
     return () => {
       disposed = true;
       cancelAnimationFrame(openFrame);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (replayTimer) clearTimeout(replayTimer);
       resizeObserver.disconnect();
       container.removeEventListener("pointerdown", claim);
+      for (const type of activity) container.removeEventListener(type, touched);
+      uninstallClipboard();
+      document.removeEventListener("visibilitychange", onVisibility);
       ws?.close();
       term.dispose();
     };
@@ -378,7 +565,10 @@ export function LocalTerminal({
         </div>
       )}
       {foreignGrid && (
-        <div className="shrink-0 flex items-center gap-2 px-3 py-1 text-[11px] bg-primary/10 text-text-muted">
+        <div
+          ref={stripRef}
+          className="shrink-0 flex items-center gap-2 px-3 py-1 text-[11px] bg-primary/10 text-text-muted"
+        >
           <span className="w-1.5 h-1.5 rounded-full bg-primary" />
           <span className="min-w-0 truncate">
             {recorded ? "Recorded screen" : "Sized for another device"}

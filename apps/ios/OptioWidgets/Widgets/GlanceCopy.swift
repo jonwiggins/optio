@@ -60,14 +60,34 @@ enum GlanceCopy {
         }
     }
 
-    /// Inline accessory: "Optio · web Allow? +2" / "Optio · 3 running" / "Optio · quiet".
+    /// Inline accessory: "Optio · 3 need you · Allow? web" / "Optio · Allow? · web" /
+    /// "Optio · 3 running" / "Optio · quiet". The counts and the status word come first,
+    /// so when the system shortens the line only the session name gives way.
     static func inline(prefix: String, headName: String?, headWord: String?, needsYou: Int, running: Int) -> String {
         if let headName, needsYou > 0 {
             let word = headWord ?? "needs you"
-            return needsYou > 1 ? "\(prefix) · \(headName) \(word) +\(needsYou - 1)" : "\(prefix) · \(headName) \(word)"
+            return needsYou > 1 ? "\(prefix) · \(needsYou) need you · \(word) \(headName)" : "\(prefix) · \(word) · \(headName)"
         }
         if running > 0 { return "\(prefix) · \(running) running" }
         return "\(prefix) · quiet"
+    }
+
+    /// Live Activity headline, longest first: the view shows the first one that fits
+    /// whole (`ViewThatFits`), so a narrow phone or a large text size gets a shorter
+    /// sentence instead of an ellipsis. The last option is always short.
+    static func headlineOptions(phase: String, needsYou: Int, running: Int) -> [String] {
+        switch phase {
+        case "waiting":
+            let full = headline(phase: phase, needsYou: needsYou, running: running)
+            let short = "\(needsYou) need\(needsYou == 1 ? "s" : "") you"
+            return running > 0 ? ["\(full) · \(running) running", full, "\(short) · \(running) running", short] : [full, short]
+        case "working":
+            return running > 0 ? [headline(phase: phase, needsYou: 0, running: running), "\(running) running"] : ["Nothing needs you", "Quiet"]
+        case "offline":
+            return ["Machine unreachable", "Unreachable"]
+        default:
+            return ["Sessions ended", "Ended"]
+        }
     }
 
     // MARK: Board tiles
@@ -116,6 +136,19 @@ enum GlanceCopy {
         case "cursor": return "Cursor"
         default: return who
         }
+    }
+
+    /// Every whole way to say a Where, longest first: the full detail, `host · leaf`,
+    /// then the leaf alone. Views show the first that fits (`ViewThatFits`) rather than
+    /// cutting a path mid-name. "MacBook Pro · ~/repos/optio/apps/web" →
+    /// ["MacBook Pro · ~/repos/optio/apps/web", "MacBook Pro · web", "web"].
+    static func whereOptions(_ detail: String?, target: String) -> [String] {
+        let full = whereLabel(detail, target: target, short: false)
+        let short = whereLabel(detail, target: target, short: true)
+        let leaf = short.components(separatedBy: " · ").last ?? short
+        var out: [String] = []
+        for option in [full, short, leaf] where !out.contains(option) { out.append(option) }
+        return out
     }
 
     /// Where chip copy trimmed for a widget row: keep the leaf of a path and the host.

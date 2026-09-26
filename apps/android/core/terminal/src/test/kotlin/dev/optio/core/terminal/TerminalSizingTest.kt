@@ -136,6 +136,31 @@ class TerminalSizingTest {
 
     // endregion
 
+    // region onGridAssigned (the server says whose the grid is)
+
+    @Test
+    fun fitsOurOwnScreenWhenTheGridIsOurs() {
+        // Even mid-flight, before the PTY has caught up with our size.
+        assertEquals(Mode.Owner, s.onGridAssigned(phone, yours = true, natural = laptop))
+    }
+
+    @Test
+    fun rendersAnotherScreensGridScaled() {
+        assertEquals(Mode.Passive(phone), s.onGridAssigned(phone, yours = false, natural = laptop))
+    }
+
+    @Test
+    fun showsNoStripWhenAnotherScreensGridIsOurOwnFit() {
+        assertEquals(Mode.Unclaimed, s.onGridAssigned(laptop, yours = false, natural = laptop))
+    }
+
+    @Test
+    fun treatsAScreenNotLaidOutAsNotFitting() {
+        assertEquals(Mode.Passive(laptop), s.onGridAssigned(laptop, yours = false, natural = null))
+    }
+
+    // endregion
+
     @Test
     fun sizingModesMapToGridModes() {
         assertEquals(TerminalGridMode.Fit, Mode.Unclaimed.gridMode)

@@ -126,6 +126,27 @@ describe("createWork", () => {
     });
   });
 
+  it("runs Codex on a machine with --yolo when every check is skipped", async () => {
+    api.createLocalTerminal.mockResolvedValue({ terminal: { id: "t-10" } });
+    const session: WorkDraft = normalize({
+      ...EMPTY_DRAFT,
+      withRepo: false,
+      runtime: "codex",
+      agentOptions: { copilotModel: "gpt-5.6-sol", codexPermissionMode: "bypassPermissions" },
+      location: onMachine,
+      prompt: "Fix the flaky test",
+      then: "waits-for-me",
+    });
+    await createWork(session, { repoUrl: "", autoName: "Session 2" });
+    expect(api.createLocalTerminal.mock.calls.at(-1)![0].spec).toEqual({
+      kind: "agent",
+      agent: "codex",
+      prompt: "Fix the flaky test",
+      model: "gpt-5.6-sol",
+      permissionMode: "bypassPermissions",
+    });
+  });
+
   it("saves a Local automation's agent options", async () => {
     api.createLocalBlueprint.mockResolvedValue({ blueprint: { id: "b-2" } });
     api.createLocalBlueprintTrigger.mockResolvedValue({});

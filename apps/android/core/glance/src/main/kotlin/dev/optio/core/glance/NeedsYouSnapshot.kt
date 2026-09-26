@@ -60,29 +60,35 @@ data class NeedsYouSnapshot(
         )
 
     /**
-     * The Watch content per the product brief: oldest needs-you item first (anything under a
-     * "Later" window behind everything that isn't), up to two more listed, counts for the rest;
-     * the newest running item when nothing needs you; offline when every host is down.
+     * The Watch content per the product brief: oldest needs-you item first, up to two more
+     * listed, counts for the rest; the newest running item when nothing needs you; offline when
+     * every host is down.
+     *
+     * An item under a **Later** window doesn't need you until the window closes: it counts as
+     * running, the way the server's frame counts it (`computeWatchState` in glance-service.ts) and
+     * iOS `watchState()` does, so the Watch moves on to the next session, or to working when that
+     * was the only one. The widgets keep snoozed items in their list, last.
      */
     fun watchState(): GlanceWatchState {
+        val waiting = needsYou.filterNot { it.isSnoozed(asOf) }.sortedBy { it.since }
+        val running = this.running + needsYou.filter { it.isSnoozed(asOf) }
         if (hostsTotal > 0 && hostsOnline == 0) {
             return GlanceWatchState(
                 phase = WatchPhase.OFFLINE,
-                head = needsYou.firstOrNull(),
-                needsYouCount = needsYou.size,
+                head = waiting.firstOrNull(),
+                needsYouCount = waiting.size,
                 runningCount = running.size,
                 offlineSince = asOf,
                 asOf = asOf,
             )
         }
-        val sorted = needsYou.sortedWith(GlanceWatchState.needsYouOrder(asOf))
-        val head = sorted.firstOrNull()
+        val head = waiting.firstOrNull()
         if (head != null) {
             return GlanceWatchState(
                 phase = WatchPhase.WAITING,
                 head = head,
-                others = sorted.drop(1).take(GlanceWatchState.OTHERS_MAX),
-                needsYouCount = sorted.size,
+                others = waiting.drop(1).take(GlanceWatchState.OTHERS_MAX),
+                needsYouCount = waiting.size,
                 runningCount = running.size,
                 waitingCount = counts?.waiting,
                 recurringCount = counts?.recurring,

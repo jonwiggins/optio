@@ -133,6 +133,28 @@ class FakeStreamSocket : StreamSocket {
 
     fun size(cols: Int, rows: Int) = json("""{"type":"size","cols":$cols,"rows":$rows}""")
 
+    /** A `size` frame from a server that says whose the grid is. */
+    fun size(cols: Int, rows: Int, yours: Boolean) = json("""{"type":"size","cols":$cols,"rows":$rows,"yours":$yours}""")
+
+    /** A `view` frame the stream sent. */
+    data class View(val grid: TerminalGrid, val visible: Boolean, val idleMs: Long, val open: Boolean?)
+
+    /** The view frames sent. */
+    fun views(): List<View> =
+        sent.mapNotNull { text ->
+            val o = Json.parseToJsonElement(text).jsonObject
+            if (o["type"].toString().trim('"') != "view") return@mapNotNull null
+            View(
+                TerminalGrid(o["cols"].toString().toInt(), o["rows"].toString().toInt()),
+                visible = o["visible"].toString().toBoolean(),
+                idleMs = o["idleMs"].toString().toLong(),
+                open = o["open"]?.toString()?.toBoolean(),
+            )
+        }
+
+    /** Everything sent that reaches the PTY (resizes and input): no `view` reports. */
+    fun ptyFrames(): List<String> = sent.filterNot { it.contains("\"type\":\"view\"") }
+
     /** The resize frames sent, as grids. */
     fun resizes(): List<TerminalGrid> =
         sent.mapNotNull { text ->

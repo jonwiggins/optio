@@ -72,13 +72,15 @@ that writes your message plus Enter to the PTY — whenever one exists, live or
 finished; a plain shell falls back to the **Screen** (SwiftTerm). The toggle in
 the header switches between them (`Features/Live/Local/SessionView.swift`).
 
-One PTY, one grid: attaching from the phone never resizes the session. The
-Screen face renders the grid the daemon announces shrunk to fit ("Sized for
-another device"), and only an explicit interaction — focusing the terminal, a
-key from the extra-keys bar, or "Use this screen" — claims the grid for the
-phone (`TerminalSizing.swift`, `LocalTerminalHostView.swift`; ports of the web's
-`sizing.ts` / `stream-policy.ts`). SwiftTerm does not reflow, so the stream
-holds replayed bytes until the `size` frame lands.
+One PTY, one grid, sized for the screen in use (the server decides:
+`apps/api/src/services/local-grid.ts`). The Screen face coming on screen, with
+the app in front, fits the session to the phone, unless another screen showing
+it was used in the last minute (a laptop you're working at). Then it renders
+that grid shrunk to fit ("Sized for another device"), and focusing the
+terminal, a key from the extra-keys bar, or "Use this screen" takes the grid
+for the phone (`TerminalSizing.swift`, `LocalTerminalHostView.swift`; ports of
+the web's `sizing.ts` / `stream-policy.ts`). SwiftTerm does not reflow, so the
+stream holds replayed bytes until the `size` frame lands.
 
 ## Multiple servers
 

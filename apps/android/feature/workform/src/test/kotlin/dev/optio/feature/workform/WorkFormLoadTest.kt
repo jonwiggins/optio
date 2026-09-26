@@ -67,6 +67,29 @@ class WorkFormLoadTest {
     }
 
     @Test
+    fun localAutomationKeepsItsAgentOptionsSoASaveDoesNotClearThem() {
+        val agent = draftFromRow(
+            EditableKind.LOCAL_BLUEPRINT,
+            obj(
+                """{"name":"Alerts","hostId":"h1","dir":"/Users/dev/notes","commandTemplate":"Debug {{text}}","agent":"codex",
+                "sessionMode":"interactive","agentOptions":{"copilotModel":"gpt-5.6-sol","codexPermissionMode":"bypassPermissions"}}""",
+            ),
+            null,
+        )
+        assertEquals(
+            mapOf("copilotModel" to OptionValue.Str("gpt-5.6-sol"), "codexPermissionMode" to OptionValue.Str("bypassPermissions")),
+            agent.agentOptions,
+        )
+        // A shell automation has no agent to take them.
+        val shell = draftFromRow(
+            EditableKind.LOCAL_BLUEPRINT,
+            obj("""{"name":"Sync","hostId":"h1","dir":"/x","commandTemplate":"make","agent":null,"agentOptions":{"claudeModel":"opus"}}"""),
+            null,
+        )
+        assertEquals(emptyMap(), shell.agentOptions)
+    }
+
+    @Test
     fun localAutomationOnANewBranchWithAGitHubEvent() {
         val d = draftFromRow(
             EditableKind.LOCAL_BLUEPRINT,

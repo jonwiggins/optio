@@ -83,4 +83,23 @@ final class TerminalSizingTests: XCTestCase {
         XCTAssertEqual(S.onGridAnnounced(.unclaimed, laptop, natural: laptop, sent: [], recorded: true), .passive(laptop))
         XCTAssertEqual(S.onGridAnnounced(.owner, laptop, natural: laptop, sent: [laptop], recorded: true), .passive(laptop))
     }
+
+    // MARK: onGridAssigned (the server says whose the grid is)
+
+    func testFitsOwnScreenWhenTheGridIsOurs() {
+        // Even mid-flight, before the PTY has caught up with our size.
+        XCTAssertEqual(S.onGridAssigned(phone, yours: true, natural: laptop), .owner)
+    }
+
+    func testRendersAnotherScreensGridScaled() {
+        XCTAssertEqual(S.onGridAssigned(phone, yours: false, natural: laptop), .passive(phone))
+    }
+
+    func testShowsNoStripWhenAnotherScreensGridIsOurOwnFit() {
+        XCTAssertEqual(S.onGridAssigned(laptop, yours: false, natural: laptop), .unclaimed)
+    }
+
+    func testTreatsAnUnmeasuredScreenAsNotFitting() {
+        XCTAssertEqual(S.onGridAssigned(laptop, yours: false, natural: nil), .passive(laptop))
+    }
 }

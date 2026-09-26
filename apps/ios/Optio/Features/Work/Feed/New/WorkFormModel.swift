@@ -327,7 +327,7 @@ enum WorkForm {
         .webhook: [],
         .ticket: ["ticketSource", "ticketExternalId", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"],
         .github: ["event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "headBranch", "baseBranch", "commentBody", "commentUrl"],
-        .slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink"],
+        .slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"],
         .linear: ["event", "identifier", "title", "description", "url", "labels", "teamKey", "assignee", "priority", "state", "commentBody", "commentUrl", "actor", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels"],
     ]
 

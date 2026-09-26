@@ -29,6 +29,59 @@ enum GlanceStyle {
     static func time(_ date: Date) -> String { clock.string(from: date) }
 }
 
+extension View {
+    /// Text on the glanceable surfaces scales with the user's setting up to xLarge and
+    /// stops there. A widget or Live Activity has a fixed size (the lock screen clips a
+    /// Live Activity past 160 pt), so larger text would only turn values into ellipses.
+    /// Every layout is checked at xLarge on the smallest phone (WidgetSnapshots).
+    func glanceTypeClamp() -> some View {
+        dynamicTypeSize(...DynamicTypeSize.xLarge)
+    }
+}
+
+/// A live "since" clock (`Text(date, style: .timer)`, or a count-up interval) sized to
+/// the widest value it can show: an invisible template ("00:00", "0:00:00", …) sets the
+/// width at the current font and text size, and the timer draws over it,
+/// right-aligned. It never wraps and never takes the row's whole width, which is what
+/// a bare timer text does in a widget.
+struct FitTimer: View {
+    let since: Date
+    /// Count up as a stopwatch (working) rather than the `.timer` style (waiting).
+    var countUp = false
+    var font: Font = .subheadline.weight(.semibold)
+    var style: AnyShapeStyle = AnyShapeStyle(.secondary)
+    var now: Date = .now
+
+    /// The widest string the clock shows over the next half hour. Minutes ("59:59")
+    /// under an hour, then H:MM:SS with as many hour digits as it needs.
+    static func template(elapsed: TimeInterval) -> String {
+        let soon = elapsed + 30 * 60
+        if soon < 3600 { return "00:00" }
+        let hourDigits = String(max(1, Int(soon / 3600))).count
+        return String(repeating: "0", count: hourDigits) + ":00:00"
+    }
+
+    var body: some View {
+        Text(Self.template(elapsed: max(0, now.timeIntervalSince(since))))
+            .font(font.monospacedDigit())
+            .hidden()
+            .overlay(alignment: .trailing) {
+                Group {
+                    if countUp {
+                        Text(timerInterval: since...since.addingTimeInterval(8 * 3600), countsDown: false)
+                    } else {
+                        Text(since, style: .timer)
+                    }
+                }
+                .font(font.monospacedDigit())
+                .foregroundStyle(style)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+            }
+            .fixedSize()
+    }
+}
+
 // MARK: - Row vocabulary
 
 /// One symbol and one word for a row's trailing edge. Nil means "just working": the
@@ -131,7 +184,9 @@ struct WhoGlyph: View {
 
 // MARK: - Session vocabulary (When · Where · Who · Then)
 
-/// One attribute chip: `[icon] label`, the same icons as the app's `WorkRowView`.
+/// One attribute chip: `[icon] label`, the same icons as the app's `WorkRowView`. The
+/// label is a standard value and always renders whole; rows choose which chips fit
+/// (`SessionChipsLine`) rather than shortening one.
 struct SessionChip: View {
     let systemImage: String
     let label: String
@@ -145,42 +200,55 @@ struct SessionChip: View {
                 .font(mono ? font.monospaced() : font)
                 .foregroundStyle(Color.secondary)
                 .lineLimit(1)
-                .truncationMode(mono ? .head : .tail)
+        }
+        .fixedSize()
+    }
+}
+
+/// A session's chips on one line, fitted whole: the most that fit, in order of use —
+/// Where, Who, When, Then — with Where as long as the room allows (full path, then
+/// `host · leaf`, then the leaf). Nothing is cut mid-word.
+struct SessionChipsLine: View {
+    let item: WatchItem
+    var font: Font = .caption2
+    var spacing: CGFloat = 10
+
+    var body: some View {
+        let place = item.whereValue
+        let wheres = GlanceCopy.whereOptions(place.detail, target: place.target.rawValue)
+        let whereChip = { (label: String) in SessionChip(systemImage: place.systemImage, label: label, mono: true, font: font) }
+        let who = SessionChip(systemImage: item.whoSystemImage, label: GlanceCopy.whoLabel(item.whoValue), font: font)
+        let when = SessionChip(systemImage: item.whenSystemImage, label: item.whenLabel, font: font)
+        let then = SessionChip(systemImage: item.thenValue.systemImage, label: item.thenValue.label, font: font)
+        let short = wheres.count > 1 ? wheres[1] : wheres[0]
+        let leaf = wheres[wheres.count - 1]
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: spacing) { whereChip(wheres[0]); who; when; then }
+            HStack(spacing: spacing) { whereChip(short); who; when; then }
+            HStack(spacing: spacing) { whereChip(short); who; when }
+            HStack(spacing: spacing) { whereChip(short); who }
+            HStack(spacing: spacing) { whereChip(leaf); who; when }
+            HStack(spacing: spacing) { whereChip(leaf); who }
+            HStack(spacing: spacing) { whereChip(leaf) }
         }
     }
 }
 
-/// The four chips of a session: one line (`short` trims Where to `host · leaf` so four
-/// chips fit a widget row) or, with `grid`, two columns of two like the app's session
-/// row — the Live Activity uses that so Where never has to be squeezed.
-struct SessionChips: View {
+/// The status of a row as one symbol and one word, whole: `✋ Allow?`, `💬 Reply`,
+/// `PR`, or the session row's own label.
+struct StatusBadge: View {
     let item: WatchItem
-    var short = true
-    var grid = false
-    var font: Font = .caption2
-    var spacing: CGFloat = 8
+    var font: Font = .caption2.weight(.semibold)
 
     var body: some View {
-        let place = item.whereValue
-        let when = SessionChip(systemImage: item.whenSystemImage, label: item.whenLabel, font: font)
-        let whereChip = SessionChip(systemImage: place.systemImage, label: GlanceCopy.whereLabel(place.detail, target: place.target.rawValue, short: short), mono: true, font: font)
-        let who = SessionChip(systemImage: item.whoSystemImage, label: GlanceCopy.whoLabel(item.whoValue), font: font)
-        let then = SessionChip(systemImage: item.thenValue.systemImage, label: item.thenValue.label, font: font)
-        if grid {
-            Grid(alignment: .leading, horizontalSpacing: spacing, verticalSpacing: 2) {
-                GridRow { when; whereChip }
-                GridRow { who; then }
-            }
-            .lineLimit(1)
-        } else {
-            HStack(spacing: spacing) {
-                when.fixedSize()
-                whereChip.layoutPriority(-1)
-                who.fixedSize()
-                then.fixedSize()
-            }
-            .lineLimit(1)
+        HStack(spacing: 3) {
+            if let symbol = item.statusSymbol { Image(systemName: symbol) }
+            Text(item.statusWord)
         }
+        .font(font)
+        .foregroundStyle(item.statusColor)
+        .lineLimit(1)
+        .fixedSize()
     }
 }
 
@@ -192,9 +260,10 @@ extension WatchItem {
     var statusColor: Color { RowBadge.of(self)?.color ?? StatusKind.forState(state).color }
 }
 
-/// A session as a widget row. One line — `● name  [where]  status 4m` — or two, with
-/// the four chips underneath (`expanded`). The row is a deep link; the moon is
-/// **Later** (App Intent, no app launch) on needs-you rows.
+/// A session as a widget row: `● name  [server]  ✋ Allow?  4m  ☾`, and with `expanded`
+/// the chips underneath. The name is the only text that may shorten; the status word
+/// and the wait always render whole. The row is a deep link; the moon is **Later**
+/// (App Intent) on needs-you rows.
 struct SessionGlanceRow: View {
     let item: WatchItem
     let now: Date
@@ -213,26 +282,16 @@ struct SessionGlanceRow: View {
                             .foregroundStyle(Color.primary)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .layoutPriority(1)
                         if showsServer, let tag = ServerTag(item: item) { tag.dot() }
-                        if !expanded {
-                            let place = item.whereValue
-                            SessionChip(systemImage: place.systemImage, label: GlanceCopy.whereLabel(place.detail, target: place.target.rawValue, short: true), mono: true)
-                                .layoutPriority(0)
-                        }
                         Spacer(minLength: 4)
-                        HStack(spacing: 3) {
-                            if let symbol = item.statusSymbol { Image(systemName: symbol) }
-                            Text(item.statusWord)
-                        }
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(item.statusColor)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
+                        StatusBadge(item: item)
+                            .layoutPriority(1)
                         Text(GlancePolicy.waitText(since: item.since, now: now))
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(Color(.tertiaryLabel))
-                            .frame(minWidth: 22, alignment: .trailing)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .layoutPriority(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -241,7 +300,7 @@ struct SessionGlanceRow: View {
                         Image(systemName: "moon.zzz")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.tertiary)
-                            .frame(width: 22, height: 18)
+                            .frame(width: 20, height: 18)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Later")
@@ -249,7 +308,7 @@ struct SessionGlanceRow: View {
             }
             if expanded {
                 Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
-                    SessionChips(item: item).padding(.leading, 13)
+                    SessionChipsLine(item: item).padding(.leading, 13)
                 }
             }
         }
@@ -267,20 +326,25 @@ struct TileStrip: View {
             ForEach(tiles, id: \.id) { tile in
                 Link(destination: DeepLink.work(view: tile.view).url) {
                     VStack(alignment: .leading, spacing: 0) {
+                        // Fixed sizes: five tiles share the widget's width whatever the
+                        // text size, and a count or label must never shorten.
                         Text("\(tile.count)")
-                            .font(.system(compact ? .callout : .title3, design: .rounded).weight(.semibold))
+                            .font(.system(size: compact ? 16 : 19, weight: .semibold, design: .rounded))
                             .foregroundStyle(color(tile))
                             .contentTransition(.numericText())
                             .monospacedDigit()
+                            .lineLimit(1)
+                        // "Recurring" is the widest label; on a 4.7" phone's medium
+                        // widget it may need to shrink a hair rather than shorten.
                         Text(tile.label)
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(Color.secondary)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .minimumScaleFactor(0.85)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, compact ? 3 : 4)
                     .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
@@ -293,20 +357,6 @@ struct TileStrip: View {
         case .running: return tile.count > 0 ? GlanceStyle.working : .secondary
         default: return tile.count > 0 ? .primary : .secondary
         }
-    }
-}
-
-/// Directory basename / branch / slug: SF Mono, semibold, head-truncated so the leaf survives.
-struct MonoPath: View {
-    let text: String
-    var weight: Font.Weight = .semibold
-    var size: Font.TextStyle = .subheadline
-
-    var body: some View {
-        Text(text)
-            .font(.system(size, design: .monospaced).weight(weight))
-            .lineLimit(1)
-            .truncationMode(.head)
     }
 }
 

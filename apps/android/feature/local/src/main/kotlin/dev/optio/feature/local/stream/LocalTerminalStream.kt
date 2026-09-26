@@ -30,13 +30,20 @@ import kotlinx.serialization.json.put
  *
  * - Server → client: binary frames are raw terminal bytes (the scrollback replay, then live); JSON
  *   frames are control: `status` / `size` / `exit` / `error`.
- * - Client → server: JSON only, `{type:"input", data}` and `{type:"resize", cols, rows}`.
+ * - Client → server: JSON only, `{type:"input", data}`, `{type:"resize", cols, rows}` and
+ *   `{type:"view", cols, rows, visible, idleMs, open?}`.
  *
- * One PTY, one grid. Attaching never resizes it; only an explicit interaction (a tap or focus on the
- * terminal, a key-bar key, "Use this screen": [claim]) takes the grid for this phone. Until then the
- * sink renders the daemon's announced grid shrunk to fit ([State.foreignGrid], "Sized for another
- * device"). Each connection's replay is held until its `size` frame lands (or [sizeHold] passes), so
- * it paints at the grid it was drawn for: a TUI's absolute cursor moves can't be reflowed later.
+ * One PTY, one grid, and the server gives it to the screen in use
+ * (`apps/api/src/services/local-grid.ts`). This phone reports the grid that fits it, whether the
+ * Screen face is showing ([setShowing]), and how long since it was used ([viewFrame]). A stream
+ * that opens with the Screen showing, or the Screen coming on, asks for the grid (`open`), granted
+ * unless another screen showing the session was used in the last minute. An explicit interaction
+ * (a tap or focus on the terminal, a key-bar key, "Use this screen": [claim]) takes it outright. A
+ * phone that doesn't hold the grid renders it shrunk to fit ([State.foreignGrid], "Sized for another
+ * device"). Servers before `yours` leave the phone inferring ownership from the echoes of its own
+ * resizes, as before. Each connection's replay is held until its `size` frame lands (or [sizeHold]
+ * passes), so it paints at the grid it was drawn for: a TUI's absolute cursor moves can't be
+ * reflowed later.
  *
  * Runs on the main thread ([scope] = the ViewModel's scope). Wire the terminal's callbacks to
  * [sendInput], [onInteraction], [onGridSizeChanged] and [onNaturalGridChanged]. A stream is spent
@@ -52,6 +59,7 @@ class LocalTerminalStream(
     private val reconnectDelay: Duration = RECONNECT_DELAY,
     private val sizeHold: Duration = SIZE_HOLD,
     owned: List<TerminalGrid> = emptyList(),
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     enum class ConnState(val label: String) {
         CONNECTING("connecting…"),
@@ -129,6 +137,25 @@ class LocalTerminalStream(
      * the PTY is still at one of them. Meanwhile we act as the owner but send no resize.
      */
     private var reclaiming: List<TerminalGrid> = emptyList()
+
+    /** The server says whose the grid is (`size` frames carry `yours`). */
+    private var arbitrated = false
+
+    /** Whether the last announced grid was ours; null when the server didn't say. */
+    private var announcedYours: Boolean? = null
+
+    /** The Screen face is showing ([setShowing]). */
+    private var showing = false
+
+    /** When this phone last used the terminal (ms); the stream opening counts. */
+    private var lastUsedAt = clock()
+
+    /** The grid in the last `view` sent on this connection. */
+    private var lastViewGrid: TerminalGrid? = null
+
+    /** A `view` held until the Screen has laid out; true when it asks for the grid. */
+    private var heldOpen: Boolean? = null
+    private var everConnected = false
 
     init {
         // The screen came back (rotation, the app back from the background) and this phone held the
@@ -210,9 +237,18 @@ class LocalTerminalStream(
         when (frame) {
             WsFrame.Opened -> {
                 _state.update { it.copy(conn = ConnState.CONNECTED) }
-                // Attaching never resizes the PTY. If we already own it (a reconnect after a blip),
-                // re-assert our grid; otherwise (or while reclaiming) wait for `size`.
-                if (mode == TerminalSizing.Mode.Owner && reclaiming.isEmpty()) sendResize(sink.grid)
+                lastViewGrid = null
+                heldOpen = null
+                val first = !everConnected
+                everConnected = true
+                val wasOurs = mode == TerminalSizing.Mode.Owner
+                // Opening the session asks for the grid. A reconnect asks only when the grid was ours
+                // or we're in use: a blip must not hand it to whichever screen reconnects first.
+                sendView(open = first || wasOurs || clock() - lastUsedAt < TerminalSizing.IN_USE_MS)
+                // A server that doesn't say whose the grid is never sizes it for us. If we already
+                // own it (a reconnect after a blip), re-assert our grid; otherwise (or while
+                // reclaiming) wait for `size`.
+                if (!arbitrated && wasOurs && reclaiming.isEmpty()) sendResize(sink.grid)
             }
             is WsFrame.Binary -> onBytes(frame.bytes)
             // Non-JSON text is unexpected on this stream; render it so nothing is lost.
@@ -258,7 +294,7 @@ class LocalTerminalStream(
             }
             is LocalStreamServerMessage.Size -> {
                 val grid = TerminalGrid(message.cols.toInt(), message.rows.toInt())
-                if (grid.cols > 0 && grid.rows > 0) gridAnnounced(grid)
+                if (grid.cols > 0 && grid.rows > 0) gridAnnounced(grid, message.yours)
                 // Everything before this frame was the replay: don't answer its queries.
                 releaseHold(suppressReplies = true)
             }
@@ -368,8 +404,22 @@ class LocalTerminalStream(
 
     // region Grid ownership
 
-    private fun gridAnnounced(grid: TerminalGrid) {
+    private fun gridAnnounced(
+        grid: TerminalGrid,
+        yours: Boolean?,
+    ) {
         announced = grid
+        announcedYours = yours
+        if (yours != null && !terminalDead) {
+            // The server says whose it is: no inferring from echoes, no reclaiming.
+            arbitrated = true
+            reclaiming = emptyList()
+            sent = emptyList()
+            val next = TerminalSizing.onGridAssigned(grid, yours, sink.naturalGrid)
+            ownedEcho = if (next == TerminalSizing.Mode.Owner) grid else null
+            setMode(next)
+            return
+        }
         val natural = sink.naturalGrid ?: TerminalGrid(0, 0)
         if (reclaiming.isNotEmpty()) {
             val stillOurs = !terminalDead && grid in reclaiming
@@ -412,6 +462,7 @@ class LocalTerminalStream(
      */
     fun claim() {
         if (terminalDead || disposed) return
+        lastUsedAt = clock()
         reclaiming = emptyList()
         val before = sent.size
         setMode(TerminalSizing.Mode.Owner)
@@ -422,12 +473,29 @@ class LocalTerminalStream(
 
     /** The terminal saw an explicit interaction (tap, focus, a key): claim first, so the program lays out for us. */
     fun onInteraction() {
+        lastUsedAt = clock()
         if (mode != TerminalSizing.Mode.Owner) claim()
     }
 
-    /** The terminal's own grid changed (rotation, keyboard, our claim). Only the owner tells the PTY. */
+    /**
+     * The terminal's own grid changed (rotation, keyboard, our claim). Only the owner tells the PTY,
+     * and only a server that doesn't decide: otherwise our fit goes out as a `view`
+     * ([onNaturalGridChanged]) and the server resizes the PTY while the grid is ours.
+     */
     fun onGridSizeChanged(grid: TerminalGrid) {
+        if (arbitrated) return
         if (mode == TerminalSizing.Mode.Owner && reclaiming.isEmpty()) sendResize(grid)
+    }
+
+    /**
+     * The Screen face came on or went away. Coming on is arriving: it asks for the grid unless
+     * another screen is in use.
+     */
+    fun setShowing(on: Boolean) {
+        if (on == showing) return
+        showing = on
+        if (on) lastUsedAt = clock()
+        sendView(open = on)
     }
 
     /**
@@ -438,8 +506,19 @@ class LocalTerminalStream(
      * the fit again.
      */
     fun onNaturalGridChanged() {
+        if (arbitrated || heldOpen != null) reportGrid()
         if (mode == TerminalSizing.Mode.Owner) return
-        announced?.let(::gridAnnounced)
+        announced?.let { gridAnnounced(it, announcedYours) }
+    }
+
+    /** Our fit may have changed: send the `view` waiting on it, or tell the server the new one. */
+    private fun reportGrid() {
+        heldOpen?.let {
+            sendView(open = it)
+            return
+        }
+        val natural = sink.naturalGrid ?: return
+        if (lastViewGrid != null && natural != lastViewGrid) sendView(open = false)
     }
 
     // endregion
@@ -453,6 +532,20 @@ class LocalTerminalStream(
     }
 
     fun sendInput(bytes: ByteArray): Boolean = sendInput(String(bytes, Charsets.UTF_8))
+
+    /** Tell the server how this phone sees the terminal; [open] asks for the grid. */
+    private fun sendView(open: Boolean) {
+        if (disposed || terminalDead || !_state.value.connected) return
+        // Asking for the grid needs our real fit; a state report can reuse the last one.
+        val grid = sink.naturalGrid ?: (if (open) null else lastViewGrid)
+        if (grid == null || grid.cols <= 0 || grid.rows <= 0) {
+            heldOpen = (heldOpen ?: false) || open
+            return
+        }
+        heldOpen = null
+        lastViewGrid = grid
+        socket?.send(viewFrame(grid, visible = showing, idleMs = maxOf(0L, clock() - lastUsedAt), open = open && showing))
+    }
 
     private fun sendResize(grid: TerminalGrid) {
         if (grid.cols <= 0 || grid.rows <= 0) return
@@ -475,6 +568,22 @@ class LocalTerminalStream(
             buildJsonObject {
                 put("type", "input")
                 put("data", text)
+            }.toString()
+
+        /** `{"type":"view",…}`: how this phone sees the terminal; `open` only when it asks for the grid. */
+        fun viewFrame(
+            grid: TerminalGrid,
+            visible: Boolean,
+            idleMs: Long,
+            open: Boolean,
+        ): String =
+            buildJsonObject {
+                put("type", "view")
+                put("cols", grid.cols)
+                put("rows", grid.rows)
+                put("visible", visible)
+                put("idleMs", idleMs)
+                if (open) put("open", true)
             }.toString()
 
         /** `{"type":"resize","cols":…,"rows":…}` with integer dimensions (the server checks `Number.isInteger`). */

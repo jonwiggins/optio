@@ -82,7 +82,11 @@ export interface WatchState {
   phase: WatchPhase;
   /** Oldest item needing you (when `waiting`) or most recent running item (when `working`). */
   head?: WatchItem | null;
-  /** Up to two further items needing you; the island only shows `head`. */
+  /**
+   * Up to two further rows from `head`'s list, listed under it on the Watch: the next
+   * items needing you (oldest first), or with none waiting, the next running items
+   * (newest first).
+   */
   others: WatchItem[];
   /** Total items needing you, including `head` and beyond `others`. */
   needsYouCount: number;
@@ -120,7 +124,7 @@ export function appleSeconds(date: Date | string | number): number {
 /** Longest `preview` the Watch carries; keeps the payload far under APNs' 4 KB. */
 export const WATCH_PREVIEW_MAX_CHARS = 120;
 
-/** How many needs-you items ride along beside `head`. */
+/** How many further rows (needing you, else running) ride along beside `head`. */
 export const WATCH_OTHERS_MAX = 2;
 
 export interface BuildWatchStateInput {
@@ -178,12 +182,14 @@ export function buildWatchState(input: BuildWatchStateInput): WatchState {
   else if (running.length > 0) phase = "working";
   else phase = "done";
 
-  const head = needsYou[0] ?? running[0] ?? null;
+  // The head and the rows after it come from one list: needing you while
+  // anything does, else running.
+  const rows = needsYou.length > 0 ? needsYou : running;
 
   return {
     phase,
-    head,
-    others: needsYou.slice(1, 1 + WATCH_OTHERS_MAX),
+    head: rows[0] ?? null,
+    others: rows.slice(1, 1 + WATCH_OTHERS_MAX),
     needsYouCount: needsYou.length,
     runningCount: running.length,
     waitingCount: input.counts?.waiting ?? null,

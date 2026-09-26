@@ -33,24 +33,27 @@ public struct NeedsYouSnapshot: Codable, Hashable, Sendable {
         counts = SessionTileCounts.sum(counts, other.counts)
     }
 
-    /// Derives the Watch content state per the product brief: oldest needs-you item
-    /// first, up to two more listed, counts for the rest.
+    /// Derives the Watch content state per the product brief: the oldest needs-you item
+    /// first and up to two more, or with none waiting the newest running item and up to
+    /// two more (the Watch lists them), counts for the rest.
+    ///
+    /// An item under a **Later** window doesn't need you until the window closes: it
+    /// counts as running, the way the server's frame counts it (`computeWatchState` in
+    /// glance-service.ts), so the Watch moves on to the next session, or to `working`
+    /// when that was the only one. The widgets keep snoozed items in their list, last
+    /// (`GlanceTimelineProvider.ordered`); only the Watch drops them.
     public func watchState() -> WatchState {
-        if hostsTotal > 0, hostsOnline == 0 {
-            return WatchState(phase: .offline, head: needsYou.first, needsYouCount: needsYou.count, runningCount: running.count, offlineSince: asOf, asOf: asOf)
-        }
-        // Oldest first; anything under a "Later" window drops behind everything that isn't.
         let now = asOf
-        let sorted = needsYou.sorted {
-            let (a, b) = ($0.isSnoozed(at: now), $1.isSnoozed(at: now))
-            return a == b ? $0.since < $1.since : !a
+        let waiting = needsYou.filter { !$0.isSnoozed(at: now) }.sorted { $0.since < $1.since }
+        let running = (self.running + needsYou.filter { $0.isSnoozed(at: now) }).sorted { $0.since > $1.since }
+        if hostsTotal > 0, hostsOnline == 0 {
+            return WatchState(phase: .offline, head: waiting.first, needsYouCount: waiting.count, runningCount: running.count, offlineSince: asOf, asOf: asOf)
         }
-        if let head = sorted.first {
-            return WatchState(phase: .waiting, head: head, others: Array(sorted.dropFirst().prefix(2)), needsYouCount: sorted.count, runningCount: running.count,
+        if let head = waiting.first {
+            return WatchState(phase: .waiting, head: head, others: Array(waiting.dropFirst().prefix(2)), needsYouCount: waiting.count, runningCount: running.count,
                               waitingCount: counts?.waiting, recurringCount: counts?.recurring, agentCount: counts?.agents, asOf: asOf)
         }
-        let latest = running.sorted { $0.since > $1.since }.first
-        return WatchState(phase: .working, head: latest, needsYouCount: 0, runningCount: running.count,
+        return WatchState(phase: .working, head: running.first, others: Array(running.dropFirst().prefix(2)), needsYouCount: 0, runningCount: running.count,
                           waitingCount: counts?.waiting, recurringCount: counts?.recurring, agentCount: counts?.agents, asOf: asOf)
     }
 

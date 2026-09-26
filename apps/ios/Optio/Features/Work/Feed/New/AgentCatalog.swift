@@ -40,10 +40,14 @@ struct ProviderCatalog: Decodable, Hashable, Sendable {
         let helpText: String?
         /// Where the field applies: "pod" and/or "local" (a run on a machine); nil = pods only.
         let runsOn: [String]?
+        /// On a machine, the agent spec field the value becomes: "effort" or "permissionMode".
+        let localParam: String?
         var id: String { key }
 
         /// The field reaches a run in an Optio pod (a machine-only one, like Claude's permissions, doesn't).
         var appliesToPods: Bool { runsOn?.contains("pod") ?? true }
+        /// The daemon hands the field to the agent CLI on a machine (effort, the permission mode).
+        var appliesToLocal: Bool { runsOn?.contains("local") ?? false }
 
         var defaultString: String { `default`?.stringValue ?? "" }
         var defaultBool: Bool { `default`?.boolValue ?? false }

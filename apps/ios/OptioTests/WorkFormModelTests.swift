@@ -250,6 +250,43 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertEqual(l["localSessionMode"], .string("interactive"))
     }
 
+    /// `localAgentParams` in `@optio/shared`: a run on a machine takes the model,
+    /// the effort and the permission mode — Claude Code's `--permission-mode`,
+    /// or `bypassPermissions` for Codex's `--yolo`.
+    func testLocalAgentParamsReadTheCatalogsLocalFields() throws {
+        let json = #"""
+        {"provider":"openai","label":"OpenAI Codex","modelField":"copilotModel","models":[],"options":[
+          {"key":"copilotEffort","label":"Reasoning effort","kind":"select","runsOn":["pod","local"],"localParam":"effort"},
+          {"key":"codexPermissionMode","label":"Permissions","kind":"select","runsOn":["local"],"localParam":"permissionMode",
+           "choices":[{"value":"bypassPermissions","label":"Skip all checks"}]},
+          {"key":"podOnly","label":"Pod only","kind":"select"}
+        ]}
+        """#
+        let catalog = try JSONDecoder().decode(ProviderCatalog.self, from: Data(json.utf8))
+        XCTAssertEqual(catalog.options.map(\.appliesToLocal), [true, true, false])
+        XCTAssertEqual(catalog.options.map(\.appliesToPods), [true, false, true])
+
+        let yolo = with(empty) {
+            $0.runtime = "codex"
+            $0.agentOptions = ["copilotModel": .string("gpt-5.6-sol"), "copilotEffort": .string("high"),
+                               "codexPermissionMode": .string("bypassPermissions"), "podOnly": .string("x")]
+        }
+        let p = F.localAgentParams(yolo, catalog: catalog)
+        XCTAssertEqual(p.model, "gpt-5.6-sol")
+        XCTAssertEqual(p.effort, "high")
+        XCTAssertEqual(p.permissionMode, .bypassPermissions)
+
+        // Blank ("Default") and unknown modes leave the machine's own config.
+        let blank = with(yolo) { $0.agentOptions = ["codexPermissionMode": .string(""), "copilotEffort": .string("")] }
+        XCTAssertNil(F.localAgentParams(blank, catalog: catalog).permissionMode)
+        XCTAssertNil(F.localAgentParams(blank, catalog: catalog).effort)
+        let odd = with(yolo) { $0.agentOptions = ["codexPermissionMode": .string("yolo")] }
+        XCTAssertNil(F.localAgentParams(odd, catalog: catalog).permissionMode)
+        // No catalog (it didn't load): just the model.
+        XCTAssertNil(F.localAgentParams(yolo, catalog: nil).permissionMode)
+        XCTAssertEqual(F.localAgentParams(yolo, catalog: nil).model, "gpt-5.6-sol")
+    }
+
     func testSubmitLabel() {
         XCTAssertEqual(F.submitLabel(empty), "Start work (opens a PR)")
         XCTAssertEqual(F.submitLabel(with(empty) { $0.withRepo = false }), "Start work")

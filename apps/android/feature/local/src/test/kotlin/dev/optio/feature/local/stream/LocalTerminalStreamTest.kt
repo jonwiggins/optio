@@ -25,7 +25,11 @@ import org.junit.Test
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LocalTerminalStreamTest {
-    private class Harness(scope: TestScope, natural: TerminalGrid? = TerminalGrid(50, 20)) {
+    private class Harness(
+        scope: TestScope,
+        natural: TerminalGrid? = TerminalGrid(50, 20),
+        clock: () -> Long = { 0L },
+    ) {
         val sink = FakeSink(natural)
         val sockets = mutableListOf<FakeStreamSocket>()
         val statuses = mutableListOf<Pair<LocalTerminalState, LocalAttentionState>>()
@@ -36,6 +40,7 @@ class LocalTerminalStreamTest {
                 scope = scope.backgroundScope,
                 sink = sink,
                 openSocket = { FakeStreamSocket().also { sockets += it } },
+                clock = clock,
             ).also { s ->
                 s.onStatus = { st, att -> statuses += st to att }
                 s.onExit = { exits += it }
@@ -165,7 +170,7 @@ class LocalTerminalStreamTest {
             h.stream.onInteraction()
             h.stream.sendInput("w")
             runCurrent()
-            val kinds = h.socket.sent.map { if (it.contains("\"resize\"")) "resize" else "input" }
+            val kinds = h.socket.ptyFrames().map { if (it.contains("\"resize\"")) "resize" else "input" }
             assertEquals(listOf("resize", "input", "input"), kinds)
         }
 
@@ -273,7 +278,7 @@ class LocalTerminalStreamTest {
             assertFalse(h.stream.sendInput("x"))
             runCurrent()
             assertEquals(TerminalSizing.Mode.Passive(TerminalGrid(132, 40)), h.state.mode)
-            assertEquals(emptyList(), h.socket.sent)
+            assertEquals(emptyList(), h.socket.ptyFrames())
         }
 
     /** The stream a screen that came back creates over the same sink, handed the old one's grids. */
@@ -656,7 +661,7 @@ class LocalTerminalStreamTest {
             assertTrue(h.stream.sendInput(byteArrayOf(0x1b, '['.code.toByte(), 'A'.code.toByte())))
             assertTrue(h.stream.sendInput(byteArrayOf(0x03)))
             assertEquals(listOf("echo \"hi\" ✓\r", "\u001b[A", "\u0003"), h.socket.inputs())
-            assertEquals("""{"type":"input","data":"\u001b[A"}""", h.socket.sent[1])
+            assertEquals("""{"type":"input","data":"\u001b[A"}""", h.socket.ptyFrames()[1])
         }
 
     @Test
@@ -677,6 +682,126 @@ class LocalTerminalStreamTest {
             h.socket.opened()
             runCurrent()
             assertEquals(listOf(TerminalGrid(50, 20)), h.socket.resizes())
+        }
+
+    // endregion
+
+    // region The server says whose the grid is
+
+    @Test
+    fun opensAskingForTheGridWhileTheScreenShows() =
+        runTest {
+            val h = Harness(this)
+            h.stream.setShowing(true)
+            h.stream.connect()
+            h.socket.opened()
+            runCurrent()
+            assertEquals(listOf(FakeStreamSocket.View(TerminalGrid(50, 20), visible = true, idleMs = 0, open = true)), h.socket.views())
+            assertEquals(emptyList(), h.socket.resizes(), "the server sizes the PTY, not us")
+        }
+
+    @Test
+    fun aScreenThatIsntShowingReportsWithoutAsking() =
+        runTest {
+            val h = Harness(this)
+            h.stream.connect() // the Transcript face is up
+            h.socket.opened()
+            runCurrent()
+            assertEquals(listOf(FakeStreamSocket.View(TerminalGrid(50, 20), visible = false, idleMs = 0, open = null)), h.socket.views())
+
+            h.stream.setShowing(true) // the user switches to the Screen
+            h.stream.setShowing(false)
+            assertEquals(listOf(null, true, null), h.socket.views().map { it.open })
+            assertEquals(listOf(false, true, false), h.socket.views().map { it.visible })
+        }
+
+    @Test
+    fun followsTheServerOnWhoseGridItIs() =
+        runTest {
+            val h = Harness(this)
+            h.stream.setShowing(true)
+            h.stream.connect()
+            h.socket.opened()
+            h.socket.status("running")
+            h.socket.size(160, 45, yours = true) // taken for us; the PTY hasn't caught up yet
+            runCurrent()
+            assertEquals(TerminalSizing.Mode.Owner, h.state.mode)
+
+            h.socket.size(48, 30, yours = false) // another screen took it
+            runCurrent()
+            assertEquals(TerminalSizing.Mode.Passive(TerminalGrid(48, 30)), h.state.mode)
+
+            h.socket.size(50, 20, yours = false) // someone else's, but it's our own fit: no strip
+            runCurrent()
+            assertEquals(TerminalSizing.Mode.Unclaimed, h.state.mode)
+        }
+
+    @Test
+    fun theOwnersNewFitGoesOutAsAViewNotAResize() =
+        runTest {
+            val h = Harness(this)
+            h.stream.setShowing(true)
+            h.stream.connect()
+            h.socket.opened()
+            h.socket.status("running")
+            h.socket.size(50, 20, yours = true)
+            runCurrent()
+            h.sink.natural = TerminalGrid(40, 30) // rotated
+            h.stream.onNaturalGridChanged()
+            runCurrent()
+            assertEquals(TerminalGrid(40, 30), h.socket.views().last().grid)
+            assertEquals(emptyList(), h.socket.resizes())
+        }
+
+    @Test
+    fun aClaimStillTakesTheGridOutright() =
+        runTest {
+            val h = Harness(this)
+            h.stream.connect()
+            h.socket.opened()
+            h.socket.status("running")
+            h.socket.size(160, 45, yours = false)
+            runCurrent()
+            h.stream.claim() // "Use this screen"
+            runCurrent()
+            assertEquals(listOf(TerminalGrid(50, 20)), h.socket.resizes())
+        }
+
+    @Test
+    fun theViewWaitsForTheScreenToLayOut() =
+        runTest {
+            val h = Harness(this, natural = null)
+            h.stream.setShowing(true)
+            h.stream.connect()
+            h.socket.opened()
+            runCurrent()
+            assertEquals(emptyList(), h.socket.views())
+            h.sink.natural = TerminalGrid(50, 20)
+            h.stream.onNaturalGridChanged()
+            runCurrent()
+            assertEquals(listOf(true), h.socket.views().map { it.open })
+        }
+
+    @Test
+    fun aReconnectAsksAgainOnlyWhenTheGridWasOursOrInUse() =
+        runTest {
+            var now = 0L
+            val h = Harness(this, clock = { now })
+            h.stream.setShowing(true)
+            h.stream.connect()
+            h.socket.opened()
+            h.socket.status("running")
+            h.socket.size(160, 45, yours = false) // watching the laptop
+            runCurrent()
+            now += TerminalSizing.IN_USE_MS + 1_000 // untouched since
+            h.socket.closed(1006) // a blip
+            advanceTimeBy(LocalTerminalStream.RECONNECT_DELAY.inWholeMilliseconds + 1)
+            runCurrent()
+            h.socket.opened()
+            runCurrent()
+            val back = h.socket.views().single()
+            assertNull(back.open, "a blip doesn't grab the grid for a phone nobody is using")
+            assertEquals(TerminalSizing.IN_USE_MS + 1_000, back.idleMs)
         }
 
     // endregion

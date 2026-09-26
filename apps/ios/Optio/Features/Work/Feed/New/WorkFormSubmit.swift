@@ -46,6 +46,26 @@ extension WorkForm {
         return v.isEmpty ? nil : v
     }
 
+    /// What a run on a machine passes its agent CLI (`localAgentParams` in
+    /// `@optio/shared`): the model, plus each option the catalog marks with a
+    /// `localParam` — the effort, and the permission mode (Claude Code's
+    /// `--permission-mode`, Codex's `--yolo`). Blanks are left out, so the
+    /// machine's own config applies.
+    static func localAgentParams(_ d: Draft, catalog: ProviderCatalog?) -> (model: String?, effort: String?, permissionMode: LocalAgentPermissionMode?) {
+        var effort: String?
+        var permissionMode: LocalAgentPermissionMode?
+        for field in catalog?.options ?? [] {
+            let v = d.agentOptions[field.key]?.stringValue?.trimmingCharacters(in: .whitespaces) ?? ""
+            guard !v.isEmpty else { continue }
+            switch field.localParam {
+            case "effort": effort = v
+            case "permissionMode": permissionMode = LocalAgentPermissionMode(rawValue: v).flatMap { $0 == .unknown ? nil : $0 }
+            default: break
+            }
+        }
+        return (pickedModel(d), effort, permissionMode)
+    }
+
     /// The run-location fields a `POST /api/tasks` body carries (`runLocationPayload`):
     /// a pod spells "none" as explicit nulls, exactly like the web.
     static func locationPayload(_ d: Draft) -> [String: AnyCodable] {
@@ -71,7 +91,9 @@ struct WorkFormSubmitter {
     private struct RunEnvelope: Decodable { let runId: String }
     private struct SessionEnvelope: Decodable { struct Row: Decodable { let id: String }; let session: Row }
 
-    func create(_ d: WorkForm.Draft, repoUrl: String, autoName: String) async throws -> WorkForm.Created {
+    /// `catalog` is the runtime's provider catalog, when it loaded: which options
+    /// a run on a machine hands its agent CLI.
+    func create(_ d: WorkForm.Draft, repoUrl: String, autoName: String, catalog: ProviderCatalog? = nil) async throws -> WorkForm.Created {
         typealias F = WorkForm
         let kind = F.deriveKind(d)
         let trimmedName = d.name.trimmingCharacters(in: .whitespaces)
@@ -154,7 +176,9 @@ struct WorkFormSubmitter {
                 agent: d.runtime == F.terminal ? nil : LocalAgentKind(rawValue: d.runtime),
                 clearAgent: d.runtime == F.terminal,
                 spawnMode: .auto,
-                sessionMode: d.then == .waitsForMe ? .interactive : .headless
+                sessionMode: d.then == .waitsForMe ? .interactive : .headless,
+                // Model, effort, permissions: what a run on a machine takes.
+                agentOptions: d.runtime == F.terminal ? nil : options
             ))
             if let trigger {
                 _ = try await api.createLocalBlueprintTrigger(blueprint.id, CreateLocalTriggerBody(type: trigger.type, config: trigger.config, enabled: true))
@@ -166,7 +190,14 @@ struct WorkFormSubmitter {
             if d.runtime == F.terminal {
                 spec = .shell
             } else {
-                spec = .agent(.init(agent: LocalAgentKind(rawValue: d.runtime) ?? .claudeCode, prompt: prompt.isEmpty ? nil : prompt, model: model))
+                let params = F.localAgentParams(d, catalog: catalog)
+                spec = .agent(.init(
+                    agent: LocalAgentKind(rawValue: d.runtime) ?? .claudeCode,
+                    prompt: prompt.isEmpty ? nil : prompt,
+                    model: params.model,
+                    effort: params.effort,
+                    permissionMode: params.permissionMode
+                ))
             }
             let terminal = try await api.createLocalTerminal(CreateLocalTerminalBody(hostId: d.location.localHostId, dir: d.location.localDir, title: name, spec: spec))
             return .init(kind: kind, destination: .localTerminal(terminal.id), toast: "\(name) opened")

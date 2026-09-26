@@ -80,6 +80,9 @@ describe("validateTriggerConfig — the same rules for every target", () => {
     ).toBeNull();
     expect(validateTriggerConfig("github", { events: ["pr_opened"] })).toBeNull();
     expect(validateTriggerConfig("slack", { channelId: "C0123ABCD" })).toBeNull();
+    expect(
+      validateTriggerConfig("slack", { channelId: "C0123ABCD", postedBy: "bots", bot: "Sentry" }),
+    ).toBeNull();
     expect(validateTriggerConfig("linear", { events: ["created"], teams: ["ENG"] })).toBeNull();
   });
 
@@ -94,6 +97,10 @@ describe("validateTriggerConfig — the same rules for every target", () => {
       /repos/,
     );
     expect(validateTriggerConfig("slack", { channelId: "general" })).toMatch(/channelId/);
+    expect(validateTriggerConfig("slack", { channelId: "C0123ABCD", postedBy: "robots" })).toMatch(
+      /postedBy/,
+    );
+    expect(validateTriggerConfig("slack", { channelId: "C0123ABCD", bot: 7 })).toMatch(/bot/);
     expect(validateTriggerConfig("linear", { events: ["assigned"] })).toMatch(/user/);
   });
 });

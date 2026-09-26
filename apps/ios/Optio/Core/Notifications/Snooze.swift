@@ -25,7 +25,11 @@ enum SnoozeStore {
     }
 
     /// Server first, local fallback. Never throws: "Later" must always succeed from a banner.
+    /// The Watch moves on at once, as it does for its own **Later** button.
     static func snooze(_ id: String, minutes: Int = defaultMinutes, api: APIClient?) async {
+        let now = Date()
+        let until = now.addingTimeInterval(Double(minutes * 60))
+        await WatchActions.redrawWatch(handling: id, at: now) { $0.snoozedUntil = until }
         if let api, api.isConfigured {
             struct Body: Encodable { let minutes: Int }
             if (try? await api.post("/api/local/terminals/\(id)/snooze", body: Body(minutes: minutes))) != nil {

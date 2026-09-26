@@ -2,14 +2,16 @@ import SwiftUI
 
 /// Port of `agent-options-picker.tsx` as Form rows: the model (a menu grouped
 /// by family, or a free-text field for OpenCode / OpenClaw and whenever the
-/// catalog didn't load) plus, when `modelOnly` is false, every provider
-/// option — selects as menu rows, booleans as toggles, texts as fields. Blank
-/// means the runtime's default.
+/// catalog didn't load) plus the provider's options — selects as menu rows,
+/// booleans as toggles, texts as fields. A pod run gets every option; a run on
+/// a machine (`local`) only what the daemon hands the agent CLI there: effort,
+/// and the permission mode (Claude Code's, or Codex's `--yolo`). Blank means
+/// the runtime's default.
 struct AgentOptionsPickerView: View {
     let provider: String
     let state: AgentCatalogStore.State?
     let values: WorkForm.AgentOptions
-    let modelOnly: Bool
+    let local: Bool
     let onChange: (String, WorkForm.OptionValue) -> Void
 
     private var catalog: ProviderCatalog? { if case .loaded(let c) = state { return c } else { return nil } }
@@ -30,9 +32,8 @@ struct AgentOptionsPickerView: View {
 
     var body: some View {
         modelRow
-        if !modelOnly, let catalog {
-            // Every field here goes to a pod run (a run on a machine is model-only).
-            let fields = catalog.options.filter(\.appliesToPods)
+        if let catalog {
+            let fields = catalog.options.filter { local ? $0.appliesToLocal : $0.appliesToPods }
             ForEach(fields.filter { $0.kind == "select" }) { field in selectRow(field) }
             ForEach(fields.filter { $0.kind == "boolean" }) { field in
                 Toggle(isOn: Binding(get: { values[field.key]?.boolValue ?? field.defaultBool }, set: { onChange(field.key, .bool($0)) })) {
@@ -81,9 +82,15 @@ struct AgentOptionsPickerView: View {
     }
 
     private func selectRow(_ field: ProviderCatalog.Option) -> some View {
-        let current = values[field.key]?.stringValue ?? field.defaultString
+        // On a machine a field pods share (effort) has no default of its own:
+        // unset leaves the machine's config, so the menu offers "Default".
+        let fieldDefault = local && field.appliesToPods ? "" : field.defaultString
+        let current = values[field.key]?.stringValue ?? fieldDefault
         let choices = field.choices ?? []
         return MenuRow(label: field.label, value: choices.first { $0.value == current }?.label ?? (current.isEmpty ? "Default" : current)) {
+            if fieldDefault.isEmpty {
+                MenuChoice(title: "Default", selected: current.isEmpty) { onChange(field.key, .string("")) }
+            }
             ForEach(choices) { c in
                 MenuChoice(title: c.label, subtitle: c.description, selected: c.value == current) { onChange(field.key, .string(c.value)) }
             }

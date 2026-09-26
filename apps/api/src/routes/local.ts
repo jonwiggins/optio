@@ -117,7 +117,7 @@ const blueprintBodySchema = z
       .record(z.string().max(64), z.union([z.string().max(200), z.boolean()]))
       .nullish()
       .describe(
-        "Agent spawns: per-run agent parameters keyed like the provider catalog (claudeModel, claudeEffort, claudePermissionMode, copilotModel, copilotEffort); null = the machine's own",
+        "Agent spawns: per-run agent parameters keyed like the provider catalog (claudeModel, claudeEffort, claudePermissionMode, copilotModel, copilotEffort, codexPermissionMode); null = the machine's own",
       ),
   })
   .describe("Local automation (blueprint) definition");

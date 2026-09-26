@@ -6,9 +6,12 @@
  * first, then live); JSON text frames are control (status / size / exit /
  * error). An exited terminal gets its recorded final screen instead of a
  * live attach: `size` (the grid it ran at), the screen bytes, then `exit`.
- * Client → server: JSON only — {type:"input",data} | {type:"resize",cols,rows}.
- * JSON-only input eliminates the "pasted JSON swallowed as control" bug the
- * legacy session terminal protocol has.
+ * Client → server: JSON only — {type:"input",data} | {type:"resize",cols,rows}
+ * | {type:"view",cols,rows,visible,idleMs,open?}. JSON-only input eliminates
+ * the "pasted JSON swallowed as control" bug the legacy session terminal
+ * protocol has. Which viewer's screen the PTY is sized for is decided in
+ * services/local-grid.ts; pings check a viewer is still there before it keeps
+ * another screen waiting.
  */
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -65,6 +68,7 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
 
     if (terminal.state === "running" || terminal.state === "launching") {
       if (relay.attachBrowser(terminal.hostId, terminal.id, socket)) {
+        socket.on("pong", () => relay.viewerPong(terminal.id, socket));
         conn.onClose(() => relay.detachBrowser(terminal.hostId, terminal.id, socket));
       } else {
         socket.send(JSON.stringify({ type: "error", message: "Host is offline" }));
@@ -90,25 +94,35 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
         return;
       }
       if (msg.type === "input" && typeof msg.data === "string") {
+        relay.viewerInput(terminal.id, socket);
         relay.sendToHost(terminal.hostId, {
           type: "input",
           terminalId: terminal.id,
           dataB64: Buffer.from(msg.data, "utf-8").toString("base64"),
         });
-      } else if (
-        msg.type === "resize" &&
-        Number.isInteger(msg.cols) &&
-        Number.isInteger(msg.rows) &&
-        msg.cols > 0 &&
-        msg.rows > 0
-      ) {
-        relay.sendToHost(terminal.hostId, {
-          type: "resize",
-          terminalId: terminal.id,
-          cols: Math.min(msg.cols, 1000),
-          rows: Math.min(msg.rows, 1000),
+      } else if (msg.type === "resize" && isGrid(msg)) {
+        relay.viewerClaim(terminal.hostId, terminal.id, socket, clampGrid(msg));
+      } else if (msg.type === "view" && isGrid(msg) && typeof msg.visible === "boolean") {
+        relay.viewerView(terminal.id, socket, {
+          ...clampGrid(msg),
+          visible: msg.visible,
+          idleMs: Number.isFinite(msg.idleMs) && msg.idleMs > 0 ? msg.idleMs : 0,
+          open: msg.open === true,
         });
       }
     });
   });
+}
+
+function isGrid(msg: { cols: unknown; rows: unknown }): msg is { cols: number; rows: number } {
+  return (
+    Number.isInteger(msg.cols) &&
+    Number.isInteger(msg.rows) &&
+    (msg.cols as number) > 0 &&
+    (msg.rows as number) > 0
+  );
+}
+
+function clampGrid(msg: { cols: number; rows: number }): { cols: number; rows: number } {
+  return { cols: Math.min(msg.cols, 1000), rows: Math.min(msg.rows, 1000) };
 }

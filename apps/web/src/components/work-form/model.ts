@@ -264,7 +264,7 @@ export const TRIGGER_PARAMS: Record<WhenType, string[]> = {
     "commentUrl",
     "action",
   ],
-  slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink"],
+  slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"],
   linear: [
     "event",
     "identifier",
@@ -406,8 +406,9 @@ export function normalize(d: WorkDraft): WorkDraft {
 /**
  * Which agent parameters the run will honor. Every pod run — a Task (over
  * the repo's defaults), a Job, a persistent agent — reads the runtime's full
- * provider option set. On your machine the daemon passes the CLI just a
- * model; its other settings come from the machine's own config.
+ * provider option set. On your machine the daemon passes the CLI only the
+ * model, the effort and the permission mode (`runsOn: ["local"]` fields);
+ * everything else comes from the machine's own config.
  */
 export function fullOptionsApply(d: WorkDraft): boolean {
   return !isLocal(d) && d.runtime !== TERMINAL;

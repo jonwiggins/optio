@@ -54,9 +54,12 @@ final class WidgetContactSheetTests: XCTestCase {
 
     func testLiveActivityLockScreen() throws {
         let states: [(String, WatchState)] = [
-            ("waiting", WatchState.Samples.waiting), ("waiting · task", WatchState.Samples.waitingTask),
-            ("waiting · legacy row", WatchState.Samples.waitingLegacy), ("working", WatchState.Samples.working),
-            ("working · agent", WatchState.Samples.workingAgent), ("offline", WatchState.Samples.offline), ("done", WatchState.Samples.done),
+            ("waiting · 5", WatchState.Samples.waiting), ("waiting · 3", WatchState.Samples.waitingThree),
+            ("waiting · 2", WatchState.Samples.waitingTwo), ("waiting · 1", WatchState.Samples.waitingOne),
+            ("waiting · task", WatchState.Samples.waitingTask), ("waiting · legacy row", WatchState.Samples.waitingLegacy),
+            ("working · 3", WatchState.Samples.working), ("working · 7", WatchState.Samples.workingMany),
+            ("working · task", WatchState.Samples.workingTask), ("working · agent", WatchState.Samples.workingAgent),
+            ("offline", WatchState.Samples.offline), ("done", WatchState.Samples.done),
         ]
         try sheet("live-activity-lock-screen", columns: 2) {
             for (label, s) in states { cell(label, size: CGSize(width: 364, height: 160), fit: true) { WatchLockScreenView(state: s) } }
@@ -65,13 +68,143 @@ final class WidgetContactSheetTests: XCTestCase {
 
     func testDynamicIslandRegions() throws {
         let states: [(String, WatchState)] = [
-            ("waiting", WatchState.Samples.waiting), ("waiting · task", WatchState.Samples.waitingTask),
-            ("working", WatchState.Samples.working), ("working · agent", WatchState.Samples.workingAgent),
+            ("waiting · 5", WatchState.Samples.waiting), ("waiting · 3", WatchState.Samples.waitingThree),
+            ("waiting · 2", WatchState.Samples.waitingTwo), ("waiting · 1", WatchState.Samples.waitingOne),
+            ("waiting · task", WatchState.Samples.waitingTask),
+            ("working · 3", WatchState.Samples.working), ("working · 7", WatchState.Samples.workingMany),
+            ("working · task", WatchState.Samples.workingTask),
             ("offline", WatchState.Samples.offline), ("done", WatchState.Samples.done),
         ]
         try sheet("dynamic-island", columns: 2, dark: true) {
             for (label, s) in states {
                 cell(label, size: CGSize(width: 364, height: 170), fit: true) { IslandMock(state: s) }
+            }
+        }
+    }
+
+    // MARK: - Phone widths × text sizes
+    //
+    // Standard values (status word, timer, counts, chip values) must render whole at
+    // every width and text size; only free text (title, reason, preview, a long path)
+    // may truncate. These sheets put realistic, long content through the Live Activity,
+    // the island and the Sessions widget at a small and a large phone's sizes, at the
+    // default text size and at xxLarge.
+
+    private static let textSizes: [(String, DynamicTypeSize)] = [("default", .large), ("xxLarge", .xxLarge)]
+    /// Lock-screen banner widths: 4.7"/5.4" phones, 6.1"–6.3", Pro Max.
+    private static let bannerWidths: [(String, CGFloat)] = [("343", 343), ("361", 361), ("398", 398)]
+
+    func testLiveActivityAtPhoneWidths() throws {
+        let states: [(String, WatchState)] = [
+            ("waiting · 12", LongContent.waiting), ("waiting · 3", LongContent.waitingThree),
+            ("waiting · 2", LongContent.waitingTwo), ("waiting · 1", LongContent.waitingOne),
+            ("waiting · task", LongContent.waitingTask), ("working · 11", LongContent.working), ("working · 3", LongContent.workingThree),
+            ("working · 1", LongContent.workingOne), ("after Later", LongContent.afterLater),
+        ]
+        for (textLabel, dts) in Self.textSizes {
+            try sheet("la-widths-\(textLabel)", columns: 3) {
+                for (label, s) in states {
+                    for (w, width) in Self.bannerWidths {
+                        cell("\(label) · \(w)pt", size: CGSize(width: width, height: 150), fit: true, inset: 0) {
+                            WatchLockScreenView(state: s).environment(\.dynamicTypeSize, dts)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testWatchCopy() {
+        XCTAssertEqual(WatchCopy.summaryLine(WatchState(phase: .done, summary: "Sessions ended. 3 answered, 1 PR merged.")), "3 answered, 1 PR merged.",
+                       "the headline already says Sessions ended")
+        XCTAssertEqual(WatchCopy.summaryLine(WatchState(phase: .done, summary: "Quiet.")), "Quiet.", "the server's summary stands")
+        XCTAssertNil(WatchCopy.summaryLine(WatchState(phase: .done, summary: "Sessions ended.")))
+        XCTAssertNil(WatchCopy.summaryLine(WatchState(phase: .done)))
+        XCTAssertEqual(WatchCopy.moreLine(LongContent.waiting), "+10 more")
+        XCTAssertNil(WatchCopy.moreLine(LongContent.waitingThree))
+        XCTAssertEqual(WatchCopy.tiles(LongContent.waiting).map(\.count), [12, 14, 3, 6, 2])
+        XCTAssertEqual(WatchCopy.tiles(LongContent.working).map(\.id), [.needsYou, .running], "no server tiles, two tiles")
+        XCTAssertEqual(WatchCopy.moreLine(LongContent.working), "+9 more", "running sessions past the two listed")
+        XCTAssertNil(WatchCopy.moreLine(LongContent.workingThree))
+    }
+
+    /// The lock screen clips a Live Activity past 160 pt, and the expanded island is held
+    /// to about the same: every state fits at every width, at the default text size and
+    /// at the largest the Watch allows.
+    func testLiveActivityFitsItsHeight() {
+        let states: [(String, WatchState)] = [
+            ("waiting · 12", LongContent.waiting), ("waiting · 3", LongContent.waitingThree), ("waiting · 2", LongContent.waitingTwo),
+            ("waiting · 1", LongContent.waitingOne), ("waiting · task", LongContent.waitingTask), ("working · 11", LongContent.working),
+            ("working · 3", LongContent.workingThree), ("working · 1", LongContent.workingOne), ("after Later", LongContent.afterLater),
+            ("waiting · 5", WatchState.Samples.waiting), ("waiting · legacy row", WatchState.Samples.waitingLegacy),
+            ("offline", WatchState.Samples.offline), ("done", WatchState.Samples.done),
+        ]
+        func height(_ view: some View, width: CGFloat) -> CGFloat {
+            UIHostingController(rootView: view).sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        }
+        for (textLabel, dts) in Self.textSizes {
+            for (label, s) in states {
+                for (w, width) in Self.bannerWidths {
+                    let h = height(WatchLockScreenView(state: s).environment(\.dynamicTypeSize, dts), width: width)
+                    XCTAssertLessThanOrEqual(h, 160, "lock screen · \(label) · \(w)pt · \(textLabel): \(h) pt")
+                }
+                let island = VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 8) {
+                        WatchExpandedLeading(state: s)
+                        Spacer(minLength: 0)
+                        WatchExpandedTrailing(state: s)
+                    }
+                    WatchExpandedBottom(state: s)
+                }
+                let h = height(island.environment(\.dynamicTypeSize, dts), width: 350)
+                XCTAssertLessThanOrEqual(h, 160, "island · \(label) · \(textLabel): \(h) pt")
+            }
+        }
+    }
+
+    func testDynamicIslandAtPhoneWidths() throws {
+        let states: [(String, WatchState)] = [
+            ("waiting · 12", LongContent.waiting), ("waiting · 3", LongContent.waitingThree),
+            ("waiting · 2", LongContent.waitingTwo), ("waiting · 1", LongContent.waitingOne),
+            ("waiting · task", LongContent.waitingTask), ("working · 11", LongContent.working), ("working · 3", LongContent.workingThree),
+            ("working · 1", LongContent.workingOne), ("after Later", LongContent.afterLater),
+        ]
+        for (textLabel, dts) in Self.textSizes {
+            try sheet("island-widths-\(textLabel)", columns: 2, dark: true) {
+                for (label, s) in states {
+                    for (w, width) in [("small", CGFloat(350)), ("large", CGFloat(404))] {
+                        cell("\(label) · \(w)", size: CGSize(width: width, height: 170), fit: true, inset: 0) {
+                            IslandMock(state: s).environment(\.dynamicTypeSize, dts)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testSessionsWidgetAtPhoneSizes() throws {
+        // (small, medium, large) family sizes: iPhone SE and Pro Max.
+        let phones: [(String, CGSize, CGSize, CGSize)] = [
+            ("SE", CGSize(width: 148, height: 148), CGSize(width: 321, height: 148), CGSize(width: 321, height: 324)),
+            ("Pro Max", CGSize(width: 170, height: 170), CGSize(width: 364, height: 170), CGSize(width: 364, height: 382)),
+        ]
+        let entries: [(String, GlanceEntry)] = [("waiting · long", LongContent.entry), ("waiting · 2 servers", GlanceFixtures.waiting)]
+        for (textLabel, dts) in Self.textSizes {
+            try sheet("widget-sizes-\(textLabel)", columns: 4) {
+                for (label, e) in entries {
+                    for (phone, small, medium, large) in phones {
+                        cell("small · \(label) · \(phone)", size: small) { SessionsSmall(entry: e).environment(\.dynamicTypeSize, dts) }
+                        cell("medium · \(label) · \(phone)", size: medium) { WorkBoard(entry: e, budget: 2, expandedRows: false).environment(\.dynamicTypeSize, dts) }
+                        cell("large · \(label) · \(phone)", size: large) { WorkBoard(entry: e, budget: 6, expandedRows: true).environment(\.dynamicTypeSize, dts) }
+                    }
+                }
+            }
+            try sheet("widget-accessories-\(textLabel)", columns: 3, accessory: true) {
+                for (label, e) in entries {
+                    cell(label, size: CGSize(width: 76, height: 76), accessory: true) { SessionsCircular(entry: e).environment(\.dynamicTypeSize, dts) }
+                    cell(label, size: CGSize(width: 160, height: 72), accessory: true) { SessionsRectangular(entry: e).padding(6).environment(\.dynamicTypeSize, dts) }
+                    cell(label, size: CGSize(width: 234, height: 26), accessory: true) { SessionsInline(entry: e).font(.caption).environment(\.dynamicTypeSize, dts) }
+                }
             }
         }
     }
@@ -98,9 +231,9 @@ final class WidgetContactSheetTests: XCTestCase {
 
     /// One widget-shaped cell: the view clipped to its family size on the widget's
     /// container background, with a caption. `fit` lets the height grow to the content.
-    private func cell<V: View>(_ label: String, size: CGSize, accessory: Bool = false, fit: Bool = false, @ViewBuilder _ content: () -> V) -> Cell {
+    private func cell<V: View>(_ label: String, size: CGSize, accessory: Bool = false, fit: Bool = false, inset: CGFloat? = nil, @ViewBuilder _ content: () -> V) -> Cell {
         let body = content()
-            .padding(accessory ? 0 : 14)
+            .padding(inset ?? (accessory ? 0 : 14))
             .frame(width: size.width, height: fit ? nil : size.height, alignment: .topLeading)
             .frame(minHeight: fit ? size.height : nil)
         let framed: AnyView = accessory
@@ -149,15 +282,11 @@ private struct IslandMock: View {
             // Expanded
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 8) {
-                    WatchExpandedLeading(state: state).frame(width: 96, alignment: .leading)
-                    WatchExpandedCenter(state: state)
+                    WatchExpandedLeading(state: state)
+                    Spacer(minLength: 0)
                     WatchExpandedTrailing(state: state)
                 }
-                if let head = state.head, state.phase == .waiting || state.phase == .working {
-                    SessionChips(item: head, short: true, grid: true, font: .caption2, spacing: 14).padding(.leading, 4)
-                }
-                WatchCountsLine(state: state)
-                WatchButtons(state: state)
+                WatchExpandedBottom(state: state)
             }
             .padding(14)
             .background(Color.black, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
@@ -184,4 +313,68 @@ private struct IslandMock: View {
         }
         .environment(\.colorScheme, .dark)
     }
+}
+
+/// Content at the lengths people actually see: a user-titled session, a machine with a
+/// long name, a deep directory, a long reason.
+private enum LongContent {
+    static let now = Date()
+    static let host = "Jon’s MacBook Pro"
+    static let head = WatchItem(
+        kind: .local, id: "l1", title: "Refactor the session sizing so the laptop keeps its grid", mono: "optio",
+        reason: "Claude stopped — reply to continue", preview: "Should I also update the Android port? (y/n)",
+        since: now.addingTimeInterval(-14 * 60 - 32), state: "needs_you", link: "optio://local/l1?compose=1",
+        source: .localTerminal, when: "github", where: WatchWhere(target: .machine, detail: "\(host) · ~/repos/optio/apps/web"),
+        who: "claude-code", then: .waitsForMe, statusLabel: "needs you")
+    static let second = WatchItem(
+        kind: .local, id: "l2", title: "claude-code · optio", mono: "optio", reason: "Waiting on a permission",
+        since: now.addingTimeInterval(-3 * 60), state: "needs_you", link: "optio://local/l2?compose=1",
+        source: .localTerminal, when: "now", where: WatchWhere(target: .machine, detail: "\(host) · ~/repos/optio"),
+        who: "claude-code", then: .waitsForMe, statusLabel: "needs you")
+    static let task = WatchItem(
+        kind: .task, id: "k1", title: "Migrate workspace settings to Drizzle", mono: "feat/settings-drizzle-migration",
+        reason: "Merge conflict — resume?", since: now.addingTimeInterval(-47 * 60), state: "needs_attention",
+        link: "optio://tasks/k1", prUrl: "https://github.com/jonwiggins/optio/pull/612",
+        source: .repoTask, when: "on a trigger", where: WatchWhere(target: .pod, detail: "jonwiggins/optio"),
+        who: "codex", then: .exits, statusLabel: "needs attention")
+    static let pr = WatchItem(
+        kind: .task, id: "k2", title: "fix: login redirect loops on expired PAT", mono: "fix/login-redirect-expired-pat",
+        reason: "PR #581 open · CI running", since: now.addingTimeInterval(-2 * 3600 - 5 * 60), state: "pr_opened",
+        link: "optio://tasks/k2", prUrl: "https://github.com/jonwiggins/optio/pull/581",
+        source: .repoTask, when: "now", where: WatchWhere(target: .pod, detail: "jonwiggins/optio"),
+        who: "claude-code", then: .exits, statusLabel: "PR open")
+
+    static let busy = WatchItem(
+        kind: .local, id: "l3", title: "Port the terminal sizing arbiter to the Android client", mono: "optio",
+        since: now.addingTimeInterval(-6 * 60 - 12), state: "working", link: "optio://local/l3?compose=1",
+        source: .localTerminal, when: "now", where: WatchWhere(target: .machine, detail: "\(host) · ~/repos/optio"),
+        who: "claude-code", then: .waitsForMe, statusLabel: "working")
+    static let agentRow = WatchItem(
+        kind: .agent, id: "a1", title: "Vesper", mono: "@vesper", since: now.addingTimeInterval(-41 * 60), state: "running",
+        link: "optio://agents/a1?compose=1", source: .persistentAgent, when: "messages", where: WatchWhere(target: .pod, detail: "@vesper"),
+        who: "claude-code", then: .waitsForMessages, statusLabel: "thinking")
+
+    static let waiting = WatchState(phase: .waiting, head: task, others: [head, second], needsYouCount: 12, runningCount: 14,
+                                    waitingCount: 3, recurringCount: 6, agentCount: 2, asOf: now)
+    static let waitingThree = WatchState(phase: .waiting, head: task, others: [head, second], needsYouCount: 3, runningCount: 14,
+                                         waitingCount: 3, recurringCount: 6, agentCount: 2, asOf: now)
+    static let waitingTwo = WatchState(phase: .waiting, head: head, others: [second], needsYouCount: 2, runningCount: 14,
+                                       waitingCount: 3, recurringCount: 6, agentCount: 2, asOf: now)
+    static let waitingOne = WatchState(phase: .waiting, head: head, needsYouCount: 1, runningCount: 14,
+                                       waitingCount: 3, recurringCount: 6, agentCount: 2, asOf: now)
+    static let waitingTask = WatchState(phase: .waiting, head: task, needsYouCount: 1, runningCount: 2, asOf: now)
+    static let working = WatchState(phase: .working, head: busy, others: [agentRow, pr], needsYouCount: 0, runningCount: 11, asOf: now)
+    static let workingThree = WatchState(phase: .working, head: busy, others: [agentRow, pr], needsYouCount: 0, runningCount: 3,
+                                         waitingCount: 3, recurringCount: 6, agentCount: 2, asOf: now)
+    static let workingOne = WatchState(phase: .working, head: pr, needsYouCount: 0, runningCount: 1, asOf: now)
+    static let afterLater = WatchState(phase: .waiting, head: head, needsYouCount: 1, runningCount: 3, asOf: now)
+        .handling("l1", at: now) { $0.snoozedUntil = now.addingTimeInterval(15 * 60) }!
+
+    static let server = ServerProfile(id: "srv-long", name: host, url: URL(string: "http://jons-macbook-pro.tailnet.ts.net:30400")!, color: .slate)
+    static let entry: GlanceEntry = {
+        func tag(_ i: WatchItem) -> WatchItem { var i = i; i.serverId = server.id; i.serverName = server.shortName; return i }
+        let snap = NeedsYouSnapshot(needsYou: [tag(head), tag(second), tag(task)], running: [tag(pr)], hostsOnline: 1, hostsTotal: 1,
+                                    counts: SessionTileCounts(waiting: 3, recurring: 6, agents: 2), asOf: now)
+        return GlanceEntry(date: now, slices: [GlanceSlice(server: server, reachability: .live, snapshot: snap, tasks: [], unreachableSince: nil)])
+    }()
 }

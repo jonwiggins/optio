@@ -324,7 +324,7 @@ struct WhoSection: View {
                     provider: state.provider,
                     state: state.catalogs.state(state.provider),
                     values: state.draft.agentOptions,
-                    modelOnly: !state.fullOptionsApply,
+                    local: !state.fullOptionsApply,
                     onChange: state.setOption
                 )
             }
@@ -342,7 +342,7 @@ struct WhoSection: View {
         if state.isTerminal {
             lines.append("Just you at a shell prompt — no agent, no prompt.")
         } else if state.isLocal {
-            lines.append("Uses the CLI and login already on the machine; only the model is set here.")
+            lines.append("Uses the CLI and login already on the machine; anything left at Default comes from its own config.")
         } else if state.draft.withRepo {
             lines.append("Runs with the server's credentials. Parameters start from the repo's defaults and apply to this run only.")
         } else {

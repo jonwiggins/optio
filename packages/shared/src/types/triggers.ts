@@ -114,6 +114,14 @@ export interface GitHubEvent {
 
 // ── Slack ───────────────────────────────────────────────────────────────────
 
+/**
+ * Whose Slack posts fire a trigger: `people` (the default), `bots` (apps,
+ * integrations and incoming webhooks, such as an alerting tool), or `anyone`.
+ */
+export type SlackPostedBy = "people" | "bots" | "anyone";
+
+export const SLACK_POSTED_BY: readonly SlackPostedBy[] = ["people", "bots", "anyone"];
+
 export interface SlackTriggerConfig {
   /** Channel id (C0123…) to listen on. Required. */
   channelId: string;
@@ -123,18 +131,45 @@ export interface SlackTriggerConfig {
   mentionOnly?: boolean;
   /** Also fire for thread replies (default: top-level messages only). */
   includeThreads?: boolean;
+  /**
+   * Whose messages fire it (default `people`). Posts by the Slack app Optio
+   * receives events as never fire a trigger, whatever this says.
+   */
+  postedBy?: SlackPostedBy;
+  /**
+   * With bots: only this one — its name as Slack shows it, its bot id (B…),
+   * or its app id (A…); case-insensitive. Empty = any bot.
+   */
+  bot?: string;
+}
+
+/** The bot that posted a Slack message. */
+export interface SlackBot {
+  /** Bot id (B…); null for an app posting without one. */
+  id: string | null;
+  /** App id (A…), when Slack says. */
+  appId: string | null;
+  /** The name Slack shows on the post, when it says. */
+  name: string | null;
 }
 
 export interface SlackEvent {
   /** `message` | `app_mention`. */
   event: string;
   channelId: string;
+  /** Who posted it; empty for a bot's post. */
   userId: string;
+  /**
+   * What the message says. A bot's post adds what its attachments and blocks
+   * say, which is where alerting tools put the details.
+   */
   text: string;
   ts: string;
   threadTs: string | null;
   teamId: string | null;
   eventId: string | null;
+  /** Set when a bot posted it. */
+  bot?: SlackBot | null;
 }
 
 // ── Linear ──────────────────────────────────────────────────────────────────

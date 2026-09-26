@@ -182,7 +182,7 @@ fun draftFromRow(kind: EditableKind, row: JsonObject, trigger: JsonObject?): Wor
                     repoUrl = row.text("repoUrl"),
                     repoBranch = baseBranch.ifEmpty { "main" },
                     runtime = row.text("agent").ifEmpty { TERMINAL },
-                    agentOptions = emptyMap(),
+                    agentOptions = row.text("agent").takeIf { it.isNotEmpty() }?.let { optionsFromRow(it, row) }.orEmpty(),
                     prompt = row.text("commandTemplate"),
                     then = if (interactive) Then.WAITS_FOR_ME else Then.EXITS,
                 ),

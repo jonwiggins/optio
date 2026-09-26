@@ -3,10 +3,11 @@ import Foundation
 /// Pure helpers behind "the PTY follows whoever is using it" — a port of the
 /// web's `sizing.ts`.
 ///
-/// One PTY has one grid. Viewers that interact (focus the terminal, type, tap
-/// "Use this screen") claim it and size it to their own screen; viewers that
-/// are only watching render the owner's grid shrunk to fit instead of fighting
-/// over the PTY. Kept UIKit-free so the arithmetic is unit-testable.
+/// One PTY has one grid. The server sizes it for the screen in use
+/// (apps/api/src/services/local-grid.ts) and says so in each `size` frame
+/// (`yours`); viewers watching another screen's grid render it shrunk to fit
+/// instead of fighting over the PTY. Kept UIKit-free so the arithmetic is
+/// unit-testable.
 struct TerminalGrid: Equatable, Hashable, Sendable {
     var cols: Int
     var rows: Int
@@ -22,6 +23,9 @@ enum TerminalSizing {
     static let maxPassiveFontPt: CGFloat = 20
     /// Resize requests we've sent that the daemon hasn't echoed yet (oldest first).
     static let maxPendingGrids = 32
+    /// A screen touched this recently is in use and keeps the grid
+    /// (`LOCAL_VIEW_IN_USE_MS` in @optio/shared).
+    static let inUse: TimeInterval = 60
 
     enum Mode: Equatable {
         /// No one has claimed the grid yet — render at our own natural fit.
@@ -67,9 +71,19 @@ enum TerminalSizing {
         return Array(sent[(i + 1)...])
     }
 
-    /// Next mode when the daemon announces the PTY grid. `natural` is what a fit
-    /// to our own screen would produce; `sent` the grids we've asked for that
-    /// haven't been echoed yet.
+    /// Next mode when the server says whose the PTY grid is (a `size` frame with
+    /// `yours`). Ours: fit our own screen — the PTY follows as we report it.
+    /// Another screen's: render it scaled to fit, unless it happens to be our
+    /// own natural fit, when there's nothing to scale and no reason for the strip.
+    static func onGridAssigned(_ grid: TerminalGrid, yours: Bool, natural: TerminalGrid?) -> Mode {
+        if yours { return .owner }
+        return grid == natural ? .unclaimed : .passive(grid)
+    }
+
+    /// Next mode when the PTY grid is announced without saying whose it is — a
+    /// server before `yours`, or an exited terminal's recorded grid. `natural`
+    /// is what a fit to our own screen would produce; `sent` the grids we've
+    /// asked for that haven't been echoed yet.
     ///
     /// Every echo of our own request is still ours — not just the latest: a
     /// claim can fit twice in quick succession, so the echo of the first request

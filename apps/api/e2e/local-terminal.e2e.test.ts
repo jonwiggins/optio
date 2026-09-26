@@ -722,6 +722,96 @@ describe("optio local e2e", () => {
     await daemon2.connect(hostId, DIRS, []);
     await waitFor(async () => ((await getTerminal(terminalId)).state === "exited" ? true : null));
   });
+
+  it("sizes the PTY for the screen in use, and tells each viewer whose grid it is", async () => {
+    const hostId = await registerHost("e2e-grid");
+    const daemon = new FakeDaemon();
+    cleanups.push(() => daemon.close());
+    await daemon.connect(hostId, DIRS);
+    await waitFor(async () => {
+      const { body } = await api<{ hosts: HostBody["host"][] }>("/api/local/hosts");
+      return body.hosts.find((h) => h.id === hostId)?.state === "online" ? true : null;
+    });
+    const { body } = await api<TerminalBody>("/api/local/terminals", {
+      method: "POST",
+      body: JSON.stringify({ hostId, dir: "/tmp/e2e-repo", spec: { kind: "shell" } }),
+    });
+    const terminalId = body.terminal.id;
+    await daemon.next((m) => m.type === "spawn" && m.terminalId === terminalId);
+    daemon.send({ type: "started", terminalId });
+    await waitFor(async () => ((await getTerminal(terminalId)).state === "running" ? true : null));
+
+    // The daemon's side, as terminal-manager.ts plays it: an attach gets the
+    // scrollback then the grid; every resize is echoed as the new grid.
+    let grid = { cols: 120, rows: 32 };
+    const answerAttach = async () => {
+      const attach = await daemon.next((m) => m.type === "attach" && m.terminalId === terminalId);
+      daemon.send({ type: "scrollback", terminalId, attachId: attach.attachId, dataB64: "" });
+      daemon.send({ type: "size", terminalId, ...grid });
+    };
+    const resized = async () => {
+      const r = await daemon.next((m) => m.type === "resize" && m.terminalId === terminalId);
+      grid = { cols: Number(r.cols), rows: Number(r.rows) };
+      daemon.send({ type: "size", terminalId, ...grid });
+      return grid;
+    };
+    const told = (viewer: FakeViewer, expected: Json) =>
+      waitFor(
+        async () => {
+          const last = viewer.control.filter((m) => m.type === "size").at(-1);
+          return last && JSON.stringify(last) === JSON.stringify({ type: "size", ...expected })
+            ? true
+            : null;
+        },
+        { timeoutMs: 10_000 },
+      );
+    const open = (cols: number, rows: number) => ({
+      type: "view",
+      cols,
+      rows,
+      visible: true,
+      idleMs: 0,
+      open: true,
+    });
+
+    // The laptop opens the session: the PTY is fitted to it.
+    const laptop = new FakeViewer();
+    cleanups.push(() => laptop.close());
+    await laptop.connect(terminalId);
+    await answerAttach();
+    laptop.send(open(160, 45));
+    expect(await resized()).toEqual({ cols: 160, rows: 45 });
+    await told(laptop, { cols: 160, rows: 45, yours: true });
+
+    // The phone opens it while the laptop is in use: it watches the laptop's grid.
+    const phone = new FakeViewer();
+    cleanups.push(() => phone.close());
+    await phone.connect(terminalId);
+    await answerAttach();
+    phone.send(open(48, 30));
+    await told(phone, { cols: 160, rows: 45, yours: false });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(daemon.inbox.filter((m) => m.type === "resize")).toEqual([]);
+
+    // "Use this screen" on the phone takes it.
+    phone.send({ type: "resize", cols: 48, rows: 30 });
+    expect(await resized()).toEqual({ cols: 48, rows: 30 });
+    await told(phone, { cols: 48, rows: 30, yours: true });
+    await told(laptop, { cols: 48, rows: 30, yours: false });
+
+    // The phone goes away; coming back to the laptop fits it again.
+    phone.close();
+    await waitFor(
+      async () => {
+        laptop.send(open(160, 45));
+        await new Promise((r) => setTimeout(r, 100));
+        return daemon.inbox.some((m) => m.type === "resize") ? true : null;
+      },
+      { timeoutMs: 10_000 },
+    );
+    expect(await resized()).toEqual({ cols: 160, rows: 45 });
+    await told(laptop, { cols: 160, rows: 45, yours: true });
+  });
 });
 
 describe("optio local e2e: machine identity, resume, and backfill", () => {

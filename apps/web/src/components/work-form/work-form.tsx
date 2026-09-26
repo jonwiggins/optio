@@ -1338,6 +1338,7 @@ function EventConfig({
   const personal = kinds.some((k) => k.personal && events.includes(k.value));
   const identityKey = type === "github" ? "login" : "user";
   const identity = String(config[identityKey] ?? "");
+  const postedBy = String(config.postedBy ?? "people");
   const listField = (key: string, label: string, placeholder: string) => (
     <div>
       <label className="block text-xs text-text-muted mb-1">
@@ -1384,6 +1385,47 @@ function EventConfig({
                 className={INPUT_INNER}
               />
             </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-text-muted mb-1">Posted by</label>
+              <select
+                value={postedBy}
+                onChange={(e) => {
+                  const next: Record<string, unknown> = { ...config, postedBy: e.target.value };
+                  // People only: a bot to match would be left over, unseen.
+                  if (e.target.value === "people") delete next.bot;
+                  onChange(next);
+                }}
+                className={INPUT_INNER}
+              >
+                <option value="people">People</option>
+                <option value="bots">Bots (apps, integrations, alerts)</option>
+                <option value="anyone">Anyone</option>
+              </select>
+              <p className="text-[11px] text-text-muted/60 mt-1">
+                {postedBy === "people"
+                  ? "Bots' posts don't start it."
+                  : "Posts by Optio's own Slack app never do."}
+              </p>
+            </div>
+            {postedBy !== "people" && (
+              <div>
+                <label className="block text-xs text-text-muted mb-1">
+                  Bot <span className="text-text-muted/60">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={String(config.bot ?? "")}
+                  onChange={(e) => onChange({ ...config, bot: e.target.value })}
+                  placeholder="Any bot"
+                  className={INPUT_INNER}
+                />
+                <p className="text-[11px] text-text-muted/60 mt-1">
+                  The name on its posts, or its bot id (B0123…) or app id (A0123…).
+                </p>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1.5">
             <label className="flex items-center gap-1.5 text-xs text-text-muted">

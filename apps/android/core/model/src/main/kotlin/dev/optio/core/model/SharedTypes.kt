@@ -1296,7 +1296,11 @@ data class WatchState(
     val phase: WatchPhase,
     /** Oldest item needing you (when `waiting`) or most recent running item (when `working`). */
     val head: WatchItem? = null,
-    /** Up to two further items needing you; the island only shows `head`. */
+    /**
+     * Up to two further rows from `head`'s list, listed under it on the Watch: the next
+     * items needing you (oldest first), or with none waiting, the next running items
+     * (newest first).
+     */
     val others: List<WatchItem>,
     /** Total items needing you, including `head` and beyond `others`. */
     val needsYouCount: Double,
@@ -1459,12 +1463,14 @@ data class LocalHostAgentModels(
 }
 
 /**
- * How a local Claude Code agent handles permission prompts — its
- * `--permission-mode`. `auto` (the daemon's default): Claude's classifier
- * approves routine actions and blocks risky ones, so an unattended run
- * doesn't stall on a prompt. `bypassPermissions`: skip every check
- * (`--dangerously-skip-permissions`). `default`: ask first (a headless run
- * can't ask, so those actions are denied).
+ * How a local agent handles permission prompts. For Claude Code, its
+ * `--permission-mode`: `auto` (the daemon's default) lets Claude's classifier
+ * approve routine actions and block risky ones, so an unattended run doesn't
+ * stall on a prompt; `bypassPermissions` skips every check
+ * (`--dangerously-skip-permissions`); `default` asks first (a headless run
+ * can't ask, so those actions are denied). For Codex, only
+ * `bypassPermissions` means anything: `--yolo` (no approvals, no sandbox);
+ * otherwise Codex keeps the machine's own approval and sandbox config.
  */
 @Serializable(with = LocalAgentPermissionMode.Companion::class)
 enum class LocalAgentPermissionMode(override val raw: String) : RawEnum {
@@ -1614,7 +1620,11 @@ sealed interface LocalTerminalSpec {
          * `--effort`, Codex `-c model_reasoning_effort=…`.
          */
         val effort: String? = null,
-        /** Claude Code only: its `--permission-mode`. The daemon's default is `auto`. */
+        /**
+         * Claude Code: its `--permission-mode` (the daemon's default is `auto`).
+         * Codex: `bypassPermissions` runs it with `--yolo`; anything else keeps
+         * the machine's own config.
+         */
         val permissionMode: LocalAgentPermissionMode? = null,
         /**
          * "Work on a new branch that becomes a PR": the server wraps the prompt
@@ -1836,8 +1846,8 @@ data class LocalBlueprint(
     /**
      * Agent spawns: per-run agent parameters keyed like the provider catalog
      * (`claudeModel`, `claudeEffort`, `claudePermissionMode`, `copilotModel`,
-     * `copilotEffort`; string or boolean values) — the fields that apply to a
-     * run on a machine. Null = the machine's own defaults.
+     * `copilotEffort`, `codexPermissionMode`; string or boolean values) — the
+     * fields that apply to a run on a machine. Null = the machine's own defaults.
      */
     val agentOptions: Map<String, JsonElement>? = null,
     val enabled: Boolean,
@@ -2173,6 +2183,7 @@ sealed interface LocalStreamServerMessage {
     data class Size(
         val cols: Double,
         val rows: Double,
+        val yours: Boolean? = null,
     ) : LocalStreamServerMessage
 
     @Serializable
@@ -2222,6 +2233,15 @@ sealed interface LocalStreamClientMessage {
         val rows: Double,
     ) : LocalStreamClientMessage
 
+    @Serializable
+    data class View(
+        val cols: Double,
+        val rows: Double,
+        val visible: Boolean,
+        val idleMs: Double,
+        val open: Boolean? = null,
+    ) : LocalStreamClientMessage
+
     /** Fallback for discriminator values this client does not know about yet. */
     data class Unknown(val raw: JsonElement) : LocalStreamClientMessage
 
@@ -2229,12 +2249,14 @@ sealed interface LocalStreamClientMessage {
         override fun decode(tag: String, element: JsonObject, json: Json): LocalStreamClientMessage? = when (tag) {
             "input" -> json.decodeFromJsonElement(Input.serializer(), element.withoutDiscriminator())
             "resize" -> json.decodeFromJsonElement(Resize.serializer(), element.withoutDiscriminator())
+            "view" -> json.decodeFromJsonElement(View.serializer(), element.withoutDiscriminator())
             else -> null
         }
 
         override fun encode(value: LocalStreamClientMessage, json: Json): JsonElement = when (value) {
             is Input -> tagged("input", json.encodeToJsonElement(Input.serializer(), value))
             is Resize -> tagged("resize", json.encodeToJsonElement(Resize.serializer(), value))
+            is View -> tagged("view", json.encodeToJsonElement(View.serializer(), value))
             is Unknown -> value.raw
         }
 
@@ -3597,6 +3619,21 @@ data class GitHubEvent(
     }
 }
 
+/**
+ * Whose Slack posts fire a trigger: `people` (the default), `bots` (apps,
+ * integrations and incoming webhooks, such as an alerting tool), or `anyone`.
+ */
+@Serializable(with = SlackPostedBy.Companion::class)
+enum class SlackPostedBy(override val raw: String) : RawEnum {
+    PEOPLE("people"),
+    BOTS("bots"),
+    ANYONE("anyone"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<SlackPostedBy>("dev.optio.core.model.SlackPostedBy", entries, UNKNOWN)
+}
+
 @Serializable
 data class SlackTriggerConfig(
     /** Channel id (C0123…) to listen on. Required. */
@@ -3607,6 +3644,27 @@ data class SlackTriggerConfig(
     val mentionOnly: Boolean? = null,
     /** Also fire for thread replies (default: top-level messages only). */
     val includeThreads: Boolean? = null,
+    /**
+     * Whose messages fire it (default `people`). Posts by the Slack app Optio
+     * receives events as never fire a trigger, whatever this says.
+     */
+    val postedBy: SlackPostedBy? = null,
+    /**
+     * With bots: only this one — its name as Slack shows it, its bot id (B…),
+     * or its app id (A…); case-insensitive. Empty = any bot.
+     */
+    val bot: String? = null,
+)
+
+/** The bot that posted a Slack message. */
+@Serializable
+data class SlackBot(
+    /** Bot id (B…); null for an app posting without one. */
+    val id: String? = null,
+    /** App id (A…), when Slack says. */
+    val appId: String? = null,
+    /** The name Slack shows on the post, when it says. */
+    val name: String? = null,
 )
 
 @Serializable
@@ -3614,12 +3672,19 @@ data class SlackEvent(
     /** `message` | `app_mention`. */
     val event: String,
     val channelId: String,
+    /** Who posted it; empty for a bot's post. */
     val userId: String,
+    /**
+     * What the message says. A bot's post adds what its attachments and blocks
+     * say, which is where alerting tools put the details.
+     */
     val text: String,
     val ts: String,
     val threadTs: String? = null,
     val teamId: String? = null,
     val eventId: String? = null,
+    /** Set when a bot posted it. */
+    val bot: SlackBot? = null,
 )
 
 @Serializable(with = LinearEventKind.Companion::class)

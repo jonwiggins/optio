@@ -62,10 +62,16 @@ data class ProviderCatalog(
         val helpText: String? = null,
         /** Where the field applies: "pod" and/or "local" (a run on a machine); null = pods only. */
         val runsOn: List<String>? = null,
+        /** On a machine, the agent spec field the value becomes: "effort" or "permissionMode". */
+        val localParam: String? = null,
     ) {
         /** The field reaches a run in an Optio pod (a machine-only one, like Claude's permissions, doesn't). */
         val appliesToPods: Boolean
             get() = runsOn?.contains("pod") ?: true
+
+        /** The daemon hands the field to the agent CLI on a machine (effort, the permission mode). */
+        val appliesToLocal: Boolean
+            get() = runsOn?.contains("local") ?: false
 
         val defaultString: String
             get() = default?.stringValue.orEmpty()

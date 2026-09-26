@@ -379,6 +379,9 @@ describe("optionRunsOn / optionChoicesFor", () => {
     // Pods always skip permission checks: the choice is a machine's only.
     expect(optionRunsOn(field("claudePermissionMode"), "pod")).toBe(false);
     expect(optionRunsOn(field("copilotEffort"), "pod")).toBe(true);
+    // Codex's skip-all-checks is a machine's choice too; pods run --full-auto.
+    expect(optionRunsOn(field("codexPermissionMode"), "local")).toBe(true);
+    expect(optionRunsOn(field("codexPermissionMode"), "pod")).toBe(false);
   });
 
   it("narrows a model's reasoning efforts, labelling ones it doesn't know", () => {
@@ -409,6 +412,9 @@ describe("localAgentParams", () => {
     expect(
       localAgentParams("codex", { copilotModel: "gpt-5.6-sol", copilotEffort: "xhigh" }),
     ).toEqual({ model: "gpt-5.6-sol", effort: "xhigh" });
+    expect(localAgentParams("codex", { codexPermissionMode: "bypassPermissions" })).toEqual({
+      permissionMode: "bypassPermissions",
+    });
   });
 
   it("leaves out blanks and unknown permission modes", () => {

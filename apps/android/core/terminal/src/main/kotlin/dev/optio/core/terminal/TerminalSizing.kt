@@ -11,10 +11,10 @@ data class TerminalGrid(val cols: Int, val rows: Int) {
  * Pure helpers behind "the PTY follows whoever is using it": a port of iOS `TerminalSizing.swift`,
  * itself a port of the web's `components/local/sizing.ts`.
  *
- * One PTY has one grid. Viewers that interact (focus the terminal, type, tap "Use this screen")
- * claim it and size it to their own screen; viewers that are only watching render the owner's grid
- * shrunk to fit instead of fighting over the PTY. Kept free of Android types so the arithmetic is
- * unit-testable on the JVM.
+ * One PTY has one grid. The server sizes it for the screen in use
+ * (`apps/api/src/services/local-grid.ts`) and says so in each `size` frame (`yours`); viewers
+ * watching another screen's grid render it shrunk to fit instead of fighting over the PTY. Kept
+ * free of Android types so the arithmetic is unit-testable on the JVM.
  */
 object TerminalSizing {
     /** The font the terminal renders at when the grid is ours (dp; iOS uses 12 pt). */
@@ -31,6 +31,9 @@ object TerminalSizing {
 
     /** Resize requests we've sent that the daemon hasn't echoed yet (oldest first). */
     const val MAX_PENDING_GRIDS: Int = 32
+
+    /** A screen touched this recently is in use and keeps the grid (`LOCAL_VIEW_IN_USE_MS`). */
+    const val IN_USE_MS: Long = 60_000
 
     /** Who owns the PTY grid, from this viewer's point of view. */
     sealed interface Mode {
@@ -87,8 +90,26 @@ object TerminalSizing {
     fun sameGrid(a: TerminalGrid?, b: TerminalGrid?): Boolean = a != null && b != null && a == b
 
     /**
-     * Next mode when the daemon announces the PTY grid. `natural` is what a fit to our own screen
-     * would produce; `sent` the grids we've asked for that haven't been echoed yet.
+     * Next mode when the server says whose the PTY grid is (a `size` frame with `yours`). Ours: fit
+     * our own screen; the PTY follows as we report it. Another screen's: render it scaled to fit,
+     * unless it happens to be our own natural fit, when there's nothing to scale and no reason for
+     * the strip.
+     */
+    fun onGridAssigned(
+        grid: TerminalGrid,
+        yours: Boolean,
+        natural: TerminalGrid?,
+    ): Mode =
+        when {
+            yours -> Mode.Owner
+            grid == natural -> Mode.Unclaimed
+            else -> Mode.Passive(grid)
+        }
+
+    /**
+     * Next mode when the PTY grid is announced without saying whose it is: a server before `yours`,
+     * or an exited terminal's recorded grid. `natural` is what a fit to our own screen would
+     * produce; `sent` the grids we've asked for that haven't been echoed yet.
      *
      * Every echo of our own request is still ours, not just the latest: a claim can fit twice in
      * quick succession, so the echo of the first request lands after the second was sent.

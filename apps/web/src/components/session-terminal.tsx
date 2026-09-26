@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { installTerminalLinks } from "@/lib/terminal-links";
+import { installTerminalClipboard } from "@/lib/terminal-clipboard";
 import "@xterm/xterm/css/xterm.css";
 import { getWsBaseUrl } from "@/lib/ws-client.js";
 
@@ -36,6 +37,7 @@ export function SessionTerminal({ sessionId }: { sessionId: string }) {
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     installTerminalLinks(term);
+    const uninstallClipboard = installTerminalClipboard(term, containerRef.current);
     term.open(containerRef.current);
     fitAddon.fit();
     termRef.current = term;
@@ -91,6 +93,7 @@ export function SessionTerminal({ sessionId }: { sessionId: string }) {
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      uninstallClipboard();
       resizeObserver.disconnect();
       ws.close();
       term.dispose();

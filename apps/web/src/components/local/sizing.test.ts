@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { ackSentGrid, onGridAnnounced, passiveFontPx, pushSentGrid, sameGrid } from "./sizing";
+import {
+  ackSentGrid,
+  onGridAnnounced,
+  onGridAssigned,
+  passiveFontPx,
+  pushSentGrid,
+  sameGrid,
+} from "./sizing";
 
 describe("passiveFontPx", () => {
   it("shrinks the font so an oversize grid fits the width", () => {
@@ -98,5 +105,29 @@ describe("onGridAnnounced", () => {
       kind: "passive",
       grid: laptop,
     });
+  });
+});
+
+describe("onGridAssigned", () => {
+  const natural = { cols: 120, rows: 40 };
+
+  it("fits our own screen when the server says the grid is ours", () => {
+    // Even mid-flight, before the PTY has caught up with our size.
+    expect(onGridAssigned({ cols: 80, rows: 24 }, true, natural)).toEqual({ kind: "owner" });
+  });
+
+  it("renders another screen's grid scaled to fit", () => {
+    expect(onGridAssigned({ cols: 48, rows: 30 }, false, natural)).toEqual({
+      kind: "passive",
+      grid: { cols: 48, rows: 30 },
+    });
+  });
+
+  it("shows no strip when another screen's grid is our own fit anyway", () => {
+    expect(onGridAssigned(natural, false, natural)).toEqual({ kind: "unclaimed" });
+  });
+
+  it("treats a pane it can't measure yet as not fitting", () => {
+    expect(onGridAssigned(natural, false, null)).toEqual({ kind: "passive", grid: natural });
   });
 });

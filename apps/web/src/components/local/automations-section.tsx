@@ -89,7 +89,7 @@ const PARAM_HINTS: Record<string, string[]> = {
     "commentBody",
     "commentUrl",
   ],
-  slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink"],
+  slack: ["channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"],
   linear: [
     "event",
     "identifier",
@@ -132,8 +132,13 @@ export function triggerSummary(trigger: any): string {
       const repos = Array.isArray(c.repos) && c.repos.length ? ` in ${c.repos.join(", ")}` : "";
       return `${events}${c.login ? ` → @${c.login}` : ""}${repos}`;
     }
-    case "slack":
-      return `${c.channelId ?? "?"}${c.mentionOnly ? " (@-mentions)" : ""}${c.keyword ? ` · "${c.keyword}"` : ""}`;
+    case "slack": {
+      const by =
+        c.postedBy === "bots" || c.postedBy === "anyone"
+          ? ` · ${c.bot ? String(c.bot) : c.postedBy === "bots" ? "bots" : "people + bots"}`
+          : "";
+      return `${c.channelId ?? "?"}${c.mentionOnly ? " (@-mentions)" : ""}${by}${c.keyword ? ` · "${c.keyword}"` : ""}`;
+    }
     case "linear": {
       const events = Array.isArray(c.events) && c.events.length ? c.events.join(", ") : "any";
       const teams = Array.isArray(c.teams) && c.teams.length ? ` in ${c.teams.join(", ")}` : "";
@@ -779,6 +784,10 @@ function AddTriggerForm({
   const [keyword, setKeyword] = useState(String(c.keyword ?? ""));
   const [mentionOnly, setMentionOnly] = useState(Boolean(c.mentionOnly));
   const [includeThreads, setIncludeThreads] = useState(Boolean(c.includeThreads));
+  const [postedBy, setPostedBy] = useState(
+    c.postedBy === "bots" || c.postedBy === "anyone" ? c.postedBy : "people",
+  );
+  const [bot, setBot] = useState(String(c.bot ?? ""));
   // linear
   const [lnEvents, setLnEvents] = useState<string[]>(
     Array.isArray(c.events) && type === "linear" ? (c.events as string[]) : ["assigned"],
@@ -827,6 +836,8 @@ function AddTriggerForm({
           ...(keyword.trim() ? { keyword: keyword.trim() } : {}),
           ...(mentionOnly ? { mentionOnly: true } : {}),
           ...(includeThreads ? { includeThreads: true } : {}),
+          ...(postedBy !== "people" ? { postedBy } : {}),
+          ...(postedBy !== "people" && bot.trim() ? { bot: bot.trim() } : {}),
         };
       case "linear": {
         if (lnEvents.length === 0) return "Pick at least one Linear event";
@@ -1026,6 +1037,27 @@ function AddTriggerForm({
               />
               Include thread replies
             </label>
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={postedBy}
+              onChange={(e) => setPostedBy(e.target.value as typeof postedBy)}
+              aria-label="Posted by"
+              className={cn(smallInput, "flex-1")}
+            >
+              <option value="people">Posted by people</option>
+              <option value="bots">Posted by bots (apps, integrations, alerts)</option>
+              <option value="anyone">Posted by anyone</option>
+            </select>
+            {postedBy !== "people" && (
+              <input
+                type="text"
+                value={bot}
+                onChange={(e) => setBot(e.target.value)}
+                placeholder="only this bot: name, B… or A… id (optional)"
+                className={cn(smallInput, "flex-1")}
+              />
+            )}
           </div>
           <p className="text-[11px] text-text-muted/80 leading-snug">
             In your Slack app, set the Event Subscriptions request URL to{" "}

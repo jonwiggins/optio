@@ -80,6 +80,31 @@ fun pickedModel(d: WorkDraft): String? {
     return d.agentOptions[modelFieldForRuntime(d.runtime)]?.stringValue?.ifEmpty { null }
 }
 
+/** What a run on a machine passes its agent CLI; null fields leave the machine's own config. */
+data class LocalAgentParams(val model: String?, val effort: String?, val permissionMode: String?)
+
+/**
+ * `localAgentParams` in `@optio/shared`: the model, plus each option [catalog] marks with a
+ * `localParam` — the effort, and the permission mode (Claude Code's `--permission-mode`, Codex's
+ * `--yolo`). Blanks and unknown modes are left out.
+ */
+fun localAgentParams(d: WorkDraft, catalog: ProviderCatalog?): LocalAgentParams {
+    var effort: String? = null
+    var permissionMode: String? = null
+    catalog?.options.orEmpty().forEach { field ->
+        val v = d.agentOptions[field.key]?.stringValue?.trim().orEmpty()
+        if (v.isEmpty()) return@forEach
+        when (field.localParam) {
+            "effort" -> effort = v
+            "permissionMode" -> if (v in LOCAL_PERMISSION_MODES) permissionMode = v
+        }
+    }
+    return LocalAgentParams(pickedModel(d), effort, permissionMode)
+}
+
+/** `LOCAL_AGENT_PERMISSION_MODES`: what the server's spec schema takes. */
+private val LOCAL_PERMISSION_MODES = setOf("auto", "bypassPermissions", "default")
+
 /**
  * The run-location fields a create / update body carries (`runLocationPayload`): a pod spells
  * "none" as explicit nulls, exactly like the web.
@@ -172,13 +197,13 @@ class WorkFormSubmitter(private val api: ApiClient) {
      * automatic name is bumped ("Job 4 (2)") and tried again, up to 5 times; the user's own name
      * surfaces as the error.
      */
-    suspend fun create(d: WorkDraft, repoUrl: String, autoName: String): Created {
+    suspend fun create(d: WorkDraft, repoUrl: String, autoName: String, catalog: ProviderCatalog? = null): Created {
         val auto = d.name.isBlank()
         var attempt = 1
         while (true) {
             val name = if (auto && attempt > 1) "$autoName ($attempt)" else d.name.trim().ifEmpty { autoName }
             try {
-                return createOnce(d, repoUrl, name)
+                return createOnce(d, repoUrl, name, catalog)
             } catch (e: AfterCreate) {
                 throw e.error
             } catch (e: ApiError) {
@@ -218,7 +243,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
         return id
     }
 
-    private suspend fun createOnce(d: WorkDraft, repoUrl: String, name: String): Created {
+    private suspend fun createOnce(d: WorkDraft, repoUrl: String, name: String, catalog: ProviderCatalog?): Created {
         val kind = deriveKind(d)
         val runName = runNameFor(d)
         val prompt = d.prompt.trim()
@@ -330,6 +355,8 @@ class WorkFormSubmitter(private val api: ApiClient) {
                                 if (d.runtime == TERMINAL) put("agent", JsonNull) else put("agent", d.runtime)
                                 put("spawnMode", "auto")
                                 put("sessionMode", sessionModeFor(d))
+                                // Model, effort, permissions: what a run on a machine takes.
+                                if (d.runtime != TERMINAL) options?.let { put("agentOptions", it) }
                             },
                         )
                     },
@@ -343,11 +370,14 @@ class WorkFormSubmitter(private val api: ApiClient) {
                 val spec = if (d.runtime == TERMINAL) {
                     jsonObjectOf("kind" to JsonPrimitive("shell"))
                 } else {
+                    val params = localAgentParams(d, catalog)
                     buildJsonObject {
                         put("kind", "agent")
                         put("agent", d.runtime)
                         if (prompt.isNotEmpty()) put("prompt", prompt)
-                        model?.let { put("model", it) }
+                        params.model?.let { put("model", it) }
+                        params.effort?.let { put("effort", it) }
+                        params.permissionMode?.let { put("permissionMode", it) }
                         // "New branch": the server wraps the prompt with branch + PR
                         // instructions off this base.
                         if (d.withRepo) put("baseBranch", d.repoBranch.ifEmpty { "main" })
@@ -476,6 +506,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                         putOrNull("runTitle", runName)
                         putOrNull("agent", d.runtime.takeUnless { it == TERMINAL })
                         put("sessionMode", sessionModeFor(d))
+                        putOrNull("agentOptions", options.takeUnless { d.runtime == TERMINAL })
                     },
                 )
                 syncTrigger(

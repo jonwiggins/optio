@@ -20,7 +20,10 @@ export interface AgentCommandOptions {
   model?: string;
   /** Reasoning effort: Claude Code `--effort`, Codex `-c model_reasoning_effort="…"`. */
   effort?: string;
-  /** Claude Code's `--permission-mode`; `auto` when unset. */
+  /**
+   * Claude Code's `--permission-mode`; `auto` when unset. Codex takes only
+   * `bypassPermissions` (`--yolo`); otherwise it keeps its own config.
+   */
   permissionMode?: LocalAgentPermissionMode;
   /**
    * What this machine's `claude` accepts (see `probeClaudeCli`), once known.
@@ -80,7 +83,13 @@ export function buildAgentCommand(
       return base + (p ? ` ${p}` : "");
     }
     case "codex": {
-      let flags = model ? ` -m ${model}` : "";
+      // `--yolo` is Codex's alias for this flag; the long name is the one its
+      // --help documents, so it's the one older releases are sure to take.
+      let flags =
+        opts.permissionMode === "bypassPermissions"
+          ? " --dangerously-bypass-approvals-and-sandbox"
+          : "";
+      if (model) flags += ` -m ${model}`;
       if (effort) flags += ` -c ${shellQuote(`model_reasoning_effort="${effort}"`)}`;
       if (resume) return `codex resume${flags} ${resume}` + (p ? ` ${p}` : "");
       if (headless) return `codex exec${flags}` + (p ? ` ${p}` : "");

@@ -563,7 +563,7 @@ class WorkFormState(
         return try {
             val submitter = WorkFormSubmitter(api)
             val target = edit
-            if (target != null) submitter.update(target, draft, effectiveRepoUrl) else submitter.create(draft, effectiveRepoUrl, autoName)
+            if (target != null) submitter.update(target, draft, effectiveRepoUrl) else submitter.create(draft, effectiveRepoUrl, autoName, catalog)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

@@ -95,128 +95,137 @@ extension GlanceEntry {
     var headLink: URL { headSession.flatMap { URL(string: $0.link) } ?? boardLink }
 }
 
-// MARK: - Header
-
-/// `[bot] 3 need you · 2 running [server]      [footer]`, or `Quiet` when nothing is on.
-struct SessionsHeader: View {
-    let entry: GlanceEntry
-
-    var body: some View {
-        HStack(spacing: 5) {
-            GlanceStyle.headerGlyph(needsYou: entry.needsYouCount)
-            let needs = entry.needsYouCount
-            let running = entry.runningCount
-            if needs > 0 {
-                Text("\(needs)").foregroundStyle(GlanceStyle.needsYou).contentTransition(.numericText()).widgetAccentable()
-                Text(needs == 1 ? "needs you" : "need you").foregroundStyle(.secondary)
-            }
-            if running > 0 {
-                if needs > 0 { Text("·").foregroundStyle(.tertiary) }
-                Text("\(running)").foregroundStyle(GlanceStyle.working).contentTransition(.numericText())
-                Text("running").foregroundStyle(.secondary)
-            }
-            if needs == 0, running == 0 {
-                Text("Quiet").foregroundStyle(.secondary)
-            }
-            if entry.showsServerName, let s = entry.server {
-                ServerTag(s)
-            }
-            Spacer(minLength: 4)
-            HonestyFooter(entry: entry)
-        }
-        .font(.subheadline.weight(.semibold))
-        .lineLimit(1)
-    }
-}
-
 // MARK: - Home screen
 
-/// The number that matters on top, the head session and its Where underneath, so the
-/// count is never a dead end. The whole widget opens the Sessions list.
+/// The number that matters and the head session: `3 need you`, then `● name` over its
+/// status and wait. The whole widget opens the Sessions list.
 struct SessionsSmall: View {
     let entry: GlanceEntry
 
     var body: some View {
-        if entry.reachability == .signedOut {
-            SignedOutView()
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    GlanceStyle.headerGlyph(needsYou: entry.needsYouCount, size: 18)
-                    if entry.showsServerName, let s = entry.server {
-                        ServerTag(s)
-                    } else if entry.isMulti {
-                        Text("\(entry.slices.count) servers").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+        Group {
+            if entry.reachability == .signedOut {
+                SignedOutView()
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        GlanceStyle.headerGlyph(needsYou: entry.needsYouCount, size: 18)
+                        if entry.showsServerName, let s = entry.server {
+                            ServerTag(s)
+                        } else if entry.isMulti {
+                            Text("\(entry.slices.count) servers").font(.caption2.weight(.semibold)).foregroundStyle(.secondary).fixedSize()
+                        }
+                        Spacer(minLength: 0)
+                        HonestyFooter(entry: entry)
                     }
                     Spacer(minLength: 0)
-                    HonestyFooter(entry: entry)
-                }
-                Spacer(minLength: 0)
-                if let headline = GlanceCopy.headlineCount(needsYou: entry.needsYouCount, running: entry.runningCount) {
-                    CountText(count: headline.count, color: entry.needsYouCount > 0 ? GlanceStyle.needsYou : GlanceStyle.working)
-                    Text(headline.noun).font(.footnote.weight(.medium)).foregroundStyle(.secondary)
-                } else {
-                    Text("Quiet").font(.title.weight(.semibold)).foregroundStyle(.secondary)
-                    Text("no sessions running").font(.footnote).foregroundStyle(.tertiary)
-                }
-                if let head = entry.headSession {
-                    let place = head.whereValue
-                    VStack(alignment: .leading, spacing: 1) {
-                        HStack(spacing: 5) {
-                            StateDotView(state: head.state, size: 6)
-                            Text(head.rowName).font(.footnote.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
-                            if entry.isMulti, let tag = ServerTag(item: head) { tag.dot() }
+                    if let headline = GlanceCopy.headlineCount(needsYou: entry.needsYouCount, running: entry.runningCount) {
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            CountText(count: headline.count, style: .system(size: 36, weight: .semibold, design: .rounded),
+                                      color: entry.needsYouCount > 0 ? GlanceStyle.needsYou : GlanceStyle.working)
+                            Text(headline.noun).font(.footnote.weight(.medium)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
                         }
-                        SessionChip(systemImage: place.systemImage, label: GlanceCopy.whereLabel(place.detail, target: place.target.rawValue, short: true), mono: true)
-                            .padding(.leading, 11)
+                    } else {
+                        Text("Quiet").font(.title2.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("no sessions running").font(.caption).foregroundStyle(.tertiary).lineLimit(1)
                     }
-                    .padding(.top, 2)
+                    if let head = entry.headSession {
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 5) {
+                                StateDotView(state: head.state, size: 6)
+                                Text(head.rowName).font(.footnote.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
+                                if entry.isMulti, let tag = ServerTag(item: head) { tag.dot() }
+                            }
+                            HStack(spacing: 5) {
+                                StatusBadge(item: head)
+                                Text(GlancePolicy.waitText(since: head.since, now: entry.date))
+                                    .font(.caption2.monospacedDigit()).foregroundStyle(Color(.tertiaryLabel)).fixedSize()
+                            }
+                            .padding(.leading, 11)
+                        }
+                        .padding(.top, 2)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .widgetURL(entry.boardLink)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .widgetURL(entry.boardLink)
         }
+        .glanceTypeClamp()
     }
 }
 
-/// Medium and large: header, the board tiles, then session rows within a budget.
+/// Medium and large: the board tiles (they carry the counts), then as many session rows
+/// as the height holds, up to `budget`, then `+N more` and the server / freshness note.
 struct WorkBoard: View {
     let entry: GlanceEntry
     let budget: Int
     var expandedRows = false
 
     var body: some View {
-        if entry.reachability == .signedOut {
-            SignedOutView()
-        } else {
-            let rows = entry.sessionRows
-            let shown = Array(rows.prefix(budget))
-            let overflow = rows.count - shown.count
-            VStack(alignment: .leading, spacing: expandedRows ? 6 : 5) {
-                SessionsHeader(entry: entry)
-                TileStrip(tiles: entry.tiles, compact: !expandedRows)
-                if rows.isEmpty {
-                    Spacer(minLength: 0)
-                    HStack(spacing: 6) {
-                        Image(systemName: entry.reachability == .unreachable ? "wifi.slash" : "moon.zzz")
-                        Text(entry.reachability == .unreachable ? "Unreachable" : "No sessions running")
-                    }
-                    .font(.footnote).foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
-                    Spacer(minLength: 0)
-                } else {
-                    ForEach(shown) { item in
-                        SessionGlanceRow(item: item, now: entry.date, showsServer: entry.isMulti, showsLater: expandedRows, expanded: expandedRows)
-                    }
-                    if overflow > 0 {
-                        Link(destination: entry.boardLink) {
-                            Text("+\(overflow) more").font(.caption2.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel))
-                        }
+        Group {
+            if entry.reachability == .signedOut {
+                SignedOutView()
+            } else {
+                // The most rows that fit the family at this text size: a 4.7" phone's
+                // large widget holds fewer than a Pro Max's.
+                ViewThatFits(in: .vertical) {
+                    ForEach(Array(stride(from: max(budget, 1), through: 1, by: -1)), id: \.self) { n in
+                        board(rows: n)
                     }
                 }
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .glanceTypeClamp()
+    }
+
+    private func board(rows limit: Int) -> some View {
+        let rows = entry.sessionRows
+        let shown = Array(rows.prefix(limit))
+        let overflow = rows.count - shown.count
+        return VStack(alignment: .leading, spacing: expandedRows ? 6 : 5) {
+            TileStrip(tiles: entry.tiles, compact: !expandedRows)
+            if rows.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: entry.reachability == .unreachable ? "wifi.slash" : "moon.zzz")
+                    Text(entry.reachability == .unreachable ? "Unreachable" : "No sessions running")
+                }
+                .font(.footnote).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
+            } else {
+                ForEach(shown) { item in
+                    SessionGlanceRow(item: item, now: entry.date, showsServer: entry.isMulti, showsLater: expandedRows, expanded: expandedRows)
+                }
+            }
+            BoardFooter(entry: entry, overflow: overflow)
+        }
+    }
+}
+
+/// `+2 more` on the left, the server name (when others are paired) and the freshness
+/// note on the right. Nothing when there is nothing to say.
+struct BoardFooter: View {
+    let entry: GlanceEntry
+    let overflow: Int
+
+    private var hasNote: Bool {
+        entry.reachability == .unreachable || entry.isStale || (entry.isMulti && !entry.unreachableSlices.isEmpty) || entry.showsServerName
+    }
+
+    var body: some View {
+        if overflow > 0 || hasNote {
+            HStack(spacing: 6) {
+                if overflow > 0 {
+                    Link(destination: entry.boardLink) {
+                        Text("+\(overflow) more").font(.caption2.weight(.semibold)).foregroundStyle(Color(.tertiaryLabel)).fixedSize()
+                    }
+                }
+                Spacer(minLength: 4)
+                if entry.showsServerName, let s = entry.server { ServerTag(s) }
+                HonestyFooter(entry: entry)
+            }
+            .lineLimit(1)
         }
     }
 }
@@ -241,10 +250,12 @@ struct SessionsCircular: View {
             }
         }
         .widgetURL(entry.headLink)
+        .glanceTypeClamp()
     }
 }
 
-/// `Needs you +2` / `[who] web · Allow?` / `4m · MacBook · web`, the oldest session only.
+/// `Needs you +2` / `[who] Allow? · web` / `4m · MacBook Pro · web`, the oldest session
+/// only. The status word comes before the name, so only the name ever shortens.
 struct SessionsRectangular: View {
     let entry: GlanceEntry
 
@@ -260,15 +271,15 @@ struct SessionsRectangular: View {
             default:
                 if let head = entry.headSession, head.waitsOnYou {
                     HStack(spacing: 4) {
-                        Text("Needs you").font(.headline).widgetAccentable()
-                        if entry.needsYouCount > 1 { Text("+\(entry.needsYouCount - 1)").font(.caption).foregroundStyle(.secondary) }
+                        Text("Needs you").font(.headline).widgetAccentable().fixedSize()
+                        if entry.needsYouCount > 1 { Text("+\(entry.needsYouCount - 1)").font(.caption).foregroundStyle(.secondary).fixedSize() }
                     }
                     AccessorySessionLine(item: head)
                     AccessoryWhereLine(item: head, now: entry.date, showsServer: entry.isMulti || entry.showsServerName)
                 } else if let head = entry.headSession {
                     HStack(spacing: 4) {
-                        Text("Running").font(.headline)
-                        if entry.runningCount > 1 { Text("+\(entry.runningCount - 1)").font(.caption).foregroundStyle(.secondary) }
+                        Text("Running").font(.headline).fixedSize()
+                        if entry.runningCount > 1 { Text("+\(entry.runningCount - 1)").font(.caption).foregroundStyle(.secondary).fixedSize() }
                     }
                     AccessorySessionLine(item: head)
                     AccessoryWhereLine(item: head, now: entry.date, showsServer: entry.isMulti || entry.showsServerName)
@@ -280,23 +291,24 @@ struct SessionsRectangular: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .widgetURL(entry.reachability == .signedOut ? DeepLink.section("more").url : entry.headLink)
+        .glanceTypeClamp()
     }
 }
 
-/// `[who] name · Word` for the lock screen: monochrome, one line.
+/// `[who] Allow? · web` for the lock screen: monochrome, one line, the word whole.
 struct AccessorySessionLine: View {
     let item: WatchItem
 
     var body: some View {
         HStack(spacing: 4) {
             WhoGlyph(item: item, size: 10)
-            MonoPath(text: item.rowName, size: .caption)
-            Text("· \(item.statusWord)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(item.statusWord).font(.caption.weight(.semibold)).lineLimit(1).fixedSize()
+            Text("· \(item.rowName)").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
         }
     }
 }
 
-/// `4m · MacBook · web`: wait, then the Where chip (host and leaf).
+/// `4m · MacBook Pro · web`: the wait, then the Where as long as it fits whole.
 struct AccessoryWhereLine: View {
     let item: WatchItem
     let now: Date
@@ -304,12 +316,14 @@ struct AccessoryWhereLine: View {
 
     var body: some View {
         let place = item.whereValue
-        HStack(spacing: 4) {
-            Text(GlancePolicy.waitText(since: item.since, now: now))
+        var options = GlanceCopy.whereOptions(place.detail, target: place.target.rawValue)
+        if showsServer, let name = item.serverName, place.detail == nil { options = options.map { "\($0) · \(name)" } }
+        return HStack(spacing: 4) {
+            Text(GlancePolicy.waitText(since: item.since, now: now)).fixedSize()
             Image(systemName: place.systemImage).font(.caption2)
-            Text(GlanceCopy.whereLabel(place.detail, target: place.target.rawValue, short: true)).lineLimit(1)
-            if showsServer, let name = item.serverName, place.detail == nil {
-                Text("· \(name)").lineLimit(1)
+            ViewThatFits(in: .horizontal) {
+                ForEach(options, id: \.self) { Text($0).lineLimit(1).fixedSize() }
+                Text(options.last ?? "").lineLimit(1).truncationMode(.middle)
             }
         }
         .font(.caption).foregroundStyle(.secondary)
@@ -325,14 +339,17 @@ struct SessionsInline: View {
     }
 
     var body: some View {
-        switch entry.reachability {
-        case .signedOut: Text("Optio · sign in")
-        case .unreachable where entry.needsYouCount == 0: Text("\(prefix) · unreachable")
-        default:
-            let head = entry.headSession.flatMap { $0.waitsOnYou ? $0 : nil }
-            Text(GlanceCopy.inline(prefix: prefix, headName: head?.rowName, headWord: head?.statusWord,
-                                   needsYou: entry.needsYouCount, running: entry.runningCount))
+        Group {
+            switch entry.reachability {
+            case .signedOut: Text("Optio · sign in")
+            case .unreachable where entry.needsYouCount == 0: Text("\(prefix) · unreachable")
+            default:
+                let head = entry.headSession.flatMap { $0.waitsOnYou ? $0 : nil }
+                Text(GlanceCopy.inline(prefix: prefix, headName: head?.rowName, headWord: head?.statusWord,
+                                       needsYou: entry.needsYouCount, running: entry.runningCount))
+            }
         }
+        .glanceTypeClamp()
     }
 }
 

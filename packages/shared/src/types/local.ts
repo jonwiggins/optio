@@ -63,12 +63,14 @@ export interface LocalHostAgentModels {
 }
 
 /**
- * How a local Claude Code agent handles permission prompts — its
- * `--permission-mode`. `auto` (the daemon's default): Claude's classifier
- * approves routine actions and blocks risky ones, so an unattended run
- * doesn't stall on a prompt. `bypassPermissions`: skip every check
- * (`--dangerously-skip-permissions`). `default`: ask first (a headless run
- * can't ask, so those actions are denied).
+ * How a local agent handles permission prompts. For Claude Code, its
+ * `--permission-mode`: `auto` (the daemon's default) lets Claude's classifier
+ * approve routine actions and block risky ones, so an unattended run doesn't
+ * stall on a prompt; `bypassPermissions` skips every check
+ * (`--dangerously-skip-permissions`); `default` asks first (a headless run
+ * can't ask, so those actions are denied). For Codex, only
+ * `bypassPermissions` means anything: `--yolo` (no approvals, no sandbox);
+ * otherwise Codex keeps the machine's own approval and sandbox config.
  */
 export type LocalAgentPermissionMode = "auto" | "bypassPermissions" | "default";
 
@@ -166,7 +168,11 @@ export type LocalTerminalSpec =
        * `--effort`, Codex `-c model_reasoning_effort=…`.
        */
       effort?: string;
-      /** Claude Code only: its `--permission-mode`. The daemon's default is `auto`. */
+      /**
+       * Claude Code: its `--permission-mode` (the daemon's default is `auto`).
+       * Codex: `bypassPermissions` runs it with `--yolo`; anything else keeps
+       * the machine's own config.
+       */
       permissionMode?: LocalAgentPermissionMode;
       /**
        * "Work on a new branch that becomes a PR": the server wraps the prompt
@@ -347,8 +353,8 @@ export interface LocalBlueprint {
   /**
    * Agent spawns: per-run agent parameters keyed like the provider catalog
    * (`claudeModel`, `claudeEffort`, `claudePermissionMode`, `copilotModel`,
-   * `copilotEffort`; string or boolean values) — the fields that apply to a
-   * run on a machine. Null = the machine's own defaults.
+   * `copilotEffort`, `codexPermissionMode`; string or boolean values) — the
+   * fields that apply to a run on a machine. Null = the machine's own defaults.
    */
   agentOptions?: Record<string, unknown> | null;
   enabled: boolean;
@@ -505,18 +511,43 @@ export type LocalDirOp = "add" | "remove";
 export type LocalStreamServerMessage =
   | { type: "status"; state: LocalTerminalState; attentionState: LocalAttentionState }
   /**
-   * The PTY's current grid. Viewers that did not ask for this size render it
-   * scaled to fit rather than fighting over the PTY (see local-terminal.tsx).
-   * For an exited terminal it is the grid its final screen was recorded at:
-   * the replay that follows only reads right at that size.
+   * The PTY's current grid. `yours` says whether this viewer holds it (the
+   * server picks the screen in use, see services/local-grid.ts): true — fit
+   * the terminal to your own screen; false — render this grid scaled to fit,
+   * with "Use this screen". Servers before it omit `yours`; viewers then
+   * treat a grid they did not ask for as another screen's (see
+   * local-terminal.tsx). For an exited terminal it is the grid its final
+   * screen was recorded at, without `yours`: the replay that follows only
+   * reads right at that size.
    */
-  | { type: "size"; cols: number; rows: number }
+  | { type: "size"; cols: number; rows: number; yours?: boolean }
   | { type: "exit"; exitCode: number | null }
   | { type: "error"; message: string };
 
 export type LocalStreamClientMessage =
   | { type: "input"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+  /** Size the PTY to this screen now: a click or keystroke here, or "Use this screen". */
+  | { type: "resize"; cols: number; rows: number }
+  /**
+   * How this viewer sees the terminal, sent on connect and whenever it
+   * changes: the grid that fits its screen, whether the terminal is on screen
+   * (a visible tab, the app in front), and how long since its user last
+   * touched it. `open` marks the user arriving — the pane opened, its tab came
+   * to the front, or they came back after LOCAL_VIEW_IN_USE_MS away — and asks
+   * for the grid: the server fits the PTY to this screen unless another
+   * screen showing the terminal was used within LOCAL_VIEW_IN_USE_MS.
+   */
+  | {
+      type: "view";
+      cols: number;
+      rows: number;
+      visible: boolean;
+      idleMs: number;
+      open?: boolean;
+    };
+
+/** A screen touched this recently is in use: it keeps the terminal's grid. */
+export const LOCAL_VIEW_IN_USE_MS = 60_000;
 
 /** Content-free nudge published on the shared /ws/events stream. */
 export interface LocalChangedEvent {

@@ -3144,12 +3144,14 @@ public struct LocalHostAgentModels: Codable, Hashable, Sendable {
     }
 }
 
-/// How a local Claude Code agent handles permission prompts — its
-/// `--permission-mode`. `auto` (the daemon's default): Claude's classifier
-/// approves routine actions and blocks risky ones, so an unattended run
-/// doesn't stall on a prompt. `bypassPermissions`: skip every check
-/// (`--dangerously-skip-permissions`). `default`: ask first (a headless run
-/// can't ask, so those actions are denied).
+/// How a local agent handles permission prompts. For Claude Code, its
+/// `--permission-mode`: `auto` (the daemon's default) lets Claude's classifier
+/// approve routine actions and block risky ones, so an unattended run doesn't
+/// stall on a prompt; `bypassPermissions` skips every check
+/// (`--dangerously-skip-permissions`); `default` asks first (a headless run
+/// can't ask, so those actions are denied). For Codex, only
+/// `bypassPermissions` means anything: `--yolo` (no approvals, no sandbox);
+/// otherwise Codex keeps the machine's own approval and sandbox config.
 public enum LocalAgentPermissionMode: String, Codable, Hashable, Sendable, CaseIterable {
     case auto = "auto"
     case bypassPermissions = "bypassPermissions"
@@ -3373,7 +3375,9 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
         /// Reasoning effort passed to the agent CLI, when set: Claude Code
         /// `--effort`, Codex `-c model_reasoning_effort=…`.
         public let effort: String?
-        /// Claude Code only: its `--permission-mode`. The daemon's default is `auto`.
+        /// Claude Code: its `--permission-mode` (the daemon's default is `auto`).
+        /// Codex: `bypassPermissions` runs it with `--yolo`; anything else keeps
+        /// the machine's own config.
         public let permissionMode: LocalAgentPermissionMode?
         /// "Work on a new branch that becomes a PR": the server wraps the prompt
         /// with branch-and-PR instructions off this base before the spawn.
@@ -3799,8 +3803,8 @@ public struct LocalBlueprint: Codable, Hashable, Sendable {
     public let sessionMode: LocalAgentSessionMode
     /// Agent spawns: per-run agent parameters keyed like the provider catalog
     /// (`claudeModel`, `claudeEffort`, `claudePermissionMode`, `copilotModel`,
-    /// `copilotEffort`; string or boolean values) — the fields that apply to a
-    /// run on a machine. Null = the machine's own defaults.
+    /// `copilotEffort`, `codexPermissionMode`; string or boolean values) — the
+    /// fields that apply to a run on a machine. Null = the machine's own defaults.
     public let agentOptions: [String: AnyCodable]?
     public let enabled: Bool
     public let createdAt: String
@@ -4688,15 +4692,18 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
     public struct SizePayload: Codable, Hashable, Sendable {
         public let cols: Double
         public let rows: Double
+        public let yours: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case cols = "cols"
             case rows = "rows"
+            case yours = "yours"
         }
 
-        public init(cols: Double, rows: Double) {
+        public init(cols: Double, rows: Double, yours: Bool? = nil) {
             self.cols = cols
             self.rows = rows
+            self.yours = yours
         }
     }
 
@@ -4767,6 +4774,7 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
 public enum LocalStreamClientMessage: Codable, Hashable, Sendable {
     case input(InputPayload)
     case resize(ResizePayload)
+    case view(ViewPayload)
     /// Fallback for discriminator values this client does not know about yet.
     case unknown(AnyCodable)
 
@@ -4797,6 +4805,30 @@ public enum LocalStreamClientMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct ViewPayload: Codable, Hashable, Sendable {
+        public let cols: Double
+        public let rows: Double
+        public let visible: Bool
+        public let idleMs: Double
+        public let `open`: Bool?
+
+        private enum CodingKeys: String, CodingKey {
+            case cols = "cols"
+            case rows = "rows"
+            case visible = "visible"
+            case idleMs = "idleMs"
+            case `open` = "open"
+        }
+
+        public init(cols: Double, rows: Double, visible: Bool, idleMs: Double, `open`: Bool? = nil) {
+            self.cols = cols
+            self.rows = rows
+            self.visible = visible
+            self.idleMs = idleMs
+            self.`open` = `open`
+        }
+    }
+
     private enum DiscriminatorKey: String, CodingKey {
         case type
     }
@@ -4807,6 +4839,7 @@ public enum LocalStreamClientMessage: Codable, Hashable, Sendable {
         switch discriminator {
         case "input": self = .input(try InputPayload(from: decoder))
         case "resize": self = .resize(try ResizePayload(from: decoder))
+        case "view": self = .view(try ViewPayload(from: decoder))
         default: self = .unknown(try AnyCodable(from: decoder))
         }
     }
@@ -4820,6 +4853,10 @@ public enum LocalStreamClientMessage: Codable, Hashable, Sendable {
         case .resize(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("resize", forKey: .type)
+            try payload.encode(to: encoder)
+        case .view(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("view", forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let value):
             try value.encode(to: encoder)
@@ -7919,6 +7956,23 @@ public struct GitHubEvent: Codable, Hashable, Sendable {
     }
 }
 
+/// Whose Slack posts fire a trigger: `people` (the default), `bots` (apps,
+/// integrations and incoming webhooks, such as an alerting tool), or `anyone`.
+public enum SlackPostedBy: String, Codable, Hashable, Sendable, CaseIterable {
+    case people = "people"
+    case bots = "bots"
+    case anyone = "anyone"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [SlackPostedBy] = [.people, .bots, .anyone]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SlackPostedBy(rawValue: raw) ?? .unknown
+    }
+}
+
 public struct SlackTriggerConfig: Codable, Hashable, Sendable {
     /// Channel id (C0123…) to listen on. Required.
     public let channelId: String
@@ -7928,24 +7982,58 @@ public struct SlackTriggerConfig: Codable, Hashable, Sendable {
     public let mentionOnly: Bool?
     /// Also fire for thread replies (default: top-level messages only).
     public let includeThreads: Bool?
+    /// Whose messages fire it (default `people`). Posts by the Slack app Optio
+    /// receives events as never fire a trigger, whatever this says.
+    public let postedBy: SlackPostedBy?
+    /// With bots: only this one — its name as Slack shows it, its bot id (B…),
+    /// or its app id (A…); case-insensitive. Empty = any bot.
+    public let bot: String?
 
     private enum CodingKeys: String, CodingKey {
         case channelId = "channelId"
         case keyword = "keyword"
         case mentionOnly = "mentionOnly"
         case includeThreads = "includeThreads"
+        case postedBy = "postedBy"
+        case bot = "bot"
     }
 
     public init(
         channelId: String,
         keyword: String? = nil,
         mentionOnly: Bool? = nil,
-        includeThreads: Bool? = nil
+        includeThreads: Bool? = nil,
+        postedBy: SlackPostedBy? = nil,
+        bot: String? = nil
     ) {
         self.channelId = channelId
         self.keyword = keyword
         self.mentionOnly = mentionOnly
         self.includeThreads = includeThreads
+        self.postedBy = postedBy
+        self.bot = bot
+    }
+}
+
+/// The bot that posted a Slack message.
+public struct SlackBot: Codable, Hashable, Sendable {
+    /// Bot id (B…); null for an app posting without one.
+    public let id: String?
+    /// App id (A…), when Slack says.
+    public let appId: String?
+    /// The name Slack shows on the post, when it says.
+    public let name: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case appId = "appId"
+        case name = "name"
+    }
+
+    public init(id: String? = nil, appId: String? = nil, name: String? = nil) {
+        self.id = id
+        self.appId = appId
+        self.name = name
     }
 }
 
@@ -7953,12 +8041,17 @@ public struct SlackEvent: Codable, Hashable, Sendable {
     /// `message` | `app_mention`.
     public let event: String
     public let channelId: String
+    /// Who posted it; empty for a bot's post.
     public let userId: String
+    /// What the message says. A bot's post adds what its attachments and blocks
+    /// say, which is where alerting tools put the details.
     public let text: String
     public let ts: String
     public let threadTs: String?
     public let teamId: String?
     public let eventId: String?
+    /// Set when a bot posted it.
+    public let bot: SlackBot?
 
     private enum CodingKeys: String, CodingKey {
         case event = "event"
@@ -7969,6 +8062,7 @@ public struct SlackEvent: Codable, Hashable, Sendable {
         case threadTs = "threadTs"
         case teamId = "teamId"
         case eventId = "eventId"
+        case bot = "bot"
     }
 
     public init(
@@ -7979,7 +8073,8 @@ public struct SlackEvent: Codable, Hashable, Sendable {
         ts: String,
         threadTs: String? = nil,
         teamId: String? = nil,
-        eventId: String? = nil
+        eventId: String? = nil,
+        bot: SlackBot? = nil
     ) {
         self.event = event
         self.channelId = channelId
@@ -7989,6 +8084,7 @@ public struct SlackEvent: Codable, Hashable, Sendable {
         self.threadTs = threadTs
         self.teamId = teamId
         self.eventId = eventId
+        self.bot = bot
     }
 }
 

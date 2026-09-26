@@ -163,11 +163,12 @@ composer that writes your message plus Enter to the PTY. A plain shell, or an ag
 said anything yet, opens on the **Screen**, the live terminal. The toggle in the header switches
 between them (`LocalSessionView` in `:feature:local`).
 
-**One PTY, one grid.** Attaching from the phone never resizes the session. The Screen face renders
-the grid the daemon announces, shrunk to fit (**Sized for another device**), and only an explicit
-interaction claims the grid for the phone: a tap on the terminal, a key from the key bar, or **Use
-this screen**. The PTY is then resized to the phone. TUI screens use absolute cursor moves and
-can't reflow, so each connection's replay is held until the daemon's `size` frame lands
+**One PTY, one grid,** sized for the screen in use (the server decides:
+`apps/api/src/services/local-grid.ts`). The Screen face coming up fits the session to the phone,
+unless another screen showing it was used in the last minute (a laptop you're working at). Then it
+renders that grid shrunk to fit (**Sized for another device**), and a tap on the terminal, a key
+from the key bar, or **Use this screen** takes the grid for the phone. TUI screens use absolute
+cursor moves and can't reflow, so each connection's replay is held until the daemon's `size` frame lands
 (`LocalTerminalStream`, plus `TerminalSizing` and `StreamPolicy` in `:core:terminal`, ports of the
 web's `sizing.ts` and `stream-policy.ts`). A finished terminal shows its **Recorded screen**. Pod
 sessions work the other way round: the phone owns their grid, and the PTY follows its size.

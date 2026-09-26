@@ -1,9 +1,10 @@
 import XCTest
 
 /// Walks a Local session's two faces on a real terminal and saves screenshots:
-/// Transcript (default), Screen sized for another device, the claim, and the
-/// composer. Needs a dev server and a *throwaway* terminal id — the claim step
-/// resizes its PTY and the composer types into it:
+/// Transcript (default), the Screen (fitted to the phone, or sized for another
+/// device when a screen showing it is in use), the claim, and the composer.
+/// Needs a dev server and a *throwaway* terminal id — opening the Screen and the
+/// claim resize its PTY, and the composer types into it:
 ///   OPTIO_UITEST_SERVER_URL, OPTIO_UITEST_TOKEN, OPTIO_UITEST_TERMINAL_ID
 ///   (optional OPTIO_UITEST_TERMINAL_TITLE to navigate by row when the deep link
 ///   misses, OPTIO_UITEST_SHOT_DIR for PNGs, OPTIO_UITEST_MESSAGE to send)

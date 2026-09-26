@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Slack bots can start work.** A Slack trigger's new **Posted by** setting takes bots (apps, integrations, incoming webhooks: an alerting tool, say) or anyone, not just people, and **Bot** narrows it to one bot by the name on its posts or its id. So "when the alert bot posts in #alerts, start a Codex session to debug it" is a Slack trigger with the channel, **Posted by: Bots** and the bot's name. A bot's `{{text}}` includes what its attachments and blocks say, where alerting tools put the details, and `{{botName}}` names the bot. Posts by Optio's own Slack app never start anything. Triggers keep firing only for people unless you change the setting.
+- **Codex can skip every check on your machine.** For a Codex run on a machine, the New work form's **Permissions** has **Skip all checks**, which starts Codex with `--yolo` (`--dangerously-bypass-approvals-and-sandbox`: no approval prompts, no sandbox), for new, one-shot and resumed sessions alike. Left at **Default**, Codex keeps the machine's own settings. Claude Code's **Skip all checks** (`--dangerously-skip-permissions`) was already there. The iOS and Android forms now show **Permissions** and **Reasoning effort** for runs on a machine too, where they showed only the model. Restart `optio local up` to pick this up.
+
+### Changed
+
+- **A session fits the screen you open it on.** Opening a session, bringing its tab to the front, or coming back to it after a minute away resizes the terminal to that screen, with no need to click **Use this screen**. A screen that is showing the session and was used in the last minute keeps its size, so glancing from your phone at a laptop you're working at doesn't squeeze the laptop down to phone width. The newcomer then shows the laptop's layout scaled down, with **Use this screen**, and typing or clicking there still takes it. The server decides which screen that is (it knows every screen viewing a session), and a laptop that went to sleep with the session open stops counting within seconds. Same in the iOS and Android apps, on the Screen face.
+- **The iOS Live Activity looks like the Work widget.** Its top row is the widget's counts: Need you and Running, plus Waiting, Recurring, and Agents. When more than one session needs you, it lists them instead of showing only the oldest: each row has its status (**Allow?**, **Reply**, **Conflict**…), how long it has waited, and a **Later** button, and tapping a row opens that session. Up to three are listed, else the oldest two and "+N more". A single waiting session is still shown in full with **Reply…** and **Later**. When nothing needs you, it lists what's running the same way, newest first. The Dynamic Island shows how many need you and how many are running, and lists the same sessions when expanded.
+- **iOS Live Activity and widgets** read cleanly at any width and text size. Status words, timers, counts, and chip values always show in full; only titles and reasons shorten. A widget lists as many sessions as fit.
+
+### Fixed
+
+- **Copying from a session in the web UI.** With Claude Code in fullscreen mode, a drag selects in Claude Code rather than in the terminal, and Claude Code copies the selection with an escape sequence (OSC 52) that the web terminal ignored. Now a drag followed by ⌘C copies it (in Chrome it's on the clipboard as soon as you let go), and ⌥-drag selects in the terminal itself. The same goes for `/copy` and for tmux and vim copying. Pod sessions get the same fix.
+- The iOS app no longer puts text back on the clipboard when you open a session that copied something earlier, and a program in a session can no longer read your phone's clipboard.
+- On Android, editing a Local automation shows its model and permission settings, and saving applies changes to them; the edit form used to leave them out.
+- A screen whose size already matched the session's no longer showed **Sized for another device**, and **Use this screen** no longer resized the session twice.
+- A web terminal no longer answered queries replayed from a session's history (a cursor-position or terminal-identity request from when the program started). The stray answers reached the program as input, and opening a second window could take the session's size.
+- **Later** on the iOS Live Activity takes effect at once: the activity moves on to the next session waiting, or shows the session as running when it was the only one. It used to look like nothing happened until the app refreshed, and a lone waiting session stayed put even then. **Resume** and **Retry** update it right away too, and **Later** from a notification does the same. On Android, **Later** on the only waiting session now moves the Watch on as well.
+
 ## [0.6.3] - 2026-09-24
 
 ### Changed

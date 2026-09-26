@@ -418,7 +418,7 @@ val TRIGGER_PARAMS: Map<WhenType, List<String>> = mapOf(
         "event", "kind", "repo", "repoUrl", "number", "title", "body", "url", "author", "headBranch", "baseBranch",
         "commentBody", "commentUrl", "action",
     ),
-    WhenType.SLACK to listOf("channelId", "userId", "text", "ts", "threadTs", "permalink"),
+    WhenType.SLACK to listOf("channelId", "userId", "text", "ts", "threadTs", "permalink", "botName"),
     WhenType.LINEAR to listOf(
         "event", "identifier", "title", "description", "url", "labels", "teamKey", "assignee", "priority", "state",
         "commentBody", "commentUrl", "actor", "ticketTitle", "ticketBody", "ticketUrl", "ticketLabels",

@@ -350,7 +350,7 @@ final class WorkFormState {
         submitting = true
         defer { submitting = false }
         do {
-            return try await WorkFormSubmitter(api: api).create(draft, repoUrl: effectiveRepoUrl, autoName: autoName)
+            return try await WorkFormSubmitter(api: api).create(draft, repoUrl: effectiveRepoUrl, autoName: autoName, catalog: catalog)
         } catch {
             self.error = "Couldn't create it: \(ErrorText.humanize(error))"
             return nil

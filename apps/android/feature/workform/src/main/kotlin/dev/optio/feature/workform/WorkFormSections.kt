@@ -529,7 +529,7 @@ internal fun WhoSection(state: WorkFormState, modifier: Modifier = Modifier) {
                 provider = state.provider,
                 state = state.catalogState,
                 values = d.agentOptions,
-                modelOnly = !state.fullOptionsApply,
+                local = !state.fullOptionsApply,
                 onChange = state::setOption,
             )
         }
@@ -542,7 +542,7 @@ private fun whoFooter(state: WorkFormState, runtimes: List<Choice<String>>): Str
         state.isTerminal -> "Just you at a shell prompt — no agent, no prompt."
         state.kind == WorkKind.POD_SESSION ->
             "A pod session opens a terminal and a Claude Code chat side by side — you type the first message there."
-        state.isLocal -> "Uses the CLI and login already on the machine; only the model is set here."
+        state.isLocal -> "Uses the CLI and login already on the machine; anything left at Default comes from its own config."
         state.draft.withRepo -> "Runs with the server's credentials. Parameters start from the repo's defaults and apply to this run only."
         else -> "Runs with the server's credentials. Blank means the runtime's default."
     }

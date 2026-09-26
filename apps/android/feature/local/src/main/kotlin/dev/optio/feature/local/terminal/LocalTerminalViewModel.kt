@@ -159,6 +159,10 @@ class LocalTerminalViewModel(
         }
         screen.onGridSizeChanged = { grid -> _stream.value?.onGridSizeChanged(grid) }
         screen.onNaturalGridChanged = { _stream.value?.onNaturalGridChanged() }
+        // The grid goes to the screen in use: this phone, while the Screen face shows.
+        viewModelScope.launch {
+            sessionView.collect { view -> _stream.value?.setShowing(view == LocalSessionView.SCREEN) }
+        }
         viewModelScope.launch { load() }
         viewModelScope.launch {
             try {
@@ -297,6 +301,7 @@ class LocalTerminalViewModel(
             )
         s.onStatus = { state, attention -> applyStatus(state, attention) }
         s.onExit = { code -> onExit(code) }
+        s.setShowing(sessionView.value == LocalSessionView.SCREEN)
         _stream.value = s
         s.connect()
     }

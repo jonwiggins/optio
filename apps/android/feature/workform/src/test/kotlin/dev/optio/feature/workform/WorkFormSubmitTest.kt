@@ -255,6 +255,71 @@ class WorkFormSubmitTest {
         )
     }
 
+    /** Codex's catalog as the API serves it: effort both places, "Skip all checks" on a machine only. */
+    private val codexCatalog = OptioJson.decodeFromString(
+        ProviderCatalog.serializer(),
+        """{"provider":"openai","label":"OpenAI Codex","modelField":"copilotModel","options":[
+          {"key":"copilotEffort","label":"Reasoning effort","kind":"select","runsOn":["pod","local"],"localParam":"effort"},
+          {"key":"codexPermissionMode","label":"Permissions","kind":"select","runsOn":["local"],"localParam":"permissionMode",
+           "choices":[{"value":"bypassPermissions","label":"Skip all checks"}]}]}""",
+    )
+
+    @Test
+    fun localCodexTerminalSkipsAllChecksWhenAsked() = runTest {
+        val d = normalize(
+            local(
+                WorkDraft.EMPTY.copy(
+                    then = Then.WAITS_FOR_ME,
+                    withRepo = false,
+                    runtime = "codex",
+                    prompt = "Fix the flaky test",
+                    name = "Yolo",
+                    agentOptions = mapOf(
+                        "copilotModel" to OptionValue.Str("gpt-5.6-sol"),
+                        "copilotEffort" to OptionValue.Str("high"),
+                        "codexPermissionMode" to OptionValue.Str("bypassPermissions"),
+                    ),
+                ),
+            ),
+        )
+        submitter.create(d, "", autoName = "Terminal 1", catalog = codexCatalog)
+        assertEquals(
+            obj(
+                """{"kind":"agent","agent":"codex","prompt":"Fix the flaky test","model":"gpt-5.6-sol","effort":"high",
+                "permissionMode":"bypassPermissions"}""",
+            ),
+            body("POST", "/api/local/terminals")["spec"],
+        )
+        // "Default" leaves the machine's own approval and sandbox config.
+        val plain = d.copy(agentOptions = d.agentOptions + ("codexPermissionMode" to OptionValue.Str("")))
+        assertEquals(LocalAgentParams("gpt-5.6-sol", "high", null), localAgentParams(plain, codexCatalog))
+        // No catalog (it didn't load): just the model.
+        assertEquals(LocalAgentParams("gpt-5.6-sol", null, null), localAgentParams(d, null))
+    }
+
+    @Test
+    fun localAutomationCarriesItsAgentOptions() = runTest {
+        val d = normalize(
+            local(
+                WorkDraft.EMPTY.copy(
+                    whenType = WhenType.SLACK,
+                    event = EventTrigger(EventTriggerType.SLACK, obj("""{"channelId":"C0123ABCD"}""")),
+                    withRepo = false,
+                    runtime = "codex",
+                    prompt = "Debug {{text}}",
+                    then = Then.WAITS_FOR_ME,
+                    name = "Alerts",
+                    agentOptions = mapOf("codexPermissionMode" to OptionValue.Str("bypassPermissions")),
+                ),
+            ),
+        )
+        submitter.create(d, "", autoName = "Automation 1", catalog = codexCatalog)
+        assertEquals(
+            obj("""{"codexPermissionMode":"bypassPermissions"}"""),
+            body("POST", "/api/local/blueprints")["agentOptions"],
+        )
+    }
+
     @Test
     fun localShellTerminalIsJustAShell() = runTest {
         val d = normalize(local(preset("terminal")!!.apply(WorkDraft.EMPTY), dir = "/Users/e2e/notes"))
@@ -527,7 +592,8 @@ class WorkFormSubmitTest {
         assertEquals(
             obj(
                 """{"name":"Reviews","description":null,"hostId":"h1","dir":"/Users/dev/repos/app","repoUrl":"https://github.com/acme/app",
-                "baseBranch":"main","commandTemplate":"Look at {{url}}","runTitle":null,"agent":"claude-code","sessionMode":"interactive"}""",
+                "baseBranch":"main","commandTemplate":"Look at {{url}}","runTitle":null,"agent":"claude-code","sessionMode":"interactive",
+                "agentOptions":null}""",
             ),
             body("PATCH", "/api/local/blueprints/b-1"),
         )

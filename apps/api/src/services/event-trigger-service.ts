@@ -23,6 +23,7 @@ import type {
   LinearEvent,
   LinearEventKind,
   LinearTriggerConfig,
+  SlackBot,
   SlackEvent,
   SlackTriggerConfig,
 } from "@optio/shared";
@@ -42,6 +43,9 @@ type Obj = Record<string, unknown>;
 
 function obj(v: unknown): Obj {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : {};
+}
+function arr(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : [];
 }
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
@@ -253,10 +257,15 @@ export function githubEventParams(
 
 // ── Slack ───────────────────────────────────────────────────────────────────
 
+/** The most message text a Slack firing hands on (to a prompt, a title). */
+const SLACK_TEXT_MAX = 20_000;
+
 /**
- * Normalize a Slack Events API `event_callback`. Bot messages, edits,
- * joins and other subtypes are dropped — only human `message` and
- * `app_mention` events come through.
+ * Normalize a Slack Events API `event_callback`: new `message` and
+ * `app_mention` posts, by people or by bots (`bot_id`, or the `bot_message`
+ * subtype of integrations and incoming webhooks). Edits, deletes, joins and
+ * other subtypes are dropped, and so is anything the receiving app posted
+ * itself, so Optio's own Slack messages can't start work.
  */
 export function normalizeSlackEvent(payload: unknown): SlackEvent | null {
   const p = obj(payload);
@@ -264,9 +273,22 @@ export function normalizeSlackEvent(payload: unknown): SlackEvent | null {
   const ev = obj(p.event);
   const type = str(ev.type);
   if (type !== "message" && type !== "app_mention") return null;
-  if (ev.bot_id || ev.subtype) return null;
+  const subtype = str(ev.subtype);
+  if (subtype && subtype !== "bot_message") return null;
+  const profile = obj(ev.bot_profile);
+  const bot: SlackBot | null =
+    ev.bot_id || subtype === "bot_message"
+      ? {
+          id: strOrNull(ev.bot_id),
+          appId: strOrNull(ev.app_id) ?? strOrNull(profile.app_id),
+          name: strOrNull(profile.name) ?? strOrNull(ev.username),
+        }
+      : null;
+  if (postedByReceivingApp(p, ev, bot)) return null;
   const channelId = str(ev.channel);
-  const text = str(ev.text);
+  // A person's text is the whole message (their blocks repeat it); a bot's
+  // is often a one-line summary with the details in attachments or blocks.
+  const text = bot ? slackMessageText(ev) : str(ev.text);
   if (!channelId || !text) return null;
   return {
     event: type,
@@ -277,11 +299,121 @@ export function normalizeSlackEvent(payload: unknown): SlackEvent | null {
     threadTs: strOrNull(ev.thread_ts),
     teamId: strOrNull(p.team_id),
     eventId: strOrNull(p.event_id),
+    bot,
   };
+}
+
+/**
+ * Whether the app these events are delivered to posted the message itself
+ * (its app id, or its bot user): Optio replying in a channel must not start
+ * more work there.
+ */
+function postedByReceivingApp(p: Obj, ev: Obj, bot: SlackBot | null): boolean {
+  const appId = str(p.api_app_id);
+  if (appId && bot?.appId === appId) return true;
+  const user = str(ev.user);
+  return (
+    !!user &&
+    arr(p.authorizations).some((a) => obj(a).is_bot === true && str(obj(a).user_id) === user)
+  );
+}
+
+/**
+ * What a message says: its text, then what its blocks and attachments add
+ * (header, sections, fields, context, rich text; an attachment's pretext,
+ * title, text, fields and footer, or its fallback when it has none of those).
+ * A piece the text already says isn't repeated.
+ */
+export function slackMessageText(ev: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const flat = (t: string) => t.replace(/\s+/g, " ");
+  const add = (piece: unknown) => {
+    const t = typeof piece === "string" ? piece.trim() : "";
+    if (t && !flat(parts.join("\n")).includes(flat(t))) parts.push(t);
+  };
+  add(ev.text);
+  for (const block of arr(ev.blocks)) blockText(block).forEach(add);
+  for (const raw of arr(ev.attachments)) {
+    const a = obj(raw);
+    const title = str(a.title);
+    const link = str(a.title_link);
+    const fields = arr(a.fields).map((f) => {
+      const title = str(obj(f).title);
+      const value = str(obj(f).value);
+      return title && value ? `${title}: ${value}` : value || title;
+    });
+    const blocks = arr(a.blocks).flatMap(blockText);
+    add(a.pretext);
+    add(title && link ? `${title} (${link})` : title);
+    add(a.text);
+    fields.forEach(add);
+    blocks.forEach(add);
+    add(a.footer);
+    if (!a.pretext && !title && !a.text && !fields.length && !blocks.length) add(a.fallback);
+  }
+  return parts.join("\n").slice(0, SLACK_TEXT_MAX);
+}
+
+/** A Block Kit block's text. */
+function blockText(block: unknown): string[] {
+  const b = obj(block);
+  const textOf = (t: unknown) => (typeof t === "string" ? t : str(obj(t).text));
+  switch (str(b.type)) {
+    case "header":
+    case "markdown":
+      return [textOf(b.text)];
+    case "section":
+      return [textOf(b.text), ...arr(b.fields).map(textOf)];
+    case "context":
+      return [arr(b.elements).map(textOf).filter(Boolean).join(" ")];
+    case "rich_text":
+      return arr(b.elements).map(richText);
+    default:
+      return [];
+  }
+}
+
+/** A rich_text element as plain text. */
+function richText(element: unknown): string {
+  const e = obj(element);
+  switch (str(e.type)) {
+    case "text":
+      return str(e.text);
+    case "link":
+      return str(e.text) || str(e.url);
+    case "user":
+      return `<@${str(e.user_id)}>`;
+    case "channel":
+      return `<#${str(e.channel_id)}>`;
+    case "emoji":
+      return `:${str(e.name)}:`;
+    case "rich_text_list":
+      return arr(e.elements)
+        .map((item) => `- ${richText(item)}`)
+        .join("\n");
+    default:
+      return arr(e.elements).map(richText).join("");
+  }
+}
+
+/**
+ * Whether the poster may fire the trigger: people unless it's for bots
+ * only; a bot only when it asks for bots, and then only the one it names,
+ * if it names one.
+ */
+function slackPosterMatches(config: SlackTriggerConfig, event: SlackEvent): boolean {
+  const postedBy = config.postedBy ?? "people";
+  if (!event.bot) return postedBy !== "bots";
+  if (postedBy === "people") return false;
+  const want = lower(config.bot);
+  if (!want) return true;
+  const { id, appId, name } = event.bot;
+  return [id, appId, name].some((v) => lower(v) === want);
 }
 
 export function matchSlackTrigger(config: SlackTriggerConfig, event: SlackEvent): boolean {
   if (!config.channelId || config.channelId !== event.channelId) return false;
+  if (!slackPosterMatches(config, event)) return false;
   // An @-mention arrives as both `app_mention` and `message` when the app
   // subscribes to both; a trigger listens to exactly one of them.
   if (config.mentionOnly ? event.event !== "app_mention" : event.event !== "message") return false;
@@ -307,7 +439,15 @@ export function slackEventParams(event: SlackEvent): Record<string, string> {
     threadTs: event.threadTs ?? "",
     teamId: event.teamId ?? "",
     permalink: slackPermalink(event),
+    botName: event.bot?.name ?? "",
+    botId: event.bot?.id ?? "",
   };
+}
+
+/** Who posted it, for a firing's message: the bot's name, else the user id. */
+function slackPoster(event: SlackEvent): string {
+  if (!event.bot) return event.userId;
+  return event.bot.name ?? event.bot.id ?? event.bot.appId ?? "a bot";
 }
 
 // ── Linear ──────────────────────────────────────────────────────────────────
@@ -583,7 +723,11 @@ function firingFor<S extends EventTriggerType>(
       matched: ev.event,
       params: slackEventParams(ev),
       title: ev.text.length > 60 ? `${ev.text.slice(0, 57)}…` : ev.text,
-      message: [`Slack message in ${ev.channelId} from ${ev.userId}:`, ev.text, slackPermalink(ev)]
+      message: [
+        `Slack message in ${ev.channelId} from ${slackPoster(ev)}:`,
+        ev.text,
+        slackPermalink(ev),
+      ]
         .filter(Boolean)
         .join("\n"),
     };

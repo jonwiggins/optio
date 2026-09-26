@@ -12,6 +12,7 @@ import {
   GITHUB_PERSONAL_EVENT_KINDS,
   LINEAR_EVENT_KINDS,
   LINEAR_PERSONAL_EVENT_KINDS,
+  SLACK_POSTED_BY,
   TRIGGER_TYPES_FOR_TARGET,
   type TriggerTargetType,
   type TriggerType,
@@ -67,6 +68,15 @@ export function validateTriggerConfig(
   if (type === "slack") {
     if (typeof config?.channelId !== "string" || !SLACK_CHANNEL_ID.test(config.channelId)) {
       return "Slack triggers require config.channelId (e.g. C0123ABCD)";
+    }
+    if (
+      config.postedBy !== undefined &&
+      !(SLACK_POSTED_BY as readonly unknown[]).includes(config.postedBy)
+    ) {
+      return "slack.postedBy must be people, bots or anyone";
+    }
+    if (config.bot !== undefined && (typeof config.bot !== "string" || config.bot.length > 100)) {
+      return "slack.bot must be a bot's name or id";
     }
   }
   if (type === "linear") {

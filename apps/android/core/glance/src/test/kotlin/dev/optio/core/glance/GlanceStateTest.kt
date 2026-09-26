@@ -56,10 +56,24 @@ class GlanceStateTest {
             )
         val state = snap.watchState()
         assertEquals(WatchPhase.WAITING, state.phase)
-        assertEquals("old", state.head?.id, "a snoozed item drops behind every unsnoozed one")
+        assertEquals("old", state.head?.id, "a snoozed item doesn't need you")
         assertEquals(listOf("mid", "new"), state.others.map { it.id })
-        assertEquals(4, state.needsYouCount)
+        assertEquals(3, state.needsYouCount)
+        assertEquals(3, state.runningCount, "it counts as running, like the server's frame")
+    }
+
+    @Test
+    fun laterOnTheOnlyWaitingItemMovesTheWatchToWorking() {
+        val snoozed = item("only", 30, snoozedUntil = now.plusSeconds(900))
+        val state = NeedsYouSnapshot(needsYou = listOf(snoozed), running = listOf(item("r1", 50, "working")), hostsOnline = 1, hostsTotal = 1, asOf = now).watchState()
+        assertEquals(WatchPhase.WORKING, state.phase)
+        assertEquals(0, state.needsYouCount)
         assertEquals(2, state.runningCount)
+
+        // Once the window closes it needs you again.
+        val later = NeedsYouSnapshot(needsYou = listOf(snoozed), hostsOnline = 1, hostsTotal = 1, asOf = now.plusSeconds(901)).watchState()
+        assertEquals(WatchPhase.WAITING, later.phase)
+        assertEquals("only", later.head?.id)
     }
 
     @Test

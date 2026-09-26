@@ -1986,7 +1986,7 @@ export const api = {
           model?: string;
           /** Claude Code `--effort` / Codex reasoning effort. */
           effort?: string;
-          /** Claude Code's `--permission-mode` (the daemon's default is auto). */
+          /** Claude Code's `--permission-mode` (the daemon's default is auto); Codex: bypassPermissions = `--yolo`. */
           permissionMode?: "auto" | "bypassPermissions" | "default";
           baseBranch?: string;
         };

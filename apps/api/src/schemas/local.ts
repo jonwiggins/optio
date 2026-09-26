@@ -91,7 +91,7 @@ export const LocalTerminalSpecSchema = z
         .enum(["auto", "bypassPermissions", "default"])
         .optional()
         .describe(
-          "Claude Code's --permission-mode: auto (the default — its classifier approves routine actions, blocks risky ones), bypassPermissions (skip every check), default (ask first)",
+          "Claude Code's --permission-mode: auto (the default — its classifier approves routine actions, blocks risky ones), bypassPermissions (skip every check), default (ask first). Codex: bypassPermissions runs it with --yolo; otherwise it keeps the machine's own config",
         ),
       baseBranch: z
         .string()

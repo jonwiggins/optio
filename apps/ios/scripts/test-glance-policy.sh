@@ -82,8 +82,8 @@ check(GlanceCopy.workingLine(running: 1) == "1 session running", "working line 1
 check(GlanceCopy.workingLine(running: 3) == "3 sessions running", "working line 3")
 
 // Inline
-check(GlanceCopy.inline(prefix: "Optio", headName: "web", headWord: "Allow?", needsYou: 3, running: 1) == "Optio · web Allow? +2", "inline +2")
-check(GlanceCopy.inline(prefix: "Optio", headName: "web", headWord: nil, needsYou: 1, running: 1) == "Optio · web needs you", "inline default word")
+check(GlanceCopy.inline(prefix: "Optio", headName: "web", headWord: "Allow?", needsYou: 3, running: 1) == "Optio · 3 need you · Allow? web", "inline: counts and word before the name")
+check(GlanceCopy.inline(prefix: "Optio", headName: "web", headWord: nil, needsYou: 1, running: 1) == "Optio · needs you · web", "inline default word")
 check(GlanceCopy.inline(prefix: "Optio", headName: nil, headWord: nil, needsYou: 0, running: 2) == "Optio · 2 running", "inline running")
 check(GlanceCopy.inline(prefix: "Optio · MBP", headName: nil, headWord: nil, needsYou: 0, running: 0) == "Optio · MBP · quiet", "inline quiet")
 
@@ -106,6 +106,14 @@ check(GlanceCopy.whereLabel("jonwiggins/optio", target: "pod", short: true) == "
 check(GlanceCopy.whereLabel("@vesper", target: "pod", short: true) == "@vesper", "slug unchanged")
 check(GlanceCopy.whereLabel(nil, target: "pod", short: true) == "Optio pod", "pod fallback")
 check(GlanceCopy.whereLabel("", target: "machine", short: true) == "machine", "machine fallback")
+check(GlanceCopy.whereOptions("MacBook Pro · ~/repos/optio/apps/web", target: "machine") == ["MacBook Pro · ~/repos/optio/apps/web", "MacBook Pro · web", "web"], "where options: full, host + leaf, leaf")
+check(GlanceCopy.whereOptions("jonwiggins/optio", target: "pod") == ["jonwiggins/optio", "optio"], "repo options")
+check(GlanceCopy.whereOptions("@vesper", target: "pod") == ["@vesper"], "one option when nothing shortens")
+check(GlanceCopy.whereOptions(nil, target: "pod") == ["Optio pod"], "fallback option")
+check(GlanceCopy.headlineOptions(phase: "waiting", needsYou: 12, running: 14) == ["12 sessions need you · 14 running", "12 sessions need you", "12 need you · 14 running", "12 need you"], "waiting headline options")
+check(GlanceCopy.headlineOptions(phase: "waiting", needsYou: 1, running: 0) == ["1 session needs you", "1 needs you"], "waiting, nothing running")
+check(GlanceCopy.headlineOptions(phase: "working", needsYou: 0, running: 3) == ["Nothing needs you · 3 running", "3 running"], "working headline options")
+check(GlanceCopy.headlineOptions(phase: "offline", needsYou: 0, running: 0).last == "Unreachable", "offline short")
 
 if failures == 0 { print("GlancePolicy + GlanceCopy: all checks passed") } else { print("GlancePolicy + GlanceCopy: \(failures) failure(s)"); exit(1) }
 SWIFT

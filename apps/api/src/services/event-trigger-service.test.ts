@@ -13,8 +13,10 @@ import {
   normalizeGitHubEvent,
   normalizeLinearEvent,
   normalizeSlackEvent,
+  slackEventParams,
   slackPermalink,
 } from "./event-trigger-service.js";
+import type { SlackTriggerConfig } from "@optio/shared";
 
 const REPO = {
   full_name: "acme/optio",
@@ -160,17 +162,191 @@ describe("Slack", () => {
     },
   });
 
-  it("normalizes human messages and drops bots / subtypes / other payload types", () => {
+  it("normalizes new posts and drops edits / other subtypes / other payload types", () => {
     expect(normalizeSlackEvent(callback({}))).toMatchObject({
       event: "message",
       channelId: "C123",
       text: "deploy please",
       eventId: "Ev1",
       threadTs: null,
+      bot: null,
     });
-    expect(normalizeSlackEvent(callback({ bot_id: "B1" }))).toBeNull();
     expect(normalizeSlackEvent(callback({ subtype: "message_changed" }))).toBeNull();
+    expect(normalizeSlackEvent(callback({ subtype: "channel_join" }))).toBeNull();
+    expect(normalizeSlackEvent(callback({ subtype: "message_deleted" }))).toBeNull();
     expect(normalizeSlackEvent({ type: "url_verification", challenge: "x" })).toBeNull();
+  });
+
+  it("takes a bot's post with who posted it", () => {
+    // An app posting with its bot token.
+    const app = normalizeSlackEvent(
+      callback({
+        user: "U0BOT",
+        bot_id: "B1",
+        app_id: "A1",
+        bot_profile: { name: "Alertmanager", app_id: "A1" },
+        text: "[FIRING:1] HighErrorRate api",
+      }),
+    );
+    expect(app).toMatchObject({
+      text: "[FIRING:1] HighErrorRate api",
+      bot: { id: "B1", appId: "A1", name: "Alertmanager" },
+    });
+    // An integration / incoming webhook: the bot_message subtype, a username, no user.
+    const hook = normalizeSlackEvent(
+      callback({ user: undefined, subtype: "bot_message", bot_id: "B2", username: "deploy-bot" }),
+    );
+    expect(hook).toMatchObject({ userId: "", bot: { id: "B2", appId: null, name: "deploy-bot" } });
+  });
+
+  it("never takes what the receiving app posted itself", () => {
+    const own = (event: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      normalizeSlackEvent({ ...callback(event), api_app_id: "AOPTIO", ...extra });
+    expect(own({ bot_id: "B9", app_id: "AOPTIO" })).toBeNull();
+    expect(own({ bot_id: "B9", bot_profile: { app_id: "AOPTIO", name: "Optio" } })).toBeNull();
+    // Its bot user, per the event's authorizations.
+    expect(
+      own({ user: "UOPTIO" }, { authorizations: [{ user_id: "UOPTIO", is_bot: true }] }),
+    ).toBeNull();
+    // A person who installed the app with a user token is still a person.
+    expect(
+      own({ user: "U1" }, { authorizations: [{ user_id: "U1", is_bot: false }] }),
+    ).not.toBeNull();
+    // Another app's bot is not the receiving app.
+    expect(own({ bot_id: "B1", app_id: "A1" })).not.toBeNull();
+  });
+
+  it("reads what an alert bot puts in attachments and blocks", () => {
+    const alert = normalizeSlackEvent(
+      callback({
+        bot_id: "B1",
+        text: "",
+        attachments: [
+          {
+            fallback: "[Triggered] CPU high on db-1",
+            title: "[Triggered] CPU high on db-1",
+            title_link: "https://app.datadoghq.com/monitors/1",
+            text: "CPU usage is above 90% for 5 minutes.",
+            fields: [
+              { title: "Host", value: "db-1" },
+              { title: "Value", value: "97%" },
+            ],
+            footer: "Datadog",
+          },
+        ],
+      }),
+    );
+    expect(alert?.text).toBe(
+      [
+        "[Triggered] CPU high on db-1 (https://app.datadoghq.com/monitors/1)",
+        "CPU usage is above 90% for 5 minutes.",
+        "Host: db-1",
+        "Value: 97%",
+        "Datadog",
+      ].join("\n"),
+    );
+    // Blocks, with the text they repeat said once; a fallback only stands in for nothing else.
+    const blocks = normalizeSlackEvent(
+      callback({
+        bot_id: "B1",
+        text: "New issue: TypeError in checkout",
+        blocks: [
+          {
+            type: "header",
+            text: { type: "plain_text", text: "New issue: TypeError in checkout" },
+          },
+          {
+            type: "section",
+            text: { type: "mrkdwn", text: "Cannot read properties of undefined (reading 'id')" },
+            fields: [{ type: "mrkdwn", text: "*Project:* web" }],
+          },
+          {
+            type: "context",
+            elements: [
+              { type: "mrkdwn", text: "Sentry" },
+              { type: "plain_text", text: "prod" },
+            ],
+          },
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "text", text: "See " },
+                  { type: "link", url: "https://sentry.io/issues/1" },
+                ],
+              },
+            ],
+          },
+        ],
+        attachments: [{ fallback: "only a fallback" }],
+      }),
+    );
+    expect(blocks?.text).toBe(
+      [
+        "New issue: TypeError in checkout",
+        "Cannot read properties of undefined (reading 'id')",
+        "*Project:* web",
+        "Sentry prod",
+        "See https://sentry.io/issues/1",
+        "only a fallback",
+      ].join("\n"),
+    );
+    // A bot post that says nothing at all is dropped, like an empty human one.
+    expect(normalizeSlackEvent(callback({ bot_id: "B1", text: "" }))).toBeNull();
+  });
+
+  it("fires for people by default, for bots when asked, and for the named bot only", () => {
+    const person = normalizeSlackEvent(callback({}))!;
+    const bot = normalizeSlackEvent(
+      callback({ bot_id: "B1", app_id: "A1", bot_profile: { name: "Alertmanager" } }),
+    )!;
+    const other = normalizeSlackEvent(callback({ bot_id: "B2", username: "deploy-bot" }))!;
+    const on = (config: Partial<SlackTriggerConfig>) => (ev: typeof person) =>
+      matchSlackTrigger({ channelId: "C123", ...config }, ev);
+
+    expect([person, bot].map(on({}))).toEqual([true, false]);
+    expect([person, bot].map(on({ postedBy: "people" }))).toEqual([true, false]);
+    expect([person, bot, other].map(on({ postedBy: "bots" }))).toEqual([false, true, true]);
+    expect([person, bot, other].map(on({ postedBy: "anyone" }))).toEqual([true, true, true]);
+    // By name, bot id or app id, any case; people still count with "anyone".
+    for (const name of ["alertmanager", "B1", "a1"]) {
+      expect([person, bot, other].map(on({ postedBy: "bots", bot: name }))).toEqual([
+        false,
+        true,
+        false,
+      ]);
+    }
+    expect([person, bot, other].map(on({ postedBy: "anyone", bot: "deploy-bot" }))).toEqual([
+      true,
+      false,
+      true,
+    ]);
+    // Keyword and thread rules apply to bots as to people.
+    expect(on({ postedBy: "bots", keyword: "nope" })(bot)).toBe(false);
+    const threaded = normalizeSlackEvent(callback({ bot_id: "B1", thread_ts: "0.9" }))!;
+    expect(on({ postedBy: "bots" })(threaded)).toBe(false);
+  });
+
+  it("hands the bot to the prompt", () => {
+    const bot = normalizeSlackEvent(
+      callback({
+        bot_id: "B1",
+        bot_profile: { name: "Alertmanager" },
+        text: "[FIRING:1] disk full",
+      }),
+    )!;
+    expect(slackEventParams(bot)).toMatchObject({
+      text: "[FIRING:1] disk full",
+      botName: "Alertmanager",
+      botId: "B1",
+    });
+    expect(slackEventParams(normalizeSlackEvent(callback({}))!)).toMatchObject({
+      userId: "U1",
+      botName: "",
+      botId: "",
+    });
   });
 
   it("matches on channel, keyword, mention mode, and threads", () => {

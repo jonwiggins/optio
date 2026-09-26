@@ -172,7 +172,7 @@ listens for, so several people's automations can share one ingress.
 | Source | Ingress                                                                                            | Secret                  | Trigger `config`                                                                                                                    |
 | ------ | -------------------------------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | GitHub | `POST /api/webhooks/github` (the existing receiver, `X-Hub-Signature-256`)                         | `GITHUB_WEBHOOK_SECRET` | `{ events?: ("review_requested" \| "mentioned" \| "assigned" \| "pr_opened" \| "issue_opened")[], login?, repos?: ["owner/name"] }` |
-| Slack  | `POST /api/webhooks/slack/events` (Events API; answers `url_verification`; `X-Slack-Signature` v0) | `SLACK_SIGNING_SECRET`  | `{ channelId, keyword?, mentionOnly?, includeThreads? }`                                                                            |
+| Slack  | `POST /api/webhooks/slack/events` (Events API; answers `url_verification`; `X-Slack-Signature` v0) | `SLACK_SIGNING_SECRET`  | `{ channelId, keyword?, mentionOnly?, includeThreads?, postedBy?: "people" \| "bots" \| "anyone", bot? }`                           |
 | Linear | `POST /api/webhooks/linear` (`Linear-Signature` over the raw body + `webhookTimestamp` ≤ 60 s)     | `LINEAR_WEBHOOK_SECRET` | `{ events?: ("assigned" \| "mentioned" \| "created" \| "labeled")[], user?, labels?, teams? }`                                      |
 
 Matching lives in `services/event-trigger-service.ts` as pure functions
@@ -187,7 +187,8 @@ name, or the `@handle` in a mention link); `pr_opened` / `issue_opened` / `creat
 
 Prompt params: GitHub `{{event}} {{kind}} {{repo}} {{repoUrl}} {{number}} {{title}} {{body}}
 {{url}} {{author}} {{headBranch}} {{baseBranch}} {{commentBody}} {{commentUrl}} {{action}}`;
-Slack `{{channelId}} {{userId}} {{text}} {{ts}} {{threadTs}} {{permalink}}`; Linear
+Slack `{{channelId}} {{userId}} {{text}} {{ts}} {{threadTs}} {{permalink}} {{botName}}
+{{botId}}`; Linear
 `{{event}} {{identifier}} {{title}} {{description}} {{url}} {{labels}} {{teamKey}}
 {{assignee}} {{priority}} {{state}} {{commentBody}} {{commentUrl}} {{actor}}` plus the
 `ticket*` aliases used by ticket triggers. GitHub and Linear runs are linked to the PR /
@@ -212,8 +213,17 @@ spawn.
 Slack notes: subscribe the app to `message.channels` (plain messages) and/or
 `app_mention` (`mentionOnly` triggers listen to the latter only, so an @-mention never
 fires twice), invite the app to the channel, and use the channel _id_ (`C0…`) from the
-channel details. Bot messages, edits, and other subtypes are dropped; thread replies only
-match with `includeThreads`; `event_id`s are remembered so Slack's retries don't
+channel details. Only people's posts fire a trigger unless its `postedBy` says `bots`
+(apps, integrations and incoming webhooks: a post with a `bot_id` or the `bot_message`
+subtype) or `anyone`; `bot` narrows that to one bot, by the name on its posts, its bot id
+(`B…`) or its app id (`A…`), case-insensitive. A bot's `{{text}}` adds what its
+attachments and blocks say (title, text, fields, sections, context, rich text), since
+alerting tools put the details there; `{{userId}}` is empty and `{{botName}}` names it.
+Anything the receiving app posts itself (its app id, or its bot user in the event's
+`authorizations`) never fires, so Optio's own Slack messages can't start work; Optio's
+notification webhook, if it belongs to a different Slack app, is not excluded, which is
+what `bot` is for. Edits, deletes, joins and other subtypes are dropped; thread replies
+only match with `includeThreads`; `event_id`s are remembered so Slack's retries don't
 double-fire. The endpoint acks before dispatching (Slack retries anything slower than 3 s).
 
 ### Recipes
@@ -226,6 +236,10 @@ double-fire. The endpoint acks before dispatching (Slack retries anything slower
 - **"When a message lands in #channel, do it and wait for me"**: agent automation with
   Then = keep the session open and a prompt around `{{text}}` / `{{permalink}}`; trigger
   `slack` with the `channelId` (optionally a `keyword`).
+- **"When the alert bot posts in #alerts, debug it"**: agent automation (Codex, say, with
+  Permissions = Skip all checks), Then = keep the session open, prompt
+  `{{botName}} posted this alert ({{permalink}}):\n\n{{text}}\n\nFind the cause.`; trigger
+  `slack` with the `channelId`, `postedBy: "bots"` and the bot's name as `bot`.
 - **"When a Linear ticket is assigned to me, triage it and open a PR"**: agent automation
   pinned to the repo's dir (or `repoUrl`), Then = exit when done, prompt around
   `{{identifier}}` / `{{title}}` / `{{description}}` / `{{url}}`; trigger `linear` with
@@ -411,6 +425,12 @@ single shell-quoted argv element.
   `claudePermissionMode` catalog field, shown only for runs on a machine (pods always skip
   checks). Claude Code falls back to Manual on its own when auto mode isn't available to
   the account or model.
+- **Permissions (Codex).** Codex keeps the machine's own approval and sandbox config unless
+  the spec's `permissionMode` is `bypassPermissions` ("Skip all checks", the
+  `codexPermissionMode` catalog field): then it runs with
+  `--dangerously-bypass-approvals-and-sandbox` (`--yolo` is Codex's alias for it), for new,
+  headless (`codex exec`) and resumed sessions alike. The other modes mean nothing to Codex.
+  A pod runs `codex exec --full-auto`.
 - **Effort.** The spec's `effort` becomes Claude Code's `--effort` and Codex's
   `-c model_reasoning_effort="…"`. The New work form offers it for runs on a machine as
   well as in pods.
@@ -530,7 +550,32 @@ that grid ("Recorded screen 132×40" strip, no "use this screen"), so a click to
 a window resize can never reflow the replay. A viewer that was streaming when the terminal
 exited gets `exit` followed by a `size` with that recorded grid, so it pins the same way. Client → server (JSON only — no raw-keystroke frames, which
 eliminates the classic "pasted JSON swallowed as control" bug):
-`{type:"input", data}` | `{type:"resize", cols, rows}`.
+`{type:"input", data}` | `{type:"resize", cols, rows}` |
+`{type:"view", cols, rows, visible, idleMs, open?}`.
+
+**Which screen the PTY is sized for.** One PTY has one grid, and every viewer of a terminal
+is its owner on some screen (a laptop tab, a second window, the phone), so the server picks:
+the screen in use (`services/local-grid.ts`, per terminal in the relay). Each viewer reports
+how it sees the terminal in `view` frames: the grid that fits its screen, whether the terminal
+is on screen (web: the tab is visible; iOS / Android: the Screen face is up with the app in
+front), and how long since its user touched it. `open` marks an arrival: the pane opened, its
+tab came to the front, or the user came back after a minute away. On an arrival the PTY is
+fitted to that screen, unless the screen holding the grid is still in use: on screen, alive,
+and touched within `LOCAL_VIEW_IN_USE_MS` (60 s). In that case the newcomer renders the
+holder's grid scaled to fit, with the "Sized for another device · Use this screen" strip.
+Typing, a click or tap in the terminal, or "Use this screen" (`resize`) takes the grid
+outright, and the holder's own screen changing size resizes the PTY with it. "Alive" is
+checked, not assumed: a laptop that went to sleep with the session open keeps its socket for
+minutes, so a holder that looks in use but hasn't been heard from in 5 s gets a WebSocket ping,
+and stops counting if it doesn't answer within 1.5 s. Every `size` frame carries
+`yours: true | false` per viewer: ours → fit our own screen; not ours → render it scaled. A
+viewer that leaves frees the grid without handing it on. The next arrival, click, or keystroke
+takes it, including the same pane reconnecting after a blip. A reconnect only asks for the grid
+when the pane held it or was used in the last minute, so a restart never hands it to whichever
+screen reconnects first. Older clients never send `view`: they count as on screen, count as in
+use when they type or resize, take the grid only by resizing, and ignore `yours`. Clients
+facing an older server (no `yours`) infer ownership from the echoes of their own resizes, as
+before.
 
 ## Web UI
 
@@ -567,7 +612,14 @@ eliminates the classic "pasted JSON swallowed as control" bug):
   terminal — OSC 8 hyperlinks (Claude Code and gh print PR links that way) and URLs in
   the text — open on ⌘-click (Ctrl-click off a Mac), straight into a new tab with no
   "Do you want to navigate to…?" prompt; a plain click stays a click in the terminal, and
-  a tap opens on a touch screen (`lib/terminal-links.ts`, every web terminal). On a Mac, Option
+  a tap opens on a touch screen (`lib/terminal-links.ts`, every web terminal). Copying works
+  over a program that tracks the mouse (Claude Code's fullscreen renderer takes every drag):
+  what the program copies itself with OSC 52 (Claude Code's copy-on-select and `/copy`, tmux)
+  lands on the browser's clipboard, straight away where the browser allows it and on the
+  next ⌘C otherwise (Safari); ⌥-drag (Shift-drag off a Mac) still selects in the terminal
+  for ⌘C. Replayed output never copies, and a program asking to read the clipboard gets no
+  answer (`lib/terminal-clipboard.ts`, every web terminal; `e2e/terminal-clipboard.spec.ts`).
+  The iOS and Android apps take OSC 52 the same way. On a Mac, Option
   keys reach the agent as a Mac terminal sends them (`⌥↑` is `ESC[1;3A`, Codex's key for
   answering a question or editing a queued message). This relies on
   `apps/web/next.config.ts` including xterm.js unparsed: webpack's `process` polyfill

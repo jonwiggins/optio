@@ -99,6 +99,24 @@ export const OPENAI_CATALOG: ProviderCatalog = {
         { value: "ultra", label: "Ultra" },
       ],
     },
+    {
+      // A pod runs `codex exec --full-auto`; on your own machine Codex keeps
+      // its own approval and sandbox config unless this says to skip them.
+      key: "codexPermissionMode",
+      label: "Permissions",
+      kind: "select",
+      runsOn: ["local"],
+      localParam: "permissionMode",
+      choices: [
+        {
+          value: "bypassPermissions",
+          label: "Skip all checks",
+          description:
+            "--yolo: no approval prompts and no sandbox; every command runs as you on this machine",
+        },
+      ],
+      helpText: "Default keeps Codex's own approval and sandbox settings on this machine.",
+    },
   ],
   liveRefreshSupported: true,
 };

@@ -56,13 +56,12 @@ final class LiveActivityManager {
 
     static let debounceMs = 500
     static let quietWindow: TimeInterval = 2 * 60
-    static let staleAfter: TimeInterval = 90
     static let offlineAfter: TimeInterval = 90
     static let restartAfter: TimeInterval = 7 * 3600 + 45 * 60
     static let dismissAfter: TimeInterval = 15 * 60
     static let foregroundPoll: TimeInterval = 30
-    /// Re-send unchanged content this long after the last update so `staleDate` (90 s) never
-    /// lapses while the app is foregrounded and polling.
+    /// Re-send unchanged content this long after the last update so `staleDate`
+    /// (`WatchState.staleAfter`, 90 s) never lapses while the app is foregrounded and polling.
     static let refreshAfter: TimeInterval = 45
 
     init(api: APIClient, events: EventHub, session: SessionStore) {
@@ -240,10 +239,11 @@ final class LiveActivityManager {
             }
         }
 
-        // "Later" pressed on the island/widget before the server learned about it.
+        // "Later" pressed on the island/widget before the server learned about it (or a
+        // fresh Later over an older, lapsed server snooze): the later window wins.
         snapshot.needsYou = snapshot.needsYou.map { item in
             var item = item
-            if item.snoozedUntil == nil, let until = LocalSnoozes.until(item.id), until > now { item.snoozedUntil = until }
+            if let until = LocalSnoozes.until(item.id), until > now, (item.snoozedUntil ?? .distantPast) < until { item.snoozedUntil = until }
             return item
         }
         snapshot.asOf = now
@@ -310,7 +310,7 @@ final class LiveActivityManager {
         guard hash != lastHash || refreshStale else { return }
         let alert: AlertConfiguration? = (state.phase == .waiting && lastHashPhase != .waiting)
             ? AlertConfiguration(title: "A session needs you", body: LocalizedStringResource(stringLiteral: alertBody(state)), sound: .default) : nil
-        await activity.update(content(state, at: now), alertConfiguration: alert)
+        await activity.update(state.activityContent(at: now), alertConfiguration: alert)
         log.notice("updated \(activity.id, privacy: .public) phase=\(state.phase.rawValue, privacy: .public) needsYou=\(state.needsYouCount) running=\(state.runningCount) alert=\(alert != nil)")
         lastHash = hash
         lastHashPhase = state.phase
@@ -324,7 +324,7 @@ final class LiveActivityManager {
         guard let userId = session.user?.id else { return }
         let now = Date()
         let attributes = WatchAttributes(userId: userId, startedAt: now)
-        let content = content(state, at: now)
+        let content = state.activityContent(at: now)
         do {
             let a: Activity<WatchAttributes>
             if Self.pushCapable {
@@ -359,16 +359,6 @@ final class LiveActivityManager {
         lastState = done
         log.notice("ended with summary: \(summary, privacy: .public)")
         detach()
-    }
-
-    private func content(_ state: WatchState, at now: Date) -> ActivityContent<WatchState> {
-        let relevance: Double = switch state.phase {
-        case .waiting: 100
-        case .working: 50
-        case .offline: 20
-        case .done: 0
-        }
-        return ActivityContent(state: state, staleDate: now.addingTimeInterval(Self.staleAfter), relevanceScore: relevance)
     }
 
     private func alertBody(_ state: WatchState) -> String {
@@ -408,7 +398,7 @@ final class LiveActivityManager {
             lastHashPhase = state.phase
             lastState = state
             lastUpdateAt = .now
-            pendingIds = state.phase == .waiting ? Set(([state.head] + state.others).compactMap { $0 }.map(\.id)) : []
+            pendingIds = Set(state.queue.map(\.id))
             attach(mine)
         }
     }

@@ -1,8 +1,8 @@
 import ActivityKit
 import Foundation
 
-/// The one Live Activity Optio runs: "the thing waiting on you, plus how many more".
-/// See docs/design/ios-glanceable-surfaces.md §2a. The content state is the wire
+/// The one Live Activity Optio runs: how many sessions need you and how many are
+/// running, and the sessions waiting on you. See docs/design/ios-glanceable-surfaces.md §2a. The content state is the wire
 /// contract shared with the API's APNs `liveactivity` payloads
 /// (apps/api/src/services/apns-service.ts), so field names must not change casually.
 public struct WatchAttributes: ActivityAttributes {
@@ -33,7 +33,9 @@ public struct WatchState: Codable, Hashable, Sendable {
     public var phase: Phase
     /// Oldest item needing you (when `waiting`) or most recent running item (when `working`).
     public var head: WatchItem?
-    /// Up to two further items needing you (lock-screen list); the island only shows `head`.
+    /// Up to two further rows from `head`'s list, listed under it: the next items needing
+    /// you (oldest first) while `waiting`, the next running items (newest first) while
+    /// `working`.
     public var others: [WatchItem]
     /// Total number of items needing you, including `head` and beyond `others`.
     public var needsYouCount: Int
@@ -64,6 +66,104 @@ public struct WatchState: Codable, Hashable, Sendable {
     }
 
     public static let quiet = WatchState(phase: .working)
+
+    // MARK: What the Watch lists
+
+    /// The sessions waiting on you that this frame carries, oldest first: the head, then
+    /// the others. Empty unless `waiting`.
+    public var queue: [WatchItem] {
+        guard phase == .waiting else { return [] }
+        return (head.map { [$0] } ?? []) + others
+    }
+
+    /// The sessions the Watch lists: the queue while `waiting`; with nothing waiting,
+    /// the running sessions, newest first.
+    public var rows: [WatchItem] {
+        switch phase {
+        case .waiting, .working: return (head.map { [$0] } ?? []) + others
+        case .offline, .done: return []
+        }
+    }
+
+    /// How many sessions `rows` stands for: those needing you while `waiting`, those
+    /// running while `working`. A frame carries three at most.
+    public var rowCount: Int {
+        switch phase {
+        case .waiting: return needsYouCount
+        case .working: return runningCount
+        case .offline, .done: return 0
+        }
+    }
+
+    /// Whether the Watch lists sessions rather than showing one in detail with its
+    /// buttons: two or more need you, or with none waiting, two or more are running.
+    public var listsRows: Bool { rowCount > 1 }
+
+    /// Most rows the Watch lists. Past that it lists one fewer and a "+N more" line: three
+    /// rows and the line under the tiles would overflow the lock screen's 160 pt.
+    public static let listMax = 3
+
+    /// The rows the Watch lists: all of them when nothing is left out, else the first
+    /// `listMax - 1`.
+    public var listed: [WatchItem] {
+        rowCount > Self.listMax ? Array(rows.prefix(Self.listMax - 1)) : rows
+    }
+
+    /// Sessions the list leaves out (the "+N more" line).
+    public var unlisted: Int { max(0, rowCount - listed.count) }
+
+    // MARK: Handing a frame to ActivityKit
+
+    /// Past this the system shows the Watch as stale. The app re-sends unchanged content
+    /// before then while it is in the foreground (`LiveActivityManager.refreshAfter`).
+    public static let staleAfter: TimeInterval = 90
+
+    /// How the system ranks this activity against the user's others.
+    public var relevanceScore: Double {
+        switch phase {
+        case .waiting: return 100
+        case .working: return 50
+        case .offline: return 20
+        case .done: return 0
+        }
+    }
+
+    /// This state as an activity update, stale after `staleAfter`.
+    public func activityContent(at now: Date = .now) -> ActivityContent<WatchState> {
+        ActivityContent(state: self, staleDate: now.addingTimeInterval(Self.staleAfter), relevanceScore: relevanceScore)
+    }
+
+    // MARK: Acting from the island
+
+    /// The frame right after the user dealt with item `id` from one of the Watch's
+    /// buttons (**Later**, **Resume**, **Retry**). The item stops needing you and counts
+    /// as running, as `NeedsYouSnapshot.watchState()` and the server's frame count it,
+    /// so the app's next reconcile (or a push) agrees instead of putting it back. The
+    /// next oldest item becomes the head. With none left the Watch drops to `working`
+    /// with the handled item as its head. `update` rewrites the handled item, for
+    /// example its snooze window or a task's new state. Nil when the Watch isn't
+    /// asking about `id`.
+    public func handling(_ id: String, at now: Date = .now, update: (inout WatchItem) -> Void = { _ in }) -> WatchState? {
+        guard phase == .waiting else { return nil }
+        var queue = self.queue
+        guard let index = queue.firstIndex(where: { $0.id == id }) else { return nil }
+        var handled = queue.remove(at: index)
+        update(&handled)
+        var next = self
+        next.asOf = now
+        next.runningCount = runningCount + 1
+        next.needsYouCount = max(0, needsYouCount - 1)
+        if next.needsYouCount > 0, let newHead = queue.first {
+            next.head = newHead
+            next.others = Array(queue.dropFirst())
+        } else {
+            next.phase = .working
+            next.head = handled
+            next.others = []
+            next.needsYouCount = 0
+        }
+        return next
+    }
 }
 
 // MARK: - Session attributes (v0.5 "one noun: Sessions")
@@ -140,8 +240,9 @@ public struct WatchItem: Codable, Hashable, Sendable, Identifiable {
     public var link: String
     /// Pull request URL for followed tasks in `pr_opened` (drives the **Open PR** button). Optional, additive.
     public var prUrl: String?
-    /// Server-side "Later" (`local_terminals.snoozedUntil`) or the App Group fallback; snoozed
-    /// items sort after unsnoozed ones while the window is open. Optional, additive.
+    /// Server-side "Later" (`local_terminals.snoozedUntil`) or the App Group fallback. While
+    /// the window is open the Watch counts the item as running and the widgets list it
+    /// last. Optional, additive.
     public var snoozedUntil: Date?
     /// Which paired server this item lives on (`ServerProfile.id`) and its short name,
     /// so surfaces that merge several servers can label and route it. Optional, additive.
@@ -245,5 +346,11 @@ public struct WatchItem: Codable, Hashable, Sendable, Identifiable {
     public func isSnoozed(at now: Date = .now) -> Bool {
         guard let snoozedUntil else { return false }
         return snoozedUntil > now
+    }
+
+    /// Status word on the Watch's head row: "later" while a Later window is open (the
+    /// item sits in the running count until it closes), otherwise `statusText`.
+    public func watchStatusText(at now: Date = .now) -> String {
+        isSnoozed(at: now) ? "later" : statusText
     }
 }

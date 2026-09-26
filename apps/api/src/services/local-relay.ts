@@ -16,12 +16,15 @@
 import { randomUUID } from "node:crypto";
 import type { LocalServerMessage, LocalStreamServerMessage } from "@optio/shared";
 import { logger } from "../logger.js";
+import { GridArbiter, type Grid, type ViewReport } from "./local-grid.js";
 
 /** Minimal socket surface shared by @fastify/websocket sockets. */
 export interface RelaySocket {
   readyState: number;
   send(data: string | Buffer): void;
   close(code?: number, reason?: string): void;
+  /** WebSocket ping: is this viewer still there? Its pong goes to `viewerPong`. */
+  ping?(): void;
 }
 
 const WS_OPEN = 1;
@@ -47,6 +50,8 @@ const daemonsByHost = new Map<string, DaemonConn>();
 const browsersByTerminal = new Map<string, Set<RelaySocket>>();
 const pendingAttaches = new Map<string, PendingAttach>();
 const hostByTerminal = new Map<string, string>();
+/** Each terminal's viewers and which of them its PTY is sized for (local-grid.ts). */
+const gridByTerminal = new Map<string, GridArbiter<RelaySocket>>();
 
 function safeSend(socket: RelaySocket, data: string | Buffer): void {
   if (socket.readyState === WS_OPEN) {
@@ -136,6 +141,7 @@ export function unregisterDaemon(hostId: string, socket: RelaySocket): boolean {
       }
     }
     browsersByTerminal.delete(terminalId);
+    dropGrid(terminalId);
     for (const [attachId, pending] of pendingAttaches) {
       if (pending.terminalId === terminalId) {
         pendingAttaches.delete(attachId);
@@ -175,6 +181,7 @@ export function attachBrowser(hostId: string, terminalId: string, socket: RelayS
   const attachId = randomUUID();
   pendingAttaches.set(attachId, { terminalId, socket });
   hostByTerminal.set(terminalId, hostId);
+  gridFor(hostId, terminalId).add(socket);
   sendToHost(hostId, { type: "attach", terminalId, attachId });
   return true;
 }
@@ -190,6 +197,11 @@ export function detachBrowser(hostId: string, terminalId: string, socket: RelayS
   if (set) {
     set.delete(socket);
     if (set.size === 0) browsersByTerminal.delete(terminalId);
+  }
+  const grid = gridByTerminal.get(terminalId);
+  if (grid) {
+    grid.remove(socket);
+    if (grid.viewerCount === 0) dropGrid(terminalId);
   }
   const stillPending = [...pendingAttaches.values()].some((p) => p.terminalId === terminalId);
   if (!browsersByTerminal.has(terminalId) && !stillPending) {
@@ -250,13 +262,69 @@ export function forwardOutput(hostId: string, terminalId: string, data: Buffer):
 }
 
 /**
- * Forward the daemon's PTY size to every viewer. Same ownership rule as
- * output: only the host that holds the terminal's live subscription may
- * speak for it.
+ * Forward the daemon's PTY size to every viewer, each told whether the grid
+ * is theirs. Same ownership rule as output: only the host that holds the
+ * terminal's live subscription may speak for it.
  */
 export function forwardSize(hostId: string, terminalId: string, cols: number, rows: number): void {
   if (hostByTerminal.get(terminalId) !== hostId) return;
-  notifyBrowsers(terminalId, { type: "size", cols, rows });
+  gridByTerminal.get(terminalId)?.sized({ cols, rows });
+}
+
+// ── Grid: which screen the PTY is sized for (local-grid.ts) ─────────────────
+
+function gridFor(hostId: string, terminalId: string): GridArbiter<RelaySocket> {
+  let grid = gridByTerminal.get(terminalId);
+  if (!grid) {
+    grid = new GridArbiter<RelaySocket>({
+      resize: ({ cols, rows }) => sendToHost(hostId, { type: "resize", terminalId, cols, rows }),
+      announce: (socket, { cols, rows }, yours) =>
+        sendToViewer(socket, { type: "size", cols, rows, yours }),
+      ping: (socket) => {
+        if (socket.readyState !== WS_OPEN || !socket.ping) return false;
+        try {
+          socket.ping();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
+    gridByTerminal.set(terminalId, grid);
+  }
+  return grid;
+}
+
+function dropGrid(terminalId: string): void {
+  gridByTerminal.get(terminalId)?.dispose();
+  gridByTerminal.delete(terminalId);
+}
+
+/** A viewer said how it sees the terminal (`view`). */
+export function viewerView(terminalId: string, socket: RelaySocket, report: ViewReport): void {
+  gridByTerminal.get(terminalId)?.view(socket, report);
+}
+
+/** A viewer asked for the PTY at its size (`resize`: a click, a keystroke, "Use this screen"). */
+export function viewerClaim(
+  hostId: string,
+  terminalId: string,
+  socket: RelaySocket,
+  grid: Grid,
+): void {
+  const arbiter = gridByTerminal.get(terminalId);
+  if (arbiter?.has(socket)) arbiter.claim(socket, grid);
+  else sendToHost(hostId, { type: "resize", terminalId, cols: grid.cols, rows: grid.rows });
+}
+
+/** A viewer typed. */
+export function viewerInput(terminalId: string, socket: RelaySocket): void {
+  gridByTerminal.get(terminalId)?.input(socket);
+}
+
+/** A viewer answered a ping. */
+export function viewerPong(terminalId: string, socket: RelaySocket): void {
+  gridByTerminal.get(terminalId)?.pong(socket);
 }
 
 /**
@@ -287,4 +355,6 @@ export function resetRelayForTests(): void {
   browsersByTerminal.clear();
   pendingAttaches.clear();
   hostByTerminal.clear();
+  for (const grid of gridByTerminal.values()) grid.dispose();
+  gridByTerminal.clear();
 }

@@ -90,8 +90,8 @@ class NeedsYouSnapshotLoadTest {
 
             val state = snap.watchState()
             assertEquals(WatchPhase.WAITING, state.phase)
-            assertEquals("t-need", state.head?.id, "the snoozed older item drops behind")
-            assertEquals(2, state.needsYouCount)
+            assertEquals("t-need", state.head?.id, "the snoozed older item doesn't need you")
+            assertEquals(1, state.needsYouCount)
             assertEquals(4, state.recurringCount)
         }
 

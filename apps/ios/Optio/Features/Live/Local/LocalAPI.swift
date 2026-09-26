@@ -89,10 +89,13 @@ struct LocalBlueprintBody: Encodable {
     var spawnMode: LocalBlueprintSpawnMode?
     /// Agent spawns: stay open for chat (`interactive`, the default) or exit when the turn is done.
     var sessionMode: LocalAgentSessionMode?
+    /// Agent spawns: per-run parameters keyed like the provider catalog (model,
+    /// effort, permission mode); nil leaves them out.
+    var agentOptions: [String: AnyCodable]?
     var enabled: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case name, description, hostId, dir, repoUrl, commandTemplate, agent, spawnMode, sessionMode, enabled
+        case name, description, hostId, dir, repoUrl, commandTemplate, agent, spawnMode, sessionMode, agentOptions, enabled
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -110,6 +113,7 @@ struct LocalBlueprintBody: Encodable {
         }
         try c.encodeIfPresent(spawnMode, forKey: .spawnMode)
         try c.encodeIfPresent(sessionMode, forKey: .sessionMode)
+        try c.encodeIfPresent(agentOptions, forKey: .agentOptions)
         try c.encodeIfPresent(enabled, forKey: .enabled)
     }
 }

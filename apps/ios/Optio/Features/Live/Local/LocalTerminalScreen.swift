@@ -413,6 +413,7 @@ struct LocalTranscriptFace: View {
 
 struct LocalTerminalStreamView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     let stream: LocalTerminalStream
     var focusComposer = false
     @State private var keyboardShown = false
@@ -466,6 +467,12 @@ struct LocalTerminalStreamView: View {
                 }
             }
         }
+        // The grid goes to the screen in use: this face on screen, the app in front.
+        .onChange(of: ObjectIdentifier(stream), initial: true) { _, _ in
+            stream.setShowing(scenePhase != .background)
+        }
+        .onChange(of: scenePhase) { _, phase in stream.setShowing(phase != .background) }
+        .onDisappear { stream.setShowing(false) }
     }
 
     private func strip<Trailing: View>(dot: SwiftUI.Color, text: Text, @ViewBuilder trailing: () -> Trailing = { EmptyView() }) -> some View {
@@ -600,13 +607,19 @@ struct SwiftTermView: UIViewRepresentable {
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
         }
 
+        /// What the program copies (OSC 52: Claude Code's copy-on-select and
+        /// `/copy`, tmux) goes on the clipboard — unless it's in replayed output,
+        /// which would re-copy something from long ago each time the session opens.
         func clipboardCopy(source: TerminalView, content: Data) {
-            UIPasteboard.general.string = String(decoding: content, as: UTF8.self)
+            MainActor.assumeIsolated {
+                guard !stream.bridge.replaying else { return }
+                UIPasteboard.general.string = String(decoding: content, as: UTF8.self)
+            }
         }
 
-        func clipboardRead(source: TerminalView) -> Data? {
-            UIPasteboard.general.string.map { Data($0.utf8) }
-        }
+        /// A program can't read the clipboard (OSC 52 `?`): whatever was last
+        /// copied on this phone isn't the program's to see.
+        func clipboardRead(source: TerminalView) -> Data? { nil }
 
         func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
         func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}

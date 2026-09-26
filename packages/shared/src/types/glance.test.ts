@@ -21,6 +21,39 @@ function item(overrides: Partial<WatchItem> = {}): WatchItem {
   };
 }
 
+describe("buildWatchState rows", () => {
+  const at = (minutesAgo: number) => appleSeconds(NOW.getTime() - minutesAgo * 60_000);
+
+  it("lists the items needing you after the head, oldest first", () => {
+    const state = buildWatchState({
+      needsYou: [
+        item({ id: "n2", since: at(2) }),
+        item({ id: "n9", since: at(9) }),
+        item({ id: "n5", since: at(5) }),
+        item({ id: "n1", since: at(1) }),
+      ],
+      running: [item({ id: "r1", state: "working", since: at(1) })],
+      now: NOW,
+    });
+    expect(state.phase).toBe("waiting");
+    expect([state.head?.id, ...state.others.map((o) => o.id)]).toEqual(["n9", "n5", "n2"]);
+    expect(state.needsYouCount).toBe(4);
+  });
+
+  it("lists the running items, newest first, when nothing needs you", () => {
+    const state = buildWatchState({
+      needsYou: [],
+      running: ["r7", "r1", "r3", "r2"].map((id) =>
+        item({ id, state: "working", since: at(Number(id.slice(1))) }),
+      ),
+      now: NOW,
+    });
+    expect(state.phase).toBe("working");
+    expect([state.head?.id, ...state.others.map((o) => o.id)]).toEqual(["r1", "r2", "r3"]);
+    expect(state.runningCount).toBe(4);
+  });
+});
+
 describe("buildWatchState (sessions)", () => {
   it("carries the board tiles when given, null otherwise", () => {
     const withCounts = buildWatchState({

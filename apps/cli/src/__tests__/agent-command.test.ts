@@ -179,6 +179,29 @@ describe("buildAgentCommand permissions and effort", () => {
     );
   });
 
+  it("skips Codex's approvals and sandbox (--yolo) only when told to", () => {
+    const yolo = { permissionMode: "bypassPermissions" as const };
+    expect(buildAgentCommand("codex", "p", SETTINGS, yolo)).toBe(
+      `codex --dangerously-bypass-approvals-and-sandbox 'p'`,
+    );
+    expect(buildAgentCommand("codex", "p", SETTINGS, { ...yolo, mode: "headless" })).toBe(
+      `codex exec --dangerously-bypass-approvals-and-sandbox 'p'`,
+    );
+    // A resumed session runs the way it started.
+    expect(
+      buildAgentCommand("codex", undefined, SETTINGS, {
+        ...yolo,
+        model: "gpt-5.6-sol",
+        resumeSessionId: "s",
+      }),
+    ).toBe(`codex resume --dangerously-bypass-approvals-and-sandbox -m 'gpt-5.6-sol' 's'`);
+    // Claude's other modes mean nothing to Codex: its own config applies.
+    expect(buildAgentCommand("codex", "p", SETTINGS, { permissionMode: "auto" })).toBe(`codex 'p'`);
+    expect(buildAgentCommand("codex", "p", SETTINGS, { permissionMode: "default" })).toBe(
+      `codex 'p'`,
+    );
+  });
+
   it("ignores permission mode and effort for the other CLIs", () => {
     const o = { permissionMode: "bypassPermissions" as const, effort: "high" };
     expect(buildAgentCommand("cursor", "p", SETTINGS, o)).toBe(`cursor-agent 'p'`);

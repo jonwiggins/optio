@@ -18,6 +18,10 @@ final class TerminalBridge {
 
     var view: TerminalView? { host?.terminal }
 
+    /// True while replayed output is being parsed: what the program copied in
+    /// it (OSC 52) was copied long ago and must not land on the clipboard again.
+    private(set) var replaying = false
+
     func attach(_ h: LocalTerminalHostView, mode: TerminalSizing.Mode) {
         host = h
         h.mode = mode
@@ -32,8 +36,11 @@ final class TerminalBridge {
         host?.mode = mode
     }
 
-    func feed(_ data: Data) {
+    /// SwiftTerm parses as it's fed, so `replay` covers exactly these bytes.
+    func feed(_ data: Data, replay: Bool = false) {
         if let host, host.settled {
+            replaying = replay
+            defer { replaying = false }
             host.terminal.feed(byteArray: ArraySlice([UInt8](data)))
         } else {
             pending.append(data)
@@ -48,6 +55,10 @@ final class TerminalBridge {
         guard let host, host.settled, !pending.isEmpty else { return }
         let data = pending
         pending.removeAll()
+        // What arrived before the view laid out is the replay: nobody could
+        // have used this screen yet.
+        replaying = true
+        defer { replaying = false }
         host.terminal.feed(byteArray: ArraySlice([UInt8](data)))
     }
 
@@ -72,13 +83,18 @@ final class TerminalBridge {
 /// `stream-policy.ts` and `sizing.ts`:
 /// - server → client: binary = raw terminal bytes (scrollback replay then live),
 ///   JSON = `status` / `size` / `exit` / `error`
-/// - client → server: JSON only — `input` and `resize`
+/// - client → server: JSON only — `input`, `resize` and `view`
 ///
-/// One PTY, one grid. Attaching never resizes it; only an explicit interaction
-/// (focusing the terminal, typing, "Use this screen") claims it for this phone.
-/// A viewer that hasn't claimed it renders the announced grid shrunk to fit, so
-/// glancing at a laptop session from the phone never forces the laptop's TUI
-/// down to phone width.
+/// One PTY, one grid, and the server gives it to the screen in use
+/// (apps/api/src/services/local-grid.ts). This phone reports the grid that fits
+/// it, whether the Screen face is on screen with the app in front, and how long
+/// since it was used (`view`). The Screen face coming on screen asks for the grid
+/// (`open`) — granted unless another screen showing the session was used in the
+/// last minute, so glancing at a laptop session you're working at never forces
+/// the laptop's TUI down to phone width. Focusing the terminal, typing, or "Use
+/// this screen" takes it outright (`resize`). A viewer that doesn't hold the grid
+/// renders it shrunk to fit. Servers before `yours` leave the phone inferring
+/// ownership from the echoes of its own resizes, as before.
 @MainActor
 @Observable
 final class LocalTerminalStream {
@@ -128,6 +144,19 @@ final class LocalTerminalStream {
     private var sent: [TerminalGrid] = []
     /// The PTY grid last announced by the daemon.
     private var announcedGrid: TerminalGrid?
+    /// The server says whose the grid is (`size` frames carry `yours`).
+    private var arbitrated = false
+    /// Whether the last announced grid was ours; nil when the server didn't say.
+    private var announcedYours: Bool?
+    /// The Screen face is on screen with the app in front (`setShowing`).
+    private var showing = false
+    /// When this screen was last used; the Screen face coming on screen counts.
+    private var lastUsed = Date()
+    /// The grid in the last `view` sent on this connection.
+    private var lastViewGrid: TerminalGrid?
+    /// A `view` held until SwiftTerm is laid out; true when it asks for the grid.
+    private var heldOpen: Bool?
+    private var everConnected = false
     /// Bytes that arrived before this connection's `size` frame. The daemon
     /// announces the grid right after the scrollback replay; holding the replay
     /// until then lets it land on the right grid (SwiftTerm can't reflow later).
@@ -141,10 +170,12 @@ final class LocalTerminalStream {
         self.api = api
         self.terminalId = terminalId
         // A grid announced while the Screen face was hidden was judged without
-        // knowing our natural fit; judge it again once the host has laid out.
+        // knowing our natural fit; judge it again once the host has laid out, and
+        // send the `view` that was waiting on that fit.
         bridge.onSettled = { [weak self] in
-            guard let self, let grid = announcedGrid else { return }
-            gridAnnounced(grid)
+            guard let self else { return }
+            if let grid = announcedGrid { gridAnnounced(grid, yours: announcedYours) }
+            if let held = heldOpen { sendView(open: held) }
         }
     }
 
@@ -193,9 +224,18 @@ final class LocalTerminalStream {
         switch frame {
         case .opened:
             connState = .connected
-            // Attaching never resizes the PTY. If we already own it (reconnect
-            // after a blip), re-assert our grid; otherwise wait for `size`.
-            if mode == .owner, let grid = bridge.grid { sendResize(grid) }
+            lastViewGrid = nil
+            heldOpen = nil
+            let first = !everConnected
+            everConnected = true
+            let wasOurs = mode == .owner
+            // Opening the session asks for the grid. A reconnect asks only when the
+            // grid was ours or we're in use: a blip must not hand it to whichever
+            // screen happens to reconnect first.
+            sendView(open: first || wasOurs || Date().timeIntervalSince(lastUsed) < TerminalSizing.inUse)
+            // A server that doesn't say whose the grid is never sizes it for us:
+            // re-assert ours after a blip.
+            if !arbitrated, wasOurs, let grid = bridge.grid { sendResize(grid) }
         case .binary(let data):
             if pendingReset {
                 pendingReset = false
@@ -222,7 +262,7 @@ final class LocalTerminalStream {
                 onStatus?(p.state, p.attentionState)
             case .size(let p):
                 let cols = Int(p.cols), rows = Int(p.rows)
-                if cols > 0, rows > 0 { gridAnnounced(TerminalGrid(cols: cols, rows: rows)) }
+                if cols > 0, rows > 0 { gridAnnounced(TerminalGrid(cols: cols, rows: rows), yours: p.yours) }
                 releaseHold()
             case .exit(let p):
                 terminalDead = true
@@ -294,18 +334,26 @@ final class LocalTerminalStream {
         holdTask = nil
         guard let held = heldBytes else { return }
         heldBytes = nil
-        if !held.isEmpty { bridge.feed(held) }
+        if !held.isEmpty { bridge.feed(held, replay: true) }
     }
 
     // MARK: Grid ownership
 
-    private func gridAnnounced(_ grid: TerminalGrid) {
+    private func gridAnnounced(_ grid: TerminalGrid, yours: Bool?) {
         announcedGrid = grid
-        // Until SwiftTerm is mounted our natural fit is unknown, so the grid can't
-        // be ours: render it as announced (passive) rather than at phone width.
-        let natural = bridge.naturalGrid ?? TerminalGrid(cols: 0, rows: 0)
-        mode = TerminalSizing.onGridAnnounced(mode, grid, natural: natural, sent: sent, recorded: terminalDead)
-        if let rest = TerminalSizing.ackSentGrid(sent, grid) { sent = rest }
+        announcedYours = yours
+        // Until SwiftTerm is mounted our natural fit is unknown, so a grid that isn't
+        // ours renders as announced (passive) rather than at phone width.
+        let natural = bridge.naturalGrid
+        if let yours, !terminalDead {
+            arbitrated = true
+            sent = []
+            mode = TerminalSizing.onGridAssigned(grid, yours: yours, natural: natural)
+        } else {
+            // No say from the server (or an exited terminal's recorded grid).
+            mode = TerminalSizing.onGridAnnounced(mode, grid, natural: natural ?? TerminalGrid(cols: 0, rows: 0), sent: sent, recorded: terminalDead)
+            if let rest = TerminalSizing.ackSentGrid(sent, grid) { sent = rest }
+        }
         if terminalDead { recorded = true }
         bridge.setMode(mode)
     }
@@ -315,6 +363,7 @@ final class LocalTerminalStream {
     /// screen out of its recorded grid.
     func claim() {
         guard !terminalDead, !disposed else { return }
+        lastUsed = Date()
         mode = .owner
         bridge.setMode(.owner)
         // Always tell the daemon, even if our grid is what we last sent: another
@@ -323,10 +372,27 @@ final class LocalTerminalStream {
     }
 
     /// The SwiftTerm view's grid changed (rotation, keyboard, our own claim).
-    /// Passive renders resize the view too; only the owner tells the PTY.
+    /// Passive renders resize the view too; only the owner tells the PTY — via
+    /// `view` when the server decides whose the grid is.
     func viewGridChanged(_ grid: TerminalGrid) {
-        guard mode == .owner else { return }
-        sendResize(grid)
+        if arbitrated {
+            if let held = heldOpen {
+                sendView(open: held)
+            } else if lastViewGrid != nil, let natural = bridge.naturalGrid, natural != lastViewGrid {
+                sendView(open: false)
+            }
+        } else if mode == .owner {
+            sendResize(grid)
+        }
+    }
+
+    /// The Screen face came on screen with the app in front, or left it. Coming on
+    /// screen is arriving: it asks for the grid unless another screen is in use.
+    func setShowing(_ on: Bool) {
+        guard on != showing else { return }
+        showing = on
+        if on { lastUsed = Date() }
+        sendView(open: on)
     }
 
     // MARK: Client → server
@@ -344,8 +410,28 @@ final class LocalTerminalStream {
     /// — take the grid first so the program lays out for it before it processes
     /// the keystroke. Keyboard typing is covered by the focus claim.
     func typed(bytes: [UInt8]) {
+        lastUsed = Date()
         if mode != .owner { claim() }
         sendInput(bytes: bytes)
+    }
+
+    /// Tell the server how this screen sees the terminal; `open` asks for the grid.
+    private func sendView(open: Bool) {
+        guard connState == .connected, let ws, !terminalDead, !disposed else { return }
+        // Asking for the grid needs our real fit; a state report can reuse the last
+        // one (the Screen face may already be gone).
+        let measured = bridge.host?.settled == true ? bridge.naturalGrid : nil
+        guard let grid = measured ?? (open ? nil : lastViewGrid) else {
+            heldOpen = (heldOpen ?? false) || open
+            return
+        }
+        heldOpen = nil
+        lastViewGrid = grid
+        let idleMs = (max(0, Date().timeIntervalSince(lastUsed)) * 1000).rounded()
+        let msg = LocalStreamClientMessage.view(.init(
+            cols: Double(grid.cols), rows: Double(grid.rows), visible: showing,
+            idleMs: idleMs, open: open && showing ? true : nil))
+        Task { try? await ws.send(msg) }
     }
 
     private func sendResize(_ grid: TerminalGrid) {

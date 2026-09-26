@@ -238,7 +238,8 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
                 kind: "agent",
                 agent: d.runtime,
                 ...(prompt ? { prompt } : {}),
-                // Model, effort, and (Claude Code) the permission mode.
+                // Model, effort, and the permission mode (Claude Code's
+                // --permission-mode, Codex's --yolo).
                 ...localAgentParams(d.runtime, options),
                 // "New branch": the server wraps the prompt with branch + PR
                 // instructions off this base.

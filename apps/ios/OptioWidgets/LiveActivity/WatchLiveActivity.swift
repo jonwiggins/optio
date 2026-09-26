@@ -2,15 +2,27 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
-/// The one Optio Live Activity: "the session waiting on you, plus how many more".
-/// Region table and copy: docs/design/ios-glanceable-surfaces.md §2a.
+/// The one Optio Live Activity, built from the Work widget's pieces: the board tiles
+/// (Need you, Running, and Waiting / Recurring / Agents when the server sends them), then
+/// the sessions waiting on you. Region table and copy: docs/design/ios-glanceable-surfaces.md §2a.
 ///
-/// The head session renders as a session row — status dot · name · `status · reason`,
-/// then its four attribute chips (When / Where / Who / Then, the same icons as the
-/// app's `WorkRowView`) — with the "since" timer and a counts line underneath.
-/// Colour follows the status palette (Shared/StatusColor.swift): yellow while a
-/// session needs you, purple while sessions are working, grey when offline / ended.
-/// The only live elements are the system timers.
+/// - Two or more sessions need you: they are listed as the widget's rows
+///   (`● name  ✋ Allow?  14:32  ☾`), oldest first: all of them up to three, else the
+///   oldest two and "+N more" (`WatchState.listed`). A row opens its session; the moon
+///   is **Later**.
+/// - One needs you: it is shown in detail (name, status word and reason, how long it has
+///   waited) with its buttons: **Reply…** / **Later**, **Resume** / **Retry** for a task.
+/// - Nothing needs you: the running sessions, listed the same way, newest first (without
+///   the moon); a lone one in detail, with **Open PR** for a task at an open PR.
+///
+/// The island keeps the two numbers that matter: needs-you on the leading side, running
+/// on the trailing side, and the same list or detail underneath when expanded.
+///
+/// Standard values (counts, status words, timers) always render whole; only free text
+/// (a session's name, the reason, the preview) may end in an ellipsis. The lock screen
+/// clips a Live Activity past 160 pt, so the layout is sized for that at the largest text
+/// size it allows (`glanceTypeClamp`); WidgetSnapshots renders it at phone widths and
+/// text sizes.
 struct WatchLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: WatchAttributes.self) { context in
@@ -22,21 +34,11 @@ struct WatchLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     WatchExpandedLeading(state: state)
                 }
-                DynamicIslandExpandedRegion(.center) {
-                    WatchExpandedCenter(state: state)
-                }
                 DynamicIslandExpandedRegion(.trailing) {
                     WatchExpandedTrailing(state: state)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let head = state.head, state.phase == .waiting || state.phase == .working {
-                            SessionChips(item: head, short: true, grid: true, font: .caption2, spacing: 14)
-                                .padding(.leading, 4)
-                        }
-                        WatchCountsLine(state: state)
-                        WatchButtons(state: state)
-                    }
+                    WatchExpandedBottom(state: state)
                 }
             } compactLeading: {
                 WatchCompactLeading(state: state)
@@ -74,19 +76,17 @@ enum WatchCopy {
         }
     }
 
-    /// "2 sessions need you" / "Nothing needs you · 3 running" / "Machine unreachable" / "Sessions ended".
-    static func headline(_ state: WatchState) -> String {
-        GlanceCopy.headline(phase: state.phase.rawValue, needsYou: state.needsYouCount, running: state.runningCount)
+    /// The Work widget's tiles for this frame: Need you and Running always, Waiting /
+    /// Recurring / Agents when the server sent them.
+    static func tiles(_ state: WatchState) -> [GlanceCopy.Tile] {
+        GlanceCopy.tiles(needsYou: state.needsYouCount, running: state.runningCount,
+                         waiting: state.waitingCount, recurring: state.recurringCount, agents: state.agentCount)
     }
 
-    /// Short headline for the narrow leading region: "Needs you" / "Running" / "Offline" / "Ended".
-    static func shortHeadline(_ state: WatchState) -> String {
-        switch state.phase {
-        case .waiting: return "Needs you"
-        case .working: return "Running"
-        case .offline: return "Offline"
-        case .done: return "Ended"
-        }
+    /// The headline, longest first; the view shows the first that fits whole. Only the
+    /// final frame uses it now: the tiles carry the counts.
+    static func headlineOptions(_ state: WatchState) -> [String] {
+        GlanceCopy.headlineOptions(phase: state.phase.rawValue, needsYou: state.needsYouCount, running: state.runningCount)
     }
 
     static func offlineLine(_ state: WatchState) -> String {
@@ -94,33 +94,50 @@ enum WatchCopy {
         return "Machine unreachable since \(t)"
     }
 
-    static func workingLine(_ state: WatchState) -> String {
-        GlanceCopy.workingLine(running: state.runningCount)
-    }
-
-    /// `status · reason` under the name: "needs you · Waiting on a permission",
-    /// "needs attention · Merge conflict". A reason that already opens with the status
-    /// word ("PR #581 open · CI running" under "PR open") stands alone.
-    static func statusLine(_ item: WatchItem) -> String {
-        let status = item.statusText
-        guard let reason = item.reason, !reason.isEmpty else { return status }
+    /// The line under the name, as a status word that always renders whole and a
+    /// detail that may shorten: ("needs you", "Waiting on a permission"), ("needs
+    /// attention", "Merge conflict — resume?"), ("later", …) after **Later**. `preview`
+    /// prefers the last output line to the reason. A detail that already opens with
+    /// the status word ("PR #581 open · CI running" under "PR open") stands alone.
+    static func statusParts(_ item: WatchItem, preview: Bool = false, now: Date = .now) -> (word: String?, detail: String?) {
+        let status = item.watchStatusText(at: now)
+        let text = (preview ? item.preview.flatMap { $0.isEmpty ? nil : $0 } : nil) ?? item.reason
+        guard let text, !text.isEmpty else { return (status, nil) }
         let first = { (s: String) in s.lowercased().split(separator: " ").first.map(String.init) ?? "" }
-        if reason.lowercased() == status.lowercased() || first(reason) == first(status) { return reason }
-        return "\(status) · \(reason)"
+        if text.lowercased() == status.lowercased() || first(text) == first(status) { return (nil, text) }
+        return (status, text)
     }
 
-    /// The counts line under the head: "2 more need you · 3 running" (waiting) or
-    /// "3 sessions running" (working). Empty when it would repeat the headline.
-    static func countsLine(_ state: WatchState) -> String {
-        switch state.phase {
-        case .waiting: return GlanceCopy.countsLine(needsYou: state.needsYouCount, running: state.runningCount, excludingHead: true)
-        case .working: return state.runningCount > 1 ? "\(state.runningCount - 1) more running" : ""
-        case .offline, .done: return ""
-        }
+    /// `status · detail` in one string (accessibility, tests).
+    static func statusLine(_ item: WatchItem, preview: Bool = false, now: Date = .now) -> String {
+        let parts = statusParts(item, preview: preview, now: now)
+        return [parts.word, parts.detail].compactMap { $0 }.joined(separator: " · ")
     }
 
-    static func summaryLine(_ state: WatchState) -> String {
-        state.summary ?? "Sessions ended."
+    /// The status word's colour: the item's status, grey while put off with **Later**.
+    static func statusColor(_ item: WatchItem, now: Date = .now) -> Color {
+        item.isSnoozed(at: now) ? StatusColor.grey : StatusKind.forState(item.state).color
+    }
+
+    /// The button that opens the session: "Reply…" for a terminal, "Message…" for a
+    /// persistent agent, "Open" for a task (a task takes no reply).
+    static func openLabel(_ item: WatchItem) -> String {
+        if item.thenValue == .waitsForMessages { return "Message…" }
+        return item.kind == .task ? "Open" : "Reply…"
+    }
+
+    /// "+10 more": the sessions the list leaves out (needing you, else running).
+    static func moreLine(_ state: WatchState) -> String? {
+        state.unlisted > 0 ? "+\(state.unlisted) more" : nil
+    }
+
+    /// The final frame's line under "Sessions ended": the summary without the words the
+    /// headline already says ("3 answered, 1 PR merged."). Nil when nothing is left.
+    static func summaryLine(_ state: WatchState) -> String? {
+        let summary = (state.summary ?? "").trimmingCharacters(in: .whitespaces)
+        let headline = "Sessions ended."
+        let rest = summary.hasPrefix(headline) ? String(summary.dropFirst(headline.count)).trimmingCharacters(in: .whitespaces) : summary
+        return rest.isEmpty ? nil : rest
     }
 
     static func url(for state: WatchState) -> URL? {
@@ -142,8 +159,11 @@ struct WatchServerTag: View {
     let item: WatchItem
     var size: Font = .caption2
 
+    /// More than one server is paired, so rows say which one they are on.
+    static var showsServers: Bool { ServerRegistry.all.count > 1 }
+
     private var profile: ServerProfile? {
-        guard ServerRegistry.all.count > 1, let id = item.serverId else { return nil }
+        guard Self.showsServers, let id = item.serverId else { return nil }
         return ServerRegistry.profile(id)
     }
 
@@ -153,22 +173,9 @@ struct WatchServerTag: View {
                 Circle().fill(p.color.swiftUI).frame(width: 6, height: 6)
                 Text(p.shortName).font(size.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
             }
+            .fixedSize()
             .accessibilityLabel("on \(p.name)")
         }
-    }
-}
-
-/// Monospace path/branch/slug, truncating head-first so the leaf survives.
-struct MonoText: View {
-    let text: String
-    var size: Font.TextStyle = .subheadline
-    var weight: Font.Weight = .semibold
-
-    var body: some View {
-        Text(text)
-            .font(.system(size, design: .monospaced).weight(weight))
-            .lineLimit(1)
-            .truncationMode(.head)
     }
 }
 
@@ -183,16 +190,19 @@ struct WatchGlyph: View {
     }
 }
 
-/// A status dot for one session: yellow needs input, purple working, red failed, green done.
+/// A status dot for one session: yellow needs input, purple working, red failed, green
+/// done, grey while a **Later** window is open.
 struct WatchStateDot: View {
     let item: WatchItem
     var size: CGFloat = 7
 
     var body: some View {
+        let snoozed = item.isSnoozed()
+        let kind = snoozed ? StatusKind.dead : StatusKind.forState(item.state)
         Circle()
-            .fill(StatusKind.forState(item.state).color)
+            .fill(kind.color)
             .frame(width: size, height: size)
-            .accessibilityLabel(StatusKind.forState(item.state).label)
+            .accessibilityLabel(snoozed ? "later" : kind.label)
     }
 }
 
@@ -207,103 +217,368 @@ struct WatchPhaseDot: View {
     }
 }
 
-/// The head session as a row: `● name [server]` then `status · reason`. Shared by
-/// the expanded island centre and the lock screen.
-struct WatchHeadRow: View {
-    let item: WatchItem
-    var nameFont: Font = .subheadline.weight(.semibold)
-    var lineFont: Font = .caption
-    var dotSize: CGFloat = 7
-    /// Show the last output line instead of `status · reason` when there is one.
-    var preview = false
+/// The headline, as long as the width allows ("Sessions ended", else "Ended"). Never
+/// an ellipsis.
+struct WatchHeadline: View {
+    let state: WatchState
+    var font: Font = .subheadline.weight(.semibold)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                WatchStateDot(item: item, size: dotSize)
-                Text(item.title).font(nameFont).lineLimit(1)
-                WatchServerTag(item: item)
+        ViewThatFits(in: .horizontal) {
+            ForEach(WatchCopy.headlineOptions(state), id: \.self) { line in
+                Text(line).lineLimit(1).fixedSize()
             }
-            if preview, let line = item.preview, !line.isEmpty {
-                Text(line).font(lineFont).foregroundStyle(.secondary).lineLimit(1).privacySensitive()
-            } else {
-                Text(WatchCopy.statusLine(item)).font(lineFont).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .font(font)
+        .foregroundStyle(WatchCopy.style(state.phase))
+    }
+}
+
+/// How long the head has been waiting (yellow) or running (secondary), sized to its
+/// widest value so hours never wrap it.
+struct WatchSinceTimer: View {
+    let state: WatchState
+    var font: Font = .subheadline
+
+    var body: some View {
+        switch state.phase {
+        case .waiting:
+            if let head = state.head {
+                FitTimer(since: head.since, font: font.weight(.semibold), style: AnyShapeStyle(StatusColor.yellow))
+                    .widgetAccentable()
+            }
+        case .working:
+            if let head = state.head {
+                FitTimer(since: head.since, countUp: true, font: font, style: AnyShapeStyle(.secondary))
+            }
+        case .offline, .done:
+            EmptyView()
+        }
+    }
+}
+
+/// `needs you  Waiting on a permission`: the status word whole and coloured, then the
+/// reason (or the last output line) in whatever room is left.
+struct WatchStatusLine: View {
+    let item: WatchItem
+    var preview = false
+    var font: Font = .footnote
+
+    var body: some View {
+        let parts = WatchCopy.statusParts(item, preview: preview)
+        HStack(spacing: 5) {
+            if let word = parts.word {
+                Text(word)
+                    .font(font.weight(.semibold))
+                    .foregroundStyle(WatchCopy.statusColor(item))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            if let detail = parts.detail {
+                Text(detail)
+                    .font(font)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .privacySensitive(preview && item.preview != nil)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A board number over its noun, `3` / `need you`: the island's two expanded sides.
+/// Grey at zero, like the tiles.
+struct WatchCount: View {
+    let count: Int
+    let noun: String
+    let color: Color
+    var alignment: HorizontalAlignment = .leading
+
+    var body: some View {
+        VStack(alignment: alignment, spacing: 0) {
+            Text("\(count)")
+                .font(.title3.weight(.bold).monospacedDigit())
+                .foregroundStyle(count > 0 ? color : .secondary)
+                .contentTransition(.numericText())
+            Text(noun)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Sessions
+
+/// One session as the Work widget's row with a live clock: `● name [server]  ✋ Allow?
+/// 14:32  ☾` for one waiting on you, `● name  working  3:10` for one running. The row
+/// opens the session (its composer for a terminal or an agent); the moon is **Later**.
+/// Only the name may shorten.
+struct WatchListRow: View {
+    let item: WatchItem
+    var large = false
+    var showsLater = true
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Link(destination: URL(string: item.link) ?? DeepLink.needsYou.url) {
+                HStack(spacing: 6) {
+                    WatchStateDot(item: item, size: large ? 9 : 7)
+                    Text(item.rowName)
+                        .font((large ? Font.body : .footnote).weight(.semibold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if WatchServerTag.showsServers, let tag = ServerTag(item: item) { tag.dot() }
+                    Spacer(minLength: 4)
+                    WatchRowStatus(item: item, font: (large ? Font.subheadline : .caption).weight(.semibold))
+                        .layoutPriority(1)
+                    // Concrete colours inside a Link: the hierarchical `.secondary` would
+                    // take the link tint.
+                    FitTimer(since: item.since, font: large ? .subheadline : .caption, style: AnyShapeStyle(Color.secondary))
+                        .layoutPriority(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            }
+            if showsLater {
+                Button(intent: LaterIntent(item: item)) {
+                    Image(systemName: "moon.zzz")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(.fill.tertiary, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Later")
             }
         }
     }
 }
 
-/// "2 more need you · 3 running" in the phase colour; nothing when empty.
-struct WatchCountsLine: View {
+/// A row's status in the widget's vocabulary (`✋ Allow?`, `PR`, `working`), or `☾ Later`
+/// in grey while a **Later** window is open: the session counts as running until then.
+struct WatchRowStatus: View {
+    let item: WatchItem
+    var font: Font = .caption.weight(.semibold)
+
+    var body: some View {
+        if item.isSnoozed() {
+            HStack(spacing: 3) {
+                Image(systemName: "moon.zzz")
+                Text("Later")
+            }
+            .font(font)
+            .foregroundStyle(StatusColor.grey)
+            .lineLimit(1)
+            .fixedSize()
+        } else {
+            StatusBadge(item: item, font: font)
+        }
+    }
+}
+
+/// One session in detail: `● name [server] … 14:32`, then the status word and the
+/// reason (or, while it waits on you, the last output line).
+struct WatchDetailRow: View {
+    let state: WatchState
+    let item: WatchItem
+    var large = false
+
+    var body: some View {
+        let dot: CGFloat = large ? 9 : 7
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                WatchStateDot(item: item, size: dot)
+                Text(item.title).font((large ? Font.title3 : .body).weight(.semibold)).lineLimit(1)
+                WatchServerTag(item: item)
+                Spacer(minLength: 8)
+                WatchSinceTimer(state: state, font: large ? .title3 : .subheadline)
+            }
+            WatchStatusLine(item: item, preview: state.phase == .waiting, font: large ? .body : .footnote)
+                .padding(.leading, dot + 6)
+        }
+    }
+}
+
+/// What sits under the counts: the sessions waiting on you as rows (two or more), the
+/// one waiting on you in detail with its buttons; with nothing waiting, the running
+/// sessions the same way. Shared by the lock screen and the expanded island.
+struct WatchSessions: View {
+    let state: WatchState
+    /// StandBy: larger type, no buttons.
+    var large = false
+    var buttons = true
+    /// The expanded island, whose leading side already says "Offline" with its icon.
+    var island = false
+
+    var body: some View {
+        switch state.phase {
+        case .waiting, .working:
+            if state.listsRows {
+                VStack(alignment: .leading, spacing: large ? 8 : 6) {
+                    ForEach(state.listed) { item in
+                        WatchListRow(item: item, large: large, showsLater: buttons && state.phase == .waiting)
+                    }
+                    if let more = WatchCopy.moreLine(state) {
+                        Link(destination: state.phase == .waiting ? DeepLink.needsYou.url : DeepLink.work(view: "active").url) {
+                            Text(more)
+                                .font((large ? Font.subheadline : .caption).weight(.semibold))
+                                .foregroundStyle(Color.secondary)
+                                .fixedSize()
+                        }
+                        .padding(.leading, large ? 15 : 13)
+                    }
+                }
+            } else if let head = state.head {
+                VStack(alignment: .leading, spacing: large ? 10 : 7) {
+                    WatchDetailRow(state: state, item: head, large: large)
+                    if buttons { WatchButtons(state: state) }
+                }
+            } else {
+                Text("No sessions running").font(large ? .title3 : .subheadline).foregroundStyle(.secondary)
+            }
+        case .offline:
+            Label(WatchCopy.offlineLine(state), systemImage: "wifi.slash")
+                .labelStyle(OfflineLabelStyle(icon: !island))
+                .font(large ? .title3 : .subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        case .done:
+            if let line = WatchCopy.summaryLine(state) {
+                Text(line)
+                    .font(large ? .title3 : .subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+}
+
+/// The offline line with its icon, or the words alone.
+private struct OfflineLabelStyle: LabelStyle {
+    let icon: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        if icon { Label(configuration) } else { configuration.title }
+    }
+}
+
+/// The buttons under a session shown in detail. Waiting: **Reply…** (or **Message…**,
+/// **Open** for a task) + **Later**; `needs_attention` task: **Resume**; `failed` task:
+/// **Retry**; a task with a PR: **Open PR**. Working: **Open PR** for a followed task at
+/// an open PR, else nothing.
+struct WatchButtons: View {
     let state: WatchState
 
     var body: some View {
-        let line = WatchCopy.countsLine(state)
-        if !line.isEmpty {
-            Text(line)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.leading, 4)
-                .contentTransition(.numericText())
+        if let head = state.head, state.phase == .waiting || (state.phase == .working && WatchCopy.prURL(head) != nil) {
+            HStack(spacing: 8) {
+                if state.phase == .waiting {
+                    let acts = WatchCopy.isAttentionTask(head) || WatchCopy.isFailedTask(head)
+                    if WatchCopy.isAttentionTask(head) {
+                        Button(intent: ResumeTaskIntent(taskId: head.id, serverId: head.serverId)) { pill("Resume", prominent: true) }
+                            .buttonStyle(.plain)
+                    } else if WatchCopy.isFailedTask(head) {
+                        Button(intent: WatchRetryTaskIntent(taskId: head.id, serverId: head.serverId)) { pill("Retry", prominent: true) }
+                            .buttonStyle(.plain)
+                    }
+                    if let url = URL(string: head.link) {
+                        Link(destination: url) { pill(WatchCopy.openLabel(head), prominent: !acts) }
+                    }
+                    if let pr = WatchCopy.prURL(head) {
+                        Link(destination: pr) { pill("Open PR", prominent: false) }
+                    }
+                    Button(intent: LaterIntent(item: head)) { pill("Later", prominent: false) }
+                        .buttonStyle(.plain)
+                } else if let pr = WatchCopy.prURL(head) {
+                    Link(destination: pr) { pill("Open PR", prominent: false) }
+                }
+            }
         }
+    }
+
+    private func pill(_ title: String, prominent: Bool) -> some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .lineLimit(1)
+            // Last resort for four buttons on a 4.7" phone at the largest text size.
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(prominent ? AnyShapeStyle(WatchCopy.purple) : AnyShapeStyle(.fill.tertiary), in: Capsule())
+            .foregroundStyle(prominent ? .white : .primary)
     }
 }
 
 // MARK: - Dynamic Island regions
 
-/// Status dot + the number that matters: needs-you while waiting, running otherwise.
+/// Needs you: the yellow dot and count. Nothing waiting: the bot, purple while sessions
+/// run, grey otherwise.
 struct WatchCompactLeading: View {
     let state: WatchState
 
     var body: some View {
-        HStack(spacing: 4) {
-            WatchPhaseDot(phase: state.phase, size: 8)
-            switch state.phase {
-            case .waiting:
-                Text("\(state.needsYouCount)")
-                    .font(.caption.weight(.bold).monospacedDigit())
-                    .foregroundStyle(StatusColor.yellow)
-                    .contentTransition(.numericText())
-                    .widgetAccentable()
-            case .working:
-                Text("\(state.runningCount)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(state.runningCount > 0 ? AnyShapeStyle(StatusColor.purple) : AnyShapeStyle(.secondary))
-                    .contentTransition(.numericText())
-            case .offline, .done:
-                EmptyView()
+        Group {
+            if state.phase == .waiting {
+                HStack(spacing: 4) {
+                    WatchPhaseDot(phase: .waiting, size: 8)
+                    Text("\(state.needsYouCount)")
+                        .font(.caption.weight(.bold).monospacedDigit())
+                        .foregroundStyle(StatusColor.yellow)
+                        .contentTransition(.numericText())
+                        .widgetAccentable()
+                        .fixedSize()
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(state.needsYouCount) need you")
+            } else {
+                OptioGlyph(size: 16, style: state.phase == .working && state.runningCount > 0 ? StatusColor.purple : StatusColor.grey)
             }
         }
         .padding(.leading, 2)
+        .glanceTypeClamp()
     }
 }
 
-/// The head's Who glyph (terminal vs agent) with the head's name; offline / ended words otherwise.
+/// Running: the purple dot and count. With nothing running, how long the oldest
+/// session has waited on you (yellow), or a word: "quiet", "offline", "ended".
 struct WatchCompactTrailing: View {
     let state: WatchState
 
     var body: some View {
-        switch state.phase {
-        case .waiting, .working:
-            if let head = state.head {
-                HStack(spacing: 4) {
-                    WhoGlyph(item: head, size: 11, style: AnyShapeStyle(WatchCopy.tint(state.phase)))
-                    Text(head.rowName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(WatchCopy.tint(state.phase))
-                        .lineLimit(1)
-                        .frame(maxWidth: 56, alignment: .trailing)
+        Group {
+            switch state.phase {
+            case .waiting, .working:
+                if state.runningCount > 0 {
+                    HStack(spacing: 4) {
+                        Circle().fill(StatusColor.purple).frame(width: 8, height: 8)
+                        Text("\(state.runningCount)")
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(StatusColor.purple)
+                            .contentTransition(.numericText())
+                            .fixedSize()
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(state.runningCount) running")
+                } else if state.phase == .waiting, let head = state.head {
+                    FitTimer(since: head.since, font: .caption.weight(.semibold), style: AnyShapeStyle(StatusColor.yellow))
+                        .widgetAccentable()
+                } else {
+                    Text("quiet").font(.caption).foregroundStyle(.secondary).fixedSize()
                 }
-                .widgetAccentable(state.phase == .waiting)
-            } else {
-                Text(WatchCopy.workingLine(state)).font(.caption).foregroundStyle(.secondary)
+            case .offline:
+                Text("offline").font(.caption).foregroundStyle(.secondary).fixedSize()
+            case .done:
+                Text("ended").font(.caption).foregroundStyle(.tertiary).fixedSize()
             }
-        case .offline:
-            Text("offline").font(.caption).foregroundStyle(.secondary)
-        case .done:
-            Text("ended").font(.caption).foregroundStyle(.tertiary)
         }
+        .padding(.trailing, 2)
+        .glanceTypeClamp()
     }
 }
 
@@ -312,220 +587,126 @@ struct WatchMinimal: View {
     let state: WatchState
 
     var body: some View {
-        switch state.phase {
-        case .waiting:
-            ZStack {
-                Circle().fill(StatusColor.yellow)
-                Text("\(state.needsYouCount)")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.black)
-                    .contentTransition(.numericText())
+        Group {
+            switch state.phase {
+            case .waiting:
+                ZStack {
+                    Circle().fill(StatusColor.yellow)
+                    Text("\(state.needsYouCount)")
+                        .font(.system(size: 11, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.black)
+                        .minimumScaleFactor(0.7)
+                        .contentTransition(.numericText())
+                }
+                .frame(width: 20, height: 20)
+                .widgetAccentable()
+            case .working where state.runningCount > 0:
+                ZStack {
+                    Circle().fill(StatusColor.purple)
+                    Text("\(state.runningCount)")
+                        .font(.system(size: 11, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.white)
+                        .minimumScaleFactor(0.7)
+                        .contentTransition(.numericText())
+                }
+                .frame(width: 20, height: 20)
+            default:
+                WatchPhaseDot(phase: state.phase, size: 10)
             }
-            .frame(width: 20, height: 20)
-            .widgetAccentable()
-        case .working where state.runningCount > 0:
-            ZStack {
-                Circle().fill(StatusColor.purple)
-                Text("\(state.runningCount)")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-            }
-            .frame(width: 20, height: 20)
-        default:
-            WatchPhaseDot(phase: state.phase, size: 10)
         }
     }
 }
 
+/// `3` / `need you`, yellow; "Offline" or "Ended" when there is nothing to count.
 struct WatchExpandedLeading: View {
     let state: WatchState
 
     var body: some View {
-        HStack(spacing: 6) {
-            WatchPhaseDot(phase: state.phase, size: 8)
-            Text(WatchCopy.shortHeadline(state))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(WatchCopy.style(state.phase))
-        }
-        .padding(.leading, 4)
-    }
-}
-
-struct WatchExpandedCenter: View {
-    let state: WatchState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        Group {
             switch state.phase {
             case .waiting, .working:
-                if let head = state.head {
-                    WatchHeadRow(item: head, preview: state.phase == .waiting)
-                } else {
-                    Text("No sessions running").font(.subheadline).foregroundStyle(.secondary)
-                }
+                WatchCount(count: state.needsYouCount, noun: state.needsYouCount == 1 ? "needs you" : "need you", color: StatusColor.yellow)
+                    .widgetAccentable(state.needsYouCount > 0)
             case .offline:
-                Text(WatchCopy.offlineLine(state)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                word("Offline", systemImage: "wifi.slash")
             case .done:
-                Text(WatchCopy.summaryLine(state)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                word("Ended", systemImage: "checkmark")
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 4)
+        .glanceTypeClamp()
+    }
+
+    private func word(_ text: String, systemImage: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
     }
 }
 
-/// The "since" timer: how long the head has been waiting (yellow) or running (secondary).
+/// `14` / `running`, purple.
 struct WatchExpandedTrailing: View {
     let state: WatchState
 
     var body: some View {
-        switch state.phase {
-        case .waiting:
-            if let head = state.head {
-                Text(head.since, style: .timer)
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(StatusColor.yellow)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 52, alignment: .trailing)
-                    .widgetAccentable()
+        Group {
+            switch state.phase {
+            case .waiting, .working:
+                WatchCount(count: state.runningCount, noun: "running", color: StatusColor.purple, alignment: .trailing)
+            case .offline, .done:
+                EmptyView()
             }
-        case .working:
-            if let head = state.head {
-                Text(timerInterval: head.since...head.since.addingTimeInterval(8 * 3600), countsDown: false)
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 52, alignment: .trailing)
-            }
-        case .offline, .done:
-            EmptyView()
         }
+        .padding(.trailing, 4)
+        .glanceTypeClamp()
     }
 }
 
-/// Bottom row. Waiting: **Reply…** + **Later**. Followed task in `pr_opened`: **Open PR**.
-/// `needs_attention` task: **Resume**; `failed` task: **Retry**. Working: nothing (no filler).
-struct WatchButtons: View {
+/// The sessions under the two counts: the list, or one session and its buttons.
+struct WatchExpandedBottom: View {
     let state: WatchState
 
     var body: some View {
-        if let head = state.head {
-            HStack(spacing: 8) {
-                if state.phase == .waiting {
-                    if WatchCopy.isAttentionTask(head) {
-                        Button(intent: ResumeTaskIntent(taskId: head.id, serverId: head.serverId)) { pill("Resume", prominent: true) }
-                            .buttonStyle(.plain)
-                    } else if WatchCopy.isFailedTask(head) {
-                        Button(intent: RetryTaskIntent(taskId: head.id, serverId: head.serverId)) { pill("Retry", prominent: true) }
-                            .buttonStyle(.plain)
-                    }
-                    if let url = URL(string: head.link) {
-                        Link(destination: url) { pill(head.thenValue == .waitsForMessages ? "Message…" : "Reply…", prominent: !WatchCopy.isAttentionTask(head) && !WatchCopy.isFailedTask(head)) }
-                    }
-                    if let pr = WatchCopy.prURL(head) {
-                        Link(destination: pr) { pill("Open PR", prominent: false) }
-                    }
-                    Button(intent: LaterIntent(item: head)) { pill("Later", prominent: false) }
-                        .buttonStyle(.plain)
-                } else if state.phase == .working, let pr = WatchCopy.prURL(head) {
-                    Link(destination: pr) { pill("Open PR", prominent: false) }
-                }
-            }
+        WatchSessions(state: state, island: true)
+            .padding(.horizontal, 4)
             .padding(.top, 2)
-        }
-    }
-
-    private func pill(_ title: String, prominent: Bool) -> some View {
-        Text(title)
-            .font(.footnote.weight(.semibold))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
-            .background(prominent ? AnyShapeStyle(WatchCopy.purple) : AnyShapeStyle(.fill.tertiary), in: Capsule())
-            .foregroundStyle(prominent ? .white : .primary)
+            .glanceTypeClamp()
     }
 }
 
 // MARK: - Lock screen / StandBy
 
-/// Headline row, the head session as a session row (name, `status · reason`, four
-/// chips), the counts line, then the buttons. StandBy (`isActivityFullscreen`) gets
-/// larger type and drops the chips and buttons.
+/// The bot and the board tiles, then the sessions (`WatchSessions`): at most five rows,
+/// inside the 160 pt the lock screen allows. StandBy (`isActivityFullscreen`) gets larger
+/// type and no buttons.
 struct WatchLockScreenView: View {
     let state: WatchState
     @Environment(\.isActivityFullscreen) private var fullscreen
 
     var body: some View {
-        VStack(alignment: .leading, spacing: fullscreen ? 10 : 6) {
-            HStack(spacing: 6) {
-                WatchGlyph(phase: state.phase, size: fullscreen ? 28 : 20)
-                Text(WatchCopy.headline(state))
-                    .font((fullscreen ? Font.title3 : .subheadline).weight(.semibold))
-                    .foregroundStyle(WatchCopy.style(state.phase))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 8)
-                trailing
-            }
-            center
-            if !fullscreen {
-                WatchButtons(state: state)
-            }
+        VStack(alignment: .leading, spacing: fullscreen ? 12 : 8) {
+            header
+            WatchSessions(state: state, large: fullscreen, buttons: !fullscreen)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .glanceTypeClamp()
     }
 
-    @ViewBuilder private var trailing: some View {
+    @ViewBuilder private var header: some View {
         switch state.phase {
-        case .waiting:
-            if let head = state.head {
-                Text(head.since, style: .timer)
-                    .font((fullscreen ? Font.title3 : .subheadline).monospacedDigit().weight(.semibold))
-                    .foregroundStyle(StatusColor.yellow)
-                    .frame(minWidth: 44, alignment: .trailing)
-                    .widgetAccentable()
+        case .waiting, .working, .offline:
+            HStack(spacing: 8) {
+                WatchGlyph(phase: state.phase, size: fullscreen ? 26 : 18)
+                TileStrip(tiles: WatchCopy.tiles(state), compact: !fullscreen)
             }
-        case .working:
-            if let head = state.head {
-                Text(timerInterval: head.since...head.since.addingTimeInterval(8 * 3600), countsDown: false)
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 44, alignment: .trailing)
-            }
-        case .offline, .done:
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder private var center: some View {
-        switch state.phase {
-        case .waiting, .working:
-            if let head = state.head {
-                VStack(alignment: .leading, spacing: fullscreen ? 6 : 4) {
-                    WatchHeadRow(item: head,
-                                 nameFont: (fullscreen ? Font.title3 : .body).weight(.semibold),
-                                 lineFont: fullscreen ? .body : .footnote,
-                                 dotSize: fullscreen ? 9 : 7,
-                                 preview: false)
-                    if !fullscreen {
-                        SessionChips(item: head, short: false, grid: true, font: .caption2, spacing: 14).padding(.leading, 13)
-                    }
-                    let counts = WatchCopy.countsLine(state)
-                    if !counts.isEmpty {
-                        Text(counts)
-                            .font(fullscreen ? .body : .caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, fullscreen ? 0 : 13)
-                            .contentTransition(.numericText())
-                    }
-                }
-            } else {
-                Text("No sessions running").font(.subheadline).foregroundStyle(.secondary)
-            }
-        case .offline:
-            Text(WatchCopy.offlineLine(state)).font(fullscreen ? .title3 : .subheadline).foregroundStyle(.secondary)
         case .done:
-            Text(WatchCopy.summaryLine(state)).font(fullscreen ? .title3 : .subheadline).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                WatchGlyph(phase: state.phase, size: fullscreen ? 26 : 18)
+                WatchHeadline(state: state, font: (fullscreen ? Font.title3 : .subheadline).weight(.semibold))
+            }
         }
     }
 }
@@ -565,16 +746,29 @@ extension WatchState {
             link: DeepLink.agent("a1", compose: true).url.absoluteString,
             source: .persistentAgent, when: "messages", where: WatchWhere(target: .pod, detail: "@vesper"),
             who: "claude-code", then: .waitsForMessages, statusLabel: "running")
+        static let busy = WatchItem(
+            kind: .local, id: "t4", title: "claude-code · inventory", mono: "inventory",
+            reason: nil, since: Date().addingTimeInterval(-9 * 60), state: "working",
+            link: DeepLink.local("t4", compose: true).url.absoluteString,
+            source: .localTerminal, when: "now", where: WatchWhere(target: .machine, detail: "MacBook Pro · ~/repos/inventory"),
+            who: "claude-code", then: .waitsForMe, statusLabel: "working")
         /// A row from a server that predates the session chips: every fallback kicks in.
         static let legacy = WatchItem(
             kind: .local, id: "t3", title: "codex · cli", mono: "optio/apps/cli",
             reason: "Gone quiet — check in", since: Date().addingTimeInterval(-20 * 60), state: "needs_you",
             link: DeepLink.local("t3", compose: true).url.absoluteString)
 
-        static let waiting = WatchState(phase: .waiting, head: head, others: [second], needsYouCount: 3, runningCount: 2, waitingCount: 1, recurringCount: 4, agentCount: 2)
+        /// Five need you: the oldest two listed, then "+3 more".
+        static let waiting = WatchState(phase: .waiting, head: attentionTask, others: [head, second], needsYouCount: 5, runningCount: 2, waitingCount: 1, recurringCount: 4, agentCount: 2)
+        static let waitingThree = WatchState(phase: .waiting, head: attentionTask, others: [head, second], needsYouCount: 3, runningCount: 2, waitingCount: 1, recurringCount: 4, agentCount: 2)
+        static let waitingTwo = WatchState(phase: .waiting, head: head, others: [second], needsYouCount: 2, runningCount: 3, waitingCount: 1, recurringCount: 4, agentCount: 2)
+        static let waitingOne = WatchState(phase: .waiting, head: head, needsYouCount: 1, runningCount: 2, waitingCount: 1, recurringCount: 4, agentCount: 2)
         static let waitingTask = WatchState(phase: .waiting, head: attentionTask, needsYouCount: 1, runningCount: 1)
         static let waitingLegacy = WatchState(phase: .waiting, head: legacy, needsYouCount: 1, runningCount: 0)
-        static let working = WatchState(phase: .working, head: task, needsYouCount: 0, runningCount: 3, waitingCount: 1, recurringCount: 4, agentCount: 2)
+        /// Nothing waiting, three running: all listed, newest first.
+        static let working = WatchState(phase: .working, head: agent, others: [busy, task], needsYouCount: 0, runningCount: 3, waitingCount: 1, recurringCount: 4, agentCount: 2)
+        static let workingMany = WatchState(phase: .working, head: agent, others: [busy, task], needsYouCount: 0, runningCount: 7, waitingCount: 1, recurringCount: 4, agentCount: 2)
+        static let workingTask = WatchState(phase: .working, head: task, needsYouCount: 0, runningCount: 1)
         static let workingAgent = WatchState(phase: .working, head: agent, needsYouCount: 0, runningCount: 1)
         static let offline = WatchState(phase: .offline, needsYouCount: 0, runningCount: 0, offlineSince: Date().addingTimeInterval(-6 * 60))
         static let done = WatchState(phase: .done, summary: "Sessions ended. 3 answered, 1 PR merged.")
@@ -585,6 +779,9 @@ extension WatchState {
     WatchLiveActivity()
 } contentStates: {
     WatchState.Samples.waiting
+    WatchState.Samples.waitingThree
+    WatchState.Samples.waitingTwo
+    WatchState.Samples.waitingOne
     WatchState.Samples.waitingTask
     WatchState.Samples.waitingLegacy
 }
@@ -593,6 +790,8 @@ extension WatchState {
     WatchLiveActivity()
 } contentStates: {
     WatchState.Samples.working
+    WatchState.Samples.workingMany
+    WatchState.Samples.workingTask
     WatchState.Samples.workingAgent
 }
 
@@ -607,6 +806,7 @@ extension WatchState {
     WatchLiveActivity()
 } contentStates: {
     WatchState.Samples.waiting
+    WatchState.Samples.waitingOne
     WatchState.Samples.working
     WatchState.Samples.offline
     WatchState.Samples.done
