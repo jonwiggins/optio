@@ -211,6 +211,25 @@ async function liveTerminal(id: string | null | undefined): Promise<LocalTermina
   return row && isLiveTerminalState(row.state) ? row : null;
 }
 
+/** How long a dispatcher that lost the claim waits for the winner's terminal row. */
+const CLAIM_WAIT_ATTEMPTS = 20;
+const CLAIM_WAIT_MS = 25;
+
+/**
+ * The terminal the dispatcher that won the claim is creating. It stamps the
+ * id on the run first and inserts the row right after, so a loser reading in
+ * between gives the row a moment to land instead of reporting no terminal.
+ */
+async function claimedTerminal(id: string | null | undefined): Promise<LocalTerminalRow | null> {
+  if (!id) return null;
+  for (let attempt = 0; ; attempt++) {
+    const row = await getTerminal(id);
+    if (row) return isLiveTerminalState(row.state) ? row : null;
+    if (attempt >= CLAIM_WAIT_ATTEMPTS) return null;
+    await new Promise((resolve) => setTimeout(resolve, CLAIM_WAIT_MS));
+  }
+}
+
 /**
  * Spawn (or re-attach to) the local terminal that executes a queued Job run.
  * Called by the workflow worker instead of provisioning a pod. Idempotent:
@@ -259,7 +278,7 @@ export async function dispatchLocalWorkflowRun(
   if (claimed.length === 0) {
     log.info("local dispatch lost the claim race — another dispatcher owns this run");
     const [fresh] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, run.id));
-    return liveTerminal(fresh?.localTerminalId);
+    return claimedTerminal(fresh?.localTerminalId);
   }
 
   try {
@@ -361,7 +380,7 @@ export async function dispatchLocalTask(
   if (claimed.length === 0) {
     log.info("local dispatch lost the claim race — another dispatcher owns this task");
     const fresh = await taskService.getTask(task.id);
-    return liveTerminal(fresh?.localTerminalId);
+    return claimedTerminal(fresh?.localTerminalId);
   }
 
   const resumeSessionId =
