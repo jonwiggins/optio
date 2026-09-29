@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-09-28
+
 ### Added
 
 - **Codex sessions have a Transcript too.** Opening a Codex session now offers the same **Transcript ⇄ Screen** toggle as Claude Code: your prompts, Codex's replies, its reasoning summaries, and every command or patch with its output, readable at any width. It works for Codex started by Optio and for `codex` typed into a shell on your machine. The daemon reads Codex's own session file (the one the running `codex` process holds open), so nothing needs configuring. Codex runs now report their session id too, so **Resume chat** works for them, a headless Codex task that gets review feedback resumes one-shot (`codex exec resume`), and a finished Codex session's conversation can be read back off the machine like a Claude Code one's. Restart `optio local up` to pick this up.
