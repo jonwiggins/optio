@@ -9,3 +9,7 @@ dist
 **/.env.*
 !**/.env.example
 .values.local.yaml
+# The native apps: never copied into an image, and their build output (Xcode's
+# DerivedData, Gradle's) runs to gigabytes of build context.
+apps/ios
+apps/android
