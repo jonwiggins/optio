@@ -77,7 +77,7 @@ describe("buildAgentCommand session modes", () => {
     );
   });
 
-  it("headless resume is one-shot for Claude Code and interactive for every other CLI", () => {
+  it("headless resume is one-shot for Claude Code and Codex", () => {
     // A local Repo Task resuming after review feedback: run the turn, then exit.
     expect(
       buildAgentCommand("claude-code", "fix CI", SETTINGS, {
@@ -85,10 +85,10 @@ describe("buildAgentCommand session modes", () => {
         resumeSessionId: "abc-123",
       }),
     ).toBe(`${CLAUDE} -p --resume 'abc-123' 'fix CI'`);
-    // Codex has no `exec resume`; fall back to the interactive resume.
+    // A headless local task resuming after review feedback must still exit when done.
     expect(
       buildAgentCommand("codex", "fix CI", SETTINGS, { mode: "headless", resumeSessionId: "s1" }),
-    ).toBe(`codex resume 's1' 'fix CI'`);
+    ).toBe(`codex exec resume 's1' 'fix CI'`);
   });
 
   it("passes a model override as a quoted flag per CLI", () => {

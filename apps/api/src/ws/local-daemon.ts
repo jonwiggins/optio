@@ -127,7 +127,11 @@ export async function localDaemonWs(app: FastifyInstance) {
         case "scrollback":
           // attachId is a server-generated secret only the owning host was
           // told, so no cross-host check is needed here.
-          relay.deliverScrollback(msg.attachId, Buffer.from(msg.dataB64, "base64"));
+          relay.deliverScrollback(
+            msg.attachId,
+            Buffer.from(msg.dataB64, "base64"),
+            replayGrid(msg.cols, msg.rows),
+          );
           return;
         case "attach-error":
           // Off the frame queue: it may wait for this terminal's `exit`,
@@ -217,4 +221,11 @@ export async function localDaemonWs(app: FastifyInstance) {
     // Replays the frames that arrived during auth (hello first), in order.
     conn.ready(onMessage);
   });
+}
+
+/** The grid a daemon's snapshot names, when it names a sane one (older daemons don't). */
+function replayGrid(cols: unknown, rows: unknown): { cols: number; rows: number } | undefined {
+  const ok = (n: unknown): n is number =>
+    Number.isInteger(n) && (n as number) > 0 && (n as number) <= 1000;
+  return ok(cols) && ok(rows) ? { cols, rows } : undefined;
 }

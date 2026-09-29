@@ -287,7 +287,18 @@ private fun EventRows(state: WorkFormState) {
     val kinds = eventKinds(type)
     RowDivider()
     kinds.forEach { k -> CheckRow(k.label, checked = k.value in events, onToggle = { state.toggleEventKind(k.value) }) }
-    val personal = kinds.any { it.personal && it.value in events }
+    // Linear: skip tickets you created and changes you made yourself.
+    val othersOnly = type == EventTriggerType.LINEAR && config.bool("othersOnly")
+    if (type == EventTriggerType.LINEAR) {
+        RowDivider()
+        SwitchRow(
+            "Only tickets from someone else",
+            checked = othersOnly,
+            onCheckedChange = { state.setEventField("othersOnly", JsonPrimitive(it)) },
+        )
+        CardNote("Skips tickets you created and changes you made yourself, like assigning a ticket to yourself.")
+    }
+    val personal = kinds.any { it.personal && it.value in events } || othersOnly
     if (personal) {
         val key = identityKey(type)
         RowDivider()

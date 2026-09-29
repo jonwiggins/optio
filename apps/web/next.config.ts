@@ -15,11 +15,13 @@ const nextConfig: NextConfig = {
     // Codex's "answer the question" key never arrives), ⌥←/→ lose their word
     // jumps, and Option-typed characters arrive as Esc+letter. The prebuilt
     // bundle imports nothing, so include it unparsed: no polyfill, and xterm
-    // sees the real browser. (Fixed upstream after @xterm/xterm 6.0.)
+    // sees the real browser. (Fixed upstream after @xterm/xterm 6.0.) The WebGL
+    // renderer addon carries its own copy of the same platform check.
     const noParse = config.module.noParse;
     config.module.noParse = [
       ...(noParse ? (Array.isArray(noParse) ? noParse : [noParse]) : []),
       /[\\/]@xterm[\\/]xterm[\\/]lib[\\/]xterm\.js$/,
+      /[\\/]@xterm[\\/]addon-webgl[\\/]lib[\\/]addon-webgl\.js$/,
     ];
     return config;
   },

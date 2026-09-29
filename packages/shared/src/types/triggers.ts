@@ -195,12 +195,24 @@ export interface LinearTriggerConfig {
   labels?: string[];
   /** Restrict to these team keys (empty = any). */
   teams?: string[];
+  /**
+   * Only tickets from someone else: skip an issue `user` created, and any
+   * change `user` made themselves (assigning it to themselves, mentioning
+   * themselves, adding a label). Needs `user`.
+   */
+  othersOnly?: boolean;
 }
 
 export interface LinearEvent {
   kinds: LinearEventKind[];
   /** User ids / names the event concerns: new assignee, @-mentions. */
   targets: string[];
+  /** Who did it (the webhook's actor), every way the payload names them: id, name, email, handle. Lowercased. */
+  actorKeys: string[];
+  /** Who created the issue, when the payload says (issue events): id, name, email, handle. Lowercased. */
+  creatorKeys: string[];
+  /** The issue's assignee, every way the payload names them. Lowercased. */
+  assigneeKeys: string[];
   /** e.g. ENG-123 */
   identifier: string;
   title: string;

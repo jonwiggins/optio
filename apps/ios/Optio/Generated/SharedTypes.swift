@@ -3523,15 +3523,22 @@ public struct RunLocation: Codable, Hashable, Sendable {
 /// every reply, every tool call and its result, as plain text that reflows to
 /// any screen. `seq` is the daemon's per-terminal counter, 1-based and
 /// monotonic; the server stores entries keyed by it so a re-sent batch is
-/// idempotent.
+/// idempotent. Claude Code's JSONL and Codex's session rollout
+/// (`~/.codex/sessions/…/rollout-*.jsonl`) both distill to this shape.
+///
+/// `user` is the person typing in the session. Everything else the agent CLI
+/// files as a "user" turn — a background task reporting back, another agent's
+/// message, the summary that replaced a compacted conversation — is `system`,
+/// with `source` saying which.
 public enum LocalTranscriptRole: String, Codable, Hashable, Sendable, CaseIterable {
     case user = "user"
     case assistant = "assistant"
     case tool = "tool"
+    case system = "system"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [LocalTranscriptRole] = [.user, .assistant, .tool]
+    public static let allCases: [LocalTranscriptRole] = [.user, .assistant, .tool, .system]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -3555,10 +3562,41 @@ public enum LocalTranscriptKind: String, Codable, Hashable, Sendable, CaseIterab
     }
 }
 
+/// Where an entry came from, when it isn't simply what it looks like:
+/// - `prompt` (role `user`): the prompt the session was started with — from
+/// the New work form, an automation's template, or a headless `-p` run —
+/// rather than something typed into the running session
+/// - `task`: a background task or agent the session started reported back
+/// - `agent`: a message from another agent session
+/// - `compact`: the summary that replaced the conversation so far
+/// - `interrupt`: the turn was stopped
+/// - `rewind`: the conversation was rolled back to an earlier turn
+/// - `other`: anything else the CLI injected as a turn
+public enum LocalTranscriptSource: String, Codable, Hashable, Sendable, CaseIterable {
+    case prompt = "prompt"
+    case task = "task"
+    case agent = "agent"
+    case compact = "compact"
+    case interrupt = "interrupt"
+    case rewind = "rewind"
+    case other = "other"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [LocalTranscriptSource] = [.prompt, .task, .agent, .compact, .interrupt, .rewind, .other]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = LocalTranscriptSource(rawValue: raw) ?? .unknown
+    }
+}
+
 public struct LocalTranscriptEntry: Codable, Hashable, Sendable {
     public let seq: Double
     public let role: LocalTranscriptRole
     public let kind: LocalTranscriptKind
+    /// See LocalTranscriptSource; null / missing for an ordinary entry (and from older daemons).
+    public let source: LocalTranscriptSource?
     /// The prompt / reply / thinking text, a tool call's one-line summary, or the tool's result.
     public let text: String
     /// `tool_use`: the full input (JSON, bounded); `tool_result`: unused.
@@ -3574,6 +3612,7 @@ public struct LocalTranscriptEntry: Codable, Hashable, Sendable {
         case seq = "seq"
         case role = "role"
         case kind = "kind"
+        case source = "source"
         case text = "text"
         case detail = "detail"
         case toolName = "toolName"
@@ -3586,6 +3625,7 @@ public struct LocalTranscriptEntry: Codable, Hashable, Sendable {
         seq: Double,
         role: LocalTranscriptRole,
         kind: LocalTranscriptKind,
+        source: LocalTranscriptSource? = nil,
         text: String,
         detail: String? = nil,
         toolName: String? = nil,
@@ -3596,6 +3636,7 @@ public struct LocalTranscriptEntry: Codable, Hashable, Sendable {
         self.seq = seq
         self.role = role
         self.kind = kind
+        self.source = source
         self.text = text
         self.detail = detail
         self.toolName = toolName
@@ -4048,17 +4089,29 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         public let terminalId: String
         public let attachId: String
         public let dataB64: String
+        public let cols: Double?
+        public let rows: Double?
 
         private enum CodingKeys: String, CodingKey {
             case terminalId = "terminalId"
             case attachId = "attachId"
             case dataB64 = "dataB64"
+            case cols = "cols"
+            case rows = "rows"
         }
 
-        public init(terminalId: String, attachId: String, dataB64: String) {
+        public init(
+            terminalId: String,
+            attachId: String,
+            dataB64: String,
+            cols: Double? = nil,
+            rows: Double? = nil
+        ) {
             self.terminalId = terminalId
             self.attachId = attachId
             self.dataB64 = dataB64
+            self.cols = cols
+            self.rows = rows
         }
     }
 
@@ -4544,24 +4597,29 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         public let terminalId: String
         public let agent: LocalAgentKind
         public let agentSessionId: String
+        /// The prompt the session was spawned with: its turn reads as the prompt, as when streamed.
+        public let prompt: String?
 
         private enum CodingKeys: String, CodingKey {
             case requestId = "requestId"
             case terminalId = "terminalId"
             case agent = "agent"
             case agentSessionId = "agentSessionId"
+            case prompt = "prompt"
         }
 
         public init(
             requestId: String,
             terminalId: String,
             agent: LocalAgentKind,
-            agentSessionId: String
+            agentSessionId: String,
+            prompt: String? = nil
         ) {
             self.requestId = requestId
             self.terminalId = terminalId
             self.agent = agent
             self.agentSessionId = agentSessionId
+            self.prompt = prompt
         }
     }
 
@@ -4669,6 +4727,7 @@ public enum LocalDirOp: String, Codable, Hashable, Sendable, CaseIterable {
 public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
     case status(StatusPayload)
     case size(SizePayload)
+    case replay(ReplayPayload)
     case exit(ExitPayload)
     case error(ErrorPayload)
     /// Fallback for discriminator values this client does not know about yet.
@@ -4707,6 +4766,21 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct ReplayPayload: Codable, Hashable, Sendable {
+        public let cols: Double
+        public let rows: Double
+
+        private enum CodingKeys: String, CodingKey {
+            case cols = "cols"
+            case rows = "rows"
+        }
+
+        public init(cols: Double, rows: Double) {
+            self.cols = cols
+            self.rows = rows
+        }
+    }
+
     public struct ExitPayload: Codable, Hashable, Sendable {
         public let exitCode: Double?
 
@@ -4741,6 +4815,7 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
         switch discriminator {
         case "status": self = .status(try StatusPayload(from: decoder))
         case "size": self = .size(try SizePayload(from: decoder))
+        case "replay": self = .replay(try ReplayPayload(from: decoder))
         case "exit": self = .exit(try ExitPayload(from: decoder))
         case "error": self = .error(try ErrorPayload(from: decoder))
         default: self = .unknown(try AnyCodable(from: decoder))
@@ -4756,6 +4831,10 @@ public enum LocalStreamServerMessage: Codable, Hashable, Sendable {
         case .size(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("size", forKey: .type)
+            try payload.encode(to: encoder)
+        case .replay(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("replay", forKey: .type)
             try payload.encode(to: encoder)
         case .exit(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
@@ -8113,24 +8192,31 @@ public struct LinearTriggerConfig: Codable, Hashable, Sendable {
     public let labels: [String]?
     /// Restrict to these team keys (empty = any).
     public let teams: [String]?
+    /// Only tickets from someone else: skip an issue `user` created, and any
+    /// change `user` made themselves (assigning it to themselves, mentioning
+    /// themselves, adding a label). Needs `user`.
+    public let othersOnly: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case events = "events"
         case user = "user"
         case labels = "labels"
         case teams = "teams"
+        case othersOnly = "othersOnly"
     }
 
     public init(
         events: [LinearEventKind]? = nil,
         user: String? = nil,
         labels: [String]? = nil,
-        teams: [String]? = nil
+        teams: [String]? = nil,
+        othersOnly: Bool? = nil
     ) {
         self.events = events
         self.user = user
         self.labels = labels
         self.teams = teams
+        self.othersOnly = othersOnly
     }
 }
 
@@ -8138,6 +8224,12 @@ public struct LinearEvent: Codable, Hashable, Sendable {
     public let kinds: [LinearEventKind]
     /// User ids / names the event concerns: new assignee,
     public let targets: [String]
+    /// Who did it (the webhook's actor), every way the payload names them: id, name, email, handle. Lowercased.
+    public let actorKeys: [String]
+    /// Who created the issue, when the payload says (issue events): id, name, email, handle. Lowercased.
+    public let creatorKeys: [String]
+    /// The issue's assignee, every way the payload names them. Lowercased.
+    public let assigneeKeys: [String]
     /// e.g. ENG-123
     public let identifier: String
     public let title: String
@@ -8158,6 +8250,9 @@ public struct LinearEvent: Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case kinds = "kinds"
         case targets = "targets"
+        case actorKeys = "actorKeys"
+        case creatorKeys = "creatorKeys"
+        case assigneeKeys = "assigneeKeys"
         case identifier = "identifier"
         case title = "title"
         case description = "description"
@@ -8177,6 +8272,9 @@ public struct LinearEvent: Codable, Hashable, Sendable {
     public init(
         kinds: [LinearEventKind],
         targets: [String],
+        actorKeys: [String],
+        creatorKeys: [String],
+        assigneeKeys: [String],
         identifier: String,
         title: String,
         description: String,
@@ -8194,6 +8292,9 @@ public struct LinearEvent: Codable, Hashable, Sendable {
     ) {
         self.kinds = kinds
         self.targets = targets
+        self.actorKeys = actorKeys
+        self.creatorKeys = creatorKeys
+        self.assigneeKeys = assigneeKeys
         self.identifier = identifier
         self.title = title
         self.description = description

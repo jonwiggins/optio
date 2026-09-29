@@ -1708,13 +1708,20 @@ data class RunLocation(
  * every reply, every tool call and its result, as plain text that reflows to
  * any screen. `seq` is the daemon's per-terminal counter, 1-based and
  * monotonic; the server stores entries keyed by it so a re-sent batch is
- * idempotent.
+ * idempotent. Claude Code's JSONL and Codex's session rollout
+ * (`~/.codex/sessions/…/rollout-*.jsonl`) both distill to this shape.
+ *
+ * `user` is the person typing in the session. Everything else the agent CLI
+ * files as a "user" turn — a background task reporting back, another agent's
+ * message, the summary that replaced a compacted conversation — is `system`,
+ * with `source` saying which.
  */
 @Serializable(with = LocalTranscriptRole.Companion::class)
 enum class LocalTranscriptRole(override val raw: String) : RawEnum {
     USER("user"),
     ASSISTANT("assistant"),
     TOOL("tool"),
+    SYSTEM("system"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -1733,11 +1740,40 @@ enum class LocalTranscriptKind(override val raw: String) : RawEnum {
     companion object : RawEnumSerializer<LocalTranscriptKind>("dev.optio.core.model.LocalTranscriptKind", entries, UNKNOWN)
 }
 
+/**
+ * Where an entry came from, when it isn't simply what it looks like:
+ * - `prompt` (role `user`): the prompt the session was started with — from
+ * the New work form, an automation's template, or a headless `-p` run —
+ * rather than something typed into the running session
+ * - `task`: a background task or agent the session started reported back
+ * - `agent`: a message from another agent session
+ * - `compact`: the summary that replaced the conversation so far
+ * - `interrupt`: the turn was stopped
+ * - `rewind`: the conversation was rolled back to an earlier turn
+ * - `other`: anything else the CLI injected as a turn
+ */
+@Serializable(with = LocalTranscriptSource.Companion::class)
+enum class LocalTranscriptSource(override val raw: String) : RawEnum {
+    PROMPT("prompt"),
+    TASK("task"),
+    AGENT("agent"),
+    COMPACT("compact"),
+    INTERRUPT("interrupt"),
+    REWIND("rewind"),
+    OTHER("other"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<LocalTranscriptSource>("dev.optio.core.model.LocalTranscriptSource", entries, UNKNOWN)
+}
+
 @Serializable
 data class LocalTranscriptEntry(
     val seq: Double,
     val role: LocalTranscriptRole,
     val kind: LocalTranscriptKind,
+    /** See LocalTranscriptSource; null / missing for an ordinary entry (and from older daemons). */
+    val source: LocalTranscriptSource? = null,
     /** The prompt / reply / thinking text, a tool call's one-line summary, or the tool's result. */
     val text: String,
     /** `tool_use`: the full input (JSON, bounded); `tool_result`: unused. */
@@ -1915,6 +1951,8 @@ sealed interface LocalDaemonMessage {
         val terminalId: String,
         val attachId: String,
         val dataB64: String,
+        val cols: Double? = null,
+        val rows: Double? = null,
     ) : LocalDaemonMessage
 
     @Serializable
@@ -2114,6 +2152,8 @@ sealed interface LocalServerMessage {
         val terminalId: String,
         val agent: LocalAgentKind,
         val agentSessionId: String,
+        /** The prompt the session was spawned with: its turn reads as the prompt, as when streamed. */
+        val prompt: String? = null,
     ) : LocalServerMessage
 
     @Serializable
@@ -2187,6 +2227,12 @@ sealed interface LocalStreamServerMessage {
     ) : LocalStreamServerMessage
 
     @Serializable
+    data class Replay(
+        val cols: Double,
+        val rows: Double,
+    ) : LocalStreamServerMessage
+
+    @Serializable
     data class Exit(
         val exitCode: Double? = null,
     ) : LocalStreamServerMessage
@@ -2203,6 +2249,7 @@ sealed interface LocalStreamServerMessage {
         override fun decode(tag: String, element: JsonObject, json: Json): LocalStreamServerMessage? = when (tag) {
             "status" -> json.decodeFromJsonElement(Status.serializer(), element.withoutDiscriminator())
             "size" -> json.decodeFromJsonElement(Size.serializer(), element.withoutDiscriminator())
+            "replay" -> json.decodeFromJsonElement(Replay.serializer(), element.withoutDiscriminator())
             "exit" -> json.decodeFromJsonElement(Exit.serializer(), element.withoutDiscriminator())
             "error" -> json.decodeFromJsonElement(Error.serializer(), element.withoutDiscriminator())
             else -> null
@@ -2211,6 +2258,7 @@ sealed interface LocalStreamServerMessage {
         override fun encode(value: LocalStreamServerMessage, json: Json): JsonElement = when (value) {
             is Status -> tagged("status", json.encodeToJsonElement(Status.serializer(), value))
             is Size -> tagged("size", json.encodeToJsonElement(Size.serializer(), value))
+            is Replay -> tagged("replay", json.encodeToJsonElement(Replay.serializer(), value))
             is Exit -> tagged("exit", json.encodeToJsonElement(Exit.serializer(), value))
             is Error -> tagged("error", json.encodeToJsonElement(Error.serializer(), value))
             is Unknown -> value.raw
@@ -3709,6 +3757,12 @@ data class LinearTriggerConfig(
     val labels: List<String>? = null,
     /** Restrict to these team keys (empty = any). */
     val teams: List<String>? = null,
+    /**
+     * Only tickets from someone else: skip an issue `user` created, and any
+     * change `user` made themselves (assigning it to themselves, mentioning
+     * themselves, adding a label). Needs `user`.
+     */
+    val othersOnly: Boolean? = null,
 )
 
 @Serializable
@@ -3716,6 +3770,12 @@ data class LinearEvent(
     val kinds: List<LinearEventKind>,
     /** User ids / names the event concerns: new assignee, */
     val targets: List<String>,
+    /** Who did it (the webhook's actor), every way the payload names them: id, name, email, handle. Lowercased. */
+    val actorKeys: List<String>,
+    /** Who created the issue, when the payload says (issue events): id, name, email, handle. Lowercased. */
+    val creatorKeys: List<String>,
+    /** The issue's assignee, every way the payload names them. Lowercased. */
+    val assigneeKeys: List<String>,
     /** e.g. ENG-123 */
     val identifier: String,
     val title: String,

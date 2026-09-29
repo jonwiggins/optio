@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { installTerminalLinks } from "@/lib/terminal-links";
 import { installTerminalClipboard } from "@/lib/terminal-clipboard";
 import { Maximize2 } from "lucide-react";
@@ -43,8 +44,10 @@ const REPLAY_CLOSE_MS = 1500;
 /**
  * xterm.js viewer for an Optio Local terminal (/ws/local/terminals/:id/stream).
  *
- * Protocol: server → client binary frames are raw terminal bytes (scrollback
- * replay first, then live); JSON text frames are {type:"status"|"size"|"exit"|"error"}.
+ * Protocol: server → client binary frames are raw terminal bytes (the
+ * terminal as it stands first — announced by a `replay` frame naming the grid
+ * it was drawn for — then live); JSON text frames are
+ * {type:"status"|"replay"|"size"|"exit"|"error"}.
  * Client → server is JSON only: {type:"input",data} | {type:"resize",cols,rows}
  * | {type:"view",cols,rows,visible,idleMs,open?}.
  */
@@ -283,6 +286,21 @@ export function LocalTerminal({
       }
     };
 
+    // Set while the grid is changed for a replay: that's not this screen's
+    // size, so it must not be reported as one.
+    let sizingReplay = false;
+    const layoutReplay = (grid: Grid) => {
+      if (disposed || (term.cols === grid.cols && term.rows === grid.rows)) return;
+      sizingReplay = true;
+      try {
+        term.resize(grid.cols, grid.rows);
+      } catch {
+        // renderer not ready yet
+      } finally {
+        sizingReplay = false;
+      }
+    };
+
     const applyMode = () => {
       if (mode.kind === "passive") {
         renderPassive(mode.grid);
@@ -330,6 +348,9 @@ export function LocalTerminal({
     };
 
     const resizeObserver = new ResizeObserver(() => {
+      // A replay laid out at its own grid can overflow the pane until it is
+      // parsed; fitting now would parse it at this screen's width after all.
+      if (holdingReplay()) return;
       applyMode();
       reportGrid();
     });
@@ -337,6 +358,7 @@ export function LocalTerminal({
     // Moving over, scrolling, or touching the terminal is using this screen.
     const activity = ["pointermove", "wheel", "touchstart"] as const;
     for (const type of activity) container.addEventListener(type, touched, { passive: true });
+    const uninstallTouchScroll = installTouchWheel(term, container);
     document.addEventListener("visibilitychange", onVisibility);
     // Open on the next frame, after React's commit has been laid out: WebKit
     // otherwise syncs xterm's viewport against a renderer that doesn't exist
@@ -344,6 +366,7 @@ export function LocalTerminal({
     const openFrame = requestAnimationFrame(() => {
       if (disposed) return;
       term.open(container);
+      loadWebglRenderer(term);
       safeFit();
       opened = true;
       resizeObserver.observe(container);
@@ -371,11 +394,26 @@ export function LocalTerminal({
     let replayWrites = 0;
     let replayClosed = false;
     let replayTimer: ReturnType<typeof setTimeout> | null = null;
+    // The daemon named the grid its snapshot was drawn for (`replay`). xterm
+    // parses writes asynchronously, so a `size` right behind the snapshot
+    // would resize the terminal before the snapshot is parsed and lay it out
+    // at this screen's width instead; it waits for the parse instead.
+    let replayLaidOut = false;
+    let deferredGrid: { grid: Grid; yours: boolean | undefined } | null = null;
     const closeReplay = () => {
       if (replayTimer) clearTimeout(replayTimer);
       replayTimer = null;
       replayClosed = true;
       if (replayWrites === 0) replaying = false;
+    };
+    /** A replay laid out at its own grid is still being parsed. */
+    const holdingReplay = () => replayLaidOut && replayWrites > 0;
+    /** The replay is parsed: apply the grid that arrived meanwhile. */
+    const replayParsed = () => {
+      if (replayClosed) replaying = false;
+      const pending = deferredGrid;
+      deferredGrid = null;
+      if (pending) onGrid(pending.grid, pending.yours);
     };
     // ⌥-drag selects over a program that tracks the mouse, and what the
     // program copies (OSC 52: Claude Code's copy-on-select) reaches this
@@ -408,6 +446,8 @@ export function LocalTerminal({
         replaying = true;
         replayWrites = 0;
         replayClosed = false;
+        replayLaidOut = false;
+        deferredGrid = null;
         if (replayTimer) clearTimeout(replayTimer);
         // A daemon that never says the size: don't hold answers back for good.
         replayTimer = setTimeout(closeReplay, REPLAY_CLOSE_MS);
@@ -437,13 +477,20 @@ export function LocalTerminal({
             if (isTerminalStateDead(parsed.state)) terminalDead = true;
             else liveOnThisConnection = true;
             onStatusRef.current?.(parsed.state, parsed.attentionState);
+          } else if (parsed.type === "replay") {
+            // The snapshot that follows was drawn for this grid: lay it out at
+            // that size, then let the `size` frames size it for this screen.
+            if (Number.isInteger(parsed.cols) && Number.isInteger(parsed.rows)) {
+              layoutReplay({ cols: parsed.cols, rows: parsed.rows });
+              replayLaidOut = true;
+            }
           } else if (parsed.type === "size") {
             if (!replayClosed) closeReplay();
             if (Number.isInteger(parsed.cols) && Number.isInteger(parsed.rows)) {
-              onGrid(
-                { cols: parsed.cols, rows: parsed.rows },
-                typeof parsed.yours === "boolean" ? parsed.yours : undefined,
-              );
+              const grid = { cols: parsed.cols, rows: parsed.rows };
+              const yours = typeof parsed.yours === "boolean" ? parsed.yours : undefined;
+              if (holdingReplay()) deferredGrid = { grid, yours };
+              else onGrid(grid, yours);
             }
           } else if (parsed.type === "exit") {
             terminalDead = true;
@@ -478,7 +525,7 @@ export function LocalTerminal({
           if (replaying && !replayClosed) {
             replayWrites++;
             term.write(new Uint8Array(msg.data), () => {
-              if (--replayWrites === 0 && replayClosed) replaying = false;
+              if (--replayWrites === 0) replayParsed();
             });
           } else {
             term.write(new Uint8Array(msg.data));
@@ -531,6 +578,7 @@ export function LocalTerminal({
     term.onResize(({ cols, rows }) => {
       // Passive renders call term.resize() too; only the owner tells the PTY.
       // (With a server that says whose the grid is, `view` carries it.)
+      if (sizingReplay) return;
       if (!arbitrated && mode.kind === "owner") sendResize({ cols, rows });
     });
 
@@ -542,6 +590,7 @@ export function LocalTerminal({
       resizeObserver.disconnect();
       container.removeEventListener("pointerdown", claim);
       for (const type of activity) container.removeEventListener(type, touched);
+      uninstallTouchScroll();
       uninstallClipboard();
       document.removeEventListener("visibilitychange", onVisibility);
       ws?.close();
@@ -600,4 +649,93 @@ export function LocalTerminal({
       <div className="shrink-0 h-[env(safe-area-inset-bottom)]" aria-hidden />
     </div>
   );
+}
+
+/**
+ * Draw with WebGL where the browser has it. xterm's default DOM renderer
+ * draws box-drawing characters with the font and each row's background as its
+ * own box: a rule like Codex's `────` shows a tick at every glyph join, and a
+ * tinted band (Codex's composer) shows seams between its rows at fractional
+ * zoom. WebGL draws those glyphs itself and paints backgrounds in device
+ * pixels. The DOM renderer stays when WebGL2 isn't there, takes over again if
+ * the context is lost, and is what `NEXT_PUBLIC_OPTIO_TERMINAL_RENDERER=dom`
+ * (or `localStorage["optio.terminal.renderer"] = "dom"`) asks for.
+ */
+function loadWebglRenderer(term: XTerm): void {
+  let choice = process.env.NEXT_PUBLIC_OPTIO_TERMINAL_RENDERER;
+  try {
+    choice = window.localStorage.getItem("optio.terminal.renderer") ?? choice;
+  } catch {
+    // storage blocked
+  }
+  if (choice === "dom") return;
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => webgl.dispose());
+    term.loadAddon(webgl);
+  } catch {
+    // No WebGL2 here: the DOM renderer draws instead.
+  }
+}
+
+/**
+ * A finger drag over a program that tracks the mouse (Claude Code's
+ * fullscreen UI, less, vim): xterm.js leaves touches alone then, so on a
+ * phone or tablet the drag scrolled nothing at all. Turn it into the wheel
+ * the program listens for — xterm encodes each one as the program asked
+ * (SGR reports, say). Without mouse tracking xterm scrolls on its own.
+ */
+export function installTouchWheel(term: XTerm, container: HTMLElement): () => void {
+  let lastY: number | null = null;
+  let lastX = 0;
+  let pending = 0;
+  const cellHeight = () => {
+    const h = (term as any)._core?._renderService?.dimensions?.css?.cell?.height;
+    return h > 0 ? h : 17;
+  };
+  const onStart = (e: TouchEvent) => {
+    lastY = e.touches.length === 1 ? e.touches[0]!.clientY : null;
+    lastX = e.touches.length === 1 ? e.touches[0]!.clientX : 0;
+    pending = 0;
+  };
+  const onMove = (e: TouchEvent) => {
+    if (lastY === null || e.touches.length !== 1 || term.modes.mouseTrackingMode === "none") {
+      return;
+    }
+    const y = e.touches[0]!.clientY;
+    // Finger up = further down the conversation, as with native scrolling.
+    pending += lastY - y;
+    lastY = y;
+    e.preventDefault();
+    const step = cellHeight();
+    const target = term.element?.querySelector(".xterm-screen") ?? term.element;
+    // One wheel event per line moved, a few at most per frame.
+    for (let n = 0; Math.abs(pending) >= step && n < 5; n++) {
+      const deltaY = pending > 0 ? step : -step;
+      pending -= deltaY;
+      target?.dispatchEvent(
+        new WheelEvent("wheel", {
+          deltaY,
+          deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+          clientX: lastX,
+          clientY: y,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }
+  };
+  const onEnd = () => {
+    lastY = null;
+  };
+  container.addEventListener("touchstart", onStart, { passive: true });
+  container.addEventListener("touchmove", onMove, { passive: false });
+  container.addEventListener("touchend", onEnd, { passive: true });
+  container.addEventListener("touchcancel", onEnd, { passive: true });
+  return () => {
+    container.removeEventListener("touchstart", onStart);
+    container.removeEventListener("touchmove", onMove);
+    container.removeEventListener("touchend", onEnd);
+    container.removeEventListener("touchcancel", onEnd);
+  };
 }

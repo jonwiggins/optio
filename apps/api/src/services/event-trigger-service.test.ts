@@ -460,4 +460,76 @@ describe("Linear", () => {
       state: "Todo",
     });
   });
+
+  describe("othersOnly", () => {
+    const assignedBy = (actor: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      normalizeLinearEvent({
+        type: "Issue",
+        action: "update",
+        data: { ...issue, ...extra },
+        updatedFrom: { assigneeId: null },
+        actor,
+      })!;
+
+    it("fires when someone else assigns someone else's ticket to you", () => {
+      const ev = assignedBy({ id: "u-alice", name: "Alice" }, { creatorId: "u-alice" });
+      expect(matchLinearTrigger({ user: "Jon Wiggins", othersOnly: true }, ev)).toBe("assigned");
+      expect(matchLinearTrigger({ user: "u-jon", othersOnly: true }, ev)).toBe("assigned");
+    });
+
+    it("skips tickets you assigned to yourself", () => {
+      const ev = assignedBy({ id: "u-jon", name: "Jon Wiggins" }, { creatorId: "u-alice" });
+      expect(matchLinearTrigger({ user: "u-jon" }, ev)).toBe("assigned");
+      expect(matchLinearTrigger({ user: "u-jon", othersOnly: true }, ev)).toBeNull();
+      expect(matchLinearTrigger({ user: "Jon Wiggins", othersOnly: true }, ev)).toBeNull();
+    });
+
+    it("skips tickets you created, even when a name matched and the payload has only creatorId", () => {
+      const ev = assignedBy({ id: "u-alice", name: "Alice" }, { creatorId: "u-jon" });
+      expect(matchLinearTrigger({ user: "Jon Wiggins" }, ev)).toBe("assigned");
+      expect(matchLinearTrigger({ user: "Jon Wiggins", othersOnly: true }, ev)).toBeNull();
+      expect(matchLinearTrigger({ user: "@jon", othersOnly: true }, ev)).toBeNull();
+    });
+
+    it("skips an issue you filed and assigned to yourself on creation", () => {
+      const ev = normalizeLinearEvent({
+        type: "Issue",
+        action: "create",
+        data: { ...issue, creatorId: "u-jon" },
+        actor: { id: "u-jon", name: "Jon Wiggins", url: "https://linear.app/acme/profiles/jonw" },
+      })!;
+      expect(matchLinearTrigger({ user: "jon", events: ["assigned"] }, ev)).toBe("assigned");
+      expect(
+        matchLinearTrigger({ user: "jon", events: ["assigned"], othersOnly: true }, ev),
+      ).toBeNull();
+      // Known only by the handle in the actor's profile URL.
+      expect(
+        matchLinearTrigger({ user: "jonw", events: ["created"], othersOnly: true }, ev),
+      ).toBeNull();
+      expect(
+        matchLinearTrigger({ user: "u-jon", events: ["created"], othersOnly: true }, ev),
+      ).toBeNull();
+    });
+
+    it("knows the person behind an integration's actor, and the author of a comment", () => {
+      const viaSlack = assignedBy(
+        { id: "slack-app", name: "Slack" },
+        { botActor: { name: "Slack", userDisplayName: "Jon Wiggins" }, creatorId: "u-x" },
+      );
+      expect(matchLinearTrigger({ user: "Jon Wiggins", othersOnly: true }, viaSlack)).toBeNull();
+
+      const comment = normalizeLinearEvent({
+        type: "Comment",
+        action: "create",
+        data: {
+          body: "[@Jon Wiggins](https://linear.app/acme/profiles/jonw) please look",
+          issue,
+          user: { id: "u-alice", name: "Alice" },
+          userId: "u-alice",
+        },
+        actor: { id: "u-alice", name: "Alice" },
+      })!;
+      expect(matchLinearTrigger({ user: "jonw", othersOnly: true }, comment)).toBe("mentioned");
+    });
+  });
 });

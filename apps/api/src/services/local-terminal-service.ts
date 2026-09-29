@@ -14,13 +14,16 @@ import {
   LOCAL_LAUNCH_TIMEOUT_MS,
   LOCAL_TRANSCRIPT_DETAIL_MAX,
   LOCAL_TRANSCRIPT_MAX_ENTRIES,
+  LOCAL_TRANSCRIPT_SOURCES,
   LOCAL_TRANSCRIPT_TEXT_MAX,
   MAX_WORK_LINKS,
+  classifyTranscriptUserText,
   dedupeWorkLinks,
   type WorkLink,
   type LocalTranscriptEntry,
   type LocalTranscriptKind,
   type LocalTranscriptRole,
+  type LocalTranscriptSource,
   type LocalAttentionState,
   type LocalDaemonTerminalSync,
   type LocalSpawnSource,
@@ -793,7 +796,8 @@ export async function getSnapshot(terminalId: string): Promise<LocalTerminalSnap
   return row ?? null;
 }
 
-const TRANSCRIPT_ROLES = new Set<LocalTranscriptRole>(["user", "assistant", "tool"]);
+const TRANSCRIPT_ROLES = new Set<LocalTranscriptRole>(["user", "assistant", "tool", "system"]);
+const TRANSCRIPT_SOURCES = new Set<LocalTranscriptSource>(LOCAL_TRANSCRIPT_SOURCES);
 const TRANSCRIPT_KINDS = new Set<LocalTranscriptKind>([
   "text",
   "thinking",
@@ -828,6 +832,9 @@ export function sanitizeTranscriptEntries(input: unknown): LocalTranscriptEntry[
       seq: e.seq as number,
       role: e.role as LocalTranscriptRole,
       kind: e.kind as LocalTranscriptKind,
+      source: TRANSCRIPT_SOURCES.has(e.source as LocalTranscriptSource)
+        ? (e.source as LocalTranscriptSource)
+        : null,
       text: e.text.slice(0, LOCAL_TRANSCRIPT_TEXT_MAX),
       detail: typeof e.detail === "string" ? e.detail.slice(0, LOCAL_TRANSCRIPT_DETAIL_MAX) : null,
       toolName: typeof e.toolName === "string" ? e.toolName.slice(0, 100) : null,
@@ -872,6 +879,7 @@ async function insertTranscriptEntries(
         seq: e.seq,
         role: e.role,
         kind: e.kind,
+        source: e.source ?? null,
         text: e.text,
         detail: e.detail,
         toolName: e.toolName,
@@ -919,7 +927,9 @@ const backfills = new Map<string, Backfill>();
 export function requestTranscriptBackfill(row: LocalTerminalRow, now = Date.now()): boolean {
   const spec = row.spec as unknown as LocalTerminalSpec;
   if (row.state !== "exited" && row.state !== "error") return false;
-  if (spec.kind !== "agent" || spec.agent !== "claude-code" || !row.agentSessionId) return false;
+  if (spec.kind !== "agent" || !row.agentSessionId) return false;
+  // The CLIs whose transcripts the daemon can read off disk.
+  if (spec.agent !== "claude-code" && spec.agent !== "codex") return false;
   for (const [id, b] of backfills) {
     if (now - (b.finishedAt ?? b.requestedAt) > BACKFILL_RETRY_MS) backfills.delete(id);
   }
@@ -934,6 +944,7 @@ export function requestTranscriptBackfill(row: LocalTerminalRow, now = Date.now(
     terminalId: row.id,
     agent: spec.agent,
     agentSessionId: row.agentSessionId,
+    ...(spec.prompt ? { prompt: spec.prompt } : {}),
   });
   if (!sent) return false;
   backfills.set(row.id, { requestId, hostId: row.hostId, requestedAt: now, finishedAt: null });
@@ -1006,17 +1017,32 @@ export async function getTranscript(
     )
     .orderBy(asc(localTerminalTranscripts.seq))
     .limit(limit);
-  return rows.map((r) => ({
-    seq: r.seq,
-    role: r.role as LocalTranscriptRole,
-    kind: r.kind as LocalTranscriptKind,
-    text: r.text,
-    detail: r.detail,
-    toolName: r.toolName,
-    toolUseId: r.toolUseId,
-    isError: r.isError,
-    at: r.at ? r.at.toISOString() : null,
-  }));
+  return rows.map((r) =>
+    reclassifyStoredTurn({
+      seq: r.seq,
+      role: r.role as LocalTranscriptRole,
+      kind: r.kind as LocalTranscriptKind,
+      source: (r.source as LocalTranscriptSource | null) ?? null,
+      text: r.text,
+      detail: r.detail,
+      toolName: r.toolName,
+      toolUseId: r.toolUseId,
+      isError: r.isError,
+      at: r.at ? r.at.toISOString() : null,
+    }),
+  );
+}
+
+/**
+ * A "user" turn stored before the daemon told turns apart: a background
+ * task's notification, another session's message, a compaction summary or
+ * an interruption read as "You". Recognized by its text, it reads as what it
+ * was.
+ */
+export function reclassifyStoredTurn(entry: LocalTranscriptEntry): LocalTranscriptEntry {
+  if (entry.role !== "user" || entry.kind !== "text" || entry.source) return entry;
+  const turn = classifyTranscriptUserText(entry.text);
+  return turn ? { ...entry, role: "system", source: turn.source, text: turn.text } : entry;
 }
 
 /** How many transcript entries a terminal has (0 = no conversation recorded). */

@@ -142,7 +142,7 @@ export function triggerSummary(trigger: any): string {
     case "linear": {
       const events = Array.isArray(c.events) && c.events.length ? c.events.join(", ") : "any";
       const teams = Array.isArray(c.teams) && c.teams.length ? ` in ${c.teams.join(", ")}` : "";
-      return `${events}${c.user ? ` → ${c.user}` : ""}${teams}`;
+      return `${events}${c.user ? ` → ${c.user}` : ""}${teams}${c.othersOnly ? " · from others" : ""}`;
     }
     default:
       return "";
@@ -794,6 +794,7 @@ function AddTriggerForm({
   );
   const [lnUser, setLnUser] = useState(String(c.user ?? ""));
   const [lnTeams, setLnTeams] = useState(Array.isArray(c.teams) ? c.teams.join(", ") : "");
+  const [lnOthersOnly, setLnOthersOnly] = useState(type === "linear" && c.othersOnly === true);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const list = (s: string) =>
@@ -844,6 +845,8 @@ function AddTriggerForm({
         const personal = lnEvents.some((e) => LINEAR_KINDS.find((k) => k.value === e)?.personal);
         if (personal && !lnUser.trim())
           return "Your Linear name or user id is required for those events";
+        if (lnOthersOnly && !lnUser.trim())
+          return "Your Linear name or user id is required to skip your own tickets";
         const l = list(labels);
         const t = list(lnTeams);
         return {
@@ -851,6 +854,7 @@ function AddTriggerForm({
           ...(lnUser.trim() ? { user: lnUser.trim().replace(/^@/, "") } : {}),
           ...(l.length ? { labels: l } : {}),
           ...(t.length ? { teams: t } : {}),
+          ...(lnOthersOnly ? { othersOnly: true } : {}),
         };
       }
     }
@@ -1078,9 +1082,13 @@ function AddTriggerForm({
               value={lnUser}
               onChange={(e) => setLnUser(e.target.value)}
               placeholder="your Linear name, @handle, or user id"
-              required={lnEvents.some((e) => LINEAR_KINDS.find((k) => k.value === e)?.personal)}
+              required={
+                lnOthersOnly ||
+                lnEvents.some((e) => LINEAR_KINDS.find((k) => k.value === e)?.personal)
+              }
               aria-invalid={
-                lnEvents.some((e) => LINEAR_KINDS.find((k) => k.value === e)?.personal) &&
+                (lnOthersOnly ||
+                  lnEvents.some((e) => LINEAR_KINDS.find((k) => k.value === e)?.personal)) &&
                 !lnUser.trim()
               }
               className={cn(smallInput, "flex-1 aria-[invalid=true]:border-error/60")}
@@ -1100,6 +1108,18 @@ function AddTriggerForm({
               className={cn(smallInput, "w-40")}
             />
           </div>
+          <label className="flex items-center gap-1.5 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={lnOthersOnly}
+              onChange={(e) => setLnOthersOnly(e.target.checked)}
+              className="accent-[#6d28d9]"
+            />
+            Only tickets from someone else
+            <span className="text-text-muted/60">
+              — skips tickets you created and ones you assigned to yourself
+            </span>
+          </label>
           <p className="text-[11px] text-text-muted/80 leading-snug">
             In Linear → Settings → API → Webhooks, add{" "}
             <code className="font-mono break-all">{origin}/api/webhooks/linear</code> for Issues and

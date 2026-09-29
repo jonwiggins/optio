@@ -32,6 +32,8 @@ import {
 } from "./hook-server.js";
 import { UsageTracker } from "./usage-tracker.js";
 import { TranscriptTracker } from "./transcript-tracker.js";
+import { CodexSessionFinder } from "./codex-sessions.js";
+import { codexThreadIdFromPath } from "./codex-transcript.js";
 import { readSessionTranscript } from "./transcript-backfill.js";
 import { readAgentLimits } from "./codex-limits.js";
 import { probeClaudeCli, probeCodexModels, type ClaudeCliCaps } from "./cli-probes.js";
@@ -178,9 +180,9 @@ export async function runDaemon(opts: {
 
   /** Re-read a terminal's transcript (when known) and ship what's new. */
   const flushTranscript = (terminalId: string): void => {
-    const path = transcript.paths().find(([id]) => id === terminalId)?.[1];
-    if (!path) return;
-    sendTranscript(terminalId, transcript.update(terminalId, path));
+    const known = transcript.paths().find(([id]) => id === terminalId);
+    if (!known) return;
+    sendTranscript(terminalId, transcript.update(terminalId, known[1], known[2]));
   };
 
   // One outbound path: drop while disconnected (don't queue), EXCEPT
@@ -241,6 +243,11 @@ export async function runDaemon(opts: {
 
   // Agent session ids already reported, so each terminal sends its id once.
   const reportedSessions = new Map<string, string>();
+  const reportSession = (terminalId: string, agentSessionId: string) => {
+    if (reportedSessions.get(terminalId) === agentSessionId) return;
+    reportedSessions.set(terminalId, agentSessionId);
+    send({ type: "session", terminalId, agentSessionId });
+  };
 
   const hookServer = await startHookServer((terminalId, eventName, payload) => {
     if (!manager.has(terminalId)) return;
@@ -249,10 +256,7 @@ export async function runDaemon(opts: {
     // attention is over for it.
     if (manager.isLive(terminalId)) attention.hookEvent(terminalId, eventName);
     // The agent's own session id makes the run resumable (`claude --resume`).
-    if (payload.sessionId && reportedSessions.get(terminalId) !== payload.sessionId) {
-      reportedSessions.set(terminalId, payload.sessionId);
-      send({ type: "session", terminalId, agentSessionId: payload.sessionId });
-    }
+    if (payload.sessionId) reportSession(terminalId, payload.sessionId);
     // Every hook names the transcript; Stop is when a turn's usage is
     // complete, but folding on each event keeps the header fresh mid-turn too.
     if (payload.transcriptPath) {
@@ -262,21 +266,46 @@ export async function runDaemon(opts: {
     }
   });
 
+  // Codex has no hooks Optio can use without asking the person to trust them;
+  // its session is the rollout file its process holds open (codex-sessions.ts).
+  const codexSessions = new CodexSessionFinder();
+  const followCodex = async () => {
+    const found = await codexSessions
+      .scan(manager.livePids())
+      .catch(() => new Map<string, string>());
+    for (const [terminalId, path] of found) {
+      if (!manager.has(terminalId)) continue;
+      const threadId = codexThreadIdFromPath(path);
+      // The thread id makes the session resumable (`codex resume <id>`).
+      if (threadId) reportSession(terminalId, threadId);
+      if (transcript.pathOf(terminalId) !== path) {
+        sendTranscript(terminalId, transcript.update(terminalId, path, "codex"));
+      }
+    }
+  };
+
   // Between hooks, keep the conversation view current for live sessions.
   const transcriptTimer = setInterval(() => {
-    for (const [terminalId, path] of transcript.paths()) {
-      if (!manager.has(terminalId)) {
-        transcript.remove(terminalId);
-        continue;
+    void followCodex().finally(() => {
+      for (const [terminalId, path, format] of transcript.paths()) {
+        if (!manager.has(terminalId)) {
+          transcript.remove(terminalId);
+          continue;
+        }
+        sendTranscript(terminalId, transcript.update(terminalId, path, format));
       }
-      sendTranscript(terminalId, transcript.update(terminalId, path));
-    }
+    });
   }, TRANSCRIPT_POLL_MS);
   transcriptTimer.unref();
 
   function handleServerMessage(msg: LocalServerMessage): void {
     switch (msg.type) {
       case "spawn":
+        // The session's first turn is this prompt, not something typed into it.
+        transcript.setLaunchPrompt(
+          msg.terminalId,
+          msg.spec.kind === "agent" ? msg.spec.prompt : undefined,
+        );
         manager.spawn(msg);
         return;
       case "input":
@@ -358,6 +387,7 @@ export async function runDaemon(opts: {
       agent: msg.agent,
       sessionId: msg.agentSessionId,
       allowedDirs: loadLocalConfig().dirs.map((d) => d.path),
+      launchPrompt: msg.prompt,
     });
     const batches: LocalTranscriptEntry[][] = [];
     for (let i = 0; i < entries.length; i += TRANSCRIPT_BATCH) {

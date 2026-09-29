@@ -164,6 +164,27 @@ describe("output subscription", () => {
     expect(sent[idx + 1]).toEqual({ type: "size", terminalId: "t-1", cols: 45, rows: 30 });
   });
 
+  it("attach sends the screen as it stands, with its grid and the program's modes", async () => {
+    const { sent, manager } = setup();
+    spawnTerminal(manager, "t-1");
+    // A full-screen program sets its modes once; a long session pushes that
+    // far past any byte budget.
+    h.spawned[0].dataCb?.("\x1b[?1049h\x1b[?1003h\x1b[?1006h");
+    for (let i = 0; i < 3000; i++) h.spawned[0].dataCb?.(`\x1b[1;1Hframe ${i} ${"=".repeat(200)}`);
+    await new Promise((r) => setTimeout(r, 50));
+    manager.attach("t-1", "attach-1");
+    const scrollback = sent.find((m) => m.type === "scrollback") as {
+      dataB64: string;
+      cols: number;
+      rows: number;
+    };
+    expect(scrollback).toMatchObject({ cols: expect.any(Number), rows: expect.any(Number) });
+    const text = Buffer.from(scrollback.dataB64, "base64").toString("utf-8");
+    expect(text).toContain("\x1b[?1049h");
+    expect(text).toContain("\x1b[?1006h");
+    expect(text).toContain("frame 2999");
+  });
+
   it("attach sends scrollback then streams output", () => {
     const { sent, manager } = setup();
     spawnTerminal(manager, "t-1");

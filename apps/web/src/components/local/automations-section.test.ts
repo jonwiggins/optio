@@ -43,4 +43,13 @@ describe("triggerSummary", () => {
       triggerSummary({ type: "github", config: { events: ["review_requested"], login: "" } }),
     ).toBe("review_requested");
   });
+
+  it("says when a Linear trigger skips your own tickets", () => {
+    expect(
+      triggerSummary({
+        type: "linear",
+        config: { events: ["assigned"], user: "Ada", othersOnly: true },
+      }),
+    ).toBe("assigned → Ada · from others");
+  });
 });

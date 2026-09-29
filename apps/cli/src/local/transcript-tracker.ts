@@ -2,8 +2,14 @@ import {
   LOCAL_TRANSCRIPT_DETAIL_MAX,
   LOCAL_TRANSCRIPT_MAX_ENTRIES,
   LOCAL_TRANSCRIPT_TEXT_MAX,
+  classifyTranscriptUserText,
+  peerMessageText,
+  taskNotificationText,
   type LocalTranscriptEntry,
+  type LocalTranscriptRole,
+  type LocalTranscriptSource,
 } from "@optio/shared";
+import { entriesFromCodexLine } from "./codex-transcript.js";
 import { JsonlTail } from "./jsonl-tail.js";
 
 /**
@@ -20,7 +26,16 @@ import { JsonlTail } from "./jsonl-tail.js";
  * transcript that is re-read from the top (rewritten file) yields no
  * duplicates. Subagent (sidechain) lines are skipped: they are a tool's
  * internals, and the parent's Agent tool call + result already covers them.
+ *
+ * Not every "user" line is the person: Claude Code files background-task
+ * notifications, other sessions' messages, compaction summaries and
+ * interruptions as user turns too. Those become `system` entries with a
+ * `source` (see LocalTranscriptSource), and the prompt a session was started
+ * with is tagged `prompt`. Codex rollouts go through codex-transcript.ts.
  */
+
+/** Which agent CLI wrote the transcript file. */
+export type TranscriptFormat = "claude" | "codex";
 
 /** Tool-result text longer than this is cut (the full output was on screen at the time). */
 const RESULT_TEXT_MAX = 4 * 1024;
@@ -28,10 +43,15 @@ const SUMMARY_MAX = 400;
 
 interface TerminalTranscriptState {
   transcriptPath: string;
+  format: TranscriptFormat;
   tail: JsonlTail;
   seen: Set<string>;
   nextSeq: number;
+  /** The prompt the session was spawned with, until its turn is seen. */
+  launchPrompt: string | null;
 }
+
+type ParsedEntry = Omit<LocalTranscriptEntry, "seq"> & { uuid: string | null };
 
 /** Truncate with a marker, keeping the result under `max` characters. */
 function clip(text: string, max: number): string {
@@ -101,13 +121,49 @@ export function summarizeToolInput(name: string, input: unknown): string {
   return clip(summary.replace(/\s+/g, " ").trim(), SUMMARY_MAX);
 }
 
+/** `origin.kind` of a Claude Code user line: human, task-notification, peer, … (newer CLIs). */
+function originKind(d: any): string | null {
+  const kind = d?.origin?.kind;
+  return typeof kind === "string" ? kind : null;
+}
+
+/**
+ * A user line's text as the conversation entry it really is: the person's
+ * turn, or — judged by the line's own metadata first, then by its text —
+ * something the CLI or another agent put there.
+ */
+function userTurn(
+  d: any,
+  raw: string,
+): { role: LocalTranscriptRole; kind: "text"; text: string; source: LocalTranscriptSource | null } {
+  const turn = (role: LocalTranscriptRole, text: string, source: LocalTranscriptSource | null) => ({
+    role,
+    kind: "text" as const,
+    text: clip(text, LOCAL_TRANSCRIPT_TEXT_MAX),
+    source,
+  });
+  const kind = originKind(d);
+  if (d.isCompactSummary === true) return turn("system", raw, "compact");
+  if (kind === "task-notification") return turn("system", taskNotificationText(raw), "task");
+  if (kind === "peer") {
+    const sender = typeof d.origin?.name === "string" ? d.origin.name : null;
+    return turn("system", peerMessageText(raw, sender), "agent");
+  }
+  const byText = classifyTranscriptUserText(raw);
+  if (byText) return turn("system", byText.text, byText.source);
+  // Anything a newer Claude Code marks as not coming from a person.
+  if ((kind && kind !== "human") || d.promptSource === "system")
+    return turn("system", raw, "other");
+  // `claude -p "…"`: the run's prompt, not a turn typed into the session.
+  if (d.promptSource === "sdk") return turn("user", raw, "prompt");
+  return turn("user", raw, null);
+}
+
 /**
  * The entries one transcript line contributes, in order, without `seq`
  * (assigned by the tracker). Exported for tests.
  */
-export function entriesFromLine(
-  line: string,
-): Array<Omit<LocalTranscriptEntry, "seq"> & { uuid: string | null }> | null {
+export function entriesFromLine(line: string): ParsedEntry[] | null {
   let d: any;
   try {
     d = JSON.parse(line);
@@ -120,21 +176,24 @@ export function entriesFromLine(
   if (!msg || typeof msg !== "object") return null;
   const uuid = typeof d.uuid === "string" ? d.uuid : null;
   const at = typeof d.timestamp === "string" ? d.timestamp : null;
-  const out: Array<Omit<LocalTranscriptEntry, "seq"> & { uuid: string | null }> = [];
-  const base = { detail: null, toolName: null, toolUseId: null, isError: false, at, uuid };
+  const out: ParsedEntry[] = [];
+  const base = {
+    detail: null,
+    toolName: null,
+    toolUseId: null,
+    isError: false,
+    source: null,
+    at,
+    uuid,
+  };
 
   if (d.type === "user") {
-    if (d.isMeta === true) return null;
+    // Claude Code's own bookkeeping is meta — but so is a message another
+    // agent session sent this one, and that belongs in the conversation.
+    if (d.isMeta === true && originKind(d) !== "peer") return null;
     if (typeof msg.content === "string") {
       const text = msg.content.trim();
-      if (text && !META_TAG_RE.test(text)) {
-        out.push({
-          ...base,
-          role: "user",
-          kind: "text",
-          text: clip(text, LOCAL_TRANSCRIPT_TEXT_MAX),
-        });
-      }
+      if (text && !META_TAG_RE.test(text)) out.push({ ...base, ...userTurn(d, text) });
       return out;
     }
     if (!Array.isArray(msg.content)) return null;
@@ -155,14 +214,7 @@ export function entriesFromLine(
       }
     }
     const text = texts.join("\n").trim();
-    if (text && !META_TAG_RE.test(text)) {
-      out.push({
-        ...base,
-        role: "user",
-        kind: "text",
-        text: clip(text, LOCAL_TRANSCRIPT_TEXT_MAX),
-      });
-    }
+    if (text && !META_TAG_RE.test(text)) out.push({ ...base, ...userTurn(d, text) });
     return out;
   }
 
@@ -213,31 +265,64 @@ export function entriesFromLine(
 
 export class TranscriptTracker {
   private byTerminal = new Map<string, TerminalTranscriptState>();
+  /** Launch prompts set before the terminal's transcript was found. */
+  private pendingPrompts = new Map<string, string>();
 
   /** Terminals with a known transcript, for the daemon's periodic poll. */
-  paths(): Array<[terminalId: string, transcriptPath: string]> {
-    return [...this.byTerminal].map(([id, s]) => [id, s.transcriptPath]);
+  paths(): Array<[terminalId: string, transcriptPath: string, format: TranscriptFormat]> {
+    return [...this.byTerminal].map(([id, s]) => [id, s.transcriptPath, s.format]);
+  }
+
+  /** The transcript a terminal is being read from, when known. */
+  pathOf(terminalId: string): string | null {
+    return this.byTerminal.get(terminalId)?.transcriptPath ?? null;
+  }
+
+  /**
+   * The prompt a terminal's session was spawned with: its turn in the
+   * transcript is the run's prompt (source `prompt`), not something typed
+   * into the session. Set before the first `update`.
+   */
+  setLaunchPrompt(terminalId: string, prompt: string | undefined): void {
+    const text = prompt?.trim();
+    const state = this.byTerminal.get(terminalId);
+    if (state) state.launchPrompt = text || null;
+    else if (text) this.pendingPrompts.set(terminalId, text);
   }
 
   /**
    * Point a terminal at its transcript and return the entries appended since
    * the last call (empty when nothing new). A different transcript path
-   * (`claude --resume` inside the same terminal) continues the numbering, so
-   * the server sees one growing conversation.
+   * (`claude --resume` inside the same terminal, Codex's `/new`) continues the
+   * numbering, so the server sees one growing conversation.
    */
-  update(terminalId: string, transcriptPath: string): LocalTranscriptEntry[] {
+  update(
+    terminalId: string,
+    transcriptPath: string,
+    format: TranscriptFormat = "claude",
+  ): LocalTranscriptEntry[] {
     let state = this.byTerminal.get(terminalId);
     if (!state) {
-      state = { transcriptPath, tail: new JsonlTail(transcriptPath), seen: new Set(), nextSeq: 1 };
+      state = {
+        transcriptPath,
+        format,
+        tail: new JsonlTail(transcriptPath),
+        seen: new Set(),
+        nextSeq: 1,
+        launchPrompt: this.pendingPrompts.get(terminalId) ?? null,
+      };
+      this.pendingPrompts.delete(terminalId);
       this.byTerminal.set(terminalId, state);
     } else if (state.transcriptPath !== transcriptPath) {
       state.transcriptPath = transcriptPath;
+      state.format = format;
       state.tail = new JsonlTail(transcriptPath);
     }
     if (state.nextSeq > LOCAL_TRANSCRIPT_MAX_ENTRIES) return [];
+    const parse = state.format === "codex" ? entriesFromCodexLine : entriesFromLine;
     const out: LocalTranscriptEntry[] = [];
     state.tail.readNew((line) => {
-      const entries = entriesFromLine(line);
+      const entries = parse(line);
       if (!entries || entries.length === 0) return;
       for (const { uuid, ...entry } of entries) {
         // One line per content block, each with its own uuid; a line with
@@ -248,6 +333,16 @@ export class TranscriptTracker {
           state!.seen.add(key);
         }
         if (state!.nextSeq > LOCAL_TRANSCRIPT_MAX_ENTRIES) return;
+        // The session's first turn, when it is the prompt it was spawned with.
+        if (
+          state!.launchPrompt &&
+          entry.role === "user" &&
+          !entry.source &&
+          entry.text.trim() === clip(state!.launchPrompt, LOCAL_TRANSCRIPT_TEXT_MAX).trim()
+        ) {
+          entry.source = "prompt";
+          state!.launchPrompt = null;
+        }
         out.push({ seq: state!.nextSeq++, ...entry });
       }
     });
@@ -256,5 +351,6 @@ export class TranscriptTracker {
 
   remove(terminalId: string): void {
     this.byTerminal.delete(terminalId);
+    this.pendingPrompts.delete(terminalId);
   }
 }

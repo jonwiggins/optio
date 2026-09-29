@@ -142,7 +142,10 @@ private struct EventRows: View {
     private var config: [String: AnyCodable] { state.draft.event.config }
     private var events: [String] { config["events"]?.arrayValue?.compactMap(\.stringValue) ?? [] }
     private var kinds: [F.EventKind] { type == .github ? F.githubKinds : type == .linear ? F.linearKinds : [] }
-    private var personal: Bool { kinds.contains { $0.personal && events.contains($0.value) } }
+    /// Linear: skip tickets you created and changes you made yourself.
+    private var othersOnly: Bool { type == .linear && config["othersOnly"]?.boolValue == true }
+    /// The events are about you (or you're skipped): the form needs to know who you are.
+    private var personal: Bool { kinds.contains { $0.personal && events.contains($0.value) } || othersOnly }
 
     private func set(_ key: String, _ value: AnyCodable) {
         state.edit { $0.event.config[key] = value }
@@ -165,6 +168,16 @@ private struct EventRows: View {
                     set: { on in
                         let next = on ? events + [k.value] : events.filter { $0 != k.value }
                         set("events", .array(next.map { .string($0) }))
+                    }
+                ))
+            }
+            if type == .linear {
+                Toggle("Only tickets from someone else", isOn: Binding(
+                    get: { othersOnly },
+                    set: { on in
+                        state.edit {
+                            if on { $0.event.config["othersOnly"] = .bool(true) } else { $0.event.config.removeValue(forKey: "othersOnly") }
+                        }
                     }
                 ))
             }

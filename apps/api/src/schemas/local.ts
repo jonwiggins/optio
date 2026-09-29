@@ -107,8 +107,19 @@ export const LocalTerminalSpecSchema = z
 export const LocalTranscriptEntrySchema = z
   .object({
     seq: z.number().int(),
-    role: z.enum(["user", "assistant", "tool"]),
+    role: z
+      .enum(["user", "assistant", "tool", "system"])
+      .describe(
+        "`user` is the person typing in the session; `system` is a turn the agent CLI or another agent put there (see `source`)",
+      ),
     kind: z.enum(["text", "thinking", "tool_use", "tool_result"]),
+    source: z
+      .enum(["prompt", "task", "agent", "compact", "interrupt", "rewind", "other"])
+      .nullable()
+      .optional()
+      .describe(
+        "Where the entry came from when it isn't what it looks like: the session's launch prompt, a background task's report, another agent's message, a compaction summary, an interruption, a rollback",
+      ),
     text: z.string(),
     detail: z.string().nullable().describe("tool_use: the full input as JSON (bounded)"),
     toolName: z.string().nullable(),

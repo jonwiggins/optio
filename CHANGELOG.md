@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Codex sessions have a Transcript too.** Opening a Codex session now offers the same **Transcript ⇄ Screen** toggle as Claude Code: your prompts, Codex's replies, its reasoning summaries, and every command or patch with its output, readable at any width. It works for Codex started by Optio and for `codex` typed into a shell on your machine. The daemon reads Codex's own session file (the one the running `codex` process holds open), so nothing needs configuring. Codex runs now report their session id too, so **Resume chat** works for them, a headless Codex task that gets review feedback resumes one-shot (`codex exec resume`), and a finished Codex session's conversation can be read back off the machine like a Claude Code one's. Restart `optio local up` to pick this up.
+- **Linear triggers can skip your own tickets.** A Linear trigger's new **Only tickets from someone else** option ignores issues you created and changes you made yourself, like filing a ticket assigned to you or assigning one to yourself. A ticket someone else creates for you, or assigns to you, still starts the work. It's in the New work form, the Machines automations editor, and the iOS and Android forms, and needs your Linear name, handle or user id.
+
+### Fixed
+
+- **Scrolling back in a session.** Opening a long-running Claude Code session (after a reload, switching sessions, another device, or a reconnect) could leave the wheel, a trackpad or a finger drag scrolling nothing. A viewer got only the last 512 KB of the session's output, and Claude Code turns on its fullscreen mode and mouse reporting once, at startup. A viewer now gets the terminal as it stands, rebuilt from the daemon's model of the screen, with the program's modes. Restart `optio local up` to pick this up. Also:
+  - On a phone or tablet in the web app, a finger drag now scrolls Claude Code.
+  - The iOS Transcript no longer jumps back to the bottom every few seconds while you read back through a running session.
+  - The iOS Screen view no longer comes back blank and unscrollable after you switch to the Transcript and back.
+  - Android's Transcript no longer pulls you down while you read up through a long last message.
+- **Codex's lines around the prompt.** The tinted band Codex draws around where you type, and the `────` rules between turns, could look broken in the web terminal: part of the band was left untinted after you opened a session in the middle of a turn, rows landed at the wrong width when the session had been sized for another screen, and xterm's HTML renderer left seams between the band's rows and ticks along the rules at some zoom levels. Sessions now open exactly as they were drawn, and the web terminal draws with WebGL where the browser supports it, falling back to the HTML renderer otherwise.
+- **Messages you didn't send no longer show as yours** in a session's Transcript. Claude Code files some messages as your turns: a background task or agent reporting back, a message from another agent session, the summary that replaces a compacted conversation, an interruption. These now show as notes saying what they are, and a session's launch prompt (from the New work form or an automation) shows as **Prompt**. Conversations recorded before this read correctly too.
+
 ## [0.6.4] - 2026-09-26
 
 ### Added

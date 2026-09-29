@@ -25,11 +25,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardReturn
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Dangerous
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.UnfoldLess
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
@@ -97,9 +105,13 @@ fun AgentLogView(
         val previous = previousCount
         previousCount = count
         if (!autoScroll || count == 0) return@LaunchedEffect
-        // Follow when the reader could see the previous last entry (appending doesn't move the list).
-        val lastVisible = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        if (previous == 0 || lastVisible >= previous - 1) state.scrollToBottom(animated = previous != 0)
+        // Follow when the reader could see the end of the previous last entry (appending doesn't
+        // move the list). Reading up inside a long last entry is reading back: stay put.
+        val info = state.layoutInfo
+        val previousLast = info.visibleItemsInfo.firstOrNull { it.index == previous - 1 }
+        val sawEnd = previousLast != null &&
+            previousLast.offset + previousLast.size <= info.viewportEndOffset - info.afterContentPadding + FOLLOW_SLACK_PX
+        if (previous == 0 || sawEnd) state.scrollToBottom(animated = previous != 0)
     }
     LazyColumn(
         state = state,
@@ -112,6 +124,9 @@ fun AgentLogView(
         }
     }
 }
+
+/** How far above the end of the last entry still counts as "at the bottom". */
+private const val FOLLOW_SLACK_PX = 48
 
 /** Scrolls to the end of the last item (iOS `scrollTo(last, anchor: .bottom)`). */
 private suspend fun LazyListState.scrollToBottom(animated: Boolean) {
@@ -139,11 +154,20 @@ fun AgentLogRow(
     val colors = OptioTheme.colors
     val type = OptioTheme.type
     val meta = entry.metadata
+    val role = meta?.get("role")?.stringValue
+    val source = meta?.get("source")?.stringValue
     when (entry.type) {
-        AgentLogEntry.TypeValue.TEXT -> if (meta?.get("role")?.stringValue == "user") {
-            UserPrompt(entry, modifier)
+        AgentLogEntry.TypeValue.TEXT -> if (role == "user" || role == "prompt") {
+            UserPrompt(entry, modifier, prompt = role == "prompt")
         } else {
             SelectionContainer(modifier.fillMaxWidth()) { MarkdownText(entry.content) }
+        }
+        AgentLogEntry.TypeValue.SYSTEM -> if (source != null) {
+            SystemNote(entry, source, modifier)
+        } else {
+            SelectionContainer(modifier.fillMaxWidth()) {
+                Text(entry.content, style = type.caption.mono(), color = colors.secondaryLabel)
+            }
         }
         AgentLogEntry.TypeValue.THINKING -> SelectionContainer(modifier.fillMaxWidth()) {
             Text(entry.content, style = type.footnote.italic(), color = colors.secondaryLabel)
@@ -156,24 +180,34 @@ fun AgentLogRow(
             Icon(Icons.Outlined.Dangerous, contentDescription = "Error", tint = colors.red, modifier = Modifier.padding(top = 1.dp).size(16.dp))
             SelectionContainer { Text(entry.content, style = type.monoFootnote, color = colors.red) }
         }
-        AgentLogEntry.TypeValue.SYSTEM, AgentLogEntry.TypeValue.INFO, AgentLogEntry.TypeValue.UNKNOWN -> SelectionContainer(modifier.fillMaxWidth()) {
+        AgentLogEntry.TypeValue.INFO, AgentLogEntry.TypeValue.UNKNOWN -> SelectionContainer(modifier.fillMaxWidth()) {
             Text(entry.content, style = type.caption.mono(), color = colors.secondaryLabel)
         }
     }
 }
 
+/**
+ * A turn typed by the person ("You"), or with [prompt] the prompt the session was started with
+ * (the New work form, an automation's template) rather than something typed into it.
+ */
 @Composable
-private fun UserPrompt(entry: AgentLogEntry, modifier: Modifier) {
+private fun UserPrompt(entry: AgentLogEntry, modifier: Modifier, prompt: Boolean = false) {
     val colors = OptioTheme.colors
     val type = OptioTheme.type
+    val tint = if (prompt) colors.secondaryLabel else colors.accent
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
         Box(
             Modifier
                 .size(22.dp)
-                .background(colors.accent.copy(alpha = 0.15f), CircleShape),
+                .background(if (prompt) colors.fillTertiary else colors.accent.copy(alpha = 0.15f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Person, contentDescription = null, tint = colors.accent, modifier = Modifier.size(13.dp))
+            Icon(
+                if (prompt) Icons.Outlined.Description else Icons.Filled.Person,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(13.dp),
+            )
         }
         Column(
             Modifier
@@ -183,12 +217,74 @@ private fun UserPrompt(entry: AgentLogEntry, modifier: Modifier) {
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("You", style = type.caption.semibold(), color = colors.accent)
+                Text(if (prompt) "Prompt" else "You", style = type.caption.semibold(), color = tint)
                 shortTime(entry.timestamp, LocalClock.current.zone)?.let { Text(it, style = type.caption2.tabularNums(), color = colors.tertiaryLabel) }
             }
             SelectionContainer { Text(entry.content, style = type.callout, color = colors.label) }
         }
     }
+}
+
+/**
+ * A turn the agent CLI filed as the person's but isn't: a background task reporting back, another
+ * agent's message, a compaction summary, an interruption (iOS `systemNote`). The first line reads
+ * inline; the rest folds away.
+ */
+@Composable
+private fun SystemNote(entry: AgentLogEntry, source: String, modifier: Modifier) {
+    val colors = OptioTheme.colors
+    val type = OptioTheme.type
+    val (label, icon, folds) = systemTurn(source)
+    val newline = entry.content.indexOf('\n')
+    val head = if (folds) label else "$label · ${if (newline >= 0) entry.content.substring(0, newline) else entry.content}"
+    val rest = if (folds) entry.content else if (newline >= 0) entry.content.substring(newline + 1).trim() else ""
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(colors.fillQuaternary, Radius.cardShape)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .then(if (rest.isNotEmpty()) Modifier.clickable(role = Role.Button) { expanded = !expanded } else Modifier)
+                .semantics { if (rest.isNotEmpty()) stateDescription = if (expanded) "Expanded" else "Collapsed" },
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (rest.isNotEmpty()) {
+                Icon(
+                    Icons.Filled.ExpandMore,
+                    contentDescription = null,
+                    tint = colors.secondaryLabel,
+                    modifier = Modifier.padding(top = 1.dp).size(14.dp).rotate(if (expanded) 0f else -90f),
+                )
+            }
+            Icon(icon, contentDescription = null, tint = colors.secondaryLabel, modifier = Modifier.padding(top = 1.dp).size(14.dp))
+            Text(
+                head,
+                style = type.caption,
+                color = colors.secondaryLabel,
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        AnimatedVisibility(expanded && rest.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            SelectionContainer { Text(rest, style = type.caption, color = colors.secondaryLabel) }
+        }
+    }
+}
+
+/** Label, icon, and whether the whole text folds away, per transcript `source`. */
+private fun systemTurn(source: String): Triple<String, ImageVector, Boolean> = when (source) {
+    "task" -> Triple("Background task", Icons.Outlined.Notifications, false)
+    "agent" -> Triple("Message from another agent", Icons.Outlined.Groups, false)
+    "compact" -> Triple("Earlier conversation summarized", Icons.Outlined.UnfoldLess, true)
+    "interrupt" -> Triple("Interrupted", Icons.Outlined.Block, false)
+    "rewind" -> Triple("Rolled back", Icons.AutoMirrored.Outlined.Undo, false)
+    else -> Triple("From the agent CLI", Icons.Outlined.Info, true)
 }
 
 @Composable

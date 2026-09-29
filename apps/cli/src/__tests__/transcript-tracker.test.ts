@@ -114,6 +114,88 @@ describe("entriesFromLine", () => {
   });
 });
 
+describe("who said it", () => {
+  const parse = (l: unknown) => entriesFromLine(JSON.stringify(l))!;
+
+  it("keeps the person's turns as theirs", () => {
+    expect(
+      parse(line("user", "fix the build", { origin: { kind: "human" }, promptSource: "typed" })),
+    ).toMatchObject([{ role: "user", source: null, text: "fix the build" }]);
+    // Older CLIs record no origin at all.
+    expect(parse(userPrompt("plain"))).toMatchObject([{ role: "user", source: null }]);
+  });
+
+  it("files a background task's notification as a system turn with its summary", () => {
+    const [e] = parse(
+      line(
+        "user",
+        '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Agent "Audit" finished</summary>\n<result>All good.</result>\n</task-notification>',
+        { origin: { kind: "task-notification" }, promptSource: "system" },
+      ),
+    );
+    expect(e).toMatchObject({
+      role: "system",
+      source: "task",
+      text: 'Agent "Audit" finished\n\nAll good.',
+    });
+  });
+
+  it("shows another session's message, though Claude Code marks it meta", () => {
+    const [e] = parse(
+      line(
+        "user",
+        'Another Claude session sent a message:\n<agent-message from="a150">\nM1 is merged.\n</agent-message>',
+        { isMeta: true, origin: { kind: "peer", name: "general-purpose" }, promptSource: "system" },
+      ),
+    );
+    expect(e).toMatchObject({
+      role: "system",
+      source: "agent",
+      text: "general-purpose: M1 is merged.",
+    });
+    // Other meta lines stay out.
+    expect(
+      entriesFromLine(JSON.stringify(line("user", "skill body", { isMeta: true }))),
+    ).toBeNull();
+  });
+
+  it("tells compaction summaries, interruptions and injected turns from the person", () => {
+    expect(
+      parse(
+        line("user", "This session is being continued from a previous conversation…", {
+          isCompactSummary: true,
+          isVisibleInTranscriptOnly: true,
+        }),
+      ),
+    ).toMatchObject([{ role: "system", source: "compact" }]);
+    expect(
+      parse(line("user", [{ type: "text", text: "[Request interrupted by user]" }])),
+    ).toMatchObject([{ role: "system", source: "interrupt", text: "Request interrupted by user" }]);
+    expect(parse(line("user", "wake up", { origin: { kind: "scheduled" } }))).toMatchObject([
+      { role: "system", source: "other" },
+    ]);
+  });
+
+  it("marks a headless run's prompt and a session's launch prompt as the prompt", () => {
+    expect(parse(line("user", "Reply with pong", { promptSource: "sdk" }))).toMatchObject([
+      { role: "user", source: "prompt" },
+    ]);
+    const tracker = new TranscriptTracker();
+    tracker.setLaunchPrompt("term", "Triage ENG-12: login breaks");
+    const path = transcript([
+      userPrompt("Triage ENG-12: login breaks"),
+      assistantText("On it."),
+      userPrompt("Triage ENG-12: login breaks"),
+    ]);
+    expect(tracker.update("term", path).map((e) => [e.role, e.source])).toEqual([
+      ["user", "prompt"],
+      ["assistant", null],
+      // Only the first time: typing it again is the person.
+      ["user", null],
+    ]);
+  });
+});
+
 describe("summarizeToolInput", () => {
   it("picks the field that names what the tool did", () => {
     expect(summarizeToolInput("Bash", { command: "npm test" })).toBe("npm test");
@@ -157,7 +239,7 @@ describe("TranscriptTracker", () => {
       [3, "tool_use"],
       [4, "tool_result"],
     ]);
-    expect(tracker.paths()).toEqual([["term", path]]);
+    expect(tracker.paths()).toEqual([["term", path, "claude"]]);
   });
 
   it("does not repeat entries when the file is rewritten from the top", () => {

@@ -1335,7 +1335,9 @@ function EventConfig({
       events: events.includes(v) ? events.filter((e) => e !== v) : [...events, v],
     });
   const kinds = type === "github" ? GITHUB_KINDS : type === "linear" ? LINEAR_KINDS : [];
-  const personal = kinds.some((k) => k.personal && events.includes(k.value));
+  // "Only tickets from someone else" needs to know who you are, whatever the events.
+  const othersOnly = type === "linear" && config.othersOnly === true;
+  const personal = kinds.some((k) => k.personal && events.includes(k.value)) || othersOnly;
   const identityKey = type === "github" ? "login" : "user";
   const identity = String(config[identityKey] ?? "");
   const postedBy = String(config.postedBy ?? "people");
@@ -1486,6 +1488,27 @@ function EventConfig({
               : listField("teams", "Only these teams", "ENG, OPS")}
             {type === "linear" && listField("labels", "Only with a label", "bug, triage")}
           </div>
+          {type === "linear" && (
+            <div>
+              <label className="flex items-center gap-1.5 text-xs text-text-muted">
+                <input
+                  type="checkbox"
+                  checked={othersOnly}
+                  onChange={(e) => {
+                    const next: Record<string, unknown> = { ...config };
+                    if (e.target.checked) next.othersOnly = true;
+                    else delete next.othersOnly;
+                    onChange(next);
+                  }}
+                />
+                Only tickets from someone else
+              </label>
+              <p className="text-[11px] text-text-muted/60 mt-1 ml-5">
+                Skips tickets you created and changes you made yourself, like assigning a ticket to
+                yourself.
+              </p>
+            </div>
+          )}
         </>
       )}
       <p className="text-[11px] text-text-muted/80">

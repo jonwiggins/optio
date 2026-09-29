@@ -7,6 +7,9 @@ import SwiftUI
 struct AgentLogView: View {
     let entries: [AgentLogEntry]
     var autoScroll = true
+    /// The reader is at the end: new entries scroll into view. Once they scroll
+    /// up to read back, a live log stops pulling them down.
+    @State private var atBottom = true
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -15,13 +18,37 @@ struct AgentLogView: View {
                     ForEach(Array(entries.enumerated()), id: \.offset) { idx, entry in
                         AgentLogRow(entry: entry).id(idx)
                     }
+                    // iOS 17 has no scroll geometry: the end coming into view stands in.
+                    Color.clear.frame(height: 1)
+                        .onAppear { if #unavailable(iOS 18.0) { atBottom = true } }
+                        .onDisappear { if #unavailable(iOS 18.0) { atBottom = false } }
                 }
                 .padding()
             }
-            .onChange(of: entries.count) { _, count in
-                guard autoScroll, count > 0 else { return }
+            .modifier(TracksBottom(atBottom: $atBottom))
+            .onChange(of: entries.count) { old, count in
+                // Land at the end when the log first loads; after that, follow
+                // only a reader who is already there.
+                guard autoScroll, count > 0, old == 0 || atBottom else { return }
                 withAnimation { proxy.scrollTo(count - 1, anchor: .bottom) }
             }
+        }
+    }
+}
+
+/// Whether a scroll view is at (or within a few points of) its end.
+private struct TracksBottom: ViewModifier {
+    @Binding var atBottom: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { geo in
+                geo.contentOffset.y + geo.containerSize.height >= geo.contentSize.height - 48
+            } action: { _, isAtBottom in
+                atBottom = isAtBottom
+            }
+        } else {
+            content
         }
     }
 }
@@ -32,8 +59,10 @@ struct AgentLogRow: View {
 
     var body: some View {
         switch entry.type {
-        case .text where isUser:
+        case .text where isUser || isPrompt:
             userBubble
+        case .system where systemSource != nil:
+            systemNote
         case .text:
             Text(LocalizedStringKey(entry.content))
                 .font(.body)
@@ -69,6 +98,12 @@ struct AgentLogRow: View {
     // one-line summary shown in the header (the body is then the full input);
     // `result` / `resultIsError` fold the tool's result under its call.
     private var isUser: Bool { entry.metadata?["role"]?.stringValue == "user" }
+    /// `role: "prompt"`: the prompt the session started with (the New work form,
+    /// an automation's template), not a turn typed into it.
+    private var isPrompt: Bool { entry.metadata?["role"]?.stringValue == "prompt" }
+    /// `source` on a `.system` entry: what put a non-human turn in the conversation
+    /// (a background task, another agent, a compaction, an interruption).
+    private var systemSource: String? { entry.metadata?["source"]?.stringValue }
     private var summary: String? { entry.metadata?["summary"]?.stringValue }
     private var pairedResult: String? { entry.metadata?["result"]?.stringValue }
     private var isError: Bool {
@@ -78,14 +113,16 @@ struct AgentLogRow: View {
 
     private var userBubble: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "person.fill")
+            Image(systemName: isPrompt ? "doc.text" : "person.fill")
                 .font(.caption2)
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(isPrompt ? AnyShapeStyle(.secondary) : AnyShapeStyle(AppTheme.accent))
                 .frame(width: 22, height: 22)
-                .background(AppTheme.accent.opacity(0.15), in: Circle())
+                .background(isPrompt ? AnyShapeStyle(.fill.tertiary) : AnyShapeStyle(AppTheme.accent.opacity(0.15)), in: Circle())
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("You").font(.caption.weight(.semibold)).foregroundStyle(AppTheme.accent)
+                    Text(isPrompt ? "Prompt" : "You")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isPrompt ? AnyShapeStyle(.secondary) : AnyShapeStyle(AppTheme.accent))
                     if let time = Self.shortTime(entry.timestamp) {
                         Text(time).font(.caption2).foregroundStyle(.tertiary).monospacedDigit()
                     }
@@ -100,6 +137,57 @@ struct AgentLogRow: View {
             .background(.fill.tertiary, in: Radius.cardShape)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A turn the agent CLI filed as the person's but isn't. The first line reads
+    /// inline; the rest (a task's result, a compaction summary) folds away.
+    private var systemNote: some View {
+        let (label, icon, folds) = Self.systemTurn(systemSource ?? "other")
+        let text = entry.content
+        let newline = text.firstIndex(of: "\n")
+        let head = folds ? label : "\(label) · \(newline.map { String(text[..<$0]) } ?? text)"
+        let rest = folds ? text : newline.map { String(text[text.index(after: $0)...]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+        return VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.snappy) { expanded.toggle() }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if !rest.isEmpty {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption2)
+                    }
+                    Image(systemName: icon).font(.caption2)
+                    Text(head).font(.caption).lineLimit(expanded ? nil : 2).multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(rest.isEmpty)
+            if expanded, !rest.isEmpty {
+                Text(rest)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.fill.quaternary, in: Radius.cardShape)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Label, SF Symbol, and whether the whole text folds away, per `source`.
+    private static func systemTurn(_ source: String) -> (String, String, Bool) {
+        switch source {
+        case "task": return ("Background task", "bell", false)
+        case "agent": return ("Message from another agent", "person.2", false)
+        case "compact": return ("Earlier conversation summarized", "rectangle.compress.vertical", true)
+        case "interrupt": return ("Interrupted", "nosign", false)
+        case "rewind": return ("Rolled back", "arrow.uturn.backward", false)
+        default: return ("From the agent CLI", "info.circle", true)
+        }
     }
 
     private static let timeFormatter: DateFormatter = {

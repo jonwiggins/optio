@@ -4,15 +4,23 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { LocalTranscriptEntry } from "@optio/shared";
 import {
   AlertCircle,
+  Bell,
+  Bot,
   Brain,
   ChevronDown,
   ChevronRight,
+  CircleSlash,
   FileText,
+  FoldVertical,
   Globe,
+  Info,
+  ListChecks,
   Pencil,
+  ScrollText,
   Search,
   Sparkles,
   Terminal,
+  Undo2,
   User,
   Wrench,
   MessagesSquare,
@@ -32,6 +40,22 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   WebSearch: Globe,
   Agent: Sparkles,
   Task: Sparkles,
+  // Codex (codex-transcript.ts names its calls these)
+  Shell: Terminal,
+  exec: Terminal,
+  Patch: Pencil,
+  Plan: ListChecks,
+  ViewImage: FileText,
+};
+
+/** How a `system` entry reads: what put it there, and its icon. */
+const SYSTEM_TURNS: Record<string, { label: string; icon: typeof Info; collapse?: boolean }> = {
+  task: { label: "Background task", icon: Bell },
+  agent: { label: "Message from another agent", icon: Bot },
+  compact: { label: "Earlier conversation summarized", icon: FoldVertical, collapse: true },
+  interrupt: { label: "Interrupted", icon: CircleSlash },
+  rewind: { label: "Rolled back", icon: Undo2 },
+  other: { label: "From the agent CLI", icon: Info, collapse: true },
 };
 
 /** A tool call joined with its result, or a lone entry. */
@@ -152,8 +176,14 @@ export function TranscriptView({
             showThinking ? (
               <ThinkingRow key={item.entry.seq} entry={item.entry} />
             ) : null
+          ) : item.entry.role === "system" ? (
+            <SystemRow key={item.entry.seq} entry={item.entry} />
           ) : item.entry.role === "user" ? (
-            <UserRow key={item.entry.seq} entry={item.entry} />
+            item.entry.source === "prompt" ? (
+              <PromptRow key={item.entry.seq} entry={item.entry} />
+            ) : (
+              <UserRow key={item.entry.seq} entry={item.entry} />
+            )
           ) : item.entry.kind === "tool_result" ? (
             <ToolCallRow key={item.entry.seq} use={null} result={item.entry} />
           ) : (
@@ -185,6 +215,88 @@ const UserRow = memo(function UserRow({ entry }: { entry: LocalTranscriptEntry }
         <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-text">
           {entry.text}
         </div>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * The prompt the session started with — from the New work form, an
+ * automation's template, a headless run — rather than a turn typed into the
+ * running session.
+ */
+const PromptRow = memo(function PromptRow({ entry }: { entry: LocalTranscriptEntry }) {
+  return (
+    <div className="flex gap-2.5" data-role="prompt">
+      <span className="mt-1 shrink-0 w-6 h-6 rounded-full bg-bg-hover text-text-muted flex items-center justify-center">
+        <ScrollText className="w-3.5 h-3.5" />
+      </span>
+      <div className="min-w-0 flex-1 rounded-lg bg-bg-card border border-dashed border-border px-3 py-2">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-[11px] font-medium text-text-muted">Prompt</span>
+          <span className="text-[10px] text-text-muted tabular-nums">{formatTime(entry.at)}</span>
+        </div>
+        <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-text">
+          {entry.text}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * A turn the agent CLI filed as the person's but isn't: a background task
+ * reporting back, another agent's message, a compaction summary, an
+ * interruption. Its first line reads inline; the rest folds away.
+ */
+const SystemRow = memo(function SystemRow({ entry }: { entry: LocalTranscriptEntry }) {
+  const turn = SYSTEM_TURNS[entry.source ?? "other"] ?? SYSTEM_TURNS.other!;
+  const Icon = turn.icon;
+  const newline = entry.text.indexOf("\n");
+  const head = turn.collapse
+    ? turn.label
+    : newline >= 0
+      ? entry.text.slice(0, newline)
+      : entry.text;
+  const rest = turn.collapse
+    ? entry.text
+    : newline >= 0
+      ? entry.text.slice(newline + 1).trim()
+      : "";
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex gap-2.5 pl-8" data-role="system" data-source={entry.source ?? "other"}>
+      <div className="min-w-0 flex-1 rounded-md border border-border/60 bg-bg-card/40 px-3 py-1.5">
+        <button
+          type="button"
+          onClick={() => rest && setOpen((v) => !v)}
+          className={cn(
+            "flex items-start gap-1.5 w-full text-left text-[11px] text-text-muted",
+            rest && "hover:text-text",
+          )}
+          aria-expanded={rest ? open : undefined}
+        >
+          {rest ? (
+            open ? (
+              <ChevronDown className="w-3 h-3 mt-0.5 shrink-0" />
+            ) : (
+              <ChevronRight className="w-3 h-3 mt-0.5 shrink-0" />
+            )
+          ) : null}
+          <Icon className="w-3 h-3 mt-0.5 shrink-0" />
+          <span className="min-w-0">
+            {!turn.collapse && <span className="font-medium">{turn.label} · </span>}
+            <span className={cn(turn.collapse && "font-medium")}>{head}</span>
+          </span>
+          <span className="ml-auto pl-2 text-[10px] tabular-nums shrink-0">
+            {formatTime(entry.at)}
+          </span>
+        </button>
+        {open && rest && (
+          <div className="mt-1.5 text-[12px] leading-relaxed text-text-muted whitespace-pre-wrap break-words max-h-96 overflow-auto">
+            {rest}
+          </div>
+        )}
       </div>
     </div>
   );

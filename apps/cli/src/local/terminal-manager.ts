@@ -31,8 +31,11 @@ import { ScreenModel } from "./screen.js";
  */
 
 const RING_CAPACITY = 512 * 1024;
-// Tail of the ring persisted server-side as the terminal's final screen.
-// Kept under the server's 1 MB frame limit with base64 overhead to spare.
+// What a viewer that attaches gets: the screen model's snapshot, at most
+// this big (the old ring replay's size; under the server's 1 MB frame limit
+// with base64 overhead to spare).
+const ATTACH_BYTES = RING_CAPACITY;
+// The final screen persisted server-side, same limit story.
 const SNAPSHOT_BYTES = 384 * 1024;
 const PREVIEW_THROTTLE_MS = 2000;
 // The final preview / links wait for the screen model to catch up before the
@@ -103,6 +106,13 @@ export class TerminalManager {
   isLive(terminalId: string): boolean {
     const term = this.terminals.get(terminalId);
     return term !== undefined && !term.exited;
+  }
+
+  /** The PTY process of each terminal still running (its shell or agent CLI). */
+  livePids(): Array<{ terminalId: string; pid: number }> {
+    return [...this.terminals.values()]
+      .filter((t) => !t.exited)
+      .map((t) => ({ terminalId: t.terminalId, pid: t.pty.pid }));
   }
 
   /**
@@ -255,12 +265,11 @@ export class TerminalManager {
    * persists it so the session can be read back after the PTY is gone.
    */
   private sendSnapshot(term: ManagedTerminal): void {
-    const tail = term.ring.tail(SNAPSHOT_BYTES);
-    if (tail.length === 0) return;
+    if (term.ring.size === 0) return;
     this.opts.send({
       type: "snapshot",
       terminalId: term.terminalId,
-      dataB64: tail.toString("base64"),
+      dataB64: screenBytes(term, SNAPSHOT_BYTES).toString("base64"),
       cols: term.pty.cols,
       rows: term.pty.rows,
     });
@@ -289,11 +298,13 @@ export class TerminalManager {
   }
 
   /**
-   * Snapshot the ring buffer and enable live output atomically (in that
-   * order): frames go out on one socket, so the viewer sees scrollback
-   * followed by every subsequent byte — no gap. An exited terminal whose
-   * final frames are still going out attaches the same way: its scrollback,
-   * then the snapshot and `exit` that follow on this socket.
+   * Snapshot the screen and enable live output atomically (in that order):
+   * frames go out on one socket, so the viewer sees the terminal as it stands
+   * followed by every subsequent byte — no gap. The snapshot names the grid
+   * it was drawn for, so a viewer can lay it out at that size before it
+   * applies its own. An exited terminal whose final frames are still going
+   * out attaches the same way: its screen, then the snapshot and `exit` that
+   * follow on this socket.
    */
   attach(terminalId: string, attachId: string): void {
     const term = this.terminals.get(terminalId);
@@ -310,7 +321,9 @@ export class TerminalManager {
       type: "scrollback",
       terminalId,
       attachId,
-      dataB64: term.ring.toBuffer().toString("base64"),
+      dataB64: screenBytes(term, ATTACH_BYTES).toString("base64"),
+      cols: term.screen.cols,
+      rows: term.screen.rows,
     });
     term.subscribed = true;
     // A new viewer must know the grid before it can render it faithfully.
@@ -495,6 +508,21 @@ export class TerminalManager {
     }
     return resolved;
   }
+}
+
+/**
+ * The terminal as it stands, for a viewer to rebuild (ScreenModel.snapshot);
+ * the raw tail of the output only if the model can't say.
+ */
+function screenBytes(term: ManagedTerminal, maxBytes: number): Buffer {
+  try {
+    const snapshot = term.screen.snapshot(maxBytes);
+    // A screen too big for the frame even without scrollback (a huge grid).
+    if (snapshot.length <= maxBytes) return snapshot;
+  } catch {
+    // fall through to the raw tail
+  }
+  return term.ring.tail(maxBytes);
 }
 
 function normalizeOptional(url: string | undefined): string | undefined {

@@ -94,6 +94,12 @@ export function validateTriggerConfig(
     ) {
       return "Linear triggers need config.user (a Linear name, handle, or user id) for assign / mention events";
     }
+    if (config?.othersOnly !== undefined && typeof config.othersOnly !== "boolean") {
+      return "linear.othersOnly must be true or false";
+    }
+    if (config?.othersOnly === true && (typeof config.user !== "string" || !config.user.trim())) {
+      return "Linear triggers need config.user (whose tickets to skip) with othersOnly";
+    }
   }
   return null;
 }

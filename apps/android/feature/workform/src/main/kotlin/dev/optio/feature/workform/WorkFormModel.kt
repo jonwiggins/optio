@@ -521,7 +521,9 @@ fun eventGaps(e: EventTrigger): List<SentenceField> {
     val events = eventsOf(c)
     // No kinds checked would mean "every kind" to the matcher: make it a choice.
     if (events.isEmpty()) return listOf(SentenceField.EVENTS)
-    val personal = events.any { it in PERSONAL_EVENT_KINDS[e.type].orEmpty() }
+    val personal = events.any { it in PERSONAL_EVENT_KINDS[e.type].orEmpty() } ||
+        // Linear's "only tickets from someone else" skips yours: it has to know you.
+        (e.type == EventTriggerType.LINEAR && c.bool("othersOnly"))
     val identity = c.string(identityKey(e.type)).trim()
     if (personal && identity.isEmpty()) return listOf(SentenceField.IDENTITY)
     return emptyList()

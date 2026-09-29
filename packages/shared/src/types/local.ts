@@ -239,15 +239,54 @@ export interface RunLocation {
  * every reply, every tool call and its result, as plain text that reflows to
  * any screen. `seq` is the daemon's per-terminal counter, 1-based and
  * monotonic; the server stores entries keyed by it so a re-sent batch is
- * idempotent.
+ * idempotent. Claude Code's JSONL and Codex's session rollout
+ * (`~/.codex/sessions/…/rollout-*.jsonl`) both distill to this shape.
+ *
+ * `user` is the person typing in the session. Everything else the agent CLI
+ * files as a "user" turn — a background task reporting back, another agent's
+ * message, the summary that replaced a compacted conversation — is `system`,
+ * with `source` saying which.
  */
-export type LocalTranscriptRole = "user" | "assistant" | "tool";
+export type LocalTranscriptRole = "user" | "assistant" | "tool" | "system";
 export type LocalTranscriptKind = "text" | "thinking" | "tool_use" | "tool_result";
+
+/**
+ * Where an entry came from, when it isn't simply what it looks like:
+ * - `prompt` (role `user`): the prompt the session was started with — from
+ *   the New work form, an automation's template, or a headless `-p` run —
+ *   rather than something typed into the running session
+ * - `task`: a background task or agent the session started reported back
+ * - `agent`: a message from another agent session
+ * - `compact`: the summary that replaced the conversation so far
+ * - `interrupt`: the turn was stopped
+ * - `rewind`: the conversation was rolled back to an earlier turn
+ * - `other`: anything else the CLI injected as a turn
+ */
+export type LocalTranscriptSource =
+  | "prompt"
+  | "task"
+  | "agent"
+  | "compact"
+  | "interrupt"
+  | "rewind"
+  | "other";
+
+export const LOCAL_TRANSCRIPT_SOURCES: readonly LocalTranscriptSource[] = [
+  "prompt",
+  "task",
+  "agent",
+  "compact",
+  "interrupt",
+  "rewind",
+  "other",
+];
 
 export interface LocalTranscriptEntry {
   seq: number;
   role: LocalTranscriptRole;
   kind: LocalTranscriptKind;
+  /** See LocalTranscriptSource; null / missing for an ordinary entry (and from older daemons). */
+  source?: LocalTranscriptSource | null;
   /** The prompt / reply / thinking text, a tool call's one-line summary, or the tool's result. */
   text: string;
   /** `tool_use`: the full input (JSON, bounded); `tool_result`: unused. */
@@ -415,7 +454,20 @@ export type LocalDaemonMessage =
   | { type: "started"; terminalId: string }
   | { type: "spawn-error"; terminalId: string; message: string }
   | { type: "output"; terminalId: string; dataB64: string }
-  | { type: "scrollback"; terminalId: string; attachId: string; dataB64: string }
+  /**
+   * Answer to `attach`: the terminal as it stands, as bytes that rebuild it
+   * (the daemon's screen model, serialized: scrollback, screen, cursor, the
+   * program's modes), drawn for `cols`×`rows`. Daemons before the screen
+   * model sent the raw tail of the output and no grid.
+   */
+  | {
+      type: "scrollback";
+      terminalId: string;
+      attachId: string;
+      dataB64: string;
+      cols?: number;
+      rows?: number;
+    }
   | { type: "attach-error"; terminalId: string; attachId: string; message: string }
   | { type: "attention"; terminalId: string; state: LocalAttentionState; reason: string }
   | { type: "preview"; terminalId: string; preview: string; lastActivityAt: string }
@@ -492,6 +544,8 @@ export type LocalServerMessage =
       terminalId: string;
       agent: LocalAgentKind;
       agentSessionId: string;
+      /** The prompt the session was spawned with: its turn reads as the prompt, as when streamed. */
+      prompt?: string;
     }
   /**
    * Add a directory to the machine's allowlist, or remove one — what
@@ -521,6 +575,15 @@ export type LocalStreamServerMessage =
    * reads right at that size.
    */
   | { type: "size"; cols: number; rows: number; yours?: boolean }
+  /**
+   * The binary frame that follows is the terminal as it stood when this
+   * viewer attached, drawn for this grid: lay it out at this size, write it,
+   * then size the terminal as the `size` frames that follow say. A replay
+   * written at another width wraps a full-screen program's rows and an
+   * inline one's rules. Sent only ahead of a snapshot from a daemon that
+   * names its grid.
+   */
+  | { type: "replay"; cols: number; rows: number }
   | { type: "exit"; exitCode: number | null }
   | { type: "error"; message: string };
 

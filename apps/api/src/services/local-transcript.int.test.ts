@@ -184,6 +184,7 @@ describe("transcript backfill", () => {
       terminalId: terminal.id,
       agent: "claude-code",
       agentSessionId: SESSION,
+      prompt: "hi",
     });
     // In flight: asking again waits on the same request.
     expect(requestTranscriptBackfill(terminal)).toBe(true);
@@ -254,15 +255,12 @@ describe("transcript backfill", () => {
     ).toBe(0);
   });
 
-  it("only asks about finished Claude Code sessions with a session id, on hosts that can answer", async () => {
+  it("only asks about finished Claude Code / Codex sessions with a session id, on hosts that can answer", async () => {
     const running = await runningAgentTerminal({ transcriptBackfill: true });
     expect(requestTranscriptBackfill(running.terminal)).toBe(false);
 
     const noSession = await finishedSession({ session: false });
     expect(requestTranscriptBackfill(noSession.terminal)).toBe(false);
-
-    const codex = await finishedSession({ agent: "codex" });
-    expect(requestTranscriptBackfill(codex.terminal)).toBe(false);
 
     const oldDaemon = await finishedSession({ transcriptBackfill: false });
     expect(requestTranscriptBackfill(oldDaemon.terminal)).toBe(false);
@@ -271,8 +269,52 @@ describe("transcript backfill", () => {
     relay.unregisterDaemon(offline.host.id, offline.host.daemon);
     expect(requestTranscriptBackfill(offline.terminal)).toBe(false);
 
-    for (const h of [running, noSession, codex, oldDaemon, offline]) {
+    for (const h of [running, noSession, oldDaemon, offline]) {
       expect(h.host.daemon.requests()).toHaveLength(0);
     }
+
+    // A Codex session is read from its rollout, by thread id.
+    const codex = await finishedSession({ agent: "codex" });
+    expect(requestTranscriptBackfill(codex.terminal)).toBe(true);
+    expect(codex.host.daemon.requests()).toMatchObject([
+      { agent: "codex", agentSessionId: SESSION, terminalId: codex.terminal.id },
+    ]);
+  });
+});
+
+describe("who said it", () => {
+  it("keeps each entry's source and drops unknown ones", async () => {
+    const { host, terminal } = await runningAgentTerminal();
+    await handleTranscript(host.id, terminal.id, [
+      entry(1, { role: "user", text: "hi", source: "prompt" }),
+      entry(2, { role: "system", text: "Background command finished", source: "task" }),
+      entry(3, { role: "system", text: "?", source: "gossip" as never }),
+      entry(4, { role: "user", text: "thanks" }),
+    ]);
+    expect((await getTranscript(terminal.id)).map((e) => [e.role, e.source])).toEqual([
+      ["user", "prompt"],
+      ["system", "task"],
+      ["system", null],
+      ["user", null],
+    ]);
+  });
+
+  it("reads turns stored before sources as what they were, not as the person", async () => {
+    const { host, terminal } = await runningAgentTerminal();
+    await handleTranscript(host.id, terminal.id, [
+      entry(1, { role: "user", text: "please fix the build" }),
+      entry(2, {
+        role: "user",
+        text: '<task-notification>\n<status>completed</status>\n<summary>Agent "Audit" finished</summary>\n</task-notification>',
+      }),
+      entry(3, { role: "user", text: "[Request interrupted by user]" }),
+    ]);
+    expect(
+      (await getTranscript(terminal.id)).map((e) => [e.role, e.source ?? null, e.text]),
+    ).toEqual([
+      ["user", null, "please fix the build"],
+      ["system", "task", 'Agent "Audit" finished'],
+      ["system", "interrupt", "Request interrupted by user"],
+    ]);
   });
 });

@@ -458,6 +458,24 @@ function linearLabels(data: Obj): string[] {
 }
 
 /**
+ * Every way a Linear payload names a person, lowercased: id, name, display
+ * name, email, and the handle in a profile URL (…/profiles/<handle>) — so a
+ * trigger's `user` matches however it was written. `extraIds` adds bare ids
+ * (`creatorId`, `assigneeId`) given beside the object.
+ */
+function linearUserKeys(u: Obj, ...extraIds: unknown[]): string[] {
+  const keys = new Set<string>();
+  const add = (v: unknown) => {
+    const s = lower(str(v));
+    if (s) keys.add(s);
+  };
+  for (const v of [u.id, u.name, u.displayName, u.email, u.userDisplayName, ...extraIds]) add(v);
+  const handle = /\/profiles\/([^/?#]+)/.exec(str(u.url))?.[1];
+  if (handle) add(decodeURIComponent(handle));
+  return [...keys];
+}
+
+/**
  * Normalize a Linear webhook delivery (Issue / Comment). Returns null for
  * types and updates we don't act on. A Linear `update` names the changed
  * fields in `updatedFrom`, which is how "assigned" and "labeled" are told
@@ -544,10 +562,24 @@ export function normalizeLinearEvent(payload: unknown): LinearEvent | null {
   if (!identifier) return null;
   const team = obj(issue.team);
   const assignee = obj(issue.assignee);
+  // Who did it: the webhook's actor — or, for an integration acting for a
+  // person (an issue filed from Slack), that person too. A comment's author
+  // is its actor.
+  const actorKeys = new Set([
+    ...linearUserKeys(obj(p.actor)),
+    ...linearUserKeys(obj(data.botActor)),
+    ...(type === "Comment" ? linearUserKeys(obj(data.user), data.userId) : []),
+  ]);
+  // Who wrote the ticket, when the payload says (issue events carry
+  // `creatorId`, and sometimes the creator itself).
+  const creatorKeys = linearUserKeys(obj(issue.creator), issue.creatorId);
 
   return {
     kinds: [...kinds],
     targets: [...targets],
+    actorKeys: [...actorKeys],
+    creatorKeys,
+    assigneeKeys: linearUserKeys(assignee, issue.assigneeId),
     identifier,
     title: str(issue.title),
     description: str(issue.description),
@@ -567,6 +599,21 @@ export function normalizeLinearEvent(payload: unknown): LinearEvent | null {
 
 const LINEAR_PERSONAL_KINDS: ReadonlySet<LinearEventKind> = new Set(LINEAR_PERSONAL_EVENT_KINDS);
 
+/**
+ * Whether `user` (a trigger's lowercased `user`) wrote the ticket or made
+ * this change themselves — what `othersOnly` skips. When the ticket is
+ * assigned to `user`, every key of the assignee is theirs too: a trigger set
+ * up with a display name still knows its user's id when the payload names the
+ * creator only by `creatorId`.
+ */
+function isOwnLinearEvent(user: string, event: LinearEvent): boolean {
+  const me = new Set([user]);
+  const assigneeKeys = event.assigneeKeys ?? [];
+  if (assigneeKeys.includes(user)) for (const k of assigneeKeys) me.add(k);
+  const mine = (keys: string[] | undefined) => (keys ?? []).some((k) => me.has(k));
+  return mine(event.actorKeys) || mine(event.creatorKeys);
+}
+
 export function matchLinearTrigger(
   config: LinearTriggerConfig,
   event: LinearEvent,
@@ -581,6 +628,7 @@ export function matchLinearTrigger(
   );
   const user = lower(stripAt(config.user ?? ""));
   const targets = new Set(event.targets.map(lower));
+  if (config.othersOnly && user && isOwnLinearEvent(user, event)) return null;
 
   const order: LinearEventKind[] = ["assigned", "mentioned", "labeled", "created"];
   for (const kind of order) {

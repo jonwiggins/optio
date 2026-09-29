@@ -12,8 +12,9 @@ export interface AgentCommandOptions {
   mode?: LocalAgentSessionMode;
   /**
    * Resume this agent session instead of starting fresh. Interactive, except
-   * for Claude Code in headless mode (`claude -p --resume`), which is how a
-   * local Repo Task picks its own session back up after review feedback.
+   * for Claude Code and Codex in headless mode (`claude -p --resume`, `codex
+   * exec resume`), which is how a local Repo Task picks its own session back
+   * up after review feedback.
    */
   resumeSessionId?: string;
   /** Model override for the agent CLI (`--model` / `-m`). */
@@ -56,9 +57,10 @@ export function buildAgentCommand(
   opts: AgentCommandOptions = {},
 ): string {
   const resume = opts.resumeSessionId ? shellQuote(opts.resumeSessionId) : null;
-  // Only Claude Code has a one-shot resume; every other CLI resumes into its
-  // interactive prompt.
-  const headless = opts.mode === "headless" && (!resume || agent === "claude-code");
+  // Claude Code and Codex resume one-shot (`claude -p --resume`, `codex exec
+  // resume`); every other CLI resumes into its interactive prompt.
+  const headless =
+    opts.mode === "headless" && (!resume || agent === "claude-code" || agent === "codex");
   const model = opts.model?.trim() ? shellQuote(opts.model.trim()) : null;
   // Effort names are short words ("xhigh"); anything else is dropped rather
   // than handed to a CLI flag or a Codex config override.
@@ -91,7 +93,10 @@ export function buildAgentCommand(
           : "";
       if (model) flags += ` -m ${model}`;
       if (effort) flags += ` -c ${shellQuote(`model_reasoning_effort="${effort}"`)}`;
-      if (resume) return `codex resume${flags} ${resume}` + (p ? ` ${p}` : "");
+      if (resume) {
+        const sub = headless ? "codex exec resume" : "codex resume";
+        return `${sub}${flags} ${resume}` + (p ? ` ${p}` : "");
+      }
       if (headless) return `codex exec${flags}` + (p ? ` ${p}` : "");
       return `codex${flags}` + (p ? ` ${p}` : "");
     }

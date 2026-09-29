@@ -144,6 +144,7 @@ final class LocalTranscriptModel {
 enum LocalTranscriptLog {
     /// Metadata keys `AgentLogRow` understands beyond the shared `toolName`.
     static let roleKey = "role"
+    static let sourceKey = "source"
     static let summaryKey = "summary"
     static let resultKey = "result"
     static let resultIsErrorKey = "resultIsError"
@@ -182,7 +183,15 @@ enum LocalTranscriptLog {
             case .thinking:
                 out.append(AgentLogEntry(taskId: terminalId, timestamp: at, type: .thinking, content: e.text))
             case .text, .unknown:
-                let meta: [String: AnyCodable]? = e.role == .user ? [roleKey: .string("user")] : nil
+                if e.role == .system {
+                    // Not the person: a background task, another agent, a compaction…
+                    let source = e.source.map(\.rawValue) ?? "other"
+                    out.append(AgentLogEntry(taskId: terminalId, timestamp: at, type: .system, content: e.text,
+                                             metadata: [sourceKey: .string(source)]))
+                    continue
+                }
+                let role: String? = e.role == .user ? (e.source == .prompt ? "prompt" : "user") : nil
+                let meta: [String: AnyCodable]? = role.map { [roleKey: .string($0)] }
                 out.append(AgentLogEntry(taskId: terminalId, timestamp: at, type: .text, content: e.text, metadata: meta))
             }
         }

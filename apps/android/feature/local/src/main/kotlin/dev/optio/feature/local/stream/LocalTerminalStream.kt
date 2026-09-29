@@ -344,6 +344,9 @@ class LocalTerminalStream(
                     else -> _state.update { it.copy(errorMessage = message.message, retrying = false) }
                 }
             }
+            // The snapshot that follows was drawn for this grid. The bytes are held for the `size`
+            // right behind it and land once, at the grid this screen shows (see releaseHold).
+            is LocalStreamServerMessage.Replay -> Unit
             is LocalStreamServerMessage.Unknown -> Unit
         }
     }

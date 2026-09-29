@@ -15,6 +15,11 @@ final class TerminalBridge {
     private var pending = Data()
     /// The host has laid out for the first time: its natural grid is known.
     var onSettled: (() -> Void)?
+    /// A new SwiftTerm view took the place of an earlier one (the Screen face
+    /// came back after the Transcript): it starts blank, with none of the
+    /// program's modes, so the stream attaches again for a fresh snapshot.
+    var onReplaced: (() -> Void)?
+    private var everAttached = false
 
     var view: TerminalView? { host?.terminal }
 
@@ -23,8 +28,16 @@ final class TerminalBridge {
     private(set) var replaying = false
 
     func attach(_ h: LocalTerminalHostView, mode: TerminalSizing.Mode) {
+        let replacing = everAttached && host !== h
+        everAttached = true
         host = h
         h.mode = mode
+        if replacing {
+            // What was queued while no view was up is only the tail; the
+            // fresh snapshot covers it.
+            pending.removeAll()
+            onReplaced?()
+        }
         h.onLayoutSettled = { [weak self] in
             self?.onSettled?()
             self?.flush()
@@ -42,6 +55,9 @@ final class TerminalBridge {
             replaying = replay
             defer { replaying = false }
             host.terminal.feed(byteArray: ArraySlice([UInt8](data)))
+        } else if host == nil, everAttached {
+            // The Screen face is away; when it comes back it attaches again
+            // (onReplaced) and gets the whole screen, so don't pile this up.
         } else {
             pending.append(data)
         }
@@ -177,6 +193,7 @@ final class LocalTerminalStream {
             if let grid = announcedGrid { gridAnnounced(grid, yours: announcedYours) }
             if let held = heldOpen { sendView(open: held) }
         }
+        bridge.onReplaced = { [weak self] in self?.reconnect() }
     }
 
     func connect() {
@@ -285,6 +302,11 @@ final class LocalTerminalStream {
                 } else {
                     retrying = false
                 }
+            case .replay:
+                // The snapshot that follows was drawn for this grid. SwiftTerm
+                // can't reflow, so the bytes are held for the `size` that comes
+                // right after and land once, at the grid this screen shows.
+                break
             case .unknown:
                 break
             }

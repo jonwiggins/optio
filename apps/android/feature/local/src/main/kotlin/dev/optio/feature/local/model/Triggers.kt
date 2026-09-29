@@ -104,7 +104,9 @@ object Triggers {
             "linear" -> {
                 val events = list("events").ifEmpty { listOf("any") }.joinToString(", ")
                 val teams = list("teams")
-                events + (str("user")?.let { " → $it" } ?: "") + if (teams.isNotEmpty()) " in ${teams.joinToString(", ")}" else ""
+                events + (str("user")?.let { " → $it" } ?: "") +
+                    (if (teams.isNotEmpty()) " in ${teams.joinToString(", ")}" else "") +
+                    (if (c["othersOnly"]?.boolValue == true) " · from others" else "")
             }
             else -> ""
         }
@@ -130,6 +132,8 @@ object Triggers {
         val linearEvents: Set<String> = setOf("assigned"),
         val linearUser: String = "",
         val linearTeams: String = "",
+        /** Skip tickets you created and changes you made yourself. */
+        val linearOthersOnly: Boolean = false,
     )
 
     /** The config the server takes for [draft], or the problem to show (the web's `build()`). */
@@ -178,12 +182,16 @@ object Triggers {
                 val user = draft.linearUser.trim().removePrefix("@")
                 val personal = draft.linearEvents.any { e -> linearKinds.firstOrNull { it.value == e }?.personal == true }
                 if (personal && user.isEmpty()) return fail("Your Linear name or user id is required for those events")
+                if (draft.linearOthersOnly && user.isEmpty()) {
+                    return fail("Your Linear name or user id is required to skip your own tickets")
+                }
                 out["events"] = strings(linearKinds.map { it.value }.filter { it in draft.linearEvents })
                 if (user.isNotEmpty()) out["user"] = JsonPrimitive(user)
                 val labels = list(draft.labels)
                 if (labels.isNotEmpty()) out["labels"] = strings(labels)
                 val teams = list(draft.linearTeams)
                 if (teams.isNotEmpty()) out["teams"] = strings(teams)
+                if (draft.linearOthersOnly) out["othersOnly"] = JsonPrimitive(true)
             }
         }
         return Result.success(JsonObject(out))

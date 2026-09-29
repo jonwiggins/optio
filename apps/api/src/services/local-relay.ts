@@ -8,10 +8,11 @@
  * exec-based interactive sessions).
  *
  * Attach flow: each browser attach gets an attachId; the daemon replies with
- * a scrollback snapshot addressed to that attachId and enables live output at
- * the same moment. Because daemon frames arrive in order on one socket, the
- * browser is enrolled for live output exactly when its snapshot is relayed —
- * no gap, no duplicated history for other viewers.
+ * a snapshot of the terminal (addressed to that attachId, relayed behind a
+ * `replay` frame naming its grid) and enables live output at the same
+ * moment. Because daemon frames arrive in order on one socket, the browser is
+ * enrolled for live output exactly when its snapshot is relayed — no gap, no
+ * duplicated history for other viewers.
  */
 import { randomUUID } from "node:crypto";
 import type { LocalServerMessage, LocalStreamServerMessage } from "@optio/shared";
@@ -210,12 +211,23 @@ export function detachBrowser(hostId: string, terminalId: string, socket: RelayS
   }
 }
 
-/** Relay a daemon scrollback snapshot to the browser that requested it, then enroll it live. */
-export function deliverScrollback(attachId: string, data: Buffer): void {
+/**
+ * Relay a daemon's snapshot to the browser that requested it, then enroll it
+ * live. A snapshot that names its grid goes out behind a `replay` frame, so
+ * the viewer lays it out at the size it was drawn for.
+ */
+export function deliverScrollback(
+  attachId: string,
+  data: Buffer,
+  grid?: { cols: number; rows: number },
+): void {
   const pending = pendingAttaches.get(attachId);
   if (!pending) return;
   pendingAttaches.delete(attachId);
-  if (data.length > 0) safeSend(pending.socket, data);
+  if (data.length > 0) {
+    if (grid) sendToViewer(pending.socket, { type: "replay", cols: grid.cols, rows: grid.rows });
+    safeSend(pending.socket, data);
+  }
   let set = browsersByTerminal.get(pending.terminalId);
   if (!set) {
     set = new Set();

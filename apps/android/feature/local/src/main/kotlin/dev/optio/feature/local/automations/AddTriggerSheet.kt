@@ -157,6 +157,8 @@ internal fun AddTriggerSheet(
                     Field("Your Linear name, @handle, or user id", draft.linearUser, { draft = draft.copy(linearUser = it) })
                     Field("Team keys, e.g. ENG (optional)", draft.linearTeams, { draft = draft.copy(linearTeams = it) }, mono = true, capitalize = true)
                     Field("Labels (optional)", draft.labels, { draft = draft.copy(labels = it) })
+                    Toggle("Only tickets from someone else", draft.linearOthersOnly) { draft = draft.copy(linearOthersOnly = it) }
+                    Hint("Skips tickets you created and ones you assigned to yourself.")
                     Hint(
                         "In Linear → Settings → API → Webhooks, add ${serverUrl?.trimEnd('/') ?: ""}/api/webhooks/linear for Issues and Comments, " +
                             "and set LINEAR_WEBHOOK_SECRET on the server to the webhook's signing secret.",

@@ -147,11 +147,21 @@ describe("readSessionTranscript", () => {
     ).toMatch(/No transcript/);
     expect(
       readSessionTranscript({
-        agent: "codex",
+        agent: "gemini",
         sessionId: SESSION,
         allowedDirs: ["/home/dev/optio"],
         configDir,
       }).error,
-    ).toMatch(/codex/);
+    ).toMatch(/gemini/);
+    const codexHome = mkdtempSync(join(tmpdir(), "optio-codex-"));
+    dirs.push(codexHome);
+    expect(
+      readSessionTranscript({
+        agent: "codex",
+        sessionId: SESSION,
+        allowedDirs: ["/home/dev/optio"],
+        codexHome,
+      }).error,
+    ).toMatch(/No transcript/);
   });
 });

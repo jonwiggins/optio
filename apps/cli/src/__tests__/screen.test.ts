@@ -64,4 +64,61 @@ describe("ScreenModel", () => {
     );
     expect(s.lines()[0]).toBe("first https://github.com/jonwiggins/optio/pull/1");
   });
+
+  describe("snapshot", () => {
+    const replay = async (bytes: Buffer, cols = 80, rows = 24) => {
+      const fresh = new ScreenModel(cols, rows);
+      fresh.write(bytes);
+      await fresh.flush();
+      return fresh;
+    };
+
+    it("rebuilds a full-screen program with the modes it set long ago", async () => {
+      // Claude Code's fullscreen UI: alternate screen, SGR mouse reporting, hidden
+      // cursor — set once, then megabytes of repaints.
+      const s = new ScreenModel(80, 24);
+      s.write("$ claude\r\n\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?2004h\x1b[?25l");
+      for (let i = 0; i < 4000; i++)
+        s.write(`\x1b[${(i % 20) + 1};1H\x1b[2Kline ${i} ${"·".repeat(60)}`);
+      await s.flush();
+      const bytes = s.snapshot(512 * 1024);
+      const text = bytes.toString("utf-8");
+      for (const mode of ["?1049h", "?1002h", "?1006h", "?2004h", "?25l"]) {
+        expect(text).toContain(`\x1b[${mode}`);
+      }
+      const copy = await replay(bytes);
+      expect(copy.activeBuffer).toBe("alternate");
+      expect(copy.lines("alternate")).toEqual(s.lines("alternate"));
+      expect(copy.lines("normal")).toEqual(["$ claude"]);
+    });
+
+    it("keeps an inline program's colored rows and scrollback", async () => {
+      const s = new ScreenModel(40, 6);
+      for (let i = 0; i < 20; i++) s.write(`history ${i}\r\n`);
+      // A tinted band, drawn the way Codex draws its composer: erase with a background.
+      s.write("\x1b[5;1H\x1b[48;2;38;38;40m\x1b[K\x1b[6;1H\x1b[K› ask\x1b[0m\x1b[6;3H");
+      await s.flush();
+      const copy = await replay(s.snapshot(512 * 1024), 40, 6);
+      expect(copy.lines("normal")).toEqual(s.lines("normal"));
+    });
+
+    it("includes output written but not parsed yet", async () => {
+      const s = new ScreenModel(80, 24);
+      s.write("parsed\r\n");
+      await s.flush();
+      s.write("not yet");
+      const copy = await replay(s.snapshot(512 * 1024));
+      expect(copy.lines()).toEqual(["parsed", "not yet"]);
+    });
+
+    it("drops scrollback to fit the byte budget", async () => {
+      const s = new ScreenModel(80, 24);
+      for (let i = 0; i < 1500; i++) s.write(`row ${i} ${"x".repeat(70)}\r\n`);
+      await s.flush();
+      const small = s.snapshot(40 * 1024);
+      expect(small.length).toBeLessThanOrEqual(40 * 1024);
+      const copy = await replay(small);
+      expect(copy.lines().at(-1)).toBe(s.lines().at(-1));
+    });
+  });
 });

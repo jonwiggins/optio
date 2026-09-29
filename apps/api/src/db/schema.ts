@@ -1807,8 +1807,10 @@ export const localTerminalTranscripts = pgTable(
       .notNull()
       .references(() => localTerminals.id, { onDelete: "cascade" }),
     seq: integer("seq").notNull(),
-    role: text("role").notNull(), // user | assistant | tool
+    role: text("role").notNull(), // user | assistant | tool | system
     kind: text("kind").notNull(), // text | thinking | tool_use | tool_result
+    // prompt | task | agent | compact | interrupt | rewind | other (LocalTranscriptSource)
+    source: text("source"),
     text: text("text").notNull(),
     detail: text("detail"),
     toolName: text("tool_name"),

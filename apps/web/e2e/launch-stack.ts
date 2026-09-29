@@ -211,6 +211,9 @@ async function main(): Promise<void> {
       PUBLIC_API_URL: API_URL,
       // Beats the stale apps/web/.env.local value so WebSockets hit our API.
       NEXT_PUBLIC_WS_URL: `ws://127.0.0.1:${API_PORT}`,
+      // Specs read terminal text off the DOM renderer's rows; the WebGL one
+      // draws to a canvas (terminal-render.spec.ts turns it back on).
+      NEXT_PUBLIC_OPTIO_TERMINAL_RENDERER: "dom",
       OPTIO_AUTH_DISABLED: "true",
     },
     stdio: "inherit",

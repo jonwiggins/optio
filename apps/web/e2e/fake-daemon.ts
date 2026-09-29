@@ -15,7 +15,14 @@ type Frame = Record<string, any>;
 
 type Grid = { cols: number; rows: number };
 
-export async function fakeDaemon(hostId: string, dirs: unknown[], opts: { screen?: string } = {}) {
+/**
+ * What the daemon hands a viewer that attaches: fixed text, or drawn for the
+ * PTY's grid. `snapshotGrid` names that grid in the `scrollback` frame, as a
+ * daemon with a screen model does (the relay then sends a `replay` frame).
+ */
+type ScreenOpts = { screen?: string | ((grid: Grid) => string); snapshotGrid?: boolean };
+
+export async function fakeDaemon(hostId: string, dirs: unknown[], opts: ScreenOpts = {}) {
   const input: string[] = [];
   const resizes: Grid[] = [];
   const grids = new Map<string, Grid>();
@@ -32,10 +39,17 @@ export async function fakeDaemon(hostId: string, dirs: unknown[], opts: { screen
       send({ type: "started", terminalId: msg.terminalId });
     }
     if (msg.type === "attach") {
-      const dataB64 = Buffer.from(opts.screen ?? "", "utf-8").toString("base64");
-      send({ type: "scrollback", terminalId: msg.terminalId, attachId: msg.attachId, dataB64 });
-      const grid = grids.get(msg.terminalId);
-      if (grid) send({ type: "size", terminalId: msg.terminalId, ...grid });
+      const grid = grids.get(msg.terminalId) ?? { cols: 120, rows: 32 };
+      const screen = typeof opts.screen === "function" ? opts.screen(grid) : (opts.screen ?? "");
+      const dataB64 = Buffer.from(screen, "utf-8").toString("base64");
+      send({
+        type: "scrollback",
+        terminalId: msg.terminalId,
+        attachId: msg.attachId,
+        dataB64,
+        ...(opts.snapshotGrid ? grid : {}),
+      });
+      send({ type: "size", terminalId: msg.terminalId, ...grid });
     }
     if (msg.type === "resize") {
       const grid = { cols: msg.cols, rows: msg.rows };
@@ -62,11 +76,14 @@ const terminalState = async (request: APIRequestContext, id: string) =>
  */
 export async function liveTerminal(
   request: APIRequestContext,
-  opts: { title: string; screen?: string },
+  opts: { title: string } & ScreenOpts,
 ) {
   const { hosts } = await (await request.get(`${API}/api/local/hosts`)).json();
   const laptop = hosts.find((h: { name: string }) => h.name === "E2E laptop");
-  const daemon = await fakeDaemon(laptop.id, laptop.dirs, { screen: opts.screen });
+  const daemon = await fakeDaemon(laptop.id, laptop.dirs, {
+    screen: opts.screen,
+    snapshotGrid: opts.snapshotGrid,
+  });
   const created = await request.post(`${API}/api/local/terminals`, {
     data: {
       hostId: laptop.id,

@@ -70,8 +70,9 @@ server never ships secrets to your machine.
   - `headless` — the agent's one-shot entry point (`claude -p`, `codex exec`,
     `cursor-agent -p`, `gemini -p`, `opencode run`): it prints its result and the process
     exits. A clean exit lands in the queue as `needs_you` / `done` for review. Claude Code
-    still fires hooks in `-p` mode, so the daemon captures the agent's own `session_id`
-    (`local_terminals.agent_session_id`) and the run can be **resumed** later.
+    still fires hooks in `-p` mode, and Codex's rollout names its thread, so the daemon
+    captures the agent's own session id (`local_terminals.agent_session_id`) and the run
+    can be **resumed** later.
 - **Resume** — `POST /api/local/terminals/:id/resume` (the "Resume chat" button on an
   exited agent session) opens a fresh interactive terminal in the same dir with
   `claude --resume <id>` (or `codex resume <id>`), inheriting the ticket / automation
@@ -173,7 +174,7 @@ listens for, so several people's automations can share one ingress.
 | ------ | -------------------------------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | GitHub | `POST /api/webhooks/github` (the existing receiver, `X-Hub-Signature-256`)                         | `GITHUB_WEBHOOK_SECRET` | `{ events?: ("review_requested" \| "mentioned" \| "assigned" \| "pr_opened" \| "issue_opened")[], login?, repos?: ["owner/name"] }` |
 | Slack  | `POST /api/webhooks/slack/events` (Events API; answers `url_verification`; `X-Slack-Signature` v0) | `SLACK_SIGNING_SECRET`  | `{ channelId, keyword?, mentionOnly?, includeThreads?, postedBy?: "people" \| "bots" \| "anyone", bot? }`                           |
-| Linear | `POST /api/webhooks/linear` (`Linear-Signature` over the raw body + `webhookTimestamp` ≤ 60 s)     | `LINEAR_WEBHOOK_SECRET` | `{ events?: ("assigned" \| "mentioned" \| "created" \| "labeled")[], user?, labels?, teams? }`                                      |
+| Linear | `POST /api/webhooks/linear` (`Linear-Signature` over the raw body + `webhookTimestamp` ≤ 60 s)     | `LINEAR_WEBHOOK_SECRET` | `{ events?: ("assigned" \| "mentioned" \| "created" \| "labeled")[], user?, labels?, teams?, othersOnly? }`                         |
 
 Matching lives in `services/event-trigger-service.ts` as pure functions
 (`normalize*` → one event; `match*` → the matched kind or null); `fireEventTriggers`
@@ -184,6 +185,12 @@ through the shared trigger dispatcher with the event's fields as prompt params. 
 (reviewer, assignee, `@`-mentions, case-insensitive; Linear matches user id, name, display
 name, or the `@handle` in a mention link); `pr_opened` / `issue_opened` / `created` /
 `labeled` need no identity. A comment you wrote that mentions yourself never fires.
+Linear's `othersOnly` ("Only tickets from someone else", needs `user`) skips an issue
+`user` created (`creatorId`, or the creator itself when the payload has it) and any change
+`user` made (the webhook's actor, or the person behind an integration's `botActor`): a
+ticket you file and assign to yourself, or assign to yourself later, starts nothing. When
+the ticket is assigned to `user`, all the assignee's keys count as theirs, so a trigger set
+up with a display name still recognizes its user's id as creator or actor.
 
 Prompt params: GitHub `{{event}} {{kind}} {{repo}} {{repoUrl}} {{number}} {{title}} {{body}}
 {{url}} {{author}} {{headBranch}} {{baseBranch}} {{commentBody}} {{commentUrl}} {{action}}`;
@@ -304,38 +311,73 @@ Webhook/Schedule/Ticket triggers ───────────┘        /ws
   read off the screen model, never off the flattened byte stream: TUIs paint cells, and
   Claude Code repaints only the cells that changed with absolute cursor moves, so
   stripping ANSI from the stream glues fragments of different repaints into text that was
-  never on screen (`…/jonwi` + jump + `ns/optio/pull/607`, or `#6` + jump + `07`). The DB
-  stores only metadata plus a throttled `preview` (last ~12 lines) for the wall view — and, once
-  a terminal exits, its **final screen**: the daemon sends the ring's tail (≤384 KB, raw
-  bytes) plus the PTY grid right before `exit`, stored in `local_terminal_snapshots`
+  never on screen (`…/jonwi` + jump + `ns/optio/pull/607`, or `#6` + jump + `07`).
+- **Attaching** gets the terminal as it stands, not the raw tail of its output:
+  `ScreenModel.snapshot` serializes the screen model (`@xterm/addon-serialize`: scrollback,
+  screen, the alternate screen when a full-screen program is up, the cursor, and the modes
+  the program set — mouse tracking plus its SGR encoding, bracketed paste, focus events, a
+  hidden cursor), with output not yet parsed appended raw. The raw tail lost a program's
+  setup once a session had run a while: Claude Code turns on the alternate screen and
+  mouse reporting once at startup, so a viewer attaching after 512 KB of repaints got
+  neither, and wheel and drag scrolled nothing. The `scrollback` frame names the grid the
+  snapshot was drawn for; the relay sends viewers a `replay` frame with it just ahead of
+  the bytes. The web lays the snapshot out at that grid, then sizes it for its own screen
+  (xterm reflows, as it would have live). iOS and Android hold the bytes for the `size`
+  that follows and write them once at the grid they will show (SwiftTerm doesn't reflow).
+  The DB stores only metadata plus a throttled `preview` (last ~12 lines) for the wall view —
+  and, once a terminal exits, its **final screen**: the daemon sends the same snapshot
+  (≤384 KB) plus the PTY grid right before `exit`, stored in `local_terminal_snapshots`
   (own table, so terminal rows and list responses stay lean; cascades on delete). Opening
   an exited terminal replays it into the xterm at the recorded grid, so a finished session
   reads the way it ran instead of as a text preview; the preview is the fallback for rows
   recorded before snapshots existed.
 - **The conversation** (`local_terminal_transcripts`). A screen is not a record of an agent
   session: Claude Code draws a full-screen TUI, so the bytes that survive its exit are one
-  redraw of the last screen — the last message, not the exchange. For Claude Code spawns
-  the daemon also distills the agent's own transcript (the JSONL at the hooks'
-  `transcript_path`, the same file the usage chip is summed from,
-  `cli/src/local/transcript-tracker.ts`) into plain entries — every prompt, reply, tool
-  call (name + one-line summary + full input, bounded) with its result (bounded), and
-  thinking — and streams them as `transcript` frames: on every hook, every 3 s while the
-  session runs, and once more right before `exit`. Rows are keyed by the daemon's
-  per-terminal `seq`, so a re-sent batch is a no-op; sidechain (subagent) lines and Claude
-  Code's bookkeeping lines (slash-command echoes, meta) are skipped. `GET
+  redraw of the last screen — the last message, not the exchange. The daemon also distills
+  the agent's own transcript into plain entries — every prompt, reply, tool call (name +
+  one-line summary + full input, bounded) with its result (bounded), and thinking — and
+  streams them as `transcript` frames: every 3 s while the session runs, and once more
+  right before `exit`. Rows are keyed by the daemon's per-terminal `seq`, so a re-sent batch
+  is a no-op.
+  - **Claude Code**: the JSONL at the hooks' `transcript_path` (the same file the usage
+    chip is summed from, `cli/src/local/transcript-tracker.ts`), also read on every hook.
+    Sidechain (subagent) lines and Claude Code's bookkeeping (slash-command echoes, meta
+    lines) are skipped.
+  - **Codex**: the session rollout (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread
+id>.jsonl`, `cli/src/local/codex-transcript.ts`). Codex creates it with the first
+    message and holds it open for the session's life, so the daemon finds it among the open
+    files of a `codex` process under the terminal's PTY (`lsof` on macOS, `/proc` on Linux;
+    `codex-sessions.ts`) — an agent spawn or a `codex` typed into a shell alike. Codex's own
+    hooks could name it, but Codex asks the person to trust every new hook. Text comes from
+    the rollout's `event_msg` lines (what the person typed, what the assistant said — not
+    the `<environment_context>` and AGENTS.md Codex injects as "user" messages), tool calls
+    and outputs from its `response_item` lines; subagent threads are skipped. The file's
+    thread id is reported as the session id, so a Codex run can be resumed (`codex resume`,
+    or `codex exec resume` for a headless run) and backfilled.
+  - **Who said it.** `user` is the person typing in the session. Everything else an agent
+    CLI files as a "user" turn is `system`, with a `source`: `task` (a background task or
+    agent reporting back, `<task-notification>`), `agent` (another session's message),
+    `compact` (the summary that replaced the conversation), `interrupt`, `rewind` (Codex
+    rolled back), `other`. Claude Code's newer transcripts say where a turn came from
+    (`origin.kind`, `promptSource`, `isCompactSummary`); older lines are judged by their
+    text, and so are rows stored before sources existed, on read
+    (`classifyTranscriptUserText` in `@optio/shared`). The prompt a session was started
+    with (the spawn's `prompt`, or a `claude -p` run's) is role `user` with source
+    `prompt`, shown as **Prompt** rather than **You**. `GET
 /api/local/terminals/:id/transcript` serves it; the session page opens a finished agent
-  session on this **Transcript** view (the **Screen** toggle brings the recorded grid
-  back), which reflows to any width — a session run on a 132×40 grid reads on a phone.
-  **Backfill**: a finished Claude Code session with a session id but no stored entries (it
-  ran under a daemon that predates transcripts, or its hooks never named the file) is read
-  off its machine on demand. The first transcript read asks the host's daemon
-  (`transcript-request`, only to daemons whose hello set `transcriptBackfill`); the daemon
-  finds `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/*/<session id>.jsonl`, refuses a
-  session whose working dir is outside its allowlist, and answers with the whole
-  conversation as `transcript-backfill` frames addressed to the request id. Meanwhile the
-  read returns `backfilling: true` and clients poll briefly; a host that had nothing isn't
-  asked again for 10 minutes (`cli/src/local/transcript-backfill.ts`,
-  `requestTranscriptBackfill` in `local-terminal-service.ts`).
+    session on this **Transcript** view (the **Screen** toggle brings the recorded grid
+    back), which reflows to any width — a session run on a 132×40 grid reads on a phone.
+    **Backfill**: a finished Claude Code or Codex session with a session id but no stored
+    entries (it ran under a daemon that predates transcripts, or its hooks never named the
+    file) is read off its machine on demand. The first transcript read asks the host's daemon
+    (`transcript-request`, only to daemons whose hello set `transcriptBackfill`); the daemon
+    finds `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/*/<session id>.jsonl` (Codex: the
+    rollout named after the thread id), refuses a session whose working dir is outside its
+    allowlist, and answers with the whole
+    conversation as `transcript-backfill` frames addressed to the request id. Meanwhile the
+    read returns `backfilling: true` and clients poll briefly; a host that had nothing isn't
+    asked again for 10 minutes (`cli/src/local/transcript-backfill.ts`,
+    `requestTranscriptBackfill` in `local-terminal-service.ts`).
 - Live UI updates: content-free nudges `{type:"local:changed", terminalId, hostId, userId}`
   on the shared `/ws/events` stream (that stream is visible to all authenticated users, so
   no terminal content may ever be published there); clients refetch via REST.

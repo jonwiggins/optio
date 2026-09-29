@@ -2,6 +2,7 @@ import { closeSync, existsSync, openSync, readSync, readdirSync } from "node:fs"
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { LocalTranscriptEntry } from "@optio/shared";
+import { codexHomeDir, codexRolloutCwd, findCodexRollout } from "./codex-sessions.js";
 import { TranscriptTracker } from "./transcript-tracker.js";
 
 /**
@@ -9,7 +10,8 @@ import { TranscriptTracker } from "./transcript-tracker.js";
  * server to store when the session's transcript was never streamed: it ran
  * under a daemon that predates transcripts, or its hooks never named the
  * file. Claude Code keeps every session at
- * `<config dir>/projects/<slug of the working dir>/<session id>.jsonl`.
+ * `<config dir>/projects/<slug of the working dir>/<session id>.jsonl`;
+ * Codex at `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`.
  *
  * Only a session that ran inside one of the daemon's allowlisted dirs is
  * read: the daemon never hands over a conversation from a folder that
@@ -102,15 +104,23 @@ export function readSessionTranscript(opts: {
   sessionId: string;
   allowedDirs: string[];
   configDir?: string;
+  codexHome?: string;
+  /** The prompt the session was spawned with, tagged `prompt` like the live stream does. */
+  launchPrompt?: string;
 }): SessionTranscript {
-  if (opts.agent !== "claude-code") {
+  if (opts.agent !== "claude-code" && opts.agent !== "codex") {
     return { entries: [], error: `No transcripts are read for ${opts.agent} sessions` };
   }
-  const path = findClaudeTranscript(opts.sessionId, opts.configDir);
+  const codex = opts.agent === "codex";
+  const path = codex
+    ? findCodexRollout(opts.sessionId, opts.codexHome ?? codexHomeDir())
+    : findClaudeTranscript(opts.sessionId, opts.configDir);
   if (!path) return { entries: [], error: "No transcript for this session on this machine" };
-  const cwd = transcriptCwd(path);
+  const cwd = codex ? codexRolloutCwd(path) : transcriptCwd(path);
   if (!cwd || !insideAny(cwd, opts.allowedDirs)) {
     return { entries: [], error: "The session ran outside this machine's allowlisted dirs" };
   }
-  return { entries: new TranscriptTracker().update("backfill", path) };
+  const tracker = new TranscriptTracker();
+  tracker.setLaunchPrompt("backfill", opts.launchPrompt);
+  return { entries: tracker.update("backfill", path, codex ? "codex" : "claude") };
 }

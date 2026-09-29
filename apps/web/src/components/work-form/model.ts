@@ -58,7 +58,10 @@ export function eventGaps(e: EventTrigger): SentenceField[] {
   }
   // No kinds checked would mean "every kind" to the matcher — make it a choice.
   if (events.length === 0) return ["events"];
-  const personal = events.some((k) => PERSONAL_EVENT_KINDS[e.type].includes(k));
+  const personal =
+    events.some((k) => PERSONAL_EVENT_KINDS[e.type].includes(k)) ||
+    // Linear's "only tickets from someone else" skips yours: it has to know you.
+    (e.type === "linear" && c.othersOnly === true);
   const identity = String((e.type === "github" ? c.login : c.user) ?? "").trim();
   if (personal && !identity) return ["identity"];
   return [];

@@ -194,6 +194,13 @@ suite("the sentence", () => {
     expect(eventGaps({ type: "linear", config: { events: ["assigned"], user: "" } })).toEqual([
       "identity",
     ]);
+    // "Only tickets from someone else" has to know whose tickets to skip.
+    expect(
+      eventGaps({ type: "linear", config: { events: ["created"], othersOnly: true, user: "" } }),
+    ).toEqual(["identity"]);
+    expect(
+      eventGaps({ type: "linear", config: { events: ["created"], othersOnly: true, user: "Ada" } }),
+    ).toEqual([]);
     expect(eventGaps({ type: "github", config: { events: [], login: "octocat" } })).toEqual([
       "events",
     ]);

@@ -4,6 +4,7 @@ import dev.optio.core.model.AgentLogEntry
 import dev.optio.core.model.LocalTranscriptEntry
 import dev.optio.core.model.LocalTranscriptKind
 import dev.optio.core.model.LocalTranscriptRole
+import dev.optio.core.model.LocalTranscriptSource
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -16,6 +17,7 @@ import kotlinx.serialization.json.JsonPrimitive
 object LocalTranscriptLog {
     /** Metadata keys `AgentLogRow` understands beyond the shared `toolName`. */
     const val ROLE_KEY = "role"
+    const val SOURCE_KEY = "source"
     const val SUMMARY_KEY = "summary"
     const val RESULT_KEY = "result"
     const val RESULT_IS_ERROR_KEY = "resultIsError"
@@ -64,7 +66,24 @@ object LocalTranscriptLog {
                 LocalTranscriptKind.THINKING ->
                     out += AgentLogEntry(terminalId, at, type = AgentLogEntry.TypeValue.THINKING, content = e.text)
                 LocalTranscriptKind.TEXT, LocalTranscriptKind.UNKNOWN -> {
-                    val meta = if (e.role == LocalTranscriptRole.USER) mapOf<String, JsonElement>(ROLE_KEY to JsonPrimitive("user")) else null
+                    if (e.role == LocalTranscriptRole.SYSTEM) {
+                        // Not the person: a background task, another agent, a compaction…
+                        val source = e.source?.raw?.takeIf { e.source != LocalTranscriptSource.UNKNOWN } ?: "other"
+                        out += AgentLogEntry(
+                            terminalId,
+                            at,
+                            type = AgentLogEntry.TypeValue.SYSTEM,
+                            content = e.text,
+                            metadata = mapOf(SOURCE_KEY to JsonPrimitive(source)),
+                        )
+                        continue
+                    }
+                    val role = when {
+                        e.role != LocalTranscriptRole.USER -> null
+                        e.source == LocalTranscriptSource.PROMPT -> "prompt"
+                        else -> "user"
+                    }
+                    val meta = role?.let { mapOf<String, JsonElement>(ROLE_KEY to JsonPrimitive(it)) }
                     out += AgentLogEntry(terminalId, at, type = AgentLogEntry.TypeValue.TEXT, content = e.text, metadata = meta)
                 }
             }

@@ -88,5 +88,13 @@ class TriggersTest {
             """{"events":["created"],"labels":["bug"],"teams":["ENG"]}""",
             ok(Triggers.Draft(kind = TriggerKind.LINEAR, linearEvents = setOf("created"), labels = "bug", linearTeams = "ENG")),
         )
+        // Skipping your own tickets needs to know who you are.
+        val fromOthers = Triggers.Draft(kind = TriggerKind.LINEAR, linearEvents = setOf("created"), linearOthersOnly = true)
+        assertEquals("Your Linear name or user id is required to skip your own tickets", problem(fromOthers))
+        assertEquals(
+            """{"events":["created"],"user":"Ada","othersOnly":true}""",
+            ok(fromOthers.copy(linearUser = "Ada")),
+        )
+        assertEquals("assigned → Ada · from others", summary("linear", """{"events":["assigned"],"user":"Ada","othersOnly":true}"""))
     }
 }
