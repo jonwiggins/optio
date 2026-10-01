@@ -4,6 +4,8 @@ import {
   type LocalAgentKind,
   type LocalAgentPermissionMode,
   type LocalAgentSessionMode,
+  type ModelProviderLaunch,
+  bedrockRuntime,
 } from "@optio/shared";
 import type { ClaudeCliCaps } from "./cli-probes.js";
 
@@ -32,6 +34,12 @@ export interface AgentCommandOptions {
    * with them, so they are left out; unknown = pass them.
    */
   claudeCaps?: ClaudeCliCaps | null;
+  /**
+   * Reach the models through a model provider (Amazon Bedrock) with this
+   * machine's own AWS credentials: its region and, optionally, which of the
+   * machine's AWS profiles to use. Claude Code and Codex only.
+   */
+  provider?: Pick<ModelProviderLaunch, "region" | "awsProfile"> | null;
 }
 
 /**
@@ -55,6 +63,38 @@ export function buildAgentCommand(
   prompt: string | undefined,
   hookSettingsPath: string,
   opts: AgentCommandOptions = {},
+): string {
+  const provider =
+    opts.provider && (agent === "claude-code" || agent === "codex")
+      ? bedrockRuntime(agent, opts.provider)
+      : null;
+  const command = agentCli(agent, prompt, hookSettingsPath, opts, provider?.codexConfig ?? []);
+  return provider ? withProviderEnv(provider.env, !!opts.provider?.awsProfile, command) : command;
+}
+
+/**
+ * Run `command` with the provider's env set on the command itself — after
+ * the login shell's rc files, which could otherwise override it. With a
+ * named AWS profile, AWS keys exported in the environment are dropped first:
+ * the SDK prefers them to the profile.
+ */
+function withProviderEnv(env: Record<string, string>, profile: boolean, command: string): string {
+  const unset = profile
+    ? " -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_BEARER_TOKEN_BEDROCK"
+    : "";
+  const assignments = Object.entries(env)
+    .filter(([k]) => /^[A-Z_][A-Z0-9_]*$/.test(k))
+    .map(([k, v]) => `${k}=${shellQuote(v)}`)
+    .join(" ");
+  return `env${unset} ${assignments} ${command}`;
+}
+
+function agentCli(
+  agent: LocalAgentKind,
+  prompt: string | undefined,
+  hookSettingsPath: string,
+  opts: AgentCommandOptions,
+  codexConfig: string[],
 ): string {
   const resume = opts.resumeSessionId ? shellQuote(opts.resumeSessionId) : null;
   // Claude Code and Codex resume one-shot (`claude -p --resume`, `codex exec
@@ -93,6 +133,7 @@ export function buildAgentCommand(
           : "";
       if (model) flags += ` -m ${model}`;
       if (effort) flags += ` -c ${shellQuote(`model_reasoning_effort="${effort}"`)}`;
+      for (const override of codexConfig) flags += ` -c ${shellQuote(override)}`;
       if (resume) {
         const sub = headless ? "codex exec resume" : "codex resume";
         return `${sub}${flags} ${resume}` + (p ? ` ${p}` : "");

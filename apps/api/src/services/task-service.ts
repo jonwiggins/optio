@@ -1,4 +1,5 @@
 import { eq, desc, and, or, ilike, gte, lte, sql } from "drizzle-orm";
+import { ensurePrimaryPrRow, prNumberFromUrl } from "./task-pr-service.js";
 import { db } from "../db/client.js";
 import { tasks, taskEvents, taskLogs, users, repos } from "../db/schema.js";
 import {
@@ -34,7 +35,15 @@ export class StateRaceError extends Error {
   }
 }
 
-export async function createTask(input: CreateTaskInput & { workspaceId?: string | null }) {
+export async function createTask(
+  input: CreateTaskInput & {
+    workspaceId?: string | null;
+    /** Null = the organization's; see services/work-ownership.ts. */
+    ownerUserId?: string | null;
+    /** Secrets (by name) the agent gets in its pod; null = the workspace's default. */
+    podSecrets?: string[] | null;
+  },
+) {
   const [task] = await db
     .insert(tasks)
     .values({
@@ -55,6 +64,8 @@ export async function createTask(input: CreateTaskInput & { workspaceId?: string
       localHostId: input.runTarget === "local" ? (input.localHostId ?? null) : null,
       localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
+      ownerUserId: input.ownerUserId ?? null,
+      podSecrets: input.podSecrets ?? null,
       autoResume: input.autoResume ?? null,
       autoMerge: input.autoMerge ?? null,
     })
@@ -487,7 +498,11 @@ export async function updateTaskContainer(id: string, containerId: string) {
   await db.update(tasks).set({ containerId, updatedAt: new Date() }).where(eq(tasks.id, id));
 }
 
-export async function updateTaskPr(id: string, prUrl: string) {
+export async function updateTaskPr(
+  id: string,
+  prUrl: string,
+  source: "tool_call" | "branch" | "attached" = "branch",
+) {
   // A cancelled task must never adopt a PR. The agent can still emit a PR
   // URL after the user cancels (late exec output before the kill lands, or
   // an API-fallback detection); dropping the write keeps cancelled tasks
@@ -497,12 +512,13 @@ export async function updateTaskPr(id: string, prUrl: string) {
     logger.info({ taskId: id, prUrl }, "Ignoring PR URL for cancelled task");
     return;
   }
-  const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
-  const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : undefined;
+  const prNumber = prNumberFromUrl(prUrl) ?? undefined;
   await db
     .update(tasks)
     .set({ prUrl, ...(prNumber != null && { prNumber }), updatedAt: new Date() })
     .where(eq(tasks.id, id));
+  // Every PR of a task has a task_prs row, the primary included.
+  if (current) await ensurePrimaryPrRow(id, current.repoUrl, prUrl, source);
 }
 
 /**

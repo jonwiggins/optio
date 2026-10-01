@@ -105,6 +105,8 @@ fun OptioRow(
     onLongClick: (() -> Unit)? = null,
     onClickLabel: String? = null,
     contentPadding: PaddingValues = OptioRowDefaults.ContentPadding,
+    /** A mark leading the meta line (iOS `glyph`): a PR / issue glyph, the source's brand ([BrandMark], [PrGlyph]). */
+    metaGlyph: (@Composable () -> Unit)? = null,
 ) {
     val type = OptioTheme.type
     val colors = OptioTheme.colors
@@ -130,7 +132,12 @@ fun OptioRow(
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             Text(title, style = type.body, color = colors.label, maxLines = titleMaxLines, overflow = TextOverflow.Ellipsis)
-            if (meta != null) {
+            if (meta != null && metaGlyph != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    metaGlyph()
+                    Text(meta, style = type.subheadline, color = colors.secondaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            } else if (meta != null) {
                 Text(meta, style = type.subheadline, color = colors.secondaryLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (footer != null) {

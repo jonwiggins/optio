@@ -743,6 +743,20 @@
       "when": 1791600000000,
       "tag": "1791600000_task_pr_follow_through",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1791700000000,
+      "tag": "1791700000_model_providers_and_owners",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1791800000000,
+      "tag": "1791800000_task_prs",
+      "breakpoints": true
     }
   ]
 }

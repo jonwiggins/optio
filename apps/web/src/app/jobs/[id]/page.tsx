@@ -29,15 +29,22 @@ import {
   CopyPlus,
   Laptop,
   Server,
+  Bot,
 } from "lucide-react";
 import { RunWorkflowDialog } from "@/components/run-workflow-dialog";
-import { StateBadge } from "@/components/state-badge";
+import { TriggerIcon, brandFor } from "@/components/brand-icon";
 import { DetailHeader } from "@/components/detail-header";
 import { MetadataCard } from "@/components/metadata-card";
+import { RunsAsBadge } from "@/components/runs-as-badge";
+import { EmptyState } from "@/components/empty-state";
+import { Panel, PanelEmpty } from "@/components/ui/panel";
+import { Segmented } from "@/components/ui/segmented";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface WorkflowDetail {
+  /** Personal work: who it runs as (null = the organization's). */
+  ownerUserId?: string | null;
   id: string;
   name: string;
   description: string | null;
@@ -100,7 +107,11 @@ interface WorkflowTrigger {
 
 // ── Trigger type icon ──────────────────────────────────────────────────────────
 
-function TriggerTypeIcon({ type }: { type: string }) {
+function TriggerTypeIcon({ type, source }: { type: string; source?: unknown }) {
+  // Event and ticket triggers show their source's mark (GitHub, Slack, Linear, …).
+  if (brandFor(type) || (type === "ticket" && brandFor(String(source ?? "")))) {
+    return <TriggerIcon type={type} source={String(source ?? "")} />;
+  }
   switch (type) {
     case "manual":
       return <Play className="w-3.5 h-3.5" />;
@@ -253,8 +264,19 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
         }
         state={workflow.enabled ? "enabled" : "disabled"}
         metaItems={
-          workflow.description
-            ? [<span className="text-text-muted">{workflow.description}</span>]
+          workflow.description || workflow.ownerUserId
+            ? [
+                ...(workflow.ownerUserId
+                  ? [<RunsAsBadge key="owner" ownerUserId={workflow.ownerUserId} />]
+                  : []),
+                ...(workflow.description
+                  ? [
+                      <span key="desc" className="text-text-muted">
+                        {workflow.description}
+                      </span>,
+                    ]
+                  : []),
+              ]
             : undefined
         }
         rightSlot={
@@ -354,25 +376,19 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
           </div>
         )}
 
-        {/* Tabs */}
-        <div className="flex gap-1 mb-4 border-b border-border">
-          {(["runs", "triggers", "config"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={cn(
-                "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-                activeTab === tab
-                  ? "border-primary text-text"
-                  : "border-transparent text-text-muted hover:text-text",
-              )}
-            >
-              {tab === "runs" && `Runs (${runs.length})`}
-              {tab === "triggers" && `Triggers (${triggers.length})`}
-              {tab === "config" && "Configuration"}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          className="mb-4"
+          size="md"
+          surface="card"
+          aria-label="Job view"
+          value={activeTab}
+          onChange={setActiveTab}
+          options={[
+            { value: "runs", label: "Runs", count: runs.length },
+            { value: "triggers", label: "Triggers", count: triggers.length },
+            { value: "config", label: "Configuration" },
+          ]}
+        />
 
         {/* Tab content */}
         {activeTab === "runs" && (
@@ -425,7 +441,6 @@ function RunsTable({
   onRunClick: () => void;
   canRun: boolean;
 }) {
-  const router = useRouter();
   const [filter, setFilter] = useState<RunFilter>("all");
   const filteredRuns =
     filter === "all"
@@ -436,134 +451,144 @@ function RunsTable({
 
   if (runs.length === 0) {
     return (
-      <div className="text-center py-8 text-text-muted border border-dashed border-border rounded-lg">
-        <CircleDot className="w-6 h-6 mx-auto mb-2 opacity-50" />
-        <p className="text-sm">No runs yet</p>
-        <p className="text-xs mt-1 mb-3">Start your first run to see results here.</p>
-        <button
-          onClick={onRunClick}
-          disabled={!canRun}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Play className="w-3 h-3" /> Run Now
-        </button>
-      </div>
+      <EmptyState
+        icon={CircleDot}
+        title="No runs yet"
+        description="Start your first run to see results here."
+        action={
+          <button
+            onClick={onRunClick}
+            disabled={!canRun}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Play className="w-3.5 h-3.5" /> Run Now
+          </button>
+        }
+      />
     );
   }
 
+  const countFor = (f: RunFilter) =>
+    f === "running"
+      ? runs.filter((r) => r.state === "running" || r.state === "queued").length
+      : runs.filter((r) => r.state === f).length;
+
   return (
-    <div className="space-y-3">
-      <div className="flex gap-1.5">
-        {RUN_FILTERS.map((f) => (
-          <button
-            key={f.value}
-            onClick={() => setFilter(f.value)}
-            className={cn(
-              "text-xs px-2.5 py-1 rounded-md font-medium transition-colors",
-              filter === f.value
-                ? "bg-primary/10 text-primary"
-                : "text-text-muted hover:text-text hover:bg-bg-hover",
-            )}
-          >
-            {f.label}
-            {f.value !== "all" && (
-              <span className="ml-1 text-[10px] opacity-70">
-                {f.value === "running"
-                  ? runs.filter((r) => r.state === "running" || r.state === "queued").length
-                  : runs.filter((r) => r.state === f.value).length}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+    <Panel
+      title="Runs"
+      actions={
+        <Segmented
+          aria-label="Filter runs"
+          value={filter}
+          onChange={setFilter}
+          options={RUN_FILTERS.map((f) => ({
+            value: f.value,
+            label: f.label,
+            count: f.value === "all" ? undefined : countFor(f.value),
+          }))}
+        />
+      }
+    >
       {filteredRuns.length === 0 ? (
-        <div className="text-center py-6 text-text-muted border border-dashed border-border rounded-lg">
-          <p className="text-sm">No {filter} runs</p>
-        </div>
+        <PanelEmpty>No {filter} runs</PanelEmpty>
       ) : (
-        <div className="rounded-lg border border-border/50 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border/50 bg-bg-card">
-                <th className="text-left px-4 py-2 text-xs font-medium text-text-muted">State</th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-text-muted">Started</th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-text-muted">
-                  Duration
-                </th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-text-muted">Model</th>
-                <th className="text-right px-4 py-2 text-xs font-medium text-text-muted">Cost</th>
-                <th className="text-right px-4 py-2 text-xs font-medium text-text-muted">Tokens</th>
-                <th className="text-left px-4 py-2 text-xs font-medium text-text-muted">Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRuns.map((run) => (
-                <tr
-                  key={run.id}
-                  className="border-b border-border/30 last:border-0 hover:bg-bg-hover/40 cursor-pointer"
-                  onClick={() => router.push(`/jobs/${workflowId}/runs/${run.id}`)}
-                >
-                  <td className="px-4 py-2.5">
-                    <Link
-                      href={`/jobs/${workflowId}/runs/${run.id}`}
-                      className="inline-flex items-center gap-1.5"
-                    >
-                      <StateBadge state={run.state} />
-                      {run.localTerminalId && (
-                        <Laptop
-                          className="w-3 h-3 text-text-muted"
-                          aria-label="Ran on your machine"
-                        />
-                      )}
-                      {run.title && (
-                        <span className="text-xs text-text truncate max-w-[18rem]">
-                          {run.title}
-                        </span>
-                      )}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2.5 text-text-muted text-xs">
-                    {run.startedAt
-                      ? formatRelativeTime(run.startedAt)
-                      : formatRelativeTime(run.createdAt)}
-                  </td>
-                  <td className="px-4 py-2.5 text-text-muted text-xs">
-                    {run.startedAt
+        <div className="divide-y divide-border/60">
+          {filteredRuns.map((run) => (
+            <Link
+              key={run.id}
+              href={`/jobs/${workflowId}/runs/${run.id}`}
+              className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+            >
+              <span
+                className={cn("w-2 h-2 rounded-full", RUN_DOT[run.state] ?? "bg-text-muted/40")}
+                aria-label={run.state}
+              />
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-text-heading truncate">
+                  {run.title ?? `Run ${run.id.slice(0, 8)}`}
+                </div>
+                <div className="text-[11px] text-text-muted truncate">
+                  <span className={run.state === "failed" ? "text-error" : undefined}>
+                    {RUN_LABEL[run.state] ?? run.state}
+                  </span>
+                  {run.errorMessage && (
+                    <span className="text-text-muted/70" title={run.errorMessage}>
+                      {" "}
+                      · {run.errorMessage}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="col-span-3 sm:col-span-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-muted min-w-0">
+                {run.localTerminalId ? (
+                  <RunAttr icon={Laptop} label="your machine" />
+                ) : (
+                  <RunAttr icon={Server} label="Optio pod" />
+                )}
+                <RunAttr
+                  icon={Clock}
+                  label={
+                    run.startedAt
                       ? formatDuration(run.startedAt, run.finishedAt ?? undefined)
-                      : "\u2014"}
-                  </td>
-                  <td className="px-4 py-2.5 text-text-muted text-xs">
-                    {run.modelUsed ?? "\u2014"}
-                  </td>
-                  <td className="px-4 py-2.5 text-right text-xs">
-                    {run.costUsd ? `$${parseFloat(run.costUsd).toFixed(2)}` : "\u2014"}
-                  </td>
-                  <td className="px-4 py-2.5 text-right text-text-muted text-xs">
-                    {run.inputTokens != null && run.outputTokens != null
-                      ? `${(run.inputTokens / 1000).toFixed(1)}k / ${(run.outputTokens / 1000).toFixed(1)}k`
-                      : "\u2014"}
-                  </td>
-                  <td className="px-4 py-2.5 text-xs">
-                    {run.errorMessage ? (
-                      <span
-                        className="text-error truncate max-w-[200px] block"
-                        title={run.errorMessage}
-                      >
-                        {run.errorMessage.length > 60
-                          ? run.errorMessage.slice(0, 60) + "\u2026"
-                          : run.errorMessage}
-                      </span>
-                    ) : (
-                      "\u2014"
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      : "\u2014"
+                  }
+                />
+                {run.modelUsed && <RunAttr icon={Bot} label={run.modelUsed} mono />}
+                {run.inputTokens != null && run.outputTokens != null && (
+                  <RunAttr
+                    icon={Hash}
+                    label={`${(run.inputTokens / 1000).toFixed(1)}k / ${(run.outputTokens / 1000).toFixed(1)}k`}
+                  />
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-[11px] text-text-muted/70 whitespace-nowrap">
+                {run.costUsd && (
+                  <span className="text-text-muted tabular-nums">
+                    ${parseFloat(run.costUsd).toFixed(2)}
+                  </span>
+                )}
+                <span>{formatRelativeTime(run.startedAt ?? run.createdAt)}</span>
+              </div>
+            </Link>
+          ))}
         </div>
       )}
-    </div>
+    </Panel>
+  );
+}
+
+const RUN_DOT: Record<string, string> = {
+  queued: "bg-warning/70",
+  provisioning: "bg-primary animate-pulse",
+  running: "bg-primary animate-pulse",
+  completed: "bg-success",
+  failed: "bg-error",
+  cancelled: "bg-text-muted/40",
+};
+
+const RUN_LABEL: Record<string, string> = {
+  queued: "Queued",
+  provisioning: "Setting up",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+function RunAttr({
+  icon: Icon,
+  label,
+  mono,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  mono?: boolean;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 min-w-0">
+      <Icon className="w-3 h-3 shrink-0 text-text-muted/60" />
+      <span className={cn("truncate", mono && "font-mono")}>{label}</span>
+    </span>
   );
 }
 
@@ -578,19 +603,19 @@ function TriggersList({
 }) {
   if (triggers.length === 0) {
     return (
-      <div className="text-center py-8 text-text-muted border border-dashed border-border rounded-lg">
-        <Zap className="w-6 h-6 mx-auto mb-2 opacity-50" />
-        <p className="text-sm">No triggers configured</p>
-        <p className="text-xs mt-1 mb-3">
-          Triggers define how this job is started (manually, on schedule, or via webhook).
-        </p>
-        <Link
-          href={`/work/${workflowId}/edit`}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg-hover text-text-muted text-xs font-medium hover:text-text transition-colors"
-        >
-          <Pencil className="w-3 h-3" /> Configure Triggers
-        </Link>
-      </div>
+      <EmptyState
+        icon={Zap}
+        title="No triggers configured"
+        description="Triggers define how this job is started (manually, on schedule, or via webhook)."
+        action={
+          <Link
+            href={`/work/${workflowId}/edit`}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-bg-hover text-text-muted hover:text-text transition-colors"
+          >
+            <Pencil className="w-3.5 h-3.5" /> Configure Triggers
+          </Link>
+        }
+      />
     );
   }
 
@@ -601,70 +626,79 @@ function TriggersList({
   };
 
   return (
-    <div className="space-y-3">
-      {triggers.map((trigger) => {
-        const rawPath =
-          trigger.type === "webhook"
-            ? (trigger.config as Record<string, unknown> | null)?.path
-            : null;
-        const webhookPath = typeof rawPath === "string" ? rawPath : null;
+    <Panel
+      title="Triggers"
+      actions={
+        <Link href={`/work/${workflowId}/edit`} className="text-primary hover:underline">
+          Edit
+        </Link>
+      }
+    >
+      <div className="divide-y divide-border/60">
+        {triggers.map((trigger) => {
+          const rawPath =
+            trigger.type === "webhook"
+              ? (trigger.config as Record<string, unknown> | null)?.path
+              : null;
+          const webhookPath = typeof rawPath === "string" ? rawPath : null;
 
-        return (
-          <div
-            key={trigger.id}
-            className="rounded-lg border border-border/50 bg-bg-card p-4 flex items-center justify-between"
-          >
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              <div
-                className={cn(
-                  "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-                  trigger.enabled ? "bg-primary/10 text-primary" : "bg-bg-hover text-text-muted",
-                )}
-              >
-                <TriggerTypeIcon type={trigger.type} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium capitalize">{trigger.type}</span>
-                  <span
-                    className={cn(
-                      "text-[10px] px-1.5 py-0.5 rounded uppercase font-medium",
-                      trigger.enabled
-                        ? "text-success bg-success/10"
-                        : "text-text-muted bg-bg-hover",
-                    )}
-                  >
-                    {trigger.enabled ? "Active" : "Disabled"}
-                  </span>
+          return (
+            <div
+              key={trigger.id}
+              className="px-4 py-3 bg-bg-card/40 flex items-center justify-between"
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div
+                  className={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
+                    trigger.enabled ? "bg-primary/10 text-primary" : "bg-bg-hover text-text-muted",
+                  )}
+                >
+                  <TriggerTypeIcon type={trigger.type} source={trigger.config?.source} />
                 </div>
-                {webhookPath && (
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <code className="text-xs text-text-muted bg-bg rounded px-1.5 py-0.5 font-mono truncate">
-                      {window.location.origin}/api/hooks/{webhookPath}
-                    </code>
-                    <button
-                      onClick={() => copyWebhookUrl(webhookPath)}
-                      className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text transition-colors shrink-0"
-                      title="Copy webhook URL"
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium capitalize">{trigger.type}</span>
+                    <span
+                      className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded uppercase font-medium",
+                        trigger.enabled
+                          ? "text-success bg-success/10"
+                          : "text-text-muted bg-bg-hover",
+                      )}
                     >
-                      <Copy className="w-3 h-3" />
-                    </button>
+                      {trigger.enabled ? "Active" : "Disabled"}
+                    </span>
                   </div>
-                )}
-                {!webhookPath && trigger.config && Object.keys(trigger.config).length > 0 && (
-                  <p className="text-xs text-text-muted mt-0.5 font-mono truncate">
-                    {JSON.stringify(trigger.config)}
+                  {webhookPath && (
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <code className="text-xs text-text-muted bg-bg rounded px-1.5 py-0.5 font-mono truncate">
+                        {window.location.origin}/api/hooks/{webhookPath}
+                      </code>
+                      <button
+                        onClick={() => copyWebhookUrl(webhookPath)}
+                        className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text transition-colors shrink-0"
+                        title="Copy webhook URL"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                  {!webhookPath && trigger.config && Object.keys(trigger.config).length > 0 && (
+                    <p className="text-xs text-text-muted mt-0.5 font-mono truncate">
+                      {JSON.stringify(trigger.config)}
+                    </p>
+                  )}
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Created {formatRelativeTime(trigger.createdAt)}
                   </p>
-                )}
-                <p className="text-xs text-text-muted mt-0.5">
-                  Created {formatRelativeTime(trigger.createdAt)}
-                </p>
+                </div>
               </div>
             </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+    </Panel>
   );
 }
 

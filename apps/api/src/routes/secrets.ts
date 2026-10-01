@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as secretService from "../services/secret-service.js";
@@ -88,6 +88,18 @@ async function validateAuthToken(
   return { valid: true };
 }
 
+/** Org-level secrets need an admin; a member manages their own (`scope: user`). */
+const scopeOnlySchema = z.object({ scope: z.string().optional() }).passthrough();
+
+async function requireAdminUnlessUserScope(req: FastifyRequest, reply: FastifyReply) {
+  const body = scopeOnlySchema.safeParse(req.body ?? {});
+  const query = scopeOnlySchema.safeParse(req.query ?? {});
+  const scope =
+    (body.success ? body.data.scope : undefined) ?? (query.success ? query.data.scope : undefined);
+  if (scope === "user" && req.user?.id) return;
+  return requireRole("admin")(req, reply);
+}
+
 export async function secretRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
@@ -127,10 +139,38 @@ export async function secretRoutes(rawApp: FastifyInstance) {
     },
   );
 
+  app.get(
+    "/api/secrets/pickable",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "listPickableSecrets",
+        summary: "Secrets work can pick",
+        description:
+          "Names (never values) of the secrets a piece of work can give its pod: the " +
+          "organization's (`owner: workspace`) and the caller's own (`owner: me`).",
+        tags: ["Setup & Settings"],
+        response: {
+          200: z.object({
+            secrets: z.array(z.object({ name: z.string(), owner: z.enum(["workspace", "me"]) })),
+          }),
+        },
+      },
+    },
+    async (req, reply) => {
+      const secrets = await secretService.listPickableSecrets(
+        req.user?.workspaceId ?? null,
+        req.user?.id ?? null,
+      );
+      reply.send({ secrets });
+    },
+  );
+
   app.post(
     "/api/secrets",
     {
-      preHandler: [requireRole("admin")],
+      // Members may store their own (`scope: user`) secrets; the rest need an admin.
+      preHandler: [requireRole("member"), requireAdminUnlessUserScope],
       schema: {
         operationId: "createOrUpdateSecret",
         summary: "Create or update a secret",
@@ -213,7 +253,7 @@ export async function secretRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/secrets/:name",
     {
-      preHandler: [requireRole("admin")],
+      preHandler: [requireRole("member"), requireAdminUnlessUserScope],
       schema: {
         operationId: "deleteSecret",
         summary: "Delete a secret",

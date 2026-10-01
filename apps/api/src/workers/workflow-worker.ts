@@ -15,7 +15,12 @@ import * as workflowPool from "../services/workflow-pool-service.js";
 import { publishWorkflowRunEvent } from "../services/event-bus.js";
 import { enqueueWebhookEvent } from "./webhook-worker.js";
 import type { WebhookEvent } from "../services/webhook-service.js";
-import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
+import {
+  resolvePodSecrets,
+  resolveSecretsForTask,
+  retrieveSecretWithFallback,
+} from "../services/secret-service.js";
+import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
 import { agentOptionsEnv } from "../services/agent-options-env.js";
 import { buildPooledAgentCommand } from "../services/pooled-agent-command.js";
@@ -310,24 +315,56 @@ export function startWorkflowWorker() {
 
         // ── Resolve secrets ───────────────────────────────────────────
         const workspaceId = workflow.workspaceId ?? null;
-        const workflowUserId = workflow.createdBy ?? null;
+        // Personal work runs with its owner's secrets; organization work never
+        // sees anyone's (see services/work-ownership.ts).
+        const workflowUserId = workflow.ownerUserId ?? null;
         const adapter = getAdapter(workflow.agentRuntime);
-        const resolvedSecrets = await resolveSecretsForTask(
-          adapter.validateSecrets([]).missing,
-          "",
+        // A model provider (Bedrock) picked for the job replaces the agent's
+        // own sign-in: no Anthropic / OpenAI key is needed then.
+        const providerRow = await resolveProviderForWork({
+          agentType: workflow.agentRuntime,
+          agentOptions: workflow.agentOptions,
           workspaceId,
-          workflowUserId,
-        );
+          ownerUserId: workflowUserId,
+          runsOn: "pod",
+        });
+        const providerRuntime = providerRow
+          ? podProviderRuntime(providerRow, workflow.agentRuntime)
+          : null;
+        const resolvedSecrets = providerRuntime
+          ? {}
+          : await resolveSecretsForTask(
+              adapter.validateSecrets([]).missing,
+              "",
+              workspaceId,
+              workflowUserId,
+            );
+        const picked = await resolvePodSecrets(workflow.podSecrets, {
+          workspaceId,
+          ownerUserId: workflowUserId,
+        });
+        if (picked.missing.length > 0) {
+          log.warn({ missing: picked.missing }, "Picked pod secrets not found");
+        }
 
         // Resolve auth mode for the agent runtime
-        const claudeAuthMode =
-          ((await retrieveSecretWithFallback("CLAUDE_AUTH_MODE", "global", workspaceId).catch(
-            () => null,
-          )) as any) ?? "api-key";
+        const claudeAuthMode = providerRuntime
+          ? "bedrock"
+          : (((await retrieveSecretWithFallback(
+              "CLAUDE_AUTH_MODE",
+              "global",
+              workspaceId,
+              workflowUserId,
+            ).catch(() => null)) as any) ?? "api-key");
 
         // Build env vars
         const env: Record<string, string> = {
+          ...picked.env,
           ...resolvedSecrets,
+          ...(providerRuntime?.env ?? {}),
+          ...(providerRuntime?.codexConfig.length
+            ? { OPTIO_CODEX_PROVIDER_CONFIG: JSON.stringify(providerRuntime.codexConfig) }
+            : {}),
           OPTIO_PROMPT: renderedPrompt,
           OPTIO_WORKFLOW_RUN_ID: workflowRunId,
           OPTIO_AGENT_TYPE: workflow.agentRuntime,

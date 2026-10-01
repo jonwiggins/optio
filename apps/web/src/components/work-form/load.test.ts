@@ -241,6 +241,49 @@ describe("loadEditTarget", () => {
   });
 });
 
+import { ownerFromRow } from "./load";
+
+describe("owner and secrets from a row", () => {
+  it("maps the owner id to the form's answer and flags someone else's work", () => {
+    expect(ownerFromRow({ ownerUserId: null }, "u-me")).toEqual({
+      owner: "workspace",
+      foreignOwnerId: null,
+    });
+    expect(ownerFromRow({ ownerUserId: "u-me" }, "u-me")).toEqual({
+      owner: "me",
+      foreignOwnerId: null,
+    });
+    expect(ownerFromRow({ ownerUserId: "u-x" }, "u-me")).toEqual({
+      owner: "me",
+      foreignOwnerId: "u-x",
+    });
+    // Unknown viewer: stays editable, the server decides.
+    expect(ownerFromRow({ ownerUserId: "u-x" }, null).foreignOwnerId).toBeNull();
+  });
+
+  it("restores picked secrets, keeping null for rows that never picked", () => {
+    const row = { name: "J", agentRuntime: "claude-code", promptTemplate: "hi" };
+    expect(draftFromRow("standalone", { ...row, podSecrets: ["A"] }, null).podSecrets).toEqual([
+      "A",
+    ]);
+    expect(draftFromRow("standalone", row, null).podSecrets).toBeNull();
+    expect(draftFromRow("standalone", { ...row, ownerUserId: "u-me" }, null, "u-me").owner).toBe(
+      "me",
+    );
+  });
+
+  it("loadEditTarget flags a row owned by someone else", async () => {
+    (api as any).getCurrentUser = vi.fn().mockResolvedValue({ user: { id: "u-me" } });
+    api.getTaskUnified.mockResolvedValue({
+      task: { id: "w-9", type: "standalone", name: "J", ownerUserId: "u-x", promptTemplate: "hi" },
+    });
+    api.listTaskTriggers.mockResolvedValue({ triggers: [] });
+    const t = await loadEditTarget("w-9");
+    expect(t.foreignOwnerId).toBe("u-x");
+    delete (api as any).getCurrentUser;
+  });
+});
+
 describe("loading a scheduled Task's follow-through", () => {
   const row = {
     name: "Assign",

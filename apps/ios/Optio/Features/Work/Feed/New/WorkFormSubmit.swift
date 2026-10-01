@@ -102,7 +102,7 @@ struct WorkFormSubmitter {
 
     /// `catalog` is the runtime's provider catalog, when it loaded: which options
     /// a run on a machine hands its agent CLI.
-    func create(_ d: WorkForm.Draft, repoUrl: String, autoName: String, catalog: ProviderCatalog? = nil) async throws -> WorkForm.Created {
+    func create(_ d: WorkForm.Draft, repoUrl: String, autoName: String, catalog: ProviderCatalog? = nil, providers: [ModelProvider] = []) async throws -> WorkForm.Created {
         typealias F = WorkForm
         let kind = F.deriveKind(d)
         let trimmedName = d.name.trimmingCharacters(in: .whitespaces)
@@ -112,6 +112,8 @@ struct WorkFormSubmitter {
         let options = F.setOptions(d)
         let model = F.pickedModel(d)
         let description: AnyCodable? = d.description.isEmpty ? nil : .string(d.description)
+        // Owner + pod secrets ride on every row that runs an agent in a pod or as a Task.
+        let access = F.accessPayload(d)
 
         switch kind {
         case .repoTask:
@@ -130,6 +132,7 @@ struct WorkFormSubmitter {
             if !d.dependsOn.isEmpty { body["dependsOn"] = .array(d.dependsOn.map { .string($0) }) }
             if d.then == .untilMerged { body.merge(F.followThroughFor(d)) { _, new in new } }
             body.merge(F.locationPayload(d)) { _, new in new }
+            body.merge(access) { _, new in new }
             let id = try await api.post("/api/tasks", body: body, as: IdEnvelope.self).task.id
             let toast = d.then == .untilMerged ? "\(name) started — it will work the PR until it merges" : "\(name) started — it will open a PR"
             return .init(kind: kind, destination: .task(id), toast: toast)
@@ -151,6 +154,7 @@ struct WorkFormSubmitter {
             body["agentOptions"] = options.map { .object($0) } ?? .null
             if d.then == .untilMerged { body.merge(F.followThroughFor(d)) { _, new in new } }
             body.merge(F.locationPayload(d)) { _, new in new }
+            body.merge(access) { _, new in new }
             let id = try await api.post("/api/tasks", body: body, as: IdEnvelope.self).task.id
             if let trigger { try await createTaskTrigger(id, trigger) }
             return .init(kind: kind, destination: .blueprint(id), toast: "\(name) saved")
@@ -169,6 +173,7 @@ struct WorkFormSubmitter {
             if let model { body["model"] = .string(model) }
             body["agentOptions"] = options.map { .object($0) } ?? .null
             body.merge(F.locationPayload(d)) { _, new in new }
+            body.merge(access) { _, new in new }
             let id = try await api.post("/api/tasks", body: body, as: IdEnvelope.self).task.id
             if let trigger {
                 try await createTaskTrigger(id, trigger)
@@ -208,7 +213,8 @@ struct WorkFormSubmitter {
                     prompt: prompt.isEmpty ? nil : prompt,
                     model: params.model,
                     effort: params.effort,
-                    permissionMode: params.permissionMode
+                    permissionMode: params.permissionMode,
+                    provider: F.providerLaunch(d, providers: providers)
                 ))
             }
             let terminal = try await api.createLocalTerminal(CreateLocalTerminalBody(hostId: d.location.localHostId, dir: d.location.localDir, title: name, spec: spec))
@@ -232,6 +238,7 @@ struct WorkFormSubmitter {
                 "podLifecycle": .string(d.agent.podLifecycle.rawValue),
             ]
             if let description { body["description"] = description }
+            body.merge(access) { _, new in new }
             struct AgentEnvelope: Decodable { struct Row: Decodable { let id: String }; let agent: Row }
             let id = try await api.post("/api/persistent-agents", body: body, as: AgentEnvelope.self).agent.id
             if let trigger {

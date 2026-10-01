@@ -4,17 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import {
-  Loader2,
-  Plus,
-  Trash2,
-  KeyRound,
-  Globe,
-  FolderGit2,
-  Filter,
-  User,
-  Info,
-} from "lucide-react";
+import { Plus, Trash2, KeyRound, Building2, FolderGit2, User, Info } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { SectionCard } from "@/components/ui/section-card";
+import { Segmented } from "@/components/ui/segmented";
 import { TokenRefreshBanner } from "@/components/token-refresh-banner";
 
 export default function SecretsPage() {
@@ -49,10 +43,11 @@ export default function SecretsPage() {
     };
   }, [checkClaudeAuth]);
 
+  // One fetch of everything the caller can see (workspace secrets plus their
+  // own); the scope pills filter it client-side so each can show a count.
   const loadSecrets = () => {
-    const scope = scopeFilter === "all" ? undefined : scopeFilter;
     api
-      .listSecrets(scope)
+      .listSecrets()
       .then((res) => setSecrets(res.secrets))
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -65,11 +60,6 @@ export default function SecretsPage() {
       .catch(() => {});
     loadSecrets();
   }, []);
-
-  useEffect(() => {
-    setLoading(true);
-    loadSecrets();
-  }, [scopeFilter]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,31 +89,55 @@ export default function SecretsPage() {
     }
   };
 
-  /** Display-friendly label for a scope value */
-  const scopeLabel = (scope: string) => {
-    if (scope === "global") return "Global";
-    if (scope === "user") return "User-only";
-    const repo = repos.find((r) => r.repoUrl === scope);
-    return repo?.fullName ?? scope;
-  };
+  const repoName = (scope: string) =>
+    repos.find((r) => r.repoUrl === scope)?.fullName ?? scope.replace(/^https?:\/\//, "");
 
   const hasUserScopedSecrets = secrets.some((s) => s.scope === "user");
 
-  /** Unique scopes present in the current secrets list (for filter dropdown) */
-  const uniqueScopes = Array.from(new Set(secrets.map((s) => s.scope)));
+  // Pills: All / Organization / Mine, then one per repo that has secrets
+  // (a select instead when there are many of those).
+  const repoScopes = Array.from(
+    new Set(secrets.map((s) => s.scope).filter((sc) => sc !== "global" && sc !== "user")),
+  );
+  const countFor = (f: string) =>
+    f === "all" ? secrets.length : secrets.filter((s) => s.scope === f).length;
+  const scopeOptions = [
+    { value: "all", label: "All", count: countFor("all") },
+    { value: "global", label: "Organization", count: countFor("global") },
+    { value: "user", label: "Mine", count: countFor("user") },
+    ...(repoScopes.length <= 3
+      ? repoScopes.map((sc) => ({ value: sc, label: repoName(sc), count: countFor(sc) }))
+      : []),
+  ];
+  const visible = secrets.filter((s) => scopeFilter === "all" || s.scope === scopeFilter);
+
+  const inputClass =
+    "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Secrets</h1>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Secret
-        </button>
-      </div>
+    <div className="p-6 max-w-4xl mx-auto">
+      <PageHeader
+        icon={KeyRound}
+        title="Secrets"
+        description="Encrypted at rest and injected into agent pods. Values are never shown again."
+        meta={
+          secrets.length > 0 ? (
+            <span>
+              {secrets.length} secret{secrets.length === 1 ? "" : "s"} · {countFor("global")}{" "}
+              organization · {countFor("user")} yours
+            </span>
+          ) : null
+        }
+        actions={
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Secret
+          </button>
+        }
+      />
 
       {claudeExpired && (
         <div className="mb-6">
@@ -132,137 +146,205 @@ export default function SecretsPage() {
       )}
 
       {showForm && (
-        <form
-          onSubmit={handleCreate}
-          className="mb-6 p-5 rounded-xl border border-border/50 bg-bg-card space-y-3"
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm text-text-muted mb-1">Name</label>
-              <input
-                required
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="ANTHROPIC_API_KEY"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-              />
+        <form onSubmit={handleCreate} className="mb-6">
+          <SectionCard
+            label="New secret"
+            hint="Encrypted with AES-256-GCM before it's stored"
+            bodyClassName="p-4 space-y-3"
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Name</label>
+                <input
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="ANTHROPIC_API_KEY"
+                  className={inputClass + " font-mono"}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-text-muted mb-1">Value</label>
+                <input
+                  required
+                  type="password"
+                  value={form.value}
+                  onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
+                  placeholder="sk-ant-..."
+                  className={inputClass}
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm text-text-muted mb-1">Scope</label>
-              <select
-                value={form.scope}
-                onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <span className="block text-xs text-text-muted mb-1">Owner</span>
+                <Segmented
+                  aria-label="Owner"
+                  value={form.scope === "user" ? "user" : "org"}
+                  onChange={(v) =>
+                    setForm((f) => ({ ...f, scope: v === "user" ? "user" : "global" }))
+                  }
+                  options={[
+                    {
+                      value: "org",
+                      label: "Organization",
+                      icon: <Building2 className="w-3 h-3" />,
+                    },
+                    { value: "user", label: "Just me", icon: <User className="w-3 h-3" /> },
+                  ]}
+                />
+              </div>
+              {form.scope !== "user" && (
+                <div className="flex-1 min-w-[12rem]">
+                  <label className="block text-xs text-text-muted mb-1">Repos</label>
+                  <select
+                    value={form.scope}
+                    onChange={(e) => setForm((f) => ({ ...f, scope: e.target.value }))}
+                    className={inputClass}
+                  >
+                    <option value="global">All repos</option>
+                    {repos.map((repo) => (
+                      <option key={repo.id} value={repo.repoUrl}>
+                        {repo.fullName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-text-muted">
+              {form.scope === "user"
+                ? "Only your own runs see it — background runs (schedules, webhooks, ticket sync) don't."
+                : "Every run in the workspace can use it. Saving organization secrets needs an admin."}
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover disabled:opacity-50"
               >
-                <option value="global">Global (all repos)</option>
-                {repos.map((repo) => (
-                  <option key={repo.id} value={repo.repoUrl}>
-                    {repo.fullName}
-                  </option>
-                ))}
-              </select>
+                {submitting ? "Saving..." : "Save"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="px-4 py-2 rounded-md border border-border text-text-muted text-sm hover:text-text hover:bg-bg-hover"
+              >
+                Cancel
+              </button>
             </div>
-          </div>
-          <div>
-            <label className="block text-sm text-text-muted mb-1">Value</label>
-            <input
-              required
-              type="password"
-              value={form.value}
-              onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
-              placeholder="sk-ant-..."
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            />
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"
-            >
-              {submitting ? "Saving..." : "Save"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="px-4 py-2 rounded-md bg-bg-hover text-text-muted text-sm"
-            >
-              Cancel
-            </button>
-          </div>
+          </SectionCard>
         </form>
       )}
 
       {hasUserScopedSecrets && (
-        <div className="mb-4 p-3 rounded-lg border border-border/50 bg-bg-card flex gap-2 text-xs text-text-muted">
+        <div className="mb-4 px-4 py-3 rounded-xl border border-border/70 bg-bg-card/40 flex gap-2 text-xs text-text-muted">
           <Info className="w-4 h-4 shrink-0 text-text-muted mt-0.5" />
           <div>
-            <strong className="text-text">User-only</strong> secrets are scoped to a single user and
+            <strong className="text-text">Just me</strong> secrets are scoped to a single user and
             are <strong>not visible to background runs</strong> (GitHub ticket sync, scheduled
             triggers, webhooks) since those have no user context. To make a credential available
-            everywhere, store it as <strong>Global</strong>.
+            everywhere, store it for the <strong>Organization</strong>.
           </div>
         </div>
       )}
 
-      {/* Scope filter */}
-      <div className="flex items-center gap-2 mb-4">
-        <Filter className="w-4 h-4 text-text-muted" />
-        <select
-          value={scopeFilter}
-          onChange={(e) => setScopeFilter(e.target.value)}
-          className="px-3 py-1.5 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-        >
-          <option value="all">All scopes</option>
-          <option value="global">Global only</option>
-          {repos.map((repo) => (
-            <option key={repo.id} value={repo.repoUrl}>
-              {repo.fullName}
-            </option>
-          ))}
-        </select>
-      </div>
+      {secrets.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <Segmented
+            size="md"
+            surface="card"
+            wrap
+            className="gap-1"
+            aria-label="Filter by scope"
+            value={scopeOptions.some((o) => o.value === scopeFilter) ? scopeFilter : "all"}
+            onChange={setScopeFilter}
+            options={scopeOptions}
+          />
+          {repoScopes.length > 3 && (
+            <select
+              aria-label="Filter by repo"
+              value={repoScopes.includes(scopeFilter) ? scopeFilter : ""}
+              onChange={(e) => setScopeFilter(e.target.value || "all")}
+              className="px-3 py-1.5 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+            >
+              <option value="">Any repo…</option>
+              {repoScopes.map((sc) => (
+                <option key={sc} value={sc}>
+                  {repoName(sc)}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-text-muted">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" />
-          Loading...
-        </div>
-      ) : secrets.length === 0 ? (
-        <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
-          <KeyRound className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>No secrets configured</p>
-          <p className="text-xs mt-1">Add API keys for Claude Code or Codex to get started.</p>
-        </div>
-      ) : (
         <div className="space-y-2">
-          {secrets.map((secret: any) => (
-            <div
-              key={secret.id}
-              className="flex items-center justify-between p-3 rounded-xl border border-border/50 bg-bg-card"
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium">{secret.name}</span>
-                <span className="inline-flex items-center gap-1 text-xs text-text-muted px-2 py-0.5 rounded-full bg-bg-hover">
-                  {secret.scope === "global" ? (
-                    <Globe className="w-3 h-3" />
-                  ) : secret.scope === "user" ? (
-                    <User className="w-3 h-3" />
-                  ) : (
-                    <FolderGit2 className="w-3 h-3" />
-                  )}
-                  {scopeLabel(secret.scope)}
-                </span>
-              </div>
-              <button
-                onClick={() => handleDelete(secret.name, secret.scope)}
-                className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                title="Delete secret"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-12 skeleton-shimmer rounded-lg" />
           ))}
+        </div>
+      ) : visible.length === 0 ? (
+        <EmptyState
+          icon={KeyRound}
+          title={secrets.length === 0 ? "No secrets configured" : "No secrets in this scope"}
+          description="Add API keys for Claude Code or Codex, and tokens for your git host."
+          action={
+            !showForm && (
+              <button
+                onClick={() => setShowForm(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover"
+              >
+                <Plus className="w-4 h-4" /> Add Secret
+              </button>
+            )
+          }
+        />
+      ) : (
+        <div className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60">
+          {visible.map((secret: any) => {
+            const owner = secret.scope === "user" ? "Just me" : "Organization";
+            const OwnerIcon = secret.scope === "user" ? User : Building2;
+            const isRepo = secret.scope !== "global" && secret.scope !== "user";
+            return (
+              <div
+                key={secret.id}
+                className="group flex items-center gap-3 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-text-muted shrink-0" />
+                <span className="text-sm font-medium font-mono text-text-heading truncate min-w-0 flex-1">
+                  {secret.name}
+                </span>
+                <div className="flex items-center gap-3 text-[11px] text-text-muted shrink-0">
+                  {isRepo && (
+                    <span className="inline-flex items-center gap-1">
+                      <FolderGit2 className="w-3 h-3" />
+                      {repoName(secret.scope)}
+                    </span>
+                  )}
+                  <span
+                    className={
+                      "inline-flex items-center gap-1 px-1.5 py-0.5 rounded " +
+                      (secret.scope === "user"
+                        ? "bg-primary/10 text-primary"
+                        : "bg-bg-hover text-text-muted")
+                    }
+                  >
+                    <OwnerIcon className="w-3 h-3" />
+                    {owner}
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleDelete(secret.name, secret.scope)}
+                  className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error opacity-60 group-hover:opacity-100 focus:opacity-100 transition-all"
+                  title="Delete secret"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

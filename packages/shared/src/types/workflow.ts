@@ -45,6 +45,17 @@ export interface Workflow {
   localSessionMode?: LocalAgentSessionMode | null;
   enabled: boolean;
   createdBy?: string | null;
+  /**
+   * Who the work belongs to: null = the organization; set = one person's own.
+   * Personal work runs with that person's secrets, model providers and
+   * connections, and only they can change it.
+   */
+  ownerUserId?: string | null;
+  /**
+   * The secrets (by name) the agent gets in its pod. Null = the workspace's
+   * legacy behavior (see `Workspace.restrictPodSecrets`).
+   */
+  podSecrets?: string[] | null;
   createdAt: Date;
   updatedAt: Date;
 }

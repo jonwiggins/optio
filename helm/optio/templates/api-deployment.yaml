@@ -137,8 +137,50 @@ spec:
               port: {{ .Values.api.port }}
             initialDelaySeconds: 15
             periodSeconds: 20
+        # The web UI shares the API's pod: one rollout, one pod to schedule,
+        # and the Next server reaches the API over localhost.
+        - name: web
+          image: "{{ .Values.web.image.repository }}:{{ .Values.web.image.tag }}"
+          imagePullPolicy: {{ .Values.web.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - containerPort: {{ .Values.web.port }}
+          volumeMounts:
+            - name: web-tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/.next/cache
+          env:
+            - name: INTERNAL_API_URL
+              value: "http://127.0.0.1:{{ .Values.api.port }}"
+            - name: OPTIO_AUTH_DISABLED
+              value: {{ .Values.auth.disabled | quote }}
+            {{- if .Values.publicUrl }}
+            - name: PUBLIC_URL
+              value: {{ .Values.publicUrl | quote }}
+            {{- end }}
+            {{- if .Values.web.publicApiUrl }}
+            - name: PUBLIC_API_URL
+              value: {{ .Values.web.publicApiUrl | quote }}
+            {{- else if and (eq .Values.api.service.type "NodePort") .Values.api.service.nodePort }}
+            - name: PUBLIC_API_URL
+              value: "http://localhost:{{ .Values.api.service.nodePort }}"
+            {{- end }}
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: web-tmp
+          emptyDir: {}
+        - name: next-cache
           emptyDir: {}
         - name: installed-skills-cache
           {{- if .Values.installedSkillsCache.enabled }}

@@ -112,6 +112,8 @@ struct MenuRow<Items: View>: View {
     /// The value is a prompt ("Pick a directory…"), not an answer.
     var placeholder = false
     var mono = false
+    /// A mark beside the value (the trigger's brand, a ticket source's logo).
+    var glyph: Glyph? = nil
     @ViewBuilder let items: Items
 
     var body: some View {
@@ -121,6 +123,9 @@ struct MenuRow<Items: View>: View {
             HStack(spacing: Spacing.s) {
                 Text(label).foregroundStyle(.primary)
                 Spacer(minLength: Spacing.m)
+                if let glyph, !placeholder {
+                    GlyphView(glyph: glyph, size: 15).foregroundStyle(.secondary)
+                }
                 Text(value)
                     .font(mono && !placeholder ? .monoSubheadline : .body)
                     .foregroundStyle(placeholder ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
@@ -144,11 +149,15 @@ struct MenuChoice: View {
     let title: String
     var subtitle: String? = nil
     let selected: Bool
+    /// Shown when not selected (the selected item carries the checkmark).
+    var glyph: Glyph? = nil
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            if selected { Label(title, systemImage: "checkmark") } else { Text(title) }
+            if selected { Label(title, systemImage: "checkmark") }
+            else if let glyph { Label { Text(title) } icon: { glyph.image() } }
+            else { Text(title) }
             if let subtitle { Text(subtitle) }
         }
     }

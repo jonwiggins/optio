@@ -285,7 +285,7 @@ describe("local runs e2e", () => {
     expect(run.errorMessage).toBe("Cancelled by user");
   });
 
-  it("runs a Repo Task in the local checkout and promotes it to pr_opened from the PR link", async () => {
+  it("runs a Repo Task in the local checkout and promotes it to pr_opened from the PR it created", async () => {
     const { hostId, daemon } = await onlineHost("e2e-local-task", cleanups);
     const { status, body } = await api<TaskBody>("/api/tasks", {
       method: "POST",
@@ -320,10 +320,37 @@ describe("local runs e2e", () => {
     expect(terminal.spawnedBy).toBe("task");
     expect(terminal.taskId).toBe(taskId);
 
+    // A PR link the agent only printed is not adopted; the PR its
+    // `gh pr create` call returned (in the transcript) is.
     daemon.send({
       type: "links",
       terminalId,
-      links: [{ url: `${REPO_URL}/pull/12`, kind: "pr", provider: "github", label: "#12" }],
+      links: [{ url: `${REPO_URL}/pull/99`, kind: "pr", provider: "github", label: "#99" }],
+    });
+    const entry = (seq: number, kind: string, text: string, extra: Json = {}) => ({
+      seq,
+      role: kind === "tool_use" ? "assistant" : kind === "tool_result" ? "tool" : "assistant",
+      kind,
+      text,
+      detail: null,
+      toolName: null,
+      toolUseId: null,
+      isError: false,
+      at: null,
+      ...extra,
+    });
+    daemon.send({
+      type: "transcript",
+      terminalId,
+      entries: [
+        entry(1, "text", `Like ${REPO_URL}/pull/99, I'll open a PR.`),
+        entry(2, "tool_use", "$ gh pr create --fill", {
+          detail: JSON.stringify({ command: "gh pr create --fill" }),
+          toolName: "Bash",
+          toolUseId: "toolu_1",
+        }),
+        entry(3, "tool_result", `${REPO_URL}/pull/12\n`, { toolUseId: "toolu_1" }),
+      ],
     });
     const opened = await waitFor(async () => {
       const t = await getTask(taskId);

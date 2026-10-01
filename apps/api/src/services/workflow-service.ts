@@ -55,6 +55,10 @@ export async function createWorkflow(input: {
   paramsSchema?: Record<string, unknown>;
   workspaceId?: string;
   createdBy?: string;
+  /** Null = the organization's; see services/work-ownership.ts. */
+  ownerUserId?: string | null;
+  /** Secrets (by name) the pod gets; null = the workspace's legacy behavior. */
+  podSecrets?: string[] | null;
   // Run location — validate with local-run-service.validateRunLocation first.
   runTarget?: RunTarget;
   localHostId?: string | null;
@@ -87,6 +91,8 @@ export async function createWorkflow(input: {
       paramsSchema: input.paramsSchema,
       workspaceId: input.workspaceId,
       createdBy: input.createdBy,
+      ownerUserId: input.ownerUserId ?? null,
+      podSecrets: input.podSecrets ?? null,
     })
     .returning();
   return workflow;
@@ -116,6 +122,8 @@ export async function updateWorkflow(
     localHostId?: string | null;
     localDir?: string | null;
     localSessionMode?: LocalAgentSessionMode | null;
+    ownerUserId?: string | null;
+    podSecrets?: string[] | null;
   },
 ) {
   const { localSessionMode, runTitle, ...rest } = input;
@@ -171,6 +179,11 @@ export async function cloneWorkflow(
     paramsSchema: (source.paramsSchema as Record<string, unknown>) ?? undefined,
     workspaceId: opts?.workspaceId ?? source.workspaceId ?? undefined,
     createdBy: opts?.createdBy,
+    // A copy of someone's personal work is the organization's: their
+    // provider / secrets stay theirs (the copy's runs say so until changed).
+    ownerUserId:
+      source.ownerUserId && source.ownerUserId === opts?.createdBy ? source.ownerUserId : null,
+    podSecrets: source.podSecrets,
   });
 
   // Clone triggers (except webhook — paths must be unique)

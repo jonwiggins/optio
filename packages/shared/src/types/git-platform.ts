@@ -18,6 +18,10 @@ export interface PullRequest {
   draft: boolean;
   headSha: string;
   baseBranch: string;
+  /** The PR's head / source branch, when the platform reports it. */
+  headBranch?: string;
+  /** `owner/repo` the head branch lives in (differs from the base repo for a fork), when known. */
+  headRepo?: string;
   url: string;
   author: string;
   assignees: string[];
@@ -87,6 +91,11 @@ export interface GitPlatform {
     ri: RepoIdentifier,
     opts?: { branch?: string; perPage?: number },
   ): Promise<PullRequest[]>;
+  /**
+   * Open PRs whose head branch starts with `prefix` (e.g. `optio/task-<id>`),
+   * newest pages first, bounded. Platforms that can't filter return [].
+   */
+  findPullRequestsByHeadPrefix(ri: RepoIdentifier, prefix: string): Promise<PullRequest[]>;
   getCIChecks(ri: RepoIdentifier, commitSha: string): Promise<CICheck[]>;
   getReviews(ri: RepoIdentifier, prNumber: number): Promise<Review[]>;
   getInlineComments(ri: RepoIdentifier, prNumber: number): Promise<InlineComment[]>;

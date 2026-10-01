@@ -51,6 +51,10 @@ data class EditTarget(
             EditableKind.LOCAL_BLUEPRINT -> LocalAutomationRoute(id)
         }
 
+    /** The person the saved work belongs to; null for Organization work. */
+    val ownerUserId: String?
+        get() = row.text("ownerUserId").ifEmpty { null }
+
     /** The saved name (the Name field's placeholder). */
     val savedName: String
         get() = row.text("name").ifEmpty { row.text("title") }
@@ -104,6 +108,13 @@ fun runLocationFromRow(row: JsonObject): RunLocation {
     )
 }
 
+/** A row's owner: personal when `ownerUserId` is set. */
+fun ownerFromRow(row: JsonObject): WorkOwner = if (row.text("ownerUserId").isNotEmpty()) WorkOwner.ME else WorkOwner.WORKSPACE
+
+/** A row's picked pod secrets; null (legacy) when the row has none recorded. */
+fun podSecretsFromRow(row: JsonObject): List<String>? =
+    (row["podSecrets"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+
 /** The row's saved agent parameters, folding a legacy single `model` in. */
 private fun optionsFromRow(runtime: String, row: JsonObject): Map<String, OptionValue> {
     val out = LinkedHashMap<String, OptionValue>()
@@ -129,6 +140,8 @@ fun draftFromRow(kind: EditableKind, row: JsonObject, trigger: JsonObject?): Wor
         event = w.event,
         name = row.text("name").ifEmpty { row.text("title") },
         description = row.text("description"),
+        owner = ownerFromRow(row),
+        podSecrets = podSecretsFromRow(row),
     )
     return when (kind) {
         EditableKind.REPO_BLUEPRINT -> {

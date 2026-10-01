@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import { NumberInput } from "@/components/number-input";
 import { toast } from "sonner";
 import {
   Loader2,
-  Bell,
   RefreshCw,
   Shield,
   CheckCircle2,
@@ -16,14 +15,12 @@ import {
   Sparkles,
   Plus,
   X,
-  Bot,
   AlertTriangle,
-  ChevronDown,
-  ChevronRight,
   Trash2,
   Ticket,
-  Github,
   KeyRound,
+  Settings as SettingsIcon,
+  Store,
 } from "lucide-react";
 import {
   OPTIO_TOOL_CATEGORIES,
@@ -33,8 +30,33 @@ import {
 } from "@optio/shared";
 import { NotificationPreferences } from "@/components/notifications/notification-preferences";
 import { ApiKeysManager } from "@/components/settings/api-keys-manager";
+import { ModelProvidersManager } from "@/components/settings/model-providers-manager";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
+import { AgentIcon, BrandIcon, brandFor } from "@/components/brand-icon";
 import { AgentOptionsPicker } from "@/components/agent-options-picker";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { SectionCard } from "@/components/ui/section-card";
+import { Segmented } from "@/components/ui/segmented";
+import { Disclosure } from "@/components/ui/disclosure";
+import {
+  BTN_HEADER,
+  BTN_PRIMARY,
+  BTN_ROW,
+  BTN_ROW_DANGER,
+  BTN_SECONDARY,
+  BTN_TEXT,
+  CardFooter,
+  Field,
+  INPUT,
+  InsetForm,
+  MONO_AREA,
+  SkeletonCard,
+  Tag,
+  TemplateVars,
+} from "@/components/settings/settings-ui";
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function PromptTemplateEditor() {
   const [template, setTemplate] = useState("");
@@ -70,83 +92,61 @@ function PromptTemplateEditor() {
     setTemplate(res.template);
   };
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "Agent prompt";
+  const hint = "Default for every repo unless a repo overrides it";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={2} />;
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-text-muted">
-          Default prompt used for all repos unless overridden in repo settings.
-        </p>
-        <button onClick={handleReset} className="text-xs text-primary hover:underline">
-          Reset to default
-        </button>
-      </div>
-      <div className="p-3 rounded-md bg-bg border border-border">
-        <p className="text-xs text-text-muted mb-2">Available template variables:</p>
-        <ul className="text-xs space-y-1.5">
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{TASK_FILE}}"}</code>
-            <span className="text-text-muted">
-              Path to the task markdown file written into the worktree
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{BRANCH_NAME}}"}</code>
-            <span className="text-text-muted">Git branch name the agent is working on</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{TASK_ID}}"}</code>
-            <span className="text-text-muted">Unique task identifier</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{TASK_TITLE}}"}</code>
-            <span className="text-text-muted">Short title of the task</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{REPO_NAME}}"}</code>
-            <span className="text-text-muted">Repository name (e.g. owner/repo)</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{AUTO_MERGE}}"}</code>
-            <span className="text-text-muted">
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={autoMerge ? "auto-merge on" : "auto-merge off"}
+      bodyClassName="p-4 space-y-4"
+    >
+      <TemplateVars
+        vars={[
+          ["TASK_FILE", "Path to the task markdown file written into the worktree"],
+          ["BRANCH_NAME", "Git branch name the agent is working on"],
+          ["TASK_ID", "Unique task identifier"],
+          ["TASK_TITLE", "Short title of the task"],
+          ["REPO_NAME", "Repository name (e.g. owner/repo)"],
+          [
+            "AUTO_MERGE",
+            <>
               Whether auto-merge is enabled — use with{" "}
               <code className="text-primary">{"{{#if AUTO_MERGE}}...{{/if}}"}</code>
-            </span>
-          </li>
-        </ul>
-      </div>
+            </>,
+          ],
+        ]}
+      />
       <textarea
         value={template}
         onChange={(e) => setTemplate(e.target.value)}
         rows={12}
-        className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y leading-relaxed"
+        className={MONO_AREA}
       />
-      <div className="flex items-center justify-between">
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
-          <input
-            type="checkbox"
-            checked={autoMerge}
-            onChange={(e) => setAutoMerge(e.target.checked)}
-            className="w-4 h-4 rounded"
-          />
-          Auto-merge PRs
-        </label>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-4 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
-        >
+      <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
+        <input
+          type="checkbox"
+          checked={autoMerge}
+          onChange={(e) => setAutoMerge(e.target.checked)}
+          className="w-4 h-4 rounded"
+        />
+        Auto-merge PRs
+      </label>
+      <CardFooter
+        note={
+          <button onClick={handleReset} className="text-xs text-primary hover:underline">
+            Reset to default
+          </button>
+        }
+      >
+        <button onClick={handleSave} disabled={saving} className={BTN_PRIMARY}>
+          {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           {saving ? "Saving..." : "Save"}
         </button>
-      </div>
-    </div>
+      </CardFooter>
+    </SectionCard>
   );
 }
 
@@ -185,32 +185,30 @@ function DefaultReviewEditor() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "Code review";
+  const hint = "The default reviewer for every repo";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={3} />;
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-      <p className="text-xs text-text-muted">
-        Default review settings applied to all repos unless overridden in repo settings.
-      </p>
-
-      <div>
-        <label className="block text-xs text-text-muted mb-1">Default Trigger</label>
-        <select
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={[reviewAgentType, reviewModel, reviewEffort].filter(Boolean).join(" · ")}
+      summaryIcon={<AgentIcon runtime={reviewAgentType} className="w-3 h-3" />}
+      bodyClassName="p-4 space-y-4"
+    >
+      <Field label="Starts">
+        <Segmented
           value={reviewTrigger}
-          onChange={(e) => setReviewTrigger(e.target.value)}
-          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-        >
-          <option value="on_ci_pass">After CI passes</option>
-          <option value="on_pr">Immediately on PR open</option>
-          <option value="manual">Manual only</option>
-        </select>
-      </div>
+          onChange={setReviewTrigger}
+          aria-label="Default trigger"
+          options={[
+            { value: "on_ci_pass", label: "After CI passes" },
+            { value: "on_pr", label: "When the PR opens" },
+            { value: "manual", label: "Manual only" },
+          ]}
+        />
+      </Field>
 
       <ReviewAgentPicker
         agentType={reviewAgentType}
@@ -220,99 +218,84 @@ function DefaultReviewEditor() {
         allowInherit={false}
       />
 
-      <div className="grid grid-cols-3 gap-4">
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Context Window</label>
-          <select
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+        <Field label="Context window">
+          <Segmented
             value={reviewContextWindow}
-            onChange={(e) => setReviewContextWindow(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-          >
-            <option value="200k">200K tokens</option>
-            <option value="1m">1M tokens</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Effort Level</label>
-          <select
+            onChange={setReviewContextWindow}
+            aria-label="Context window"
+            options={[
+              { value: "200k", label: "200K" },
+              { value: "1m", label: "1M" },
+            ]}
+          />
+        </Field>
+        <Field label="Effort">
+          <Segmented
             value={reviewEffort}
-            onChange={(e) => setReviewEffort(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-        <div className="flex items-end pb-1">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={reviewThinking}
-              onChange={(e) => setReviewThinking(e.target.checked)}
-              className="w-4 h-4 rounded"
-            />
-            <span className="text-sm">Thinking</span>
-          </label>
-        </div>
+            onChange={setReviewEffort}
+            aria-label="Effort level"
+            options={[
+              { value: "low", label: "Low" },
+              { value: "medium", label: "Medium" },
+              { value: "high", label: "High" },
+            ]}
+          />
+        </Field>
+        <label className="flex items-center gap-2 cursor-pointer pb-2">
+          <input
+            type="checkbox"
+            checked={reviewThinking}
+            onChange={(e) => setReviewThinking(e.target.checked)}
+            className="w-4 h-4 rounded"
+          />
+          <span className="text-sm">Thinking</span>
+        </label>
       </div>
 
-      <div>
-        <label className="block text-xs text-text-muted mb-1">Default Test Command</label>
-        <p className="text-[10px] text-text-muted/60 mb-1.5">
-          Command to run tests locally. Leave empty if GitHub Actions handles testing — the reviewer
-          will check CI status instead.
-        </p>
+      <Field
+        label="Test command"
+        help="Leave empty if GitHub Actions runs the tests — the reviewer checks CI status instead."
+      >
         <input
           value={reviewTestCommand}
           onChange={(e) => setReviewTestCommand(e.target.value)}
           placeholder="npm test, cargo test, pytest"
-          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+          className={INPUT}
+        />
+      </Field>
+
+      <div className="pt-4 border-t border-border space-y-3">
+        <div className="text-xs font-medium text-text-muted">Review prompt</div>
+        <TemplateVars
+          vars={[
+            ["PR_NUMBER", "Pull request number"],
+            ["TASK_FILE", "Path to the review context file"],
+            ["REPO_NAME", "Repository name (e.g. owner/repo)"],
+            ["TASK_TITLE", "Original task title"],
+            ["TEST_COMMAND", "Test command from repo settings"],
+          ]}
+        />
+        <textarea
+          value={reviewPrompt}
+          onChange={(e) => setReviewPrompt(e.target.value)}
+          rows={10}
+          className={MONO_AREA}
         />
       </div>
 
-      <div className="p-3 rounded-md bg-bg border border-border">
-        <p className="text-xs text-text-muted mb-2">Available template variables:</p>
-        <ul className="text-xs space-y-1.5">
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{PR_NUMBER}}"}</code>
-            <span className="text-text-muted">Pull request number</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{TASK_FILE}}"}</code>
-            <span className="text-text-muted">Path to the review context file</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{REPO_NAME}}"}</code>
-            <span className="text-text-muted">Repository name (e.g. owner/repo)</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{TASK_TITLE}}"}</code>
-            <span className="text-text-muted">Original task title</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <code className="text-primary shrink-0">{"{{TEST_COMMAND}}"}</code>
-            <span className="text-text-muted">Test command from repo settings</span>
-          </li>
-        </ul>
-      </div>
-
-      <textarea
-        value={reviewPrompt}
-        onChange={(e) => setReviewPrompt(e.target.value)}
-        rows={10}
-        className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y leading-relaxed"
-      />
-
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() =>
-            import("@optio/shared").then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE))
-          }
-          className="text-xs text-primary hover:underline"
-        >
-          Reset to default
-        </button>
+      <CardFooter
+        note={
+          <button
+            onClick={() =>
+              import("@optio/shared").then((m) => setReviewPrompt(m.DEFAULT_REVIEW_PROMPT_TEMPLATE))
+            }
+            className="text-xs text-primary hover:underline"
+          >
+            Reset to default
+          </button>
+        }
+      >
         <button
           onClick={async () => {
             setSaving(true);
@@ -330,14 +313,43 @@ function DefaultReviewEditor() {
             }
           }}
           disabled={saving}
-          className="px-4 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
+          className={BTN_PRIMARY}
         >
+          {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           {saving ? "Saving..." : "Save"}
         </button>
-      </div>
-    </div>
+      </CardFooter>
+    </SectionCard>
   );
 }
+
+/** One row of an installable list (MCP server, skill). */
+function ListRow({
+  title,
+  tags,
+  detail,
+  actions,
+}: {
+  title: ReactNode;
+  tags?: ReactNode;
+  detail?: ReactNode;
+  actions: ReactNode;
+}) {
+  return (
+    <li className="flex items-center gap-3 px-3 py-2.5">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium">{title}</span>
+          {tags}
+        </div>
+        {detail && <p className="text-xs text-text-muted mt-0.5 truncate">{detail}</p>}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">{actions}</div>
+    </li>
+  );
+}
+
+const LIST = "divide-y divide-border/60 rounded-lg border border-border bg-bg";
 
 function GlobalMcpServers() {
   const [servers, setServers] = useState<any[]>([]);
@@ -357,147 +369,144 @@ function GlobalMcpServers() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "MCP servers";
+  const hint = "Available to every repo";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={1} />;
+
+  const reset = () => {
+    setShowAdd(false);
+    setName("");
+    setCommand("");
+    setArgs("");
+    setEnv("");
+    setInstallCmd("");
+  };
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-text-muted">
-          Global MCP servers are available to all repos. Use{" "}
-          <code className="text-primary">{"${{SECRET_NAME}}"}</code> to reference Optio secrets.
-        </p>
-        <button
-          onClick={() => setShowAdd(!showAdd)}
-          className="flex items-center gap-1 text-xs text-primary hover:underline"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Add
-        </button>
-      </div>
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={servers.length ? plural(servers.length, "server") : undefined}
+      actions={
+        !showAdd && (
+          <button onClick={() => setShowAdd(true)} className={BTN_HEADER}>
+            <Plus className="w-3.5 h-3.5" />
+            Add
+          </button>
+        )
+      }
+      bodyClassName="p-4 space-y-3"
+    >
+      <p className="text-xs text-text-muted">
+        Use <code className="text-primary">{"${{SECRET_NAME}}"}</code> to reference Optio secrets.
+      </p>
 
       {servers.length > 0 && (
-        <div className="space-y-2">
+        <ul className={LIST}>
           {servers.map((server: any) => (
-            <div
+            <ListRow
               key={server.id}
-              className="flex items-center gap-3 p-3 rounded-lg border border-border bg-bg"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{server.name}</span>
-                  {!server.enabled && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning">
-                      disabled
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-text-muted mt-0.5 font-mono truncate">
+              title={server.name}
+              tags={!server.enabled && <Tag tone="warning">disabled</Tag>}
+              detail={
+                <span className="font-mono">
                   {server.command} {(server.args ?? []).join(" ")}
-                </p>
-              </div>
-              <button
-                onClick={async () => {
-                  await api.updateMcpServer(server.id, { enabled: !server.enabled });
-                  setServers((prev) =>
-                    prev.map((s) => (s.id === server.id ? { ...s, enabled: !s.enabled } : s)),
-                  );
-                }}
-                className="text-xs text-text-muted hover:text-text"
-              >
-                {server.enabled ? "Disable" : "Enable"}
-              </button>
-              <button
-                onClick={async () => {
-                  await api.deleteMcpServer(server.id);
-                  setServers((prev) => prev.filter((s) => s.id !== server.id));
-                  toast.success("MCP server removed");
-                }}
-                className="text-text-muted hover:text-error"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                </span>
+              }
+              actions={
+                <>
+                  <button
+                    onClick={async () => {
+                      await api.updateMcpServer(server.id, { enabled: !server.enabled });
+                      setServers((prev) =>
+                        prev.map((s) => (s.id === server.id ? { ...s, enabled: !s.enabled } : s)),
+                      );
+                    }}
+                    className={BTN_ROW}
+                  >
+                    {server.enabled ? "Disable" : "Enable"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await api.deleteMcpServer(server.id);
+                      setServers((prev) => prev.filter((s) => s.id !== server.id));
+                      toast.success("MCP server removed");
+                    }}
+                    className={BTN_ROW_DANGER}
+                    aria-label={`Remove ${server.name}`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              }
+            />
           ))}
-        </div>
+        </ul>
       )}
 
       {servers.length === 0 && !showAdd && (
-        <p className="text-xs text-text-muted/60 text-center py-2">
-          No global MCP servers configured.
-        </p>
+        <EmptyState
+          size="panel"
+          icon={Server}
+          title="No MCP servers"
+          description="Add one to give every agent the same tools."
+          action={
+            <button onClick={() => setShowAdd(true)} className={BTN_PRIMARY}>
+              <Plus className="w-3.5 h-3.5" />
+              Add server
+            </button>
+          }
+        />
       )}
 
       {showAdd && (
-        <div className="space-y-3 p-3 rounded-lg border border-primary/30 bg-primary/5">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Name</label>
+        <InsetForm>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Name">
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="postgres"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={INPUT}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Command</label>
+            </Field>
+            <Field label="Command">
               <input
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
                 placeholder="npx"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={INPUT}
               />
-            </div>
+            </Field>
           </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Args (one per line)</label>
+          <Field label="Args (one per line)">
             <textarea
               value={args}
               onChange={(e) => setArgs(e.target.value)}
               rows={2}
               placeholder={"-y\n@modelcontextprotocol/server-postgres"}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y"
+              className={MONO_AREA}
             />
-          </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">
-              Env vars (KEY=VALUE, one per line)
-            </label>
+          </Field>
+          <Field label="Env vars (KEY=VALUE, one per line)">
             <textarea
               value={env}
               onChange={(e) => setEnv(e.target.value)}
               rows={2}
               placeholder={"POSTGRES_URL=${{POSTGRES_URL}}"}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y"
+              className={MONO_AREA}
             />
-          </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Install command (optional)</label>
+          </Field>
+          <Field label="Install command (optional)">
             <input
               value={installCmd}
               onChange={(e) => setInstallCmd(e.target.value)}
               placeholder="npm install -g @modelcontextprotocol/server-postgres"
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              className={INPUT}
             />
-          </div>
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => {
-                setShowAdd(false);
-                setName("");
-                setCommand("");
-                setArgs("");
-                setEnv("");
-                setInstallCmd("");
-              }}
-              className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover"
-            >
+          </Field>
+          <div className="flex justify-end items-center gap-3">
+            <button onClick={reset} className={BTN_TEXT}>
               Cancel
             </button>
             <button
@@ -523,22 +532,17 @@ function GlobalMcpServers() {
                   installCommand: installCmd || undefined,
                 });
                 setServers((prev) => [...prev, res.server]);
-                setShowAdd(false);
-                setName("");
-                setCommand("");
-                setArgs("");
-                setEnv("");
-                setInstallCmd("");
+                reset();
                 toast.success("MCP server added");
               }}
-              className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover"
+              className={BTN_PRIMARY}
             >
               Add Server
             </button>
           </div>
-        </div>
+        </InsetForm>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -552,6 +556,39 @@ const SKILL_AGENT_TYPES = [
 ];
 
 type SkillExtraFile = { relativePath: string; content: string };
+
+/** Multi-select agent chips (any number on; none = all agents). */
+function AgentChips({
+  selected,
+  onToggle,
+}: {
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {SKILL_AGENT_TYPES.map((a) => {
+        const active = selected.includes(a.value);
+        return (
+          <button
+            key={a.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onToggle(a.value)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition-colors ${
+              active
+                ? "bg-primary/10 border-primary text-primary"
+                : "bg-bg border-border text-text-muted hover:text-text hover:border-primary/40"
+            }`}
+          >
+            <AgentIcon runtime={a.value} className="w-3 h-3" />
+            {a.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function GlobalSkills() {
   const [skills, setSkills] = useState<any[]>([]);
@@ -588,121 +625,141 @@ function GlobalSkills() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "Custom skills";
+  const hint = "Slash commands and skills for agents in every repo";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={1} />;
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-text-muted">
-          Global skills are available to agents in all repos. Written to{" "}
-          <code className="text-primary">.claude/commands/</code> or{" "}
-          <code className="text-primary">.claude/skills/&lt;name&gt;/</code> before the agent
-          starts. Optionally scope by agent type.
-        </p>
-        <button
-          onClick={() => setShowAdd(!showAdd)}
-          className="flex items-center gap-1 text-xs text-primary hover:underline"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Add
-        </button>
-      </div>
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={skills.length ? plural(skills.length, "skill") : undefined}
+      actions={
+        !showAdd && (
+          <button onClick={() => setShowAdd(true)} className={BTN_HEADER}>
+            <Plus className="w-3.5 h-3.5" />
+            Add
+          </button>
+        )
+      }
+      bodyClassName="p-4 space-y-3"
+    >
+      <p className="text-xs text-text-muted">
+        Written to <code className="text-primary">.claude/commands/</code> or{" "}
+        <code className="text-primary">.claude/skills/&lt;name&gt;/</code> before the agent starts.
+        Optionally scope by agent type.
+      </p>
 
       {skills.length > 0 && (
-        <div className="space-y-2">
+        <ul className={LIST}>
           {skills.map((skill: any) => (
-            <div
+            <ListRow
               key={skill.id}
-              className="flex items-center gap-3 p-3 rounded-lg border border-border bg-bg"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium">/{skill.name}</span>
+              title={`/${skill.name}`}
+              tags={
+                <>
                   {skill.layout === "skill-dir" && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                    <Tag tone="primary">
                       skill-dir
                       {Array.isArray(skill.files) && skill.files.length > 0
                         ? ` +${skill.files.length}`
                         : ""}
-                    </span>
+                    </Tag>
                   )}
                   {Array.isArray(skill.agentTypes) && skill.agentTypes.length > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hover text-text-muted">
-                      {skill.agentTypes.join(", ")}
-                    </span>
+                    <Tag>{skill.agentTypes.join(", ")}</Tag>
                   )}
-                  {!skill.enabled && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning">
-                      disabled
-                    </span>
-                  )}
-                </div>
-                {skill.description && (
-                  <p className="text-xs text-text-muted mt-0.5 truncate">{skill.description}</p>
-                )}
-              </div>
-              <button
-                onClick={async () => {
-                  await api.updateSkill(skill.id, { enabled: !skill.enabled });
-                  setSkills((prev) =>
-                    prev.map((s) => (s.id === skill.id ? { ...s, enabled: !s.enabled } : s)),
-                  );
-                }}
-                className="text-xs text-text-muted hover:text-text"
-              >
-                {skill.enabled ? "Disable" : "Enable"}
-              </button>
-              <button
-                onClick={async () => {
-                  await api.deleteSkill(skill.id);
-                  setSkills((prev) => prev.filter((s) => s.id !== skill.id));
-                  toast.success("Skill removed");
-                }}
-                className="text-text-muted hover:text-error"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                  {!skill.enabled && <Tag tone="warning">disabled</Tag>}
+                </>
+              }
+              detail={skill.description}
+              actions={
+                <>
+                  <button
+                    onClick={async () => {
+                      await api.updateSkill(skill.id, { enabled: !skill.enabled });
+                      setSkills((prev) =>
+                        prev.map((s) => (s.id === skill.id ? { ...s, enabled: !s.enabled } : s)),
+                      );
+                    }}
+                    className={BTN_ROW}
+                  >
+                    {skill.enabled ? "Disable" : "Enable"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await api.deleteSkill(skill.id);
+                      setSkills((prev) => prev.filter((s) => s.id !== skill.id));
+                      toast.success("Skill removed");
+                    }}
+                    className={BTN_ROW_DANGER}
+                    aria-label={`Remove ${skill.name}`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              }
+            />
           ))}
-        </div>
+        </ul>
       )}
 
       {skills.length === 0 && !showAdd && (
-        <p className="text-xs text-text-muted/60 text-center py-2">No global skills configured.</p>
+        <EmptyState
+          size="panel"
+          icon={Sparkles}
+          title="No custom skills"
+          description="Write a command or skill once and every agent gets it."
+          action={
+            <button onClick={() => setShowAdd(true)} className={BTN_PRIMARY}>
+              <Plus className="w-3.5 h-3.5" />
+              Add skill
+            </button>
+          }
+        />
       )}
 
       {showAdd && (
-        <div className="space-y-3 p-3 rounded-lg border border-primary/30 bg-primary/5">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Name</label>
+        <InsetForm>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Name">
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="run-tests"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={INPUT}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Description</label>
+            </Field>
+            <Field label="Description">
               <input
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Run the full test suite"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={INPUT}
               />
-            </div>
+            </Field>
           </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">
-              {layout === "skill-dir" ? "SKILL.md body" : "Prompt (markdown)"}
-            </label>
+          <Field
+            label="Layout"
+            help={
+              layout === "skill-dir" ? (
+                <code>.claude/skills/&lt;name&gt;/...</code>
+              ) : (
+                <code>.claude/commands/&lt;name&gt;.md</code>
+              )
+            }
+          >
+            <Segmented
+              value={layout}
+              onChange={setLayout}
+              aria-label="Layout"
+              options={[
+                { value: "commands", label: "Command" },
+                { value: "skill-dir", label: "Skill directory" },
+              ]}
+            />
+          </Field>
+          <Field label={layout === "skill-dir" ? "SKILL.md body" : "Prompt (markdown)"}>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -712,58 +769,27 @@ function GlobalSkills() {
                   ? "Body of SKILL.md. YAML frontmatter is fine if Claude expects it."
                   : "Run the full test suite and analyze any failures..."
               }
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y"
+              className={MONO_AREA}
             />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Layout</label>
-              <select
-                value={layout}
-                onChange={(e) => setLayout(e.target.value as "commands" | "skill-dir")}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-              >
-                <option value="commands">commands (.claude/commands/&lt;name&gt;.md)</option>
-                <option value="skill-dir">skill-dir (.claude/skills/&lt;name&gt;/...)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Agent types</label>
-              <div className="flex flex-wrap gap-1.5">
-                {SKILL_AGENT_TYPES.map((a) => {
-                  const active = agentTypes.includes(a.value);
-                  return (
-                    <button
-                      key={a.value}
-                      type="button"
-                      onClick={() => toggleAgent(a.value)}
-                      className={`px-2 py-1 rounded-md text-[11px] border ${
-                        active
-                          ? "bg-primary/10 border-primary text-primary"
-                          : "bg-bg border-border text-text-muted hover:border-primary/40"
-                      }`}
-                    >
-                      {a.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[10px] text-text-muted/70 mt-1">
-                {agentTypes.length === 0
-                  ? "No selection — applies to all agents."
-                  : `Applies only to: ${agentTypes.join(", ")}`}
-              </p>
-            </div>
-          </div>
+          </Field>
+          <Field
+            label="Agent types"
+            help={
+              agentTypes.length === 0
+                ? "No selection — applies to all agents."
+                : `Applies only to: ${agentTypes.join(", ")}`
+            }
+          >
+            <AgentChips selected={agentTypes} onToggle={toggleAgent} />
+          </Field>
 
           {layout === "skill-dir" && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-xs text-text-muted">
+                <span className="text-xs font-medium text-text-muted">
                   Additional files (under{" "}
-                  <code className="text-primary">.claude/skills/{name || "&lt;name&gt;"}/</code>)
-                </label>
+                  <code className="text-primary">.claude/skills/{name || "<name>"}/</code>)
+                </span>
                 <button
                   type="button"
                   onClick={() => setFiles((prev) => [...prev, { relativePath: "", content: "" }])}
@@ -774,7 +800,7 @@ function GlobalSkills() {
                 </button>
               </div>
               {files.map((f, i) => (
-                <div key={i} className="space-y-1.5 p-2 rounded-md border border-border/60 bg-bg">
+                <div key={i} className="space-y-1.5 p-2 rounded-md border border-border bg-bg">
                   <div className="flex items-center gap-2">
                     <input
                       value={f.relativePath}
@@ -791,7 +817,8 @@ function GlobalSkills() {
                     <button
                       type="button"
                       onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
-                      className="text-text-muted hover:text-error"
+                      className={BTN_ROW_DANGER}
+                      aria-label="Remove file"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -810,7 +837,7 @@ function GlobalSkills() {
                 </div>
               ))}
               {files.length === 0 && (
-                <p className="text-[11px] text-text-muted/60">
+                <p className="text-[11px] text-text-muted/70">
                   None. SKILL.md is enough for most skills — add files only when you need scripts or
                   supporting docs.
                 </p>
@@ -818,11 +845,8 @@ function GlobalSkills() {
             </div>
           )}
 
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={resetForm}
-              className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover"
-            >
+          <div className="flex justify-end items-center gap-3">
+            <button onClick={resetForm} className={BTN_TEXT}>
               Cancel
             </button>
             <button
@@ -852,14 +876,14 @@ function GlobalSkills() {
                 resetForm();
                 toast.success("Skill added");
               }}
-              className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover"
+              className={BTN_PRIMARY}
             >
               Add Skill
             </button>
           </div>
-        </div>
+        </InsetForm>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -910,131 +934,134 @@ function MarketplaceSkills() {
       .slice(0, 64);
   };
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "Marketplace skills";
+  const hint = "Installed from a git URL · Claude Code only";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={1} />;
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-text-muted">
-          Install a skill from any public git URL (e.g. an Anthropic marketplace skill repo). Files
-          are fetched into a shared cache and materialized into{" "}
-          <code className="text-primary">.claude/skills/&lt;name&gt;/</code> at task spawn. Claude
-          Code only.
-        </p>
-        <button
-          onClick={() => setShowAdd(!showAdd)}
-          className="flex items-center gap-1 text-xs text-primary hover:underline"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Install
-        </button>
-      </div>
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={skills.length ? plural(skills.length, "installed", "installed") : undefined}
+      actions={
+        !showAdd && (
+          <button onClick={() => setShowAdd(true)} className={BTN_HEADER}>
+            <Plus className="w-3.5 h-3.5" />
+            Install
+          </button>
+        )
+      }
+      bodyClassName="p-4 space-y-3"
+    >
+      <p className="text-xs text-text-muted">
+        Install a skill from any public git URL (e.g. an Anthropic marketplace skill repo). Files
+        are fetched into a shared cache and materialized into{" "}
+        <code className="text-primary">.claude/skills/&lt;name&gt;/</code> at task spawn.
+      </p>
 
       {skills.length > 0 && (
-        <div className="space-y-2">
+        <ul className={LIST}>
           {skills.map((skill: any) => (
-            <div
+            <ListRow
               key={skill.id}
-              className="flex items-center gap-3 p-3 rounded-lg border border-border bg-bg"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium">{skill.name}</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+              title={skill.name}
+              tags={
+                <>
+                  <Tag tone="primary">
                     {skill.ref}
                     {skill.resolvedSha ? ` @${skill.resolvedSha.slice(0, 7)}` : ""}
-                  </span>
+                  </Tag>
                   {skill.hasExecutableFiles && (
-                    <span
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning"
+                    <Tag
+                      tone="warning"
                       title="This skill ships executable scripts. Review the source before enabling."
                     >
-                      <AlertTriangle className="w-3 h-3 inline" /> scripts
-                    </span>
+                      <AlertTriangle className="w-3 h-3" /> scripts
+                    </Tag>
                   )}
                   {Array.isArray(skill.agentTypes) && skill.agentTypes.length > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hover text-text-muted">
-                      {skill.agentTypes.join(", ")}
-                    </span>
+                    <Tag>{skill.agentTypes.join(", ")}</Tag>
                   )}
-                  {!skill.enabled && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning">
-                      disabled
-                    </span>
-                  )}
+                  {!skill.enabled && <Tag tone="warning">disabled</Tag>}
                   {skill.lastSyncError && (
-                    <span
-                      className="text-[10px] px-1.5 py-0.5 rounded bg-error/10 text-error truncate max-w-[200px]"
-                      title={skill.lastSyncError}
-                    >
+                    <Tag tone="error" title={skill.lastSyncError}>
                       sync failed
-                    </span>
+                    </Tag>
                   )}
-                </div>
-                <p className="text-xs text-text-muted mt-0.5 truncate">
+                </>
+              }
+              detail={
+                <>
                   {skill.sourceUrl}
                   {skill.subpath !== "." && (
                     <span className="text-text-muted/70"> · {skill.subpath}</span>
                   )}
-                </p>
-              </div>
-              <button
-                onClick={async () => {
-                  try {
-                    await api.syncInstalledSkill(skill.id);
-                    toast.success("Sync queued");
-                    setTimeout(refresh, 1500);
-                  } catch {
-                    toast.error("Sync failed to queue");
-                  }
-                }}
-                className="text-xs text-text-muted hover:text-text"
-                title="Force re-sync"
-              >
-                Sync
-              </button>
-              <button
-                onClick={async () => {
-                  await api.updateInstalledSkill(skill.id, { enabled: !skill.enabled });
-                  setSkills((prev) =>
-                    prev.map((s) => (s.id === skill.id ? { ...s, enabled: !s.enabled } : s)),
-                  );
-                }}
-                className="text-xs text-text-muted hover:text-text"
-              >
-                {skill.enabled ? "Disable" : "Enable"}
-              </button>
-              <button
-                onClick={async () => {
-                  await api.deleteInstalledSkill(skill.id);
-                  setSkills((prev) => prev.filter((s) => s.id !== skill.id));
-                  toast.success("Skill removed");
-                }}
-                className="text-text-muted hover:text-error"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                </>
+              }
+              actions={
+                <>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.syncInstalledSkill(skill.id);
+                        toast.success("Sync queued");
+                        setTimeout(refresh, 1500);
+                      } catch {
+                        toast.error("Sync failed to queue");
+                      }
+                    }}
+                    className={BTN_ROW}
+                    title="Force re-sync"
+                  >
+                    Sync
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await api.updateInstalledSkill(skill.id, { enabled: !skill.enabled });
+                      setSkills((prev) =>
+                        prev.map((s) => (s.id === skill.id ? { ...s, enabled: !s.enabled } : s)),
+                      );
+                    }}
+                    className={BTN_ROW}
+                  >
+                    {skill.enabled ? "Disable" : "Enable"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await api.deleteInstalledSkill(skill.id);
+                      setSkills((prev) => prev.filter((s) => s.id !== skill.id));
+                      toast.success("Skill removed");
+                    }}
+                    className={BTN_ROW_DANGER}
+                    aria-label={`Remove ${skill.name}`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              }
+            />
           ))}
-        </div>
+        </ul>
       )}
 
       {skills.length === 0 && !showAdd && (
-        <p className="text-xs text-text-muted/60 text-center py-2">
-          No marketplace skills installed.
-        </p>
+        <EmptyState
+          size="panel"
+          icon={Store}
+          title="No marketplace skills"
+          description="Install one from a git repo; Optio keeps it synced."
+          action={
+            <button onClick={() => setShowAdd(true)} className={BTN_PRIMARY}>
+              <Plus className="w-3.5 h-3.5" />
+              Install skill
+            </button>
+          }
+        />
       )}
 
       {showAdd && (
-        <div className="space-y-3 p-3 rounded-lg border border-primary/30 bg-primary/5">
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Source URL (git)</label>
+        <InsetForm>
+          <Field label="Source URL (git)">
             <input
               value={sourceUrl}
               onChange={(e) => {
@@ -1042,69 +1069,43 @@ function MarketplaceSkills() {
                 if (!name) setName(deriveName(e.target.value));
               }}
               placeholder="https://github.com/anthropics/skills.git"
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              className={`${INPUT} font-mono`}
             />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Name</label>
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Field label="Name">
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="superpowers"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={INPUT}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Ref</label>
+            </Field>
+            <Field label="Ref">
               <input
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
                 placeholder="main"
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={INPUT}
               />
-            </div>
-            <div>
-              <label className="block text-xs text-text-muted mb-1">Subpath (optional)</label>
+            </Field>
+            <Field label="Subpath (optional)">
               <input
                 value={subpath}
                 onChange={(e) => setSubpath(e.target.value)}
                 placeholder="."
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className={`${INPUT} font-mono`}
               />
-            </div>
+            </Field>
           </div>
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Agent types</label>
-            <div className="flex flex-wrap gap-1.5">
-              {SKILL_AGENT_TYPES.map((a) => {
-                const active = agentTypes.includes(a.value);
-                return (
-                  <button
-                    key={a.value}
-                    type="button"
-                    onClick={() => toggleAgent(a.value)}
-                    className={`px-2 py-1 rounded-md text-[11px] border ${
-                      active
-                        ? "bg-primary/10 border-primary text-primary"
-                        : "bg-bg border-border text-text-muted hover:border-primary/40"
-                    }`}
-                  >
-                    {a.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="text-[10px] text-text-muted/70 mt-1">
-              Marketplace skills only inject for Claude Code today; other selections are recorded
-              for future agents.
-            </p>
-          </div>
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={resetForm}
-              className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover"
-            >
+          <Field
+            label="Agent types"
+            help="Marketplace skills only inject for Claude Code today; other selections are recorded for future agents."
+          >
+            <AgentChips selected={agentTypes} onToggle={toggleAgent} />
+          </Field>
+          <div className="flex justify-end items-center gap-3">
+            <button onClick={resetForm} className={BTN_TEXT}>
               Cancel
             </button>
             <button
@@ -1129,14 +1130,14 @@ function MarketplaceSkills() {
                   toast.error(err instanceof Error ? err.message : "Could not install skill");
                 }
               }}
-              className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover"
+              className={BTN_PRIMARY}
             >
               Install
             </button>
           </div>
-        </div>
+        </InsetForm>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -1156,73 +1157,82 @@ function AuthenticationSettings() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "Sign-in";
+  const hint = "OAuth providers, detected from environment variables";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={3} />;
+
+  const configured = (["github", "google", "gitlab"] as const).filter((n) =>
+    providers.some((p) => p.name === n),
+  );
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={
+        authDisabled
+          ? "auth disabled"
+          : configured.length
+            ? `${configured.length} of 3 configured`
+            : "none configured"
+      }
+      bodyClassName="p-4 space-y-3"
+    >
       {authDisabled && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-warning/10 border border-warning/20 text-warning text-xs">
           <Shield className="w-4 h-4 shrink-0" />
           <div>
             <p className="font-medium">Authentication is disabled</p>
-            <p className="text-amber-400/70 mt-0.5">
+            <p className="opacity-80 mt-0.5">
               Set{" "}
-              <code className="px-1 py-0.5 bg-amber-500/10 rounded">OPTIO_AUTH_DISABLED=false</code>{" "}
+              <code className="px-1 py-0.5 bg-warning/10 rounded">OPTIO_AUTH_DISABLED=false</code>{" "}
               and configure OAuth providers to enable authentication.
             </p>
           </div>
         </div>
       )}
 
-      <div>
-        <p className="text-xs text-text-muted mb-3">
-          OAuth providers are auto-detected from environment variables. Configure the client ID and
-          secret for each provider you want to enable.
-        </p>
-
-        <div className="space-y-2">
-          {(["github", "google", "gitlab"] as const).map((name) => {
-            const enabled = providers.some((p) => p.name === name);
-            const displayName =
-              name === "github" ? "GitHub" : name === "google" ? "Google" : "GitLab";
-            const envPrefix = name.toUpperCase();
-            return (
-              <div
-                key={name}
-                className="flex items-center justify-between p-3 rounded-lg border border-border"
-              >
-                <div className="flex items-center gap-3">
-                  {enabled ? (
-                    <CheckCircle2 className="w-4 h-4 text-success shrink-0" />
+      <ul className={LIST}>
+        {(["github", "google", "gitlab"] as const).map((name) => {
+          const enabled = providers.some((p) => p.name === name);
+          const displayName =
+            name === "github" ? "GitHub" : name === "google" ? "Google" : "GitLab";
+          const envPrefix = name.toUpperCase();
+          const brand = brandFor(name);
+          return (
+            <li key={name} className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="grid place-items-center w-7 h-7 rounded-md border border-border bg-bg-card text-text-muted shrink-0">
+                  {brand ? (
+                    <BrandIcon brand={brand} className="w-3.5 h-3.5" />
                   ) : (
-                    <XCircle className="w-4 h-4 text-text-muted/40 shrink-0" />
+                    <span className="text-xs font-semibold">G</span>
                   )}
-                  <div>
-                    <p className="text-sm font-medium">{displayName}</p>
-                    <p className="text-[10px] text-text-muted">
-                      {`${envPrefix}_OAUTH_CLIENT_ID`} / {`${envPrefix}_OAUTH_CLIENT_SECRET`}
-                    </p>
-                  </div>
-                </div>
-                <span
-                  className={`text-[10px] px-2 py-0.5 rounded-full ${
-                    enabled ? "bg-success/10 text-success" : "bg-text-muted/10 text-text-muted"
-                  }`}
-                >
-                  {enabled ? "Configured" : "Not configured"}
                 </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{displayName}</p>
+                  <p className="text-[11px] text-text-muted font-mono truncate">
+                    {`${envPrefix}_OAUTH_CLIENT_ID`} / {`${envPrefix}_OAUTH_CLIENT_SECRET`}
+                  </p>
+                </div>
               </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
+              <span
+                className={`inline-flex items-center gap-1 text-[11px] ${
+                  enabled ? "text-success" : "text-text-muted"
+                }`}
+              >
+                {enabled ? (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                ) : (
+                  <XCircle className="w-3.5 h-3.5 opacity-50" />
+                )}
+                {enabled ? "Configured" : "Not configured"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </SectionCard>
   );
 }
 
@@ -1235,6 +1245,7 @@ function OptioAgentSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showBasePrompt, setShowBasePrompt] = useState(false);
+  const [showTools, setShowTools] = useState(false);
 
   useEffect(() => {
     api
@@ -1289,16 +1300,22 @@ function OptioAgentSettings() {
   const enableAll = () => setEnabledTools([...ALL_OPTIO_TOOL_NAMES]);
   const disableAll = () => setEnabledTools([]);
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "Optio agent";
+  const hint = "The assistant behind Ask Optio";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={4} />;
+
+  const toolCount =
+    enabledTools.length === ALL_OPTIO_TOOL_NAMES.length
+      ? "all tools"
+      : `${enabledTools.length}/${ALL_OPTIO_TOOL_NAMES.length} tools`;
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-5">
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={`${model} · ${toolCount}`}
+      bodyClassName="p-4 space-y-5"
+    >
       {/* Model: the live list, with each family's "always the latest" alias */}
       <AgentOptionsPicker
         provider="anthropic"
@@ -1308,135 +1325,121 @@ function OptioAgentSettings() {
         latestAliases
       />
 
-      {/* System Prompt */}
-      <div>
-        <label className="block text-xs font-medium text-text-muted mb-1">
-          Custom System Prompt
-        </label>
-        <p className="text-xs text-text-muted mb-2">
-          These instructions are appended to Optio&apos;s base prompt. Use this to add context about
-          your team&apos;s workflows, naming conventions, or preferences.
-        </p>
-        <button
-          onClick={() => setShowBasePrompt(!showBasePrompt)}
-          className="flex items-center gap-1 text-xs text-primary hover:underline mb-2"
+      <div className="pt-4 border-t border-border space-y-2">
+        <Field
+          label="Custom system prompt"
+          help="Appended to Optio's base prompt. Add context about your team's workflows, naming conventions, or preferences."
         >
-          {showBasePrompt ? (
-            <ChevronDown className="w-3 h-3" />
-          ) : (
-            <ChevronRight className="w-3 h-3" />
-          )}
-          {showBasePrompt ? "Hide" : "Show"} base system prompt
-        </button>
-        {showBasePrompt && (
-          <div className="p-3 rounded-md bg-bg border border-border mb-2 max-h-48 overflow-y-auto">
-            <p className="text-xs text-text-muted font-mono whitespace-pre-wrap">
-              The base system prompt is defined in code and includes instructions for task
-              execution, PR creation, and tool usage. Your custom prompt below is appended after the
-              base prompt to provide additional context.
-            </p>
-          </div>
-        )}
-        <textarea
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          rows={6}
-          placeholder="e.g., Always use conventional commits. Follow our coding style guide at docs/STYLE.md..."
-          className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y leading-relaxed"
-        />
+          <textarea
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            rows={5}
+            placeholder="e.g., Always use conventional commits. Follow our coding style guide at docs/STYLE.md..."
+            className={MONO_AREA}
+          />
+        </Field>
+        <Disclosure
+          open={showBasePrompt}
+          onToggle={() => setShowBasePrompt(!showBasePrompt)}
+          label="About the base system prompt"
+        >
+          <p className="p-3 rounded-lg bg-bg border border-border text-xs text-text-muted">
+            The base system prompt is defined in code and includes instructions for task execution,
+            PR creation, and tool usage. Your custom prompt above is appended after the base prompt
+            to provide additional context.
+          </p>
+        </Disclosure>
       </div>
 
-      {/* Tool Enablement */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className="block text-xs font-medium text-text-muted">Enabled Tools</label>
-          <div className="flex gap-2">
-            <button onClick={enableAll} className="text-xs text-primary hover:underline">
+      <div className="pt-4 border-t border-border space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-text-muted">
+            Tools <span className="font-normal text-text-muted/70">· {toolCount} enabled</span>
+          </span>
+          <div className="flex items-center gap-1">
+            <button onClick={enableAll} className={BTN_ROW}>
               Enable all
             </button>
-            <span className="text-xs text-text-muted">|</span>
-            <button onClick={disableAll} className="text-xs text-primary hover:underline">
+            <button onClick={disableAll} className={BTN_ROW}>
               Disable all
             </button>
           </div>
         </div>
-        <div className="space-y-3">
-          {OPTIO_TOOL_CATEGORIES.map((category) => (
-            <div key={category.name} className="p-3 rounded-md bg-bg border border-border">
-              <h4 className="text-xs font-medium mb-2">{category.name}</h4>
-              <div className="space-y-1.5">
-                {category.tools.map((tool) => (
-                  <label key={tool.name} className="flex items-center gap-2 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={enabledTools.includes(tool.name)}
-                      onChange={() => toggleTool(tool.name)}
-                      className="w-3.5 h-3.5 rounded"
-                    />
-                    <span className="font-medium">{tool.name}</span>
-                    <span className="text-text-muted">— {tool.description}</span>
-                  </label>
-                ))}
+        <Disclosure open={showTools} onToggle={() => setShowTools(!showTools)} label="Choose tools">
+          <div className="grid grid-cols-1 gap-3">
+            {OPTIO_TOOL_CATEGORIES.map((category) => (
+              <div key={category.name} className="p-3 rounded-lg bg-bg border border-border">
+                <h4 className="text-xs font-medium mb-2">{category.name}</h4>
+                <div className="space-y-1.5">
+                  {category.tools.map((tool) => (
+                    <label
+                      key={tool.name}
+                      className="flex items-center gap-2 text-xs cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={enabledTools.includes(tool.name)}
+                        onChange={() => toggleTool(tool.name)}
+                        className="w-3.5 h-3.5 rounded"
+                      />
+                      <span className="font-medium">{tool.name}</span>
+                      <span className="text-text-muted">— {tool.description}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </Disclosure>
         {enabledTools.length === 0 && (
-          <p className="text-xs text-error mt-1 flex items-center gap-1">
+          <p className="text-xs text-error flex items-center gap-1">
             <AlertTriangle className="w-3 h-3" />
             At least one tool must be enabled
           </p>
         )}
       </div>
 
-      {/* Confirmation Behavior */}
-      <div>
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
-          <input
-            type="checkbox"
-            checked={confirmWrites}
-            onChange={(e) => setConfirmWrites(e.target.checked)}
-            className="w-4 h-4 rounded"
+      <div className="pt-4 border-t border-border flex flex-wrap items-start gap-x-8 gap-y-4">
+        <Field label="Write operations">
+          <Segmented
+            value={confirmWrites ? "confirm" : "auto"}
+            onChange={(v) => setConfirmWrites(v === "confirm")}
+            aria-label="Write operations"
+            options={[
+              { value: "confirm", label: "Ask first" },
+              { value: "auto", label: "Run immediately" },
+            ]}
           />
-          Require confirmation for write operations
-        </label>
-        {!confirmWrites && (
-          <p className="text-xs text-warning mt-1 flex items-center gap-1 ml-6">
-            <AlertTriangle className="w-3 h-3" />
-            Optio will execute actions immediately without asking for approval
-          </p>
-        )}
+          {!confirmWrites && (
+            <p className="text-xs text-warning mt-1.5 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" />
+              Optio will act without asking for approval
+            </p>
+          )}
+        </Field>
+        <Field label="Max conversation turns" help="Per session (5–50).">
+          <NumberInput
+            min={5}
+            max={50}
+            value={maxTurns}
+            onChange={(v) => setMaxTurns(v)}
+            fallback={25}
+            className="w-28 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+          />
+        </Field>
       </div>
 
-      {/* Max Conversation Length */}
-      <div>
-        <label className="block text-xs font-medium text-text-muted mb-1">
-          Max Conversation Turns
-        </label>
-        <p className="text-xs text-text-muted mb-2">
-          Maximum back-and-forth exchanges per session (5–50).
-        </p>
-        <NumberInput
-          min={5}
-          max={50}
-          value={maxTurns}
-          onChange={(v) => setMaxTurns(v)}
-          fallback={25}
-          className="w-32 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-        />
-      </div>
-
-      {/* Save Button */}
-      <div className="flex justify-end">
+      <CardFooter>
         <button
           onClick={handleSave}
           disabled={saving || enabledTools.length === 0}
-          className="px-4 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
+          className={BTN_PRIMARY}
         >
+          {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           {saving ? "Saving..." : "Save Settings"}
         </button>
-      </div>
-    </div>
+      </CardFooter>
+    </SectionCard>
   );
 }
 
@@ -1490,19 +1493,39 @@ function GitHubTokenManager() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Checking token status...
-      </div>
-    );
-  }
+  const label = "GitHub token";
+  const hint = "PR watching, issue sync, and repo detection";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={1} />;
+
+  const summary =
+    status === "valid"
+      ? user
+        ? `valid · ${user.login}`
+        : source === "github_app"
+          ? "valid · GitHub App"
+          : "valid"
+      : status === "expired"
+        ? "expired"
+        : status === "missing"
+          ? "not set"
+          : "unverified";
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
-      {/* Current status */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={summary}
+      summaryIcon={<BrandIcon brand="github" className="w-3 h-3" />}
+      actions={
+        <button onClick={checkStatus} className={BTN_HEADER}>
+          <RefreshCw className="w-3 h-3" />
+          Refresh
+        </button>
+      }
+      bodyClassName="p-4 space-y-4"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           {status === "valid" ? (
             <CheckCircle2 className="w-5 h-5 text-success shrink-0" />
           ) : status === "expired" ? (
@@ -1512,7 +1535,7 @@ function GitHubTokenManager() {
           ) : (
             <AlertTriangle className="w-5 h-5 text-text-muted shrink-0" />
           )}
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-medium">
               {status === "valid"
                 ? "Token is valid"
@@ -1534,27 +1557,17 @@ function GitHubTokenManager() {
             {message && !user && <p className="text-xs text-text-muted">{message}</p>}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        {source !== "github_app" && !showRotateForm && (
           <button
-            onClick={checkStatus}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover transition-colors"
+            onClick={() => setShowRotateForm(true)}
+            className={status === "missing" ? BTN_PRIMARY : BTN_SECONDARY}
           >
-            <RefreshCw className="w-3 h-3" />
-            Refresh
+            <KeyRound className="w-3.5 h-3.5" />
+            {status === "missing" ? "Add Token" : "Replace Token"}
           </button>
-          {source !== "github_app" && (
-            <button
-              onClick={() => setShowRotateForm(!showRotateForm)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors"
-            >
-              <KeyRound className="w-3 h-3" />
-              {status === "missing" ? "Add Token" : "Replace Token"}
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* Expired/missing warning */}
       {(status === "expired" || status === "missing") && (
         <div
           className={`flex items-start gap-2 p-3 rounded-lg text-xs ${
@@ -1570,7 +1583,7 @@ function GitHubTokenManager() {
                 ? "Your GitHub token has expired or been revoked"
                 : "No GitHub token is configured"}
             </p>
-            <p className="mt-0.5 opacity-70">
+            <p className="mt-0.5 opacity-80">
               PR watching, issue sync, and repo detection require a valid GitHub token. Replace it
               below to restore these features.
             </p>
@@ -1578,60 +1591,59 @@ function GitHubTokenManager() {
         </div>
       )}
 
-      {/* Rotation form */}
       {showRotateForm && (
-        <div className="space-y-3 p-3 rounded-lg border border-primary/30 bg-primary/5">
+        <InsetForm>
           <p className="text-xs text-text-muted">
             Enter a new GitHub Personal Access Token. The token will be validated before replacing
             the existing one.
           </p>
-          <div className="flex gap-2">
-            <input
-              type="password"
-              value={newToken}
-              onChange={(e) => setNewToken(e.target.value)}
-              onPaste={(e) => {
-                e.preventDefault();
-                const pasted = e.clipboardData.getData("text").trim();
-                if (pasted) setNewToken(pasted);
+          <input
+            type="password"
+            value={newToken}
+            onChange={(e) => setNewToken(e.target.value)}
+            onPaste={(e) => {
+              e.preventDefault();
+              const pasted = e.clipboardData.getData("text").trim();
+              if (pasted) setNewToken(pasted);
+            }}
+            placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            className={`${INPUT} font-mono`}
+          />
+          <div className="flex justify-end items-center gap-3">
+            <button
+              onClick={() => {
+                setShowRotateForm(false);
+                setNewToken("");
               }}
-              placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-            />
+              className={BTN_TEXT}
+            >
+              Cancel
+            </button>
             <button
               onClick={handleRotate}
               disabled={!newToken.trim() || rotating}
-              className="px-4 py-2 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 whitespace-nowrap"
+              className={BTN_PRIMARY}
             >
-              {rotating ? (
-                <span className="flex items-center gap-1.5">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  Validating...
-                </span>
-              ) : (
-                "Validate & Save"
-              )}
+              {rotating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {rotating ? "Validating..." : "Validate & Save"}
             </button>
           </div>
-          <button
-            onClick={() => {
-              setShowRotateForm(false);
-              setNewToken("");
-            }}
-            className="text-xs text-text-muted hover:text-text"
-          >
-            Cancel
-          </button>
-        </div>
+        </InsetForm>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
-export default function SettingsPage() {
-  usePageTitle("Settings");
+const TICKET_SOURCES = [
+  { value: "github", label: "GitHub Issues" },
+  { value: "jira", label: "Jira" },
+  { value: "linear", label: "Linear" },
+  { value: "notion", label: "Notion" },
+] as const;
+
+function TicketIntegration() {
   const [syncing, setSyncing] = useState(false);
-  const [providers, setProviders] = useState<any[]>([]);
+  const [providers, setProviders] = useState<any[] | null>(null);
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [newProviderSource, setNewProviderSource] = useState("github");
   const [providerConfig, setProviderConfig] = useState<Record<string, string>>({});
@@ -1641,7 +1653,7 @@ export default function SettingsPage() {
     api
       .listTicketProviders()
       .then((res) => setProviders(res.providers))
-      .catch(() => {});
+      .catch(() => setProviders([]));
   }, []);
 
   const handleSync = async () => {
@@ -1682,9 +1694,9 @@ export default function SettingsPage() {
     if (!confirm("Remove this ticket provider? This cannot be undone.")) return;
     try {
       await api.deleteTicketProvider(id);
-      setProviders((prev) => prev.filter((p) => p.id !== id));
+      setProviders((prev) => (prev ?? []).filter((p) => p.id !== id));
       toast.success("Provider removed");
-    } catch (err) {
+    } catch {
       toast.error("Failed to remove provider");
     }
   };
@@ -1723,78 +1735,74 @@ export default function SettingsPage() {
     ],
   };
 
+  const label = "Tickets";
+  const hint = (
+    <>
+      Syncs issues labeled <code className="text-primary">optio</code>
+    </>
+  );
+  if (providers === null) return <SkeletonCard label={label} hint={hint} rows={1} />;
+
+  const failing = providers.filter((p) => p.hasAuthFailure || !p.enabled).length;
+
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-
-      {/* Optio Agent Settings */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
-          <Bot className="w-4 h-4" />
-          Optio Agent Settings
-        </h2>
-        <OptioAgentSettings />
-      </section>
-
-      {/* Authentication */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3">Authentication</h2>
-        <AuthenticationSettings />
-      </section>
-
-      {/* Personal access tokens */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
-          <KeyRound className="w-4 h-4" />
-          API Keys
-        </h2>
-        <ApiKeysManager />
-      </section>
-
-      {/* GitHub Token */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
-          <Github className="w-4 h-4" />
-          GitHub Token
-        </h2>
-        <GitHubTokenManager />
-      </section>
-
-      {/* Notifications */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3">Notifications</h2>
-        <NotificationPreferences />
-      </section>
-
-      {/* Ticket Sync */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
-          <Ticket className="w-4 h-4" />
-          Ticket Integration
-        </h2>
-        <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-          <p className="text-xs text-text-muted">
-            Sync issues labeled with{" "}
-            <code className="px-1 py-0.5 bg-bg rounded text-primary">optio</code> from your
-            configured ticket providers.
-          </p>
-          {providers.length > 0 ? (
-            <div className="space-y-2">
-              {providers.map((p: any) => (
-                <div key={p.id} className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={
+        providers.length
+          ? `${plural(providers.length, "provider")}${failing ? ` · ${failing} need attention` : ""}`
+          : undefined
+      }
+      actions={
+        <>
+          {providers.length > 0 && (
+            <button onClick={handleSync} disabled={syncing} className={BTN_HEADER}>
+              {syncing ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3 h-3" />
+              )}
+              Sync Now
+            </button>
+          )}
+          {!showAddProvider && (
+            <button onClick={() => setShowAddProvider(true)} className={BTN_HEADER}>
+              <Plus className="w-3.5 h-3.5" />
+              Add Provider
+            </button>
+          )}
+        </>
+      }
+      bodyClassName="p-4 space-y-3"
+    >
+      {providers.length > 0 ? (
+        <ul className={LIST}>
+          {providers.map((p: any) => {
+            const brand = brandFor(p.source);
+            return (
+              <li key={p.id} className="px-3 py-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="relative grid place-items-center w-7 h-7 rounded-md border border-border bg-bg-card text-text-muted shrink-0">
+                      {brand ? (
+                        <BrandIcon brand={brand} className="w-3.5 h-3.5" />
+                      ) : (
+                        <Ticket className="w-3.5 h-3.5" />
+                      )}
                       <span
-                        className={`w-2 h-2 rounded-full ${p.hasAuthFailure ? "bg-error" : p.enabled ? "bg-success" : "bg-text-muted"}`}
+                        className={`absolute -right-0.5 -bottom-0.5 w-2 h-2 rounded-full ring-2 ring-bg ${
+                          p.hasAuthFailure ? "bg-error" : p.enabled ? "bg-success" : "bg-text-muted"
+                        }`}
                       />
-                      <span className="capitalize">{p.source}</span>
-                      {!p.enabled && (
-                        <span className="text-xs text-error font-medium">Disabled</span>
-                      )}
-                      {p.hasAuthFailure && p.enabled && (
-                        <span className="text-xs text-error font-medium">Token invalid</span>
-                      )}
-                      <span className="text-xs text-text-muted">
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium capitalize">{p.source}</span>
+                        {!p.enabled && <Tag tone="error">Disabled</Tag>}
+                        {p.hasAuthFailure && p.enabled && <Tag tone="error">Token invalid</Tag>}
+                      </div>
+                      <p className="text-xs text-text-muted truncate">
                         {p.source === "github" &&
                           p.config?.owner &&
                           `${p.config.owner}/${p.config.repo}`}
@@ -1803,164 +1811,163 @@ export default function SettingsPage() {
                           `Database: ${p.config.databaseId}`}
                         {p.source === "linear" && p.config?.teamId && `Team: ${p.config.teamId}`}
                         {p.source === "jira" && p.config?.baseUrl && `${p.config.baseUrl}`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {(p.hasAuthFailure || !p.enabled) && (
-                        <button
-                          onClick={() => handleReEnableProvider(p.id)}
-                          className="flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-                          title="Clear errors and re-enable this provider"
-                        >
-                          <RefreshCw className="w-3 h-3" />
-                          Re-enable
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleDeleteProvider(p.id)}
-                        className="p-1 rounded hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                        title="Remove provider"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      </p>
                     </div>
                   </div>
-                  {p.lastError && (
-                    <div className="ml-4 p-2 rounded bg-error/5 border border-error/20">
-                      <p className="text-xs text-error">{p.lastError}</p>
-                      <p className="text-xs text-text-muted mt-0.5">
-                        {p.lastErrorAt &&
-                          `Last failure: ${new Date(p.lastErrorAt).toLocaleString()}`}
-                        {p.consecutiveFailures > 0 &&
-                          ` (${p.consecutiveFailures} consecutive failures)`}
-                      </p>
-                      <p className="text-xs text-text-muted mt-1">
-                        Refresh your token and click Re-enable to resume syncing.
-                      </p>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {(p.hasAuthFailure || !p.enabled) && (
+                      <button
+                        onClick={() => handleReEnableProvider(p.id)}
+                        className={BTN_HEADER}
+                        title="Clear errors and re-enable this provider"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Re-enable
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteProvider(p.id)}
+                      className={BTN_ROW_DANGER}
+                      title="Remove provider"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-text-muted">No ticket providers configured.</p>
-          )}
-
-          {showAddProvider ? (
-            <div className="space-y-3 pt-2 border-t border-border/50">
-              <div>
-                <label className="block text-xs text-text-muted mb-1">Provider</label>
-                <select
-                  value={newProviderSource}
-                  onChange={(e) => {
-                    setNewProviderSource(e.target.value);
-                    setProviderConfig({});
-                  }}
-                  className="w-full px-3 py-1.5 rounded-md bg-bg border border-border/50 text-sm"
-                >
-                  <option value="github">GitHub Issues</option>
-                  <option value="jira">Jira</option>
-                  <option value="linear">Linear</option>
-                  <option value="notion">Notion</option>
-                </select>
-              </div>
-              {providerFields[newProviderSource]?.map((field) => (
-                <div key={field.key}>
-                  <label className="block text-xs text-text-muted mb-1">{field.label}</label>
-                  <input
-                    type={field.type || "text"}
-                    value={providerConfig[field.key] || ""}
-                    onChange={(e) =>
-                      setProviderConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
-                    }
-                    className="w-full px-3 py-1.5 rounded-md bg-bg border border-border/50 text-sm"
-                  />
-                </div>
-              ))}
-              <div className="flex gap-2">
-                <button
-                  onClick={handleAddProvider}
-                  disabled={savingProvider}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover transition-colors disabled:opacity-50"
-                >
-                  {savingProvider && <Loader2 className="w-3 h-3 animate-spin" />}
-                  Save
-                </button>
-                <button
-                  onClick={() => {
-                    setShowAddProvider(false);
-                    setProviderConfig({});
-                  }}
-                  className="px-3 py-1.5 rounded-md bg-bg text-text-muted text-xs hover:bg-bg-hover transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowAddProvider(true)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors"
-              >
-                <Plus className="w-3 h-3" />
+                {p.lastError && (
+                  <div className="ml-10 p-2 rounded-md bg-error/5 border border-error/20">
+                    <p className="text-xs text-error">{p.lastError}</p>
+                    <p className="text-xs text-text-muted mt-0.5">
+                      {p.lastErrorAt && `Last failure: ${new Date(p.lastErrorAt).toLocaleString()}`}
+                      {p.consecutiveFailures > 0 &&
+                        ` (${p.consecutiveFailures} consecutive failures)`}
+                    </p>
+                    <p className="text-xs text-text-muted mt-1">
+                      Refresh your token and click Re-enable to resume syncing.
+                    </p>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        !showAddProvider && (
+          <EmptyState
+            size="panel"
+            icon={Ticket}
+            title="No ticket providers"
+            description="Connect GitHub Issues, Jira, Linear, or Notion to turn labeled tickets into work."
+            action={
+              <button onClick={() => setShowAddProvider(true)} className={BTN_PRIMARY}>
+                <Plus className="w-3.5 h-3.5" />
                 Add Provider
               </button>
-              <button
-                onClick={handleSync}
-                disabled={syncing}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors disabled:opacity-50"
-              >
-                {syncing ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-3 h-3" />
-                )}
-                Sync Now
-              </button>
-            </div>
-          )}
-        </div>
-      </section>
+            }
+          />
+        )
+      )}
 
-      {/* MCP Servers */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
-          <Server className="w-4 h-4" />
-          Global MCP Servers
-        </h2>
-        <GlobalMcpServers />
-      </section>
+      {showAddProvider && (
+        <InsetForm>
+          <Field label="Provider">
+            <Segmented
+              value={newProviderSource}
+              onChange={(v) => {
+                setNewProviderSource(v);
+                setProviderConfig({});
+              }}
+              aria-label="Provider"
+              wrap
+              options={TICKET_SOURCES.map((s) => ({
+                value: s.value,
+                label: s.label,
+                icon: <BrandIcon brand={s.value} className="w-3.5 h-3.5" />,
+              }))}
+            />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {providerFields[newProviderSource]?.map((field) => (
+              <Field key={field.key} label={field.label}>
+                <input
+                  type={field.type || "text"}
+                  value={providerConfig[field.key] || ""}
+                  onChange={(e) =>
+                    setProviderConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
+                  }
+                  className={INPUT}
+                />
+              </Field>
+            ))}
+          </div>
+          <div className="flex justify-end items-center gap-3">
+            <button
+              onClick={() => {
+                setShowAddProvider(false);
+                setProviderConfig({});
+              }}
+              className={BTN_TEXT}
+            >
+              Cancel
+            </button>
+            <button onClick={handleAddProvider} disabled={savingProvider} className={BTN_PRIMARY}>
+              {savingProvider && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Save
+            </button>
+          </div>
+        </InsetForm>
+      )}
+    </SectionCard>
+  );
+}
 
-      {/* Custom Skills */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
-          <Sparkles className="w-4 h-4" />
-          Global Custom Skills
-        </h2>
-        <GlobalSkills />
-      </section>
+/** An uppercase group label above a run of cards (as on the Overview). */
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+        {title}
+      </h2>
+      <div className="space-y-4">{children}</div>
+    </section>
+  );
+}
 
-      {/* Marketplace Skills */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3 flex items-center gap-2">
-          <Sparkles className="w-4 h-4" />
-          Marketplace Skills
-        </h2>
-        <MarketplaceSkills />
-      </section>
+export default function SettingsPage() {
+  usePageTitle("Settings");
 
-      {/* Prompt Template */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3">Default Agent Prompt Template</h2>
-        <PromptTemplateEditor />
-      </section>
+  return (
+    <div className="p-6 max-w-3xl mx-auto">
+      <PageHeader
+        icon={SettingsIcon}
+        title="Settings"
+        description="Defaults for every agent, how people and clients sign in, and the integrations Optio injects into pods."
+      />
+      <div className="space-y-8">
+        <Group title="Agents">
+          <OptioAgentSettings />
+          <PromptTemplateEditor />
+          <DefaultReviewEditor />
+        </Group>
 
-      {/* Default Code Review */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3">Default Code Review Agent</h2>
-        <DefaultReviewEditor />
-      </section>
+        <Group title="Access">
+          <AuthenticationSettings />
+          <ApiKeysManager />
+          <GitHubTokenManager />
+          <ModelProvidersManager />
+        </Group>
+
+        <Group title="Integrations">
+          <TicketIntegration />
+          <GlobalMcpServers />
+          <GlobalSkills />
+          <MarketplaceSkills />
+        </Group>
+
+        <Group title="Notifications">
+          <NotificationPreferences />
+        </Group>
+      </div>
     </div>
   );
 }

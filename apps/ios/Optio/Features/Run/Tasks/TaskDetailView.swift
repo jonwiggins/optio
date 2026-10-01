@@ -196,7 +196,7 @@ struct TaskDetailView: View {
         else if let st = task.startedAt { facts.append(Text("started \(st.relativeDescription)")) }
         else if let c = task.createdAt { facts.append(Text("created \(c.relativeDescription)")) }
         if let m = task.modelUsed { facts.append(Text(InsightsFormat.modelShortName(m))) }
-        facts.append(Text(RunFormatting.agentLabel(task.agentType)))
+        facts.append(Text.agent(task.agentType, RunFormatting.agentLabel(task.agentType)))
         if let cost = Cost.formatIfNonZero(task.costUsd) { facts.append(Text(cost)) }
         if let t = task.taskType, t != "coding" { facts.append(Text(t)) }
         var line2: [Text?] = [Text(task.repoShortName)]
@@ -224,9 +224,10 @@ struct TaskDetailView: View {
             showsUsage: true
         ) {
             if let prUrl = task.prUrl, let url = URL(string: prUrl) {
-                Link(destination: url) { Image(systemName: "arrow.up.right.square") }
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .accessibilityLabel("Open pull request")
+                Link(destination: url) {
+                    GlyphView(glyph: Brand(url: prUrl) == .gitlab ? .brand(.gitlab) : .pr(PRGlyphState(task.prState)), size: 17)
+                }
+                .accessibilityLabel("Open pull request")
             }
         }
     }

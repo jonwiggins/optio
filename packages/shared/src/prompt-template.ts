@@ -143,6 +143,7 @@ concurrently on this same repository — each on its own branch. You MUST stay i
 {{else}}{{#if GIT_PLATFORM_GITLAB}}- Do NOT run \`glab mr list\` to browse merge requests. You only need to create YOUR MR.
 {{else}}- Do NOT run \`gh pr list\` to browse PRs. You only need to create YOUR PR.
 {{/if}}{{/if}}- If you see references to other branches named \`optio/task-*\`, ignore them — those belong to other agents.
+- If the task genuinely needs more than one PR, name each extra branch \`{{BRANCH_NAME}}-<short-slug>\` (for example \`{{BRANCH_NAME}}-docs\`) so Optio tracks every PR you open.
 - Your working directory is your worktree. Do not navigate outside it.
 
 ## Guidelines

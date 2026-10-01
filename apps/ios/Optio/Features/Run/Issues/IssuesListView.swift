@@ -153,7 +153,8 @@ struct IssueRowView: View {
             meta: Text.meta([Text.mono(issue.numberText), (issue.repo?.fullName ?? issue.source).map { Text($0) }, issue.author.map { Text("@\($0)") }, issue.updatedAt.map { Text($0.relativeDescription) }]),
             trailing: trailing?.0,
             trailingTone: trailing?.1,
-            footer: (issue.labels?.isEmpty == false) ? Text(issue.labels!.joined(separator: " · ")) : nil
+            footer: (issue.labels?.isEmpty == false) ? Text(issue.labels!.joined(separator: " · ")) : nil,
+            glyph: issue.glyph
         )
     }
 }
@@ -180,7 +181,10 @@ struct IssueDetailView: View {
                 }.font(.footnote).foregroundStyle(.secondary)
                 if let a = issue.author { LabeledContent("Author", value: "@\(a)") }
                 if let a = issue.assignee { LabeledContent("Assignee", value: "@\(a)") }
-                if let url = issue.url.flatMap(URL.init(string:)) { Link("Open on \(issue.source ?? "GitHub")", destination: url) }
+                if let url = issue.url.flatMap(URL.init(string:)) {
+                    let brand = Brand(provider: issue.source) ?? Brand(url: issue.url) ?? .github
+                    Link(destination: url) { Label { Text("Open on \(brand.label)") } icon: { BrandMark(brand, size: 17) } }
+                }
             }
             if let body = issue.body, !body.isEmpty {
                 Section("Description") { Text(body).font(.callout).textSelection(.enabled) }

@@ -2,7 +2,6 @@ export { UsagePanel } from "./usage-panel.js";
 export { ClusterSummary } from "./cluster-summary.js";
 export { PodsList } from "./pods-list.js";
 export { WelcomeHero } from "./welcome-hero.js";
-export { EmptyState } from "./empty-state.js";
 export { AgentComparison } from "./agent-comparison.js";
 export { RecentActivity } from "./recent-activity.js";
 export { RecentRuns } from "./recent-runs.js";

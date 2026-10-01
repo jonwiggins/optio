@@ -286,6 +286,34 @@ describe("FakeContainerRuntime", () => {
       expect(events.at(-1)?.is_error).toBe(false);
     });
 
+    it("[[mock:pr]] opens the PR with a gh pr create tool call whose result has the URL", async () => {
+      const runtime = new FakeContainerRuntime();
+      const spec = makeSpec({ env: { OPTIO_REPO_URL: "https://github.com/acme/widgets" } });
+      const events = parseEvents(await runAgent(runtime, "[[mock:pr]]", spec));
+      const use = events
+        .flatMap((e: any) => e.message?.content ?? [])
+        .find((b: any) => b.type === "tool_use");
+      expect(use).toMatchObject({ name: "Bash" });
+      expect(use.input.command).toContain("gh pr create");
+      const result = events
+        .flatMap((e: any) => e.message?.content ?? [])
+        .find((b: any) => b.type === "tool_result");
+      expect(result.tool_use_id).toBe(use.id);
+      expect(result.content).toContain("https://github.com/acme/widgets/pull/1");
+    });
+
+    it("[[mock:pr-mention]] only mentions (and views) another PR", async () => {
+      const runtime = new FakeContainerRuntime();
+      const spec = makeSpec({ env: { OPTIO_REPO_URL: "https://github.com/acme/widgets" } });
+      const events = parseEvents(await runAgent(runtime, "[[mock:pr-mention]]", spec));
+      const blocks = events.flatMap((e: any) => e.message?.content ?? []);
+      expect(blocks.some((b: any) => b.type === "text" && b.text.includes("/pull/9999"))).toBe(
+        true,
+      );
+      const uses = blocks.filter((b: any) => b.type === "tool_use");
+      expect(uses.map((u: any) => u.input.command)).toEqual(["gh pr view 9999"]);
+    });
+
     it("[[mock:pr]] increments the PR number per runtime and falls back to mock/repo", async () => {
       const runtime = new FakeContainerRuntime();
 

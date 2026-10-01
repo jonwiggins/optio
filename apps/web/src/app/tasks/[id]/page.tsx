@@ -10,6 +10,7 @@ import { PipelineTimeline } from "@/components/pipeline-timeline";
 import { ActivityFeed } from "@/components/activity-feed";
 import { DetailHeader } from "@/components/detail-header";
 import { PrStatusBar } from "@/components/pr-status-bar";
+import { TaskPrs } from "./task-prs";
 import { ChatComposer } from "@/components/chat-box";
 import { StateBadge } from "@/components/state-badge";
 import { TokenRefreshBanner, GitHubTokenBanner } from "@/components/token-refresh-banner";
@@ -40,6 +41,7 @@ import {
   GitMerge,
   Laptop,
 } from "lucide-react";
+import { BRAND_LABEL, PrIcon, TriggerIcon, brandFor } from "@/components/brand-icon";
 import { toast } from "sonner";
 import { useOptioChatStore } from "@/hooks/use-optio-chat";
 import { AddDependencyDialog } from "@/components/add-dependency-dialog";
@@ -355,15 +357,18 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         }
         actions={
           <>
+            {task.ticketSource && <TicketChip task={task} />}
             {task.prUrl && (
               <a
                 href={task.prUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                title={`Pull request${task.prState ? ` (${task.prState})` : ""}`}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-success/10 text-success text-xs hover:bg-success/20 transition-colors"
               >
-                <ExternalLink className="w-3 h-3" />
+                <PrIcon state={task.prState} colored={false} className="w-3 h-3" />
                 PR #{task.prNumber ?? "?"}
+                <ExternalLink className="w-3 h-3 opacity-60" />
               </a>
             )}
             {canCancel && (
@@ -666,6 +671,9 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
               </>
             }
           />
+          {task.repoUrl && task.taskType !== "review" && (
+            <TaskPrs taskId={task.id} prs={task.prs ?? []} onChange={refresh} />
+          )}
           {task.prReviewStatus === "changes_requested" && task.prReviewComments && (
             <div className="mt-2 p-2 rounded-md bg-warning/5 border border-warning/20 text-xs">
               <div className="font-medium text-warning mb-1">Review feedback:</div>
@@ -1109,5 +1117,41 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </div>
     </div>
+  );
+}
+
+/** The ticket a task was started from (GitHub issue, Linear ticket, …), with its tracker's mark. */
+function TicketChip({ task }: { task: any }) {
+  const brand = brandFor(task.ticketSource);
+  const label = `${brand ? BRAND_LABEL[brand] : task.ticketSource} ${
+    task.ticketExternalId
+      ? /[#!/-]/.test(task.ticketExternalId)
+        ? task.ticketExternalId
+        : `#${task.ticketExternalId}`
+      : "ticket"
+  }`;
+  const url = typeof task.metadata?.ticketUrl === "string" ? task.metadata.ticketUrl : null;
+  const body = (
+    <>
+      <TriggerIcon type="ticket" source={task.ticketSource} className="w-3 h-3" />
+      <span className="font-mono">{label}</span>
+    </>
+  );
+  const cls =
+    "flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-bg-card text-text-muted text-xs";
+  return url ? (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`Started from ${label}`}
+      className={cls + " hover:text-text hover:border-border-strong transition-colors"}
+    >
+      {body}
+    </a>
+  ) : (
+    <span className={cls} title={`Started from ${label}`}>
+      {body}
+    </span>
   );
 }

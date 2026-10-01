@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.optio.core.ui.components.InsetDivider
+import dev.optio.core.ui.components.GlyphIcon
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Radius
 import dev.optio.core.ui.theme.Spacing
@@ -235,6 +236,8 @@ internal fun MenuRow(
     placeholder: Boolean = false,
     mono: Boolean = false,
     enabled: Boolean = true,
+    /** A mark beside the value (the trigger's brand, a ticket source's logo). */
+    leadingIcon: ImageVector? = null,
     items: @Composable MenuScope.() -> Unit,
 ) {
     val colors = OptioTheme.colors
@@ -254,6 +257,10 @@ internal fun MenuRow(
         ) {
             Text(label, style = OptioTheme.type.body, color = if (enabled) colors.label else colors.tertiaryLabel, maxLines = 1)
             Spacer(Modifier.width(Spacing.xs))
+            if (leadingIcon != null && !placeholder) {
+                Spacer(Modifier.weight(1f))
+                GlyphIcon(leadingIcon, contentDescription = null, tint = colors.secondaryLabel, modifier = Modifier.size(16.dp))
+            }
             Text(
                 value,
                 style = if (mono && !placeholder) OptioTheme.type.monoSubheadline else OptioTheme.type.body,
@@ -261,7 +268,7 @@ internal fun MenuRow(
                 maxLines = 1,
                 overflow = if (mono) TextOverflow.StartEllipsis else TextOverflow.Ellipsis,
                 textAlign = TextAlign.End,
-                modifier = Modifier.weight(1f),
+                modifier = if (leadingIcon != null && !placeholder) Modifier else Modifier.weight(1f),
             )
             Icon(Icons.Filled.UnfoldMore, contentDescription = null, tint = colors.tertiaryLabel, modifier = Modifier.size(16.dp))
         }
@@ -300,7 +307,7 @@ internal fun MenuScope.MenuChoice(
         leadingIcon = {
             when {
                 selected -> Icon(Icons.Filled.Check, contentDescription = "Selected", tint = colors.accent)
-                icon != null -> Icon(icon, contentDescription = null)
+                icon != null -> GlyphIcon(icon, contentDescription = null)
                 else -> Spacer(Modifier.size(24.dp))
             }
         },

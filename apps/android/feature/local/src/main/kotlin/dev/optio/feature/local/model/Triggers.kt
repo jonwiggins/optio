@@ -1,17 +1,15 @@
 package dev.optio.feature.local.model
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ConfirmationNumber
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Webhook
 import androidx.compose.ui.graphics.vector.ImageVector
 import dev.optio.core.model.arrayValue
 import dev.optio.core.model.boolValue
 import dev.optio.core.model.stringValue
+import dev.optio.core.ui.components.BrandIcons
 import dev.optio.feature.local.api.LocalTrigger
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -38,9 +36,9 @@ enum class TriggerKind(val raw: String, val label: String) {
                 SCHEDULE -> Icons.Outlined.Schedule
                 WEBHOOK -> Icons.Outlined.Webhook
                 TICKET -> Icons.Outlined.ConfirmationNumber
-                GITHUB -> Icons.Outlined.Code
-                SLACK -> Icons.Outlined.Tag
-                LINEAR -> Icons.Outlined.Bolt
+                GITHUB -> BrandIcons.GitHub
+                SLACK -> BrandIcons.Slack
+                LINEAR -> BrandIcons.Linear
             }
 
     companion object {

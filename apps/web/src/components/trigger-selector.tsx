@@ -10,6 +10,7 @@
 
 import { useMemo, useState } from "react";
 import { Clock, Play, Webhook, Ticket } from "lucide-react";
+import { SegmentedButton, SegmentedGroup } from "@/components/ui/segmented";
 
 export type TriggerType = "manual" | "schedule" | "webhook" | "ticket";
 
@@ -98,9 +99,7 @@ export function TriggerSelector({
   return (
     <div className="space-y-3">
       {label && <label className="block text-sm text-text-muted">{label}</label>}
-      <div
-        className={`flex flex-wrap gap-1.5 p-1 rounded-lg ${panelBg} border border-border w-fit max-w-full`}
-      >
+      <SegmentedGroup size="md" surface={inset ? "bg" : "card"} wrap>
         {!hideManual && (
           <TriggerTypeButton
             icon={<Play className="w-3.5 h-3.5" />}
@@ -132,7 +131,7 @@ export function TriggerSelector({
           disabled={disabledTypes.ticket}
         />
         {extra}
-      </div>
+      </SegmentedGroup>
 
       {!hideConfig && !extraActive && value.type === "schedule" && (
         <div className={`p-3 rounded-lg ${panelBg} border border-border space-y-2`}>
@@ -306,23 +305,9 @@ export function TriggerTypeButton({
   /** Why it can't be picked right now; the active pill is never disabled. */
   disabled?: string;
 }) {
-  const blocked = !!disabled && !active;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={blocked}
-      title={blocked ? disabled : undefined}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-        active
-          ? "bg-primary text-white"
-          : blocked
-            ? "text-text-muted/40 cursor-not-allowed"
-            : "text-text-muted hover:text-text"
-      }`}
-    >
-      {icon}
+    <SegmentedButton active={active} onClick={onClick} disabled={disabled} icon={icon}>
       {label}
-    </button>
+    </SegmentedButton>
   );
 }

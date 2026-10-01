@@ -6,10 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Adjust
-import androidx.compose.material.icons.outlined.CallMerge
-import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,7 +13,6 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
@@ -26,8 +21,8 @@ import dev.optio.core.model.LocalTerminal
 import dev.optio.core.model.LocalTerminalPendingReason
 import dev.optio.core.model.LocalTerminalState
 import dev.optio.core.model.WorkLink
-import dev.optio.core.model.WorkLinkKind
 import dev.optio.core.ui.components.OptioRow
+import dev.optio.core.ui.components.glyph
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.mono
 import dev.optio.core.ui.format.LocalClock
@@ -41,15 +36,6 @@ import dev.optio.feature.local.model.LocalPresentation
 @Composable
 @ReadOnlyComposable
 internal fun optioIsDark(): Boolean = OptioTheme.colors.page.luminance() < 0.5f
-
-/** The icon a work link wears: a PR, a ticket, a bare `#123` reference. */
-internal val WorkLink.icon: ImageVector
-    get() =
-        when (kind) {
-            WorkLinkKind.PR -> Icons.Outlined.CallMerge
-            WorkLinkKind.REF -> Icons.Outlined.Tag
-            else -> Icons.Outlined.Adjust
-        }
 
 /**
  * Small chips for a terminal's PR / ticket links (iOS `WorkLinkBadges`, web `work-links.tsx`): the
@@ -76,7 +62,7 @@ internal fun WorkLinkBadges(
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(link.icon, contentDescription = null, tint = colors.secondaryLabel, modifier = Modifier.size(12.dp))
+                Icon(link.glyph, contentDescription = null, tint = colors.secondaryLabel, modifier = Modifier.size(12.dp))
                 Text(LocalPresentation.shortLinkLabel(link), style = type.caption2.mono(), color = colors.secondaryLabel, maxLines = 1)
             }
         }

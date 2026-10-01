@@ -48,6 +48,22 @@ describe("CodexAdapter", () => {
       repoBranch: "main",
     };
 
+    it("runs on Bedrock without an OpenAI key in bedrock mode", () => {
+      const config = adapter.buildContainerConfig({
+        ...baseInput,
+        codexAuthMode: "bedrock",
+        modelProviderEnv: { AWS_REGION: "us-west-2", AWS_ACCESS_KEY_ID: "a" },
+        codexProviderConfig: ['model_provider="amazon-bedrock"'],
+      });
+      expect(config.requiredSecrets).toEqual([]);
+      expect(config.env).toMatchObject({
+        OPTIO_CODEX_AUTH_MODE: "bedrock",
+        AWS_REGION: "us-west-2",
+        AWS_ACCESS_KEY_ID: "a",
+        OPTIO_CODEX_PROVIDER_CONFIG: '["model_provider=\\"amazon-bedrock\\""]',
+      });
+    });
+
     it("uses rendered prompt when available", () => {
       const config = adapter.buildContainerConfig({
         ...baseInput,

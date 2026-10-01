@@ -26,6 +26,7 @@ web:
 
 # --- Optio operations assistant ---
 optio:
+  enabled: false
   image:
     repository: optio-optio
     pullPolicy: Never

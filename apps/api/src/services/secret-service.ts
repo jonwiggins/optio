@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { eq, and, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { secrets } from "../db/schema.js";
+import { secrets, workspaces } from "../db/schema.js";
 import { logger } from "../logger.js";
 import type { SecretRef } from "@optio/shared";
 
@@ -464,9 +464,17 @@ export async function resolveSecretsForTask(
 export async function resolveSecretsForSetup(
   repoUrl: string,
   workspaceId?: string | null,
+  opts?: {
+    /**
+     * Include the organization's global secrets (the legacy default). Off
+     * when the workspace restricts pods to the secrets work picks: then the
+     * repo pod gets only the repo's own secrets.
+     */
+    orgSecrets?: boolean;
+  },
 ): Promise<Record<string, string>> {
   // Get all global and repo-scoped secret names (never "user" scope)
-  const globalSecrets = await listSecrets("global", workspaceId);
+  const globalSecrets = opts?.orgSecrets === false ? [] : await listSecrets("global", workspaceId);
   const repoSecrets = await listSecrets(repoUrl, workspaceId);
 
   // Merge names (unique) - repo-scoped will override global in resolveSecretsForTask
@@ -483,4 +491,115 @@ export async function resolveSecretsForSetup(
 
   // Resolve with repo→global fallback (no userId — setup is pod-level, not user-level)
   return resolveSecretsForTask(safeNames, repoUrl, workspaceId);
+}
+
+/**
+ * Optio's own configuration stored as secrets (agent sign-in modes, Vertex
+ * settings): never offered to work as a pod secret.
+ */
+function isOptioConfigSecret(name: string): boolean {
+  return (
+    /_AUTH_MODE$/.test(name) ||
+    name.startsWith("CLAUDE_VERTEX_") ||
+    name === "CODEX_APP_SERVER_URL" ||
+    name.startsWith("OPENCODE_DEFAULT_")
+  );
+}
+
+/**
+ * The secrets a piece of work can give its pod, by name: the organization's
+ * (global scope, instance-wide or this workspace's) and the viewer's own.
+ * Identity tokens and Optio's own settings are never offered.
+ */
+export async function listPickableSecrets(
+  workspaceId: string | null,
+  userId: string | null,
+): Promise<Array<{ name: string; owner: "workspace" | "me" }>> {
+  const org = await db
+    .select({ name: secrets.name })
+    .from(secrets)
+    .where(
+      and(
+        eq(secrets.scope, "global"),
+        workspaceId
+          ? sql`(${secrets.workspaceId} IS NULL OR ${secrets.workspaceId} = ${workspaceId})`
+          : isNull(secrets.workspaceId),
+      ),
+    );
+  const mine = userId
+    ? await db
+        .select({ name: secrets.name })
+        .from(secrets)
+        .where(and(eq(secrets.scope, "user"), eq(secrets.userId, userId)))
+    : [];
+  const offer = (n: string) => !IDENTITY_SECRET_DENYLIST.has(n) && !isOptioConfigSecret(n);
+  const orgNames = [...new Set(org.map((r) => r.name).filter(offer))].sort();
+  const myNames = [...new Set(mine.map((r) => r.name).filter(offer))].sort();
+  return [
+    ...orgNames.map((name) => ({ name, owner: "workspace" as const })),
+    ...myNames.map((name) => ({ name, owner: "me" as const })),
+  ];
+}
+
+/**
+ * The secrets a piece of work picked for its pod, by name → value. Personal
+ * work (an owner) gets its owner's secret first, then the repo's, then the
+ * organization's; organization work never sees a personal secret. A picked
+ * name that no longer exists is reported in `missing` rather than failing
+ * the run.
+ */
+export async function resolvePodSecrets(
+  names: string[] | null | undefined,
+  opts: { repoUrl?: string | null; workspaceId?: string | null; ownerUserId?: string | null },
+): Promise<{ env: Record<string, string>; missing: string[] }> {
+  const env: Record<string, string> = {};
+  const missing: string[] = [];
+  for (const name of new Set(names ?? [])) {
+    if (IDENTITY_SECRET_DENYLIST.has(name) || isOptioConfigSecret(name)) continue;
+    let value: string | null = null;
+    if (opts.ownerUserId) {
+      value = await retrieveSecret(name, "user", undefined, opts.ownerUserId).catch(() => null);
+    }
+    if (value === null && opts.repoUrl) {
+      value = await retrieveSecretWithFallback(name, opts.repoUrl, opts.workspaceId).catch(
+        () => null,
+      );
+    }
+    if (value === null) {
+      value = await retrieveSecretWithFallback(name, "global", opts.workspaceId).catch(() => null);
+    }
+    if (value === null) missing.push(name);
+    else env[name] = value;
+  }
+  return { env, missing };
+}
+
+/** Whether every picked name is a secret this work's owner may give its pod. */
+export async function podSecretsSelectionError(
+  names: string[] | null | undefined,
+  opts: { workspaceId: string | null; ownerUserId: string | null },
+): Promise<string | null> {
+  if (!names || names.length === 0) return null;
+  const pickable = await listPickableSecrets(opts.workspaceId, opts.ownerUserId);
+  const org = new Set(pickable.filter((s) => s.owner === "workspace").map((s) => s.name));
+  const mine = new Set(pickable.filter((s) => s.owner === "me").map((s) => s.name));
+  for (const name of names) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name)) return `"${name}" isn't a secret name`;
+    if (org.has(name)) continue;
+    if (mine.has(name)) continue;
+    return opts.ownerUserId
+      ? `There's no secret named ${name} for this work`
+      : `${name} isn't one of the organization's secrets — personal secrets need work set to "Just me"`;
+  }
+  return null;
+}
+
+/** Whether the workspace gives pods only the secrets work picks. */
+export async function workspaceRestrictsPodSecrets(workspaceId: string | null): Promise<boolean> {
+  if (!workspaceId) return false;
+  const [row] = await db
+    .select({ restrict: workspaces.restrictPodSecrets })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId));
+  return row?.restrict ?? false;
 }

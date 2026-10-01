@@ -60,12 +60,16 @@ import dev.optio.core.navigation.routes.PullRequestRoute
 import dev.optio.core.navigation.routes.ReviewDetailRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
+import dev.optio.core.ui.components.Brand
+import dev.optio.core.ui.components.BrandMark
 import dev.optio.core.ui.components.ChipPicker
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.OptioRow
+import dev.optio.core.ui.components.PrGlyph
+import dev.optio.core.ui.components.PrGlyphState
 import dev.optio.core.ui.components.PullRefresh
 import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.components.dimmedWhileLoading
@@ -238,6 +242,16 @@ internal fun ReviewsContent(
     }
 }
 
+/** GitLab's mark for a merge request, else GitHub's pull-request glyph in the PR's state colour. */
+@Composable
+internal fun PrRowGlyph(pr: PullRequestSummary) {
+    if (Brand.fromUrl(pr.url) == Brand.GitLab) {
+        BrandMark(Brand.GitLab, size = 13.dp, contentDescription = "GitLab merge request", tint = OptioTheme.colors.secondaryLabel)
+    } else {
+        PrGlyph(if (pr.draft == true) PrGlyphState.DRAFT else PrGlyphState.from(pr.state), size = 13.dp)
+    }
+}
+
 /** "Paste a PR URL to review": a capsule field with a send button (iOS's top list row). */
 @Composable
 internal fun PrUrlField(
@@ -346,6 +360,7 @@ internal fun PullRequestRow(
             trailing = trailing.ifEmpty { null },
             trailingTone = trailingTone,
             footer = pr.labels?.takeIf { it.isNotEmpty() }?.let { metaText(it) },
+            metaGlyph = { PrRowGlyph(pr) },
             onClick = onOpen,
             onLongClick = { menu = true },
             onClickLabel = if (review != null) "Open review" else "Open pull request",
@@ -382,7 +397,10 @@ internal fun PullRequestRow(
             }
             DropdownMenuItem(
                 text = { Text(openLabel) },
-                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null) },
+                leadingIcon = {
+                    val brand = Brand.fromUrl(pr.url)
+                    if (brand != null) BrandMark(brand, size = 20.dp, contentDescription = null) else Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
+                },
                 onClick = {
                     menu = false
                     onOpenExternal()

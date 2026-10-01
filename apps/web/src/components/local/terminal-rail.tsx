@@ -21,16 +21,19 @@ import { useLocalFeed } from "./local-feed";
 import { useBellStore } from "./bell-store";
 import { collectWorkLinks, WorkLinkBadges, workLinksSearchText } from "./work-links";
 import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
+import { nextNeedsYou, orderSessions } from "./session-order";
 
 /**
  * Session rail: replaces the app sidebar while you're inside a terminal
  * (/local/:id) so jumping between many sessions is one click or one
- * keystroke. Grouped by what matters — needs you first — and searchable
- * by title, dir, host, or the PR / ticket the session is working on.
+ * keystroke. Ordered by when you last typed into a session (else when it
+ * was made), live above Finished, so rows stay put while agents flip
+ * between working and needs-you; searchable by title, dir, host, or the
+ * PR / ticket the session is working on.
  *
  * Keyboard (captured before xterm sees it):
  *   Ctrl/⌘ + Shift + ↑ / ↓   previous / next session in rail order
- *   Ctrl/⌘ + Shift + ↵       jump to the oldest "needs you" session
+ *   Ctrl/⌘ + Shift + ↵       jump to the next "needs you" session (rail order)
  *
  * Split view: the row's ⧉ button (or Shift+click) opens a session beside the
  * current one; the extra panes ride along in ?split= as you switch primaries.
@@ -44,34 +47,15 @@ function dotFor(t: any): string {
   return SESSION_DOT[sessionTone(t)];
 }
 
+/**
+ * Live sessions, then Finished — each in the stable order of
+ * session-order.ts. Attention never regroups rows (that made them jump
+ * under the pointer); it shows on the row and in the header count.
+ */
 function groupTerminals(terminals: any[]): Group[] {
-  const byTime = (a: any, b: any) =>
-    new Date(b.lastActivityAt ?? b.updatedAt).getTime() -
-    new Date(a.lastActivityAt ?? a.updatedAt).getTime();
-  const needsYou = terminals
-    .filter((t) => t.attentionState === "needs_you")
-    // Oldest wait first — the one you've kept waiting longest is on top.
-    .sort((a, b) => -byTime(a, b));
-  const live = (t: any) => t.state === "running" || t.state === "launching";
-  const working = terminals
-    .filter((t) => t.attentionState !== "needs_you" && live(t) && t.attentionState === "working")
-    .sort(byTime);
-  const idle = terminals
-    .filter(
-      (t) =>
-        t.attentionState !== "needs_you" &&
-        ((live(t) && t.attentionState !== "working") || t.state === "pending"),
-    )
-    .sort(byTime);
-  const finished = terminals
-    .filter(
-      (t) => t.attentionState !== "needs_you" && (t.state === "exited" || t.state === "error"),
-    )
-    .sort(byTime);
+  const { live, finished } = orderSessions(terminals);
   return [
-    { key: "needs_you", label: "Needs you", tone: "text-warning", items: needsYou },
-    { key: "working", label: "Working", tone: "text-primary", items: working },
-    { key: "idle", label: "Idle", tone: "text-text-muted", items: idle },
+    { key: "live", label: "Live", tone: "text-text-muted", items: live },
     { key: "finished", label: "Finished", tone: "text-text-muted/70", items: finished },
   ].filter((g) => g.items.length > 0);
 }
@@ -107,7 +91,8 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
   }, [terminals, search, hostName]);
 
   const groups = useMemo(() => groupTerminals(filtered), [filtered]);
-  const order = useMemo(() => groups.flatMap((g) => g.items.map((t) => t.id)), [groups]);
+  const ordered = useMemo(() => groups.flatMap((g) => g.items), [groups]);
+  const order = useMemo(() => ordered.map((t) => t.id), [ordered]);
 
   const go = useCallback(
     (id: string, opts: { split?: boolean } = {}) => {
@@ -139,8 +124,8 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
         e.stopPropagation();
         go(next);
       } else if (e.key === "Enter") {
-        const target = groups.find((g) => g.key === "needs_you")?.items[0];
-        if (!target || target.id === activeId) return;
+        const target = nextNeedsYou(ordered, activeId);
+        if (!target) return;
         e.preventDefault();
         e.stopPropagation();
         go(target.id);
@@ -148,7 +133,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [order, groups, activeId, go]);
+  }, [order, ordered, activeId, go]);
 
   // Keep the active row in view when switching by keyboard.
   useEffect(() => {
@@ -157,7 +142,16 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
     el?.scrollIntoView({ block: "nearest" });
   }, [activeId, groups]);
 
-  const needsYouCount = groups.find((g) => g.key === "needs_you")?.items.length ?? 0;
+  // Every session waiting on you, live or just finished, across the
+  // unfiltered list — the header count is how you find them now.
+  const needsYouCount = useMemo(
+    () => terminals.filter((t) => t.attentionState === "needs_you").length,
+    [terminals],
+  );
+  const jumpToNeedsYou = () => {
+    const target = nextNeedsYou(ordered, activeId);
+    if (target) go(target.id);
+  };
   const armed = useBellStore((s) => s.armed);
 
   return (
@@ -204,6 +198,19 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
             className="w-full pl-7 pr-2 py-1.5 rounded-md bg-bg border border-border text-xs focus:outline-none focus:border-primary"
           />
         </div>
+        {needsYouCount > 0 && (
+          <button
+            type="button"
+            onClick={jumpToNeedsYou}
+            title="Jump to the next session that needs you (⌃⇧↵)"
+            data-testid="rail-needs-you"
+            className="mt-2 w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium text-warning bg-warning/10 hover:bg-warning/15 transition-colors"
+          >
+            <Zap className="w-3 h-3" />
+            {needsYouCount} need{needsYouCount === 1 ? "s" : ""} you
+            <span className="ml-auto font-mono opacity-70">⌃⇧↵</span>
+          </button>
+        )}
       </div>
 
       <div ref={listRef} className="flex-1 overflow-y-auto py-1.5">
@@ -220,7 +227,6 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
                 g.tone,
               )}
             >
-              {g.key === "needs_you" && <Zap className="w-3 h-3" />}
               {g.label}
               <span className="opacity-60 font-normal">{g.items.length}</span>
             </div>

@@ -285,16 +285,6 @@ enum JobFormat {
         agentRuntimes.first { $0.0 == value }?.1 ?? value.replacingOccurrences(of: "-", with: " ").capitalized
     }
 
-    static func triggerIcon(_ type: String) -> String {
-        switch type {
-        case "manual": return "hand.tap"
-        case "schedule": return "clock"
-        case "webhook": return "antenna.radiowaves.left.and.right"
-        case "ticket": return "ticket"
-        default: return "bolt"
-        }
-    }
-
     static func prettyJSON(_ dict: [String: AnyCodable]?) -> String? {
         guard let dict, !dict.isEmpty else { return nil }
         let enc = JSONEncoder()

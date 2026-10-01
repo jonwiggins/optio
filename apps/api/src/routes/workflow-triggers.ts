@@ -1,3 +1,4 @@
+import { workActor, workChangeError } from "../services/work-ownership.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -92,6 +93,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         params: workflowParamsSchema,
         body: CreateTriggerBodySchema,
         response: {
+          403: ErrorResponseSchema,
           201: TriggerResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -108,6 +110,10 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Workflow not found" });
+      }
+      {
+        const changeErr = await workChangeError(workflow.ownerUserId, workActor(req), "edit");
+        if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
       const configError = triggerService.validateTriggerConfig(input.type, input.config);
@@ -152,6 +158,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         params: triggerParamsSchema,
         body: UpdateTriggerBodySchema,
         response: {
+          403: ErrorResponseSchema,
           200: TriggerResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -168,6 +175,10 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Workflow not found" });
+      }
+      {
+        const changeErr = await workChangeError(workflow.ownerUserId, workActor(req), "edit");
+        if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
       const existing = await triggerService.getTriggerFor("job", id, triggerId);
@@ -212,6 +223,7 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
         tags: ["Workflows"],
         params: triggerParamsSchema,
         response: {
+          403: ErrorResponseSchema,
           204: z.null().describe("Trigger deleted"),
           404: ErrorResponseSchema,
         },
@@ -225,6 +237,10 @@ export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && workflow.workspaceId && workflow.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Workflow not found" });
+      }
+      {
+        const changeErr = await workChangeError(workflow.ownerUserId, workActor(req), "edit");
+        if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
       const existing = await triggerService.getTriggerFor("job", id, triggerId);

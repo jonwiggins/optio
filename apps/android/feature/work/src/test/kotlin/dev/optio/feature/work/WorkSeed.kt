@@ -48,6 +48,23 @@ object WorkSeed {
         )
     }
 
+    /** [sources] with ticket sources and PR states on a few tasks, so rows wear brand marks. */
+    val branded: WorkFeed.Sources by lazy {
+        val origins = listOf("github", "linear", "jira", "notion", "gitlab")
+        var next = 0
+        sources.copy(
+            unified = sources.unified.map { t ->
+                when {
+                    t.type != "repo-task" -> t
+                    t.prUrl != null -> t.copy(prState = if (t.state == "completed") "merged" else "open", ticketSource = origins[next++ % origins.size])
+                    t.state == "running" || t.state == "needs_attention" || t.state == "failed" -> t.copy(ticketSource = origins[next++ % origins.size])
+                    else -> t
+                }
+            },
+            localTerminals = sources.localTerminals.mapIndexed { i, t -> if (i == 0) t.copy(spawnedBy = "slack") else t },
+        )
+    }
+
     val rows: List<WorkRow> by lazy { WorkFeed.collect(sources) }
 
     /** The feed state a screen shows once the seed has loaded. */

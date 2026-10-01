@@ -4,7 +4,19 @@ import { useEffect, useState } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import Link from "next/link";
-import { Loader2, FolderGit2, Lock, Globe, ChevronRight, Settings2, Plus } from "lucide-react";
+import { FolderGit2, Lock, Globe, ChevronRight, GitBranch, Box, Plus } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { BrandIcon, type Brand } from "@/components/brand-icon";
+
+/** The git host's mark, from the repo URL (GitHub unless it says otherwise). */
+function repoBrand(repoUrl: string | undefined): Brand | null {
+  const url = (repoUrl ?? "").toLowerCase();
+  if (url.includes("codecommit")) return null;
+  if (url.includes("gitlab")) return "gitlab";
+  if (url.includes("bitbucket")) return "bitbucket";
+  return "github";
+}
 
 export default function ReposPage() {
   usePageTitle("Repositories");
@@ -19,66 +31,93 @@ export default function ReposPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const privateCount = repos.filter((r) => r.isPrivate).length;
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Repositories</h1>
-        <Link
-          href="/repos/new"
-          className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Repository
-        </Link>
-      </div>
+      <PageHeader
+        icon={FolderGit2}
+        title="Repositories"
+        description="Repos Optio can clone into a pod, open PRs against, and watch."
+        meta={
+          repos.length > 0 ? (
+            <span>
+              {repos.length} repo{repos.length === 1 ? "" : "s"} · {privateCount} private
+            </span>
+          ) : null
+        }
+        actions={
+          <Link
+            href="/repos/new"
+            className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Repository
+          </Link>
+        }
+      />
 
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-text-muted">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading...
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-14 skeleton-shimmer rounded-lg" />
+          ))}
         </div>
       ) : repos.length === 0 ? (
-        <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
-          <FolderGit2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>No repositories configured</p>
-          <p className="text-xs mt-1">
-            <Link href="/repos/new" className="text-primary hover:underline">
-              Add a repository
-            </Link>{" "}
-            to get started.
-          </p>
-        </div>
+        <EmptyState
+          icon={FolderGit2}
+          title="No repositories configured"
+          description="Add a GitHub, GitLab, or CodeCommit repo to run PR work against it."
+          action={{ label: "Add Repository", href: "/repos/new" }}
+        />
       ) : (
-        <div className="space-y-2">
-          {repos.map((repo: any) => (
-            <Link
-              key={repo.id}
-              href={`/repos/${repo.id}`}
-              className="flex items-center justify-between p-5 rounded-xl border border-border/50 bg-bg-card hover:bg-bg-hover transition-colors"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <FolderGit2 className="w-5 h-5 text-text-muted shrink-0" />
-                <div className="min-w-0">
+        <div className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60">
+          {repos.map((repo: any) => {
+            const brand = repoBrand(repo.repoUrl);
+            return (
+              <Link
+                key={repo.id}
+                href={`/repos/${repo.id}`}
+                className="group flex items-center gap-3 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+              >
+                <span className="grid place-items-center w-7 h-7 rounded-md border border-border/70 bg-bg/60 text-text-muted shrink-0">
+                  {brand ? (
+                    <BrandIcon brand={brand} className="w-3.5 h-3.5" />
+                  ) : (
+                    <FolderGit2 className="w-3.5 h-3.5" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{repo.fullName}</span>
+                    <span className="text-sm font-medium text-text-heading truncate">
+                      {repo.fullName}
+                    </span>
                     {repo.isPrivate ? (
-                      <Lock className="w-3 h-3 text-text-muted" />
+                      <Lock className="w-3 h-3 text-text-muted shrink-0" aria-label="Private" />
                     ) : (
-                      <Globe className="w-3 h-3 text-text-muted" />
+                      <Globe className="w-3 h-3 text-text-muted shrink-0" aria-label="Public" />
                     )}
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-text-muted mt-0.5">
-                    <span>Branch: {repo.defaultBranch}</span>
-                    <span>Image: {repo.imagePreset ?? "base"}</span>
-                    {repo.autoMerge && <span className="text-warning">auto-merge</span>}
-                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2 text-text-muted">
-                <Settings2 className="w-4 h-4" />
-                <ChevronRight className="w-4 h-4" />
-              </div>
-            </Link>
-          ))}
+                <div className="hidden sm:flex items-center gap-4 text-[11px] text-text-muted shrink-0">
+                  <span className="inline-flex items-center gap-1">
+                    <GitBranch className="w-3 h-3" />
+                    <span className="font-mono">{repo.defaultBranch}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Box className="w-3 h-3" />
+                    {repo.imagePreset ?? "base"}
+                  </span>
+                  {repo.autoMerge && (
+                    <span className="px-1.5 py-0.5 rounded bg-warning/10 text-warning">
+                      auto-merge
+                    </span>
+                  )}
+                </div>
+                <ChevronRight className="w-4 h-4 text-text-muted/50 group-hover:text-text-muted shrink-0 transition-colors" />
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

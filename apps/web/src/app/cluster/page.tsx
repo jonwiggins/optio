@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import Link from "next/link";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
-  Loader2,
   Server,
   Circle,
   ChevronRight,
@@ -19,6 +18,11 @@ import {
   Container,
   Database,
 } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { Panel, PanelEmpty } from "@/components/ui/panel";
+import { Segmented } from "@/components/ui/segmented";
+import { StatTile } from "@/components/ui/stat-tile";
 
 const STATUS_COLORS: Record<string, string> = {
   Running: "text-success",
@@ -58,18 +62,54 @@ export default function ClusterPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const header = (
+    <PageHeader
+      icon={Server}
+      title="Cluster"
+      description="The Kubernetes side of Optio: nodes, pods, events, and services in the optio namespace."
+      actions={
+        <button
+          onClick={refresh}
+          className="p-2 rounded-lg hover:bg-bg-hover text-text-muted transition-all btn-press hover:text-text"
+          title="Refresh"
+          aria-label="Refresh"
+        >
+          <RefreshCw className="w-4 h-4" />
+        </button>
+      }
+    />
+  );
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full text-text-muted">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading cluster...
+      <div className="p-6 max-w-6xl mx-auto">
+        {header}
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-[84px] skeleton-shimmer rounded-xl" />
+            ))}
+          </div>
+          <div className="h-20 skeleton-shimmer rounded-xl" />
+          <div className="space-y-2">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-14 skeleton-shimmer rounded-lg" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
   if (!data) {
     return (
-      <div className="flex items-center justify-center h-full text-error">
-        Failed to load cluster data
+      <div className="p-6 max-w-6xl mx-auto">
+        {header}
+        <EmptyState
+          icon={AlertTriangle}
+          title="Failed to load cluster data"
+          description="The API couldn't reach the Kubernetes API. It retries every few seconds."
+        />
       </div>
     );
   }
@@ -77,231 +117,257 @@ export default function ClusterPage() {
   const { nodes, pods, services, events, repoPods, summary } = data;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Cluster</h1>
-        <button onClick={refresh} className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted">
-          <RefreshCw className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SummaryCard
-          icon={Server}
-          label="Nodes"
-          value={`${summary.readyNodes}/${summary.totalNodes}`}
-          sub="ready"
-          color="text-success"
-        />
-        <SummaryCard
-          icon={Container}
-          label="Pods"
-          value={`${summary.runningPods}/${summary.totalPods}`}
-          sub="running"
-          color="text-primary"
-        />
-        <SummaryCard
-          icon={Activity}
-          label="Agent Pods"
-          value={String(summary.agentPods)}
-          sub="optio-managed"
-          color="text-warning"
-        />
-        <SummaryCard
-          icon={Database}
-          label="Infrastructure"
-          value={String(summary.infraPods)}
-          sub="postgres + redis"
-          color="text-info"
-        />
-      </div>
-
-      {/* Node info */}
-      {nodes.length > 0 && (
-        <div className="p-3 rounded-xl border border-border/50 bg-bg-card">
-          <h3 className="text-xs font-medium text-text-muted mb-2">Nodes</h3>
-          {nodes.map((node: any) => (
-            <div key={node.name} className="flex items-center gap-4 text-xs">
-              <Circle
-                className={cn(
-                  "w-2 h-2 fill-current",
-                  node.status === "Ready" ? "text-success" : "text-error",
-                )}
-              />
-              <span className="font-mono font-medium">{node.name}</span>
-              <span className="text-text-muted">{node.kubeletVersion}</span>
-              <span className="text-text-muted flex items-center gap-1">
-                <Cpu className="w-3 h-3" />
-                {node.cpuPercent != null ? (
-                  <>
-                    <span className="font-medium text-text">{node.cpuPercent}%</span> of {node.cpu}{" "}
-                    cores
-                  </>
-                ) : (
-                  <>{node.cpu} cores</>
-                )}
-              </span>
-              <span className="text-text-muted flex items-center gap-1">
-                <HardDrive className="w-3 h-3" />
-                {node.memoryUsedGi != null ? (
-                  <>
-                    <span className="font-medium text-text">{node.memoryUsedGi}</span> /{" "}
-                    {node.memoryTotalGi} Gi
-                  </>
-                ) : (
-                  formatK8sResource(node.memory)
-                )}
-              </span>
-              <span className="text-text-muted">{node.containerRuntime}</span>
-            </div>
-          ))}
+    <div className="p-6 max-w-6xl mx-auto">
+      {header}
+      <div className="space-y-6">
+        {/* Summary tiles */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatTile
+            icon={Server}
+            label="Nodes"
+            value={withSub(`${summary.readyNodes}/${summary.totalNodes}`, "ready")}
+            tone={summary.readyNodes < summary.totalNodes ? "text-error" : undefined}
+          />
+          <StatTile
+            icon={Container}
+            label="Pods"
+            value={withSub(`${summary.runningPods}/${summary.totalPods}`, "running")}
+          />
+          <StatTile
+            icon={Activity}
+            label="Agent pods"
+            value={withSub(String(summary.agentPods), "optio-managed")}
+          />
+          <StatTile
+            icon={Database}
+            label="Infrastructure"
+            value={withSub(String(summary.infraPods), "postgres + redis")}
+          />
         </div>
-      )}
 
-      {/* Tabs */}
-      <div className="flex gap-0 border-b border-border">
-        {(["pods", "events", "services"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              "px-4 py-2 text-sm border-b-2 transition-colors capitalize",
-              tab === t
-                ? "border-primary text-primary"
-                : "border-transparent text-text-muted hover:text-text",
-            )}
+        {/* Node info */}
+        {nodes.length > 0 && (
+          <Panel
+            title="Nodes"
+            actions={<span className="text-text-muted tabular-nums">{nodes.length}</span>}
           >
-            {t} {t === "pods" && `(${pods.length})`}
-            {t === "events" && `(${events.length})`}
-            {t === "services" && `(${services.length})`}
-          </button>
-        ))}
-      </div>
-
-      {/* Pods tab */}
-      {tab === "pods" && (
-        <div className="space-y-1.5">
-          {pods.map((pod: any) => {
-            const color = STATUS_COLORS[pod.status] ?? "text-text-muted";
-            const repoPod = repoPods.find((rp: any) => rp.podName === pod.name);
-
-            return (
-              <div
-                key={pod.name}
-                className="flex items-center justify-between p-3 rounded-md border border-border bg-bg-card"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Circle className={cn("w-2.5 h-2.5 fill-current shrink-0", color)} />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm font-medium">{pod.name}</span>
-                      {pod.isOptioManaged && (
-                        <span className="text-[10px] px-1 py-0.5 rounded bg-primary/10 text-primary">
-                          workspace
-                        </span>
+            <div className="divide-y divide-border/40">
+              {nodes.map((node: any) => (
+                <div
+                  key={node.name}
+                  className="flex items-center gap-x-4 gap-y-1 flex-wrap px-4 py-2.5 text-xs"
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Circle
+                      className={cn(
+                        "w-2 h-2 fill-current shrink-0",
+                        node.status === "Ready" ? "text-success" : "text-error",
                       )}
-                      {pod.isInfra && (
-                        <span className="text-[10px] px-1 py-0.5 rounded bg-info/10 text-info">
-                          infra
-                        </span>
+                    />
+                    <span className="font-mono font-medium text-sm truncate">{node.name}</span>
+                  </span>
+                  <span className="text-text-muted">{node.kubeletVersion}</span>
+                  <span className="text-text-muted flex items-center gap-1">
+                    <Cpu className="w-3 h-3" />
+                    {node.cpuPercent != null ? (
+                      <>
+                        <span className="font-medium text-text">{node.cpuPercent}%</span> of{" "}
+                        {node.cpu} cores
+                      </>
+                    ) : (
+                      <>{node.cpu} cores</>
+                    )}
+                  </span>
+                  <span className="text-text-muted flex items-center gap-1">
+                    <HardDrive className="w-3 h-3" />
+                    {node.memoryUsedGi != null ? (
+                      <>
+                        <span className="font-medium text-text">{node.memoryUsedGi}</span> /{" "}
+                        {node.memoryTotalGi} Gi
+                      </>
+                    ) : (
+                      formatK8sResource(node.memory)
+                    )}
+                  </span>
+                  <span className="text-text-muted">{node.containerRuntime}</span>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        )}
+
+        {/* Tabs */}
+        <Segmented
+          size="md"
+          surface="card"
+          aria-label="Cluster resources"
+          value={tab}
+          onChange={setTab}
+          options={[
+            {
+              value: "pods",
+              label: "Pods",
+              icon: <Container className="w-3.5 h-3.5" />,
+              count: pods.length,
+            },
+            {
+              value: "events",
+              label: "Events",
+              icon: <AlertTriangle className="w-3.5 h-3.5" />,
+              count: events.length,
+            },
+            {
+              value: "services",
+              label: "Services",
+              icon: <Network className="w-3.5 h-3.5" />,
+              count: services.length,
+            },
+          ]}
+        />
+
+        {/* Pods tab */}
+        {tab === "pods" && (
+          <Panel title="Pods">
+            {pods.length === 0 ? (
+              <PanelEmpty>No pods in the optio namespace.</PanelEmpty>
+            ) : (
+              <div className="divide-y divide-border/40">
+                {pods.map((pod: any) => {
+                  const color = STATUS_COLORS[pod.status] ?? "text-text-muted";
+                  const repoPod = repoPods.find((rp: any) => rp.podName === pod.name);
+
+                  return (
+                    <div
+                      key={pod.name}
+                      className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-bg-hover/40 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Circle className={cn("w-2.5 h-2.5 fill-current shrink-0", color)} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-mono text-sm font-medium truncate">
+                              {pod.name}
+                            </span>
+                            {pod.isOptioManaged && (
+                              <span className="text-[10px] px-1.5 py-px rounded bg-primary/10 text-primary shrink-0">
+                                workspace
+                              </span>
+                            )}
+                            {pod.isInfra && (
+                              <span className="text-[10px] px-1.5 py-px rounded bg-info/10 text-info shrink-0">
+                                infra
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[11px] text-text-muted mt-0.5">
+                            <span className={color}>{pod.status}</span>
+                            {pod.cpuMillicores != null && <span>{pod.cpuMillicores}m CPU</span>}
+                            {pod.memoryMi != null && <span>{pod.memoryMi} Mi RAM</span>}
+                            {pod.restarts > 0 && (
+                              <span className="text-warning">{pod.restarts} restarts</span>
+                            )}
+                            <span className="font-mono">{pod.image?.split("/").pop()}</span>
+                            {pod.ip && <span>{pod.ip}</span>}
+                            {pod.startedAt && <span>{formatRelativeTime(pod.startedAt)}</span>}
+                          </div>
+                        </div>
+                      </div>
+                      {repoPod && (
+                        <Link
+                          href={`/cluster/${repoPod.id}`}
+                          className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0"
+                        >
+                          Details <ChevronRight className="w-3 h-3" />
+                        </Link>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 text-[11px] text-text-muted mt-0.5">
-                      <span className={color}>{pod.status}</span>
-                      {pod.cpuMillicores != null && <span>{pod.cpuMillicores}m CPU</span>}
-                      {pod.memoryMi != null && <span>{pod.memoryMi} Mi RAM</span>}
-                      {pod.restarts > 0 && (
-                        <span className="text-warning">{pod.restarts} restarts</span>
+                  );
+                })}
+              </div>
+            )}
+          </Panel>
+        )}
+
+        {/* Events tab */}
+        {tab === "events" && (
+          <Panel title="Events">
+            {events.length === 0 ? (
+              <PanelEmpty>No recent events.</PanelEmpty>
+            ) : (
+              <div className="divide-y divide-border/40">
+                {events.map((event: any, i: number) => (
+                  <div key={i} className="flex items-start gap-3 px-4 py-2.5 text-xs">
+                    <AlertTriangle
+                      className={cn(
+                        "w-3.5 h-3.5 shrink-0 mt-0.5",
+                        event.type === "Warning" ? "text-warning" : "text-info",
                       )}
-                      <span className="font-mono">{pod.image?.split("/").pop()}</span>
-                      {pod.ip && <span>{pod.ip}</span>}
-                      {pod.startedAt && <span>{formatRelativeTime(pod.startedAt)}</span>}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{event.reason}</span>
+                        <span className="text-text-muted font-mono">{event.involvedObject}</span>
+                        {event.count > 1 && <span className="text-text-muted">x{event.count}</span>}
+                      </div>
+                      <p className="text-text-muted mt-0.5">{event.message}</p>
                     </div>
+                    {event.lastTimestamp && (
+                      <span className="text-text-muted/60 shrink-0">
+                        {formatRelativeTime(event.lastTimestamp)}
+                      </span>
+                    )}
                   </div>
-                </div>
-                {repoPod && (
-                  <Link
-                    href={`/cluster/${repoPod.id}`}
-                    className="text-xs text-primary hover:underline flex items-center gap-1"
-                  >
-                    Details <ChevronRight className="w-3 h-3" />
-                  </Link>
-                )}
-              </div>
-            );
-          })}
-          {pods.length === 0 && (
-            <div className="text-center py-8 text-text-muted text-sm">
-              No pods in the optio namespace
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Events tab */}
-      {tab === "events" && (
-        <div className="space-y-1">
-          {events.map((event: any, i: number) => (
-            <div
-              key={i}
-              className="flex items-start gap-3 p-2.5 rounded-md border border-border bg-bg-card text-xs"
-            >
-              <AlertTriangle
-                className={cn(
-                  "w-3.5 h-3.5 shrink-0 mt-0.5",
-                  event.type === "Warning" ? "text-warning" : "text-info",
-                )}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{event.reason}</span>
-                  <span className="text-text-muted font-mono">{event.involvedObject}</span>
-                  {event.count > 1 && <span className="text-text-muted">x{event.count}</span>}
-                </div>
-                <p className="text-text-muted mt-0.5">{event.message}</p>
-                {event.lastTimestamp && (
-                  <span className="text-text-muted/50">
-                    {formatRelativeTime(event.lastTimestamp)}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-          {events.length === 0 && (
-            <div className="text-center py-8 text-text-muted text-sm">No recent events</div>
-          )}
-        </div>
-      )}
-
-      {/* Services tab */}
-      {tab === "services" && (
-        <div className="space-y-1.5">
-          {services.map((svc: any) => (
-            <div
-              key={svc.name}
-              className="flex items-center justify-between p-3 rounded-md border border-border bg-bg-card text-xs"
-            >
-              <div className="flex items-center gap-3">
-                <Network className="w-4 h-4 text-text-muted" />
-                <div>
-                  <span className="font-mono font-medium text-sm">{svc.name}</span>
-                  <span className="text-text-muted ml-2">{svc.type}</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 text-text-muted">
-                <span>{svc.clusterIP}</span>
-                {svc.ports?.map((p: any, i: number) => (
-                  <span key={i}>
-                    {p.port}→{String(p.targetPort)}/{p.protocol}
-                  </span>
                 ))}
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            )}
+          </Panel>
+        )}
+
+        {/* Services tab */}
+        {tab === "services" && (
+          <Panel title="Services">
+            {services.length === 0 ? (
+              <PanelEmpty>No services in the optio namespace.</PanelEmpty>
+            ) : (
+              <div className="divide-y divide-border/40">
+                {services.map((svc: any) => (
+                  <div
+                    key={svc.name}
+                    className="flex items-center justify-between gap-3 flex-wrap px-4 py-2.5 text-xs"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Network className="w-4 h-4 text-text-muted shrink-0" />
+                      <div className="min-w-0">
+                        <span className="font-mono font-medium text-sm">{svc.name}</span>
+                        <span className="text-text-muted ml-2">{svc.type}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 text-text-muted font-mono">
+                      <span>{svc.clusterIP}</span>
+                      {svc.ports?.map((p: any, i: number) => (
+                        <span key={i}>
+                          {p.port}→{String(p.targetPort)}/{p.protocol}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+        )}
+      </div>
     </div>
+  );
+}
+
+/** A StatTile value with a quiet caption line under the number. */
+function withSub(value: ReactNode, sub: ReactNode) {
+  return (
+    <>
+      {value}
+      <div className="text-xs font-normal text-text-muted mt-0.5 tracking-normal">{sub}</div>
+    </>
   );
 }
 
@@ -334,29 +400,4 @@ function formatK8sResource(value: string | undefined): string {
     return value;
   }
   return value;
-}
-
-function SummaryCard({
-  icon: Icon,
-  label,
-  value,
-  sub,
-  color,
-}: {
-  icon: any;
-  label: string;
-  value: string;
-  sub: string;
-  color: string;
-}) {
-  return (
-    <div className="p-3 rounded-xl border border-border/50 bg-bg-card">
-      <div className="flex items-center gap-2 mb-1">
-        <Icon className={cn("w-4 h-4", color)} />
-        <span className="text-xs text-text-muted">{label}</span>
-      </div>
-      <div className="text-xl font-semibold">{value}</div>
-      <div className="text-[10px] text-text-muted">{sub}</div>
-    </div>
-  );
 }

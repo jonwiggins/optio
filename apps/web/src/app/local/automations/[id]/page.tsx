@@ -20,14 +20,16 @@ import {
   Terminal,
   Trash2,
   XCircle,
-  Zap,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn, formatDuration, formatRelativeTime } from "@/lib/utils";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { DetailHeader } from "@/components/detail-header";
 import { MetadataCard } from "@/components/metadata-card";
+import { EmptyState } from "@/components/empty-state";
+import { Panel, PanelEmpty } from "@/components/ui/panel";
 import { triggerSummary } from "@/components/local/automations-section";
+import { TriggerIcon } from "@/components/brand-icon";
 import { shortDir } from "@/lib/work-feed";
 
 /**
@@ -45,18 +47,18 @@ const AGENT_LABELS: Record<string, string> = {
   opencode: "OpenCode",
 };
 
-function runState(t: any): { label: string; tone: string } {
-  if (t.state === "error") return { label: "error", tone: "bg-error/10 text-error" };
+function runState(t: any): { label: string; dot: string; tone: string } {
+  if (t.state === "error") return { label: "error", dot: "bg-error", tone: "text-error" };
   if (t.state === "exited")
     return t.exitCode === 0 || t.exitCode == null
-      ? { label: "exited", tone: "bg-bg text-text-muted" }
-      : { label: `exit ${t.exitCode}`, tone: "bg-error/10 text-error" };
+      ? { label: "exited", dot: "bg-text-muted/40", tone: "" }
+      : { label: `exit ${t.exitCode}`, dot: "bg-error", tone: "text-error" };
   if (t.state === "pending" || t.state === "launching")
-    return { label: t.state, tone: "bg-bg text-text-muted" };
+    return { label: t.state, dot: "bg-warning/70", tone: "" };
   if (t.attentionState === "needs_you")
-    return { label: "needs you", tone: "bg-warning/10 text-warning" };
-  if (t.attentionState === "idle") return { label: "idle", tone: "bg-bg text-text-muted" };
-  return { label: "working", tone: "bg-primary/10 text-primary" };
+    return { label: "needs you", dot: "bg-warning", tone: "text-warning" };
+  if (t.attentionState === "idle") return { label: "idle", dot: "bg-success", tone: "" };
+  return { label: "working", dot: "bg-primary animate-pulse", tone: "text-primary" };
 }
 
 export default function LocalAutomationPage() {
@@ -314,98 +316,130 @@ export default function LocalAutomationPage() {
           </div>
         )}
 
-        {/* Triggers */}
-        <h2 className="text-sm font-medium text-text-heading mb-2">Triggers</h2>
-        {triggers.length === 0 ? (
-          <p className="text-sm text-text-muted mb-6">
-            Starts by hand only.{" "}
-            <Link href={`/work/${id}/edit`} className="text-primary hover:underline">
-              Add a trigger
-            </Link>
-            .
-          </p>
-        ) : (
-          <div className="space-y-1.5 mb-6">
-            {triggers.map((t) => (
-              <div
-                key={t.id}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-bg-card text-sm"
-              >
-                <Zap className="w-3.5 h-3.5 text-text-muted shrink-0" />
-                <span className="capitalize">{t.type}</span>
-                <span className="font-mono text-xs text-text-muted truncate flex-1">
-                  {triggerSummary(t)}
-                </span>
-                {t.type === "schedule" && t.nextFireAt && (
-                  <span className="text-xs text-text-muted whitespace-nowrap">
-                    next {formatRelativeTime(t.nextFireAt)}
-                  </span>
-                )}
-                {t.lastFiredAt && (
-                  <span className="text-xs text-text-muted whitespace-nowrap">
-                    fired {formatRelativeTime(t.lastFiredAt)}
-                  </span>
-                )}
-                <span
-                  className={cn(
-                    "text-[10px] px-1.5 py-0.5 rounded",
-                    t.enabled === false ? "bg-bg text-text-muted" : "bg-primary/10 text-primary",
-                  )}
-                >
-                  {t.enabled === false ? "paused" : "armed"}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Runs */}
-        <h2 className="text-sm font-medium text-text-heading mb-2">Runs ({runs.length})</h2>
-        {runs.length === 0 ? (
-          <div className="text-center py-10 text-text-muted border border-dashed border-border rounded-lg text-sm">
-            Nothing has run yet.{" "}
-            <button onClick={runNow} className="text-primary hover:underline">
-              Run it now
-            </button>
-            .
-          </div>
-        ) : (
-          <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
-            {runs.map((r) => {
-              const st = runState(r);
-              return (
-                <Link
-                  key={r.id}
-                  href={`/local/${r.id}`}
-                  className="flex items-center gap-3 px-4 py-2.5 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors text-sm"
-                >
-                  <span className={cn("text-[10px] px-1.5 py-0.5 rounded shrink-0", st.tone)}>
-                    {st.label}
-                  </span>
-                  <span className="truncate flex-1">{r.title ?? "Session"}</span>
-                  {r.attentionState === "needs_you" && r.attentionReason && (
-                    <span className="text-xs text-warning truncate max-w-[16rem]">
-                      {r.attentionReason}
-                    </span>
-                  )}
-                  {r.costUsd && parseFloat(r.costUsd) > 0 && (
-                    <span className="text-xs text-text-muted whitespace-nowrap">
-                      ${parseFloat(r.costUsd).toFixed(2)}
-                    </span>
-                  )}
-                  {r.startedAt && (
-                    <span className="text-xs text-text-muted whitespace-nowrap">
-                      {formatDuration(r.startedAt, r.endedAt ?? undefined)}
-                    </span>
-                  )}
-                  <span className="text-xs text-text-muted/70 whitespace-nowrap">
-                    {formatRelativeTime(r.createdAt)}
-                  </span>
+        <div className="space-y-6">
+          <Panel
+            title="Triggers"
+            actions={
+              <Link href={`/work/${id}/edit`} className="text-primary hover:underline">
+                Edit
+              </Link>
+            }
+          >
+            {triggers.length === 0 ? (
+              <PanelEmpty>
+                Starts by hand only.{" "}
+                <Link href={`/work/${id}/edit`} className="text-primary hover:underline">
+                  Add a trigger
                 </Link>
-              );
-            })}
-          </div>
-        )}
+                .
+              </PanelEmpty>
+            ) : (
+              <div className="divide-y divide-border/60">
+                {triggers.map((t) => (
+                  <div
+                    key={t.id}
+                    className="flex items-center gap-3 px-4 py-2.5 bg-bg-card/40 text-sm"
+                  >
+                    <span
+                      className={cn(
+                        "w-2 h-2 rounded-full shrink-0",
+                        t.enabled === false ? "bg-text-muted/40" : "bg-success",
+                      )}
+                      aria-label={t.enabled === false ? "paused" : "armed"}
+                    />
+                    <TriggerIcon
+                      type={t.type}
+                      source={t.config?.source}
+                      className="text-text-muted"
+                    />
+                    <span className="capitalize font-medium text-text-heading">{t.type}</span>
+                    <span className="font-mono text-xs text-text-muted truncate flex-1">
+                      {triggerSummary(t)}
+                    </span>
+                    {t.type === "schedule" && t.nextFireAt && (
+                      <span className="text-[11px] text-text-muted whitespace-nowrap">
+                        next {formatRelativeTime(t.nextFireAt)}
+                      </span>
+                    )}
+                    {t.lastFiredAt && (
+                      <span className="text-[11px] text-text-muted whitespace-nowrap">
+                        fired {formatRelativeTime(t.lastFiredAt)}
+                      </span>
+                    )}
+                    <span className="text-[11px] text-text-muted/70 whitespace-nowrap">
+                      {t.enabled === false ? "paused" : "armed"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+
+          {runs.length === 0 ? (
+            <EmptyState
+              icon={Terminal}
+              title="Nothing has run yet"
+              description="Each session this automation starts shows up here."
+              action={
+                <button
+                  onClick={runNow}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-all disabled:opacity-50"
+                >
+                  <Play className="w-3.5 h-3.5" /> Run it now
+                </button>
+              }
+            />
+          ) : (
+            <Panel
+              title="Runs"
+              actions={<span className="text-text-muted tabular-nums">{runs.length}</span>}
+            >
+              <div className="divide-y divide-border/60">
+                {runs.map((r) => {
+                  const st = runState(r);
+                  return (
+                    <Link
+                      key={r.id}
+                      href={`/local/${r.id}`}
+                      className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-4 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+                    >
+                      <span className={cn("w-2 h-2 rounded-full", st.dot)} aria-label={st.label} />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-text-heading truncate">
+                          {r.title ?? "Session"}
+                        </div>
+                        <div className="text-[11px] text-text-muted truncate">
+                          <span className={st.tone}>{st.label}</span>
+                          {r.attentionState === "needs_you" && r.attentionReason && (
+                            <span className="text-text-muted/70"> · {r.attentionReason}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] text-text-muted whitespace-nowrap">
+                        {r.costUsd && parseFloat(r.costUsd) > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            <DollarSign className="w-3 h-3 text-text-muted/60" />
+                            {parseFloat(r.costUsd).toFixed(2)}
+                          </span>
+                        )}
+                        {r.startedAt && (
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-text-muted/60" />
+                            {formatDuration(r.startedAt, r.endedAt ?? undefined)}
+                          </span>
+                        )}
+                        <span className="text-text-muted/70">
+                          {formatRelativeTime(r.createdAt)}
+                        </span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </Panel>
+          )}
+        </div>
       </div>
     </>
   );

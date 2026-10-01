@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Notifications
@@ -54,6 +55,7 @@ import dev.optio.core.navigation.routes.ApiKeysRoute
 import dev.optio.core.navigation.routes.AppIconRoute
 import dev.optio.core.navigation.routes.NotificationDevicesRoute
 import dev.optio.core.navigation.routes.NotificationPrefsRoute
+import dev.optio.core.navigation.routes.ModelProvidersRoute
 import dev.optio.core.navigation.routes.OptioAgentSettingsRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.network.LocalCurrentUser
@@ -152,6 +154,8 @@ fun SettingsContent(
         LazyColumn(Modifier.fillMaxSize().readableWidth().testTag("settings"), contentPadding = contentPadding) {
             groupedItem("optio", header = "Optio") {
                 SettingsRow("Optio agent settings", icon = Icons.Outlined.AutoAwesome, onClick = { onOpen(OptioAgentSettingsRoute) })
+                InsetDivider(start = 56.dp)
+                SettingsRow("Model providers", icon = Icons.Outlined.Cloud, onClick = { onOpen(ModelProvidersRoute) }, modifier = Modifier.testTag("settings-model-providers"))
                 InsetDivider(start = 56.dp)
                 SettingsRow("Personal access tokens", icon = Icons.Outlined.VpnKey, onClick = { onOpen(ApiKeysRoute) }, modifier = Modifier.testTag("settings-tokens"))
                 InsetDivider(start = 56.dp)

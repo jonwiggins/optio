@@ -10,12 +10,7 @@ import {
   Loader2,
   Trash2,
   X,
-  FileText,
-  Github,
-  MessageSquare,
-  BarChart3,
   Database,
-  Bug,
   FolderOpen,
   Terminal,
   Globe,
@@ -24,24 +19,28 @@ import {
   BookOpen,
   Wrench,
   Plug,
+  Building2,
   ChevronDown,
   ChevronRight,
+  User,
   Eye,
   EyeOff,
   Zap,
 } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { SectionCard } from "@/components/ui/section-card";
+import { Segmented } from "@/components/ui/segmented";
+import { Panel } from "@/components/ui/panel";
+import { brandFor, brandIconComponent } from "@/components/brand-icon";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
+/** Generic marks; branded providers (GitHub, Slack, Linear, Notion, Sentry) use BrandIcon. */
 const PROVIDER_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  notion: FileText,
-  github: Github,
-  slack: MessageSquare,
-  linear: BarChart3,
   database: Database,
-  sentry: Bug,
   folder: FolderOpen,
   terminal: Terminal,
   globe: Globe,
@@ -75,14 +74,36 @@ const PERMISSION_LEVELS = [
 // ---------------------------------------------------------------------------
 
 function getProviderIcon(icon?: string): React.ComponentType<{ className?: string }> {
+  const brand = brandFor(icon);
+  if (brand) return brandIconComponent(brand);
   if (icon && PROVIDER_ICONS[icon]) return PROVIDER_ICONS[icon];
   return Plug;
 }
 
 function statusColor(status: string | undefined): string {
-  if (status === "healthy" || status === "connected") return "bg-green-500";
-  if (status === "error" || status === "failed") return "bg-red-500";
-  return "bg-gray-400";
+  if (status === "healthy" || status === "connected") return "bg-success";
+  if (status === "error" || status === "failed") return "bg-error";
+  return "bg-text-muted/40";
+}
+
+/** The one small chip style on this page (provider, owner, disabled). */
+function Chip({
+  tone = "muted",
+  children,
+}: {
+  tone?: "muted" | "primary";
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded shrink-0",
+        tone === "primary" ? "bg-primary/10 text-primary" : "bg-bg-hover text-text-muted",
+      )}
+    >
+      {children}
+    </span>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +131,9 @@ export default function ConnectionsPage() {
   const [formSelectedRepos, setFormSelectedRepos] = useState<string[]>([]);
   const [formSelectedAgents, setFormSelectedAgents] = useState<string[]>([]);
   const [formPermission, setFormPermission] = useState("read");
+  // Organization (admins) or Just me (only injected into work you own).
+  const [formOwner, setFormOwner] = useState<"workspace" | "me">("workspace");
+  const [isAdmin, setIsAdmin] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [secretVisible, setSecretVisible] = useState<Record<string, boolean>>({});
@@ -134,6 +158,15 @@ export default function ConnectionsPage() {
 
   useEffect(() => {
     loadData();
+    api
+      .getCurrentUser()
+      .then((r) => {
+        // Auth disabled (no workspace role) behaves as an admin, like the API.
+        const admin = !r.user.workspaceRole || r.user.workspaceRole === "admin";
+        setIsAdmin(admin);
+        if (!admin) setFormOwner("me");
+      })
+      .catch(() => {});
   }, [loadData]);
 
   // ---------------------------------------------------------------------------
@@ -148,6 +181,7 @@ export default function ConnectionsPage() {
     setFormPermission("read");
     setSecretVisible({});
     setShowAccessControl(false);
+    setFormOwner(isAdmin ? "workspace" : "me");
   };
 
   const openForm = (provider: any) => {
@@ -182,6 +216,7 @@ export default function ConnectionsPage() {
         providerId: selectedProvider.id,
         name: formName.trim(),
         config: formConfig,
+        owner: formOwner,
         assignments: [
           {
             repoId: null,
@@ -262,9 +297,11 @@ export default function ConnectionsPage() {
   if (loading) {
     return (
       <div className="p-6 max-w-5xl mx-auto">
-        <div className="flex items-center justify-center py-20 text-text-muted">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" />
-          Loading connections...
+        <div className="h-16 skeleton-shimmer rounded-lg mb-6" />
+        <div className="space-y-2">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-14 skeleton-shimmer rounded-lg" />
+          ))}
         </div>
       </div>
     );
@@ -279,33 +316,43 @@ export default function ConnectionsPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-text">Connections</h1>
-            <p className="text-sm text-text-muted mt-1">
-              Connect external services and tools to your agents
-            </p>
-          </div>
-          {!showForm && (
-            <button
-              onClick={() => setShowForm(true)}
-              className="flex items-center gap-2 bg-primary text-white hover:bg-primary/90 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Add Connection
-            </button>
-          )}
-        </div>
+      <div className="space-y-6 [&>header]:mb-0">
+        <PageHeader
+          icon={Plug}
+          title="Connections"
+          description="External services and tools, injected into your agents' pods over MCP."
+          meta={
+            connections.length > 0 ? (
+              <span>
+                {connections.length} connection{connections.length === 1 ? "" : "s"} ·{" "}
+                {connections.filter((c) => c.enabled).length} enabled · {providers.length} providers
+              </span>
+            ) : null
+          }
+          actions={
+            !showForm && (
+              <button
+                onClick={() => setShowForm(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Add Connection
+              </button>
+            )
+          }
+        />
 
         {/* ── Inline add form ──────────────────────────────────────────── */}
         {showForm && (
-          <section className="space-y-3 p-3 rounded-lg border border-primary/30 bg-primary/5">
+          <SectionCard
+            label="New connection"
+            hint={selectedProvider ? undefined : "Choose a provider"}
+            summary={selectedProvider?.name}
+            bodyClassName="p-4 space-y-3"
+          >
             {/* Provider selector (compact grid) */}
             {!selectedProvider && (
               <>
-                <label className="block text-xs text-text-muted mb-1">Choose a provider</label>
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {providers.map((p) => {
                     const Ic = getProviderIcon(p.icon);
@@ -313,7 +360,7 @@ export default function ConnectionsPage() {
                       <button
                         key={p.id}
                         onClick={() => openForm(p)}
-                        className="flex items-center gap-2 p-2 rounded-lg border border-border bg-bg hover:border-primary/40 hover:bg-bg-hover text-left text-xs transition-colors"
+                        className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-border bg-bg hover:border-primary/40 hover:bg-bg-hover text-left text-xs transition-colors"
                       >
                         <Ic className="w-3.5 h-3.5 text-text-muted flex-shrink-0" />
                         <span className="truncate">{p.name}</span>
@@ -358,6 +405,30 @@ export default function ConnectionsPage() {
                   >
                     Change
                   </button>
+                </div>
+
+                {/* Owner */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-text-muted">Owner</span>
+                  <Segmented
+                    aria-label="Owner"
+                    value={formOwner}
+                    onChange={setFormOwner}
+                    options={[
+                      {
+                        value: "workspace",
+                        label: "Organization",
+                        icon: <Building2 className="w-3 h-3" />,
+                        disabled: isAdmin ? undefined : "Only admins add organization connections",
+                      },
+                      { value: "me", label: "Just me", icon: <User className="w-3 h-3" /> },
+                    ]}
+                  />
+                  <span className="text-[11px] text-text-muted">
+                    {formOwner === "me"
+                      ? "Only work that runs as you gets it."
+                      : "Available to the organization's work."}
+                  </span>
                 </div>
 
                 {/* Name + first config field (2-col grid) */}
@@ -494,20 +565,12 @@ export default function ConnectionsPage() {
                     {/* Permission */}
                     <div>
                       <label className="block text-xs text-text-muted mb-1">Permission</label>
-                      <div className="relative">
-                        <select
-                          value={formPermission}
-                          onChange={(e) => setFormPermission(e.target.value)}
-                          className="w-full appearance-none px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 pr-8"
-                        >
-                          {PERMISSION_LEVELS.map((p) => (
-                            <option key={p.value} value={p.value}>
-                              {p.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none" />
-                      </div>
+                      <Segmented
+                        aria-label="Permission"
+                        value={formPermission}
+                        onChange={setFormPermission}
+                        options={PERMISSION_LEVELS}
+                      />
                     </div>
 
                     {/* Agents */}
@@ -596,23 +659,23 @@ export default function ConnectionsPage() {
                 </div>
               </>
             )}
-          </section>
+          </SectionCard>
         )}
 
         {/* ── Active Connections ────────────────────────────────────────── */}
         {connections.length > 0 && (
-          <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-              Active Connections ({connections.length})
-            </h2>
-            <div className="space-y-2">
+          <Panel
+            title="Active connections"
+            actions={<span className="text-text-muted tabular-nums">{connections.length}</span>}
+          >
+            <div className="divide-y divide-border/60">
               {connections.map((conn) => {
                 const provider = providers.find((p) => p.id === conn.providerId);
                 const IconComp = getProviderIcon(provider?.icon);
                 return (
                   <div
                     key={conn.id}
-                    className="flex items-center gap-3 p-3 rounded-lg border border-border bg-bg"
+                    className="group flex items-center gap-3 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
                   >
                     <span
                       className={cn("w-2 h-2 rounded-full flex-shrink-0", statusColor(conn.status))}
@@ -620,17 +683,17 @@ export default function ConnectionsPage() {
                     <IconComp className="w-4 h-4 text-text-muted flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-text truncate">{conn.name}</span>
-                        {provider && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hover text-text-muted">
-                            {provider.name}
-                          </span>
+                        <span className="text-sm font-medium text-text-heading truncate">
+                          {conn.name}
+                        </span>
+                        {provider && <Chip>{provider.name}</Chip>}
+                        {conn.ownerUserId && (
+                          <Chip tone="primary">
+                            <User className="w-2.5 h-2.5" />
+                            Just me
+                          </Chip>
                         )}
-                        {!conn.enabled && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hover text-text-muted">
-                            disabled
-                          </span>
-                        )}
+                        {!conn.enabled && <Chip>disabled</Chip>}
                       </div>
                       {conn.lastCheckedAt && (
                         <span className="text-[11px] text-text-muted/60">
@@ -642,7 +705,7 @@ export default function ConnectionsPage() {
                       <button
                         onClick={() => handleTest(conn.id)}
                         disabled={testing === conn.id}
-                        className="px-2 py-1 text-xs border border-border text-text-muted hover:bg-bg-hover rounded-md transition-colors disabled:opacity-50"
+                        className="p-1.5 text-text-muted hover:text-text hover:bg-bg-hover rounded-md transition-colors disabled:opacity-50"
                         title="Test connection"
                       >
                         {testing === conn.id ? (
@@ -655,7 +718,7 @@ export default function ConnectionsPage() {
                         onClick={() => handleToggle(conn)}
                         className={cn(
                           "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-                          conn.enabled ? "bg-primary" : "bg-gray-500/30",
+                          conn.enabled ? "bg-primary" : "bg-border",
                         )}
                         title={conn.enabled ? "Disable" : "Enable"}
                       >
@@ -668,7 +731,7 @@ export default function ConnectionsPage() {
                       </button>
                       <button
                         onClick={() => handleDelete(conn)}
-                        className="p-1 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
+                        className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error opacity-60 group-hover:opacity-100 focus:opacity-100 transition-all"
                         title="Delete"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -678,102 +741,82 @@ export default function ConnectionsPage() {
                 );
               })}
             </div>
-          </section>
+          </Panel>
         )}
 
         {/* ── Provider Catalog ─────────────────────────────────────────── */}
-        <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-              Available Providers
-            </h2>
+        <Panel title="Available providers">
+          <div className="p-4 space-y-4">
+            {/* Category filter */}
+            {groupedProviders.length > 1 && (
+              <Segmented
+                wrap
+                aria-label="Filter by category"
+                value={activeCategoryFilter ?? "all"}
+                onChange={(v) => setActiveCategoryFilter(v === "all" ? null : v)}
+                options={[
+                  { value: "all", label: "All", count: providers.length },
+                  ...groupedProviders.map((g) => {
+                    const CatIcon = g.icon;
+                    return {
+                      value: g.id,
+                      label: g.label,
+                      icon: <CatIcon className="w-3 h-3" />,
+                      count: g.providers.length,
+                    };
+                  }),
+                ]}
+              />
+            )}
+
+            {/* Empty state */}
+            {filteredGroups.length === 0 && providers.length === 0 && (
+              <EmptyState
+                size="panel"
+                icon={Plug}
+                title="No providers available"
+                description="Connection providers will appear here once configured."
+              />
+            )}
+
+            {/* Provider grid by category */}
+            {filteredGroups.map((group) => {
+              const CatIcon = group.icon;
+              return (
+                <div key={group.id}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <CatIcon className="w-3.5 h-3.5 text-text-muted" />
+                    <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                      {group.label}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {group.providers.map((provider) => {
+                      const IconComp = getProviderIcon(provider.icon);
+                      return (
+                        <button
+                          key={provider.id}
+                          onClick={() => openForm(provider)}
+                          className="flex items-center gap-3 p-3 border border-border rounded-lg bg-bg hover:border-primary/40 hover:bg-bg-hover transition-colors text-left group"
+                        >
+                          <div className="p-1.5 rounded-md bg-bg-hover border border-border/50 group-hover:border-primary/30 transition-colors">
+                            <IconComp className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-text">{provider.name}</p>
+                            <p className="text-[11px] text-text-muted mt-0.5 line-clamp-1">
+                              {provider.description ?? "Connect to " + provider.name}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-
-          {/* Category filter tabs */}
-          {groupedProviders.length > 1 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                onClick={() => setActiveCategoryFilter(null)}
-                className={cn(
-                  "px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
-                  activeCategoryFilter === null
-                    ? "bg-primary text-white"
-                    : "border border-border text-text-muted hover:bg-bg-hover",
-                )}
-              >
-                All
-              </button>
-              {CATEGORIES.map((cat) => {
-                const hasProviders = providers.some((p) => p.category === cat.id);
-                if (!hasProviders) return null;
-                const CatIcon = cat.icon;
-                return (
-                  <button
-                    key={cat.id}
-                    onClick={() =>
-                      setActiveCategoryFilter(activeCategoryFilter === cat.id ? null : cat.id)
-                    }
-                    className={cn(
-                      "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
-                      activeCategoryFilter === cat.id
-                        ? "bg-primary text-white"
-                        : "border border-border text-text-muted hover:bg-bg-hover",
-                    )}
-                  >
-                    <CatIcon className="w-3 h-3" />
-                    {cat.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Empty state */}
-          {filteredGroups.length === 0 && providers.length === 0 && (
-            <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
-              <Plug className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p>No providers available</p>
-              <p className="text-xs mt-1">Connection providers will appear here once configured.</p>
-            </div>
-          )}
-
-          {/* Provider grid by category */}
-          {filteredGroups.map((group) => {
-            const CatIcon = group.icon;
-            return (
-              <div key={group.id}>
-                <div className="flex items-center gap-2 mb-2">
-                  <CatIcon className="w-3.5 h-3.5 text-text-muted" />
-                  <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-                    {group.label}
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-4">
-                  {group.providers.map((provider) => {
-                    const IconComp = getProviderIcon(provider.icon);
-                    return (
-                      <button
-                        key={provider.id}
-                        onClick={() => openForm(provider)}
-                        className="flex items-center gap-3 p-3 border border-border rounded-lg bg-bg hover:border-primary/40 hover:bg-bg-hover transition-colors text-left group"
-                      >
-                        <div className="p-1.5 rounded-md bg-bg-hover border border-border/50 group-hover:border-primary/30 transition-colors">
-                          <IconComp className="w-4 h-4 text-text-muted group-hover:text-primary transition-colors" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-text">{provider.name}</p>
-                          <p className="text-[11px] text-text-muted mt-0.5 line-clamp-1">
-                            {provider.description ?? "Connect to " + provider.name}
-                          </p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </section>
+        </Panel>
       </div>
     </div>
   );

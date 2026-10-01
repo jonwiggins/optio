@@ -66,6 +66,52 @@ final class WorkFeedTests: XCTestCase {
         XCTAssertEqual(rows.filter { F.inView($0, .all) }.count, rows.count)
     }
 
+    /// Sessions keep a stable order: last typed into (else created), newest
+    /// first — never regrouped by attention — with finished ones below.
+    func testSessionOrderIsStableAcrossAttentionFlips() {
+        func term(_ id: String, state: String = "running", attention: String? = "working",
+                  interacted: String? = nil, created: String, activity: String = "2026-09-30T12:00:00Z") -> F.TerminalRow {
+            F.TerminalRow(id: id, title: id, state: state, attentionState: attention, spec: .init(kind: "agent", agent: "claude-code"),
+                          lastActivityAt: activity, lastInteractedAt: interacted, createdAt: created)
+        }
+        func order(_ terms: [F.TerminalRow]) -> [String] {
+            F.collect(F.Sources(localTerminals: terms)).map(\.sourceId)
+        }
+        let a = term("a", created: "2026-09-01T00:00:00Z", activity: "2026-09-30T00:00:00Z")
+        let b = term("b", interacted: "2026-09-20T00:00:00Z", created: "2026-08-01T00:00:00Z", activity: "2026-09-02T00:00:00Z")
+        let c = term("c", created: "2026-09-10T00:00:00Z")
+        let done = term("d", state: "exited", attention: nil, interacted: "2026-09-29T00:00:00Z", created: "2026-09-29T00:00:00Z")
+        XCTAssertEqual(order([a, b, c, done]), ["b", "c", "a", "d"])
+
+        // Flipping attention (or fresh output) doesn't move anything.
+        let flipped = [
+            term("a", attention: "needs_you", created: "2026-09-01T00:00:00Z", activity: "2026-09-30T23:00:00Z"),
+            term("b", attention: "idle", interacted: "2026-09-20T00:00:00Z", created: "2026-08-01T00:00:00Z"),
+            term("c", attention: "needs_you", created: "2026-09-10T00:00:00Z"),
+            done,
+        ]
+        XCTAssertEqual(order(flipped), ["b", "c", "a", "d"])
+
+        // Ties fall back to the key.
+        let x = term("x", created: "2026-09-05T00:00:00Z"), y = term("y", created: "2026-09-05T00:00:00Z")
+        XCTAssertEqual(order([y, x]), ["x", "y"])
+    }
+
+    func testNextNeedsYouWalksTheVisualOrderAndWraps() {
+        let rows = F.collect(F.Sources(localTerminals: [
+            F.TerminalRow(id: "1", state: "running", attentionState: "needs_you", createdAt: "2026-09-04T00:00:00Z"),
+            F.TerminalRow(id: "2", state: "running", attentionState: "working", createdAt: "2026-09-03T00:00:00Z"),
+            F.TerminalRow(id: "3", state: "running", attentionState: "needs_you", createdAt: "2026-09-02T00:00:00Z"),
+        ]))
+        XCTAssertEqual(F.nextNeedsYou(rows, after: nil)?.sourceId, "1")
+        XCTAssertEqual(F.nextNeedsYou(rows, after: "terminal-1")?.sourceId, "3")
+        XCTAssertEqual(F.nextNeedsYou(rows, after: "terminal-3")?.sourceId, "1")
+        XCTAssertEqual(F.nextNeedsYou(rows, after: "terminal-2")?.sourceId, "3")
+        let one = rows.filter { $0.sourceId != "3" }
+        XCTAssertNil(F.nextNeedsYou(one, after: "terminal-1"), "the only waiting row is the current one")
+        XCTAssertNil(F.nextNeedsYou(rows.filter { $0.status != .needsYou }, after: nil))
+    }
+
     func testRowsLeadToTheirKindsDetailScreen() {
         let rows = F.collect(sources())
         func dest(_ key: String) -> WorkDestination? { rows.first { $0.key == key }?.destination }

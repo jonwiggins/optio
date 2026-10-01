@@ -32,6 +32,12 @@ export type WorkStatus =
 
 export type WorkView = "active" | "recurring" | "agents" | "history" | "all";
 
+/** A trigger that starts (or started) a piece of work: its type, and a ticket trigger's source. */
+export interface WorkTrigger {
+  type: string;
+  source?: string | null;
+}
+
 export interface WorkRow {
   key: string;
   source: WorkSource;
@@ -48,7 +54,20 @@ export interface WorkRow {
   /** Extra one-liner: PR link, attention reason, next fire… */
   note: string | null;
   prUrl: string | null;
+  /** The PR's state when known ("open" | "merged" | "closed"). */
+  prState?: string | null;
+  /**
+   * What starts it, when known: a recurring definition's triggers, or the
+   * trigger / ticket a run was started by. Drives the brand marks on the row.
+   */
+  triggers?: WorkTrigger[];
   lastActivity: string | null;
+  /**
+   * What the list orders the row by, when it differs from `lastActivity`:
+   * a session on your machine sorts by when you last typed into it (else
+   * when it was made), so it doesn't jump as its attention state flips.
+   */
+  orderAt?: string | null;
   /**
    * Definitions that spawn runs (blueprints, automations). Their `href` is
    * the page about the definition (stats, triggers, prior runs); `editHref`
@@ -77,23 +96,29 @@ export function inView(row: WorkRow, view: WorkView): boolean {
   }
 }
 
-/** needs-you first, then live, then everything by recency. */
+/**
+ * Live work first (needs you / running / queued / waiting share one rank, so
+ * a row doesn't jump when an agent flips between working and needs-you —
+ * that shows on the row and in the Needs-you count), then armed, paused,
+ * failed, done; within a rank by `orderAt ?? lastActivity`, newest first.
+ */
 const STATUS_RANK: Record<WorkStatus, number> = {
   needs_you: 0,
-  running: 1,
-  queued: 2,
-  waiting: 3,
-  scheduled: 4,
-  paused: 5,
-  failed: 6,
-  done: 7,
+  running: 0,
+  queued: 0,
+  waiting: 0,
+  scheduled: 1,
+  paused: 2,
+  failed: 3,
+  done: 4,
 };
 
 export function sortWork(rows: WorkRow[]): WorkRow[] {
+  const at = (r: WorkRow) => r.orderAt ?? r.lastActivity ?? "";
   return [...rows].sort((a, b) => {
     const r = STATUS_RANK[a.status] - STATUS_RANK[b.status];
     if (r !== 0) return r;
-    return (b.lastActivity ?? "").localeCompare(a.lastActivity ?? "");
+    return at(b).localeCompare(at(a)) || a.key.localeCompare(b.key);
   });
 }
 
@@ -188,6 +213,25 @@ export interface WorkSources {
   podSessions: any[];
   agents: any[];
   hosts: any[];
+  /**
+   * Triggers per recurring definition id (task config / job / automation),
+   * when fetched. Optional: rows render without them.
+   */
+  triggers?: Record<string, Array<{ id?: string; type: string; config?: any }>>;
+}
+
+/** One entry per distinct trigger type (a ticket trigger per source). */
+function distinctTriggers(list: Array<{ type: string; config?: any }> | undefined): WorkTrigger[] {
+  const seen = new Set<string>();
+  const out: WorkTrigger[] = [];
+  for (const t of list ?? []) {
+    const source = t.type === "ticket" ? ((t.config?.source as string | undefined) ?? null) : null;
+    const key = `${t.type}:${source ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(source ? { type: t.type, source } : { type: t.type });
+  }
+  return out;
 }
 
 export function collectWork(src: WorkSources): WorkRow[] {
@@ -197,6 +241,19 @@ export function collectWork(src: WorkSources): WorkRow[] {
     detail: [hostName.get(hostId ?? "") ?? null, shortDir(dir)].filter(Boolean).join(" · ") || null,
   });
   const rows: WorkRow[] = [];
+  const triggersOf = (id: string) =>
+    src.triggers?.[id] ? distinctTriggers(src.triggers[id]) : undefined;
+  const triggerById = new Map<string, { type: string; config?: any }>();
+  for (const list of Object.values(src.triggers ?? {})) {
+    for (const t of list) if (t.id) triggerById.set(t.id, t);
+  }
+  /** What started a run: its ticket, else the trigger that fired it (when known). */
+  const startedBy = (ticketSource: unknown, triggerId: unknown): WorkTrigger[] | undefined => {
+    if (typeof ticketSource === "string" && ticketSource)
+      return [{ type: "ticket", source: ticketSource }];
+    const trig = typeof triggerId === "string" ? triggerById.get(triggerId) : undefined;
+    return trig ? distinctTriggers([trig]) : undefined;
+  };
 
   for (const t of src.unified) {
     const local = t.runTarget === "local";
@@ -217,6 +274,8 @@ export function collectWork(src: WorkSources): WorkRow[] {
         statusLabel,
         note: t.prUrl ? "PR " + t.prUrl.split("/").pop() : null,
         prUrl: t.prUrl ?? null,
+        prState: t.prState ?? null,
+        triggers: startedBy(t.ticketSource, t.metadata?.triggerId),
         lastActivity: t.updatedAt ?? t.createdAt ?? null,
         recurring: false,
         editHref: null,
@@ -238,6 +297,7 @@ export function collectWork(src: WorkSources): WorkRow[] {
         statusLabel: t.enabled === false ? "paused" : "armed",
         note: t.autoResume ? "works each PR until it merges" : "opens a PR each run",
         prUrl: null,
+        triggers: triggersOf(t.id),
         lastActivity: t.updatedAt ?? t.createdAt ?? null,
         recurring: true,
         editHref: `/work/${t.id}/edit`,
@@ -257,6 +317,7 @@ export function collectWork(src: WorkSources): WorkRow[] {
         statusLabel: t.enabled === false ? "paused" : "armed",
         note: null,
         prUrl: null,
+        triggers: triggersOf(t.id),
         lastActivity: t.updatedAt ?? t.createdAt ?? null,
         recurring: true,
         editHref: `/work/${t.id}/edit`,
@@ -285,7 +346,14 @@ export function collectWork(src: WorkSources): WorkRow[] {
       statusLabel,
       note: t.attentionState === "needs_you" && t.attentionReason ? t.attentionReason : null,
       prUrl: null,
+      triggers:
+        t.spawnedBy === "ticket"
+          ? [{ type: "ticket", source: t.ticketSource ?? null }]
+          : t.spawnedBy === "trigger" && t.triggerType
+            ? (startedBy(null, t.triggerId) ?? [{ type: t.triggerType }])
+            : undefined,
       lastActivity: t.lastActivityAt ?? t.updatedAt ?? null,
+      orderAt: t.lastInteractedAt ?? t.createdAt ?? null,
       recurring: false,
       editHref: null,
       spawned: !!t.blueprintId || !!t.workflowRunId,
@@ -306,6 +374,7 @@ export function collectWork(src: WorkSources): WorkRow[] {
       statusLabel: b.enabled === false ? "paused" : "armed",
       note: null,
       prUrl: null,
+      triggers: triggersOf(b.id),
       lastActivity: b.updatedAt ?? b.createdAt ?? null,
       recurring: true,
       editHref: `/work/${b.id}/edit`,

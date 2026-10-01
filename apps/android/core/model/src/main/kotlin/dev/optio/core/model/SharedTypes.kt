@@ -20,6 +20,7 @@
 package dev.optio.core.model
 
 import java.time.Instant
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 import kotlinx.serialization.json.Json
@@ -100,6 +101,7 @@ enum class ClaudeAuthMode(override val raw: String) : RawEnum {
     API_KEY("api-key"),
     MAX_SUBSCRIPTION("max-subscription"),
     VERTEX_AI("vertex-ai"),
+    BEDROCK("bedrock"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -110,6 +112,7 @@ enum class ClaudeAuthMode(override val raw: String) : RawEnum {
 enum class CodexAuthMode(override val raw: String) : RawEnum {
     API_KEY("api-key"),
     APP_SERVER("app-server"),
+    BEDROCK("bedrock"),
     /** Fallback for raw values this client does not know about yet. */
     UNKNOWN("__unknown__");
 
@@ -184,6 +187,13 @@ data class AgentTaskInput(
     val googleCloudProject: String? = null,
     val googleCloudLocation: String? = null,
     val claudeVertexServiceAccountKey: String? = null,
+    /**
+     * Env that points the agent at a model provider (Bedrock), from
+     * `bedrockRuntime`; set with `claudeAuthMode` / `codexAuthMode` = "bedrock".
+     */
+    val modelProviderEnv: Map<String, String>? = null,
+    /** Codex `-c` overrides for the model provider (`model_provider="amazon-bedrock"`). */
+    val codexProviderConfig: List<String>? = null,
 ) {
     @Serializable(with = GeminiApprovalMode.Companion::class)
     enum class GeminiApprovalMode(override val raw: String) : RawEnum {
@@ -318,6 +328,11 @@ data class Connection(
     val scope: String,
     val repoUrl: String? = null,
     val workspaceId: String? = null,
+    /**
+     * Null = the organization's; set = one person's own: only injected into
+     * work that person owns, and only visible to them (and admins, by name).
+     */
+    val ownerUserId: String? = null,
     val enabled: Boolean,
     val status: ConnectionStatus,
     val statusMessage: String? = null,
@@ -338,8 +353,20 @@ data class CreateConnectionInput(
     val scope: String? = null,
     val repoUrl: String? = null,
     val enabled: Boolean? = null,
+    /** Default `workspace`; `workspace` needs an admin. */
+    val owner: Owner? = null,
     val assignments: List<Assignment>? = null,
 ) {
+    @Serializable(with = Owner.Companion::class)
+    enum class Owner(override val raw: String) : RawEnum {
+        WORKSPACE("workspace"),
+        ME("me"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<Owner>("dev.optio.core.model.CreateConnectionInput.Owner", entries, UNKNOWN)
+    }
+
     @Serializable
     data class Assignment(
         val repoId: String? = null,
@@ -398,6 +425,11 @@ data class RepoConnection(
     val scope: String,
     val repoUrl: String? = null,
     val workspaceId: String? = null,
+    /**
+     * Null = the organization's; set = one person's own: only injected into
+     * work that person owns, and only visible to them (and admins, by name).
+     */
+    val ownerUserId: String? = null,
     val enabled: Boolean,
     val status: ConnectionStatus,
     val statusMessage: String? = null,
@@ -1062,6 +1094,10 @@ data class PullRequest(
     val draft: Boolean,
     val headSha: String,
     val baseBranch: String,
+    /** The PR's head / source branch, when the platform reports it. */
+    val headBranch: String? = null,
+    /** `owner/repo` the head branch lives in (differs from the base repo for a fork), when known. */
+    val headRepo: String? = null,
     val url: String,
     val author: String,
     val assignees: List<String>,
@@ -1510,6 +1546,13 @@ data class LocalHost(
      * hello), so false whenever the host is offline.
      */
     val manageDirs: Boolean? = null,
+    /**
+     * Whether the connected daemon can run agents through a model provider
+     * (Bedrock). Live, so false whenever the host is offline.
+     */
+    val modelProviders: Boolean? = null,
+    /** AWS profiles on the machine, as its daemon last reported them (names only). */
+    val awsProfiles: List<String>? = null,
     val state: LocalHostState,
     val lastSeenAt: String? = null,
     val createdAt: String,
@@ -1631,6 +1674,12 @@ sealed interface LocalTerminalSpec {
          * with branch-and-PR instructions off this base before the spawn.
          */
         val baseBranch: String? = null,
+        /**
+         * Reach the models through this provider (Amazon Bedrock) instead of
+         * the CLI's own sign-in, with the machine's own AWS credentials. Only
+         * sent to daemons whose hello set `modelProviders`.
+         */
+        val provider: ModelProviderLaunch? = null,
     ) : LocalTerminalSpec
 
     /** Fallback for discriminator values this client does not know about yet. */
@@ -1831,6 +1880,8 @@ data class LocalTerminal(
     val usage: JsonElement? = null,
     val costUsd: String? = null,
     val lastActivityAt: String? = null,
+    /** When a person last typed into it (throttled to a minute); null = never. Lists order by it, then creation. */
+    val lastInteractedAt: String? = null,
     /**
      * "Later": while set and in the future the terminal is not in the needs-you
      * queue (Watch, widgets, push). Cleared by DELETE /snooze or by expiry.
@@ -1911,6 +1962,10 @@ sealed interface LocalDaemonMessage {
         val transcriptBackfill: Boolean? = null,
         /** The daemon answers `dirs` (adds / removes an allowlisted directory when asked from Optio). */
         val manageDirs: Boolean? = null,
+        /** The daemon runs agents through a model provider (`spec.provider`). */
+        val modelProviders: Boolean? = null,
+        /** AWS profile names in the machine's ~/.aws/config and credentials (names only). */
+        val awsProfiles: List<String>? = null,
     ) : LocalDaemonMessage
 
     @Serializable
@@ -2508,6 +2563,180 @@ data class UpdateInstalledSkillInput(
 
 // endregion
 
+// region model-provider.ts
+
+@Serializable(with = ModelProviderKind.Companion::class)
+enum class ModelProviderKind(override val raw: String) : RawEnum {
+    BEDROCK("bedrock"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelProviderKind>("dev.optio.core.model.ModelProviderKind", entries, UNKNOWN)
+}
+
+@Serializable(with = ModelProviderAgent.Companion::class)
+enum class ModelProviderAgent(override val raw: String) : RawEnum {
+    CLAUDE_CODE("claude-code"),
+    CODEX("codex"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelProviderAgent>("dev.optio.core.model.ModelProviderAgent", entries, UNKNOWN)
+}
+
+/**
+ * How a pod signs in to the provider:
+ * - `access-key`: stored AWS access key id + secret (+ optional session token)
+ * - `bearer-token`: a stored Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`)
+ * - `ambient`: the pod's own AWS identity (IRSA / instance profile on EKS)
+ * - `none`: machines only — work in a pod can't use it
+ */
+@Serializable(with = ModelProviderPodCredential.Companion::class)
+enum class ModelProviderPodCredential(override val raw: String) : RawEnum {
+    ACCESS_KEY("access-key"),
+    BEARER_TOKEN("bearer-token"),
+    AMBIENT("ambient"),
+    NONE("none"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ModelProviderPodCredential>("dev.optio.core.model.ModelProviderPodCredential", entries, UNKNOWN)
+}
+
+@Serializable
+data class ModelProviderModel(
+    /** The provider's model id, passed to the CLI as-is. */
+    val id: String,
+    /** Shown in pickers; the id when absent. */
+    val label: String? = null,
+)
+
+/** The models a provider offers each agent, in picker order; the first is the default. */
+@Serializable
+data class ModelProviderModels(
+    @SerialName("claude-code") val claudeCode: List<ModelProviderModel>? = null,
+    val codex: List<ModelProviderModel>? = null,
+)
+
+/** Who a model provider, secret, connection or piece of work belongs to. */
+@Serializable(with = ResourceOwner.Companion::class)
+enum class ResourceOwner(override val raw: String) : RawEnum {
+    WORKSPACE("workspace"),
+    ME("me"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<ResourceOwner>("dev.optio.core.model.ResourceOwner", entries, UNKNOWN)
+}
+
+@Serializable
+data class ModelProvider(
+    val id: String,
+    val workspaceId: String? = null,
+    /** Null = the organization's (every member can pick it). Set = one person's own. */
+    val ownerUserId: String? = null,
+    /** Display name of `ownerUserId`, for personal providers. */
+    val ownerName: String? = null,
+    val kind: ModelProviderKind,
+    val name: String,
+    val agents: List<ModelProviderAgent>,
+    /** AWS region the runtime calls (`us-west-2`). */
+    val region: String,
+    /** The models offered for each agent, in picker order; the first is the default. */
+    val models: ModelProviderModels,
+    /** AWS profile to use on a machine; null = the machine's default AWS credentials. */
+    val localAwsProfile: String? = null,
+    val podCredential: ModelProviderPodCredential,
+    /** Whether stored pod credentials exist (the values are never returned). */
+    val hasPodCredentials: Boolean,
+    /** The viewer's own (personal) provider. */
+    val mine: Boolean,
+    /** Whether the viewer may change or delete it. */
+    val canEdit: Boolean,
+    val createdAt: String,
+    val updatedAt: String,
+)
+
+@Serializable(with = ModelProviderCredentials.Serializer::class)
+sealed interface ModelProviderCredentials {
+    @Serializable
+    data class AccessKey(
+        val accessKeyId: String,
+        val secretAccessKey: String,
+        val sessionToken: String? = null,
+    ) : ModelProviderCredentials
+
+    @Serializable
+    data class BearerToken(
+        val bearerToken: String,
+    ) : ModelProviderCredentials
+
+    /** Fallback for discriminator values this client does not know about yet. */
+    data class Unknown(val raw: JsonElement) : ModelProviderCredentials
+
+    object Serializer : DiscriminatedUnionSerializer<ModelProviderCredentials>("dev.optio.core.model.ModelProviderCredentials", "type") {
+        override fun decode(tag: String, element: JsonObject, json: Json): ModelProviderCredentials? = when (tag) {
+            "access-key" -> json.decodeFromJsonElement(AccessKey.serializer(), element.withoutDiscriminator())
+            "bearer-token" -> json.decodeFromJsonElement(BearerToken.serializer(), element.withoutDiscriminator())
+            else -> null
+        }
+
+        override fun encode(value: ModelProviderCredentials, json: Json): JsonElement = when (value) {
+            is AccessKey -> tagged("access-key", json.encodeToJsonElement(AccessKey.serializer(), value))
+            is BearerToken -> tagged("bearer-token", json.encodeToJsonElement(BearerToken.serializer(), value))
+            is Unknown -> value.raw
+        }
+
+        override fun unknown(raw: JsonElement): ModelProviderCredentials = Unknown(raw)
+    }
+}
+
+@Serializable
+data class CreateModelProviderInput(
+    val name: String,
+    /** `workspace` needs an admin. */
+    val owner: ResourceOwner,
+    val kind: ModelProviderKind,
+    val agents: List<ModelProviderAgent>,
+    val region: String,
+    val models: ModelProviderModels? = null,
+    val localAwsProfile: String? = null,
+    val podCredential: ModelProviderPodCredential? = null,
+    /** Replaces the stored pod credentials; null clears them; absent keeps them. */
+    val credentials: ModelProviderCredentials? = null,
+)
+
+/** A change to a model provider: absent fields are kept. */
+@Serializable
+data class UpdateModelProviderInput(
+    val name: String? = null,
+    /** Moving it to the organization needs an admin. */
+    val owner: ResourceOwner? = null,
+    val agents: List<ModelProviderAgent>? = null,
+    val region: String? = null,
+    val models: ModelProviderModels? = null,
+    val localAwsProfile: String? = null,
+    val podCredential: ModelProviderPodCredential? = null,
+    /** Replaces the stored pod credentials; null clears them; absent keeps them. */
+    val credentials: ModelProviderCredentials? = null,
+)
+
+/**
+ * What a spawn on a machine carries to use a provider: never a credential,
+ * only where to call and which of the machine's AWS profiles to use.
+ */
+@Serializable
+data class ModelProviderLaunch(
+    val kind: ModelProviderKind,
+    val providerId: String,
+    val name: String,
+    val region: String,
+    /** An AWS profile on the machine; absent = its default credentials. */
+    val awsProfile: String? = null,
+)
+
+// endregion
+
 // region optio-action.ts
 
 /** Audit trail entry for an Optio agent write action. */
@@ -2707,6 +2936,17 @@ data class PersistentAgent(
     val reconcileBackoffUntil: Instant? = null,
     val reconcileAttempts: Double,
     val createdBy: String? = null,
+    /**
+     * Who the work belongs to: null = the organization; set = one person's own.
+     * Personal work runs with that person's secrets, model providers and
+     * connections, and only they can change it.
+     */
+    val ownerUserId: String? = null,
+    /**
+     * The secrets (by name) the agent gets in its pod. Null = the workspace's
+     * legacy behavior (see `Workspace.restrictPodSecrets`).
+     */
+    val podSecrets: List<String>? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -3118,6 +3358,23 @@ data class CreateSecretInput(
     val scope: String? = null,
 )
 
+/** A secret a piece of work can pick for its pod: the org's and the viewer's own. */
+@Serializable
+data class PickableSecret(
+    val name: String,
+    val owner: Owner,
+) {
+    @Serializable(with = Owner.Companion::class)
+    enum class Owner(override val raw: String) : RawEnum {
+        WORKSPACE("workspace"),
+        ME("me"),
+        /** Fallback for raw values this client does not know about yet. */
+        UNKNOWN("__unknown__");
+
+        companion object : RawEnumSerializer<Owner>("dev.optio.core.model.PickableSecret.Owner", entries, UNKNOWN)
+    }
+}
+
 // endregion
 
 // region session.ts
@@ -3368,6 +3625,22 @@ data class OptioTask(
     /** Local runs: the `local_terminals` row executing this task. */
     val localTerminalId: String? = null,
     /**
+     * Who the work belongs to: null = the organization; set = one person's own.
+     * Personal work runs with that person's secrets, model providers and
+     * connections, and only they can change it.
+     */
+    val ownerUserId: String? = null,
+    /**
+     * The secrets (by name) the agent gets in its pod. Null = the workspace's
+     * legacy behavior (see `Workspace.restrictPodSecrets`).
+     */
+    val podSecrets: List<String>? = null,
+    /**
+     * Every PR the task opened or tracks (GET /api/tasks/:id only). `prUrl`
+     * stays the primary one, which the PR lifecycle follows.
+     */
+    val prs: List<TaskPr>? = null,
+    /**
      * PR follow-through over the repo's settings ("Works until merged"): resume
      * the agent on failing CI, conflicts, and requested changes / merge once
      * it's green. Null or absent = the repo's `autoResume` / `autoMerge`.
@@ -3378,6 +3651,43 @@ data class OptioTask(
     val updatedAt: Instant,
     val startedAt: Instant? = null,
     val completedAt: Instant? = null,
+)
+
+/**
+ * How Optio learned a PR belongs to a task: the agent's own PR-creating tool
+ * call (`tool_call`), a PR whose head branch is under the task's branch
+ * (`branch`), or a person attached it (`attached`).
+ */
+@Serializable(with = TaskPrSource.Companion::class)
+enum class TaskPrSource(override val raw: String) : RawEnum {
+    TOOL_CALL("tool_call"),
+    BRANCH("branch"),
+    ATTACHED("attached"),
+    /** Fallback for raw values this client does not know about yet. */
+    UNKNOWN("__unknown__");
+
+    companion object : RawEnumSerializer<TaskPrSource>("dev.optio.core.model.TaskPrSource", entries, UNKNOWN)
+}
+
+/** A pull / merge request a task opened or tracks. */
+@Serializable
+data class TaskPr(
+    val id: String,
+    val taskId: String,
+    val repoUrl: String,
+    val number: Double,
+    val url: String,
+    val headBranch: String? = null,
+    /** `owner/repo` of the head branch (a fork's differs from the task's repo). */
+    val headRepo: String? = null,
+    val baseBranch: String? = null,
+    val source: TaskPrSource,
+    /** `open` / `merged` / `closed` when last seen. */
+    val state: String,
+    /** True for the task's primary PR (`tasks.pr_url`). */
+    val primary: Boolean,
+    val createdAt: String,
+    val updatedAt: String,
 )
 
 @Serializable
@@ -3862,6 +4172,17 @@ data class Workflow(
     val localSessionMode: LocalAgentSessionMode? = null,
     val enabled: Boolean,
     val createdBy: String? = null,
+    /**
+     * Who the work belongs to: null = the organization; set = one person's own.
+     * Personal work runs with that person's secrets, model providers and
+     * connections, and only they can change it.
+     */
+    val ownerUserId: String? = null,
+    /**
+     * The secrets (by name) the agent gets in its pod. Null = the workspace's
+     * legacy behavior (see `Workspace.restrictPodSecrets`).
+     */
+    val podSecrets: List<String>? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -3956,6 +4277,18 @@ data class Workspace(
     val description: String? = null,
     val createdBy: String? = null,
     val allowDockerInDocker: Boolean,
+    /**
+     * Email domains whose people join this workspace when they sign in
+     * (verified email only), e.g. `["acme.com"]`.
+     */
+    val autoJoinDomains: List<String>? = null,
+    /** The role people joining by domain get. */
+    val autoJoinRole: WorkspaceRole? = null,
+    /**
+     * Pods get only the secrets a piece of work picks. Off keeps the legacy
+     * behavior for work that picks none: every org secret goes to repo pods.
+     */
+    val restrictPodSecrets: Boolean? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -3994,6 +4327,18 @@ data class WorkspaceSummary(
     val name: String,
     val slug: String,
     val role: WorkspaceRole,
+)
+
+/**
+ * The agent settings a person last used in the New work form, offered again
+ * next time: the runtime, and for each runtime its agent options (model,
+ * effort, model provider, …).
+ */
+@Serializable
+data class WorkFormDefaults(
+    val runtime: String? = null,
+    /** Per runtime: option key → value (a string or a boolean, like work's `agentOptions`). */
+    val agentOptions: Map<String, Map<String, JsonElement>>? = null,
 )
 
 // endregion

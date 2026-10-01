@@ -71,12 +71,6 @@ if [ "$QUICK" = false ]; then
     wait
     docker build -t optio-full:latest -f images/full.Dockerfile . -q
   fi
-
-  # Rebuild optio-optio if missing
-  if ! docker image inspect "optio-optio:latest" &>/dev/null; then
-    echo "   Rebuilding optio-optio (operations assistant)..."
-    docker build -t optio-optio:latest -f Dockerfile.optio . -q
-  fi
 fi
 
 # Wait for API and Web builds
@@ -91,7 +85,8 @@ echo "[4/4] Restarting deployments..."
 # rotating it invalidates all stored secrets (see issue #553 and setup-local.sh).
 helm upgrade optio helm/optio -n optio -f helm/optio/values.local.yaml --reset-then-reuse-values
 
-DEPLOYMENTS="deployment/optio-api deployment/optio-web"
+# The web UI runs in the API's pod (see helm/optio/templates/api-deployment.yaml).
+DEPLOYMENTS="deployment/optio-api"
 if kubectl get deployment optio-optio -n optio &>/dev/null; then
   DEPLOYMENTS="$DEPLOYMENTS deployment/optio-optio"
 fi

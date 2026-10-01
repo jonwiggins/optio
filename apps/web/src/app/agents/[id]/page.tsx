@@ -11,8 +11,9 @@ import { getWsTokenProvider } from "@/lib/ws-auth";
 import { LogViewer } from "@/components/log-viewer";
 import { useAgentLiveLogs, useAgentTurnLogs } from "@/hooks/use-agent-logs";
 import {
-  Bot,
   ArrowLeft,
+  DollarSign,
+  Server,
   Send,
   Pause,
   Play,
@@ -25,18 +26,14 @@ import {
   Loader2,
   CircleDot,
 } from "lucide-react";
-
-const STATE_STYLES: Record<string, { dot: string; label: string }> = {
-  idle: { dot: "bg-text-muted/50", label: "Idle" },
-  queued: { dot: "bg-warning", label: "Queued" },
-  provisioning: { dot: "bg-warning animate-pulse", label: "Provisioning" },
-  running: { dot: "bg-primary animate-pulse", label: "Running" },
-  paused: { dot: "bg-text-muted/30", label: "Paused" },
-  failed: { dot: "bg-error", label: "Failed" },
-  archived: { dot: "bg-text-muted/20", label: "Archived" },
-};
+import { RunsAsBadge } from "@/components/runs-as-badge";
+import { DetailHeader } from "@/components/detail-header";
+import { Segmented } from "@/components/ui/segmented";
+import { AgentIcon } from "@/components/brand-icon";
 
 interface Agent {
+  /** Personal work: who it runs as (null = the organization's). */
+  ownerUserId?: string | null;
   id: string;
   slug: string;
   name: string;
@@ -219,127 +216,129 @@ export default function AgentDetailPage() {
     );
   }
 
-  const style = STATE_STYLES[agent.state] ?? STATE_STYLES.idle;
+  const actionBtn =
+    "px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs hover:bg-bg-hover flex items-center gap-1";
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <Link
-        href="/work?view=agents"
-        className="text-sm text-text-muted hover:text-text flex items-center gap-1 mb-4"
-      >
-        <ArrowLeft className="w-4 h-4" /> Work
-      </Link>
-
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-6">
-        <div>
-          <div className="flex items-center gap-3">
-            <Bot className="w-6 h-6 text-primary" />
-            <h1 className="text-2xl font-semibold">{agent.name}</h1>
+    <>
+      <DetailHeader
+        title={agent.name}
+        subtitle={
+          <Link
+            href="/work?view=agents"
+            className="inline-flex items-center gap-1 hover:text-primary"
+          >
+            <ArrowLeft className="w-3 h-3" />
+            Work
+          </Link>
+        }
+        state={agent.state}
+        extraBadges={
+          <>
             <span className="text-sm text-text-muted font-mono">@{agent.slug}</span>
-            <span className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border border-border">
-              <span className={cn("w-2 h-2 rounded-full", style.dot)} />
-              {style.label}
-            </span>
-          </div>
-          {agent.description ? (
-            <p className="text-sm text-text-muted mt-2">{agent.description}</p>
-          ) : null}
-          <div className="flex items-center gap-4 mt-3 text-xs text-text-muted">
-            <span>{agent.agentRuntime}</span>
+            <RunsAsBadge ownerUserId={agent.ownerUserId} />
+          </>
+        }
+        metaItems={[
+          <>
+            <AgentIcon runtime={agent.agentRuntime} className="w-3 h-3" />
+            {agent.agentRuntime}
+          </>,
+          <>
+            <Server className="w-3 h-3" />
             <span className="capitalize">{agent.podLifecycle}</span>
-            <span>${Number(agent.totalCostUsd ?? 0).toFixed(4)} lifetime</span>
-            {inbox.pending > 0 ? (
-              <span className="text-warning flex items-center gap-1">
-                <Inbox className="w-3 h-3" /> {inbox.pending} pending
-              </span>
+          </>,
+          <>
+            <DollarSign className="w-3 h-3" />${Number(agent.totalCostUsd ?? 0).toFixed(4)} lifetime
+          </>,
+          ...(inbox.pending > 0
+            ? [
+                <span key="inbox" className="text-warning flex items-center gap-1">
+                  <Inbox className="w-3 h-3" /> {inbox.pending} pending
+                </span>,
+              ]
+            : []),
+          ...(agent.consecutiveFailures > 0
+            ? [
+                <span key="failures" className="text-error">
+                  {agent.consecutiveFailures} consecutive failures
+                </span>,
+              ]
+            : []),
+        ]}
+        rightSlot={
+          <>
+            {agent.state === "paused" || agent.state === "failed" ? (
+              <button onClick={() => control("resume")} className={actionBtn}>
+                <Play className="w-3.5 h-3.5" /> Resume
+              </button>
+            ) : agent.state !== "archived" ? (
+              <button onClick={() => control("pause")} className={actionBtn}>
+                <Pause className="w-3.5 h-3.5" /> Pause
+              </button>
             ) : null}
-            {agent.consecutiveFailures > 0 ? (
-              <span className="text-error">{agent.consecutiveFailures} consecutive failures</span>
+            <button onClick={() => control("restart")} className={actionBtn}>
+              <RotateCcw className="w-3.5 h-3.5" /> Restart
+            </button>
+            {agent.state !== "archived" ? (
+              <button onClick={() => control("archive")} className={actionBtn}>
+                <Archive className="w-3.5 h-3.5" /> Archive
+              </button>
             ) : null}
+            <button
+              onClick={remove}
+              className="px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs text-error hover:bg-error/10 flex items-center gap-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </button>
+          </>
+        }
+      />
+
+      <div className="p-6 max-w-5xl mx-auto">
+        {agent.description ? (
+          <p className="text-sm text-text-muted mb-4">{agent.description}</p>
+        ) : null}
+
+        {agent.lastFailureReason ? (
+          <div className="text-xs text-error bg-error/5 border border-error/30 rounded-md px-3 py-2 mb-4">
+            Last failure: {agent.lastFailureReason}
           </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {agent.state === "paused" || agent.state === "failed" ? (
-            <button
-              onClick={() => control("resume")}
-              className="px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs hover:bg-bg-hover flex items-center gap-1"
-            >
-              <Play className="w-3.5 h-3.5" /> Resume
-            </button>
-          ) : agent.state !== "archived" ? (
-            <button
-              onClick={() => control("pause")}
-              className="px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs hover:bg-bg-hover flex items-center gap-1"
-            >
-              <Pause className="w-3.5 h-3.5" /> Pause
-            </button>
-          ) : null}
-          <button
-            onClick={() => control("restart")}
-            className="px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs hover:bg-bg-hover flex items-center gap-1"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> Restart
-          </button>
-          {agent.state !== "archived" ? (
-            <button
-              onClick={() => control("archive")}
-              className="px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs hover:bg-bg-hover flex items-center gap-1"
-            >
-              <Archive className="w-3.5 h-3.5" /> Archive
-            </button>
-          ) : null}
-          <button
-            onClick={remove}
-            className="px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs text-error hover:bg-error/10 flex items-center gap-1"
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Delete
-          </button>
-        </div>
-      </div>
+        ) : null}
 
-      {agent.lastFailureReason ? (
-        <div className="text-xs text-error bg-error/5 border border-error/30 rounded-md px-3 py-2 mb-4">
-          Last failure: {agent.lastFailureReason}
-        </div>
-      ) : null}
-
-      {/* Tabs */}
-      <div className="flex border-b border-border mb-4">
-        {(["chat", "turns", "config"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              "px-4 py-2 text-sm border-b-2 -mb-px capitalize",
-              tab === t
-                ? "border-primary text-text"
-                : "border-transparent text-text-muted hover:text-text",
-            )}
-          >
-            {t === "turns" ? `Turns (${turns.length})` : t}
-          </button>
-        ))}
-      </div>
-
-      {tab === "chat" ? (
-        <ChatTab
-          agent={agent}
-          messages={messages}
-          liveLogs={liveLogs}
-          draft={draft}
-          setDraft={setDraft}
-          submitMessage={submitMessage}
-          sending={sending}
+        <Segmented
+          className="mb-4"
+          size="md"
+          surface="card"
+          aria-label="Agent view"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: "chat", label: "Chat" },
+            { value: "turns", label: "Turns", count: turns.length },
+            { value: "config", label: "Config" },
+          ]}
         />
-      ) : null}
 
-      {tab === "turns" ? (
-        <TurnsTab agentId={agentId} turns={turns} openTurns={openTurns} toggleTurn={toggleTurn} />
-      ) : null}
+        {tab === "chat" ? (
+          <ChatTab
+            agent={agent}
+            messages={messages}
+            liveLogs={liveLogs}
+            draft={draft}
+            setDraft={setDraft}
+            submitMessage={submitMessage}
+            sending={sending}
+          />
+        ) : null}
 
-      {tab === "config" ? <ConfigTab agent={agent} /> : null}
-    </div>
+        {tab === "turns" ? (
+          <TurnsTab agentId={agentId} turns={turns} openTurns={openTurns} toggleTurn={toggleTurn} />
+        ) : null}
+
+        {tab === "config" ? <ConfigTab agent={agent} /> : null}
+      </div>
+    </>
   );
 }
 

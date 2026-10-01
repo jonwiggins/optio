@@ -60,6 +60,7 @@ export class GoogleOAuthProvider implements OAuthProvider {
       email: data.email ?? "",
       displayName: data.name ?? "",
       avatarUrl: data.picture,
+      emailVerified: data.verified_email === true,
     };
   }
 }

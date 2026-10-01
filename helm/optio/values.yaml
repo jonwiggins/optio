@@ -63,12 +63,13 @@ api:
 # ──────────────────────────────────────────────────────────────────────────────
 # Web UI
 # ──────────────────────────────────────────────────────────────────────────────
+# Runs as a second container in the API pod, so it follows the API's
+# replicas, autoscaling, PDB, anti-affinity and nodeSelector.
 web:
   image:
     repository: ghcr.io/jonwiggins/optio-web
     tag: latest
     pullPolicy: IfNotPresent
-  replicas: 1
   port: 3000
   service:
     type: ClusterIP    # Set to NodePort for local K8s dev (Docker Desktop, kind, minikube)
@@ -80,22 +81,6 @@ web:
     limits:
       cpu: 500m
       memory: 512Mi
-  # Pod anti-affinity (same options as api.antiAffinity)
-  antiAffinity: soft
-  # Kubernetes nodeSelector for web pods (opt-in).
-  nodeSelector: {}
-  # Pod disruption budget (same options as api.pdb)
-  pdb:
-    enabled: false
-    minAvailable: ""
-    maxUnavailable: 1
-  # Horizontal pod autoscaler (same options as api.autoscaling)
-  autoscaling:
-    enabled: false
-    minReplicas: 2
-    maxReplicas: 4
-    targetCPUUtilizationPercentage: 70
-    targetMemoryUtilizationPercentage: ""
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Optio Operations Assistant Pod
@@ -103,7 +88,8 @@ web:
 # It makes API calls on behalf of users — no repo checkout needed.
 # ──────────────────────────────────────────────────────────────────────────────
 optio:
-  enabled: true
+  # Off by default: nothing in Optio needs it. Set true to run it.
+  enabled: false
   image:
     repository: ghcr.io/jonwiggins/optio-optio
     tag: latest

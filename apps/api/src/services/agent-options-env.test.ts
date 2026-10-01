@@ -127,3 +127,18 @@ describe("buildPooledAgentCommand", () => {
     ).toBe(` -m 'x'\\''; rm -rf / #'`);
   });
 });
+
+describe("codexModelFlags with a model provider", () => {
+  it("adds the provider's -c overrides, quoted, and drops malformed ones", () => {
+    expect(
+      codexModelFlags({
+        OPTIO_CODEX_MODEL: "openai.gpt-5.4",
+        OPTIO_CODEX_PROVIDER_CONFIG: JSON.stringify([
+          'model_provider="amazon-bedrock"',
+          "; rm -rf /",
+        ]),
+      }),
+    ).toBe(` -c 'model_provider="amazon-bedrock"' -m 'openai.gpt-5.4'`);
+    expect(codexModelFlags({ OPTIO_CODEX_PROVIDER_CONFIG: "not json" })).toBe("");
+  });
+});

@@ -11,20 +11,16 @@ import {
   msUntilOffPeak,
   classifyError,
   parseRepoUrl,
-  parsePrUrl,
   parseIntEnv,
   addCostStrings,
   addTokenCounts,
+  PrToolCallTracker,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { shellSingleQuote } from "../utils/pod-env.js";
 import { getEventParser } from "../services/event-parsers.js";
-import {
-  checkExistingPr,
-  resolveDetectedPrUrl,
-  verifyTaskPr,
-  type ExistingPr,
-} from "../services/pr-detection-service.js";
+import { checkExistingPr, type ExistingPr } from "../services/pr-detection-service.js";
+import { detectTaskPrs } from "../services/task-pr-service.js";
 import { db } from "../db/client.js";
 import { tasks } from "../db/schema.js";
 import { eq, sql } from "drizzle-orm";
@@ -34,11 +30,14 @@ import { publishEvent } from "../services/event-bus.js";
 import {
   resolveSecretsForTask,
   resolveSecretsForSetup,
+  resolvePodSecrets,
   retrieveSecretWithFallback,
+  workspaceRestrictsPodSecrets,
 } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { getCredentialSecret } from "../services/credential-secret-service.js";
+import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
 import { subscribeToTaskMessages } from "../services/task-message-bus.js";
 import { registerActiveExec, unregisterActiveExec } from "../services/task-cancellation-service.js";
 import * as messageService from "../services/task-message-service.js";
@@ -262,26 +261,39 @@ export function startTaskWorker() {
 
         // Get agent adapter and build config
         const adapter = getAdapter(task.agentType);
+        // Personal work runs with its owner's secrets; organization work never
+        // sees anyone's (see services/work-ownership.ts).
+        const runOwnerUserId = task.ownerUserId ?? null;
         const claudeAuthMode =
-          ((await retrieveSecretWithFallback("CLAUDE_AUTH_MODE", "global", taskWorkspaceId).catch(
-            () => null,
-          )) as any) ?? "api-key";
+          ((await retrieveSecretWithFallback(
+            "CLAUDE_AUTH_MODE",
+            "global",
+            taskWorkspaceId,
+            runOwnerUserId,
+          ).catch(() => null)) as any) ?? "api-key";
         const codexAuthMode =
-          ((await retrieveSecretWithFallback("CODEX_AUTH_MODE", "global", taskWorkspaceId).catch(
-            () => null,
-          )) as any) ?? "api-key";
+          ((await retrieveSecretWithFallback(
+            "CODEX_AUTH_MODE",
+            "global",
+            taskWorkspaceId,
+            runOwnerUserId,
+          ).catch(() => null)) as any) ?? "api-key";
         const codexAppServerUrl =
           codexAuthMode === "app-server"
             ? (((await retrieveSecretWithFallback(
                 "CODEX_APP_SERVER_URL",
                 "global",
                 taskWorkspaceId,
+                runOwnerUserId,
               ).catch(() => null)) as any) ?? undefined)
             : undefined;
         const geminiAuthMode =
-          ((await retrieveSecretWithFallback("GEMINI_AUTH_MODE", "global", taskWorkspaceId).catch(
-            () => null,
-          )) as any) ?? "api-key";
+          ((await retrieveSecretWithFallback(
+            "GEMINI_AUTH_MODE",
+            "global",
+            taskWorkspaceId,
+            runOwnerUserId,
+          ).catch(() => null)) as any) ?? "api-key";
 
         // GCP config for Vertex AI — resolve per-agent so Claude's vertex config
         // does not bleed into Gemini tasks (and vice versa) when both are configured.
@@ -293,6 +305,7 @@ export function startTaskWorker() {
               isClaudeVertex ? "CLAUDE_VERTEX_PROJECT_ID" : "GOOGLE_CLOUD_PROJECT",
               "global",
               taskWorkspaceId,
+              runOwnerUserId,
             ).catch(() => null)) as any) ?? undefined)
           : undefined;
         const googleCloudLocation = needsGcpConfig
@@ -300,6 +313,7 @@ export function startTaskWorker() {
               isClaudeVertex ? "CLAUDE_VERTEX_REGION" : "GOOGLE_CLOUD_LOCATION",
               "global",
               taskWorkspaceId,
+              runOwnerUserId,
             ).catch(() => null)) as any) ?? undefined)
           : undefined;
         const claudeVertexServiceAccountKey = isClaudeVertex
@@ -307,6 +321,7 @@ export function startTaskWorker() {
               "CLAUDE_VERTEX_SERVICE_ACCOUNT_KEY",
               "global",
               taskWorkspaceId,
+              runOwnerUserId,
             ).catch(() => null)) as any) ?? undefined)
           : undefined;
         const opencodeDefaultBaseUrl =
@@ -314,12 +329,14 @@ export function startTaskWorker() {
             "OPENCODE_DEFAULT_BASE_URL",
             "global",
             taskWorkspaceId,
+            runOwnerUserId,
           ).catch(() => null)) as any) ?? undefined;
         const opencodeDefaultModel =
           ((await retrieveSecretWithFallback(
             "OPENCODE_DEFAULT_MODEL",
             "global",
             taskWorkspaceId,
+            runOwnerUserId,
           ).catch(() => null)) as any) ?? undefined;
         const optioApiUrl = `http://${process.env.API_HOST ?? "host.docker.internal"}:${process.env.API_PORT ?? "4000"}`;
 
@@ -394,15 +411,32 @@ export function startTaskWorker() {
         // Codex run takes only its own.
         const copilotOpt = (key: string) => (task.agentType === "codex" ? runOpt(key) : opt(key));
         const finalClaudeModel = reviewOverride?.claudeModel ?? opt("claudeModel");
+        // A model provider (Bedrock) picked for this run: checked against the
+        // owner again here, since it may have been removed or changed since.
+        const providerRow = reviewOverride
+          ? null
+          : await resolveProviderForWork({
+              agentType: task.agentType,
+              agentOptions,
+              workspaceId: taskWorkspaceId,
+              ownerUserId: runOwnerUserId,
+              runsOn: "pod",
+            });
+        const providerRuntime = providerRow
+          ? podProviderRuntime(providerRow, task.agentType)
+          : null;
+        if (providerRow) log.info({ provider: providerRow.name }, "Using model provider");
 
         const agentConfig = adapter.buildContainerConfig({
           taskId: task.id,
           prompt: task.prompt,
           repoUrl: task.repoUrl,
           repoBranch: task.repoBranch,
-          claudeAuthMode,
-          codexAuthMode,
+          claudeAuthMode: providerRuntime ? "bedrock" : claudeAuthMode,
+          codexAuthMode: providerRuntime ? "bedrock" : codexAuthMode,
           codexAppServerUrl,
+          modelProviderEnv: providerRuntime?.env,
+          codexProviderConfig: providerRuntime?.codexConfig,
           optioApiUrl,
           renderedPrompt: finalRenderedPrompt,
           taskFileContent: finalTaskFileContent,
@@ -463,6 +497,7 @@ export function startTaskWorker() {
           task.repoUrl,
           task.agentType,
           taskWorkspaceId,
+          runOwnerUserId,
         );
         if (resolvedConnections.length > 0) {
           // Build MCP entries from connections and merge into .mcp.json
@@ -491,12 +526,14 @@ export function startTaskWorker() {
                         secretName,
                         task.repoUrl,
                         taskWorkspaceId,
+                        runOwnerUserId,
                       );
                     } catch {
                       secretValue = await retrieveSecretWithFallback(
                         secretName,
                         "global",
                         taskWorkspaceId,
+                        runOwnerUserId,
                       );
                     }
                     resolvedEnv[envKey] = secretValue;
@@ -507,6 +544,7 @@ export function startTaskWorker() {
                         configKey,
                         task.repoUrl,
                         taskWorkspaceId,
+                        runOwnerUserId,
                       );
                     } catch {
                       try {
@@ -514,6 +552,7 @@ export function startTaskWorker() {
                           configKey,
                           "global",
                           taskWorkspaceId,
+                          runOwnerUserId,
                         );
                       } catch {
                         // Leave unresolved
@@ -530,6 +569,7 @@ export function startTaskWorker() {
                     configKey,
                     task.repoUrl,
                     taskWorkspaceId,
+                    runOwnerUserId,
                   );
                 } catch {
                   try {
@@ -537,6 +577,7 @@ export function startTaskWorker() {
                       configKey,
                       "global",
                       taskWorkspaceId,
+                      runOwnerUserId,
                     );
                   } catch {
                     // Leave unresolved
@@ -658,14 +699,26 @@ export function startTaskWorker() {
             ...(!isGitHubAppConfigured() ? ["GITHUB_TOKEN"] : []),
           ]),
         ];
-        const taskUserId = task.createdBy ?? null;
         const resolvedSecrets = await resolveSecretsForTask(
           secretNames,
           task.repoUrl,
           taskWorkspaceId,
-          taskUserId,
+          runOwnerUserId,
         );
-        const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
+        // The secrets this work picked for its pod (personal work: its owner's first).
+        const picked = await resolvePodSecrets(task.podSecrets, {
+          repoUrl: task.repoUrl,
+          workspaceId: taskWorkspaceId,
+          ownerUserId: runOwnerUserId,
+        });
+        if (picked.missing.length > 0) {
+          log.warn({ missing: picked.missing }, "Picked pod secrets not found");
+        }
+        const allEnv: Record<string, string> = {
+          ...picked.env,
+          ...agentConfig.env,
+          ...resolvedSecrets,
+        };
 
         // Resolve git platform tokens (not part of adapter requiredSecrets since they're infra-level)
         for (const secretName of ["GITHUB_TOKEN", "GITLAB_TOKEN", "GITLAB_HOST"]) {
@@ -749,7 +802,7 @@ export function startTaskWorker() {
             "CLAUDE_CODE_OAUTH_TOKEN",
             "global",
             taskWorkspaceId,
-            taskUserId,
+            runOwnerUserId,
           ).catch(() => null);
           if (oauthToken) {
             allEnv.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
@@ -787,7 +840,9 @@ export function startTaskWorker() {
 
         // Inject secrets into pod env for setup commands (global + repo-scoped).
         // Repo-scoped secrets override global secrets with the same name.
-        const setupSecrets = await resolveSecretsForSetup(task.repoUrl, taskWorkspaceId);
+        const setupSecrets = await resolveSecretsForSetup(task.repoUrl, taskWorkspaceId, {
+          orgSecrets: !(await workspaceRestrictsPodSecrets(taskWorkspaceId)),
+        });
         const setupSecretCount = Object.keys(setupSecrets).length;
         if (setupSecretCount > 0) {
           Object.assign(podEnv, setupSecrets);
@@ -889,11 +944,14 @@ export function startTaskWorker() {
         // Stream stdout with structured parsing
         let allLogs = "";
         let sessionId: string | undefined;
-        // For force-restart, preserve the existing PR URL so agent output
-        // referencing other repos' PRs doesn't overwrite it
-        let capturedPrUrl: string | undefined = restartFromBranch
-          ? (task.prUrl ?? undefined)
-          : undefined;
+        // PRs the agent's own PR-creating tool calls produced (`gh pr
+        // create`, MCP `create_pull_request`, …), each paired with its call's
+        // result by id. A PR URL the agent merely mentions is never adopted.
+        const prTracker = new PrToolCallTracker();
+        const ingestPrToolCalls = (line: string) => {
+          if (!isReviewTask) ingestPrToolCallLine(prTracker, task.agentType, line);
+        };
+        const runStartedAt = new Date();
         let lastHeartbeat = Date.now();
         const HEARTBEAT_INTERVAL_MS = 60_000;
         // Stall detection: debounced activity timestamp flush
@@ -970,6 +1028,7 @@ export function startTaskWorker() {
 
           for (const line of parts) {
             if (!line.trim()) continue;
+            ingestPrToolCalls(line);
 
             // Parse as structured agent event (format depends on agent type)
             const parsed = getEventParser(task.agentType)(line, taskId);
@@ -1003,47 +1062,6 @@ export function startTaskWorker() {
               if (["text", "tool_use", "tool_result", "thinking", "system"].includes(entry.type)) {
                 pendingActivityAt = new Date();
               }
-
-              // Check for PR URL — only capture the first PR URL from agent output
-              // that matches the task's own repo. Without repo validation, the
-              // agent referencing another repo's PR (e.g. via gh pr list on a
-              // dependency) would store the wrong URL.
-              if (!capturedPrUrl) {
-                // Match both GitHub PR URLs and GitLab MR URLs (web URLs only, not API URLs)
-                const prUrlPattern =
-                  /https:\/\/(?![\w.-]+\/api\/)[^\s"]+\/(?:pull\/\d+|-\/merge_requests\/\d+)/g;
-                const prMatches = entry.content.match(prUrlPattern);
-                if (prMatches) {
-                  const taskBranch = `optio/task-${taskId}`;
-                  const content = entry.content.trim();
-                  const looksLikeJsonArray =
-                    content.startsWith("[") && content.includes('"number"');
-                  // Filter to only URLs matching the task's repo using parsePrUrl
-                  const taskRepo = parseRepoUrl(task.repoUrl);
-                  const repoMatches = prMatches.filter((url) => {
-                    const parsed = parsePrUrl(url);
-                    if (!parsed || !taskRepo) return false;
-                    return (
-                      parsed.owner.toLowerCase() === taskRepo.owner.toLowerCase() &&
-                      parsed.repo.toLowerCase() === taskRepo.repo.toLowerCase() &&
-                      parsed.host === taskRepo.host
-                    );
-                  });
-                  if (repoMatches.length > 0) {
-                    if (!looksLikeJsonArray) {
-                      const url = repoMatches[repoMatches.length - 1];
-                      capturedPrUrl = url;
-                      await taskService.updateTaskPr(taskId, url);
-                      log.info({ prUrl: url }, "PR URL detected in logs");
-                    } else if (entry.content.includes(taskBranch)) {
-                      const url = repoMatches[repoMatches.length - 1];
-                      capturedPrUrl = url;
-                      await taskService.updateTaskPr(taskId, url);
-                      log.info({ prUrl: url }, "PR URL detected in logs (own branch in JSON)");
-                    }
-                  }
-                }
-              }
             }
           }
 
@@ -1063,6 +1081,7 @@ export function startTaskWorker() {
 
         // Flush any remaining partial line in the buffer
         if (lineBuf.trim()) {
+          ingestPrToolCalls(lineBuf);
           const parsed = getEventParser(task.agentType)(lineBuf, taskId);
           for (const entry of parsed.entries) {
             await taskService.appendTaskLog(
@@ -1194,69 +1213,39 @@ export function startTaskWorker() {
           recordTaskTokens(result.outputTokens, { ...taskAttrs, direction: "output" });
         }
 
-        // Pick the best PR URL.  Priority:
-        //   1. capturedPrUrl — detected during streaming with repo validation
-        //      and heuristics (branch matching, JSON-array filtering).
-        //   2. taskAfterExec.prUrl — already persisted, e.g. preserved across
-        //      a force-restart.
-        //   3. result.prUrl — raw regex on the full NDJSON log; only used if
-        //      it matches the task's repo (can otherwise match placeholder URLs
-        //      inside code the agent wrote, or PRs from other repos).
-        let fallbackPrUrl = result.prUrl;
-        if (fallbackPrUrl) {
-          const parsedPr = parsePrUrl(fallbackPrUrl);
-          const taskRepo = parseRepoUrl(task.repoUrl);
-          if (
-            !parsedPr ||
-            !taskRepo ||
-            parsedPr.owner.toLowerCase() !== taskRepo.owner.toLowerCase() ||
-            parsedPr.repo.toLowerCase() !== taskRepo.repo.toLowerCase() ||
-            parsedPr.host !== taskRepo.host
-          ) {
-            log.info(
-              { resultPrUrl: fallbackPrUrl, expectedRepo: task.repoUrl },
-              "Ignoring result.prUrl — wrong repo",
-            );
-            fallbackPrUrl = undefined;
-          }
-        }
-        const scrapedPrUrl = capturedPrUrl || taskAfterExec?.prUrl || fallbackPrUrl || undefined;
-
-        // A `/pull/N` URL in agent output is not proof that a PR was opened —
-        // it may be an example URL echoed from the prompt (issue #531). The
-        // task branch is deterministic (`optio/task-{id}`), so ask the git
-        // platform whether an open PR actually exists for it before trusting
-        // any scraped URL. If the platform can't be consulted (no token, API
-        // error), fall back to the previous trust-the-logs behavior.
-        let detectedPrUrl = scrapedPrUrl;
-        // Set when the platform authoritatively reported no open PR for the
-        // task branch — lets later API-fallback checks skip a redundant call.
+        // Which PRs did this run open? Only the agent's own PR-creating tool
+        // calls (URL from that call's result) and PRs whose head branch is
+        // under the task's branch count — each confirmed against the git
+        // platform. A URL the agent merely mentions is never adopted. Every
+        // PR is recorded in task_prs; the first becomes tasks.pr_url (the
+        // primary the PR lifecycle follows), unless the task already has one
+        // (a resumed / restarted run keeps its PR).
+        let detectedPrUrl: string | undefined = taskAfterExec?.prUrl ?? undefined;
+        // Set when the platform answered the branch lookup and found nothing —
+        // lets the later API-fallback checks skip a redundant call.
         let prKnownAbsent = false;
-        if (scrapedPrUrl && !isReviewTask) {
-          const verification = await verifyTaskPr(task.repoUrl, taskId, taskWorkspaceId);
-          const resolved = resolveDetectedPrUrl(scrapedPrUrl, verification);
-          detectedPrUrl = resolved.url;
-          if (verification.status === "no_pr") {
-            prKnownAbsent = true;
-            log.warn(
-              { rejectedPrUrl: resolved.rejectedUrl },
-              "Ignoring PR URL from agent output — platform reports no open PR for the task branch",
+        if (!isReviewTask) {
+          try {
+            const branches = repoPodId
+              ? await repoPool.listTaskBranchesInPod(repoPodId, taskId)
+              : [];
+            const detection = await detectTaskPrs(
+              { id: taskId, repoUrl: task.repoUrl },
+              { matches: prTracker.matches, runStartedAt, branches },
             );
-            if (taskAfterExec?.prUrl) {
-              // A bogus URL was already persisted during streaming — clear it
-              // so the task doesn't advertise a PR that was never opened.
-              await taskService.clearTaskPr(taskId);
+            detectedPrUrl = detection.primaryUrl ?? detectedPrUrl;
+            prKnownAbsent = detection.platformChecked && !detection.primaryUrl;
+            if (
+              prTracker.matches.length >
+              detection.adopted.filter((p) => p.source === "tool_call").length
+            ) {
+              log.info(
+                { created: prTracker.matches.map((m) => m.url ?? m.codecommit) },
+                "Some PRs from the agent's create calls were not adopted (other repo, closed, or unconfirmed)",
+              );
             }
-          } else if (verification.status === "unavailable") {
-            log.info(
-              { prUrl: scrapedPrUrl, reason: verification.reason },
-              "PR verification unavailable — falling back to PR URL from agent output",
-            );
-          } else if (detectedPrUrl !== scrapedPrUrl) {
-            log.info(
-              { scrapedPrUrl, verifiedPrUrl: detectedPrUrl },
-              "Using canonical PR URL from platform instead of URL scraped from agent output",
-            );
+          } catch (err) {
+            log.warn({ err }, "PR detection failed");
           }
         }
 
@@ -1781,6 +1770,21 @@ export async function reconcileOrphanedTasks() {
  * The trailing newline is required: stream-json is NDJSON (one JSON object per
  * line) and claude won't process a message until it sees the line terminator.
  */
+/**
+ * Feed one line of agent output to the PR tool-call tracker. Codex speaks
+ * `exec --json`; Claude Code (and the agents that mirror its stream-json)
+ * speak stream-json. Other formats simply yield nothing, leaving the
+ * branch lookup to find their PRs.
+ */
+export function ingestPrToolCallLine(
+  tracker: PrToolCallTracker,
+  agentType: string,
+  line: string,
+): void {
+  if (agentType === "codex") tracker.ingestCodexLine(line);
+  else tracker.ingestClaudeLine(line);
+}
+
 export function buildInitialClaudeStreamMessage(prompt: string): string {
   return (
     JSON.stringify({
