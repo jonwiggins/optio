@@ -26,6 +26,7 @@ import {
   missingFields,
   normalize,
   prSettingsApply,
+  TERMINAL,
   type WorkDraft,
   type WorkKind,
 } from "./model";
@@ -78,7 +79,7 @@ function rowFromSpec(spec: WorkSpec): Record<string, unknown> {
         ? null
         : kind === "repo-blueprint"
           ? cleanWorkSettings(spec.settings)
-          : withoutPrSettings(cleanWorkSettings(spec.settings)),
+          : withoutPrSettings(spec.settings),
   };
   // `runLocation`: a Task or Job on a machine runs headless.
   const location =
@@ -153,7 +154,7 @@ function kept(d: WorkDraft) {
     settings: isPodWork(d)
       ? prSettingsApply(d)
         ? cleanWorkSettings(d.settings)
-        : withoutPrSettings(cleanWorkSettings(d.settings))
+        : withoutPrSettings(d.settings)
       : null,
     // An event When has no trigger form; any other When has no event.
     ...(isEventWhen(d.when) ? { trigger: undefined } : { event: undefined }),
@@ -457,6 +458,62 @@ describe("draftFromRow — stored rows", () => {
     expect(kindLock(d, "local-blueprint", { withRepo: true })).toMatch(/automation/);
     // Waiting for you between turns is an interactive automation — still this row.
     expect(kindLock(d, "local-blueprint", { then: "waits-for-me" })).toBeUndefined();
+  });
+});
+
+describe("draftFromRow — no agent", () => {
+  it("a command Job comes back as a command, not an agent run", () => {
+    const d = draftFromRow(
+      { kind: "standalone", name: "Backup", prompt: "./backup.sh {{date}}", agentType: null },
+      { type: "schedule", config: { cronExpression: "0 3 * * *" } },
+    );
+    expect(d.runtime).toBe(TERMINAL);
+    expect(d.then).toBe("exits");
+    expect(d.prompt).toBe("./backup.sh {{date}}");
+    expect(deriveKind(d)).toBe("standalone");
+    expect(missingFields(d)).toEqual([]);
+    // Saving it without a change keeps it a command.
+    const spec = specFor(d, { repoUrl: "", name: d.name });
+    expect(spec.who.runtime).toBeNull();
+    expect(spec.what.prompt).toBe("./backup.sh {{date}}");
+  });
+
+  it("an automation that runs a command (saved on the Machines page) keeps its command", () => {
+    const d = draftFromRow(
+      {
+        kind: "local-blueprint",
+        name: "Deploy",
+        localHostId: "h1",
+        localDir: "/Users/dev/app",
+        prompt: "make deploy",
+        agentType: null,
+        localSessionMode: "interactive",
+      },
+      { type: "webhook", config: { path: "deploy" } },
+    );
+    expect(d.runtime).toBe(TERMINAL);
+    expect(d.then).toBe("exits");
+    expect(kindLock(d, "local-blueprint", { prompt: "make deploy-all" })).toBeUndefined();
+    expect(specFor(d, { repoUrl: "", name: d.name }).what.prompt).toBe("make deploy");
+  });
+
+  it("an automation with no command opens a shell that waits for you", () => {
+    const d = draftFromRow(
+      {
+        kind: "local-blueprint",
+        name: "On call",
+        localHostId: "h1",
+        localDir: "/Users/dev/app",
+        prompt: "",
+        agentType: null,
+        localSessionMode: "interactive",
+      },
+      { type: "webhook", config: { path: "page" } },
+    );
+    expect(d.runtime).toBe(TERMINAL);
+    expect(d.then).toBe("waits-for-me");
+    expect(deriveKind(d)).toBe("local-blueprint");
+    expect(missingFields(d)).toEqual([]);
   });
 });
 

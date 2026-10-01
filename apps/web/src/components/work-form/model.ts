@@ -11,6 +11,10 @@ import {
   type IdOverrides,
   type ResourceOwner,
   type WorkFormDefaults,
+  deriveWorkKind,
+  effectivePrSettings,
+  type RepoPrSettings as SharedRepoPrSettings,
+  type WorkKind,
   type WorkSettings,
   type WorkThen,
 } from "@optio/shared";
@@ -501,8 +505,6 @@ export function fullOptionsApply(d: WorkDraft): boolean {
 /** A slug for a persistent agent, from its name. */
 export { slugify } from "@optio/shared";
 
-// ── PR follow-through ────────────────────────────────────────────────────────
-
 // ── Environment (Where) ──────────────────────────────────────────────────────
 
 /** The environment parts of `WorkSettings` that switch things on and off by id. */
@@ -527,20 +529,6 @@ export function toggleOverride(
   return { ...(add.length ? { add } : {}), ...(remove.length ? { remove } : {}) };
 }
 
-/** A draft with one environment item switched on or off. */
-export function withOverride(
-  d: WorkDraft,
-  part: EnvironmentPart,
-  id: string,
-  isDefault: boolean,
-  on: boolean,
-): WorkDraft {
-  return {
-    ...d,
-    settings: { ...d.settings, [part]: toggleOverride(d.settings[part], id, isDefault, on) },
-  };
-}
-
 /** How many things the work changes from its defaults (for the collapsed summary). */
 export function settingsChanges(s: WorkSettings): number {
   const ids = (o?: IdOverrides) => (o?.add?.length ?? 0) + (o?.remove?.length ?? 0);
@@ -549,8 +537,8 @@ export function settingsChanges(s: WorkSettings): number {
     ids(s.mcpServers) +
     ids(s.skills) +
     (s.setupCommands?.trim() ? 1 : 0) +
-    (s.review ? 1 : 0) +
-    (typeof s.cautiousMode === "boolean" ? 1 : 0) +
+    (s.review?.enabled ? 1 : 0) +
+    (s.cautiousMode === true ? 1 : 0) +
     (typeof s.maxAutoResumes === "number" ? 1 : 0)
   );
 }
@@ -563,13 +551,9 @@ export function prSettingsApply(d: WorkDraft): boolean {
 // ── PR follow-through ────────────────────────────────────────────────────────
 
 /** The repo settings that decide what happens to a PR after it opens. */
-export interface RepoPrSettings {
+export interface RepoPrSettings extends SharedRepoPrSettings {
   autoResume?: boolean | null;
   autoMerge?: boolean | null;
-  cautiousMode?: boolean | null;
-  reviewEnabled?: boolean | null;
-  reviewTrigger?: string | null;
-  maxAutoResumes?: number | null;
 }
 
 /** The server's cap when a repo sets none (OPTIO_MAX_AUTO_RESUMES' default). */
@@ -598,20 +582,14 @@ export function followThrough(
   const s = isLocal(d) ? {} : d.settings;
   const resume = own ? true : !!repo?.autoResume;
   const merge = own ? d.mergeWhenReady : !!repo?.autoMerge;
-  // The work's own settings (Where → Environment) win over the repo's.
-  const cautious = s.cautiousMode ?? !!repo?.cautiousMode;
-  const cap = s.maxAutoResumes ?? repo?.maxAutoResumes ?? DEFAULT_MAX_AUTO_RESUMES;
-  const automatic = (t: string | null | undefined): t is "on_pr" | "on_ci_pass" =>
-    t === "on_pr" || t === "on_ci_pass";
-  // The reconciler launches a review only on these two triggers.
-  const reviewTrigger = s.review?.enabled
-    ? automatic(s.review.trigger)
-      ? s.review.trigger
-      : automatic(repo?.reviewTrigger)
-        ? repo.reviewTrigger
-        : "on_ci_pass"
-    : repo?.reviewTrigger;
-  const reviewOn = s.review ? s.review.enabled : !!repo?.reviewEnabled && automatic(reviewTrigger);
+  // The work's own settings (Where → Environment) win over the repo's — the
+  // reconciler's own rule.
+  const pr = effectivePrSettings(s, repo, DEFAULT_MAX_AUTO_RESUMES);
+  const cautious = pr.cautiousMode;
+  const cap = pr.maxAutoResumes;
+  const reviewTrigger = pr.reviewTrigger;
+  // The reconciler launches a review only on an automatic trigger.
+  const reviewOn = pr.reviewEnabled && reviewTrigger !== null;
   const resumes = `the agent picks it back up (up to ${cap} times)`;
   return {
     fromRepo: !own,
@@ -630,9 +608,7 @@ export function followThrough(
           ? reviewTrigger === "on_pr"
             ? "As soon as the PR opens."
             : "Once CI passes."
-          : s.review
-            ? "Off for this work."
-            : "Off for this repo — turn it on under Where → Environment, or in the repo's settings.",
+          : "Off for this repo — turn it on under Where → Environment, or in the repo's settings.",
       },
       {
         key: "ci",
@@ -670,23 +646,16 @@ export function followThrough(
 
 // ── Kind: the storage row a draft becomes ────────────────────────────────────
 
-export type WorkKind =
-  | "repo-task" // tasks (one-shot, opens a PR)
-  | "repo-blueprint" // task_configs + trigger
-  | "standalone" // workflows (+ trigger, or run now)
-  | "local-blueprint" // local_blueprints + trigger (interactive + trigger on a machine)
-  | "local-terminal" // local_terminals (interactive, on a machine)
-  | "pod-session" // interactive_sessions (interactive, in a repo pod)
-  | "persistent-agent"; // persistent_agents
+export type { WorkKind };
 
+/** The row a draft becomes — the server's own rule (`deriveWorkKind`, `kindOfSpec`). */
 export function deriveKind(d: WorkDraft): WorkKind {
-  if (d.then === "waits-for-messages") return "persistent-agent";
-  if (d.then === "waits-for-me") {
-    if (!isLocal(d)) return "pod-session";
-    return isTriggered(d) ? "local-blueprint" : "local-terminal";
-  }
-  if (d.withRepo) return isTriggered(d) ? "repo-blueprint" : "repo-task";
-  return "standalone";
+  return deriveWorkKind({
+    then: d.then,
+    local: isLocal(d),
+    triggered: isTriggered(d),
+    withRepo: d.withRepo,
+  });
 }
 
 // ── The sentence ─────────────────────────────────────────────────────────────
@@ -729,7 +698,11 @@ function whenPhrase(d: WorkDraft): SentencePart[] {
         ? [{ text: `Started by a webhook at /api/hooks/${d.trigger.webhookPath},` }]
         : [{ text: "Started by" }, { missing: "a webhook path", field: "webhook" }, { text: "," }];
     case "ticket":
-      return [{ text: `Started by ${d.trigger.ticketSource ?? "github"} tickets,` }];
+      return [
+        {
+          text: `Started by ${TICKET_SOURCE_NAMES[d.trigger.ticketSource ?? "github"] ?? d.trigger.ticketSource} tickets,`,
+        },
+      ];
     case "github":
     case "slack":
     case "linear": {
@@ -751,6 +724,19 @@ function whenPhrase(d: WorkDraft): SentencePart[] {
   }
 }
 
+const TICKET_SOURCE_NAMES: Record<string, string> = {
+  github: "GitHub",
+  gitlab: "GitLab",
+  linear: "Linear",
+  jira: "Jira",
+  notion: "Notion",
+};
+
+/** "a Claude Code", "an OpenAI Codex". */
+function withArticle(noun: string): string {
+  return `${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun}`;
+}
+
 function shortDir(dir: string): string {
   return dir.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 }
@@ -765,12 +751,11 @@ export function describe(
   ctx: { repoName?: string | null; machineName?: string | null } = {},
 ): SentencePart[] {
   const parts: SentencePart[] = [...whenPhrase(d)];
-  const command = d.runtime === TERMINAL && d.then === "exits";
-  const who = command
+  const who = isCommand(d)
     ? "a command"
     : d.runtime === TERMINAL
       ? "a terminal"
-      : `a ${runtimeLabel(d.runtime)}`;
+      : withArticle(runtimeLabel(d.runtime));
   // Plain English for the exit condition: a run finishes, a session waits
   // for you, an agent stays.
   const noun =
@@ -812,7 +797,7 @@ export function describe(
 
   if (d.then === "exits") {
     parts.push({
-      text: command
+      text: isCommand(d)
         ? "that runs and exits."
         : d.withRepo
           ? "that opens a PR and exits when done."
@@ -837,16 +822,17 @@ export function missingFields(d: WorkDraft, ctx: Parameters<typeof describe>[1] 
   const gaps = describe(d, ctx).flatMap((p) => ("missing" in p ? [p.field] : []));
   // A terminal that opens a shell needs nothing to run; a command needs its
   // command; and everything an agent runs unattended needs a prompt.
-  if (asksForPrompt(d) && !d.prompt.trim()) {
-    const kind = deriveKind(d);
-    const adHoc = kind === "pod-session" || kind === "local-terminal";
-    if (!adHoc) gaps.push("prompt");
+  // (An agent terminal you open on your machine can start without one.)
+  if (asksForPrompt(d) && !d.prompt.trim() && deriveKind(d) !== "local-terminal") {
+    gaps.push("prompt");
   }
   return gaps;
 }
 
 /** Whether the What section asks for anything: an agent's prompt, or a command to run. */
 export function asksForPrompt(d: WorkDraft): boolean {
+  // A pod session starts empty: only its repo and name travel.
+  if (deriveKind(d) === "pod-session") return false;
   return d.runtime !== TERMINAL || d.then === "exits";
 }
 

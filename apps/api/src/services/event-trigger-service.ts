@@ -723,7 +723,11 @@ async function targetFacts(trigger: TriggerRow): Promise<TargetFacts | null> {
   if (trigger.targetType === "persistent_agent") {
     const { getPersistentAgentUnscoped } = await import("./persistent-agent-service.js");
     const row = await getPersistentAgentUnscoped(trigger.targetId);
-    return row ? { workspaceId: row.workspaceId ?? null, repoUrl: null } : null;
+    if (!row) return null;
+    // An agent with a repo listens to that repo, like a scheduled Task.
+    const { getRepo } = await import("./repo-service.js");
+    const repo = row.repoId ? await getRepo(row.repoId).catch(() => null) : null;
+    return { workspaceId: row.workspaceId ?? null, repoUrl: repo?.repoUrl ?? null };
   }
   return null;
 }
@@ -836,8 +840,9 @@ export async function fireEventTriggers<S extends EventTriggerType>(
         );
         continue;
       }
-      // A scheduled Task listens to its own repo unless the trigger names
-      // others — a PR in some other repo shouldn't start work in this one.
+      // A scheduled Task (or an agent with a repo) listens to its own repo
+      // unless the trigger names others — a PR in some other repo shouldn't
+      // start work in this one.
       const repoFilter = Array.isArray(config.repos) ? (config.repos as string[]) : [];
       if (
         source === "github" &&

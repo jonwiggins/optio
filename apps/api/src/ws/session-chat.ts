@@ -15,7 +15,7 @@ import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import type { AgentLogEntry, ExecSession } from "@optio/shared";
-import { shellSingleQuote } from "../utils/pod-env.js";
+import { shellQuote } from "@optio/shared";
 import { plusCost } from "../services/run-usage.js";
 import {
   buildClaudeChatCommand,
@@ -275,11 +275,11 @@ export async function sessionChatWs(app: FastifyInstance) {
         // Wait for repo to be ready
         "for i in $(seq 1 30); do [ -f /workspace/.ready ] && break; sleep 1; done",
         '[ -f /workspace/.ready ] || { echo "Repo not ready"; exit 1; }',
-        `cd ${shellSingleQuote(worktreePath)}`,
+        `cd ${shellQuote(worktreePath)}`,
         // Set auth env vars for the Claude process
-        ...Object.entries(authEnv).map(([k, v]) => `export ${k}=${shellSingleQuote(v)}`),
+        ...Object.entries(authEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
         // Set auth passthrough env vars for Optio API calls
-        ...Object.entries(passthroughEnv).map(([k, v]) => `export ${k}=${shellSingleQuote(v)}`),
+        ...Object.entries(passthroughEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
         // Run claude in one-shot prompt mode with streaming JSON output,
         // resuming the stored conversation when we have one.
         buildClaudeChatCommand({ prompt: fullPrompt, model: currentModel, resumeSessionId }),

@@ -198,10 +198,10 @@ describe("buildWorkflowAgentCommand", () => {
 });
 
 describe("renderJobInput", () => {
-  it("quotes a command Job's params and leaves an agent's prompt as written", () => {
+  it("passes a command Job's params as shell variables and leaves an agent's prompt as written", () => {
     const params = { name: "a b" };
     expect(renderJobInput({ agentRuntime: "shell", promptTemplate: "echo {{name}}" }, params)).toBe(
-      "echo 'a b'",
+      `OPTIO_PARAM_name='a b'\necho "\${OPTIO_PARAM_name}"`,
     );
     expect(
       renderJobInput({ agentRuntime: "claude-code", promptTemplate: "Greet {{name}}" }, params),

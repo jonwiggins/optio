@@ -10,6 +10,7 @@ import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { insertWorkspace } from "../test-utils/integration/fixtures.js";
 import { buildAgentEnvironment, environmentOptions } from "./agent-environment-service.js";
+import { logger } from "../logger.js";
 import { createConnection, seedBuiltInProviders } from "./connection-service.js";
 import { createMcpServer } from "./mcp-server-service.js";
 import { createSkill } from "./skill-service.js";
@@ -82,34 +83,44 @@ async function world() {
   };
 }
 
-const mcpOf = (env: Awaited<ReturnType<typeof buildAgentEnvironment>>) => {
-  const file = env.setupFiles.find((f) => f.path === ".mcp.json");
+type Env = Record<string, string>;
+/** The setup files a pod would write, decoded from `OPTIO_SETUP_FILES`. */
+const filesOf = (env: Env): { path: string; content: string }[] =>
+  env.OPTIO_SETUP_FILES
+    ? JSON.parse(Buffer.from(env.OPTIO_SETUP_FILES, "base64").toString("utf8"))
+    : [];
+const mcpOf = (env: Env) => {
+  const file = filesOf(env).find((f) => f.path === ".mcp.json");
   return file ? (JSON.parse(file.content).mcpServers as Record<string, { command: string }>) : {};
 };
-const skillPaths = (env: Awaited<ReturnType<typeof buildAgentEnvironment>>) =>
-  env.setupFiles.filter((f) => f.path.startsWith(".claude/")).map((f) => f.path);
+const skillPaths = (env: Env) =>
+  filesOf(env)
+    .filter((f) => f.path.startsWith(".claude/"))
+    .map((f) => f.path);
+const build = (input: Parameters<typeof buildAgentEnvironment>[0]) =>
+  buildAgentEnvironment(input, logger);
 
 describe("buildAgentEnvironment", () => {
   it("gives repo work the global and repo defaults, and work with no repo the global ones", async () => {
     const w = await world();
     const base = { agentType: "claude-code", workspaceId: w.ws.id, ownerUserId: null };
 
-    const repoEnv = await buildAgentEnvironment({ ...base, repoUrl: w.repoUrl });
+    const repoEnv = await build({ ...base, repoUrl: w.repoUrl });
     const mcp = mcpOf(repoEnv);
     expect(Object.keys(mcp).sort()).toEqual(["db", "docs", "files"]);
     // A connection is served as its provider's MCP server, args filled from its config.
     expect(mcp.files).toMatchObject({ command: "npx" });
     expect(JSON.stringify(mcp.files)).toContain("/data");
     expect(skillPaths(repoEnv)).toEqual([".claude/commands/release.md"]);
-    expect(repoEnv.env.OPTIO_WORK_SETUP_COMMANDS).toBeUndefined();
+    expect(repoEnv.OPTIO_WORK_SETUP_COMMANDS).toBeUndefined();
 
-    const jobEnv = await buildAgentEnvironment({ ...base, repoUrl: null });
+    const jobEnv = await build({ ...base, repoUrl: null });
     expect(Object.keys(mcpOf(jobEnv)).sort()).toEqual(["docs", "files"]);
   });
 
   it("applies the work's settings: added, left out, and its own setup commands", async () => {
     const w = await world();
-    const env = await buildAgentEnvironment({
+    const env = await build({
       repoUrl: w.repoUrl,
       agentType: "claude-code",
       workspaceId: w.ws.id,
@@ -125,17 +136,17 @@ describe("buildAgentEnvironment", () => {
     // Organization work never gets someone's personal connection, even when asked.
     expect(Object.keys(mcp).sort()).toEqual(["db", "metrics", "sentry"]);
     expect(mcp.sentry).toMatchObject({ env: { SENTRY_ORG: "acme" } });
-    expect(env.env.OPTIO_MCP_INSTALL_COMMANDS).toBe("npm i -g m");
+    expect(env.OPTIO_MCP_INSTALL_COMMANDS).toBe("npm i -g m");
     expect(skillPaths(env).sort()).toEqual([
       ".claude/commands/release.md",
       ".claude/commands/triage.md",
     ]);
-    expect(env.env.OPTIO_WORK_SETUP_COMMANDS).toBe("npm ci");
+    expect(env.OPTIO_WORK_SETUP_COMMANDS).toBe("npm ci");
   });
 
   it("lets personal work add its owner's own connection", async () => {
     const w = await world();
-    const env = await buildAgentEnvironment({
+    const env = await build({
       repoUrl: null,
       agentType: "claude-code",
       workspaceId: w.ws.id,
@@ -149,7 +160,7 @@ describe("buildAgentEnvironment", () => {
     const w = await world();
     const elsewhere = await insertWorkspace();
     const foreign = await createMcpServer({ name: "foreign", command: "x" }, elsewhere.id);
-    const env = await buildAgentEnvironment({
+    const env = await build({
       repoUrl: null,
       agentType: "claude-code",
       workspaceId: w.ws.id,
@@ -157,6 +168,41 @@ describe("buildAgentEnvironment", () => {
       settings: { mcpServers: { add: [foreign.id] } },
     });
     expect(Object.keys(mcpOf(env))).not.toContain("foreign");
+  });
+});
+
+describe("buildAgentEnvironment — commands and untrusted pods", () => {
+  it("a command gets only its setup commands and the files it was handed", async () => {
+    const w = await world();
+    const env = await buildAgentEnvironment(
+      {
+        repoUrl: null,
+        agentType: null,
+        workspaceId: w.ws.id,
+        ownerUserId: null,
+        settings: { mcpServers: { add: [w.ofOther.id] }, setupCommands: "make deps" },
+      },
+      logger,
+      [{ path: "notes.txt", content: "hi" }],
+    );
+    expect(filesOf(env)).toEqual([{ path: "notes.txt", content: "hi" }]);
+    expect(env.OPTIO_WORK_SETUP_COMMANDS).toBe("make deps");
+    expect(env.OPTIO_MCP_INSTALL_COMMANDS).toBeUndefined();
+  });
+
+  it("a pod reading untrusted input gets its connections without credentials", async () => {
+    const w = await world();
+    const env = await build({
+      repoUrl: w.repoUrl,
+      agentType: "claude-code",
+      workspaceId: w.ws.id,
+      ownerUserId: null,
+      settings: { connections: { add: [w.unassigned.id] } },
+      connectionSecrets: false,
+    });
+    const mcp = mcpOf(env);
+    expect(mcp.sentry).toBeDefined();
+    expect(mcp.sentry).not.toHaveProperty("env");
   });
 });
 

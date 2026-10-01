@@ -174,30 +174,17 @@ export function localModelFor(
   return localAgentParams(agentType, agentOptions).model;
 }
 
-interface ResolvedLocalHost {
-  host: LocalHostRow;
-  /** Null for a shell command. */
-  agent: LocalAgentKind | null;
-  dir: string;
-}
-
-/** Re-check a persisted location at dispatch time: hosts get unpaired, dir lists change. */
-interface LocalHostInput {
-  /** Null: a shell command, which needs no agent on the machine. */
+/**
+ * Re-check a persisted location at dispatch time: hosts get unpaired, dir
+ * lists change. `agentType` null is a shell command, which needs no agent on
+ * the machine (and resolves to `agent: null`).
+ */
+async function resolveLocalHost(input: {
   agentType: string | null;
   localHostId: string | null;
   localDir: string | null;
   noun: string;
-}
-async function resolveLocalHost(
-  input: LocalHostInput & { agentType: string },
-): Promise<(ResolvedLocalHost & { agent: LocalAgentKind }) | { error: string }>;
-async function resolveLocalHost(
-  input: LocalHostInput,
-): Promise<ResolvedLocalHost | { error: string }>;
-async function resolveLocalHost(
-  input: LocalHostInput,
-): Promise<ResolvedLocalHost | { error: string }> {
+}): Promise<{ host: LocalHostRow; agent: LocalAgentKind | null; dir: string } | { error: string }> {
   const agent = input.agentType === null ? null : toLocalAgentKind(input.agentType);
   if (input.agentType !== null && !agent) {
     return {
@@ -406,7 +393,8 @@ export async function dispatchLocalTask(
       : undefined;
   const spec: LocalTerminalSpec = {
     kind: "agent",
-    agent: resolved.agent,
+    // A task always has an agent type, so the host check found its agent.
+    agent: resolved.agent!,
     prompt: buildLocalTaskPrompt(task, opts.resumePrompt),
     mode: task.localSessionMode ?? "headless",
     ...(resumeSessionId ? { resumeSessionId } : {}),

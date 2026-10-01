@@ -16,7 +16,9 @@ Plus a **name** (or "Job N" / "Terminal N" for its kind).
 
 **Every When works with every Where.** A schedule, a webhook, a ticket, or a GitHub / Slack / Linear event can start work in a pod or on a machine; the trigger is stored the same way whatever it attaches to (see [Triggers](#triggers)).
 
-The New work form (`/work/new`, `apps/web/src/components/work-form/`) asks these in order, each answer narrowing the next: a trigger never starts a bare terminal, a bare terminal skips the prompt, a persistent agent lives in a pod. `normalize()` keeps a draft consistent when an upstream answer changes; `describe()` renders the draft as a sentence whose gaps double as validation:
+**Every Who works with every When and Where it fits.** A Terminal is a shell you open (a pod session; a terminal on your machine, by hand or on a trigger) or a command that runs and exits — a Job with no agent, in a pod or on a machine, on any trigger. A persistent agent can have a repo and works in one checkout of it across turns. What stays apart is only what makes no sense: "works until merged" needs an agent and a repo, a pod session needs a repo and a person, a persistent agent lives in a pod.
+
+The New work form (`/work/new`, `apps/web/src/components/work-form/`) asks these in order, each answer narrowing the next. `normalize()` keeps a draft consistent when an upstream answer changes; `describe()` renders the draft as a sentence whose gaps double as validation:
 
 > Started by GitHub events, a Claude Code run in an Optio pod with acme/app that opens a PR and exits when done.
 
@@ -42,13 +44,17 @@ then = exits, no repo                              → standalone
 | ------------------ | --------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------- | --------------------- |
 | `repo-task`        | `tasks`                                       | One run in a repo worktree that ends by opening a PR (or in a local checkout on a new branch) | No — it _is_ a run      | Task / Repo Task      |
 | `repo-blueprint`   | `work_definitions` + `workflow_triggers`      | A saved PR-session definition; each trigger firing spawns a `tasks` row                       | Yes (`tasks`)           | Scheduled Task        |
-| `standalone`       | `work_definitions` (+ trigger)                | Agent work with no repo on a pooled pod (or a machine); run now or on a trigger               | Yes (`tasks`)           | Job / Standalone Task |
+| `standalone`       | `work_definitions` (+ trigger)                | An agent or a shell command with no repo on a pooled pod (or a machine); now or on a trigger  | Yes (`tasks`)           | Job / Standalone Task |
 | `local-blueprint`  | `work_definitions` + `workflow_triggers`      | "When X happens, open this agent on my machine and wait for me" — an interactive automation   | Yes (`local_terminals`) | Local Automation      |
 | `local-terminal`   | `local_terminals`                             | An interactive terminal or agent on a paired machine                                          | No                      | Local session         |
 | `pod-session`      | `interactive_sessions`                        | An interactive terminal + agent chat inside a repo pod                                        | No                      | Session (v0.4)        |
 | `persistent-agent` | `persistent_agents` + turns / messages / pods | Long-lived, named, message-driven agent                                                       | Turns                   | Agent                 |
 
-Each branch of `submit.ts` calls the same service the dedicated form for that kind used to call, so nothing about how a kind runs changed — only where you make it and where you see it.
+`submit.ts` turns the draft into a `WorkSpec` and `POST`s it to `/api/work`, which derives the same kind (`kindOfSpec`) and writes the row and its trigger in one transaction (`services/work-write-service.ts`); a saved definition goes back through `PATCH /api/work/:id`. Each kind still runs the way it always has — only where you make it and where you see it changed.
+
+## Where → Environment
+
+Pod work's **Where** also says what its pod has besides the code. The repo's and the workspace's settings are the defaults; a piece of work can switch connections, MCP servers, and skills on or off by id, pick its pod secrets, and add setup commands that run before the agent (`WorkSettings`, `packages/shared/src/work/settings.ts`, stored only as the changes in a `settings` column on `tasks`, `work_definitions`, and `persistent_agents`). `buildAgentEnvironment` (`services/agent-environment-service.ts`) turns defaults plus changes into `.mcp.json`, skill files, and env for every pod worker — Repo Task, PR review, Job, persistent agent; a command Job gets only its setup commands. Work that opens a PR can also make its follow-through **more careful** than its repo's — ask for a review, open draft PRs, resume fewer times — but never less: the repo's settings are an admin's (`effectivePrSettings`). Work on a machine runs with the machine's own CLI configuration and takes none of it.
 
 `repo-task`, `repo-blueprint`, and `standalone` all carry a **run location** (`run_target` = `cluster` | `local`, with `local_host_id` / `local_dir` / `local_session_mode`). A local run is the same row, executed by a `local_terminals` row through the daemon instead of a pod; the terminal's frames drive the run's state (PR link → `pr_opened`, exit → `completed` / `failed`). See [optio-local.md](optio-local.md#local-runs-tasks-and-jobs-on-your-machine).
 
@@ -108,9 +114,9 @@ Each tool-call PR is confirmed on the git platform before it is adopted: same re
 
 Every PR is a `task_prs` row (`source`: `tool_call`, `branch` or `attached`). `tasks.pr_url` stays the **primary** PR — the first one adopted — and is what the PR watcher, reviews, auto-resume and auto-merge follow; other PRs are tracked alongside. `GET /api/tasks/:id` returns them as `task.prs`; `POST /api/tasks/:id/prs` attaches one by hand (member role; personal work only by its owner) and `DELETE /api/tasks/:id/prs/:prId` stops tracking one — the primary only while another can take its place. The task page lists them once a task has more than one.
 
-## Pod sessions without a repo (`standalone`)
+## Jobs: work without a repo (`standalone`)
 
-An agent runs in a pooled job pod with no checkout and produces logs and side effects: querying Slack, writing to a database, posting a report, calling an MCP server, triaging a ticket queue. Pods are shared across runs of the same definition, keyed on `(workflow_id, instance_index)`, with `maxPodInstances` replicas × `maxAgentsPerPod` concurrent runs. Runs auto-retry with exponential backoff.
+An agent — or a shell command — runs in a pooled job pod with no checkout and produces logs and side effects: querying Slack, writing to a database, posting a report, calling an MCP server, triaging a ticket queue. A command's exit status settles the run (`services/command-run.ts`). Pods are shared across runs of the same definition, keyed on `(workflow_id, instance_index)`, with `maxPodInstances` replicas × `maxAgentsPerPod` concurrent runs. Runs auto-retry with exponential backoff.
 
 ## Triggers
 
@@ -132,7 +138,7 @@ Ticket triggers fire from the ticket-sync sweep (`ticket-sync-service.ts`) rathe
 
 ## Templates and parameters
 
-Every kind uses the same template engine: `{{param}}` substitution and `{{#if param}}...{{/if}}` blocks, rendered lazily at firing time so the trigger payload (ticket fields, webhook body, event details) substitutes into the prompt before the agent sees it. The form lists the params each **When** provides (`TRIGGER_PARAMS` in `model.ts`). For local automations, params are shell-single-quoted before substitution so payloads can never inject commands.
+Every kind uses the same template engine: `{{param}}` substitution and `{{#if param}}...{{/if}}` blocks, rendered lazily at firing time so the trigger payload (ticket fields, webhook body, event details) substitutes into the prompt before the agent sees it. The form lists the params each **When** provides (`TRIGGER_PARAMS` in `model.ts`). Commands (a command Job, a Local automation) render through `renderCommandTemplate`: each param becomes a shell variable assigned on the first line and each `{{param}}` only references it, so a payload is never parsed as shell code wherever the template puts it.
 
 Reusable templates live in `prompt_templates` with a `kind` discriminator (`prompt` / `review` / `job` / `task`), managed under **Library → Prompts**. Precedence: repo override → global default → hardcoded fallback.
 

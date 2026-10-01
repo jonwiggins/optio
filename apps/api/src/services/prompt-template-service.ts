@@ -152,20 +152,10 @@ export async function getPromptTemplateById(id: string) {
 }
 
 /**
- * Render a template string by substituting {{param}} placeholders with values
- * from the params bag. Unknown placeholders are left intact so callers can
- * detect missing params. Supports simple {{#if param}}...{{/if}} blocks too.
- */
-/**
  * Resolve `{{#if param}}...{{/if}}` blocks only — keep the body if the param
  * is truthy, drop it otherwise — leaving `{{param}}` placeholders in place.
- * Exposed so callers that transform param values before substitution (e.g.
- * shell-quoting, which turns "" into the truthy `''`) can test the raw ones.
  */
-export function resolveTemplateConditionals(
-  template: string,
-  params: Record<string, unknown>,
-): string {
+function resolveTemplateConditionals(template: string, params: Record<string, unknown>): string {
   return template.replace(
     /\{\{#if\s+(\w+)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g,
     (_match, key: string, body: string) => {
@@ -175,6 +165,11 @@ export function resolveTemplateConditionals(
   );
 }
 
+/**
+ * Render a template string by substituting {{param}} placeholders with values
+ * from the params bag. Unknown placeholders are left intact so callers can
+ * detect missing params. Supports simple {{#if param}}...{{/if}} blocks too.
+ */
 export function renderTemplateString(template: string, params: Record<string, unknown>): string {
   let rendered = resolveTemplateConditionals(template, params);
 
@@ -191,19 +186,48 @@ export function renderTemplateString(template: string, params: Record<string, un
 }
 
 /**
- * A shell command from a `{{param}}` template: each value is single-quoted
- * before it is substituted, so a trigger payload can never inject shell
- * syntax. `{{#if}}` blocks are decided on the raw values first — a quoted
- * empty string is `''`, which would otherwise read as present.
+ * A shell command from a `{{param}}` template, safe whatever the payload and
+ * wherever the template puts a placeholder. Each value becomes a shell
+ * variable, assigned single-quoted on the first line (`OPTIO_PARAM_title='…'`),
+ * and each `{{title}}` turns into a reference to it in the form its quoting
+ * needs — `"${OPTIO_PARAM_title}"` bare, `${OPTIO_PARAM_title}` inside double
+ * quotes, `'"${OPTIO_PARAM_title}"'` inside single quotes — so a value is
+ * never read as shell code, not even in `"New issue: {{title}}"`. `{{#if}}`
+ * blocks are decided on the raw values.
  */
 export function renderCommandTemplate(
   template: string,
   params: Record<string, unknown> | null | undefined,
 ): string {
   const raw = params ?? {};
-  const quoted: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(raw)) quoted[key] = shellQuote(String(value ?? ""));
-  return renderTemplateString(resolveTemplateConditionals(template, raw), quoted).trim();
+  const body = resolveTemplateConditionals(template, raw).trim();
+  const used = new Set<string>();
+  let out = "";
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < body.length; i++) {
+    const placeholder = /^\{\{\s*(\w+)\s*\}\}/.exec(body.slice(i, i + 200));
+    if (placeholder && Object.prototype.hasOwnProperty.call(raw, placeholder[1])) {
+      const ref = `\${OPTIO_PARAM_${placeholder[1]}}`;
+      out += quote === '"' ? ref : quote === "'" ? `'"${ref}"'` : `"${ref}"`;
+      used.add(placeholder[1]);
+      i += placeholder[0].length - 1;
+      continue;
+    }
+    const c = body[i];
+    out += c;
+    if (c === "\\" && quote !== "'") {
+      // An escaped character is never a quote.
+      if (i + 1 < body.length) out += body[++i];
+    } else if (quote === null && (c === "'" || c === '"')) {
+      quote = c;
+    } else if (c === quote) {
+      quote = null;
+    }
+  }
+  const assignments = [...used].map(
+    (key) => `OPTIO_PARAM_${key}=${shellQuote(String(raw[key] ?? ""))}`,
+  );
+  return [...assignments, out].join("\n");
 }
 
 const RUN_TITLE_MAX = 200;

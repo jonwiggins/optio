@@ -182,8 +182,9 @@ function followThrough(spec: WorkSpec) {
  */
 function settingsOf(spec: WorkSpec, kind: WorkKind): WorkSettings | null {
   if (spec.where.runTarget === "local") return null;
-  const settings = cleanWorkSettings(spec.settings);
-  return kind === "repo-task" || kind === "repo-blueprint" ? settings : withoutPrSettings(settings);
+  return kind === "repo-task" || kind === "repo-blueprint"
+    ? cleanWorkSettings(spec.settings)
+    : withoutPrSettings(spec.settings);
 }
 
 /** Only the options that are set; an empty set is the defaults (null). */

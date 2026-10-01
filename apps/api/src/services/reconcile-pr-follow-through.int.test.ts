@@ -84,13 +84,26 @@ describe("a task's own settings over the repo's", () => {
     expect(s.maxAutoResumes).toBe(1);
   });
 
-  it("turns review off, and keeps the repo's trigger when it only says 'on'", async () => {
-    const repo = await insertRepo({ reviewEnabled: true, reviewTrigger: "on_pr" });
-    const off = await insertTask({
-      repoUrl: repo.repoUrl,
-      settings: { review: { enabled: false } },
+  it("can't loosen the repo's (admin-only) settings: no dropping review, drafts, or the cap", async () => {
+    const repo = await insertRepo({
+      reviewEnabled: true,
+      reviewTrigger: "on_pr",
+      cautiousMode: true,
+      maxAutoResumes: 3,
     });
-    expect((await settingsFor(off.id)).reviewEnabled).toBe(false);
+    const task = await insertTask({
+      repoUrl: repo.repoUrl,
+      settings: { review: { enabled: false }, cautiousMode: false, maxAutoResumes: 50 },
+    });
+    const s = await settingsFor(task.id);
+    expect(s.reviewEnabled).toBe(true);
+    expect(s.reviewTrigger).toBe("on_pr");
+    expect(s.cautiousMode).toBe(true);
+    expect(s.maxAutoResumes).toBe(3);
+  });
+
+  it("keeps the repo's trigger when it only says 'on'", async () => {
+    const repo = await insertRepo({ reviewEnabled: true, reviewTrigger: "on_pr" });
 
     const on = await insertTask({ repoUrl: repo.repoUrl, settings: { review: { enabled: true } } });
     const s = await settingsFor(on.id);

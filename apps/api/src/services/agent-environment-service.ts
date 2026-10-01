@@ -11,9 +11,9 @@
  * them or take from them (`packages/shared/src/work/settings.ts`).
  */
 import {
-  applyIdOverrides,
+  loadWithOverrides,
+  type AgentContainerConfig,
   type CustomSkillConfig,
-  type IdOverrides,
   type InstalledSkillConfig,
   type McpServerConfig,
   type ResolvedConnection,
@@ -21,35 +21,31 @@ import {
   type WorkEnvironmentOptions,
   type WorkSettings,
 } from "@optio/shared";
-import { logger } from "../logger.js";
+import type { logger } from "../logger.js";
 import { getConnectionsForTask, listConnections } from "./connection-service.js";
 import { buildMcpJsonContent, getMcpServersForTask, listMcpServers } from "./mcp-server-service.js";
 import { buildSkillSetupFiles, getSkillsForTask, listSkills } from "./skill-service.js";
 import { getInstalledSkillsForTask, listInstalledSkills } from "./installed-skill-service.js";
+import { getRepoByUrl } from "./repo-service.js";
 import { retrieveSecretWithFallback } from "./secret-service.js";
 
 /** A file written into the agent's working directory before it starts. */
-export interface SetupFile {
-  path: string;
-  content: string;
-  contentBase64?: string;
-  executable?: boolean;
-}
+type SetupFile = NonNullable<AgentContainerConfig["setupFiles"]>[number];
 
 export interface AgentEnvironmentInput {
   /** The repo the work runs in; null for work with no checkout (a Job, an agent). */
   repoUrl: string | null;
-  agentType: string;
+  /** The agent runtime; null for a command (it gets only its setup commands). */
+  agentType: string | null;
   workspaceId: string | null;
   /** Personal work's owner: personal connections and secrets reach only their owner's work. */
   ownerUserId: string | null;
   settings?: WorkSettings | null;
-}
-
-export interface AgentEnvironment {
-  setupFiles: SetupFile[];
-  /** `OPTIO_MCP_INSTALL_COMMANDS`, `OPTIO_WORK_SETUP_COMMANDS`. */
-  env: Record<string, string>;
+  /**
+   * False for a pod that reads untrusted input (an external PR's diff): its
+   * connections come without their credentials.
+   */
+  connectionSecrets?: boolean;
 }
 
 type McpEntry = { command: string; args: string[]; env?: Record<string, string> };
@@ -58,48 +54,42 @@ type Log = Pick<typeof logger, "info" | "warn">;
 /** The scope MCP servers and skills match: no repo matches only the global ones. */
 const scopeOf = (repoUrl: string | null) => repoUrl ?? "";
 
-const hasAdds = (o: IdOverrides | null | undefined) => (o?.add?.length ?? 0) > 0;
+/** What an agent runtime gets for this work: the defaults with its overrides applied. */
+type AgentInput = AgentEnvironmentInput & { agentType: string };
 
-async function mcpServersFor(input: AgentEnvironmentInput): Promise<McpServerConfig[]> {
-  const o = input.settings?.mcpServers;
-  const defaults = await getMcpServersForTask(scopeOf(input.repoUrl), input.workspaceId);
-  const available = hasAdds(o)
-    ? (await listMcpServers(undefined, input.workspaceId)).filter((s) => s.enabled)
-    : [];
-  return applyIdOverrides(defaults, available, (s) => s.id, o);
+function mcpServersFor(input: AgentInput): Promise<McpServerConfig[]> {
+  return loadWithOverrides(
+    getMcpServersForTask(scopeOf(input.repoUrl), input.workspaceId),
+    async () => (await listMcpServers(undefined, input.workspaceId)).filter((s) => s.enabled),
+    (s) => s.id,
+    input.settings?.mcpServers,
+  );
 }
 
-async function skillsFor(input: AgentEnvironmentInput): Promise<CustomSkillConfig[]> {
-  const o = input.settings?.skills;
-  const defaults = await getSkillsForTask(
-    scopeOf(input.repoUrl),
-    input.workspaceId,
-    input.agentType,
+function skillsFor(input: AgentInput): Promise<CustomSkillConfig[]> {
+  return loadWithOverrides(
+    getSkillsForTask(scopeOf(input.repoUrl), input.workspaceId, input.agentType),
+    async () => (await listSkills(undefined, input.workspaceId)).filter((s) => s.enabled),
+    (s) => s.id,
+    input.settings?.skills,
   );
-  const available = hasAdds(o)
-    ? (await listSkills(undefined, input.workspaceId)).filter((s) => s.enabled)
-    : [];
-  return applyIdOverrides(defaults, available, (s) => s.id, o);
 }
 
 /** Marketplace skills: Claude Code only, and only once synced. */
-async function installedSkillsFor(input: AgentEnvironmentInput): Promise<InstalledSkillConfig[]> {
+async function installedSkillsFor(input: AgentInput): Promise<InstalledSkillConfig[]> {
   if (input.agentType !== "claude-code") return [];
-  const o = input.settings?.skills;
-  const defaults = await getInstalledSkillsForTask(
-    scopeOf(input.repoUrl),
-    input.workspaceId,
-    input.agentType,
-  );
-  const available = hasAdds(o)
-    ? (await listInstalledSkills(undefined, input.workspaceId)).filter(
+  return loadWithOverrides(
+    getInstalledSkillsForTask(scopeOf(input.repoUrl), input.workspaceId, input.agentType),
+    async () =>
+      (await listInstalledSkills(undefined, input.workspaceId)).filter(
         (s) => s.enabled && s.resolvedSha,
-      )
-    : [];
-  return applyIdOverrides(defaults, available, (s) => s.id, o);
+      ),
+    (s) => s.id,
+    input.settings?.skills,
+  );
 }
 
-function connectionsFor(input: AgentEnvironmentInput): Promise<ResolvedConnection[]> {
+function connectionsFor(input: AgentInput): Promise<ResolvedConnection[]> {
   return getConnectionsForTask(
     scopeOf(input.repoUrl),
     input.agentType,
@@ -140,7 +130,8 @@ async function connectionMcpEntry(
   const cfg = conn.mcpConfig;
   if (!cfg) return null;
   const env: Record<string, string> = {};
-  for (const [envKey, configKey] of Object.entries(cfg.envMapping)) {
+  const mapping = input.connectionSecrets === false ? {} : cfg.envMapping;
+  for (const [envKey, configKey] of Object.entries(mapping)) {
     const value = conn.config[configKey];
     let resolved: string | undefined;
     if (typeof value === "string" && value.startsWith("${{") && value.endsWith("}}")) {
@@ -164,22 +155,29 @@ async function connectionMcpEntry(
 }
 
 /**
- * Everything the agent gets for this work: `.mcp.json` (the MCP servers, then
- * the connections, which win on a name clash), the skills' files, and the env
- * that carries the MCP install commands and the work's setup commands.
+ * The env every pod run of this work gets: `OPTIO_SETUP_FILES` (`.mcp.json`
+ * — the MCP servers, then the connections, which win on a name clash — the
+ * skills' files, and any `extraFiles` the runtime's adapter wants written),
+ * the MCP install commands, and the work's own setup commands. A command
+ * (no agent runtime) gets only its setup commands and `extraFiles`.
  */
 export async function buildAgentEnvironment(
   input: AgentEnvironmentInput,
-  log: Log = logger,
-): Promise<AgentEnvironment> {
-  const [servers, connections, skills, installed] = await Promise.all([
-    mcpServersFor(input),
-    connectionsFor(input),
-    skillsFor(input),
-    installedSkillsFor(input),
-  ]);
+  log: Log,
+  extraFiles: SetupFile[] = [],
+): Promise<Record<string, string>> {
+  const agentType = input.agentType;
+  const agent = agentType ? { ...input, agentType } : null;
+  const [servers, connections, skills, installed] = agent
+    ? await Promise.all([
+        mcpServersFor(agent),
+        connectionsFor(agent),
+        skillsFor(agent),
+        installedSkillsFor(agent),
+      ])
+    : [[], [], [], []];
 
-  const setupFiles: SetupFile[] = [];
+  const setupFiles: SetupFile[] = [...extraFiles];
   const env: Record<string, string> = {};
   const install: string[] = [];
 
@@ -209,7 +207,7 @@ export async function buildAgentEnvironment(
 
   if (skills.length > 0) {
     setupFiles.push(...buildSkillSetupFiles(skills));
-    log.info({ count: skills.length, agentType: input.agentType }, "Injecting custom skills");
+    log.info({ count: skills.length, agentType }, "Injecting custom skills");
   }
   if (installed.length > 0) {
     const { readInstalledSkillFiles } = await import("../workers/skill-sync-worker.js");
@@ -237,12 +235,11 @@ export async function buildAgentEnvironment(
   }
 
   if (input.settings?.setupCommands) env.OPTIO_WORK_SETUP_COMMANDS = input.settings.setupCommands;
-  return { setupFiles, env };
-}
-
-/** Setup files as the `OPTIO_SETUP_FILES` value the exec scripts decode. */
-export function encodeSetupFiles(files: SetupFile[]): string {
-  return Buffer.from(JSON.stringify(files)).toString("base64");
+  // The exec scripts decode this (`WRITE_SETUP_FILES` in utils/pod-env.ts).
+  if (setupFiles.length > 0) {
+    env.OPTIO_SETUP_FILES = Buffer.from(JSON.stringify(setupFiles)).toString("base64");
+  }
+  return env;
 }
 
 /**
@@ -252,7 +249,7 @@ export function encodeSetupFiles(files: SetupFile[]): string {
  * owner's work.
  */
 export async function environmentOptions(
-  input: Omit<AgentEnvironmentInput, "settings">,
+  input: Omit<AgentInput, "settings">,
 ): Promise<WorkEnvironmentOptions> {
   const scope = scopeOf(input.repoUrl);
   const [defaultServers, allServers, defaultConns, allConns, defaultSkills, allSkills] =
@@ -313,7 +310,6 @@ export async function environmentOptions(
 
   const byDefaultThenName = (a: WorkEnvironmentItem, b: WorkEnvironmentItem) =>
     Number(b.default) - Number(a.default) || a.name.localeCompare(b.name);
-  const { getRepoByUrl } = await import("./repo-service.js");
   const repo = input.repoUrl ? await getRepoByUrl(input.repoUrl, input.workspaceId) : null;
   return {
     connections: connections.sort(byDefaultThenName),

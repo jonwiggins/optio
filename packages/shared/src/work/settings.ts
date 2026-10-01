@@ -30,20 +30,24 @@ export interface WorkSettings {
   skills?: IdOverrides;
   /** Shell commands run in the work's directory before the agent starts. */
   setupCommands?: string | null;
-  /** Repo work: a review agent reviews the PR (over the repo's Code Review setting). */
+  /**
+   * Repo work: a review agent reviews the PR even when the repo's Code Review
+   * is off. Work can only add a review — never drop the repo's.
+   */
   review?: { enabled: boolean; trigger?: WorkReviewTrigger } | null;
-  /** Repo work: open draft PRs that a person merges (over the repo's cautious mode). */
+  /** Repo work: open draft PRs that a person merges, even when the repo doesn't (true only). */
   cautiousMode?: boolean | null;
-  /** Repo work: how many times the agent is resumed on CI failures and review comments. */
+  /** Repo work: resume the agent at most this many times (never more than the repo allows). */
   maxAutoResumes?: number | null;
 }
 
 /** The parts of `WorkSettings` that only mean something for work that opens a PR. */
-export const PR_SETTING_KEYS = ["review", "cautiousMode", "maxAutoResumes"] as const;
+const PR_SETTING_KEYS = ["review", "cautiousMode", "maxAutoResumes"] as const;
 
 /**
  * A default set with the overrides applied: the defaults minus `remove`, plus
- * the `add`ed ones from `available` that aren't already in. Unknown ids are
+ * the `add`ed ones from `available` that aren't already in (an id both added
+ * and removed is added, as `cleanWorkSettings` stores it). Unknown ids are
  * ignored, so an override that names something since deleted does nothing.
  */
 export function applyIdOverrides<T>(
@@ -56,7 +60,7 @@ export function applyIdOverrides<T>(
   const kept = defaults.filter((item) => !remove.has(idOf(item)));
   const have = new Set(kept.map(idOf));
   for (const id of overrides?.add ?? []) {
-    if (have.has(id) || remove.has(id)) continue;
+    if (have.has(id)) continue;
     const item = available.find((a) => idOf(a) === id);
     if (item) {
       kept.push(item);
@@ -64,6 +68,23 @@ export function applyIdOverrides<T>(
     }
   }
   return kept;
+}
+
+/**
+ * `applyIdOverrides` for a default set that loads asynchronously: the full
+ * list (`available`) is only loaded when the overrides add something.
+ */
+export async function loadWithOverrides<T>(
+  defaults: Promise<T[]>,
+  available: () => Promise<T[]>,
+  idOf: (item: T) => string,
+  overrides: IdOverrides | null | undefined,
+): Promise<T[]> {
+  const [have, all] = await Promise.all([
+    defaults,
+    (overrides?.add?.length ?? 0) > 0 ? available() : Promise.resolve([] as T[]),
+  ]);
+  return applyIdOverrides(have, all, idOf, overrides);
 }
 
 function cleanIds(o: IdOverrides | undefined): IdOverrides | undefined {
@@ -89,21 +110,66 @@ export function cleanWorkSettings(s: WorkSettings | null | undefined): WorkSetti
   if (skills) out.skills = skills;
   const setup = s.setupCommands?.trim();
   if (setup) out.setupCommands = setup;
-  if (s.review) {
-    out.review = {
-      enabled: !!s.review.enabled,
-      ...(s.review.trigger ? { trigger: s.review.trigger } : {}),
-    };
+  // The PR settings only tighten the repo's, so "no review" and "ready PRs"
+  // say nothing and aren't kept.
+  if (s.review?.enabled) {
+    out.review = { enabled: true, ...(s.review.trigger ? { trigger: s.review.trigger } : {}) };
   }
-  if (typeof s.cautiousMode === "boolean") out.cautiousMode = s.cautiousMode;
+  if (s.cautiousMode === true) out.cautiousMode = true;
   if (typeof s.maxAutoResumes === "number" && Number.isFinite(s.maxAutoResumes)) {
     out.maxAutoResumes = Math.max(0, Math.floor(s.maxAutoResumes));
   }
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/** The repo settings that decide what happens to a PR after it opens. */
+export interface RepoPrSettings {
+  cautiousMode?: boolean | null;
+  reviewEnabled?: boolean | null;
+  reviewTrigger?: string | null;
+  maxAutoResumes?: number | null;
+}
+
+/** The review triggers that launch a review by themselves; anything else ("manual") launches none. */
+function automaticReviewTrigger(trigger: string | null | undefined): WorkReviewTrigger | null {
+  return trigger === "on_pr" || trigger === "on_ci_pass" ? trigger : null;
+}
+
+/**
+ * The PR follow-through a run gets. The repo's settings are admin-only, so a
+ * piece of work can make its runs more careful than the repo but never less:
+ * draft PRs if either says so, a review if either asks for one, and the lower
+ * resume cap. A run that asks for a review gets one on its own trigger, else
+ * the repo's when that one launches reviews, else once CI passes;
+ * `reviewTrigger` is null when no review launches by itself. The reconciler's
+ * snapshot and the New work form's plan both read this.
+ */
+export function effectivePrSettings(
+  own: WorkSettings | null | undefined,
+  repo: RepoPrSettings | null | undefined,
+  defaultMaxAutoResumes: number,
+): {
+  cautiousMode: boolean;
+  reviewEnabled: boolean;
+  reviewTrigger: WorkReviewTrigger | null;
+  maxAutoResumes: number;
+} {
+  const ownReview = own?.review?.enabled === true;
+  const repoCap = repo?.maxAutoResumes ?? defaultMaxAutoResumes;
+  return {
+    cautiousMode: own?.cautiousMode === true || !!repo?.cautiousMode,
+    reviewEnabled: ownReview || !!repo?.reviewEnabled,
+    reviewTrigger: ownReview
+      ? (automaticReviewTrigger(own?.review?.trigger) ??
+        automaticReviewTrigger(repo?.reviewTrigger) ??
+        "on_ci_pass")
+      : automaticReviewTrigger(repo?.reviewTrigger),
+    maxAutoResumes: Math.min(own?.maxAutoResumes ?? repoCap, repoCap),
+  };
+}
+
 /** Settings without the PR follow-through, for work that opens no PR. */
-export function withoutPrSettings(s: WorkSettings | null): WorkSettings | null {
+export function withoutPrSettings(s: WorkSettings | null | undefined): WorkSettings | null {
   if (!s) return null;
   const rest: WorkSettings = { ...s };
   for (const key of PR_SETTING_KEYS) delete rest[key];

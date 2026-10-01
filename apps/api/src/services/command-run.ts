@@ -11,11 +11,16 @@ import type { AgentLogEntry, AgentResult } from "@optio/shared";
 /** The prefix of the last line a command run prints: its exit status. */
 export const COMMAND_EXIT_MARKER = "[optio:exit] ";
 
-/** Script lines that run `$OPTIO_COMMAND` and report how it exited. */
+/**
+ * Script lines that run `$OPTIO_COMMAND` and report how it exited — on a line
+ * of its own even when the output doesn't end in a newline (`printf`,
+ * `curl -s`), so it never gets glued onto the last line of output.
+ */
 export const COMMAND_SCRIPT: readonly string[] = [
   `echo "[optio] Running command..."`,
   `bash -lc "$OPTIO_COMMAND" 2>&1`,
-  `echo "${COMMAND_EXIT_MARKER}$?"`,
+  `optio_status=$?`,
+  `printf '\\n${COMMAND_EXIT_MARKER}%d\\n' "$optio_status"`,
 ];
 
 /** One line of a command's output: a log line, or the command's exit status. */
@@ -23,6 +28,9 @@ export function parseCommandLine(
   line: string,
   runId: string,
 ): { entries: AgentLogEntry[]; exitCode?: number } {
+  // The exit status is printed after a newline of its own, so a command whose
+  // output ends in one leaves a blank line behind; blank lines aren't logged.
+  if (line.trim() === "") return { entries: [] };
   if (line.startsWith(COMMAND_EXIT_MARKER)) {
     const code = Number.parseInt(line.slice(COMMAND_EXIT_MARKER.length), 10);
     if (Number.isFinite(code)) return { entries: [], exitCode: code };

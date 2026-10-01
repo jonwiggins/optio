@@ -11,7 +11,7 @@ import type {
   ConnectionProviderMcpConfig,
   IdOverrides,
 } from "@optio/shared";
-import { applyIdOverrides } from "@optio/shared";
+import { loadWithOverrides } from "@optio/shared";
 
 // ── Built-in provider definitions ─────────────────────────────────────────
 
@@ -699,11 +699,33 @@ export async function getConnectionsForTask(
   /** The work's own changes (`WorkSettings.connections`): ids added or left out. */
   overrides?: IdOverrides | null,
 ): Promise<ResolvedConnection[]> {
-  const defaults = await assignedConnections(repoUrl, agentType, workspaceId, ownerUserId);
-  if (!overrides?.add?.length && !overrides?.remove?.length) return defaults;
-  const added = (overrides.add ?? []).filter((id) => !defaults.some((d) => d.connectionId === id));
-  const available = added.length ? await usableConnections(added, workspaceId, ownerUserId) : [];
-  return applyIdOverrides(defaults, available, (c) => c.connectionId, overrides);
+  return loadWithOverrides(
+    assignedConnections(repoUrl, agentType, workspaceId, ownerUserId),
+    () => usableConnections(overrides?.add ?? [], workspaceId, ownerUserId),
+    (c) => c.connectionId,
+    overrides,
+  );
+}
+
+/** A connection as an agent gets it, with the permission and agent types it reaches. */
+function resolvedConnection(
+  conn: typeof connections.$inferSelect,
+  provider: typeof connectionProviders.$inferSelect,
+  permission: ResolvedConnection["permission"],
+  agentTypes: string[],
+): ResolvedConnection {
+  return {
+    connectionId: conn.id,
+    connectionName: conn.name,
+    providerId: provider.id,
+    providerSlug: provider.slug,
+    providerName: provider.name,
+    providerType: provider.type,
+    mcpConfig: (provider.mcpConfig as ConnectionProviderMcpConfig) ?? null,
+    config: (conn.config as Record<string, unknown>) ?? {},
+    permission,
+    agentTypes,
+  };
 }
 
 /**
@@ -712,7 +734,7 @@ export async function getConnectionsForTask(
  * connection has no assignment, so it reaches every agent with the default
  * permission.
  */
-export async function usableConnections(
+async function usableConnections(
   ids: string[],
   workspaceId?: string | null,
   ownerUserId?: string | null,
@@ -733,18 +755,7 @@ export async function usableConnections(
     );
   return rows
     .filter((r) => !r.connection.ownerUserId || r.connection.ownerUserId === (ownerUserId ?? null))
-    .map(({ connection: conn, provider }) => ({
-      connectionId: conn.id,
-      connectionName: conn.name,
-      providerId: provider.id,
-      providerSlug: provider.slug,
-      providerName: provider.name,
-      providerType: provider.type,
-      mcpConfig: (provider.mcpConfig as ConnectionProviderMcpConfig) ?? null,
-      config: (conn.config as Record<string, unknown>) ?? {},
-      permission: "read",
-      agentTypes: [],
-    }));
+    .map(({ connection, provider }) => resolvedConnection(connection, provider, "read", []));
 }
 
 /** The connections the repo's (and global) assignments give this agent. */
@@ -773,19 +784,9 @@ async function assignedConnections(
       .sort((a, b) => Number(!a.repoId) - Number(!b.repoId))[0];
     if (!matching) continue;
 
-    // 6. Build resolved connection
-    results.push({
-      connectionId: conn.id,
-      connectionName: conn.name,
-      providerId: provider.id,
-      providerSlug: provider.slug,
-      providerName: provider.name,
-      providerType: provider.type,
-      mcpConfig: (provider.mcpConfig as ConnectionProviderMcpConfig) ?? null,
-      config: (conn.config as Record<string, unknown>) ?? {},
-      permission: matching.permission,
-      agentTypes: assignmentAgentTypes(matching),
-    });
+    results.push(
+      resolvedConnection(conn, provider, matching.permission, assignmentAgentTypes(matching)),
+    );
   }
 
   return results;

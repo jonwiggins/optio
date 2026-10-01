@@ -1,5 +1,15 @@
 import { shellQuote } from "@optio/shared";
 
+/** The first stdin line for Claude Code's stream-json input: the prompt as a user message. */
+export function buildInitialClaudeStreamMessage(prompt: string): string {
+  return (
+    JSON.stringify({
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text: prompt }] },
+    }) + "\n"
+  );
+}
+
 /**
  * The shell command that runs one agent turn in a pooled pod — a Job run
  * (`workflow-worker`) or a Persistent Agent turn (`persistent-agent-worker`).

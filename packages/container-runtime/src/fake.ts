@@ -65,11 +65,6 @@ function extractScriptExport(script: string, name: string): string | null {
   return m ? m[1].replaceAll("'\\''", "'") : null;
 }
 
-/** Pull the OPTIO_PROMPT value out of the exec script's single-quoted export. */
-function extractScriptPrompt(script: string): string {
-  const m = script.match(/export OPTIO_PROMPT='([^']*(?:'\\''[^']*)*)'/);
-  return m ? m[1].replaceAll("'\\''", "'") : "";
-}
 /**
  * How long exec waits for a prompt on stdin before failing the run — a
  * missing prompt means the worker's stdin delivery broke, which must surface
@@ -431,7 +426,7 @@ export class FakeContainerRuntime implements ContainerRuntime {
     if (inlinePrompt) handlePrompt(inlinePrompt[1]);
     // Cursor delivers the prompt as a positional env-var reference, not stdin.
     if (script.includes(CURSOR_EXEC_MARKER)) {
-      handlePrompt(extractScriptPrompt(script) || (spec?.env?.OPTIO_PROMPT ?? ""));
+      handlePrompt(extractScriptExport(script, "OPTIO_PROMPT") || (spec?.env?.OPTIO_PROMPT ?? ""));
     }
 
     return {

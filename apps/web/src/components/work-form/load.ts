@@ -133,7 +133,14 @@ function optionsFromRow(runtime: string, row: any): WorkDraft["agentOptions"] {
 export function draftFromRow(row: any, trigger: any | null, meId?: string | null): WorkDraft {
   const kind = row.kind as EditableKind;
   const automation = kind === "local-blueprint";
-  const runtime = row.agentType ? String(row.agentType) : automation ? TERMINAL : "claude-code";
+  // No agent is a terminal: a command Job, or an automation's shell / command.
+  // (Only a scheduled Task always has one — Claude Code for the oldest rows.)
+  const runtime = row.agentType
+    ? String(row.agentType)
+    : kind === "repo-blueprint"
+      ? "claude-code"
+      : TERMINAL;
+  const prompt = String(row.prompt ?? "");
   const interactive = row.localSessionMode !== "headless";
   const name = String(row.name ?? "");
   // Older forms saved `run title = name` when no run name was set.
@@ -161,10 +168,12 @@ export function draftFromRow(row: any, trigger: any | null, meId?: string | null
     repoBranch: String(row.repoBranch ?? "main"),
     runtime,
     agentOptions: runtime === TERMINAL ? {} : optionsFromRow(runtime, row),
-    prompt: String(row.prompt ?? ""),
-    // A row saved with its own follow-through is "Works until merged".
+    prompt,
+    // A row saved with its own follow-through is "Works until merged". An
+    // automation with no agent that runs a command is a command (it exits);
+    // with none it opens a shell that waits for you.
     then: automation
-      ? interactive
+      ? (runtime === TERMINAL ? !prompt.trim() : interactive)
         ? "waits-for-me"
         : "exits"
       : row.autoResume === true

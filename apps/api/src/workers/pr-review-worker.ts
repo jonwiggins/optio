@@ -33,11 +33,7 @@ import { insertLog } from "../services/run-log-service.js";
 import { addUsage } from "../services/run-usage.js";
 import { getEventParser } from "../services/event-parsers.js";
 import * as repoPool from "../services/repo-pool-service.js";
-import {
-  resolveSecretsForTask,
-  resolveSecretsForSetup,
-  retrieveSecretWithFallback,
-} from "../services/secret-service.js";
+import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
@@ -47,13 +43,10 @@ import * as prReviewService from "../services/pr-review-service.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { resolveReviewConfig } from "../services/review-config.js";
 import * as optioSettingsService from "../services/optio-settings-service.js";
-import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
-import { gitAccessEnv } from "../services/git-access-env.js";
-import {
-  buildAgentCommand,
-  buildInitialClaudeStreamMessage,
-  inferExitCode,
-} from "./task-worker.js";
+import { buildAgentEnvironment } from "../services/agent-environment-service.js";
+import { applyGitAccess } from "../services/git-access-env.js";
+import { buildInitialClaudeStreamMessage } from "../services/pooled-agent-command.js";
+import { buildAgentCommand, inferExitCode } from "./task-worker.js";
 
 const connectionOpts = getBullMQConnectionOptions();
 
@@ -336,15 +329,22 @@ export function startPrReviewWorker() {
         });
 
         // ── MCP + connections + skills (agent-environment-service) ──
-        const environment = await buildAgentEnvironment(
-          { repoUrl: review.repoUrl, agentType, workspaceId, ownerUserId: null },
-          log,
+        Object.assign(
+          agentConfig.env,
+          await buildAgentEnvironment(
+            {
+              repoUrl: review.repoUrl,
+              agentType,
+              workspaceId,
+              ownerUserId: null,
+              // The pod reads the PR's diff — anyone's input — so its
+              // connections carry no credentials.
+              connectionSecrets: false,
+            },
+            log,
+            agentConfig.setupFiles,
+          ),
         );
-        agentConfig.setupFiles = [...(agentConfig.setupFiles ?? []), ...environment.setupFiles];
-        Object.assign(agentConfig.env, environment.env);
-        if (agentConfig.setupFiles.length > 0) {
-          agentConfig.env.OPTIO_SETUP_FILES = encodeSetupFiles(agentConfig.setupFiles);
-        }
 
         // ── Secrets ───────────────────────────────────────────────
         const secretNames = [
@@ -361,8 +361,7 @@ export function startPrReviewWorker() {
         );
         const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
 
-        Object.assign(allEnv, await gitAccessEnv({ workspaceId, runId: run.id, present: allEnv }));
-        if (isGitHubAppConfigured()) delete allEnv.GITHUB_TOKEN;
+        await applyGitAccess(allEnv, { workspaceId, runId: run.id });
 
         if (repoConfig.extraPackages) allEnv.OPTIO_EXTRA_PACKAGES = repoConfig.extraPackages;
         if (repoConfig.setupCommands) allEnv.OPTIO_SETUP_COMMANDS = repoConfig.setupCommands;
@@ -384,27 +383,8 @@ export function startPrReviewWorker() {
         }
 
         // ── Pod provisioning ──────────────────────────────────────
-        const podEnv: Record<string, string> = {
-          OPTIO_GIT_CREDENTIAL_URL: allEnv.OPTIO_GIT_CREDENTIAL_URL,
-          OPTIO_CREDENTIAL_SECRET: allEnv.OPTIO_CREDENTIAL_SECRET,
-          ...(allEnv.GITHUB_TOKEN ? { GITHUB_TOKEN: allEnv.GITHUB_TOKEN } : {}),
-          ...(allEnv.GITLAB_TOKEN ? { GITLAB_TOKEN: allEnv.GITLAB_TOKEN } : {}),
-          ...(allEnv.GITLAB_HOST ? { GITLAB_HOST: allEnv.GITLAB_HOST } : {}),
-          ...(process.env.GITHUB_APP_BOT_NAME
-            ? { GITHUB_APP_BOT_NAME: process.env.GITHUB_APP_BOT_NAME }
-            : {}),
-          ...(process.env.GITHUB_APP_BOT_EMAIL
-            ? { GITHUB_APP_BOT_EMAIL: process.env.GITHUB_APP_BOT_EMAIL }
-            : {}),
-          ...(allEnv.OPTIO_EXTRA_PACKAGES
-            ? { OPTIO_EXTRA_PACKAGES: allEnv.OPTIO_EXTRA_PACKAGES }
-            : {}),
-          ...(allEnv.OPTIO_SETUP_COMMANDS
-            ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
-            : {}),
-        };
-        const setupSecrets = await resolveSecretsForSetup(review.repoUrl, workspaceId);
-        Object.assign(podEnv, setupSecrets);
+        // The pod's own env (repo-init.sh): no run's secrets — the pod is shared.
+        const podEnv = await repoPool.repoPodEnv(allEnv, review.repoUrl, workspaceId);
 
         const maxAgentsPerPod = repoConfig.maxAgentsPerPod ?? 2;
         const maxPodInstances = repoConfig.maxPodInstances ?? 1;

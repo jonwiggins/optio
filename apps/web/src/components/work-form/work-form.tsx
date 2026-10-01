@@ -98,7 +98,6 @@ import {
   type Then,
   type WhenType,
   prSettingsApply,
-  withOverride,
   asksForPrompt,
   isCommand,
 } from "./model";
@@ -403,14 +402,13 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const sentenceCtx = { repoName: repoRow?.fullName ?? null, machineName: machine?.name ?? null };
   const sentence = useMemo(() => describe(draft, sentenceCtx), [draft, repoRow, machine]);
   const gaps = missingFields(draft, sentenceCtx);
-  const wantsRepoUrl = draft.withRepo;
   // The repo whose settings decide what happens to the PR (on a machine, the
   // registered repo the checkout belongs to, if any).
   const policyRepo =
     repoRow ?? (effectiveRepoUrl ? repos.find((r: any) => r.repoUrl === effectiveRepoUrl) : null);
   const prPlan = followThrough(draft, policyRepo);
   const canSubmit =
-    !readOnly && !submitting && gaps.length === 0 && (!wantsRepoUrl || !!effectiveRepoUrl);
+    !readOnly && !submitting && gaps.length === 0 && (!draft.withRepo || !!effectiveRepoUrl);
   // Named for what it is ("Job 12", "Terminal 12"), numbered after everything
   // the unified list counts; while the count is unknown (or the API predates
   // `total`) fall back to a timestamp so two unnamed rows never collide.
@@ -994,12 +992,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                         />
                       ) : null
                     }
-                    onToggle={(part, item, on) =>
-                      setDraft((d) => withOverride(d, part, item.id, item.default, on))
-                    }
-                    onChange={(patch) =>
-                      setDraft((d) => ({ ...d, settings: { ...d.settings, ...patch } }))
-                    }
+                    onChange={(settings) => setDraft((d) => ({ ...d, settings }))}
                   />
                 </div>
               )}
@@ -1085,7 +1078,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
           </Section>
 
           {/* ── What ────────────────────────────────────────────────────── */}
-          {asksForPrompt(draft) && kind !== "pod-session" && (
+          {asksForPrompt(draft) && (
             <Section
               step={4}
               label="What"

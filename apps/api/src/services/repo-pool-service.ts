@@ -31,6 +31,41 @@ import {
 import { parseIntEnv } from "@optio/shared";
 import { withSpan } from "../telemetry/spans.js";
 import { buildEnvExports, RUN_WORK_SETUP_COMMANDS, WRITE_SETUP_FILES } from "../utils/pod-env.js";
+import { resolveSecretsForSetup, workspaceRestrictsPodSecrets } from "./secret-service.js";
+
+/** The run env a repo pod starts with: git sign-in and the repo's setup. */
+const POD_ENV_KEYS = [
+  "OPTIO_GIT_CREDENTIAL_URL",
+  "OPTIO_CREDENTIAL_SECRET",
+  "GITHUB_TOKEN",
+  "GITLAB_TOKEN",
+  "GITLAB_HOST",
+  "OPTIO_EXTRA_PACKAGES",
+  "OPTIO_SETUP_COMMANDS",
+] as const;
+
+/**
+ * The env a repo pod starts with (repo-init.sh), from a run's env: git
+ * sign-in, the repo's packages and setup commands, the GitHub App's bot
+ * identity, and the secrets setup may use (repo-scoped over global; the
+ * organization's only when the workspace doesn't restrict pods to the
+ * secrets work picks). Never the run's own secrets — the pod is shared
+ * across runs and users; those travel only in each run's exec env.
+ */
+export async function repoPodEnv(
+  runEnv: Record<string, string>,
+  repoUrl: string,
+  workspaceId: string | null,
+): Promise<Record<string, string>> {
+  const env: Record<string, string> = {};
+  for (const key of POD_ENV_KEYS) if (runEnv[key]) env[key] = runEnv[key];
+  if (process.env.GITHUB_APP_BOT_NAME) env.GITHUB_APP_BOT_NAME = process.env.GITHUB_APP_BOT_NAME;
+  if (process.env.GITHUB_APP_BOT_EMAIL) env.GITHUB_APP_BOT_EMAIL = process.env.GITHUB_APP_BOT_EMAIL;
+  const setupSecrets = await resolveSecretsForSetup(repoUrl, workspaceId, {
+    orgSecrets: !(await workspaceRestrictsPodSecrets(workspaceId)),
+  });
+  return { ...env, ...setupSecrets };
+}
 
 const IDLE_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_POD_IDLE_MS", 600000); // 10 min default
 const REPO_INIT_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_INIT_TIMEOUT_MS", 120000); // 2 min default

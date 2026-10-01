@@ -45,6 +45,7 @@ import {
   sweepStuckLaunching,
 } from "./local-terminal-service.js";
 import {
+  checkBlueprint,
   createBlueprint,
   getBlueprint,
   resolveBlueprintDir,
@@ -914,7 +915,7 @@ describe("local terminal links", () => {
 });
 
 describe("local blueprints", () => {
-  it("spawns with shell-quoted params substituted into the template", async () => {
+  it("spawns with params passed as shell variables, never spliced into the command", async () => {
     const host = await makeHost();
     const daemon = new FakeDaemonSocket();
     relay.registerDaemon(host.id, null, daemon);
@@ -938,8 +939,10 @@ describe("local blueprints", () => {
       spec: { kind: string; command: string };
     };
     expect(spawn.spec.kind).toBe("command");
-    // The param is one single-quoted shell word; embedded quotes escaped.
-    expect(spawn.spec.command).toBe(`claude 'review PR; echo '\\''$(whoami)'\\'''`);
+    // The value is assigned single-quoted (embedded quotes escaped) and only referenced.
+    expect(spawn.spec.command).toBe(
+      `OPTIO_PARAM_prompt='review PR; echo '\\''$(whoami)'\\'''\nclaude "\${OPTIO_PARAM_prompt}"`,
+    );
   });
 
   it("a blueprint with no agent and nothing to run opens a shell that waits for you", async () => {
@@ -957,6 +960,14 @@ describe("local blueprints", () => {
     await spawnFromBlueprint(blueprint, {});
     const spawn = daemon.messages().find((m) => m.type === "spawn") as { spec: { kind: string } };
     expect(spawn.spec).toEqual({ kind: "shell" });
+  });
+
+  it("may be saved with nothing to run when it has no agent; an agent needs a prompt", async () => {
+    const owner = { userId: null, workspaceId: null };
+    expect(await checkBlueprint({ commandTemplate: "", agent: null }, owner)).toBeNull();
+    expect(await checkBlueprint({ commandTemplate: " ", agent: "claude-code" }, owner)).toMatch(
+      /prompt/,
+    );
   });
 
   it("agent-mode blueprints emit an agent spec with a raw (un-shell-quoted) prompt", async () => {
@@ -1093,7 +1104,9 @@ describe("local blueprints", () => {
     expect(terminal?.spawnedBy).toBe("ticket");
     // Host offline → parked for the next hello.
     expect(terminal?.state).toBe("pending");
-    expect((terminal?.spec as { command: string }).command).toBe("claude 'fix the flaky test'");
+    expect((terminal?.spec as { command: string }).command).toBe(
+      `OPTIO_PARAM_ticketTitle='fix the flaky test'\nclaude "\${OPTIO_PARAM_ticketTitle}"`,
+    );
   });
 
   it("computes nextFireAt for schedule triggers and rejects duplicate webhook paths", async () => {
@@ -1249,9 +1262,13 @@ describe("local automations (event triggers + session modes)", () => {
       commandTemplate: "run {{a}}{{#if b}} --with {{b}}{{/if}}",
     });
     const empty = await spawnFromBlueprint(blueprint, { params: { a: "x", b: "" } });
-    expect((empty.spec as { command: string }).command).toBe("run 'x'");
+    expect((empty.spec as { command: string }).command).toBe(
+      `OPTIO_PARAM_a='x'\nrun "\${OPTIO_PARAM_a}"`,
+    );
     const full = await spawnFromBlueprint(blueprint, { params: { a: "x", b: "y z" } });
-    expect((full.spec as { command: string }).command).toBe("run 'x' --with 'y z'");
+    expect((full.spec as { command: string }).command).toBe(
+      `OPTIO_PARAM_a='x'\nOPTIO_PARAM_b='y z'\nrun "\${OPTIO_PARAM_a}" --with "\${OPTIO_PARAM_b}"`,
+    );
   });
 
   it("refuses to spawn on a host that belongs to another user", async () => {

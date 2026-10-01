@@ -18,16 +18,14 @@ import { renderCommandTemplate } from "../services/prompt-template-service.js";
 import * as workflowPool from "../services/workflow-pool-service.js";
 import { addUsage } from "../services/run-usage.js";
 import { activityFlusher } from "../services/activity-flush.js";
-import {
-  resolvePodSecrets,
-  resolveSecretsForTask,
-  retrieveSecretWithFallback,
-} from "../services/secret-service.js";
-import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
+import { resolvePodSecrets } from "../services/secret-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
-import { agentOptionsEnv } from "../services/agent-options-env.js";
-import { buildPooledAgentCommand } from "../services/pooled-agent-command.js";
-import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
+import {
+  buildInitialClaudeStreamMessage,
+  buildPooledAgentCommand,
+} from "../services/pooled-agent-command.js";
+import { pooledAgentEnv } from "../services/pooled-agent-env.js";
+import { buildAgentEnvironment } from "../services/agent-environment-service.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
@@ -85,107 +83,6 @@ export function buildWorkflowAgentCommand(
     maxTurns: opts?.maxTurns ?? DEFAULT_MAX_TURNS_CODING,
     label: "workflow agent",
   });
-}
-
-/**
- * Build the initial stdin message for Claude Code's stream-json input format.
- */
-function buildInitialStreamMessage(prompt: string): string {
-  return (
-    JSON.stringify({
-      type: "user",
-      message: {
-        role: "user",
-        content: [{ type: "text", text: prompt }],
-      },
-    }) + "\n"
-  );
-}
-
-/**
- * What an agent needs in its pod for a Job run: its sign-in (an API key, an
- * OAuth token, or the model provider the Job picked) and its parameters
- * (model, effort, approval mode, …) as the env the command builder reads.
- */
-async function agentRunEnv(
-  workflow: Workflow,
-  prompt: string,
-  workspaceId: string | null,
-  ownerUserId: string | null,
-): Promise<Record<string, string>> {
-  const adapter = getAdapter(workflow.agentRuntime);
-  // A model provider (Bedrock) picked for the job replaces the agent's own
-  // sign-in: no Anthropic / OpenAI key is needed then.
-  const providerRow = await resolveProviderForWork({
-    agentType: workflow.agentRuntime,
-    agentOptions: workflow.agentOptions,
-    workspaceId,
-    ownerUserId,
-    runsOn: "pod",
-  });
-  const providerRuntime = providerRow
-    ? podProviderRuntime(providerRow, workflow.agentRuntime)
-    : null;
-  const resolvedSecrets = providerRuntime
-    ? {}
-    : await resolveSecretsForTask(
-        adapter.validateSecrets([]).missing,
-        "",
-        workspaceId,
-        ownerUserId,
-      );
-  const claudeAuthMode = providerRuntime
-    ? "bedrock"
-    : (((await retrieveSecretWithFallback(
-        "CLAUDE_AUTH_MODE",
-        "global",
-        workspaceId,
-        ownerUserId,
-      ).catch(() => null)) as string | null) ?? "api-key");
-
-  const env: Record<string, string> = {
-    ...resolvedSecrets,
-    ...(providerRuntime?.env ?? {}),
-    ...(providerRuntime?.codexConfig.length
-      ? { OPTIO_CODEX_PROVIDER_CONFIG: JSON.stringify(providerRuntime.codexConfig) }
-      : {}),
-    OPTIO_PROMPT: prompt,
-    OPTIO_AGENT_TYPE: workflow.agentRuntime,
-    OPTIO_AUTH_MODE: claudeAuthMode,
-    // `model` is the legacy field.
-    ...agentOptionsEnv(workflow.agentRuntime, workflow.agentOptions, workflow.model),
-  };
-
-  if (claudeAuthMode === "api-key") {
-    const apiKey = await retrieveSecretWithFallback(
-      "ANTHROPIC_API_KEY",
-      "global",
-      workspaceId,
-      ownerUserId,
-    ).catch(() => null);
-    if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
-  }
-  if (claudeAuthMode === "oauth-token") {
-    const oauthToken = await retrieveSecretWithFallback(
-      "CLAUDE_CODE_OAUTH_TOKEN",
-      "global",
-      workspaceId,
-      ownerUserId,
-    ).catch(() => null);
-    if (!oauthToken) {
-      throw new Error("OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found");
-    }
-    env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
-  }
-  if (claudeAuthMode === "max-subscription") {
-    const { getClaudeAuthToken } = await import("../services/auth-service.js");
-    const authResult = getClaudeAuthToken();
-    if (!authResult.available || !authResult.token) {
-      throw new Error(`Max subscription auth failed: ${authResult.error ?? "Token not available"}`);
-    }
-    env.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
-  }
-  return env;
 }
 
 // ── Concurrency lock ───────────────────────────────────────────────────────────
@@ -341,26 +238,25 @@ export function startWorkflowWorker() {
           ...picked.env,
           ...(command
             ? { OPTIO_COMMAND: rendered }
-            : await agentRunEnv(workflow, rendered, workspaceId, workflowUserId)),
-          OPTIO_WORKFLOW_RUN_ID: workflowRunId,
+            : await pooledAgentEnv(workflow, rendered, workspaceId, workflowUserId)),
         };
 
         // The agent's environment: the workspace's MCP servers, connections,
-        // and skills with the Job's settings applied, and its setup commands.
-        const environment = await buildAgentEnvironment(
-          {
-            repoUrl: null,
-            agentType: workflow.agentRuntime,
-            workspaceId,
-            ownerUserId: workflowUserId,
-            settings: workflow.settings,
-          },
-          log,
+        // and skills with the Job's settings applied, and its setup commands
+        // (a command gets only those).
+        Object.assign(
+          env,
+          await buildAgentEnvironment(
+            {
+              repoUrl: null,
+              agentType: command ? null : workflow.agentRuntime,
+              workspaceId,
+              ownerUserId: workflowUserId,
+              settings: workflow.settings,
+            },
+            log,
+          ),
         );
-        Object.assign(env, environment.env);
-        if (environment.setupFiles.length > 0) {
-          env.OPTIO_SETUP_FILES = encodeSetupFiles(environment.setupFiles);
-        }
 
         // ── Provision pod (shared across runs within the workflow) ────
         const envSpec = workflow.environmentSpec as Record<string, string> | null;
@@ -404,7 +300,7 @@ export function startWorkflowWorker() {
         // For claude-code, deliver prompt via stdin (stream-json mode)
         if (!command && workflow.agentRuntime === "claude-code") {
           try {
-            execSession.stdin.write(buildInitialStreamMessage(rendered));
+            execSession.stdin.write(buildInitialClaudeStreamMessage(rendered));
           } catch (err) {
             log.warn({ err }, "Failed to write initial prompt to agent stdin");
           }
@@ -450,51 +346,54 @@ export function startWorkflowWorker() {
             }, ACTIVITY_FLUSH_MS)
           : null;
 
-        for await (const chunk of execSession.stdout as AsyncIterable<Buffer>) {
-          const text = chunk.toString();
-          allLogs += text;
+        try {
+          for await (const chunk of execSession.stdout as AsyncIterable<Buffer>) {
+            const text = chunk.toString();
+            allLogs += text;
 
-          const parts = (lineBuf + text).split("\n");
-          lineBuf = parts.pop() ?? "";
+            const parts = (lineBuf + text).split("\n");
+            lineBuf = parts.pop() ?? "";
 
-          for (const line of parts) {
-            if (!line.trim()) continue;
+            for (const line of parts) {
+              if (!line.trim()) continue;
 
-            const parsed = parseEvent(line, workflowRunId);
-            if (parsed.sessionId && !sessionId) {
-              sessionId = parsed.sessionId;
-              await db
-                .update(workflowRuns)
-                .set({ sessionId, updatedAt: new Date() })
-                .where(eq(workflowRuns.id, workflowRunId));
-              log.info({ sessionId }, "Session ID captured");
-            }
+              const parsed = parseEvent(line, workflowRunId);
+              if (parsed.sessionId && !sessionId) {
+                sessionId = parsed.sessionId;
+                await db
+                  .update(workflowRuns)
+                  .set({ sessionId, updatedAt: new Date() })
+                  .where(eq(workflowRuns.id, workflowRunId));
+                log.info({ sessionId }, "Session ID captured");
+              }
 
-            // Close stdin on terminal event so agent exits cleanly
-            if (parsed.isTerminal) {
-              try {
-                execSession.stdin.end();
-              } catch (err) {
-                log.warn({ err }, "Failed to close agent stdin on terminal event");
+              // Close stdin on terminal event so agent exits cleanly
+              if (parsed.isTerminal) {
+                try {
+                  execSession.stdin.end();
+                } catch (err) {
+                  log.warn({ err }, "Failed to close agent stdin on terminal event");
+                }
+              }
+
+              // Persist + publish log entries (historical DB + live WS)
+              for (const entry of parsed.entries) {
+                // Stall detection: meaningful agent events are signs of life.
+                activity.mark(entry.type);
+                await workflowService.appendWorkflowRunLog({
+                  workflowRunId,
+                  stream: "stdout",
+                  content: entry.content,
+                  logType: entry.type,
+                  metadata: entry.metadata,
+                });
               }
             }
-
-            // Persist + publish log entries (historical DB + live WS)
-            for (const entry of parsed.entries) {
-              // Stall detection: meaningful agent events are signs of life.
-              activity.mark(entry.type);
-              await workflowService.appendWorkflowRunLog({
-                workflowRunId,
-                stream: "stdout",
-                content: entry.content,
-                logType: entry.type,
-                metadata: entry.metadata,
-              });
-            }
+            await activity.maybeFlush();
           }
-          await activity.maybeFlush();
+        } finally {
+          if (keepAlive) clearInterval(keepAlive);
         }
-        if (keepAlive) clearInterval(keepAlive);
         await activity.flush();
 
         // Flush remaining buffer
@@ -524,12 +423,10 @@ export function startWorkflowWorker() {
         // failure mid-run. Claude CLIs typically catch the 401 internally and
         // exit 0, which would otherwise mark the run as completed despite no
         // useful work being done. (A command's output is its own business.)
-        const authDetection = command
-          ? { matched: false as const, pattern: undefined, excerpt: undefined }
-          : detectAuthFailureInLogs(allLogs);
+        const authDetection = command ? null : detectAuthFailureInLogs(allLogs);
         let effectiveSuccess = result.success;
         let effectiveError = result.error;
-        if (authDetection.matched) {
+        if (authDetection?.matched) {
           effectiveSuccess = false;
           effectiveError = `Agent authentication failed: ${authDetection.excerpt ?? authDetection.pattern}`;
           log.warn(

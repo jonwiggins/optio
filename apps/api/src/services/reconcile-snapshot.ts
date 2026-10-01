@@ -22,6 +22,7 @@ import {
   PersistentAgentState,
   PersistentAgentPodLifecycle,
   DEFAULT_STALL_THRESHOLD_MS,
+  effectivePrSettings,
   getOffPeakInfo,
   parseIntEnv,
   parsePrUrl,
@@ -136,6 +137,11 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
   );
 
   const offPeak = getOffPeakInfo(now);
+  const prSettings = effectivePrSettings(
+    row.settings,
+    repoConfig,
+    parseIntEnv("OPTIO_MAX_AUTO_RESUMES", 10),
+  );
   const hasReviewSubtask = subtaskCounts.some(
     (s) => s.state !== TaskState.FAILED && s.blocksParent,
   );
@@ -159,23 +165,11 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
       // holds back the merge either way (reconcile-repo).
       autoMerge: row.autoMerge ?? repoConfig?.autoMerge ?? false,
       // The task's own settings (WorkSettings) win over the repo's the same way.
-      cautiousMode: row.settings?.cautiousMode ?? repoConfig?.cautiousMode ?? false,
+      ...prSettings,
       autoResume: row.autoResume ?? repoConfig?.autoResume ?? false,
-      reviewEnabled: row.settings?.review?.enabled ?? repoConfig?.reviewEnabled ?? false,
-      // A task that asks for a review gets one: its trigger, else the repo's
-      // when that one launches reviews, else once CI passes.
-      reviewTrigger: row.settings?.review?.enabled
-        ? (reviewTriggerOf(row.settings.review.trigger) ??
-          reviewTriggerOf(repoConfig?.reviewTrigger) ??
-          "on_ci_pass")
-        : reviewTriggerOf(repoConfig?.reviewTrigger),
       offPeakOnly: repoConfig?.offPeakOnly ?? false,
       offPeakActive: offPeak.isOffPeak,
       hasReviewSubtask,
-      maxAutoResumes:
-        row.settings?.maxAutoResumes ??
-        repoConfig?.maxAutoResumes ??
-        parseIntEnv("OPTIO_MAX_AUTO_RESUMES", 10),
       recentAutoResumeCount,
     },
     readErrors,
@@ -189,11 +183,6 @@ function latest(a: Date | null | undefined, b: Date | null | undefined): Date | 
   if (!a) return b ?? null;
   if (!b) return a;
   return a.getTime() >= b.getTime() ? a : b;
-}
-
-/** The review triggers the reconciler acts on; anything else ("manual") launches none. */
-function reviewTriggerOf(trigger: string | null | undefined): "on_pr" | "on_ci_pass" | null {
-  return trigger === "on_pr" || trigger === "on_ci_pass" ? trigger : null;
 }
 
 /**

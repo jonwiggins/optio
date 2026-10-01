@@ -7,7 +7,13 @@ import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { Disclosure } from "@/components/ui/disclosure";
 import { Segmented } from "@/components/ui/segmented";
-import { overrideOn, settingsChanges, type EnvironmentPart } from "./model";
+import {
+  DEFAULT_MAX_AUTO_RESUMES,
+  overrideOn,
+  settingsChanges,
+  toggleOverride,
+  type EnvironmentPart,
+} from "./model";
 
 /**
  * Where → Environment: what the agent's pod has besides the code. The repo's
@@ -31,7 +37,6 @@ export function EnvironmentPanel({
   prApplies,
   command = false,
   secrets,
-  onToggle,
   onChange,
 }: {
   settings: WorkSettings;
@@ -45,9 +50,12 @@ export function EnvironmentPanel({
   command?: boolean;
   /** The pod secrets row, rendered first. */
   secrets?: ReactNode;
-  onToggle: (part: EnvironmentPart, item: WorkEnvironmentItem, on: boolean) => void;
-  onChange: (patch: Partial<WorkSettings>) => void;
+  /** The work's settings, with a change applied ({} = back to the defaults). */
+  onChange: (next: WorkSettings) => void;
 }) {
+  const set = (patch: Partial<WorkSettings>) => onChange({ ...settings, ...patch });
+  const toggle = (part: EnvironmentPart, item: WorkEnvironmentItem, on: boolean) =>
+    set({ [part]: toggleOverride(settings[part], item.id, item.default, on) });
   const changes = settingsChanges(settings);
   const [open, setOpen] = useState(changes > 0);
   const [options, setOptions] = useState<WorkEnvironmentOptions | null>(null);
@@ -100,7 +108,7 @@ export function EnvironmentPanel({
                 icon={<Plug className="w-3 h-3" />}
                 items={options?.connections}
                 settings={settings}
-                onToggle={onToggle}
+                onToggle={toggle}
                 empty="No connections in this workspace — add them under Library → Connections."
               />
               <Toggles
@@ -109,7 +117,7 @@ export function EnvironmentPanel({
                 icon={<Server className="w-3 h-3" />}
                 items={options?.mcpServers}
                 settings={settings}
-                onToggle={onToggle}
+                onToggle={toggle}
                 empty="No MCP servers configured — add them in a repo's or the workspace's settings."
               />
               <Toggles
@@ -118,7 +126,7 @@ export function EnvironmentPanel({
                 icon={<Sparkles className="w-3 h-3" />}
                 items={options?.skills}
                 settings={settings}
-                onToggle={onToggle}
+                onToggle={toggle}
                 empty="No custom skills configured."
               />
             </>
@@ -131,7 +139,7 @@ export function EnvironmentPanel({
             <textarea
               rows={2}
               value={settings.setupCommands ?? ""}
-              onChange={(e) => onChange({ setupCommands: e.target.value })}
+              onChange={(e) => set({ setupCommands: e.target.value })}
               placeholder="npm ci && npm run build"
               className={TEXTAREA}
               aria-label="Setup commands"
@@ -151,22 +159,12 @@ export function EnvironmentPanel({
             </p>
           )}
 
-          {prApplies && <PrSettings settings={settings} repo={options?.repo} onChange={onChange} />}
+          {prApplies && <PrSettings settings={settings} repo={options?.repo} onChange={set} />}
 
           {changes > 0 && (
             <button
               type="button"
-              onClick={() =>
-                onChange({
-                  connections: undefined,
-                  mcpServers: undefined,
-                  skills: undefined,
-                  setupCommands: undefined,
-                  review: undefined,
-                  cautiousMode: undefined,
-                  maxAutoResumes: undefined,
-                })
-              }
+              onClick={() => onChange({})}
               className="text-xs text-text-muted hover:text-text underline underline-offset-2"
               data-testid="work-environment-reset"
             >
@@ -242,7 +240,11 @@ function Toggles({
   );
 }
 
-/** Review, draft PRs, and resumes for this work, over the repo's. */
+/**
+ * Review, draft PRs, and resumes for this work. The repo's settings are an
+ * admin's, so work can only be more careful than its repo: ask for a review,
+ * open drafts, or resume fewer times (`effectivePrSettings`).
+ */
 function PrSettings({
   settings,
   repo,
@@ -252,59 +254,45 @@ function PrSettings({
   repo: WorkEnvironmentOptions["repo"] | undefined;
   onChange: (patch: Partial<WorkSettings>) => void;
 }) {
-  const repoReview = repo?.reviewEnabled
-    ? `Repo (${repo.reviewTrigger === "on_pr" ? "on PR" : "after CI"})`
+  const repoReviews = !!repo?.reviewEnabled;
+  const repoReview = repoReviews
+    ? `Repo (${repo?.reviewTrigger === "on_pr" ? "on PR" : repo?.reviewTrigger === "on_ci_pass" ? "after CI" : "manual"})`
     : "Repo (off)";
-  const review = settings.review ? (settings.review.enabled ? "on" : "off") : REPO;
-  const draft =
-    typeof settings.cautiousMode === "boolean" ? (settings.cautiousMode ? "draft" : "ready") : REPO;
+  const review = settings.review?.enabled ? (settings.review.trigger ?? "on_ci_pass") : REPO;
+  const cap = repo?.maxAutoResumes ?? DEFAULT_MAX_AUTO_RESUMES;
   return (
     <div className="space-y-3 pt-3 border-t border-border">
       <div>
         <label className="block text-xs text-text-muted mb-1">Code review</label>
-        <div className="flex flex-wrap items-center gap-2">
-          <Segmented
-            wrap
-            value={review}
-            onChange={(v) =>
-              onChange({
-                review:
-                  v === REPO
-                    ? undefined
-                    : { enabled: v === "on", ...(v === "on" ? { trigger: "on_ci_pass" } : {}) },
-              })
-            }
-            options={[
-              { value: REPO, label: repoReview },
-              { value: "on", label: "Review" },
-              { value: "off", label: "No review" },
-            ]}
-          />
-          {settings.review?.enabled && (
-            <Segmented
-              wrap
-              value={settings.review.trigger ?? "on_ci_pass"}
-              onChange={(trigger) =>
-                onChange({ review: { enabled: true, trigger: trigger as "on_pr" | "on_ci_pass" } })
-              }
-              options={[
-                { value: "on_pr", label: "When the PR opens" },
-                { value: "on_ci_pass", label: "Once CI passes" },
-              ]}
-            />
-          )}
-        </div>
+        <Segmented
+          wrap
+          value={review}
+          onChange={(v) =>
+            onChange({
+              review:
+                v === REPO ? undefined : { enabled: true, trigger: v as "on_pr" | "on_ci_pass" },
+            })
+          }
+          options={[
+            { value: REPO, label: repoReview },
+            { value: "on_pr", label: "Review when the PR opens" },
+            { value: "on_ci_pass", label: "Review once CI passes" },
+          ]}
+        />
       </div>
       <div className="flex flex-wrap gap-6">
         <div>
           <label className="block text-xs text-text-muted mb-1">PRs</label>
           <Segmented
             wrap
-            value={draft}
-            onChange={(v) => onChange({ cautiousMode: v === REPO ? undefined : v === "draft" })}
+            value={settings.cautiousMode === true && !repo?.cautiousMode ? "draft" : REPO}
+            onChange={(v) => onChange({ cautiousMode: v === "draft" ? true : undefined })}
             options={[
-              { value: REPO, label: repo?.cautiousMode ? "Repo (draft)" : "Repo (ready)" },
-              { value: "ready", label: "Ready for review" },
+              {
+                value: REPO,
+                label: repo?.cautiousMode ? "Repo (draft)" : "Repo (ready for review)",
+                disabled: repo?.cautiousMode ? "This repo already opens draft PRs." : undefined,
+              },
               { value: "draft", label: "Draft — a person merges" },
             ]}
           />
@@ -314,12 +302,13 @@ function PrSettings({
           <input
             type="number"
             min={0}
-            max={100}
+            max={cap}
             value={settings.maxAutoResumes ?? ""}
-            placeholder={String(repo?.maxAutoResumes ?? 10)}
+            placeholder={String(cap)}
             onChange={(e) =>
               onChange({
-                maxAutoResumes: e.target.value === "" ? undefined : Number(e.target.value),
+                maxAutoResumes:
+                  e.target.value === "" ? undefined : Math.min(Number(e.target.value), cap),
               })
             }
             className="w-24 px-3 py-1.5 rounded-lg bg-bg border border-border text-sm"
@@ -328,7 +317,8 @@ function PrSettings({
         </div>
       </div>
       <p className="text-[11px] text-text-muted/80">
-        Blank or “Repo” follows the repo&apos;s settings; the plan under Then shows the result.
+        Work can be more careful than its repo, never less: a review, draft PRs, or fewer resumes.
+        To loosen them, change the repo&apos;s settings. The plan under Then shows the result.
       </p>
     </div>
   );

@@ -240,7 +240,7 @@ describe("local runs e2e", () => {
     expect(done.output?.agentSessionId).toBe("sess-e2e-1");
   });
 
-  it("runs a command Job on a local host as a command terminal, params shell-quoted", async () => {
+  it("runs a command Job on a local host as a command terminal, params as shell variables", async () => {
     const { hostId, daemon } = await onlineHost("e2e-local-command", cleanups);
     const { status, body } = await api<{ id: string; kind: string }>("/api/work", {
       method: "POST",
@@ -259,7 +259,10 @@ describe("local runs e2e", () => {
     const runId = await startRun(body.id, { who: "Ada; rm -rf ~" });
 
     const spawn = await daemon.next((m) => m.type === "spawn");
-    expect(spawn.spec).toEqual({ kind: "command", command: "./report.sh 'Ada; rm -rf ~'" });
+    expect(spawn.spec).toEqual({
+      kind: "command",
+      command: `OPTIO_PARAM_who='Ada; rm -rf ~'\n./report.sh "\${OPTIO_PARAM_who}"`,
+    });
     const terminalId = String(spawn.terminalId);
     daemon.send({ type: "started", terminalId });
     daemon.send({ type: "exit", terminalId, exitCode: 3 });

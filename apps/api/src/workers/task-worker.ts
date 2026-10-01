@@ -13,9 +13,9 @@ import {
   parseRepoUrl,
   parseIntEnv,
   PrToolCallTracker,
+  shellQuote,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
-import { shellSingleQuote } from "../utils/pod-env.js";
 import { getEventParser } from "../services/event-parsers.js";
 import { checkExistingPr, type ExistingPr } from "../services/pr-detection-service.js";
 import { detectTaskPrs } from "../services/task-pr-service.js";
@@ -27,10 +27,8 @@ import * as repoPool from "../services/repo-pool-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import {
   resolveSecretsForTask,
-  resolveSecretsForSetup,
   resolvePodSecrets,
   retrieveSecretWithFallback,
-  workspaceRestrictsPodSecrets,
 } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
@@ -51,10 +49,13 @@ import { withSpan, injectTraceContextIntoJob } from "../telemetry/spans.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
-import { codexModelFlags } from "../services/pooled-agent-command.js";
+import {
+  buildInitialClaudeStreamMessage,
+  codexModelFlags,
+} from "../services/pooled-agent-command.js";
 import { addUsage } from "../services/run-usage.js";
-import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
-import { gitAccessEnv } from "../services/git-access-env.js";
+import { buildAgentEnvironment } from "../services/agent-environment-service.js";
+import { applyGitAccess } from "../services/git-access-env.js";
 import { activityFlusher } from "../services/activity-flush.js";
 
 const connectionOpts = getBullMQConnectionOptions();
@@ -359,8 +360,8 @@ export function startTaskWorker() {
         const isPlanningRun =
           !!repoConfig?.planningModeEnabled && !resumeSessionId && !reviewOverride;
 
-        // The task's own cautious mode (WorkSettings) wins over the repo's.
-        const cautious = task.settings?.cautiousMode ?? promptConfig.cautiousMode;
+        // Draft PRs when the repo or the task's own settings ask for them.
+        const cautious = task.settings?.cautiousMode === true || !!promptConfig.cautiousMode;
         const renderedPrompt = renderPromptTemplate(promptConfig.template, {
           TASK_FILE: taskFilePath,
           BRANCH_NAME: branchName,
@@ -466,21 +467,20 @@ export function startTaskWorker() {
         // ── The agent's environment: MCP servers, connections, skills, and
         // the work's own setup commands — the repo's defaults with the
         // task's settings applied (agent-environment-service).
-        const environment = await buildAgentEnvironment(
-          {
-            repoUrl: task.repoUrl,
-            agentType: task.agentType,
-            workspaceId: taskWorkspaceId,
-            ownerUserId: runOwnerUserId,
-            settings: task.settings,
-          },
-          log,
+        Object.assign(
+          agentConfig.env,
+          await buildAgentEnvironment(
+            {
+              repoUrl: task.repoUrl,
+              agentType: task.agentType,
+              workspaceId: taskWorkspaceId,
+              ownerUserId: runOwnerUserId,
+              settings: task.settings,
+            },
+            log,
+            agentConfig.setupFiles,
+          ),
         );
-        agentConfig.setupFiles = [...(agentConfig.setupFiles ?? []), ...environment.setupFiles];
-        Object.assign(agentConfig.env, environment.env);
-        if (agentConfig.setupFiles.length > 0) {
-          agentConfig.env.OPTIO_SETUP_FILES = encodeSetupFiles(agentConfig.setupFiles);
-        }
 
         // Resolve secrets (workspace → repo-scoped → global fallback)
         // Only require GITHUB_TOKEN when GitHub App auth is not configured
@@ -512,12 +512,7 @@ export function startTaskWorker() {
         };
 
         // Git sign-in (platform tokens are infra-level, not adapter secrets).
-        Object.assign(
-          allEnv,
-          await gitAccessEnv({ workspaceId: taskWorkspaceId, runId: task.id, present: allEnv }),
-        );
-        // With a GitHub App the credential helper mints tokens; never ship a static one.
-        if (isGitHubAppConfigured()) delete allEnv.GITHUB_TOKEN;
+        await applyGitAccess(allEnv, { workspaceId: taskWorkspaceId, runId: task.id });
 
         // Force-restart: tell the exec script to use the existing PR branch
         if (restartFromBranch) {
@@ -583,39 +578,8 @@ export function startTaskWorker() {
           }
         }
 
-        // Split env into pod-level (for repo-init.sh) and task-level (for exec).
-        // Pod env must NOT contain user-specific secrets (API keys, OAuth tokens)
-        // since the pod is shared across users. Secrets are only in task exec env.
-        const podEnv: Record<string, string> = {
-          OPTIO_GIT_CREDENTIAL_URL: allEnv.OPTIO_GIT_CREDENTIAL_URL,
-          OPTIO_CREDENTIAL_SECRET: allEnv.OPTIO_CREDENTIAL_SECRET,
-          ...(allEnv.GITHUB_TOKEN ? { GITHUB_TOKEN: allEnv.GITHUB_TOKEN } : {}),
-          ...(allEnv.GITLAB_TOKEN ? { GITLAB_TOKEN: allEnv.GITLAB_TOKEN } : {}),
-          ...(allEnv.GITLAB_HOST ? { GITLAB_HOST: allEnv.GITLAB_HOST } : {}),
-          ...(process.env.GITHUB_APP_BOT_NAME
-            ? { GITHUB_APP_BOT_NAME: process.env.GITHUB_APP_BOT_NAME }
-            : {}),
-          ...(process.env.GITHUB_APP_BOT_EMAIL
-            ? { GITHUB_APP_BOT_EMAIL: process.env.GITHUB_APP_BOT_EMAIL }
-            : {}),
-          ...(allEnv.OPTIO_EXTRA_PACKAGES
-            ? { OPTIO_EXTRA_PACKAGES: allEnv.OPTIO_EXTRA_PACKAGES }
-            : {}),
-          ...(allEnv.OPTIO_SETUP_COMMANDS
-            ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
-            : {}),
-        };
-
-        // Inject secrets into pod env for setup commands (global + repo-scoped).
-        // Repo-scoped secrets override global secrets with the same name.
-        const setupSecrets = await resolveSecretsForSetup(task.repoUrl, taskWorkspaceId, {
-          orgSecrets: !(await workspaceRestrictsPodSecrets(taskWorkspaceId)),
-        });
-        const setupSecretCount = Object.keys(setupSecrets).length;
-        if (setupSecretCount > 0) {
-          Object.assign(podEnv, setupSecrets);
-          log.info({ count: setupSecretCount }, "Injected secrets for setup");
-        }
+        // The pod's own env (repo-init.sh): no run's secrets — the pod is shared.
+        const podEnv = await repoPool.repoPodEnv(allEnv, task.repoUrl, taskWorkspaceId);
 
         // Get or create a repo pod (with multi-pod scheduling)
         log.info("Getting repo pod");
@@ -1500,29 +1464,6 @@ export function ingestPrToolCallLine(
   if (agentType === "codex") tracker.ingestCodexLine(line);
   else tracker.ingestClaudeLine(line);
 }
-
-export function buildInitialClaudeStreamMessage(prompt: string): string {
-  return (
-    JSON.stringify({
-      type: "user",
-      message: {
-        role: "user",
-        content: [{ type: "text", text: prompt }],
-      },
-    }) + "\n"
-  );
-}
-
-/**
- * Quote a value as a single shell word. Wraps in single quotes (inside which
- * bash performs no expansion at all) and escapes embedded single quotes with
- * the standard '\'' close/escape/reopen sequence.
- *
- * JSON.stringify is NOT safe for this: it produces double quotes, and bash
- * still performs `$VAR` expansion and backtick/`$()` command substitution
- * inside double quotes.
- */
-export const shellQuote = shellSingleQuote;
 
 export function buildAgentCommand(
   agentType: string,

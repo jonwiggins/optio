@@ -6,7 +6,7 @@
  * via /ws/local/terminals/:id/stream. Covers: host registration + liveness,
  * REST spawn → daemon spawn → running, scrollback + live output relay,
  * browser input, attention persistence, exit semantics, and webhook-triggered
- * blueprint spawns with shell-quoted params.
+ * blueprint spawns with params passed as shell variables.
  *
  * Uses Node's global WebSocket (undici) — no extra deps.
  */
@@ -532,7 +532,9 @@ describe("optio local e2e", () => {
 
     const spawn = await daemon.next((m) => m.type === "spawn");
     expect(spawn.terminalId).toBe(body.terminalId);
-    expect((spawn.spec as Json).command).toBe(`claude 'fix: quote '\\''this'\\'' safely'`);
+    expect((spawn.spec as Json).command).toBe(
+      `OPTIO_PARAM_prompt='fix: quote '\\''this'\\'' safely'\nclaude "\${OPTIO_PARAM_prompt}"`,
+    );
     expect((spawn as Json).dir).toBe("/tmp/e2e-repo");
 
     const terminal = await getTerminal(body.terminalId);

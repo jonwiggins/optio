@@ -133,9 +133,10 @@ back via `local_terminal_id`). The pipeline, in `services/local-run-service.ts`:
    No cluster concurrency or off-peak gating applies; the reconciler skips capacity,
    stall, and pod-death checks for local runs (`spec.runTarget`).
 2. Dispatch re-checks the location (host still paired, dir still allowlisted, agent one the
-   daemon can launch — Claude Code / Codex / Cursor / Gemini / OpenCode), claims a terminal
-   id on the run under CAS (so a worker + reconciler race can't spawn twice), and
-   `createTerminal`s an `{kind: "agent"}` spec: the rendered prompt, the session mode, and
+   daemon can launch — Claude Code / Codex / Cursor / Gemini / OpenCode; a command Job has no
+   agent), claims a terminal id on the run under CAS (so a worker + reconciler race can't
+   spawn twice), and `createTerminal`s the spec — `{kind: "command"}` with the rendered
+   command for a command Job (its exit code settles the run), else an `{kind: "agent"}` spec: the rendered prompt, the session mode, and
    what the run's agent options set for a run on a machine (`localAgentParams` in
    `@optio/shared`): the model (`--model` / `-m`), the reasoning effort, and Claude Code's
    permission mode — see "Launching agents" below. A Task's prompt is wrapped with "work on
@@ -445,10 +446,13 @@ automations, runLocations}}`; 409 while the host is connected
   `services/event-trigger-service.ts`) — a Job or scheduled Task in a pod as well as a
   Local automation.
 
-**Command safety**: webhook/trigger payloads never carry commands. Params substitute into
-the blueprint's user-authored `commandTemplate` via `renderTemplateString`, and every
-substituted value is shell-single-quoted before insertion (`{{#if}}` blocks are decided on
-the raw values first, so an empty param drops its block). Agent prompts are passed as a
+**Command safety**: webhook/trigger payloads never carry commands. Params reach the
+user-authored command (a blueprint's `commandTemplate`, or a command Job's) through
+`renderCommandTemplate`: each value becomes a shell variable assigned single-quoted on the
+command's first line (`OPTIO_PARAM_title='…'`), and each `{{title}}` only references it —
+`"${OPTIO_PARAM_title}"` bare, `${OPTIO_PARAM_title}` inside double quotes — so a value is
+never parsed as shell code wherever the template puts it (`{{#if}}` blocks are decided on the
+raw values first, so an empty param drops its block). Agent prompts are passed as a
 single quoted argv element, never interpolated into shell syntax; a prompt that starts with
 `-` gets a leading space so an event payload can't smuggle in a CLI flag.
 

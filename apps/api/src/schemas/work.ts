@@ -75,16 +75,15 @@ export const WorkDetailResponseSchema = z
 
 const branch = z.string().regex(/^[a-zA-Z0-9._/-]+$/, "Invalid branch name");
 
-/** Work described by its five attributes — mirrors `WorkSpec` in @optio/shared. */
 const IdOverridesSchema = z
   .object({
-    add: z.array(z.string().min(1).max(100)).max(200).optional(),
-    remove: z.array(z.string().min(1).max(100)).max(200).optional(),
+    add: z.array(z.string().uuid()).max(200).optional(),
+    remove: z.array(z.string().uuid()).max(200).optional(),
   })
   .describe("Ids added to the default set, and ids taken out of it");
 
 /** What a piece of pod work changes about its agent environment — `WorkSettings`. */
-export const WorkSettingsSchema = z
+const WorkSettingsSchema = z
   .object({
     connections: IdOverridesSchema.optional().describe(
       "Connections beyond the ones the repo's assignments give, or left out",
@@ -105,12 +104,12 @@ export const WorkSettingsSchema = z
       .object({ enabled: z.boolean(), trigger: z.enum(["on_pr", "on_ci_pass"]).optional() })
       .nullable()
       .optional()
-      .describe("Repo work: a review agent reviews the PR (over the repo's setting)"),
+      .describe("Repo work: a review even when the repo has none (work can't turn the repo's off)"),
     cautiousMode: z
       .boolean()
       .nullable()
       .optional()
-      .describe("Repo work: draft PRs a person merges (over the repo's setting)"),
+      .describe("Repo work: draft PRs a person merges (true only; work can't turn the repo's off)"),
     maxAutoResumes: z
       .number()
       .int()
@@ -118,10 +117,11 @@ export const WorkSettingsSchema = z
       .max(100)
       .nullable()
       .optional()
-      .describe("Repo work: how many times the agent is resumed on CI failures and reviews"),
+      .describe("Repo work: resume the agent at most this many times (at most the repo's cap)"),
   })
   .describe("Changes to the repo's / workspace's agent environment; unset = the default");
 
+/** Work described by its five attributes — mirrors `WorkSpec` in @optio/shared. */
 export const WorkSpecSchema = z
   .object({
     name: z.string().trim().min(1).max(200),

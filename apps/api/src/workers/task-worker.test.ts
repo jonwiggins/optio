@@ -5,15 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import {
   buildAgentCommand,
-  buildInitialClaudeStreamMessage,
   classifyRunOutcome,
   inferExitCode,
   ingestPrToolCallLine,
-  shellQuote,
   shouldEscalateNoPr,
 } from "./task-worker.js";
+import { buildInitialClaudeStreamMessage } from "../services/pooled-agent-command.js";
 import { ClaudeCodeAdapter } from "@optio/agent-adapters";
-import { PrToolCallTracker } from "@optio/shared";
+import { PrToolCallTracker, shellQuote } from "@optio/shared";
 
 describe("buildAgentCommand", () => {
   describe("claude-code agent", () => {

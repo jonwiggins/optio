@@ -613,7 +613,7 @@ describe("environment settings on the wire", () => {
   const settings = {
     connections: { add: ["c1", "c1"], remove: [] },
     setupCommands: "  npm ci ",
-    review: { enabled: false },
+    review: { enabled: true },
     cautiousMode: true,
   };
 
@@ -625,22 +625,28 @@ describe("environment settings on the wire", () => {
     expect(spec.settings).toEqual({
       connections: { add: ["c1"] },
       setupCommands: "npm ci",
-      review: { enabled: false },
+      review: { enabled: true },
       cautiousMode: true,
     });
   });
 
-  it("a Job and a persistent agent keep the environment but no PR settings", () => {
+  it("a Job and a persistent agent send their changes too (the server drops PR follow-through)", () => {
+    const cleaned = {
+      connections: { add: ["c1"] },
+      setupCommands: "npm ci",
+      review: { enabled: true },
+      cautiousMode: true,
+    };
     const job = specFor(draft({ withRepo: false, prompt: "Hi", settings }), {
       repoUrl: REPO,
       name: "Job",
     });
-    expect(job.settings).toEqual({ connections: { add: ["c1"] }, setupCommands: "npm ci" });
+    expect(job.settings).toEqual(cleaned);
     const agent = specFor(
       draft({ withRepo: false, prompt: "Hi", then: "waits-for-messages", settings }),
       { repoUrl: REPO, name: "Forge" },
     );
-    expect(agent.settings).toEqual({ connections: { add: ["c1"] }, setupCommands: "npm ci" });
+    expect(agent.settings).toEqual(cleaned);
   });
 
   it("work on a machine sends none (it runs with the machine's own configuration)", () => {

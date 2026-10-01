@@ -448,7 +448,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
               input.localSessionMode !== undefined
                 ? input.localSessionMode
                 : existing.localSessionMode,
-            agentType: input.agentRuntime ?? existing.agentRuntime,
+            // A command Job ("shell") runs anywhere: there is no agent to check.
+            agentType: workflowService.agentTypeOf(input.agentRuntime ?? existing.agentRuntime),
           },
           req.user?.id,
         );

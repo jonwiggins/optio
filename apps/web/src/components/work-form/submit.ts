@@ -2,7 +2,6 @@ import {
   cleanWorkSettings,
   getProviderCatalog,
   providerForAgentType,
-  withoutPrSettings,
   type WorkFormDefaults,
   type WorkSettings,
   type WorkSpec,
@@ -16,7 +15,6 @@ import {
   isLocal,
   isPodWork,
   asksForPrompt,
-  prSettingsApply,
   slugify,
   takesOwner,
   TERMINAL,
@@ -104,10 +102,9 @@ export function ownership(d: WorkDraft): {
     ...(isPodWork(d)
       ? {
           podSecrets: d.podSecrets,
-          // Only what changes the defaults; PR follow-through only where a PR opens.
-          settings: prSettingsApply(d)
-            ? cleanWorkSettings(d.settings)
-            : withoutPrSettings(cleanWorkSettings(d.settings)),
+          // Only what changes the defaults (the server keeps PR follow-through
+          // only where a PR opens).
+          settings: cleanWorkSettings(d.settings),
         }
       : {}),
   };
@@ -224,9 +221,9 @@ export async function createWork(
 
 /**
  * Save an edited draft back onto its definition (`PATCH /api/work/:id`).
- * The kind is fixed (the form refuses answers that would change it, and so
- * does the server); the trigger the form edits follows the When answer in
- * the same transaction. Returns where to go next.
+ * The kind is fixed (the form refuses answers that would change it, and the
+ * server saves onto the row's own kind); the trigger the form edits follows
+ * the When answer in the same transaction. Returns where to go next.
  */
 export async function updateWork(
   target: EditTarget,

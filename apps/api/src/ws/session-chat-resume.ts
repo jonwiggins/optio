@@ -1,4 +1,4 @@
-import { shellSingleQuote } from "../utils/pod-env.js";
+import { shellQuote } from "@optio/shared";
 
 /**
  * Pure helpers for the interactive session chat's conversation continuity.
@@ -27,9 +27,9 @@ export interface ClaudeChatCommandOptions {
  * so the caller can tell a failed resume from a normal turn.
  */
 export function buildClaudeChatCommand(opts: ClaudeChatCommandOptions): string {
-  const parts = ["claude", "-p", shellSingleQuote(opts.prompt)];
-  if (opts.model) parts.push("--model", shellSingleQuote(opts.model));
-  if (opts.resumeSessionId) parts.push("--resume", shellSingleQuote(opts.resumeSessionId));
+  const parts = ["claude", "-p", shellQuote(opts.prompt)];
+  if (opts.model) parts.push("--model", shellQuote(opts.model));
+  if (opts.resumeSessionId) parts.push("--resume", shellQuote(opts.resumeSessionId));
   parts.push("--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions");
   // `< /dev/null`: the prompt is on the command line; without this claude waits
   // 3s on the exec's open stdin and prints a "no stdin data" warning each turn.

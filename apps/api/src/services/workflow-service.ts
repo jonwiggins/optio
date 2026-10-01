@@ -64,7 +64,7 @@ export function toWorkflow(d: WorkDefinition) {
 export type Workflow = ReturnType<typeof toWorkflow>;
 
 /** The stored agent for a runtime name: none for a shell command. */
-const agentTypeOf = (runtime: string): string | null =>
+export const agentTypeOf = (runtime: string): string | null =>
   runtime === SHELL_RUNTIME ? null : runtime;
 
 /** A Job that runs a shell command (its params shell-quoted) instead of an agent. */

@@ -6,10 +6,11 @@
  * `workflow_triggers` table with target_type = "local_blueprint" (CRUD in
  * trigger-service, firing in trigger-dispatch).
  *
- * Command safety: trigger payloads never carry commands. Params substitute
- * into the user-authored commandTemplate via renderTemplateString, and every
- * substituted value is shell-single-quoted first — write templates without
- * extra quotes around params (`claude {{prompt}}`, not `claude "{{prompt}}"`).
+ * Command safety: trigger payloads never carry commands. Params reach the
+ * user-authored commandTemplate through renderCommandTemplate: each value is
+ * a shell variable assigned on the first line, and each `{{param}}` only
+ * references it, so a value is never parsed as shell code — bare, inside
+ * double quotes, or inside single quotes.
  */
 import { modelProviderIdFrom } from "@optio/shared";
 import { eq, isNull } from "drizzle-orm";
@@ -108,9 +109,10 @@ export interface CreateBlueprintInput {
 }
 
 /**
- * What a create / update must carry: a prompt (or a saved prompt that
- * exists), a host the person owns, and — for an agent — a model provider
- * the person may use on their machine. Returns the problem, or null.
+ * What a create / update must carry: for an agent, a prompt (or a saved
+ * prompt that exists) and a model provider the person may use on their
+ * machine; and a host the person owns. With no agent the command may be
+ * empty — the automation opens a shell. Returns the problem, or null.
  */
 export async function checkBlueprint(
   body: {
@@ -122,8 +124,8 @@ export async function checkBlueprint(
   },
   owner: { userId: string | null | undefined; workspaceId: string | null },
 ): Promise<string | null> {
-  if (!body.commandTemplate?.trim() && !body.promptTemplateId) {
-    return "Give the automation a prompt / command, or pick a saved prompt";
+  if (body.agent && !body.commandTemplate?.trim() && !body.promptTemplateId) {
+    return "Give the agent a prompt, or pick a saved prompt";
   }
   if (body.promptTemplateId) {
     const saved = await getPromptTemplateById(body.promptTemplateId);

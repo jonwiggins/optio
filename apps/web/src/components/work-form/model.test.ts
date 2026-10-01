@@ -18,7 +18,6 @@ import {
   thenOptions,
   toggleOverride,
   whereOptions,
-  withOverride,
   type WhenType,
   type WorkDraft,
 } from "./model";
@@ -685,7 +684,7 @@ suite("Work until merged — PR follow-through", () => {
     expect(followThrough({ ...base, then: "waits-for-me" }, null)).toBeNull();
   });
 
-  it("the work's own settings win over the repo's: review, drafts, resumes", () => {
+  it("the work can be more careful than its repo, never less", () => {
     const repo = { autoResume: true, reviewEnabled: false, cautiousMode: true, maxAutoResumes: 9 };
     const plan = followThrough(
       {
@@ -700,15 +699,16 @@ suite("Work until merged — PR follow-through", () => {
     );
     expect(on(plan)).toContain("review");
     expect(plan!.steps.find((s) => s.key === "review")!.detail).toMatch(/as soon as the PR opens/i);
-    expect(plan!.steps[0].label).toBe("Opens a PR");
+    // The repo opens drafts; the work can't turn that off.
+    expect(plan!.steps[0].label).toBe("Opens a draft PR");
     expect(plan!.steps.find((s) => s.key === "ci")!.detail).toMatch(/up to 2 times/);
 
-    const off = followThrough(
-      { ...base, settings: { review: { enabled: false } } },
-      { reviewEnabled: true, reviewTrigger: "on_pr" },
+    const loosened = followThrough(
+      { ...base, settings: { review: { enabled: false }, maxAutoResumes: 50 } },
+      { autoResume: true, reviewEnabled: true, reviewTrigger: "on_pr", maxAutoResumes: 4 },
     );
-    expect(on(off)).not.toContain("review");
-    expect(off!.steps.find((s) => s.key === "review")!.detail).toBe("Off for this work.");
+    expect(on(loosened)).toContain("review");
+    expect(loosened!.steps.find((s) => s.key === "ci")!.detail).toMatch(/up to 4 times/);
   });
 });
 
@@ -730,15 +730,14 @@ suite("environment overrides — only the changes from the defaults", () => {
   });
 
   it("counts what the work changes", () => {
-    const d = withOverride(
-      withOverride(EMPTY_DRAFT, "mcpServers", "m", true, false),
-      "connections",
-      "c",
-      false,
-      true,
-    );
-    expect(d.settings).toEqual({ mcpServers: { remove: ["m"] }, connections: { add: ["c"] } });
-    expect(settingsChanges({ ...d.settings, setupCommands: " ", cautiousMode: false })).toBe(3);
+    const settings = {
+      mcpServers: toggleOverride(undefined, "m", true, false),
+      connections: toggleOverride(undefined, "c", false, true),
+    };
+    expect(settings).toEqual({ mcpServers: { remove: ["m"] }, connections: { add: ["c"] } });
+    // A blank setup command and "ready PRs" change nothing.
+    expect(settingsChanges({ ...settings, setupCommands: " ", cautiousMode: false })).toBe(2);
+    expect(settingsChanges({ ...settings, cautiousMode: true, review: { enabled: true } })).toBe(4);
   });
 });
 
