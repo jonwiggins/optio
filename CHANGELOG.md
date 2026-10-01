@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Reply from Chat in the web app.** A running session's conversation now has a reply box at the bottom: type and press Enter (Shift+Enter for a new line) and your message goes to the agent as if you had typed it in the terminal. While the agent is mid-turn it says so, and your message waits for it. Until now the web's conversation view was read-only, and replying meant switching back to the terminal.
+
+### Changed
+
+- **Transcript ⇄ Screen is now Chat ⇄ Terminal**, on the web, iOS and Android, matching the Chat · Terminal tabs of pod sessions. The toggle now shows up as soon as a Claude Code or Codex session starts, before the agent has said anything, with "Nothing yet" until the first message lands. On a phone-width browser, a session with a conversation opens on Chat, as it does in the iOS and Android apps.
+
 ## [0.6.5] - 2026-09-28
 
 ### Added
