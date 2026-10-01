@@ -7,7 +7,8 @@ import { eq, desc, sql, and, inArray } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import type { LocalAgentSessionMode, RunTarget } from "@optio/shared";
 import { db } from "../db/client.js";
-import { workDefinitions, workflowRuns, workflowTriggers, workflowRunLogs } from "../db/schema.js";
+import { workDefinitions, workflowRuns, workflowTriggers } from "../db/schema.js";
+import * as runLogs from "./run-log-service.js";
 import { WorkflowRunState, canTransitionWorkflowRun } from "@optio/shared";
 import { publishWorkflowRunEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
@@ -405,6 +406,9 @@ export async function createWorkflowRun(
         ? renderRunTitle(workflow.runTitle, opts?.params, workflow.name)
         : null,
       state: WorkflowRunState.QUEUED,
+      // A run is its Job's: seen in the Job's workspace, run as its owner.
+      workspaceId: workflow.workspaceId,
+      ownerUserId: workflow.ownerUserId,
     })
     .returning();
 
@@ -620,27 +624,29 @@ export async function transitionWorkflowRunCas(
 
 // ── Workflow Run Logs ────────────────────────────────────────────────────────
 
+// A Job run's lines live in task_logs with every other run's, keyed by the
+// run (it is a row of the runs table); this keeps the shape the Job-run log
+// endpoints and frames have always carried.
+
+/** A stored line, as the Job-run endpoints return it. */
+function asWorkflowRunLog(row: runLogs.LogRow) {
+  return {
+    id: row.id,
+    workflowRunId: row.taskId!,
+    stream: row.stream,
+    content: row.content,
+    logType: row.logType,
+    metadata: row.metadata,
+    timestamp: row.timestamp,
+  };
+}
+
 export async function getWorkflowRunLogs(
   workflowRunId: string,
   opts?: { logType?: string; limit?: number },
 ) {
-  const conditions = [eq(workflowRunLogs.workflowRunId, workflowRunId)];
-  if (opts?.logType) {
-    conditions.push(eq(workflowRunLogs.logType, opts.logType));
-  }
-
-  let query = db
-    .select()
-    .from(workflowRunLogs)
-    .where(and(...conditions))
-    .orderBy(workflowRunLogs.timestamp)
-    .$dynamic();
-
-  if (opts?.limit) {
-    query = query.limit(opts.limit);
-  }
-
-  return query;
+  const rows = await runLogs.listLogs({ taskId: workflowRunId }, opts);
+  return rows.map(asWorkflowRunLog);
 }
 
 export async function insertWorkflowRunLog(input: {
@@ -650,17 +656,8 @@ export async function insertWorkflowRunLog(input: {
   logType?: string;
   metadata?: Record<string, unknown>;
 }) {
-  const [log] = await db
-    .insert(workflowRunLogs)
-    .values({
-      workflowRunId: input.workflowRunId,
-      stream: input.stream ?? "stdout",
-      content: input.content,
-      logType: input.logType,
-      metadata: input.metadata,
-    })
-    .returning();
-  return log;
+  const row = await runLogs.insertLog({ taskId: input.workflowRunId }, input);
+  return asWorkflowRunLog(row);
 }
 
 export async function appendWorkflowRunLog(input: {

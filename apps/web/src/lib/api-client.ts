@@ -14,9 +14,10 @@ import type {
   TriggerType,
   UpdateModelProviderInput,
   WorkFormDefaults,
+  WorkCreated,
   WorkRow,
   WorkSource,
-  WorkView,
+  WorkSpec,
 } from "@optio/shared";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
@@ -42,6 +43,7 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
     const body = await res.json().catch(() => ({}));
     throw Object.assign(new Error(body.error ?? `API error: ${res.status}`), {
       status: res.status,
+      details: body.details as string | undefined,
     });
   }
   if (res.status === 204) return undefined as T;
@@ -1607,6 +1609,29 @@ export const api = {
     }>(`/api/activity${query ? `?${query}` : ""}`);
   },
 
+  // ── Work: every kind of work as one resource ──
+
+  /** The Work list: every kind of work the caller can see, needs-you first. */
+  listWork: () => request<{ rows: WorkRow[] }>("/api/work"),
+
+  /** Any piece of work by id, whatever its kind (a definition comes back as its stored row). */
+  getWork: (id: string) =>
+    request<{ source: WorkSource; row: WorkRow; work: Record<string, any> }>(`/api/work/${id}`),
+
+  /**
+   * Create work from its five attributes; the server derives the kind. A 409's
+   * `details` says what was taken (`name_taken`, `webhook_path_taken`).
+   */
+  createWork: (spec: WorkSpec) =>
+    request<WorkCreated>("/api/work", { method: "POST", body: JSON.stringify(spec) }),
+
+  /** Save a definition from its attributes (its kind is fixed; its trigger follows When). */
+  updateWork: (id: string, spec: WorkSpec) =>
+    request<WorkCreated>(`/api/work/${id}`, { method: "PATCH", body: JSON.stringify(spec) }),
+
+  /** The triggers of a definition or a persistent agent. */
+  listWorkTriggers: (id: string) => request<{ triggers: any[] }>(`/api/work/${id}/triggers`),
+
   // ── Unified Tasks (polymorphic over repo-task | repo-blueprint | standalone) ──
 
   /**
@@ -1614,14 +1639,6 @@ export const api = {
    * existing enriched shape (back-compat). With a `type`, returns the
    * requested kind tagged with a `type` field per row.
    */
-  /** The Work list: every kind of work the caller can see, needs-you first. */
-  listWork: (opts?: { view?: WorkView }) =>
-    request<{ rows: WorkRow[] }>(`/api/work${opts?.view ? `?view=${opts.view}` : ""}`),
-
-  /** Any piece of work by id, whatever its kind. */
-  getWork: (id: string) =>
-    request<{ source: WorkSource; row: WorkRow; work: Record<string, any> }>(`/api/work/${id}`),
-
   listTasksUnified: (opts?: {
     type?: "repo-task" | "repo-blueprint" | "standalone" | "all";
     state?: string;

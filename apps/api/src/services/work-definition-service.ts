@@ -8,10 +8,10 @@
  * (task-config-service, workflow-service, local-blueprint-service) project
  * rows back to the shapes their legacy endpoints always returned.
  */
-import { and, desc, eq, inArray, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { TriggerTargetType, WorkDefinitionKind } from "@optio/shared";
 import { db } from "../db/client.js";
-import { workDefinitions, workflowTriggers } from "../db/schema.js";
+import { workDefinitions, workflowTriggers, workRuns } from "../db/schema.js";
 
 export type { WorkDefinitionKind };
 export type WorkDefinition = typeof workDefinitions.$inferSelect;
@@ -86,9 +86,17 @@ export async function updateDefinition(
   return row ?? null;
 }
 
-/** Delete a definition and its triggers. A Job's runs go with it (FK cascade). */
+/** A Job's runs belong to it (tasks_standalone_check): they go before it does. */
+async function deleteJobRuns(jobIds: string[] | SQLWrapper, tx: Db): Promise<void> {
+  await tx
+    .delete(workRuns)
+    .where(and(eq(workRuns.kind, "standalone"), inArray(workRuns.workId, jobIds)));
+}
+
+/** Delete a definition and its triggers. A Job's runs go with it; tasks a scheduled Task spawned stay. */
 export async function deleteDefinition(id: string, kind: WorkDefinitionKind): Promise<boolean> {
   return db.transaction(async (tx) => {
+    if (kind === "standalone") await deleteJobRuns([id], tx);
     await tx
       .delete(workflowTriggers)
       .where(
@@ -106,8 +114,8 @@ export async function deleteDefinition(id: string, kind: WorkDefinitionKind): Pr
 }
 
 /**
- * A workspace's scheduled Tasks and Jobs, and their triggers — for when the
- * workspace is deleted. Local automations belong to a person, not the
+ * A workspace's scheduled Tasks and Jobs, their triggers, and the Jobs' runs
+ * — for when the workspace is deleted. Local automations belong to a person, not the
  * workspace they were made in, so they stay.
  */
 export async function deleteWorkspaceDefinitions(workspaceId: string, tx: Db): Promise<void> {
@@ -115,6 +123,13 @@ export async function deleteWorkspaceDefinitions(workspaceId: string, tx: Db): P
   const owned = and(
     eq(workDefinitions.workspaceId, workspaceId),
     inArray(workDefinitions.kind, kinds),
+  );
+  await deleteJobRuns(
+    tx
+      .select({ id: workDefinitions.id })
+      .from(workDefinitions)
+      .where(and(owned, eq(workDefinitions.kind, "standalone"))),
+    tx,
   );
   await tx.delete(workflowTriggers).where(
     and(

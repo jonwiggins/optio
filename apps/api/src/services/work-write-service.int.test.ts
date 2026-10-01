@@ -12,6 +12,7 @@ import { db } from "../db/client.js";
 import {
   persistentAgents,
   tasks,
+  users,
   workDefinitions,
   workflowRuns,
   workflowTriggers,
@@ -83,7 +84,7 @@ describe("createWork", () => {
         then: "until-merged",
         mergeWhenReady: false,
       }),
-      { workspaceId: ws.id, userId: null },
+      { workspaceId: ws.id, userId: null, isAdmin: false },
     );
     expect(created.kind).toBe("repo-blueprint");
     expect(created.href).toBe(`/tasks/scheduled/${created.id}`);
@@ -107,7 +108,7 @@ describe("createWork", () => {
 
   it("starts a Job made for now, and saves one started by a trigger", async () => {
     const ws = await insertWorkspace();
-    const now = await createWork(spec(), { workspaceId: ws.id, userId: null });
+    const now = await createWork(spec(), { workspaceId: ws.id, userId: null, isAdmin: false });
     expect(now.kind).toBe("standalone");
     expect(now.run?.href).toBe(`/jobs/${now.id}/runs/${now.run?.id}`);
     const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, now.run!.id));
@@ -115,7 +116,7 @@ describe("createWork", () => {
 
     const later = await createWork(
       spec({ when: { type: "webhook", config: { path: `hook-${uniq()}` } } }),
-      { workspaceId: ws.id, userId: null },
+      { workspaceId: ws.id, userId: null, isAdmin: false },
     );
     expect(later.run).toBeUndefined();
     expect(
@@ -128,7 +129,11 @@ describe("createWork", () => {
 
   it("submits a one-off Task in line", async () => {
     const ws = await insertWorkspace();
-    const created = await createWork(spec({ where: repo() }), { workspaceId: ws.id, userId: null });
+    const created = await createWork(spec({ where: repo() }), {
+      workspaceId: ws.id,
+      userId: null,
+      isAdmin: false,
+    });
     expect(created.kind).toBe("repo-task");
     const [task] = await db.select().from(tasks).where(eq(tasks.id, created.id));
     expect(task).toMatchObject({ state: "queued", workspaceId: ws.id, agentType: "claude-code" });
@@ -140,6 +145,7 @@ describe("createWork", () => {
     await createWork(spec({ when: { type: "webhook", config: { path } } }), {
       workspaceId: ws.id,
       userId: null,
+      isAdmin: false,
     });
 
     const name = `clash ${uniq()}`;
@@ -147,6 +153,7 @@ describe("createWork", () => {
       createWork(spec({ name, when: { type: "webhook", config: { path } } }), {
         workspaceId: ws.id,
         userId: null,
+        isAdmin: false,
       }),
     );
     expect(err).toMatchObject({ status: 409, details: "webhook_path_taken" });
@@ -155,6 +162,7 @@ describe("createWork", () => {
       createWork(spec({ name, when: { type: "schedule", config: {} } }), {
         workspaceId: ws.id,
         userId: null,
+        isAdmin: false,
       }),
     );
     expect(bad.status).toBe(400);
@@ -169,9 +177,17 @@ describe("createWork", () => {
   it("says a name is taken, per kind and workspace", async () => {
     const ws = await insertWorkspace();
     const when = { type: "schedule", config: { cronExpression: "0 9 * * *" } } as const;
-    await createWork(spec({ name: "Nightly", when }), { workspaceId: ws.id, userId: null });
+    await createWork(spec({ name: "Nightly", when }), {
+      workspaceId: ws.id,
+      userId: null,
+      isAdmin: false,
+    });
     const err = await rejection(
-      createWork(spec({ name: "Nightly", when }), { workspaceId: ws.id, userId: null }),
+      createWork(spec({ name: "Nightly", when }), {
+        workspaceId: ws.id,
+        userId: null,
+        isAdmin: false,
+      }),
     );
     expect(err).toMatchObject({ status: 409, details: "name_taken" });
 
@@ -179,13 +195,18 @@ describe("createWork", () => {
     await createWork(spec({ name: "Nightly", when, where: repo() }), {
       workspaceId: ws.id,
       userId: null,
+      isAdmin: false,
     });
     const other = await insertWorkspace();
-    await createWork(spec({ name: "Nightly", when }), { workspaceId: other.id, userId: null });
+    await createWork(spec({ name: "Nightly", when }), {
+      workspaceId: other.id,
+      userId: null,
+      isAdmin: false,
+    });
   });
 
   it("refuses answers that don't make sense together", async () => {
-    const actor = { workspaceId: null, userId: null };
+    const actor = { workspaceId: null, userId: null, isAdmin: false };
     expect((await rejection(createWork(spec({ what: { prompt: " " } }), actor))).message).toMatch(
       /needs a prompt/,
     );
@@ -217,7 +238,7 @@ describe("createWork", () => {
         when: { type: "schedule", config: { cronExpression: "0 * * * *" } },
         agent: { podLifecycle: "on-demand" },
       }),
-      { workspaceId: ws.id, userId: null },
+      { workspaceId: ws.id, userId: null, isAdmin: false },
     );
     expect(created.kind).toBe("persistent-agent");
     const [agent] = await db
@@ -238,7 +259,7 @@ describe("createWork", () => {
 describe("updateWork", () => {
   it("saves the row and moves the one trigger: patched in place, replaced, or removed", async () => {
     const ws = await insertWorkspace();
-    const actor = { workspaceId: ws.id, userId: null };
+    const actor = { workspaceId: ws.id, userId: null, isAdmin: false };
     const path = `hook-${uniq()}`;
     const base = spec({ where: repo(), when: { type: "webhook", config: { path } } });
     const { id } = await createWork(base, actor);
@@ -285,18 +306,24 @@ describe("updateWork", () => {
     const ws = await insertWorkspace();
     const other = await insertWorkspace();
     const base = spec({ when: { type: "schedule", config: { cronExpression: "0 9 * * *" } } });
-    const { id } = await createWork(base, { workspaceId: ws.id, userId: null });
-    const err = await rejection(updateWork(id, base, { workspaceId: other.id, userId: null }));
+    const { id } = await createWork(base, { workspaceId: ws.id, userId: null, isAdmin: false });
+    const err = await rejection(
+      updateWork(id, base, { workspaceId: other.id, userId: null, isAdmin: false }),
+    );
     expect(err.status).toBe(404);
-    expect(await getOwnDefinition(id, { workspaceId: other.id, userId: null })).toBeNull();
-    expect(await deleteWork(id, { workspaceId: other.id, userId: null })).toBe(false);
+    expect(
+      await getOwnDefinition(id, { workspaceId: other.id, userId: null, isAdmin: false }),
+    ).toBeNull();
+    expect(await deleteWork(id, { workspaceId: other.id, userId: null, isAdmin: false })).toBe(
+      false,
+    );
   });
 });
 
 describe("deleteWork", () => {
   it("deletes a Job with its triggers and runs", async () => {
     const ws = await insertWorkspace();
-    const actor = { workspaceId: ws.id, userId: null };
+    const actor = { workspaceId: ws.id, userId: null, isAdmin: false };
     const { id, run } = await createWork(spec(), actor);
     await db
       .insert(workflowTriggers)
@@ -306,5 +333,39 @@ describe("deleteWork", () => {
     expect(await triggersOf(id)).toEqual([]);
     expect(await db.select().from(workflowRuns).where(eq(workflowRuns.id, run!.id))).toEqual([]);
     expect(await deleteWork(id, actor)).toBe(false);
+  });
+});
+
+describe("personal work", () => {
+  async function person(label: string) {
+    const [row] = await db
+      .insert(users)
+      .values({
+        provider: "github",
+        externalId: `${label}-${uniq()}`,
+        email: `${label}-${uniq()}@example.com`,
+        displayName: label,
+      })
+      .returning();
+    return row;
+  }
+
+  it("is its owner's to change and delete; an admin may still delete it", async () => {
+    const ws = await insertWorkspace();
+    const me = await person("me");
+    const teammate = await person("teammate");
+    const mine = { workspaceId: ws.id, userId: me.id, isAdmin: false };
+    const theirs = { workspaceId: ws.id, userId: teammate.id, isAdmin: false };
+    const base = spec({
+      when: { type: "schedule", config: { cronExpression: "0 9 * * *" } },
+      owner: "me",
+    });
+    const { id } = await createWork(base, mine);
+    const [row] = await db.select().from(workDefinitions).where(eq(workDefinitions.id, id));
+    expect(row.ownerUserId).toBe(me.id);
+
+    expect((await rejection(updateWork(id, base, theirs))).status).toBe(403);
+    expect((await rejection(deleteWork(id, theirs))).status).toBe(403);
+    expect(await deleteWork(id, { ...theirs, isAdmin: true })).toBe(true);
   });
 });

@@ -219,7 +219,7 @@ describe("1791920000_work_definitions", () => {
       const fromDeleted = await spawned("00000000-0000-0000-0000-000000000000");
       const fromGarbage = await spawned("not-a-uuid");
 
-      await db.migrateRest();
+      await db.migrateRest("1791920000_work_definitions");
 
       for (const gone of ["task_configs", "workflows", "local_blueprints"]) {
         const [{ exists }] =
@@ -339,6 +339,192 @@ describe("1791920000_work_definitions", () => {
       const [automationRow] = await sql`
         SELECT owner_user_id FROM work_definitions WHERE id = ${automation.id}`;
       expect(automationRow.owner_user_id).toBeNull();
+    } finally {
+      await db.drop();
+    }
+  });
+});
+
+describe("1791930000_one_runs_table", () => {
+  it("moves Job runs and their logs into tasks, keeping ids and mapping columns, behind the old shapes", async () => {
+    const db = await stageDatabase("1791920000_work_definitions");
+    try {
+      const { sql } = db;
+      const [user] = await sql`
+        INSERT INTO users (provider, external_id, email, display_name)
+        VALUES ('github', 'u1', 'u1@example.com', 'U1') RETURNING id`;
+      const [ws] = await sql`
+        INSERT INTO workspaces (name, slug) VALUES ('W', 'w-runs') RETURNING id`;
+      const [job] = await sql`
+        INSERT INTO work_definitions (kind, name, workspace_id, owner_user_id, prompt, max_retries, run_target)
+        VALUES ('standalone', 'Report', ${ws.id}, ${user.id}, 'report', 3, 'cluster') RETURNING id`;
+      const [trigger] = await sql`
+        INSERT INTO workflow_triggers (workflow_id, target_type, target_id, type)
+        VALUES (${job.id}, 'job', ${job.id}, 'manual') RETURNING id`;
+      const [run] = await sql`
+        INSERT INTO workflow_runs (workflow_id, trigger_id, params, title, state, output, cost_usd,
+          input_tokens, output_tokens, model_used, error_message, session_id, pod_name, retry_count,
+          started_at, finished_at, reconcile_attempts, created_at)
+        VALUES (${job.id}, ${trigger.id}, ${JSON.stringify({ x: 1 })}::jsonb, 'Report 1', 'completed',
+          ${JSON.stringify({ ok: true })}::jsonb, '0.42', 10, 20, 'sonnet', NULL, 'sess-1', 'wf-pod-0', 1,
+          '2026-09-01T00:00:00Z', '2026-09-01T00:05:00Z', 2, '2026-08-31T23:59:00Z')
+        RETURNING id`;
+      // A state a Job run has no task equivalent for lands as failed.
+      const [odd] = await sql`
+        INSERT INTO workflow_runs (workflow_id, state) VALUES (${job.id}, 'mystery') RETURNING id`;
+      const [line] = await sql`
+        INSERT INTO workflow_run_logs (workflow_run_id, content, stream, log_type, metadata, timestamp)
+        VALUES (${run.id}, 'hello', 'stderr', 'text', ${JSON.stringify({ a: 1 })}::jsonb, '2026-09-01T00:01:00Z')
+        RETURNING id`;
+      const [task] = await sql`
+        INSERT INTO tasks (title, prompt, repo_url, agent_type)
+        VALUES ('t', 'p', 'https://github.com/acme/app', 'claude-code') RETURNING id`;
+
+      await db.migrateRest();
+
+      // The old tables are views now.
+      const kinds = await sql`
+        SELECT c.relname, c.relkind FROM pg_class c
+        WHERE c.relname IN ('workflow_runs', 'workflow_run_logs', 'repo_tasks')
+          AND c.relnamespace = current_schema()::regnamespace`;
+      expect(Object.fromEntries(kinds.map((k) => [k.relname, k.relkind]))).toEqual({
+        workflow_runs: "v",
+        repo_tasks: "v",
+      });
+
+      const [moved] = await sql`SELECT * FROM tasks WHERE id = ${run.id}`;
+      expect(moved).toMatchObject({
+        kind: "standalone",
+        work_id: job.id,
+        trigger_id: trigger.id,
+        params: { x: 1 },
+        title: "Report 1",
+        state: "completed",
+        output: { ok: true },
+        cost_usd: "0.42",
+        input_tokens: 10,
+        output_tokens: 20,
+        model_used: "sonnet",
+        session_id: "sess-1",
+        container_id: "wf-pod-0",
+        retry_count: 1,
+        max_retries: 3,
+        reconcile_attempts: 2,
+        workspace_id: ws.id,
+        owner_user_id: user.id,
+        run_target: "cluster",
+        prompt: null,
+        repo_url: null,
+      });
+      expect(new Date(moved.started_at).toISOString()).toBe("2026-09-01T00:00:00.000Z");
+      expect(new Date(moved.completed_at).toISOString()).toBe("2026-09-01T00:05:00.000Z");
+      expect(new Date(moved.created_at).toISOString()).toBe("2026-08-31T23:59:00.000Z");
+      const [oddRow] = await sql`SELECT state FROM tasks WHERE id = ${odd.id}`;
+      expect(oddRow.state).toBe("failed");
+
+      const [log] = await sql`SELECT * FROM task_logs WHERE id = ${line.id}`;
+      expect(log).toMatchObject({
+        task_id: run.id,
+        content: "hello",
+        stream: "stderr",
+        log_type: "text",
+        metadata: { a: 1 },
+      });
+
+      // Each view shows its own kind; workflow_runs keeps the old column names.
+      const repoIds = await sql`SELECT id FROM repo_tasks`;
+      expect(repoIds.map((r) => r.id)).toEqual([task.id]);
+      const [old] = await sql`
+        SELECT workflow_id, pod_name, finished_at FROM workflow_runs WHERE id = ${run.id}`;
+      expect(old.workflow_id).toBe(job.id);
+      expect(old.pod_name).toBe("wf-pod-0");
+      expect(new Date(old.finished_at).toISOString()).toBe("2026-09-01T00:05:00.000Z");
+
+      // Writes through workflow_runs land in tasks as Job runs.
+      const [created] = await sql`
+        INSERT INTO workflow_runs (workflow_id, workspace_id) VALUES (${job.id}, ${ws.id})
+        RETURNING id, kind, state`;
+      expect(created).toMatchObject({ kind: "standalone", state: "queued" });
+      await sql`UPDATE workflow_runs SET pod_name = 'p2', finished_at = now() WHERE id = ${created.id}`;
+      const [updated] =
+        await sql`SELECT container_id, completed_at FROM tasks WHERE id = ${created.id}`;
+      expect(updated.container_id).toBe("p2");
+      expect(updated.completed_at).not.toBeNull();
+
+      // Neither view lets a row leave its kind.
+      await expect(
+        sql`UPDATE repo_tasks SET kind = 'standalone', work_id = ${job.id} WHERE id = ${task.id}`,
+      ).rejects.toThrow(/check option/i);
+      await expect(
+        sql`INSERT INTO repo_tasks (kind, title, prompt, repo_url, agent_type, work_id)
+            VALUES ('standalone', 't', 'p', 'r', 'a', ${job.id})`,
+      ).rejects.toThrow(/check option/i);
+      // A repo run still needs what it always did; a Job run needs its Job.
+      await expect(
+        sql`INSERT INTO tasks (title, prompt, agent_type) VALUES ('t', 'p', 'claude-code')`,
+      ).rejects.toThrow(/tasks_repo_check/);
+      await expect(sql`INSERT INTO tasks (kind) VALUES ('standalone')`).rejects.toThrow(
+        /tasks_standalone_check/,
+      );
+
+      // A Job's runs go before the Job does (work-definition-service deletes
+      // them first); a run's logs go with it, and a deleted trigger only
+      // unlinks the runs it started.
+      await expect(sql`DELETE FROM work_definitions WHERE id = ${job.id}`).rejects.toThrow(
+        /tasks_standalone_check/,
+      );
+      await sql`DELETE FROM workflow_triggers WHERE id = ${trigger.id}`;
+      const [unlinked] = await sql`SELECT trigger_id FROM tasks WHERE id = ${run.id}`;
+      expect(unlinked.trigger_id).toBeNull();
+      await sql`DELETE FROM tasks WHERE kind = 'standalone' AND work_id = ${job.id}`;
+      await sql`DELETE FROM work_definitions WHERE id = ${job.id}`;
+      const [{ lines }] =
+        await sql`SELECT count(*)::int AS lines FROM task_logs WHERE id = ${line.id}`;
+      expect(lines).toBe(0);
+      const [{ repoLeft }] = await sql`SELECT count(*)::int AS "repoLeft" FROM tasks`;
+      expect(repoLeft).toBe(1);
+    } finally {
+      await db.drop();
+    }
+  });
+
+  it("keeps repo_tasks in step with tasks: every column, remade around every later migration", async () => {
+    const db = await stageDatabase(BEFORE);
+    try {
+      const { sql } = db;
+      const columnsOf = async (relation: string) =>
+        (
+          await sql`
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = ${relation}
+            ORDER BY ordinal_position`
+        ).map((c) => c.column_name as string);
+
+      await db.migrateRest();
+      expect(await columnsOf("repo_tasks")).toEqual(await columnsOf("tasks"));
+
+      // A later migration adds a run column and changes the type of one the
+      // views select — which Postgres refuses while a view depends on it —
+      // and the views come back with the new shape.
+      await db.migrateWith([
+        {
+          tag: "9999999990_later_run_column",
+          sql: `ALTER TABLE "tasks" ADD COLUMN "later" text;
+--> statement-breakpoint
+ALTER TABLE "tasks" ALTER COLUMN "title" TYPE varchar(1000);`,
+        },
+      ]);
+      const columns = await columnsOf("repo_tasks");
+      expect(columns).toContain("later");
+      expect(columns).toEqual(await columnsOf("tasks"));
+      const [{ type }] = await sql`
+        SELECT data_type AS type FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'workflow_runs' AND column_name = 'title'`;
+      expect(type).toBe("character varying");
+      const [{ def }] = await sql`
+        SELECT column_default AS def FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'workflow_runs' AND column_name = 'kind'`;
+      expect(def).toMatch(/standalone/);
     } finally {
       await db.drop();
     }

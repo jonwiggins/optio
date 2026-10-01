@@ -11,6 +11,7 @@
 import {
   localAgentParams,
   kindOfSpec,
+  modelProviderIdFrom,
   slugify,
   toLocalAgentKind,
   type PersistentAgentPodLifecycle,
@@ -32,12 +33,13 @@ import * as terminalService from "./local-terminal-service.js";
 import * as sessionService from "./interactive-session-service.js";
 import * as paService from "./persistent-agent-service.js";
 import { validateRunLocation } from "./local-run-service.js";
+import { planNewWork, planWorkUpdate, workChangeError, type WorkActor } from "./work-ownership.js";
 import { isUniqueViolation } from "../utils/db-errors.js";
 
 /** A request the caller has to fix: the route answers with `status`. */
 export class WorkError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409,
+    readonly status: 400 | 403 | 404 | 409,
     message: string,
     /** 409s: which uniqueness the work ran into (the form retries an automatic name on `name_taken`). */
     readonly details?: "name_taken" | "webhook_path_taken",
@@ -46,11 +48,8 @@ export class WorkError extends Error {
   }
 }
 
-/** Who is writing. */
-export interface Actor {
-  userId: string | null;
-  workspaceId: string | null;
-}
+/** Who is writing (an admin may delete someone's personal work). */
+export type Actor = WorkActor;
 
 const NOUN: Record<WorkKind, string> = {
   "repo-task": "Task",
@@ -148,6 +147,21 @@ async function runLocation(spec: WorkSpec, kind: WorkKind, actor: Actor) {
   return checked.location;
 }
 
+/** The kinds that run with an owner's credentials (Tasks, Jobs, agents; in a pod or on a machine). */
+const OWNED = new Set<WorkKind>(["repo-task", "repo-blueprint", "standalone", "persistent-agent"]);
+
+/** Owner and pod secrets for new work, with its provider and secrets checked. */
+async function plan(spec: WorkSpec, kind: WorkKind, actor: Actor) {
+  if (!OWNED.has(kind)) return { ownerUserId: actor.userId, podSecrets: null };
+  const planned = await planNewWork(spec, actor, {
+    agentType: spec.who.runtime ?? "claude-code",
+    agentOptions: spec.who.agentOptions,
+    runsOn: spec.where.runTarget === "local" ? "local" : "pod",
+  });
+  if (!planned.ok) throw new WorkError(planned.status, planned.error);
+  return { ownerUserId: planned.ownerUserId, podSecrets: planned.podSecrets ?? null };
+}
+
 /** "Works until merged": resume on CI / reviews, and merge unless you'd rather. */
 function followThrough(spec: WorkSpec) {
   return spec.then === "until-merged"
@@ -219,7 +233,7 @@ async function definitionColumns(
         localDir: spec.where.localDir || null,
         repoUrl: spec.where.repoUrl || null,
         // "New branch": spawns wrap the prompt with branch + PR instructions off this base.
-        repoBranch: spec.where.repoUrl ? spec.where.repoBranch || "main" : null,
+        repoBranch: spec.where.repoBranch || null,
         agentType: spec.who.runtime,
         agentOptions: spec.who.runtime ? options(spec) : null,
         localSessionMode: spec.then === "waits-for-me" ? "interactive" : "headless",
@@ -253,6 +267,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
   const kind = kindOfSpec(spec);
   check(spec, kind);
   const trigger = triggerOf(spec, kind);
+  const owned = await plan(spec, kind, actor);
   const made = (id: string): WorkCreated => ({ kind, id, href: workHref(kind, id) });
 
   switch (kind) {
@@ -272,6 +287,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
             ...(options(spec) ? { metadata: { agentOptions: options(spec) } } : {}),
             dependsOn: spec.dependsOn,
             workspaceId: actor.workspaceId,
+            ...owned,
             ...location,
           },
           actor.userId ?? undefined,
@@ -297,9 +313,8 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
               name: columns.name!,
               prompt: columns.prompt!,
               workspaceId: actor.workspaceId,
-              ...(kind === "local-blueprint"
-                ? { ownerUserId: actor.userId }
-                : { createdBy: actor.userId }),
+              createdBy: actor.userId,
+              ...owned,
             },
             tx,
           );
@@ -342,7 +357,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
             // Model, effort, and the permission mode.
             ...localAgentParams(runtime, options(spec)),
             // "New branch": the prompt is wrapped with branch + PR instructions off this base.
-            ...(spec.where.repoUrl ? { baseBranch: spec.where.repoBranch || "main" } : {}),
+            ...(spec.where.repoBranch ? { baseBranch: spec.where.repoBranch } : {}),
           }
         : { kind: "shell" };
       try {
@@ -354,6 +369,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
           spec: terminalSpec,
           title: spec.name.trim(),
           spawnedBy: "manual",
+          modelProviderId: runtime ? modelProviderIdFrom(spec.who.agentOptions) : undefined,
         });
         return made(terminal.id);
       } catch (err) {
@@ -392,6 +408,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
               podLifecycle: spec.agent?.podLifecycle as PersistentAgentPodLifecycle | undefined,
               workspaceId: actor.workspaceId,
               createdBy: actor.userId,
+              ...owned,
             },
             tx,
           );
@@ -461,6 +478,22 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   check(spec, kind);
   const wanted = triggerOf(spec, kind);
   const columns = await definitionColumns(kind, spec, actor);
+  if (kind !== "local-blueprint") {
+    // Personal work is its owner's to change; the owner and secrets follow the answers.
+    const planned = await planWorkUpdate(
+      existing,
+      { owner: spec.owner, podSecrets: spec.podSecrets, agentOptions: spec.who.agentOptions },
+      actor,
+      {
+        agentType: spec.who.runtime ?? "claude-code",
+        runsOn: spec.where.runTarget === "local" ? "local" : "pod",
+        touchesRuntime: true,
+      },
+    );
+    if (!planned.ok) throw new WorkError(planned.status, planned.error);
+    columns.ownerUserId = planned.ownerUserId;
+    if (planned.podSecrets !== undefined) columns.podSecrets = planned.podSecrets;
+  }
   const targetType = definitions.TRIGGER_TARGET[kind];
 
   try {
@@ -482,9 +515,26 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
   return { kind, id, href: workHref(kind, id) };
 }
 
-/** Delete a definition and its triggers (a Job's runs go with it; spawned tasks and terminals stay). */
+/**
+ * Delete a definition and its triggers (a Job's runs go with it; spawned
+ * tasks and terminals stay). Personal work is its owner's, or an admin's,
+ * to delete.
+ */
 export async function deleteWork(id: string, actor: Actor): Promise<boolean> {
   const existing = await getOwnDefinition(id, actor);
   if (!existing) return false;
+  await assertMayChange(existing, actor, "delete");
   return definitions.deleteDefinition(id, existing.kind);
+}
+
+/** Throws 403 unless the actor may change this definition (personal work is its owner's). */
+export async function assertMayChange(
+  definition: Pick<WorkDefinition, "kind" | "ownerUserId">,
+  actor: Actor,
+  action: "edit" | "run" | "delete",
+): Promise<void> {
+  // A Local automation is only ever visible to its owner (getOwnDefinition).
+  if (definition.kind === "local-blueprint") return;
+  const problem = await workChangeError(definition.ownerUserId, actor, action);
+  if (problem) throw new WorkError(403, problem);
 }

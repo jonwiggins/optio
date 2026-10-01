@@ -37,15 +37,8 @@ vi.mock("../db/schema.js", () => ({
   taskLogs: {
     id: "task_logs.id",
     taskId: "task_logs.task_id",
-    workflowRunId: "task_logs.workflow_run_id",
     logType: "task_logs.log_type",
     timestamp: "task_logs.timestamp",
-  },
-  workflowRunLogs: {
-    id: "workflow_run_logs.id",
-    workflowRunId: "workflow_run_logs.workflow_run_id",
-    logType: "workflow_run_logs.log_type",
-    timestamp: "workflow_run_logs.timestamp",
   },
 }));
 
@@ -665,9 +658,11 @@ describe("workflow-service", () => {
         metadata: null,
         timestamp: new Date(),
       };
+      // A Job run's lines are task_logs rows keyed by the run.
+      const { workflowRunId, ...row } = log;
       (db.insert as any) = vi.fn().mockReturnValue({
         values: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([log]),
+          returning: vi.fn().mockResolvedValue([{ ...row, taskId: workflowRunId }]),
         }),
       });
 
@@ -707,9 +702,10 @@ describe("workflow-service", () => {
         metadata: null,
         timestamp: new Date("2026-01-01"),
       };
+      const { workflowRunId, ...row } = log;
       (db.insert as any) = vi.fn().mockReturnValue({
         values: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([log]),
+          returning: vi.fn().mockResolvedValue([{ ...row, taskId: workflowRunId }]),
         }),
       });
 

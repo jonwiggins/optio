@@ -1,6 +1,6 @@
 import { and, desc, gt, lt, ilike, isNull, or, sql, inArray, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { taskLogs, secrets, authEvents } from "../db/schema.js";
+import { taskLogs, secrets, authEvents, workRuns } from "../db/schema.js";
 
 /**
  * Substrings (case-insensitive) that indicate an authentication failure bubbling
@@ -70,10 +70,15 @@ function effectiveCutoff(windowMs: number, watermark: Date | null): Date {
 
 /**
  * Only the logs of Optio's own coding work — Repo Tasks and PR reviews — say
- * whether Optio's credentials work. A persistent agent's output legitimately
- * carries other services' "invalid api key" / "bad credentials" errors.
+ * whether Optio's credentials work. A persistent agent's or a Job's output
+ * legitimately carries other services' "invalid api key" / "bad credentials"
+ * errors (a Job worker records its own agent's 401s as auth events instead).
  */
-const ownWorkLogs = () => isNull(taskLogs.persistentAgentTurnId);
+const ownWorkLogs = () =>
+  and(
+    isNull(taskLogs.persistentAgentTurnId),
+    sql`NOT EXISTS (SELECT 1 FROM ${workRuns} WHERE ${workRuns.id} = ${taskLogs.taskId} AND ${workRuns.kind} = 'standalone')`,
+  );
 
 /**
  * Check if any Claude auth failures exist in task_logs after the cutoff.
@@ -91,8 +96,8 @@ async function hasClaudeFailuresInLogs(cutoff: Date): Promise<boolean> {
 /**
  * Check if any Claude auth failures exist in auth_events after the cutoff.
  * This is the mechanism by which Standalone Task runs surface auth failures:
- * their logs live in `workflow_run_logs` (not `task_logs`), so the workflow
- * worker records a claude auth_event when it detects a 401 mid-run.
+ * their logs are left out of the log scans above, so the workflow worker
+ * records a claude auth_event when it detects a 401 mid-run.
  */
 async function hasClaudeFailuresInEvents(cutoff: Date): Promise<boolean> {
   const rows = await db

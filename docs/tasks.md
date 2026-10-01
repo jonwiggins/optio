@@ -41,9 +41,9 @@ then = exits, no repo                              → standalone
 | Kind               | Backing table                                 | What it is                                                                                    | Spawns runs?            | Legacy name           |
 | ------------------ | --------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------- | --------------------- |
 | `repo-task`        | `tasks`                                       | One run in a repo worktree that ends by opening a PR (or in a local checkout on a new branch) | No — it _is_ a run      | Task / Repo Task      |
-| `repo-blueprint`   | `task_configs` + `workflow_triggers`          | A saved PR-session definition; each trigger firing spawns a `tasks` row                       | Yes (`tasks`)           | Scheduled Task        |
-| `standalone`       | `workflows` + `workflow_runs` (+ trigger)     | Agent work with no repo on a pooled pod (or a machine); run now or on a trigger               | Yes (`workflow_runs`)   | Job / Standalone Task |
-| `local-blueprint`  | `local_blueprints` + `workflow_triggers`      | "When X happens, open this agent on my machine and wait for me" — an interactive automation   | Yes (`local_terminals`) | Local Automation      |
+| `repo-blueprint`   | `work_definitions` + `workflow_triggers`      | A saved PR-session definition; each trigger firing spawns a `tasks` row                       | Yes (`tasks`)           | Scheduled Task        |
+| `standalone`       | `work_definitions` (+ trigger)                | Agent work with no repo on a pooled pod (or a machine); run now or on a trigger               | Yes (`tasks`)           | Job / Standalone Task |
+| `local-blueprint`  | `work_definitions` + `workflow_triggers`      | "When X happens, open this agent on my machine and wait for me" — an interactive automation   | Yes (`local_terminals`) | Local Automation      |
 | `local-terminal`   | `local_terminals`                             | An interactive terminal or agent on a paired machine                                          | No                      | Local session         |
 | `pod-session`      | `interactive_sessions`                        | An interactive terminal + agent chat inside a repo pod                                        | No                      | Session (v0.4)        |
 | `persistent-agent` | `persistent_agents` + turns / messages / pods | Long-lived, named, message-driven agent                                                       | Turns                   | Agent                 |
@@ -118,7 +118,7 @@ Triggers live in one polymorphic table, `workflow_triggers`, keyed by `(target_t
 
 | `target_type`      | `fireTrigger` calls                    | Produces                                       |
 | ------------------ | -------------------------------------- | ---------------------------------------------- |
-| `job`              | `workflowService.createWorkflowRun()`  | a `workflow_runs` row                          |
+| `job`              | `workflowService.createWorkflowRun()`  | a Job run (`tasks` row, `kind = 'standalone'`) |
 | `task_config`      | `taskConfigService.instantiateTask()`  | a `tasks` row, queued and enqueued             |
 | `local_blueprint`  | `local-blueprint-service` → the daemon | a `local_terminals` row on the host            |
 | `persistent_agent` | `wakeAgent()`                          | an inbox message; the reconciler starts a turn |
@@ -145,14 +145,14 @@ The three pod-side kinds are reachable through one polymorphic resource. The ser
 | `GET /api/tasks?type=repo-task\|repo-blueprint\|standalone\|all` | Unified list, filterable by type                                                                                                         |
 | `POST /api/tasks`                                                | Create. Body takes `{ type, ... }` (+ `runTarget` / `localHostId` / `localDir` / `localSessionMode`) and dispatches to the right service |
 | `GET /api/tasks/:id`                                             | Resolve across tables; returns the native row tagged with `type`                                                                         |
-| `GET/POST /api/tasks/:id/runs[/:runId]`                          | List/start runs (spawned `tasks` for blueprints, `workflow_runs` for standalone, 405 for ad-hoc)                                         |
+| `GET/POST /api/tasks/:id/runs[/:runId]`                          | List/start runs (spawned Repo Tasks for blueprints, Job runs for standalone, 405 for ad-hoc)                                             |
 | `GET/POST/PATCH/DELETE /api/tasks/:id/triggers[/:triggerId]`     | Manage triggers (405 for ad-hoc repo-task)                                                                                               |
 
-The resolver lives in `apps/api/src/services/unified-task-service.ts` (`resolveAnyTaskById`) and checks `tasks` → `task_configs` → `workflows` in order. The polymorphic routes are in `apps/api/src/routes/tasks-unified.ts`. Legacy `/api/jobs/*` and `/api/task-configs/*` endpoints still work as thin aliases.
+The resolver lives in `apps/api/src/services/unified-task-service.ts` (`resolveAnyTaskById`) and checks `tasks` → `work_definitions` (scheduled Tasks, Jobs) → PR reviews in order. `/api/work` (`routes/work.ts`) is the newer resource over every kind: list, any id, create from a `WorkSpec`, save, delete, runs, triggers. The polymorphic routes are in `apps/api/src/routes/tasks-unified.ts`. Legacy `/api/jobs/*` and `/api/task-configs/*` endpoints still work as thin aliases.
 
 The other kinds have their own resources: `/api/local/*` (hosts, terminals, blueprints), `/api/sessions/*` (pod sessions), `/api/persistent-agents/*` and the inter-agent `/api/internal/persistent-agents/*`.
 
-> **Backend-naming note.** The schema still says `tasks`, `task_configs`, `workflows`, `workflow_runs`, `workflow_triggers`, and `local_blueprints` for historical reasons, and older UI copy called these Tasks, Scheduled Tasks, Jobs, and Local Automations. v0.5 collapsed them into one list ("Sessions"), v0.6 renamed the noun to Work and unified the trigger layer; the storage tables and per-kind execution services are unchanged. A table-level unification (one `work` + `work_runs` pair replacing the six tables) is the natural next step and would remove the client-side feed merge, but it touches every worker and the reconciler, so it hasn't been done.
+> **Backend-naming note.** The tables kept some historical names. Every saved definition — scheduled Task, Job, Local automation — is a `work_definitions` row (`kind` = `repo-blueprint` | `standalone` | `local-blueprint`), and every run — a Repo Task or a Job run — is a `tasks` row (`kind` = `repo` | `standalone`), read through the `repo_tasks` / `workflow_runs` views by code about one kind; `workflow_triggers` is the one trigger table, `agent_pods` the one pod table, `task_logs` the one log table. The legacy per-kind endpoints project rows back to their old shapes, and `/api/work` serves every kind as one resource (`docs/plans/work-unification.md`).
 
 ## Service map
 

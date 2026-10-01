@@ -17,6 +17,7 @@ const at = (s: string) => new Date(s);
 function sources(over: Partial<WorkSources> = {}): WorkSources {
   return {
     tasks: [],
+    jobRuns: [],
     definitions: [],
     localTerminals: [],
     podSessions: [],
@@ -254,5 +255,61 @@ describe("projectWork", () => {
       status: "done",
       spawned: true,
     });
+  });
+});
+
+describe("projectWork — Job runs and what started them", () => {
+  it("lists a Job's runs as spawned rows linking to the run, marked with their trigger", () => {
+    const job = {
+      id: "j1",
+      kind: "standalone",
+      name: "Report",
+      agentType: "gemini",
+      runTarget: "cluster",
+      localHostId: null,
+      localDir: null,
+      enabled: true,
+      createdAt: new Date("2026-09-01T00:00:00Z"),
+      updatedAt: new Date("2026-09-01T00:00:00Z"),
+    } as unknown as WorkSources["definitions"][number];
+    const rows = projectWork(
+      sources({
+        definitions: [job],
+        jobRuns: [
+          {
+            job,
+            run: {
+              id: "r1",
+              workflowId: "j1",
+              triggerId: "tr1",
+              title: "Report: Monday",
+              state: "running",
+              errorMessage: null,
+              createdAt: new Date("2026-09-02T00:00:00Z"),
+              updatedAt: new Date("2026-09-02T01:00:00Z"),
+            } as unknown as WorkSources["jobRuns"][number]["run"],
+          },
+        ],
+        triggers: [
+          { id: "tr1", type: "schedule", targetId: "j1", config: { cronExpression: "0 9 * * 1" } },
+          { id: "tr2", type: "ticket", targetId: "j1", config: { source: "linear" } },
+        ],
+      }),
+    );
+    expect(rows.find((r) => r.key === "job-run-r1")).toMatchObject({
+      source: "standalone",
+      href: "/jobs/j1/runs/r1",
+      name: "Report: Monday",
+      when: "on a trigger",
+      who: "gemini",
+      status: "running",
+      spawned: true,
+      recurring: false,
+      triggers: [{ type: "schedule" }],
+    });
+    expect(rows.find((r) => r.key === "job-j1")?.triggers).toEqual([
+      { type: "schedule" },
+      { type: "ticket", source: "linear" },
+    ]);
   });
 });

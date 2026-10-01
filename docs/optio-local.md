@@ -46,7 +46,7 @@ server never ships secrets to your machine.
   (`working` / `needs_you` / `idle`) that drives the UI's "needs you" queue. A terminal
   may execute a Job run or a Repo Task whose run location is this host
   (`spawned_by = "job" | "task"`, see "Local runs" below).
-- **Automation** (`local_blueprints`; "blueprint" in the API and code) — "when X happens,
+- **Automation** (`work_definitions` rows with `kind = 'local-blueprint'`; "blueprint" in the API and code) — "when X happens,
   run this agent on my machine". Who (`agent`: `claude-code` / `codex` / `cursor` /
   `gemini` / `opencode`, or null for a plain shell command), What (`commandTemplate`,
   rendered with `{{param}}` substitution — the agent's prompt, or the shell command; or
@@ -112,7 +112,7 @@ over (`services/local-auth-refresh-service.ts`, `cli/src/local/claude-credential
 ## Local runs: Tasks and Jobs on your machine
 
 Run location is a first-class attribute of every **Task**, **Job**, and scheduled Task
-blueprint (`run_target` on `tasks`, `workflows`, `task_configs`): `cluster` (an Optio pod,
+blueprint (`run_target` on `tasks` and `work_definitions`): `cluster` (an Optio pod,
 the default) or `local` — a directory on one of your paired hosts. The "Where" section of
 the New Task form, the Job editor, and the scheduled-Task editor all use the same picker
 (`components/run-location-picker.tsx`): choose **Optio pod** or **My machine** first — a

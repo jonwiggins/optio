@@ -9,6 +9,7 @@
  *     const task = await insertTask({ state: "queued", priority: 1 });
  */
 import { randomBytes } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import {
   interactiveSessions,
@@ -135,13 +136,18 @@ export async function insertWorkflowTrigger(
   return row;
 }
 
+/** A Job run; like `createWorkflowRun`, it takes its workspace and owner from its Job. */
 export async function insertWorkflowRun(
   workflowId: string,
   overrides: Insert<typeof workflowRuns> = {},
 ) {
+  const [job] = await db
+    .select({ workspaceId: workDefinitions.workspaceId, ownerUserId: workDefinitions.ownerUserId })
+    .from(workDefinitions)
+    .where(eq(workDefinitions.id, workflowId));
   const [row] = await db
     .insert(workflowRuns)
-    .values({ workflowId, ...overrides })
+    .values({ workflowId, ...job, ...overrides })
     .returning();
   return row;
 }

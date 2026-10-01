@@ -83,7 +83,7 @@ export async function recentRunsRoutes(app: FastifyInstance) {
               t.updated_at AS at,
               t.started_at AS started_at,
               t.completed_at AS ended_at
-            FROM tasks t
+            FROM repo_tasks t
             WHERE ${scopeTo(sql`t.workspace_id`)}
               AND t.parent_task_id IS NULL
             ORDER BY t.updated_at DESC
@@ -95,7 +95,7 @@ export async function recentRunsRoutes(app: FastifyInstance) {
               r.id::text AS id,
               'job-run' AS kind,
               w.name AS title,
-              r.state AS state,
+              r.state::text AS state,
               w.id::text AS parent_id,
               NULL AS "where",
               r.error_message AS detail,

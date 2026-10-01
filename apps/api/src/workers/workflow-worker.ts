@@ -30,6 +30,11 @@ import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
 const connectionOpts = getBullMQConnectionOptions();
 
+/** Agent events that count as signs of life for stall detection (as for repo tasks). */
+const ACTIVITY_EVENTS = new Set(["text", "tool_use", "tool_result", "thinking", "system"]);
+/** How often a run's last-activity time is written while its agent works. */
+const ACTIVITY_FLUSH_MS = 10_000;
+
 export const workflowRunQueue = new Queue("workflow-runs", { connection: connectionOpts });
 
 // ── Helpers (exported for testing) ─────────────────────────────────────────────
@@ -206,6 +211,17 @@ export function startWorkflowWorker() {
           workflow.promptTemplate,
           run.params as Record<string, unknown> | null,
         );
+        // What this attempt runs (the Job is read live, so it can differ per
+        // attempt), and its first sign of life for stall detection. Not a
+        // state change: the reconciler's version is left alone.
+        await db
+          .update(workflowRuns)
+          .set({
+            prompt: renderedPrompt,
+            agentType: workflow.agentRuntime,
+            lastActivityAt: new Date(),
+          })
+          .where(eq(workflowRuns.id, workflowRunId));
 
         // ── Resolve secrets ───────────────────────────────────────────
         const workspaceId = workflow.workspaceId ?? null;
@@ -375,6 +391,19 @@ export function startWorkflowWorker() {
           }
         })().catch(() => {});
 
+        // Signs of life, written at most every ACTIVITY_FLUSH_MS.
+        let pendingActivityAt: Date | null = null;
+        let activityFlushedAt = 0;
+        const flushActivity = async () => {
+          if (!pendingActivityAt) return;
+          await db
+            .update(workflowRuns)
+            .set({ lastActivityAt: pendingActivityAt })
+            .where(eq(workflowRuns.id, workflowRunId));
+          pendingActivityAt = null;
+          activityFlushedAt = Date.now();
+        };
+
         for await (const chunk of execSession.stdout as AsyncIterable<Buffer>) {
           const text = chunk.toString();
           allLogs += text;
@@ -406,6 +435,8 @@ export function startWorkflowWorker() {
 
             // Persist + publish log entries (historical DB + live WS)
             for (const entry of parsed.entries) {
+              // Stall detection: meaningful agent events are signs of life.
+              if (ACTIVITY_EVENTS.has(entry.type)) pendingActivityAt = new Date();
               await workflowService.appendWorkflowRunLog({
                 workflowRunId,
                 stream: "stdout",
@@ -415,7 +446,9 @@ export function startWorkflowWorker() {
               });
             }
           }
+          if (Date.now() - activityFlushedAt > ACTIVITY_FLUSH_MS) await flushActivity();
         }
+        await flushActivity();
 
         // Flush remaining buffer
         if (lineBuf.trim()) {

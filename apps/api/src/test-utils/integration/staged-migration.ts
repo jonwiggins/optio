@@ -32,8 +32,10 @@ const MIGRATIONS = path.resolve(
 export interface StagedDatabase {
   /** Raw client on the staged database, for seeding and assertions. */
   sql: postgres.Sql;
-  /** Apply every migration after the staged one. */
-  migrateRest(): Promise<void>;
+  /** Apply the migrations after the staged one: all of them, or up to and including `untilTag`. */
+  migrateRest(untilTag?: string): Promise<void>;
+  /** Apply every migration, then `extra` ones as if a later release had added them. */
+  migrateWith(extra: Array<{ tag: string; sql: string }>): Promise<void>;
   drop(): Promise<void>;
 }
 
@@ -44,19 +46,40 @@ export async function stageDatabase(untilTag: string): Promise<StagedDatabase> {
   const journal = JSON.parse(
     fs.readFileSync(path.join(MIGRATIONS, "meta", "_journal.json"), "utf-8"),
   ) as { entries: Array<{ tag: string }> };
-  const until = journal.entries.findIndex((e) => e.tag === untilTag);
-  if (until < 0) throw new Error(`No migration tagged ${untilTag}`);
 
-  // A copy of the migrations folder whose journal stops at `untilTag`.
-  const partial = fs.mkdtempSync(path.join(os.tmpdir(), "optio-staged-"));
-  fs.mkdirSync(path.join(partial, "meta"));
-  for (const f of fs.readdirSync(MIGRATIONS)) {
-    if (f.endsWith(".sql")) fs.copyFileSync(path.join(MIGRATIONS, f), path.join(partial, f));
-  }
-  fs.writeFileSync(
-    path.join(partial, "meta", "_journal.json"),
-    JSON.stringify({ ...journal, entries: journal.entries.slice(0, until + 1) }),
-  );
+  // Copies of the migrations folder whose journal stops at a tag, or runs on
+  // past the last one with extra migrations.
+  const partials: string[] = [];
+  const copyWith = (
+    entries: Array<{ tag: string }>,
+    extra: Array<{ tag: string; sql: string }> = [],
+  ): string => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "optio-staged-"));
+    partials.push(dir);
+    fs.mkdirSync(path.join(dir, "meta"));
+    for (const f of fs.readdirSync(MIGRATIONS)) {
+      if (f.endsWith(".sql")) fs.copyFileSync(path.join(MIGRATIONS, f), path.join(dir, f));
+    }
+    for (const m of extra) fs.writeFileSync(path.join(dir, `${m.tag}.sql`), m.sql);
+    const extraEntries = extra.map((m, i) => ({
+      idx: entries.length + i,
+      version: "7",
+      when: Date.now() + i,
+      tag: m.tag,
+      breakpoints: true,
+    }));
+    fs.writeFileSync(
+      path.join(dir, "meta", "_journal.json"),
+      JSON.stringify({ ...journal, entries: [...entries, ...extraEntries] }),
+    );
+    return dir;
+  };
+  const partialUntil = (tag: string): string => {
+    const at = journal.entries.findIndex((e) => e.tag === tag);
+    if (at < 0) throw new Error(`No migration tagged ${tag}`);
+    return copyWith(journal.entries.slice(0, at + 1));
+  };
+  const partial = partialUntil(untilTag);
 
   const name = `${RUN_DB_PREFIX}${process.pid}_${randomBytes(4).toString("hex")}`;
   const admin = postgres(adminUrl, { max: 1, onnotice: () => {} });
@@ -73,12 +96,15 @@ export async function stageDatabase(untilTag: string): Promise<StagedDatabase> {
 
   return {
     sql,
-    async migrateRest() {
-      await migrateSafe(db, MIGRATIONS);
+    async migrateRest(tag?: string) {
+      await migrateSafe(db, tag ? partialUntil(tag) : MIGRATIONS);
+    },
+    async migrateWith(extra) {
+      await migrateSafe(db, copyWith(journal.entries, extra));
     },
     async drop() {
       await sql.end({ timeout: 5 });
-      fs.rmSync(partial, { recursive: true, force: true });
+      for (const dir of partials) fs.rmSync(dir, { recursive: true, force: true });
       const cleanup = postgres(adminUrl, { max: 1, onnotice: () => {} });
       try {
         await cleanup.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);

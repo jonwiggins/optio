@@ -46,7 +46,7 @@ export async function getPerformanceAnalytics(filters: AnalyticsFilters) {
       COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (completed_at - started_at))), 0) AS p95_execution,
       COALESCE(AVG(EXTRACT(EPOCH FROM (started_at - created_at))), 0) AS avg_queue_wait,
       COUNT(*) AS task_count
-    FROM tasks
+    FROM repo_tasks
     WHERE state IN ('completed', 'pr_opened')
       AND completed_at IS NOT NULL
       AND started_at IS NOT NULL
@@ -64,7 +64,7 @@ export async function getPerformanceAnalytics(filters: AnalyticsFilters) {
     SELECT
       COUNT(*) FILTER (WHERE state NOT IN ('cancelled')) AS total,
       COUNT(*) FILTER (WHERE state IN ('completed', 'pr_opened')) AS succeeded
-    FROM tasks
+    FROM repo_tasks
     WHERE 1=1
       ${dateFilter}
       ${repoFilter}
@@ -81,7 +81,7 @@ export async function getPerformanceAnalytics(filters: AnalyticsFilters) {
     SELECT
       COUNT(*) FILTER (WHERE state NOT IN ('cancelled')) AS total,
       COUNT(*) FILTER (WHERE state IN ('completed', 'pr_opened')) AS succeeded
-    FROM tasks
+    FROM repo_tasks
     WHERE 1=1
       ${prevFilter}
       ${repoFilter}
@@ -101,7 +101,7 @@ export async function getPerformanceAnalytics(filters: AnalyticsFilters) {
       COUNT(*) AS total,
       COUNT(*) FILTER (WHERE state IN ('completed', 'pr_opened')) AS succeeded,
       COUNT(*) FILTER (WHERE state = 'failed') AS failed
-    FROM tasks
+    FROM repo_tasks
     WHERE 1=1
       ${dateFilter}
       ${repoFilter}
@@ -162,7 +162,7 @@ export async function getAgentAnalytics(filters: Omit<AnalyticsFilters, "agentTy
       COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - started_at))) FILTER (WHERE completed_at IS NOT NULL AND started_at IS NOT NULL), 0) AS avg_duration,
       COALESCE(AVG(CAST(cost_usd AS NUMERIC)) FILTER (WHERE cost_usd IS NOT NULL), 0) AS avg_cost,
       COALESCE(AVG(retry_count), 0) AS avg_retries
-    FROM tasks
+    FROM repo_tasks
     WHERE 1=1
       ${dateFilter}
       ${repoFilter}
@@ -183,7 +183,7 @@ export async function getAgentAnalytics(filters: Omit<AnalyticsFilters, "agentTy
       COALESCE(model_used, 'unknown') AS model,
       COUNT(*) AS task_count,
       COALESCE(AVG(CAST(cost_usd AS NUMERIC)) FILTER (WHERE cost_usd IS NOT NULL), 0) AS avg_cost
-    FROM tasks
+    FROM repo_tasks
     WHERE 1=1
       ${dateFilter}
       ${repoFilter}
@@ -237,7 +237,7 @@ export async function getFailureAnalytics(filters: AnalyticsFilters) {
     SELECT
       COALESCE(error_message, 'Unknown error') AS error_message,
       COUNT(*) AS count
-    FROM tasks
+    FROM repo_tasks
     WHERE state = 'failed'
       AND error_message IS NOT NULL
       ${dateFilter}
@@ -259,7 +259,7 @@ export async function getFailureAnalytics(filters: AnalyticsFilters) {
       repo_url,
       COUNT(*) AS total,
       COUNT(*) FILTER (WHERE state = 'failed') AS failed
-    FROM tasks
+    FROM repo_tasks
     WHERE state NOT IN ('cancelled')
       ${dateFilter}
       ${repoFilter}
@@ -281,7 +281,7 @@ export async function getFailureAnalytics(filters: AnalyticsFilters) {
       agent_type,
       COUNT(*) AS total,
       COUNT(*) FILTER (WHERE state = 'failed') AS failed
-    FROM tasks
+    FROM repo_tasks
     WHERE state NOT IN ('cancelled')
       ${dateFilter}
       ${repoFilter}
@@ -301,7 +301,7 @@ export async function getFailureAnalytics(filters: AnalyticsFilters) {
       COALESCE(model_used, 'unknown') AS model,
       COUNT(*) AS total,
       COUNT(*) FILTER (WHERE state = 'failed') AS failed
-    FROM tasks
+    FROM repo_tasks
     WHERE state NOT IN ('cancelled')
       ${dateFilter}
       ${repoFilter}
@@ -319,7 +319,7 @@ export async function getFailureAnalytics(filters: AnalyticsFilters) {
     SELECT
       COUNT(*) FILTER (WHERE retry_count > 0) AS retried,
       COUNT(*) FILTER (WHERE retry_count > 0 AND state IN ('completed', 'pr_opened')) AS retry_succeeded
-    FROM tasks
+    FROM repo_tasks
     WHERE 1=1
       ${dateFilter}
       ${repoFilter}
@@ -335,7 +335,7 @@ export async function getFailureAnalytics(filters: AnalyticsFilters) {
     SELECT
       COUNT(*) FILTER (WHERE activity_substate = 'stalled') AS stalled,
       COUNT(*) FILTER (WHERE activity_substate = 'recovered') AS recovered
-    FROM tasks
+    FROM repo_tasks
     WHERE 1=1
       ${dateFilter}
       ${repoFilter}
@@ -416,7 +416,7 @@ export async function getPrAnalytics(filters: AnalyticsFilters) {
       COUNT(*) FILTER (WHERE pr_checks_status = 'failing') AS checks_failing,
       COUNT(*) FILTER (WHERE pr_review_status = 'approved') AS review_approved,
       COUNT(*) FILTER (WHERE pr_review_status = 'changes_requested') AS review_changes_requested
-    FROM tasks
+    FROM repo_tasks
     WHERE 1=1
       ${dateFilter}
       ${repoFilter}
@@ -432,7 +432,7 @@ export async function getPrAnalytics(filters: AnalyticsFilters) {
     SELECT
       COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at))), 0) AS avg_merge_time,
       COUNT(*) AS merge_count
-    FROM tasks
+    FROM repo_tasks
     WHERE pr_state = 'merged'
       AND completed_at IS NOT NULL
       ${dateFilter}

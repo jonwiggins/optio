@@ -26,27 +26,29 @@ of commits.
 ## Target model
 
 ```
-work_definitions ──fires (triggers)──▶ work_runs  (tasks = the kind='repo' view) ─┐
-  kind: repo-blueprint │ standalone        kind: repo │ standalone                 │  task_logs
-        │ local-blueprint ───────────▶ local_terminals                              │  (every run's log)
-                                                                                    │
-persistent_agents ──turns──▶ persistent_agent_turns ────────────────────────────────┘
+work_definitions ──fires (triggers)──▶ tasks (every run)                  ─┐
+  kind: repo-blueprint │ standalone     kind: repo │ standalone            │  task_logs
+        │                             views: repo_tasks, workflow_runs     │  (every run's log)
+        │ local-blueprint ───────────▶ local_terminals                     │
+                                                                           │
+persistent_agents ──turns──▶ persistent_agent_turns ───────────────────────┘
                                                               agent_pods (every pod)
 ```
 
 - **One definitions table**, `work_definitions`, with a `kind` discriminator
   whose values are the kind names the API already uses
   (`repo-blueprint`, `standalone`, `local-blueprint`).
-- **One runs table**, `work_runs`, with a `kind` discriminator (`repo` |
-  `standalone`, the reconciler's pod-run `RunKind`s). `tasks` stays as an
-  auto-updatable view over it (`WHERE kind = 'repo' WITH CHECK OPTION`), so
-  every existing repo-task query — capacity, the PR watcher, worktree cleanup,
-  stale / orphan / resync sweeps, bulk actions, stats, the CLI's endpoints —
-  stays repo-only by construction instead of by audit, and inserts through it
-  get `kind = 'repo'`. Code that is about every run (the Work list, costs,
-  local runs, zombie detection, the reconciler's table mapping) reads
-  `work_runs`. Child tables (`task_events`, `task_logs`, …) keep their
-  `task_id` columns, which now point at `work_runs`.
+- **One runs table**, `tasks` (the name stays; see Phase 3), with a `kind`
+  discriminator (`repo` | `standalone`, the reconciler's pod-run
+  `RunKind`s). The schema's `tasks` is an auto-updatable view over it,
+  `repo_tasks` (`WHERE kind = 'repo' WITH CHECK OPTION`), so every existing
+  repo-task query — capacity, the PR watcher, worktree cleanup, stale /
+  orphan / resync sweeps, bulk actions, stats, the CLI's endpoints — stays
+  repo-only by construction instead of by audit, and inserts through it get
+  `kind = 'repo'`. Code that is about every run (costs, the auth-failure
+  sweep) reads the table (`workRuns` in the schema). Child tables
+  (`task_events`, `task_logs`, …) keep their `task_id` columns, which point
+  at any run.
 - **Triggers** stay where they are (`workflow_triggers`, already polymorphic
   on `(target_type, target_id)`); definition targets point into
   `work_definitions`. Renaming the table or the target types would be churn
@@ -123,48 +125,84 @@ list, the resolver, and cost accounting.
 
 ## Phase 2 — one definitions table
 
-- Migration: create `work_definitions`, copy `task_configs`, `workflows`,
-  `local_blueprints` into it (ids preserved), repoint the FKs that named the
-  old tables (Job runs and the triggers' legacy `workflow_id` cascade from a
-  Job definition, as before), add `tasks.work_id` (backfilled from
-  `metadata.taskConfigId` where the config still exists; `ON DELETE SET NULL`,
-  so deleting a scheduled Task keeps the tasks it spawned, as before), and
-  drop the three old tables.
+- Migration (`1791920000_work_definitions`): create `work_definitions`, copy
+  `task_configs`, `workflows`, `local_blueprints` into it (ids preserved),
+  repoint the FKs that named the old tables (Job runs and the triggers'
+  legacy `workflow_id` cascade from a Job definition, as before), add
+  `tasks.work_id` (backfilled from `metadata.taskConfigId` where the config
+  still exists; `ON DELETE SET NULL`, so deleting a scheduled Task keeps the
+  tasks it spawned, as before), and drop the three old tables.
+- Every attribute has one column: the prompt (a scheduled Task's `prompt`, a
+  Job's `prompt_template`, an automation's `command_template`), the agent
+  (`agent_type` / `agent_runtime` / `agent`), the base branch (an
+  automation's `base_branch`), the machine (`host_id` / `dir` /
+  `session_mode`), and the owner: `owner_user_id` is null for the
+  organization's work and set for a person's, which a Local automation's
+  `user_id` always was.
 - Name uniqueness stays per kind, via partial unique indexes: scheduled Tasks
   and Jobs per workspace, Local automations per person. Defaults that differ
-  by kind (`local_session_mode`, `max_retries`) are applied by the service.
-- `services/work-definition-service.ts`: one CRUD, one `fireDefinition` that
-  starts whatever the kind starts. `task-config-service`, `workflow-service`,
-  and `local-blueprint-service` become thin projections for the legacy
-  routes, which keep their response shapes field for field.
+  by kind (`local_session_mode`, `max_retries`) are applied by the services.
+  Deleting a workspace deletes its scheduled Tasks and Jobs (and their
+  triggers); automations are their owner's and stay.
+- `services/work-definition-service.ts`: one CRUD. Trigger dispatch resolves
+  every definition target the same way and starts what the kind starts.
+  `task-config-service`, `workflow-service`, and `local-blueprint-service`
+  are projections for the legacy routes, which keep their response shapes
+  field for field.
 - `POST /api/work` creates from the five attributes: the server derives the
-  kind (`deriveKind`, now in `@optio/shared`), creates the row and its trigger
-  in one transaction, and starts the first run for "now" work. `PATCH`,
-  `DELETE`, and the `runs` / `triggers` sub-resources complete the resource.
-  The web form calls it, so the client-side create-then-attach-then-rollback
-  dance goes away.
+  kind (`kindOfSpec` in `@optio/shared`, which the form's `deriveKind` also
+  uses), plans the owner and pod secrets, creates the row and its trigger in
+  one transaction, and starts the first run for "now" work. `PATCH` saves a
+  definition (kind fixed; the edited trigger is patched, replaced, or
+  removed in the same transaction), `DELETE` removes one, and `runs` /
+  `triggers` complete the resource. The web form creates, loads, and saves
+  through it, so the client-side create-then-attach-then-rollback dance is
+  gone. One-off Tasks go through `taskService.submitTask` from both
+  `/api/tasks` and `/api/work`.
 
 ## Phase 3 — one runs table
 
-- Migration: rename `tasks` → `work_runs`; add `kind` (default `repo`);
-  `repo_url`, `prompt`, `agent_type` become nullable with a `CHECK` that keeps
-  them required for `kind = 'repo'`; recreate `tasks` as the repo-only view;
-  move `workflow_runs` rows in (ids preserved; `workspace_id` / `created_by`
-  backfilled from the definition; unknown states mapped to `failed`), their
-  logs onto `task_id`, and their local terminals' back-pointers; drop
-  `workflow_runs`.
-- Job-run columns map onto existing ones where the meaning matches
-  (`finished_at` → `completed_at`, …); only what has no equivalent is added.
-- A Job run keeps reading its definition live at execution time (prompt,
-  enabled, location, limits, retries), exactly as today — nothing is
-  snapshotted that wasn't before. The run records the prompt it actually ran.
-- `local-run-service` has one dispatch and one terminal → run sync; PR
-  detection stays repo-only (a Job that prints a PR URL is not "PR opened").
-- Legacy `/api/jobs/:id/runs*` and `/api/workflow-runs/*` project rows back
-  to the `WorkflowRun` shape; WebSocket events and outbound webhooks keep
-  their names.
-- A test pins the view to the table (same columns), and CLAUDE.md says how to
-  add a column (to `work_runs`, then recreate the view).
+Done (`1791930000_one_runs_table`). The table keeps its name: renaming
+`tasks` to `work_runs` behind a `tasks` view would break every later
+migration that alters "tasks" (Postgres can't alter a table through a view,
+and the team adds task columns often), so instead:
+
+- `tasks` holds every run, with `kind` = `repo` (default) | `standalone`.
+  `title`, `prompt`, `repo_url`, and `agent_type` became nullable; the
+  `tasks_repo_check` CHECK keeps them required for repo runs, and
+  `tasks_standalone_check` requires a Job run's `work_id`.
+- Job runs moved in with their ids. Their columns map onto task columns
+  that mean the same thing (`workflow_id` → `work_id`, `finished_at` →
+  `completed_at`, `pod_name` → `container_id`; unknown states → `failed`);
+  only `trigger_id`, `params`, `output`, and `pod_id` are new. Each run
+  takes `workspace_id`, `owner_user_id`, `max_retries`, and `run_target`
+  from its Job, so workspace-scoped run queries see it. Their logs moved
+  onto `task_logs.task_id`.
+- Two views give code about one kind its old shape (`src/db/run-views.ts`):
+  `repo_tasks` (`SELECT *` of the repo runs — the schema's `tasks`, so
+  every existing query stays scoped to repo runs) and `workflow_runs` (the
+  Job runs under their old column names — the schema's `workflowRuns`).
+  Both are auto-updatable `WITH CASCADED CHECK OPTION`, so writes through
+  them stay in their kind, and `workflow_runs` defaults `kind` and `state`
+  for its inserts. `schema.ts`'s `workRuns` is the table itself; foreign
+  keys point at it.
+- A view's columns are fixed when it is made, so `migrate-safe` drops both
+  before each migration and makes them again after, in the migration's
+  transaction: a migration can alter "tasks" as it always has, and a new
+  column shows up in `repo_tasks` by itself. A test pins this (a later
+  migration that adds a column and changes a selected column's type).
+- A Job run still reads its Job live when it executes (prompt, enabled,
+  location, limits, retries), as before; the run records the prompt and
+  agent it ran and its last activity (`last_activity_at`, flushed at most
+  every 10s), which the stall check uses as the heartbeat.
+- Spend: `/api/analytics/costs` reads every run from one branch; the
+  analytics and dashboard counts that were about repo tasks read
+  `repo_tasks`. Auth-failure detection keeps reading only repo runs' lines
+  (Job runs report through `auth_events`).
+- Deleting a Job deletes its runs first (`work-definition-service`); the
+  CHECK makes a raw delete of a Job with runs fail rather than orphan them.
+- Legacy `/api/jobs/:id/runs*` and `/api/workflow-runs/*`, the WebSocket
+  events, and outbound webhooks keep their shapes and names.
 
 ## Safety nets
 

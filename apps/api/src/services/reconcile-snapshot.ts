@@ -434,14 +434,14 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
   ]);
 
   const stallThresholdMs = parseIntEnv("OPTIO_STALL_THRESHOLD_MS", DEFAULT_STALL_THRESHOLD_MS);
-  // workflow_runs doesn't have lastActivityAt — use startedAt for
-  // coarse stall detection until a richer signal exists. Local runs are
-  // exempt: the daemon owns liveness and interactive sessions idle by design.
+  // The worker writes the attempt's last agent event (else the claim stands
+  // in for it). Local runs are exempt: the daemon owns liveness and
+  // interactive sessions idle by design.
   if (run.kind !== "standalone") {
     throw new Error("expected standalone run for standalone snapshot");
   }
   const heartbeat = computeHeartbeat(
-    run.status.startedAt,
+    row.lastActivityAt ?? run.status.startedAt,
     run.status.state === WorkflowRunState.RUNNING && workflowRow.runTarget !== "local",
     stallThresholdMs,
     now,

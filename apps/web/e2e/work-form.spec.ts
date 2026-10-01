@@ -33,6 +33,10 @@ async function open(page: Page) {
   await expect(page.getByRole("heading", { name: "New work" })).toBeVisible({
     timeout: 30_000,
   });
+  // The heading is server-rendered; a click before hydration is lost (an
+  // example chip that never applied). The repo picker only renders once the
+  // client has fetched the repos.
+  await expect(page.locator("#session-where select").first()).toBeVisible({ timeout: 30_000 });
 }
 
 const preset = (page: Page, label: string) =>
@@ -48,6 +52,24 @@ const then = (page: Page, title: string) => page.getByRole("button", { name: new
 const prompt = (page: Page) => page.locator("#session-prompt textarea");
 const nameInput = (page: Page) => page.locator("#session-name input").first();
 const submit = (page: Page) => page.locator('form button[type="submit"]');
+
+/**
+ * The writes the page sends to the API ("POST /api/work"), in order. The form
+ * creates and saves every kind through `/api/work`; the server writes the
+ * row and its trigger together.
+ */
+function recordWrites(page: Page): string[] {
+  const writes: string[] = [];
+  page.on("request", (req) => {
+    const { pathname } = new URL(req.url());
+    if (req.method() !== "GET" && pathname.startsWith("/api/")) {
+      writes.push(`${req.method()} ${pathname}`);
+    }
+  });
+  return writes;
+}
+/** Remembering your agent settings is a write of its own, beside the work. */
+const workWrites = (writes: string[]) => writes.filter((w) => w !== "PUT /api/me/work-defaults");
 
 async function pickMachine(page: Page, dir: string) {
   await where(page, "My machine").click();
@@ -81,6 +103,7 @@ test.describe("New work form creates every kind", () => {
   test("repo-blueprint: a scheduled pod Task saves the blueprint and its cron trigger", async ({
     page,
   }) => {
+    const writes = recordWrites(page);
     await open(page);
     await preset(page, "Open a PR").click();
     await when(page, "Schedule").click();
@@ -88,6 +111,8 @@ test.describe("New work form creates every kind", () => {
     await nameInput(page).fill(named("blueprint"));
     await submit(page).click();
     await expect(page).toHaveURL(/\/tasks\/scheduled\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    // The blueprint and its trigger in one request.
+    expect(workWrites(writes)).toEqual(["POST /api/work"]);
 
     const id = page.url().split("/").pop()!;
     const { task } = await api(`/api/tasks/${id}`);
@@ -329,7 +354,8 @@ test.describe("New work form creates every kind", () => {
 
 /**
  * Editing reopens the same form on saved recurring work: prefilled from
- * the row, kind locked, Save patches the row and its trigger in place.
+ * the row, kind locked, Save patches the row and its trigger in place —
+ * one `PATCH /api/work/:id`, whatever the kind.
  */
 test.describe("Editing recurring work", () => {
   test("a Job opens from the Recurring view, keeps its kind, and saves prompt + schedule", async ({
@@ -357,6 +383,7 @@ test.describe("Editing recurring work", () => {
     });
 
     // The Recurring view's row has an Edit action beside it.
+    const writes = recordWrites(page);
     await page.goto("/work?view=recurring");
     await page.getByRole("button", { name: `Edit ${named("editable job")}` }).click();
     await expect(page).toHaveURL(new RegExp(`/work/${task.id}/edit$`), { timeout: 30_000 });
@@ -378,6 +405,7 @@ test.describe("Editing recurring work", () => {
     await page.locator("#session-when").getByRole("button", { name: "Every hour" }).click();
     await submit(page).click();
     await expect(page).toHaveURL(new RegExp(`/jobs/${task.id}$`), { timeout: 30_000 });
+    expect(writes).toEqual([`PATCH /api/work/${task.id}`]);
 
     const saved = await api(`/api/tasks/${task.id}`);
     expect(saved.task.promptTemplate).toBe("After");
@@ -410,6 +438,7 @@ test.describe("Editing recurring work", () => {
       }),
     });
 
+    const writes = recordWrites(page);
     await page.goto(`/work/${blueprint.id}/edit`);
     await expect(page.getByRole("heading", { name: "Edit work" })).toBeVisible({
       timeout: 30_000,
@@ -426,6 +455,7 @@ test.describe("Editing recurring work", () => {
     });
     await expect(page.getByRole("heading", { name: named("renamed automation") })).toBeVisible();
     await expect(page.getByText("C0999ZZZZ")).toBeVisible();
+    expect(writes).toEqual([`PATCH /api/work/${blueprint.id}`]);
 
     const after = await api(`/api/local/blueprints/${blueprint.id}`);
     expect(after.blueprint.name).toBe(named("renamed automation"));

@@ -130,6 +130,16 @@ export const WorkSpecSchema = z
       })
       .optional()
       .describe("A persistent agent's identity and pod"),
+    owner: z
+      .enum(["workspace", "me"])
+      .optional()
+      .describe("The organization's, or yours (runs with your credentials)"),
+    podSecrets: z
+      .array(z.string().min(1).max(200))
+      .max(100)
+      .nullable()
+      .optional()
+      .describe("Pod work: the secrets its pod gets, by name"),
   })
   .describe("Work described by When / Where / Who / What / Then");
 

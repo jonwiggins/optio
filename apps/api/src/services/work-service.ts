@@ -52,7 +52,7 @@ export interface WorkScope {
   userId: string | null;
 }
 
-/** Every row the Work list is built from, as each kind's list endpoint returns it. */
+/** Every row the Work list is built from. */
 export interface WorkSources {
   tasks: TaskRow[];
   /** Scheduled Tasks, Jobs, and Local automations. */
@@ -62,6 +62,8 @@ export interface WorkSources {
   agents: PersistentAgentRow[];
   /** The caller's machines — names for rows that run on them. */
   hosts: Pick<LocalHostRow, "id" | "name">[];
+  /** Job runs, each with its Job. */
+  jobRuns: Array<{ run: JobRunRow; job: WorkDefinition }>;
   /** The definitions' triggers, and those that started a task or terminal. */
   triggers: TriggerRow[];
 }
@@ -75,9 +77,16 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
   const inWorkspace = scope.workspaceId
     ? eq(workDefinitions.workspaceId, scope.workspaceId)
     : undefined;
-  const [taskRows, configs, jobs, automations, terminals, podSessions, agents, hosts] =
+  const [taskRows, jobRuns, configs, jobs, automations, terminals, podSessions, agents, hosts] =
     await Promise.all([
       taskService.listTasks({ workspaceId: scope.workspaceId, limit: TASK_LIMIT }),
+      db
+        .select({ run: workflowRuns, job: workDefinitions })
+        .from(workflowRuns)
+        .innerJoin(workDefinitions, eq(workDefinitions.id, workflowRuns.workflowId))
+        .where(inWorkspace)
+        .orderBy(desc(workflowRuns.createdAt))
+        .limit(TASK_LIMIT),
       definitions.listDefinitions("repo-blueprint", inWorkspace),
       definitions.listDefinitions("standalone", inWorkspace),
       definitions.listDefinitions("local-blueprint", ownedBy(scope.userId)),
@@ -90,9 +99,10 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
       hostService.listHosts(scope.userId),
     ]);
   const defs = [...configs.slice(0, TASK_LIMIT), ...jobs.slice(0, TASK_LIMIT), ...automations];
-  const runs = { tasks: taskRows, localTerminals: terminals };
+  const runs = { tasks: taskRows, localTerminals: terminals, jobRuns };
   return projectWork({
     ...runs,
+    jobRuns,
     definitions: defs,
     podSessions,
     agents,
@@ -239,10 +249,13 @@ async function loadTriggers(definitionIds: string[], triggerIds: string[]): Prom
 }
 
 /** The trigger ids a task or terminal says started it. */
-function triggerIdsOf(src: Pick<WorkSources, "tasks" | "localTerminals">): string[] {
+function triggerIdsOf(
+  src: Pick<WorkSources, "tasks" | "localTerminals"> & Partial<Pick<WorkSources, "jobRuns">>,
+): string[] {
   const ids = [
     ...src.tasks.map((t) => (t.metadata as { triggerId?: unknown } | null)?.triggerId),
     ...src.localTerminals.map((t) => t.triggerId),
+    ...(src.jobRuns ?? []).map(({ run }) => run.triggerId),
   ];
   return [...new Set(ids.filter((id): id is string => typeof id === "string"))];
 }
@@ -467,6 +480,7 @@ export function projectWork(src: WorkSources): WorkRow[] {
   const at = context(src.hosts, src.triggers);
   return sortWork([
     ...src.tasks.map((t) => taskRow(t, at)),
+    ...src.jobRuns.map(({ run, job }) => jobRunRow(run, job, at)),
     ...src.definitions.map((d) => definitionRow(d, at)),
     // A local Task run already has its `tasks` row; a local Job run and
     // hand-opened terminals only exist here.

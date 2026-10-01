@@ -6,6 +6,7 @@
  * disagree. Like `feed.ts`, this lives outside `types/`: it is not a mobile
  * model.
  */
+import type { ResourceOwner } from "../types/model-provider.js";
 import type { WorkSource, WorkThen } from "./feed.js";
 
 /** The kind of row a piece of work is stored as — the same names the Work list uses. */
@@ -60,7 +61,11 @@ export interface WorkWhereSpec {
   runTarget: "cluster" | "local";
   /** The repo it checks out and opens a PR against; null = no repo. */
   repoUrl?: string | null;
-  /** The branch the work starts from (and its PR targets). */
+  /**
+   * The branch the work starts from (and its PR targets). On a machine it
+   * also says the work happens on a new branch that becomes a PR (null =
+   * the directory as it is), even when the checkout's remote isn't known.
+   */
   repoBranch?: string | null;
   /** Local work: the machine and the allowlisted directory on it. */
   localHostId?: string | null;
@@ -109,6 +114,14 @@ export interface WorkSpec {
   /** A one-off Task that waits for these tasks first. */
   dependsOn?: string[];
   agent?: WorkAgentSpec;
+  /**
+   * Who it belongs to: the organization's, or yours (it then runs with your
+   * credentials). Unset: yours when it picks a personal provider or secret.
+   * Work on a machine is always yours.
+   */
+  owner?: ResourceOwner;
+  /** Pod work: the secrets its pod gets, by name (null = the workspace's legacy behavior). */
+  podSecrets?: string[] | null;
 }
 
 /** What `POST /api/work` made. */
@@ -121,13 +134,18 @@ export interface WorkCreated {
   run?: { id: string; href: string };
 }
 
+/** Whether a spec's work happens in a repo checkout and opens a PR. */
+export function specWithRepo(where: WorkWhereSpec): boolean {
+  return where.runTarget === "local" ? !!where.repoBranch : !!where.repoUrl;
+}
+
 /** The kind a spec describes. */
 export function kindOfSpec(spec: Pick<WorkSpec, "when" | "where" | "then">): WorkKind {
   return deriveWorkKind({
     then: spec.then,
     local: spec.where.runTarget === "local",
     triggered: spec.when.type !== "manual",
-    withRepo: !!spec.where.repoUrl,
+    withRepo: specWithRepo(spec.where),
   });
 }
 

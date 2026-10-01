@@ -17,6 +17,7 @@ const DROPPED_TABLES = [
   "workflow_pod_state",
   "task_configs",
   "local_blueprints",
+  "workflow_run_logs",
 ];
 
 /** `workflows` is an English word too, so it only counts where SQL names a table. */

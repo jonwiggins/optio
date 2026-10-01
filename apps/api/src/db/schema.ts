@@ -106,9 +106,17 @@ export const taskStateEnum = pgEnum("task_state", [
   "cancelled",
 ]);
 
-export const tasks = pgTable(
-  "tasks",
-  {
+// ── Runs ────────────────────────────────────────────────────────────────────
+
+// The one runs table, `tasks` (docs/plans/work-unification.md, phase 3):
+// every run, a repo task (`kind = 'repo'`) or a Job run (`kind =
+// 'standalone'`). Code about one kind goes through a view (db/run-views.ts):
+// `tasks` below is `repo_tasks` (repo runs, every column) and `workflowRuns`
+// is `workflow_runs` (Job runs in their old shape); code about every run
+// (the Work list, costs) reads `workRuns`. Add a column to `runColumns` and
+// to the "tasks" table in a migration — the views follow on their own.
+function runColumns() {
+  return {
     id: uuid("id").primaryKey().defaultRandom(),
     title: text("title").notNull(),
     prompt: text("prompt").notNull(),
@@ -184,8 +192,33 @@ export const tasks = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+  };
+}
+
+export const workRuns = pgTable(
+  "tasks",
+  {
+    ...runColumns(),
+    kind: text("kind").$type<"repo" | "standalone">().notNull().default("repo"),
+    // Only a repo run must have these (tasks_repo_check).
+    title: text("title"),
+    prompt: text("prompt"),
+    repoUrl: text("repo_url"),
+    agentType: text("agent_type"),
+    // A Job run's trigger, params, output, and the pod it holds right now.
+    triggerId: uuid("trigger_id").references(() => workflowTriggers.id, { onDelete: "set null" }),
+    params: jsonb("params").$type<Record<string, unknown>>(),
+    output: jsonb("output").$type<Record<string, unknown>>(),
+    podId: uuid("pod_id"),
   },
   (table) => [
+    index("tasks_kind_state_idx").on(table.kind, table.state),
+    index("tasks_pod_id_idx")
+      .on(table.podId)
+      .where(sql`${table.podId} IS NOT NULL`),
+    index("tasks_trigger_id_idx")
+      .on(table.triggerId)
+      .where(sql`${table.triggerId} IS NOT NULL`),
     index("tasks_repo_url_state_idx").on(table.repoUrl, table.state),
     index("tasks_state_idx").on(table.state),
     index("tasks_parent_task_id_idx").on(table.parentTaskId),
@@ -199,13 +232,16 @@ export const tasks = pgTable(
   ],
 );
 
+/** Repo runs: the `repo_tasks` view over the runs table. */
+export const tasks = pgTable("repo_tasks", runColumns());
+
 export const taskEvents = pgTable(
   "task_events",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     taskId: uuid("task_id")
       .notNull()
-      .references(() => tasks.id),
+      .references(() => workRuns.id),
     fromState: taskStateEnum("from_state"),
     toState: taskStateEnum("to_state").notNull(),
     trigger: text("trigger").notNull(),
@@ -226,7 +262,7 @@ export const taskPrs = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     taskId: uuid("task_id")
       .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
+      .references(() => workRuns.id, { onDelete: "cascade" }),
     repoUrl: text("repo_url").notNull(),
     number: integer("number").notNull(),
     url: text("url").notNull(),
@@ -247,7 +283,7 @@ export const taskLogs = pgTable(
   "task_logs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => workRuns.id, { onDelete: "cascade" }),
     stream: text("stream").notNull().default("stdout"),
     content: text("content").notNull(),
     logType: text("log_type"), // "text" | "tool_use" | "tool_result" | "thinking" | "system" | "error" | "info"
@@ -614,7 +650,7 @@ export const taskComments = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     taskId: uuid("task_id")
       .notNull()
-      .references(() => tasks.id),
+      .references(() => workRuns.id),
     userId: uuid("user_id").references(() => users.id),
     content: text("content").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -633,7 +669,7 @@ export const taskMessages = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     taskId: uuid("task_id")
       .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
+      .references(() => workRuns.id, { onDelete: "cascade" }),
     userId: uuid("user_id").references(() => users.id),
     content: text("content").notNull(),
     mode: taskMessageModeEnum("mode").notNull().default("soft"),
@@ -657,10 +693,10 @@ export const taskDependencies = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     taskId: uuid("task_id")
       .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
+      .references(() => workRuns.id, { onDelete: "cascade" }),
     dependsOnTaskId: uuid("depends_on_task_id")
       .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
+      .references(() => workRuns.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -805,73 +841,56 @@ export const workflowTriggers = pgTable(
   ],
 );
 
-export const workflowRuns = pgTable(
-  "workflow_runs",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    workflowId: uuid("workflow_id")
-      .notNull()
-      .references(() => workDefinitions.id, { onDelete: "cascade" }),
-    // SET NULL: deleting a trigger keeps the runs it started (1791000000).
-    triggerId: uuid("trigger_id").references(() => workflowTriggers.id, { onDelete: "set null" }),
-    params: jsonb("params").$type<Record<string, unknown>>(),
-    // The Job's run_title rendered with this run's params; null = no template.
-    title: text("title"),
-    state: text("state").notNull().default("queued"), // "queued" | "running" | "completed" | "failed"
-    output: jsonb("output").$type<Record<string, unknown>>(),
-    costUsd: text("cost_usd"),
-    inputTokens: integer("input_tokens"),
-    outputTokens: integer("output_tokens"),
-    modelUsed: text("model_used"),
-    errorMessage: text("error_message"),
-    sessionId: text("session_id"),
-    podName: text("pod_name"),
-    // FK to the workflow pod currently running this run. Null when queued or
-    // released. Cleared on completion so activeRunCount reflects live runs.
-    podId: uuid("pod_id"),
-    // Retry affinity — the last pod that ran this, even after release. Used to
-    // prefer same-pod retries (mirrors tasks.lastPodId). Not a hard FK so pod
-    // cleanup doesn't require nulling out historical references.
-    lastPodId: uuid("last_pod_id"),
-    // Local runs (the Job's run_target = "local"): the local_terminals row
-    // executing this attempt. Soft pointer, replaced on retry.
-    localTerminalId: uuid("local_terminal_id"),
-    retryCount: integer("retry_count").notNull().default(0),
-    startedAt: timestamp("started_at", { withTimezone: true }),
-    finishedAt: timestamp("finished_at", { withTimezone: true }),
-    // Control plane: declarative user intent. Reconciler observes and clears.
-    controlIntent: text("control_intent"), // "cancel" | "retry" | "resume" | "restart" | null
-    // Control plane: durable reconcile backoff.
-    reconcileBackoffUntil: timestamp("reconcile_backoff_until", { withTimezone: true }),
-    reconcileAttempts: integer("reconcile_attempts").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    index("workflow_runs_workflow_id_idx").on(table.workflowId),
-    index("workflow_runs_trigger_id_idx").on(table.triggerId),
-    index("workflow_runs_state_idx").on(table.state),
-    index("workflow_runs_pod_id_idx").on(table.podId),
-  ],
-);
-
-export const workflowRunLogs = pgTable(
-  "workflow_run_logs",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    workflowRunId: uuid("workflow_run_id")
-      .notNull()
-      .references(() => workflowRuns.id, { onDelete: "cascade" }),
-    stream: text("stream").notNull().default("stdout"),
-    content: text("content").notNull(),
-    logType: text("log_type"),
-    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-    timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    index("workflow_run_logs_run_id_timestamp_idx").on(table.workflowRunId, table.timestamp),
-  ],
-);
+/**
+ * Job runs: the `workflow_runs` view over the runs table (db/run-views.ts),
+ * in the shape the Job code has always used — `workflowId` is the run's
+ * `work_id`, `finishedAt` its `completed_at`, `podName` its `container_id`.
+ * Inserts through it are Job runs (`kind` defaults to 'standalone').
+ */
+export const workflowRuns = pgTable("workflow_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  workflowId: uuid("workflow_id").notNull(),
+  // SET NULL on the table: deleting a trigger keeps the runs it started.
+  triggerId: uuid("trigger_id"),
+  params: jsonb("params").$type<Record<string, unknown>>(),
+  // The Job's run_title rendered with this run's params; null = no template.
+  title: text("title"),
+  state: text("state").notNull().default("queued"), // "queued" | "running" | "completed" | "failed"
+  output: jsonb("output").$type<Record<string, unknown>>(),
+  costUsd: text("cost_usd"),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  modelUsed: text("model_used"),
+  errorMessage: text("error_message"),
+  sessionId: text("session_id"),
+  podName: text("pod_name"),
+  // The Job pod running this attempt; null when queued or released, so a
+  // pod's active count reflects live runs.
+  podId: uuid("pod_id"),
+  // Retry affinity — the last pod that ran this, even after release.
+  lastPodId: uuid("last_pod_id"),
+  // Local runs (the Job's run_target = "local"): the local_terminals row
+  // executing this attempt. Soft pointer, replaced on retry.
+  localTerminalId: uuid("local_terminal_id"),
+  retryCount: integer("retry_count").notNull().default(0),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  // Control plane: declarative user intent. Reconciler observes and clears.
+  controlIntent: text("control_intent"), // "cancel" | "retry" | "resume" | "restart" | null
+  // Control plane: durable reconcile backoff.
+  reconcileBackoffUntil: timestamp("reconcile_backoff_until", { withTimezone: true }),
+  reconcileAttempts: integer("reconcile_attempts").notNull().default(0),
+  // Scoping and identity, from the Job when the run is made.
+  workspaceId: uuid("workspace_id"),
+  ownerUserId: uuid("owner_user_id"),
+  // What the attempt actually ran: the rendered prompt and the agent.
+  prompt: text("prompt"),
+  agentType: text("agent_type"),
+  // Stall detection: the attempt's last agent event.
+  lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 // ── Connection Providers (catalog) ──────────────────────────────────────────
 

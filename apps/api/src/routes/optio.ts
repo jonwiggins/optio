@@ -213,7 +213,7 @@ export async function optioRoutes(rawApp: FastifyInstance) {
           count: string;
         }>(sql`
         SELECT state, COUNT(*)::text AS count
-        FROM tasks
+        FROM repo_tasks
         WHERE 1=1 ${wsFilter}
           AND state IN ('running', 'queued', 'provisioning', 'needs_attention', 'pr_opened')
         GROUP BY state
@@ -232,7 +232,7 @@ export async function optioRoutes(rawApp: FastifyInstance) {
         SELECT
           COUNT(*) FILTER (WHERE state = 'failed' AND updated_at >= CURRENT_DATE)::text AS failed_today,
           COUNT(*) FILTER (WHERE state = 'completed' AND updated_at >= CURRENT_DATE)::text AS completed_today
-        FROM tasks
+        FROM repo_tasks
         WHERE 1=1 ${wsFilter}
       `);
 
@@ -264,9 +264,9 @@ export async function optioRoutes(rawApp: FastifyInstance) {
         // Queue depth: tasks in queued + provisioning state
         const queueDepth = (taskCountMap["queued"] ?? 0) + (taskCountMap["provisioning"] ?? 0);
 
-        // Cost today
+        // Cost today: every run's — repo tasks and Job runs alike
         const [costRow] = await db.execute<{ cost_today: string }>(sql`
-        SELECT COALESCE(SUM(CAST(cost_usd AS NUMERIC)), 0)::text AS cost_today
+        SELECT COALESCE(SUM(CAST(NULLIF(cost_usd, '') AS NUMERIC)), 0)::text AS cost_today
         FROM tasks
         WHERE cost_usd IS NOT NULL
           AND created_at >= CURRENT_DATE

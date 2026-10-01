@@ -1310,7 +1310,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                     type="text"
                     value={draft.name}
                     onChange={(e) => setDraft({ name: e.target.value })}
-                    placeholder={edit ? String(edit.row.name ?? edit.row.title ?? "") : autoName}
+                    placeholder={edit ? String(edit.row.name ?? "") : autoName}
                     className={INPUT}
                   />
                   <p className="text-xs text-text-muted/60 mt-1">

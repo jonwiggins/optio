@@ -5,7 +5,7 @@
  * triggers that start it. See services/work-service.ts (reading),
  * services/work-write-service.ts (writing), and docs/tasks.md.
  */
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { inView, type TriggerTargetType } from "@optio/shared";
@@ -14,6 +14,7 @@ import * as workWrite from "../services/work-write-service.js";
 import * as triggerService from "../services/trigger-service.js";
 import { TRIGGER_TARGET } from "../services/work-definition-service.js";
 import { getPersistentAgentScoped } from "../services/persistent-agent-service.js";
+import { workActor, workChangeError } from "../services/work-ownership.js";
 import { logAction } from "../services/optio-action-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
@@ -82,6 +83,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
         response: {
           201: WorkCreatedSchema,
           400: WorkErrorSchema,
+          403: WorkErrorSchema,
           409: WorkErrorSchema,
         },
       },
@@ -142,6 +144,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
         response: {
           200: WorkCreatedSchema,
           400: WorkErrorSchema,
+          403: WorkErrorSchema,
           404: WorkErrorSchema,
           409: WorkErrorSchema,
         },
@@ -167,11 +170,14 @@ export async function workRoutes(rawApp: FastifyInstance) {
           "go with it; tasks and terminals a definition started stay. Requires `member` role.",
         tags: ["Work"],
         params: IdParamsSchema,
-        response: { 204: z.null(), 404: ErrorResponseSchema },
+        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
-      const deleted = await workWrite.deleteWork(req.params.id, actorOf(req));
+      const deleted = await withWorkErrors(reply, () =>
+        workWrite.deleteWork(req.params.id, actorOf(req)),
+      );
+      if (deleted === null) return;
       if (!deleted) return reply.status(404).send({ error: "Work not found" });
       reply.status(204).send(null);
     },
@@ -200,15 +206,41 @@ export async function workRoutes(rawApp: FastifyInstance) {
 
   // ── Triggers: the When of a definition or a persistent agent ──────────────
 
-  /** Where an id's triggers are filed, if it is work that takes them and the caller can see it. */
+  /**
+   * Where an id's triggers are filed, if it is work that takes them and the
+   * caller can see it, and whose it is (personal work's triggers are its
+   * owner's to change).
+   */
   async function triggerTarget(
     id: string,
-    req: { user?: { id: string; workspaceId?: string | null } },
-  ): Promise<{ targetType: TriggerTargetType; targetId: string } | null> {
-    const definition = await workWrite.getOwnDefinition(id, actorOf(req));
-    if (definition) return { targetType: TRIGGER_TARGET[definition.kind], targetId: id };
+    req: FastifyRequest,
+  ): Promise<{
+    targetType: TriggerTargetType;
+    targetId: string;
+    /** The 403 for changing its triggers, if the caller may not. */
+    changeError(): Promise<string | null>;
+  } | null> {
+    const actor = workActor(req);
+    const definition = await workWrite.getOwnDefinition(id, actor);
+    if (definition) {
+      return {
+        targetType: TRIGGER_TARGET[definition.kind],
+        targetId: id,
+        changeError: () =>
+          workWrite.assertMayChange(definition, actor, "edit").then(
+            () => null,
+            (err: unknown) =>
+              err instanceof workWrite.WorkError ? err.message : Promise.reject(err),
+          ),
+      };
+    }
     const agent = await getPersistentAgentScoped(id, req.user?.workspaceId ?? null);
-    return agent ? { targetType: "persistent_agent", targetId: id } : null;
+    if (!agent) return null;
+    return {
+      targetType: "persistent_agent",
+      targetId: id,
+      changeError: () => workChangeError(agent.ownerUserId, actor, "edit"),
+    };
   }
 
   app.get(
@@ -244,6 +276,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
         response: {
           201: WorkTriggerResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
         },
@@ -252,6 +285,8 @@ export async function workRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const target = await triggerTarget(req.params.id, req);
       if (!target) return reply.status(404).send({ error: "Work not found" });
+      const forbidden = await target.changeError();
+      if (forbidden) return reply.status(403).send({ error: forbidden });
       const input = req.body;
       const problem = triggerService.validateTriggerConfig(input.type, input.config);
       if (problem) return reply.status(400).send({ error: problem });
@@ -278,6 +313,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
         response: {
           200: WorkTriggerResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
         },
@@ -293,6 +329,8 @@ export async function workRoutes(rawApp: FastifyInstance) {
           req.params.triggerId,
         ));
       if (!existing) return reply.status(404).send({ error: "Trigger not found" });
+      const forbidden = await target!.changeError();
+      if (forbidden) return reply.status(403).send({ error: forbidden });
       if (req.body.config) {
         const problem = triggerService.validateTriggerConfig(existing.type, req.body.config);
         if (problem) return reply.status(400).send({ error: problem });
@@ -317,7 +355,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
         summary: "Delete a trigger",
         tags: ["Work"],
         params: TriggerParamsSchema,
-        response: { 204: z.null(), 404: ErrorResponseSchema },
+        response: { 204: z.null(), 403: ErrorResponseSchema, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
@@ -330,6 +368,8 @@ export async function workRoutes(rawApp: FastifyInstance) {
           req.params.triggerId,
         ));
       if (!existing) return reply.status(404).send({ error: "Trigger not found" });
+      const forbidden = await target!.changeError();
+      if (forbidden) return reply.status(403).send({ error: forbidden });
       await triggerService.deleteTrigger(existing.id);
       reply.status(204).send(null);
     },
@@ -353,4 +393,4 @@ function scopeOf(req: { user?: { id: string; workspaceId?: string | null } }) {
   return { workspaceId: req.user?.workspaceId ?? null, userId: req.user?.id ?? null };
 }
 
-const actorOf = scopeOf;
+const actorOf = workActor;

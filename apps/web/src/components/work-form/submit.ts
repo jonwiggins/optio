@@ -1,16 +1,16 @@
 import {
   getProviderCatalog,
-  localAgentParams,
   providerForAgentType,
   type WorkFormDefaults,
+  type WorkSpec,
 } from "@optio/shared";
 import { api } from "@/lib/api-client";
-import { runLocationPayload } from "@/components/run-location-picker";
 import { defaultAgentsMd } from "@/lib/persistent-agent-defaults";
 import {
   deriveKind,
   effectiveOwner,
   isEventWhen,
+  isLocal,
   isPodWork,
   slugify,
   takesOwner,
@@ -99,20 +99,6 @@ export function ownership(d: WorkDraft): {
   };
 }
 
-/**
- * A repo row's PR follow-through: "Works until merged" resumes (and merges,
- * unless you'd rather) whatever the repo says; "Exit when done" leaves both
- * to the repo (null).
- */
-export function followThroughFor(d: WorkDraft): {
-  autoResume: boolean | null;
-  autoMerge: boolean | null;
-} {
-  return d.then === "until-merged"
-    ? { autoResume: true, autoMerge: d.mergeWhenReady }
-    : { autoResume: null, autoMerge: null };
-}
-
 /** The model the draft picked for its runtime, for rows that carry just a model. */
 export function pickedModel(d: WorkDraft): string | undefined {
   if (d.runtime === TERMINAL) return undefined;
@@ -121,379 +107,118 @@ export function pickedModel(d: WorkDraft): string | undefined {
   return typeof v === "string" && v !== "" ? v : undefined;
 }
 
-/**
- * Create the blueprint row, then its trigger. A rejected trigger (the API
- * validates event configs) deletes the row again so nothing half-made is
- * left behind, and the error surfaces to the form.
- */
-async function withTrigger<T>(
-  create: () => Promise<T>,
-  attach: (row: T) => Promise<unknown>,
-  discard: (row: T) => Promise<unknown>,
-): Promise<T> {
-  const row = await create();
-  try {
-    await attach(row);
-  } catch (err) {
-    await discard(row).catch(() => {});
-    // The row was made; a rejected trigger is never a name clash.
-    throw markNotNameClash(err);
-  }
-  return row;
-}
-
-/** Only the row's own create can 409 on its name; anything after it must not be retried as one. */
-const NOT_NAME_CLASH = Symbol("notNameClash");
-function markNotNameClash(err: unknown): unknown {
-  if (err && typeof err === "object") (err as Record<symbol, boolean>)[NOT_NAME_CLASH] = true;
-  return err;
-}
+/** Only the work's own create can 409 on its name (or a webhook path, which a new name doesn't fix). */
 function isNameClash(err: unknown): boolean {
-  const e = err as { status?: number; [NOT_NAME_CLASH]?: boolean } | null;
-  return e?.status === 409 && !e?.[NOT_NAME_CLASH];
+  const e = err as { status?: number; details?: string } | null;
+  return e?.status === 409 && e?.details === "name_taken";
 }
 
 /**
- * Turn a draft into the row(s) its kind needs. Each branch calls the same
- * service the dedicated form for that kind calls today, so nothing about how
- * a Task, Job, automation, terminal, or agent runs changes — only where you
- * make it.
+ * The draft as the five attributes `/api/work` takes. The server derives
+ * the kind from them (the same rule as `deriveKind`) and creates the row,
+ * its trigger, and — for a Job started now — its first run, together.
+ */
+export function specFor(d: WorkDraft, ctx: { repoUrl: string; name: string }): WorkSpec {
+  const kind = deriveKind(d);
+  const local = isLocal(d);
+  const trigger = triggerFor(d);
+  const options = setOptions(d);
+  return {
+    name: ctx.name,
+    description: d.description.trim() || null,
+    when: trigger ? { type: trigger.type, config: trigger.config } : { type: "manual" },
+    where: {
+      runTarget: d.location.runTarget,
+      // A pod session is always in a repo pod; otherwise the repo is "with repo".
+      repoUrl: (d.withRepo || kind === "pod-session") && ctx.repoUrl ? ctx.repoUrl : null,
+      // On a machine, a base branch is also what says "on a new branch".
+      repoBranch: d.withRepo ? d.repoBranch || "main" : null,
+      localHostId: local ? d.location.localHostId || null : null,
+      localDir: local ? d.location.localDir || null : null,
+    },
+    who: {
+      runtime: d.runtime === TERMINAL ? null : d.runtime,
+      agentOptions: d.runtime === TERMINAL ? null : options,
+      model: pickedModel(d) ?? null,
+    },
+    what: { prompt: d.prompt.trim(), runTitle: runNameFor(d) },
+    then: d.then,
+    mergeWhenReady: d.mergeWhenReady,
+    maxRetries: d.maxRetries,
+    priority: d.priority,
+    ...(kind === "repo-task" && d.dependsOn.length ? { dependsOn: d.dependsOn } : {}),
+    ...(kind === "persistent-agent"
+      ? {
+          agent: {
+            slug: d.agent.slug.trim() || slugify(ctx.name),
+            systemPrompt: d.agent.systemPrompt || null,
+            agentsMd: d.agent.agentsMd || defaultAgentsMd(),
+            podLifecycle: d.agent.podLifecycle,
+          },
+        }
+      : {}),
+    ...ownership(d),
+  };
+}
+
+/** The toast a kind gets once it exists. */
+function toastFor(d: WorkDraft, kind: Created["kind"], name: string, started: boolean): string {
+  switch (kind) {
+    case "repo-task":
+      return d.then === "until-merged"
+        ? `${name} started — it will work the PR until it merges`
+        : `${name} started — it will open a PR`;
+    case "local-terminal":
+    case "pod-session":
+      return `${name} opened`;
+    case "persistent-agent":
+      return `${name} created`;
+    default:
+      return started ? `${name} started` : `${name} saved`;
+  }
+}
+
+/**
+ * Create the work the draft describes (`POST /api/work`). Jobs, scheduled
+ * Tasks, and agents have unique names, and "Session N" is only a count: on
+ * a name clash keep the user's own name as an error, but bump an automatic
+ * one and try again.
  */
 export async function createWork(
   d: WorkDraft,
   ctx: { repoUrl: string; autoName: string },
 ): Promise<Created> {
-  // Jobs, scheduled Tasks, and agents have unique names per workspace, and
-  // "Session N" is only a count: on a name clash keep the user's own name
-  // as an error, but bump an automatic one and try again.
   const auto = !d.name.trim();
   for (let attempt = 1; ; attempt++) {
     const name =
       auto && attempt > 1 ? `${ctx.autoName} (${attempt})` : d.name.trim() || ctx.autoName;
     try {
-      return await createOnce(d, { ...ctx, name });
+      const created = await api.createWork(specFor(d, { repoUrl: ctx.repoUrl, name }));
+      return {
+        kind: created.kind,
+        href: created.run?.href ?? created.href,
+        toast: toastFor(d, created.kind, name, !!created.run),
+      };
     } catch (err) {
       if (!auto || !isNameClash(err) || attempt >= 5) throw err;
     }
   }
 }
 
-async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }): Promise<Created> {
-  const kind = deriveKind(d);
-  const { name } = ctx;
-  const runName = runNameFor(d);
-  const prompt = d.prompt.trim();
-  const trigger = triggerFor(d);
-  const location = runLocationPayload(d.location);
-  const options = setOptions(d);
-  const model = pickedModel(d);
-  const owned = ownership(d);
-  const { repoUrl } = ctx;
-
-  switch (kind) {
-    case "repo-task": {
-      const { task } = await api.createTaskUnified({
-        type: "repo-task",
-        title: name,
-        prompt,
-        description: d.description || undefined,
-        agentType: d.runtime,
-        maxRetries: d.maxRetries,
-        priority: d.priority,
-        repoUrl,
-        repoBranch: d.repoBranch,
-        ...(d.then === "until-merged" ? followThroughFor(d) : {}),
-        ...(options ? { metadata: { agentOptions: options } } : {}),
-        ...(d.dependsOn.length ? { dependsOn: d.dependsOn } : {}),
-        ...location,
-        ...owned,
-      });
-      return {
-        kind,
-        href: `/tasks/${task.id}`,
-        toast:
-          d.then === "until-merged"
-            ? `${name} started — it will work the PR until it merges`
-            : `${name} started — it will open a PR`,
-      };
-    }
-
-    case "repo-blueprint": {
-      const task = await withTrigger(
-        async () =>
-          (
-            await api.createTaskUnified({
-              type: "repo-blueprint",
-              title: runName ?? name,
-              name,
-              prompt,
-              description: d.description || undefined,
-              agentType: d.runtime,
-              agentOptions: options,
-              maxRetries: d.maxRetries,
-              priority: d.priority,
-              repoUrl,
-              repoBranch: d.repoBranch,
-              ...(d.then === "until-merged" ? followThroughFor(d) : {}),
-              enabled: true,
-              ...location,
-              ...owned,
-            })
-          ).task,
-        (t) => (trigger ? api.createTaskTrigger(t.id, trigger) : Promise.resolve()),
-        (t) => api.deleteTaskConfig(t.id),
-      );
-      return { kind, href: `/tasks/scheduled/${task.id}`, toast: `${name} saved` };
-    }
-
-    case "standalone": {
-      const task = await withTrigger(
-        async () =>
-          (
-            await api.createTaskUnified({
-              type: "standalone",
-              title: name,
-              name,
-              ...(runName ? { runTitle: runName } : {}),
-              prompt,
-              description: d.description || undefined,
-              agentType: d.runtime,
-              ...(model ? { model } : {}),
-              agentOptions: options,
-              maxRetries: d.maxRetries,
-              enabled: true,
-              ...location,
-              ...owned,
-            })
-          ).task,
-        (t) => (trigger ? api.createTaskTrigger(t.id, trigger) : Promise.resolve()),
-        (t) => api.deleteWorkflow(t.id),
-      );
-      if (trigger) return { kind, href: `/jobs/${task.id}`, toast: `${name} saved` };
-      const run = await api.createTaskRun(task.id).catch((err) => {
-        throw markNotNameClash(err);
-      });
-      return { kind, href: `/jobs/${task.id}/runs/${run.runId}`, toast: `${name} started` };
-    }
-
-    case "local-blueprint": {
-      const blueprint = await withTrigger(
-        async () =>
-          (
-            await api.createLocalBlueprint({
-              name,
-              description: d.description || undefined,
-              hostId: d.location.localHostId,
-              dir: d.location.localDir,
-              ...(d.withRepo && repoUrl ? { repoUrl } : {}),
-              // "New branch": the spawn wraps the prompt with branch + PR
-              // instructions off this base.
-              ...(d.withRepo ? { baseBranch: d.repoBranch || "main" } : {}),
-              commandTemplate: prompt,
-              ...(runName ? { runTitle: runName } : {}),
-              agent: d.runtime === TERMINAL ? null : (d.runtime as "claude-code"),
-              spawnMode: "auto",
-              sessionMode: d.then === "waits-for-me" ? "interactive" : "headless",
-              // Model, effort, permissions: what a run on a machine takes.
-              agentOptions: d.runtime === TERMINAL ? null : options,
-            })
-          ).blueprint,
-        (b) => (trigger ? api.createLocalBlueprintTrigger(b.id, trigger) : Promise.resolve()),
-        (b) => api.deleteLocalBlueprint(b.id),
-      );
-      return { kind, href: `/local/automations/${blueprint.id}`, toast: `${name} saved` };
-    }
-
-    case "local-terminal": {
-      const { terminal } = await api.createLocalTerminal({
-        hostId: d.location.localHostId,
-        dir: d.location.localDir,
-        title: name,
-        spec:
-          d.runtime === TERMINAL
-            ? { kind: "shell" }
-            : {
-                kind: "agent",
-                agent: d.runtime,
-                ...(prompt ? { prompt } : {}),
-                // Model, effort, and the permission mode (Claude Code's
-                // --permission-mode, Codex's --yolo).
-                ...localAgentParams(d.runtime, options),
-                // "New branch": the server wraps the prompt with branch + PR
-                // instructions off this base.
-                ...(d.withRepo ? { baseBranch: d.repoBranch || "main" } : {}),
-              },
-        // The model provider (if any) rides in the agent options.
-        ...(d.runtime !== TERMINAL && options?.modelProvider
-          ? { agentOptions: { modelProvider: options.modelProvider } }
-          : {}),
-      });
-      return { kind, href: `/local/${terminal.id}`, toast: `${name} opened` };
-    }
-
-    case "pod-session": {
-      // A pod session is a terminal plus a Claude Code chat in a repo pod; the
-      // runtime is fixed and the first message is typed in the session, so
-      // only the repo and the name travel.
-      const { session } = await api.createSession({ repoUrl, title: name });
-      return { kind, href: `/sessions/${session.id}`, toast: `${name} opened` };
-    }
-
-    case "persistent-agent": {
-      const agent = await withTrigger(
-        async () =>
-          (
-            await api.createPersistentAgent({
-              slug: d.agent.slug.trim() || slugify(name),
-              name,
-              description: d.description || undefined,
-              agentRuntime: d.runtime,
-              model: model ?? null,
-              agentOptions: options,
-              systemPrompt: d.agent.systemPrompt || null,
-              agentsMd: d.agent.agentsMd || defaultAgentsMd(),
-              initialPrompt: prompt,
-              podLifecycle: d.agent.podLifecycle,
-              ...owned,
-            })
-          ).agent,
-        (a) => (trigger ? api.createPersistentAgentTrigger(a.id, trigger) : Promise.resolve()),
-        (a) => api.deletePersistentAgent(a.id),
-      );
-      return { kind, href: `/agents/${agent.id}`, toast: `${name} created` };
-    }
-  }
-}
-
 // ── Editing ──────────────────────────────────────────────────────────────────
 
-interface TriggerOps {
-  create: (t: { type: string; config: Record<string, unknown>; enabled: true }) => Promise<unknown>;
-  update: (triggerId: string, data: { config: Record<string, unknown> }) => Promise<unknown>;
-  remove: (triggerId: string) => Promise<unknown>;
-}
-
 /**
- * Bring the one trigger the form edits in line with the draft. Same type:
- * patch its config in place (a webhook keeps its path, a schedule its id).
- * Different type: create the new one first, then retire the old, so a
- * rejected config never leaves the row with no trigger. Triggers the form
- * didn't load (a second one added elsewhere) are left alone.
- */
-async function syncTrigger(
-  target: EditTarget,
-  wanted: { type: string; config: Record<string, unknown> } | null,
-  ops: TriggerOps,
-): Promise<void> {
-  const current = target.trigger;
-  if (!wanted) {
-    if (current) await ops.remove(current.id);
-    return;
-  }
-  if (current && current.type === wanted.type) {
-    await ops.update(current.id, { config: wanted.config });
-    return;
-  }
-  await ops.create({ ...wanted, enabled: true });
-  if (current) await ops.remove(current.id);
-}
-
-/**
- * Save an edited draft back onto its row. The kind is fixed (the form refuses
- * answers that would change it), so this is the PATCH half of `createOnce`'s
- * branch for that kind plus a trigger sync. Returns where to go next.
+ * Save an edited draft back onto its definition (`PATCH /api/work/:id`).
+ * The kind is fixed (the form refuses answers that would change it, and so
+ * does the server); the trigger the form edits follows the When answer in
+ * the same transaction. Returns where to go next.
  */
 export async function updateWork(
   target: EditTarget,
   d: WorkDraft,
   ctx: { repoUrl: string },
 ): Promise<Created> {
-  const { id, kind } = target;
-  const name = d.name.trim() || target.row.name || target.row.title;
-  const runName = runNameFor(d);
-  const prompt = d.prompt.trim();
-  const trigger = triggerFor(d);
-  const location = runLocationPayload(d.location);
-  const options = setOptions(d);
-  const model = pickedModel(d);
-  const owned = ownership(d);
-  const { repoUrl } = ctx;
-  const wanted = trigger ? { type: trigger.type, config: trigger.config } : null;
-  const href = detailHref(target);
-
-  switch (kind) {
-    case "repo-blueprint": {
-      await api.updateTaskConfig(id, {
-        name,
-        title: runName ?? name,
-        prompt,
-        description: d.description || null,
-        agentType: d.runtime,
-        agentOptions: options,
-        maxRetries: d.maxRetries,
-        priority: d.priority,
-        repoUrl,
-        repoBranch: d.repoBranch,
-        // Always sent, so switching back to "Exit when done" hands the PR
-        // back to the repo's settings.
-        ...followThroughFor(d),
-        ...location,
-        ...owned,
-      });
-      await syncTrigger(target, wanted, {
-        create: (t) => api.createTaskTrigger(id, t as Parameters<typeof api.createTaskTrigger>[1]),
-        update: (tid, data) => api.updateTaskTrigger(id, tid, data),
-        remove: (tid) => api.deleteTaskTrigger(id, tid),
-      });
-      return { kind, href, toast: `${name} saved` };
-    }
-
-    case "standalone": {
-      await api.updateWorkflow(id, {
-        name,
-        runTitle: runName,
-        promptTemplate: prompt,
-        // The Job PATCH takes a string here (blank clears it), not null.
-        description: d.description,
-        agentRuntime: d.runtime,
-        model: model ?? null,
-        agentOptions: options,
-        maxRetries: d.maxRetries,
-        ...location,
-        ...owned,
-      });
-      await syncTrigger(target, wanted, {
-        create: (t) => api.createTaskTrigger(id, t as Parameters<typeof api.createTaskTrigger>[1]),
-        update: (tid, data) => api.updateTaskTrigger(id, tid, data),
-        remove: (tid) => api.deleteTaskTrigger(id, tid),
-      });
-      return { kind, href, toast: `${name} saved` };
-    }
-
-    case "local-blueprint": {
-      await api.updateLocalBlueprint(id, {
-        name,
-        description: d.description || null,
-        hostId: d.location.localHostId || null,
-        dir: d.location.localDir || null,
-        repoUrl: d.withRepo && repoUrl ? repoUrl : null,
-        baseBranch: d.withRepo ? d.repoBranch || "main" : null,
-        commandTemplate: prompt,
-        runTitle: runName,
-        agent: d.runtime === TERMINAL ? null : (d.runtime as "claude-code"),
-        sessionMode: d.then === "waits-for-me" ? "interactive" : "headless",
-        agentOptions: d.runtime === TERMINAL ? null : options,
-      });
-      await syncTrigger(target, wanted, {
-        create: (t) =>
-          api.createLocalBlueprintTrigger(
-            id,
-            t as Parameters<typeof api.createLocalBlueprintTrigger>[1],
-          ),
-        update: (tid, data) => api.updateLocalBlueprintTrigger(id, tid, data),
-        remove: (tid) => api.deleteLocalBlueprintTrigger(id, tid),
-      });
-      return { kind, href, toast: `${name} saved` };
-    }
-  }
+  const name = d.name.trim() || target.row.name;
+  await api.updateWork(target.id, specFor(d, { repoUrl: ctx.repoUrl, name }));
+  return { kind: target.kind, href: detailHref(target), toast: `${name} saved` };
 }

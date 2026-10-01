@@ -33,17 +33,16 @@ import { pgIso } from "../utils/pg-timestamp.js";
 //   - `pr_review_runs`: runs of an external PR review
 //   - `interactive_sessions`: a pod session's chat spend
 const costRows = sql`(
-  SELECT id, title, repo_url, task_type, state::text AS state, cost_usd, model_used,
-    input_tokens, output_tokens, created_at, workspace_id,
-    '/tasks/' || id AS href
-  FROM tasks
-  UNION ALL
-  SELECT r.id, COALESCE(r.title, w.name) AS title, 'job:' || w.name AS repo_url,
-    'job' AS task_type, r.state, r.cost_usd, r.model_used, r.input_tokens, r.output_tokens,
-    r.created_at, w.workspace_id,
-    '/jobs/' || w.id || '/runs/' || r.id AS href
-  FROM workflow_runs r
-  JOIN work_definitions w ON w.id = r.workflow_id
+  SELECT t.id,
+    CASE WHEN t.kind = 'standalone' THEN COALESCE(t.title, w.name) ELSE t.title END AS title,
+    CASE WHEN t.kind = 'standalone' THEN 'job:' || w.name ELSE t.repo_url END AS repo_url,
+    CASE WHEN t.kind = 'standalone' THEN 'job' ELSE t.task_type END AS task_type,
+    t.state::text AS state, t.cost_usd, t.model_used, t.input_tokens, t.output_tokens,
+    t.created_at, t.workspace_id,
+    CASE WHEN t.kind = 'standalone' THEN '/jobs/' || t.work_id || '/runs/' || t.id
+      ELSE '/tasks/' || t.id END AS href
+  FROM tasks t
+  LEFT JOIN work_definitions w ON t.kind = 'standalone' AND w.id = t.work_id
   UNION ALL
   SELECT id, title, dir AS repo_url, 'local-session' AS task_type,
     CASE
