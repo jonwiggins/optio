@@ -13,6 +13,7 @@ import {
 } from "@optio/shared";
 import { requireRole } from "../plugins/auth.js";
 import { getGitHubToken } from "../services/github-token-service.js";
+import { browseGitHubRepos } from "../services/github-repo-browse-service.js";
 import { isSsrfSafeUrl } from "../utils/ssrf.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
@@ -117,10 +118,86 @@ const updateRepoSchema = z
 
 const RepoListResponseSchema = z.object({ repos: z.array(RepoSchema) });
 const RepoResponseSchema = z.object({ repo: RepoSchema });
+const BrowseQuerySchema = z
+  .object({
+    q: z.string().max(200).optional().describe("Filter by owner/name or description"),
+    page: z.coerce.number().int().min(1).max(1000).optional().default(1),
+    perPage: z.coerce.number().int().min(1).max(100).optional().default(30),
+  })
+  .describe("Search + paging for the accessible-repos picker");
+
+const BrowseResponseSchema = z
+  .object({
+    repos: z.array(
+      z.object({
+        fullName: z.string(),
+        cloneUrl: z.string(),
+        htmlUrl: z.string(),
+        defaultBranch: z.string(),
+        isPrivate: z.boolean(),
+        description: z.string().nullable(),
+        pushedAt: z.string().nullable(),
+      }),
+    ),
+    page: z.number(),
+    perPage: z.number(),
+    hasMore: z.boolean(),
+    truncated: z.boolean().optional(),
+    error: z.string().optional(),
+  })
+  .describe("GitHub repositories the server's credentials can access");
+
 const DetectResponseSchema = z.object({ detected: z.unknown() });
 
 export async function repoRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
+
+  app.get(
+    "/api/repos/github/accessible",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "browseAccessibleGitHubRepos",
+        summary: "Browse GitHub repos the server can access",
+        description:
+          "List the GitHub repositories reachable with the server's stored " +
+          "credentials (GitHub App installation, else the GITHUB_TOKEN PAT, " +
+          "including organization repos), for the Add repository picker. " +
+          "`q` filters by owner/name or description. Requires `member` role.",
+        tags: ["Repos & Integrations"],
+        querystring: BrowseQuerySchema,
+        response: { 200: BrowseResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const { q, page, perPage } = req.query;
+      let token: string;
+      try {
+        token = await getGitHubToken({ server: true, workspaceId: req.user?.workspaceId ?? null });
+      } catch {
+        return reply.send({
+          repos: [],
+          page,
+          perPage,
+          hasMore: false,
+          error: "No GitHub credentials configured — add a GITHUB_TOKEN secret or a GitHub App.",
+        });
+      }
+      try {
+        const result = await browseGitHubRepos(token, { q, page, perPage });
+        reply.send({ ...result, page, perPage });
+      } catch (err) {
+        req.log.warn({ err }, "Browsing accessible GitHub repos failed");
+        reply.send({
+          repos: [],
+          page,
+          perPage,
+          hasMore: false,
+          error: err instanceof Error ? err.message : "Failed to list repositories",
+        });
+      }
+    },
+  );
 
   app.get(
     "/api/repos",
