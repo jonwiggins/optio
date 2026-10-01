@@ -299,11 +299,3 @@ export async function cleanupIdlePersistentAgentPods(): Promise<number> {
   }
   return reaped;
 }
-
-export async function listPodsForAgent(agentId: string) {
-  return db
-    .select()
-    .from(agentPods)
-    .where(and(eq(agentPods.pool, "persistent-agent"), eq(agentPods.poolKey, agentId)))
-    .orderBy(desc(agentPods.createdAt));
-}

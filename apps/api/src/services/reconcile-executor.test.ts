@@ -128,7 +128,6 @@ function repoSnapshot(overrides: Partial<WorldSnapshot> = {}): WorldSnapshot {
       parentTaskId: null,
       blocksParent: false,
       workspaceId: "ws-1",
-      workflowRunId: null,
       runTarget: "cluster",
     },
     status: {

@@ -109,7 +109,6 @@ import {
   execRunInPod,
   releaseRun,
   cleanupIdleWorkflowPods,
-  listWorkflowPods,
   type WorkflowPod,
 } from "./workflow-pool-service.js";
 
@@ -241,23 +240,6 @@ describe("cleanupIdleWorkflowPods", () => {
     expect(cleaned).toBe(1);
     expect(mockRuntimeDestroy).not.toHaveBeenCalled();
     expect(podPool.deletePod).toHaveBeenCalledWith("pod-1");
-  });
-});
-
-// ── listWorkflowPods ────────────────────────────────────────────────
-
-describe("listWorkflowPods", () => {
-  it("returns all pods in the standalone (Job) pool", async () => {
-    const mockPods = [
-      workflowPod({ id: "pod-1", instanceIndex: 0, podName: "p1", state: "ready" }),
-      workflowPod({ id: "pod-2", instanceIndex: 1, podName: "p2", state: "provisioning" }),
-    ];
-
-    podPool.listPods.mockResolvedValueOnce(mockPods);
-
-    const result = await listWorkflowPods();
-    expect(result).toEqual(mockPods);
-    expect(podPool.listPods).toHaveBeenCalledWith("standalone");
   });
 });
 

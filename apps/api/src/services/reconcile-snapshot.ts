@@ -223,7 +223,6 @@ function loadRepoRun(row: typeof tasks.$inferSelect, ref: RunRef): Run {
     parentTaskId: row.parentTaskId ?? null,
     blocksParent: row.blocksParent,
     workspaceId: row.workspaceId ?? null,
-    workflowRunId: row.workflowRunId ?? null,
     runTarget: row.runTarget === "local" ? "local" : "cluster",
   };
   const status: RepoRunStatus = {

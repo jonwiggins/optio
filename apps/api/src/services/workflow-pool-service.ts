@@ -257,16 +257,6 @@ export async function cleanupIdleWorkflowPods(): Promise<number> {
   return cleaned;
 }
 
-/** Every Job pod. */
-export async function listWorkflowPods(): Promise<WorkflowPod[]> {
-  return podPool.listPods("standalone");
-}
-
-/** One Job's pods. */
-export async function listWorkflowPodsForWorkflow(workflowId: string): Promise<WorkflowPod[]> {
-  return podPool.listPods("standalone", workflowId);
-}
-
 /**
  * Repair each Job pod's active count from the runs actually holding it
  * (running / provisioning with this pod_id). Mirrors
