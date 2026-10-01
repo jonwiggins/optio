@@ -64,11 +64,14 @@ if [ "$QUICK" = false ]; then
     echo "   Rebuilding agent images (new presets detected)..."
     docker build -t optio-base:latest -f images/base.Dockerfile . -q
     docker tag optio-base:latest optio-agent:latest
-    docker build -t optio-node:latest -f images/node.Dockerfile . -q &
-    docker build -t optio-python:latest -f images/python.Dockerfile . -q &
-    docker build -t optio-go:latest -f images/go.Dockerfile . -q &
-    docker build -t optio-rust:latest -f images/rust.Dockerfile . -q &
-    wait
+    # Wait for these four by pid: a bare `wait` would also reap the API and
+    # web builds, and the `wait $API_PID` below would then fail.
+    AGENT_PIDS=()
+    docker build -t optio-node:latest -f images/node.Dockerfile . -q & AGENT_PIDS+=($!)
+    docker build -t optio-python:latest -f images/python.Dockerfile . -q & AGENT_PIDS+=($!)
+    docker build -t optio-go:latest -f images/go.Dockerfile . -q & AGENT_PIDS+=($!)
+    docker build -t optio-rust:latest -f images/rust.Dockerfile . -q & AGENT_PIDS+=($!)
+    for pid in "${AGENT_PIDS[@]}"; do wait "$pid" || { echo "Agent image build failed"; exit 1; }; done
     docker build -t optio-full:latest -f images/full.Dockerfile . -q
   fi
 fi
