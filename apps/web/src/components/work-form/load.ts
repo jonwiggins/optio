@@ -126,7 +126,9 @@ export function draftFromRow(kind: EditableKind, row: any, trigger: any | null):
         runtime: String(row.agentType ?? "claude-code"),
         agentOptions: optionsFromRow(String(row.agentType ?? "claude-code"), row),
         prompt: String(row.prompt ?? ""),
-        then: "exits",
+        // A row saved with its own follow-through is "Works until merged".
+        then: row.autoResume === true ? "until-merged" : "exits",
+        mergeWhenReady: row.autoMerge !== false,
         priority: typeof row.priority === "number" ? row.priority : EMPTY_DRAFT.priority,
         maxRetries: typeof row.maxRetries === "number" ? row.maxRetries : EMPTY_DRAFT.maxRetries,
       });

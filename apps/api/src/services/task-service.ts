@@ -55,6 +55,8 @@ export async function createTask(input: CreateTaskInput & { workspaceId?: string
       localHostId: input.runTarget === "local" ? (input.localHostId ?? null) : null,
       localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
+      autoResume: input.autoResume ?? null,
+      autoMerge: input.autoMerge ?? null,
     })
     .returning();
 

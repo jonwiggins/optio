@@ -1572,6 +1572,9 @@ export const api = {
     metadata?: Record<string, unknown>;
     dependsOn?: string[];
     enabled?: boolean;
+    /** Repo kinds: PR follow-through over the repo's settings (null = the repo's). */
+    autoResume?: boolean | null;
+    autoMerge?: boolean | null;
     // Run location: an Optio pod (default) or the caller's own machine.
     runTarget?: "cluster" | "local";
     localHostId?: string | null;
@@ -1687,6 +1690,9 @@ export const api = {
       localHostId: string | null;
       localDir: string | null;
       localSessionMode: "headless" | "interactive" | null;
+      /** PR follow-through for spawned tasks; null = the repo's settings. */
+      autoResume: boolean | null;
+      autoMerge: boolean | null;
     }>,
   ) =>
     request<{ taskConfig: any }>(`/api/task-configs/${id}`, {

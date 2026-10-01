@@ -7,6 +7,7 @@ import {
   describe,
   deriveKind,
   eventGaps,
+  followThrough,
   missingFields,
   normalize,
   optionsFromRepo,
@@ -277,5 +278,95 @@ suite("optionsFromRepo", () => {
 
   it("never seeds Codex from Copilot's shared columns", () => {
     expect(optionsFromRepo("codex", repo)).toEqual({});
+  });
+});
+
+suite("Work until merged — PR follow-through", () => {
+  const base = { ...EMPTY_DRAFT, prompt: "p", repoUrl: "https://github.com/a/b" };
+
+  it("is offered for an agent with a repo, in a pod or on a new branch on a machine", () => {
+    expect(enabled(thenOptions(base))).toContain("until-merged");
+    expect(enabled(thenOptions(local(base)))).toContain("until-merged");
+    expect(enabled(thenOptions({ ...base, withRepo: false }))).not.toContain("until-merged");
+    expect(enabled(thenOptions(local({ ...base, withRepo: false })))).not.toContain("until-merged");
+    expect(enabled(thenOptions({ ...base, runtime: TERMINAL }))).not.toContain("until-merged");
+  });
+
+  it("is still a Task (or a scheduled Task), headless", () => {
+    const d = normalize({ ...base, then: "until-merged" });
+    expect(d.then).toBe("until-merged");
+    expect(deriveKind(d)).toBe("repo-task");
+    expect(deriveKind({ ...d, when: "ticket", trigger: { type: "ticket" } })).toBe(
+      "repo-blueprint",
+    );
+    expect(normalize(local(d)).location.localSessionMode).toBe("headless");
+  });
+
+  it("snaps back to Exit when done once the repo goes away", () => {
+    expect(normalize({ ...base, then: "until-merged", withRepo: false }).then).toBe("exits");
+  });
+
+  it("reads as a sentence", () => {
+    expect(text({ ...base, then: "until-merged" })).toBe(
+      "Started now, a Claude Code run in an Optio pod with https://github.com/a/b that opens a PR and keeps working on it until it merges.",
+    );
+    expect(text({ ...base, then: "until-merged", mergeWhenReady: false })).toMatch(
+      /keeps it green until you merge it\.$/,
+    );
+  });
+
+  it("the Assign to Optio preset is a ticket-labeled scheduled Task worked until merged", () => {
+    const preset = PRESETS.find((p) => p.id === "assign")!;
+    const d = normalize(preset.apply(EMPTY_DRAFT));
+    expect(d.when).toBe("ticket");
+    expect(d.trigger.ticketLabels).toEqual(["optio"]);
+    expect(d.then).toBe("until-merged");
+    expect(deriveKind(d)).toBe("repo-blueprint");
+  });
+
+  const on = (plan: ReturnType<typeof followThrough>) =>
+    plan!.steps.filter((s) => s.on).map((s) => s.key);
+
+  it("Exit when done shows the repo's settings", () => {
+    const plan = followThrough(base, { autoResume: false, autoMerge: false });
+    expect(plan!.fromRepo).toBe(true);
+    expect(on(plan)).toEqual(["pr", "done"]);
+    expect(
+      on(
+        followThrough(base, {
+          autoResume: true,
+          autoMerge: true,
+          reviewEnabled: true,
+          reviewTrigger: "on_ci_pass",
+        }),
+      ),
+    ).toEqual(["pr", "review", "ci", "changes", "merge", "done"]);
+  });
+
+  it("Work until merged resumes and merges whatever the repo says", () => {
+    const d = { ...base, then: "until-merged" as const };
+    const plan = followThrough(d, { autoResume: false, autoMerge: false, maxAutoResumes: 4 });
+    expect(plan!.fromRepo).toBe(false);
+    expect(on(plan)).toEqual(["pr", "ci", "changes", "merge", "done"]);
+    expect(plan!.steps.find((s) => s.key === "ci")!.detail).toMatch(/up to 4 times/);
+    expect(on(followThrough({ ...d, mergeWhenReady: false }, null))).toEqual([
+      "pr",
+      "ci",
+      "changes",
+      "done",
+    ]);
+  });
+
+  it("cautious mode holds the merge back and says why", () => {
+    const plan = followThrough({ ...base, then: "until-merged" }, { cautiousMode: true });
+    const merge = plan!.steps.find((s) => s.key === "merge")!;
+    expect(merge.on).toBe(false);
+    expect(merge.detail).toMatch(/cautious mode/);
+    expect(plan!.steps[0].label).toBe("Opens a draft PR");
+  });
+
+  it("only work that opens a PR has a plan", () => {
+    expect(followThrough({ ...base, withRepo: false }, null)).toBeNull();
+    expect(followThrough({ ...base, then: "waits-for-me" }, null)).toBeNull();
   });
 });

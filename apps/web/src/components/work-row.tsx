@@ -6,6 +6,7 @@ import {
   Bot,
   Clock,
   ExternalLink,
+  GitMerge,
   Laptop,
   LogOut,
   Pencil,
@@ -36,6 +37,7 @@ export const STATUS_DOT: Record<WorkStatus, string> = {
 
 const THEN_ICON = {
   exits: LogOut,
+  "until-merged": GitMerge,
   "waits-for-me": Terminal,
   "waits-for-messages": Bot,
 } as const;
@@ -77,9 +79,11 @@ export function WorkRowView({ row }: { row: WorkRow }) {
           label={
             row.then === "exits"
               ? "exits"
-              : row.then === "waits-for-me"
-                ? "waits for me"
-                : "persistent"
+              : row.then === "until-merged"
+                ? "until merged"
+                : row.then === "waits-for-me"
+                  ? "waits for me"
+                  : "persistent"
           }
         />
       </div>

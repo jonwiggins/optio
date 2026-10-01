@@ -306,3 +306,76 @@ describe("updateWork", () => {
     expect(saved.href).toBe("/local/automations/b-1");
   });
 });
+
+describe("Work until merged", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const draft: WorkDraft = normalize({
+    ...EMPTY_DRAFT,
+    prompt: "fix it",
+    repoUrl: "https://github.com/a/b",
+    then: "until-merged",
+  });
+
+  it("a Task carries its own follow-through", async () => {
+    api.createTaskUnified.mockResolvedValue({ task: { id: "t-1" } });
+    await createWork(draft, { repoUrl: "https://github.com/a/b", autoName: "Task 1" });
+    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
+      type: "repo-task",
+      autoResume: true,
+      autoMerge: true,
+    });
+  });
+
+  it("'you merge it' keeps resuming but doesn't merge", async () => {
+    api.createTaskUnified.mockResolvedValue({ task: { id: "t-1" } });
+    await createWork(
+      { ...draft, mergeWhenReady: false },
+      { repoUrl: "https://github.com/a/b", autoName: "Task 1" },
+    );
+    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
+      autoResume: true,
+      autoMerge: false,
+    });
+  });
+
+  it("Exit when done leaves the PR to the repo's settings", async () => {
+    api.createTaskUnified.mockResolvedValue({ task: { id: "t-1" } });
+    await createWork(
+      { ...draft, then: "exits" },
+      { repoUrl: "https://github.com/a/b", autoName: "Task 1" },
+    );
+    const body = api.createTaskUnified.mock.calls[0][0];
+    expect(body.autoResume).toBeUndefined();
+    expect(body.autoMerge).toBeUndefined();
+  });
+
+  it("a scheduled Task saves it, and switching back to Exit when done clears it", async () => {
+    const ticket = {
+      ...draft,
+      when: "ticket" as const,
+      trigger: { type: "ticket" as const, ticketSource: "github" as const },
+    };
+    api.createTaskUnified.mockResolvedValue({ task: { id: "c-1" } });
+    api.createTaskTrigger.mockResolvedValue({});
+    await createWork(ticket, { repoUrl: "https://github.com/a/b", autoName: "Task 1" });
+    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
+      type: "repo-blueprint",
+      autoResume: true,
+      autoMerge: true,
+    });
+
+    api.updateTaskConfig.mockResolvedValue({});
+    api.updateTaskTrigger.mockResolvedValue({});
+    const target = {
+      id: "c-1",
+      kind: "repo-blueprint",
+      row: { name: "Task 1" },
+      trigger: { id: "tr-1", type: "ticket" },
+    } as unknown as EditTarget;
+    await updateWork(target, { ...ticket, then: "exits" }, { repoUrl: "https://github.com/a/b" });
+    expect(api.updateTaskConfig.mock.calls[0][1]).toMatchObject({
+      autoResume: null,
+      autoMerge: null,
+    });
+  });
+});
