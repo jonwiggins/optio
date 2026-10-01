@@ -83,3 +83,19 @@ describe("listAwsProfiles", () => {
     expect(listAwsProfiles({ HOME: mkdtempSync(join(tmpdir(), "aws-none-")) })).toEqual([]);
   });
 });
+
+describe("Claude Code effort levels", () => {
+  const caps = { permissionModes: null, effort: true, effortLevels: ["low", "medium", "high"] };
+  it("passes an effort this claude lists, and leaves out one it doesn't", () => {
+    expect(
+      buildAgentCommand("claude-code", undefined, SETTINGS, { effort: "high", claudeCaps: caps }),
+    ).toBe(`${CLAUDE} --effort 'high'`);
+    expect(
+      buildAgentCommand("claude-code", undefined, SETTINGS, { effort: "max", claudeCaps: caps }),
+    ).toBe(CLAUDE);
+    // Unknown list: passed as asked.
+    expect(buildAgentCommand("claude-code", undefined, SETTINGS, { effort: "max" })).toBe(
+      `${CLAUDE} --effort 'max'`,
+    );
+  });
+});

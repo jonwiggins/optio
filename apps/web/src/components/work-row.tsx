@@ -75,7 +75,7 @@ export function WorkRowView({ row }: { row: WorkRow }) {
           mono
         />
         <Attr
-          icon={agentRuntimeIcon(row.who, { colored: true })}
+          icon={agentRuntimeIcon(row.who)}
           label={row.who === "terminal" ? "terminal" : runtimeLabel(row.who)}
         />
         <Attr

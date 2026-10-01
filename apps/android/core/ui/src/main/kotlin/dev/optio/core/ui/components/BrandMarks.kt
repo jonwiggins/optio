@@ -1,6 +1,5 @@
 package dev.optio.core.ui.components
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bolt
@@ -33,17 +32,16 @@ import java.net.URI
 // plus GitHub's pull-request and issue glyphs: the Android twin of iOS
 // `BrandMark.swift` and the web's `components/brand-icon.tsx`. Brand paths are Simple Icons (CC0),
 // PR / issue glyphs GitHub Primer Octicons (MIT), inlined as SVG path data. Every mark is a
-// single-colour ImageVector, so it takes `Icon`'s tint like a Material icon; Slack also has a
-// four-colour [BrandIcons.SlackColor] that [BrandMark] draws untinted.
+// single-colour ImageVector, so it takes `Icon`'s tint like a Material icon: brand marks draw in
+// the content colour, never a brand colour (Slack's four, Claude's orange). Only PR / issue glyphs
+// carry a colour, and that is state, not brand.
 
 /** One-colour vector from SVG path data on a square [viewport] grid (24 for Simple Icons, 16 for Octicons). */
-private fun mark(name: String, viewport: Float, vararg paths: Pair<String, Color>): ImageVector {
+private fun mono(name: String, viewport: Float, vararg d: String): ImageVector {
     val b = ImageVector.Builder(name = name, defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = viewport, viewportHeight = viewport)
-    paths.forEach { (d, color) -> b.addPath(pathData = addPathNodes(d), fill = SolidColor(color)) }
+    d.forEach { b.addPath(pathData = addPathNodes(it), fill = SolidColor(Color.Black)) }
     return b.build()
 }
-
-private fun mono(name: String, viewport: Float, vararg d: String) = mark(name, viewport, *d.map { it to Color.Black }.toTypedArray())
 
 private const val SLACK_BLUE = "M8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312z"
 private const val SLACK_GREEN = "M18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312z"
@@ -65,19 +63,8 @@ object BrandIcons {
         )
     }
 
-    /** Slack in one colour (takes the tint). */
+    /** Slack's mark in one colour (Simple Icons' path; takes the tint). */
     val Slack: ImageVector by lazy { mono("Slack", 24f, SLACK_RED, SLACK_BLUE, SLACK_GREEN, SLACK_YELLOW) }
-
-    /** Slack's four-colour mark: draw it with `Image` (or `Icon(tint = Color.Unspecified)`). */
-    val SlackColor: ImageVector by lazy {
-        mark(
-            "SlackColor", 24f,
-            SLACK_BLUE to Color(0xFF36C5F0),
-            SLACK_GREEN to Color(0xFF2EB67D),
-            SLACK_YELLOW to Color(0xFFECB22E),
-            SLACK_RED to Color(0xFFE01E5A),
-        )
-    }
     val Linear: ImageVector by lazy {
         mono(
             "Linear", 24f,
@@ -192,7 +179,7 @@ enum class Brand(val label: String) {
     Sentry("Sentry"),
     ;
 
-    /** The one-colour mark (Slack included), for tinted `Icon` slots. */
+    /** The one-colour mark, for tinted `Icon` slots. */
     val icon: ImageVector
         get() = when (this) {
             GitHub -> BrandIcons.GitHub
@@ -271,9 +258,8 @@ enum class PrGlyphState(val label: String) {
 val MergedPurple = Color(0xFF8957E5)
 
 /**
- * A brand's logo at [size]. Monochrome marks take [tint] (the content colour by default); Slack
- * keeps its four colours unless [mono]. [contentDescription] defaults to the brand's name; pass
- * null when a text label already names it.
+ * A brand's logo at [size], in [tint] (the content colour by default). [contentDescription]
+ * defaults to the brand's name; pass null when a text label already names it.
  */
 @Composable
 fun BrandMark(
@@ -282,13 +268,8 @@ fun BrandMark(
     size: Dp = 16.dp,
     contentDescription: String? = brand.label,
     tint: Color = LocalContentColor.current,
-    mono: Boolean = false,
 ) {
-    if (brand == Brand.Slack && !mono) {
-        Image(BrandIcons.SlackColor, contentDescription = contentDescription, modifier = modifier.size(size))
-    } else {
-        Icon(brand.icon, contentDescription = contentDescription, tint = tint, modifier = modifier.size(size))
-    }
+    Icon(brand.icon, contentDescription = contentDescription, tint = tint, modifier = modifier.size(size))
 }
 
 /** A pull-request glyph in its state's colour ("Open pull request", … for accessibility). */
@@ -340,7 +321,7 @@ fun triggerIcon(type: String?, source: String? = null): ImageVector = triggerBra
 }
 
 /**
- * A trigger's icon as a composable: the brand mark (Slack in colour) for brand triggers, the
+ * A trigger's icon as a composable: the brand mark for brand triggers, the
  * Material icon otherwise, tinted [tint]. Decorative unless [contentDescription] is given.
  */
 @Composable
@@ -363,20 +344,6 @@ fun TriggerIcon(
             modifier = modifier.size(size),
         )
     }
-}
-
-/**
- * `Icon` for any mark or Material icon that keeps Slack's colours: [BrandIcons.SlackColor] draws
- * untinted, everything else takes [tint]. Use it in slots that take an arbitrary ImageVector.
- */
-@Composable
-fun GlyphIcon(
-    icon: ImageVector,
-    contentDescription: String?,
-    modifier: Modifier = Modifier,
-    tint: Color = LocalContentColor.current,
-) {
-    Icon(icon, contentDescription = contentDescription, tint = if (icon === BrandIcons.SlackColor) Color.Unspecified else tint, modifier = modifier)
 }
 
 /** A ticket source string → the [WorkLinkProvider] its link badge wears. */

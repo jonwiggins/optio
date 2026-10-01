@@ -119,7 +119,12 @@ function agentCli(
         : "auto";
       base += claudePermissionFlag(permission, opts.claudeCaps);
       if (model) base += ` --model ${model}`;
-      if (effort && opts.claudeCaps?.effort !== false) base += ` --effort ${shellQuote(effort)}`;
+      // An effort this `claude` doesn't list (an older release without
+      // xhigh / max) would stop it from starting: leave it to its default.
+      const effortOk =
+        opts.claudeCaps?.effort !== false &&
+        (!opts.claudeCaps?.effortLevels || opts.claudeCaps.effortLevels.includes(effort ?? ""));
+      if (effort && effortOk) base += ` --effort ${shellQuote(effort)}`;
       if (headless) base += " -p";
       if (resume) base += ` --resume ${resume}`;
       return base + (p ? ` ${p}` : "");

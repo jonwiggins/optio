@@ -177,6 +177,17 @@ export function mergeLiveModels(
     .filter((f): f is string => Boolean(f))
     .sort((a, b) => b.length - a.length);
   const additions: ModelOption[] = [];
+  // Efforts the live list reports for a model the baseline already knows
+  // (Anthropic's capabilities.effort) replace the baseline's.
+  const liveEfforts = new Map<string, string[]>();
+  for (const entry of live) {
+    if (typeof entry !== "string" && entry.id && entry.efforts) {
+      liveEfforts.set(entry.id, entry.efforts);
+    }
+  }
+  const baselineModels = catalog.models.map((m) =>
+    liveEfforts.has(m.id) ? { ...m, efforts: [...liveEfforts.get(m.id)!] } : m,
+  );
   for (const entry of live) {
     const model = typeof entry === "string" ? { id: entry } : entry;
     if (!model.id || known.has(model.id)) continue;
@@ -186,11 +197,12 @@ export function mergeLiveModels(
       id: model.id,
       label: liveLabel(catalog.provider, model),
       ...(family ? { family } : {}),
+      ...(model.efforts ? { efforts: [...model.efforts] } : {}),
       source: "live",
     });
   }
-  if (additions.length === 0) return catalog;
-  const merged = { ...catalog, models: [...catalog.models, ...additions] };
+  if (additions.length === 0 && liveEfforts.size === 0) return catalog;
+  const merged = { ...catalog, models: [...baselineModels, ...additions] };
   return catalog.provider === "anthropic" ? promoteNewestInFamily(merged) : merged;
 }
 
@@ -385,7 +397,9 @@ export function optionChoicesFor(
   model: ModelOption | undefined,
 ): OptionChoice[] {
   const choices = field.choices ?? [];
-  if (!field.modelEfforts || !model?.efforts?.length) return choices;
+  if (!field.modelEfforts || !model?.efforts) return choices;
+  // A model that takes no effort setting (e.g. Claude Haiku 4.5) offers none.
+  if (model.efforts.length === 0) return [];
   return model.efforts.map(
     (effort) =>
       choices.find((c) => c.value === effort) ?? {

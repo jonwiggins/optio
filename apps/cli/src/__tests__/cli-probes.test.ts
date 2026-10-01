@@ -25,6 +25,7 @@ describe("parseClaudeHelp", () => {
   it("reads the permission modes and --effort from a current claude", () => {
     const caps = parseClaudeHelp(HELP_2_1_282);
     expect(caps?.effort).toBe(true);
+    expect(caps?.effortLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
     expect(caps?.permissionModes).toEqual(
       expect.arrayContaining(["auto", "bypassPermissions", "manual", "default"]),
     );
@@ -40,7 +41,7 @@ describe("parseClaudeHelp", () => {
   it("leaves the modes unknown when the help doesn't list them", () => {
     expect(
       parseClaudeHelp("  --permission-mode <mode>  Permission mode to use\n  --effort <level>\n"),
-    ).toEqual({ permissionModes: null, effort: true });
+    ).toEqual({ permissionModes: null, effort: true, effortLevels: null });
   });
 
   it("is null for anything that isn't Claude Code's help", () => {

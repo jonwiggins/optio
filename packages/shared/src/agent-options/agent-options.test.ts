@@ -392,9 +392,32 @@ describe("optionRunsOn / optionChoicesFor", () => {
       { value: "ultra", label: "Ultra" },
       { value: "turbo", label: "Turbo" },
     ]);
-    // No model (or one that lists nothing): the field's own choices.
+    // No model (or one that doesn't say): the field's own choices.
     expect(optionChoicesFor(effort, undefined)).toBe(effort.choices);
-    expect(optionChoicesFor(field("claudeEffort"), model)).toBe(field("claudeEffort").choices);
+    expect(optionChoicesFor(effort, { id: "x", label: "X" })).toBe(effort.choices);
+  });
+
+  it("narrows Claude's effort to the model's own levels, none for a model without effort", () => {
+    const effort = field("claudeEffort");
+    expect(effort.choices!.map((c) => c.value)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    const opus46 = getProviderCatalog("anthropic")!.models.find((m) => m.id === "claude-opus-4-6");
+    expect(optionChoicesFor(effort, opus46).map((c) => c.value)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "max",
+    ]);
+    const haiku = getProviderCatalog("anthropic")!.models.find((m) => m.family === "haiku");
+    expect(optionChoicesFor(effort, haiku)).toEqual([]);
+  });
+
+  it("takes per-model efforts from the live list, also for models the baseline knows", () => {
+    const merged = mergeLiveModels(getProviderCatalog("anthropic")!, [
+      { id: "claude-opus-4-6", efforts: ["low", "high"] },
+      { id: "claude-opus-9", displayName: "Claude Opus 9", efforts: ["low", "max"] },
+    ]);
+    expect(merged.models.find((m) => m.id === "claude-opus-4-6")?.efforts).toEqual(["low", "high"]);
+    expect(merged.models.find((m) => m.id === "claude-opus-9")?.efforts).toEqual(["low", "max"]);
   });
 });
 

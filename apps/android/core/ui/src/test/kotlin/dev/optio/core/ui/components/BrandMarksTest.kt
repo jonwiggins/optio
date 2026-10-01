@@ -1,5 +1,9 @@
 package dev.optio.core.ui.components
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.VectorGroup
+import androidx.compose.ui.graphics.vector.VectorPath
 import dev.optio.core.model.WorkLink
 import dev.optio.core.model.WorkLinkKind
 import dev.optio.core.model.WorkLinkProvider
@@ -57,5 +61,23 @@ class BrandMarksTest {
         assertSame(BrandIcons.IssueOpen, WorkLink("u", WorkLinkKind.ISSUE, WorkLinkProvider.GITHUB, "a/b#2").glyph)
         assertEquals(WorkLinkProvider.JIRA, workLinkProvider("jira"))
         assertEquals(WorkLinkProvider.GITHUB, workLinkProvider(null))
+    }
+
+    /** Every brand / agent mark is one colour, so `Icon` tints it with the content colour (no Slack four-colour, no Claude orange). */
+    @Test
+    fun brandAndAgentMarksAreMonochrome() {
+        val marks = Brand.entries.map { it.icon } + AgentBrand.entries.filter { it != AgentBrand.OpenClaw }.map { it.icon }
+        marks.forEach { icon ->
+            val fills = (icon.root.toList()).filterIsInstance<VectorPath>().map { it.fill }
+            assert(fills.isNotEmpty()) { icon.name }
+            fills.forEach { assertEquals(icon.name, SolidColor(Color.Black), it) }
+        }
+    }
+
+    private fun VectorGroup.toList(): List<Any> = (0 until size).flatMap { i ->
+        when (val n = get(i)) {
+            is VectorGroup -> n.toList()
+            else -> listOf(n)
+        }
     }
 }

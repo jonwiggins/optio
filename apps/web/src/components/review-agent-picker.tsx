@@ -83,9 +83,7 @@ export function ReviewAgentPicker({
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="flex items-center gap-1.5 text-xs text-text-muted mb-1">
-            {!inheriting && agentType && (
-              <AgentIcon runtime={agentType} colored className="w-3 h-3" />
-            )}
+            {!inheriting && agentType && <AgentIcon runtime={agentType} className="w-3 h-3" />}
             Review Agent
           </label>
           <select

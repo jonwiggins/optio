@@ -934,10 +934,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                           : "text-text-muted hover:text-text",
                     )}
                   >
-                    <AgentIcon
-                      runtime={r.value}
-                      colored={draft.runtime !== r.value && !r.disabled}
-                    />
+                    <AgentIcon runtime={r.value} />
                     {r.value === TERMINAL ? "Terminal" : runtimeLabel(r.value)}
                   </button>
                 ))}
@@ -960,7 +957,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                 <div className="pt-3 border-t border-border">
                   <div className="flex items-baseline justify-between mb-2">
                     <span className="inline-flex items-center gap-1.5 text-sm text-text-muted">
-                      <AgentIcon runtime={draft.runtime} colored />
+                      <AgentIcon runtime={draft.runtime} />
                       {runtimeLabel(draft.runtime)} parameters
                     </span>
                     <span className="text-[11px] text-text-muted/70">
