@@ -97,7 +97,7 @@ If none of that matters to you, use a hosted product. If shipping your repo to s
    persistent agent            →  Persistent Agent: inbox, turns, inter-agent messaging
 ```
 
-The mapping is a pure function of the five attributes (`deriveKind` in `apps/web/src/components/session-form/model.ts`), and each branch calls the same service it always did. `/sessions` merges every kind into one feed with views **Active · Recurring · Agents · History**; `/sessions/new` is the single creation form. The per-kind surfaces still exist as detail pages.
+The mapping is a pure function of the five attributes (`deriveKind` in `apps/web/src/components/work-form/model.ts`), and each branch calls the same service it always did. `/work` merges every kind into one feed with views **Active · Recurring · Agents · History**; `/work/new` is the single creation form (the old `/sessions` and `/sessions/new` redirect there). The per-kind surfaces still exist as detail pages.
 
 ### Tasks — ticket to merged PR
 

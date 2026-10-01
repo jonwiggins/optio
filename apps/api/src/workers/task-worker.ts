@@ -18,13 +18,7 @@ import {
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { shellSingleQuote } from "../utils/pod-env.js";
-import { parseClaudeEvent } from "../services/agent-event-parser.js";
-import { parseCodexEvent } from "../services/codex-event-parser.js";
-import { parseCopilotEvent } from "../services/copilot-event-parser.js";
-import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
-import { parseGeminiEvent } from "../services/gemini-event-parser.js";
-import { parseOpenClawEvent } from "../services/openclaw-event-parser.js";
-import { parseCursorEvent } from "../services/cursor-event-parser.js";
+import { getEventParser } from "../services/event-parsers.js";
 import {
   checkExistingPr,
   resolveDetectedPrUrl,
@@ -978,20 +972,7 @@ export function startTaskWorker() {
             if (!line.trim()) continue;
 
             // Parse as structured agent event (format depends on agent type)
-            const parsed =
-              task.agentType === "codex"
-                ? parseCodexEvent(line, taskId)
-                : task.agentType === "copilot"
-                  ? parseCopilotEvent(line, taskId)
-                  : task.agentType === "opencode"
-                    ? parseOpenCodeEvent(line, taskId)
-                    : task.agentType === "gemini"
-                      ? parseGeminiEvent(line, taskId)
-                      : task.agentType === "openclaw"
-                        ? parseOpenClawEvent(line, taskId)
-                        : task.agentType === "cursor"
-                          ? parseCursorEvent(line, taskId)
-                          : parseClaudeEvent(line, taskId);
+            const parsed = getEventParser(task.agentType)(line, taskId);
             if (parsed.sessionId && !sessionId) {
               sessionId = parsed.sessionId;
               await taskService.updateTaskSession(taskId, sessionId);
@@ -1082,20 +1063,7 @@ export function startTaskWorker() {
 
         // Flush any remaining partial line in the buffer
         if (lineBuf.trim()) {
-          const parsed =
-            task.agentType === "codex"
-              ? parseCodexEvent(lineBuf, taskId)
-              : task.agentType === "copilot"
-                ? parseCopilotEvent(lineBuf, taskId)
-                : task.agentType === "opencode"
-                  ? parseOpenCodeEvent(lineBuf, taskId)
-                  : task.agentType === "gemini"
-                    ? parseGeminiEvent(lineBuf, taskId)
-                    : task.agentType === "openclaw"
-                      ? parseOpenClawEvent(lineBuf, taskId)
-                      : task.agentType === "cursor"
-                        ? parseCursorEvent(lineBuf, taskId)
-                        : parseClaudeEvent(lineBuf, taskId);
+          const parsed = getEventParser(task.agentType)(lineBuf, taskId);
           for (const entry of parsed.entries) {
             await taskService.appendTaskLog(
               taskId,

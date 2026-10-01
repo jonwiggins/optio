@@ -107,3 +107,16 @@ describe("rootless mode (OPTIO_ROOTLESS, issue #532)", () => {
     expect(initNames).toEqual(["custom-init"]);
   });
 });
+
+describe("service account token", () => {
+  it("never auto-mounts the API token but keeps the ServiceAccount for workload identity", () => {
+    const template = buildTemplate(baseSpec({ serviceAccountName: "optio" }));
+    expect(template.spec.automountServiceAccountToken).toBe(false);
+    expect(template.spec.serviceAccountName).toBe("optio");
+  });
+
+  it("disables the automount without a ServiceAccount too", () => {
+    const template = buildTemplate(baseSpec(), "Never");
+    expect(template.spec.automountServiceAccountToken).toBe(false);
+  });
+});

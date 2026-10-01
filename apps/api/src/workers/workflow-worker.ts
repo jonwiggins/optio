@@ -6,12 +6,7 @@ import {
   parseIntEnv,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
-import { parseClaudeEvent } from "../services/agent-event-parser.js";
-import { parseCodexEvent } from "../services/codex-event-parser.js";
-import { parseCopilotEvent } from "../services/copilot-event-parser.js";
-import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
-import { parseGeminiEvent } from "../services/gemini-event-parser.js";
-import { parseCursorEvent } from "../services/cursor-event-parser.js";
+import { getEventParser } from "../services/event-parsers.js";
 import { db } from "../db/client.js";
 import { workflowRuns, workflows } from "../db/schema.js";
 import { eq } from "drizzle-orm";
@@ -438,22 +433,7 @@ export function startWorkflowWorker() {
         let lineBuf = "";
 
         // Pick the right event parser for the agent type
-        const parseEvent = (line: string, id: string) => {
-          switch (workflow.agentRuntime) {
-            case "codex":
-              return parseCodexEvent(line, id);
-            case "copilot":
-              return parseCopilotEvent(line, id);
-            case "opencode":
-              return parseOpenCodeEvent(line, id);
-            case "gemini":
-              return parseGeminiEvent(line, id);
-            case "cursor":
-              return parseCursorEvent(line, id);
-            default:
-              return parseClaudeEvent(line, id);
-          }
-        };
+        const parseEvent = getEventParser(workflow.agentRuntime);
 
         // Capture stderr for diagnostics
         let stderrData = "";

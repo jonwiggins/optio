@@ -220,8 +220,9 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         if (!res.ok) {
           return reply.send({ valid: false, error: `GitHub returned ${res.status}` });
         }
-        const user = (await res.json()) as { login: string; name: string };
-        reply.send({ valid: true, user: { login: user.login, name: user.name } });
+        const user = (await res.json()) as { login: string; name: string | null };
+        // GitHub returns `name: null` for accounts without a display name.
+        reply.send({ valid: true, user: { login: user.login, name: user.name || user.login } });
       } catch (err) {
         app.log.error(err, "GitHub token validation failed");
         reply.send({ valid: false, error: sanitizeError(err) });
@@ -253,8 +254,11 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         if (!res.ok) {
           return reply.send({ valid: false, error: `GitLab returned ${res.status}` });
         }
-        const user = (await res.json()) as { username: string; name: string };
-        reply.send({ valid: true, user: { login: user.username, name: user.name } });
+        const user = (await res.json()) as { username: string; name: string | null };
+        reply.send({
+          valid: true,
+          user: { login: user.username, name: user.name || user.username },
+        });
       } catch (err) {
         app.log.error(err, "GitLab token validation failed");
         reply.send({ valid: false, error: sanitizeError(err) });
@@ -440,8 +444,9 @@ export async function setupRoutes(rawApp: FastifyInstance) {
         if (!res.ok) {
           return reply.send({ valid: false, error: `GitHub returned ${res.status}` });
         }
-        const user = (await res.json()) as { login: string; name: string };
-        reply.send({ valid: true, user: { login: user.login, name: user.name } });
+        const user = (await res.json()) as { login: string; name: string | null };
+        // GitHub returns `name: null` for accounts without a display name.
+        reply.send({ valid: true, user: { login: user.login, name: user.name || user.login } });
       } catch (err) {
         app.log.error(err, "Copilot token validation failed");
         reply.send({ valid: false, error: sanitizeError(err) });

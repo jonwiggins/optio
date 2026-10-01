@@ -294,6 +294,31 @@ export const api = {
 
   getRepo: (id: string) => request<{ repo: any }>(`/api/repos/${id}`),
 
+  /** GitHub repos the server's stored credentials can reach (the Add repository picker). */
+  browseGitHubRepos: (params: { q?: string; page?: number; perPage?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q) qs.set("q", params.q);
+    if (params.page) qs.set("page", String(params.page));
+    if (params.perPage) qs.set("perPage", String(params.perPage));
+    const query = qs.toString();
+    return request<{
+      repos: Array<{
+        fullName: string;
+        cloneUrl: string;
+        htmlUrl: string;
+        defaultBranch: string;
+        isPrivate: boolean;
+        description: string | null;
+        pushedAt: string | null;
+      }>;
+      page: number;
+      perPage: number;
+      hasMore: boolean;
+      truncated?: boolean;
+      error?: string;
+    }>(`/api/repos/github/accessible${query ? `?${query}` : ""}`);
+  },
+
   createRepoConfig: (data: {
     repoUrl: string;
     fullName: string;

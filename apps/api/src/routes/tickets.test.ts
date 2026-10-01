@@ -1,6 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createHmac } from "node:crypto";
-import { verifyGitHubSignature, isReplayedEvent } from "./tickets.js";
+
+// Shared Redis stand-in for the durable delivery-id dedupe (SET NX EX).
+const redisKeys = new Set<string>();
+const redisSet = vi.fn(async (key: string) => {
+  if (redisKeys.has(key)) return null;
+  redisKeys.add(key);
+  return "OK";
+});
+vi.mock("../services/event-bus.js", () => ({
+  getRedisClient: () => ({ set: redisSet }),
+  publishEvent: vi.fn(),
+}));
+
+import { verifyGitHubSignature } from "./tickets.js";
+import { resetSlackEventDedupe } from "./event-ingress.js";
 
 describe("verifyGitHubSignature", () => {
   const secret = "test-webhook-secret";
@@ -34,32 +48,6 @@ describe("verifyGitHubSignature", () => {
   });
 });
 
-describe("isReplayedEvent", () => {
-  it("returns false when no timestamp header is provided", () => {
-    expect(isReplayedEvent(undefined)).toBe(false);
-  });
-
-  it("returns false for a recent timestamp", () => {
-    const nowSec = Math.floor(Date.now() / 1000).toString();
-    expect(isReplayedEvent(nowSec)).toBe(false);
-  });
-
-  it("returns true for a timestamp older than the max age", () => {
-    const tenMinutesAgoSec = Math.floor((Date.now() - 10 * 60 * 1000) / 1000).toString();
-    expect(isReplayedEvent(tenMinutesAgoSec, 5)).toBe(true);
-  });
-
-  it("returns false for a non-numeric timestamp", () => {
-    expect(isReplayedEvent("not-a-number")).toBe(false);
-  });
-
-  it("uses the custom max age when provided", () => {
-    const threeMinutesAgoSec = Math.floor((Date.now() - 3 * 60 * 1000) / 1000).toString();
-    expect(isReplayedEvent(threeMinutesAgoSec, 2)).toBe(true);
-    expect(isReplayedEvent(threeMinutesAgoSec, 5)).toBe(false);
-  });
-});
-
 // The receiver is public (plugins/auth.ts PUBLIC_WEBHOOK_RECEIVERS), so its
 // own signature check is the only thing between the internet and it.
 describe("POST /api/webhooks/github (signature enforcement)", () => {
@@ -72,6 +60,9 @@ describe("POST /api/webhooks/github (signature enforcement)", () => {
   let app: import("fastify").FastifyInstance;
 
   beforeEach(async () => {
+    redisKeys.clear();
+    redisSet.mockClear();
+    resetSlackEventDedupe();
     process.env.GITHUB_WEBHOOK_SECRET = secret;
     const { buildRouteTestApp } = await import("../test-utils/build-route-test-app.js");
     const { ticketRoutes } = await import("./tickets.js");
@@ -115,14 +106,33 @@ describe("POST /api/webhooks/github (signature enforcement)", () => {
     expect(res.json().error).toBe("Invalid signature");
   });
 
-  it("rejects a stale delivery", async () => {
-    const stale = String(Math.floor((Date.now() - 10 * 60 * 1000) / 1000));
-    const res = await deliver({
-      "x-hub-signature-256": sign(raw),
-      "x-github-delivery-timestamp": stale,
-    });
-    expect(res.statusCode).toBe(401);
-    expect(res.json().error).toBe("Replayed event");
+  it("drops a replayed delivery id without re-processing it", async () => {
+    const headers = { "x-hub-signature-256": sign(raw), "x-github-delivery": "guid-1" };
+    expect((await deliver(headers)).statusCode).toBe(200);
+    expect(redisSet).toHaveBeenCalledTimes(1);
+    expect(redisSet.mock.calls[0]).toEqual([
+      "optio:webhook-delivery:github:guid-1",
+      "1",
+      "EX",
+      86400,
+      "NX",
+    ]);
+    // Replay: answered 200 but short-circuited by the in-process set.
+    expect((await deliver(headers)).json()).toEqual({ ok: true });
+    expect(redisSet).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a delivery another replica (or a previous process) already claimed", async () => {
+    redisKeys.add("optio:webhook-delivery:github:guid-2");
+    const res = await deliver({ "x-hub-signature-256": sign(raw), "x-github-delivery": "guid-2" });
+    expect(res.statusCode).toBe(200);
+    expect(redisSet).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts the delivery when Redis is unavailable (fails open)", async () => {
+    redisSet.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const res = await deliver({ "x-hub-signature-256": sign(raw), "x-github-delivery": "guid-3" });
+    expect(res.statusCode).toBe(200);
   });
 
   it("rejects every delivery when GITHUB_WEBHOOK_SECRET is unset", async () => {

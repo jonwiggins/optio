@@ -23,6 +23,7 @@ import Link from "next/link";
 import { AgentOptionsPicker, type AgentOptionsValues } from "@/components/agent-options-picker";
 import type { AgentType } from "@optio/shared";
 import { ReviewAgentPicker } from "@/components/review-agent-picker";
+import { GitHubRepoBrowser } from "@/components/github-repo-browser";
 
 const STEPS = [
   { id: "repo", label: "Repository" },
@@ -220,7 +221,21 @@ export default function NewRepoPage() {
         {currentStep.id === "repo" && (
           <RepoStep
             repoUrl={repoUrl}
-            setRepoUrl={setRepoUrl}
+            setRepoUrl={(v) => {
+              setRepoUrl(v);
+              // A different URL needs validating again.
+              setValidated(false);
+              setValidationError("");
+            }}
+            onPick={(r) => {
+              // The picked repo's metadata comes from GitHub already.
+              setRepoUrl(r.htmlUrl);
+              setFullName(r.fullName);
+              setDefaultBranch(r.defaultBranch);
+              setIsPrivate(r.isPrivate);
+              setValidationError("");
+              setValidated(true);
+            }}
             fullName={fullName}
             defaultBranch={defaultBranch}
             isPrivate={isPrivate}
@@ -327,6 +342,7 @@ export default function NewRepoPage() {
 function RepoStep({
   repoUrl,
   setRepoUrl,
+  onPick,
   fullName,
   defaultBranch,
   isPrivate,
@@ -338,6 +354,12 @@ function RepoStep({
 }: {
   repoUrl: string;
   setRepoUrl: (v: string) => void;
+  onPick: (repo: {
+    fullName: string;
+    htmlUrl: string;
+    defaultBranch: string;
+    isPrivate: boolean;
+  }) => void;
   fullName: string;
   defaultBranch: string;
   isPrivate: boolean;
@@ -352,23 +374,21 @@ function RepoStep({
       <div>
         <h2 className="text-sm font-medium mb-1">Repository URL</h2>
         <p className="text-xs text-text-muted">
-          Paste a GitHub repository URL. Optio will fetch the repo metadata automatically.
+          Pick one of the repositories Optio's GitHub credentials can access, or paste any
+          repository URL. Optio will fetch the repo metadata automatically.
         </p>
       </div>
+
+      <GitHubRepoBrowser selected={validated ? fullName : null} onPick={onPick} />
 
       <div className="flex gap-2">
         <input
           value={repoUrl}
-          onChange={(e) => {
-            setRepoUrl(e.target.value);
-            if (validated) {
-              // Reset validation when URL changes — but don't clear fields
-            }
-          }}
+          onChange={(e) => setRepoUrl(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onValidate()}
           placeholder="https://github.com/owner/repo"
           className={cn(inputClass, "flex-1")}
-          autoFocus
+          aria-label="Repository URL"
         />
         <button
           onClick={onValidate}
