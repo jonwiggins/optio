@@ -40,7 +40,7 @@ import { NumberInput } from "@/components/number-input";
 import { SectionCard as Section } from "@/components/ui/section-card";
 import { Segmented } from "@/components/ui/segmented";
 import { Disclosure } from "@/components/ui/disclosure";
-import { AgentOptionsPicker } from "@/components/agent-options-picker";
+import { AgentChoice, DefaultsHint } from "@/components/agent-choice";
 import { RunLocationPicker } from "@/components/run-location-picker";
 import { AgentIcon, PrIcon, TriggerIcon } from "@/components/brand-icon";
 import { TriggerSelector, TriggerTypeButton, cronIsValid } from "@/components/trigger-selector";
@@ -87,7 +87,11 @@ import {
   applyWorkDefaults,
   sameOptions,
   savedOptionsFor,
-  withSavedOptions,
+  startWith,
+  withRepoDefaults,
+  repoDefaultsApply,
+  matchesRepoDefaults,
+  resetToRepoDefaults,
   type EventTriggerType,
   type SentenceField,
   type WorkDraft,
@@ -96,7 +100,7 @@ import {
 } from "./model";
 import { createWork, rememberWorkDefaults, updateWork } from "./submit";
 import { detailHref, type EditTarget } from "./load";
-import { OwnerRow, ProviderRow, SecretsRow } from "./who-extras";
+import { OwnerRow, SecretsRow } from "./who-extras";
 
 /**
  * The one creation form. Six groups in dependency order — When, Where, Who,
@@ -303,27 +307,62 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       .catch(() => {});
   }, [foreignOwnerId, me?.workspaceId]);
 
+  // Pre-select the saved repo (by url) or the first one once the list is
+  // known, like the Task form did. A new draft starts its agent from the
+  // repo's saved defaults when the repo has its own (`withRepoDefaults`).
+  useEffect(() => {
+    if (!draft.repoId && repos.length > 0) {
+      const first = repos.find((r: any) => r.repoUrl === draft.repoUrl) ?? repos[0];
+      setDraftRaw((d) => {
+        if (d.repoId) return d;
+        const next: WorkDraft = {
+          ...d,
+          repoId: first.id,
+          repoUrl: first.repoUrl,
+          // An edit keeps what the row saved; a new draft starts from the repo.
+          repoBranch: edit ? d.repoBranch : (first.defaultBranch ?? "main"),
+        };
+        if (edit) return next;
+        // (or keeps your saved settings, when those were applied first).
+        const seeded = Object.keys(d.agentOptions).length
+          ? next
+          : { ...next, agentOptions: optionsFromRepo(d.runtime, first) };
+        return withRepoDefaults(seeded, first);
+      });
+    }
+  }, [repos, draft.repoId]);
+
   // A blank New work form starts from your last settings — once, and only
   // while it is still the untouched first example (not an edit, not another
   // example, not anything you've changed).
+  // A repo with saved defaults of its own still wins for pod work with it.
   useEffect(() => {
-    if (edit || defaultsApplied.current || !savedDefaults || !providersLoaded) return;
+    if (edit || defaultsApplied.current || !savedDefaults || !providersLoaded || reposLoading) {
+      return;
+    }
     defaultsApplied.current = true;
+    const repoOf = (d: WorkDraft) => repos.find((r: any) => r.id === d.repoId);
     if (preset === PRESETS[0].id) {
-      setDraftRaw((d) => applyWorkDefaults(d, savedDefaults, providers));
+      setDraftRaw((d) =>
+        withRepoDefaults(applyWorkDefaults(d, savedDefaults, providers), repoOf(d)),
+      );
     } else if (preset) {
       // Another chip clicked before the settings loaded: fill its blank options.
       const p = PRESETS.find((x) => x.id === preset);
-      if (p) setDraftRaw((d) => applyPresetTo(d, p, savedDefaults, providers));
+      if (p) {
+        setDraftRaw((d) => applyPresetTo(d, p, savedDefaults, providers, new Set(), repoOf(d)));
+      }
     }
-  }, [savedDefaults, providersLoaded]);
+  }, [savedDefaults, providersLoaded, reposLoading]);
 
   /** Where a runtime's parameters start: your saved ones unless you've changed them here. */
+  // (A repo with saved defaults of its own wins for pod work with it.)
   const startOptions = (d: WorkDraft, runtime: string): WorkDraft => {
-    const fresh = { ...d, runtime, agentOptions: {} };
-    if (touchedRuntimes.current.has(runtime)) return fresh;
-    const saved = savedOptionsFor(savedDefaults, runtime, providers);
-    return saved ? withSavedOptions(fresh, saved, providers) : fresh;
+    const saved = touchedRuntimes.current.has(runtime)
+      ? null
+      : savedOptionsFor(savedDefaults, runtime, providers);
+    const repo = repos.find((r: any) => r.id === d.repoId);
+    return startWith(d, runtime, repo, saved, providers);
   };
 
   // If GitHub was picked before the account loaded, fill the login in now.
@@ -335,30 +374,6 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
         : d,
     );
   }, [me]);
-
-  // Pre-select the saved repo (by url) or the first one once the list is
-  // known, like the Task form did.
-  useEffect(() => {
-    if (!draft.repoId && repos.length > 0) {
-      const first = repos.find((r: any) => r.repoUrl === draft.repoUrl) ?? repos[0];
-      setDraftRaw((d) =>
-        d.repoId
-          ? d
-          : {
-              ...d,
-              repoId: first.id,
-              repoUrl: first.repoUrl,
-              // An edit keeps what the row saved; a new draft starts from the repo.
-              repoBranch: edit ? d.repoBranch : (first.defaultBranch ?? "main"),
-              // (or keeps your saved settings, when those were applied first).
-              agentOptions:
-                edit || Object.keys(d.agentOptions).length
-                  ? d.agentOptions
-                  : optionsFromRepo(d.runtime, first),
-            },
-      );
-    }
-  }, [repos, draft.repoId]);
 
   // A pod Task starts from the repo's configured parameters for the picked
   // runtime, so the picker shows what will actually run.
@@ -404,20 +419,37 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     const p = PRESETS.find((x) => x.id === id);
     if (!p) return;
     // A chip that leaves the options blank starts from your saved settings.
-    setDraftRaw((d) => applyPresetTo(d, p, savedDefaults, providers, touchedRuntimes.current));
+    setDraftRaw((d) =>
+      applyPresetTo(
+        d,
+        p,
+        savedDefaults,
+        providers,
+        touchedRuntimes.current,
+        repos.find((r: any) => r.id === d.repoId),
+      ),
+    );
     setPreset(id);
   };
 
   const handleRepoChange = (repoId: string) => {
     const repo = repos.find((r: any) => r.id === repoId);
     if (!repo) return;
-    setDraft((d) => ({
-      ...d,
-      repoId: repo.id,
-      repoUrl: repo.repoUrl,
-      repoBranch: repo.defaultBranch ?? "main",
-      agentOptions: optionsFromRepo(d.runtime, repo),
-    }));
+    // The agent and its parameters start from the repo's saved defaults.
+    setDraft((d) =>
+      withRepoDefaults(
+        startOptions(
+          {
+            ...d,
+            repoId: repo.id,
+            repoUrl: repo.repoUrl,
+            repoBranch: repo.defaultBranch ?? "main",
+          },
+          d.runtime,
+        ),
+        repo,
+      ),
+    );
   };
 
   const setWhen = (w: WhenType) => {
@@ -555,7 +587,6 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   ) as Record<WhenType, string | undefined>;
   const withRepoDisabled = (withRepo: boolean) => lock({ withRepo, agentOptions: {} });
   const detail = edit ? detailHref(edit) : null;
-  const disabledRuntimes = runtimes.filter((r) => r.disabled);
 
   // One line per card header — the answer so far, readable when scrolled past.
   const catalog = isTerminal ? null : getProviderCatalog(providerForAgentType(draft.runtime));
@@ -586,6 +617,17 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
       ...d,
       agentOptions: fullOptionsApply(d) && d.withRepo ? optionsFromRepo(d.runtime, repoRow) : {},
     }));
+  };
+  // Otherwise, for pod work with a repo: are these still the repo's defaults?
+  const repoHint =
+    !edit && !lastSettingsShown && repoDefaultsApply(draft) && repoRow
+      ? matchesRepoDefaults(draft, repoRow)
+        ? "same"
+        : "changed"
+      : null;
+  const resetRepoDefaults = () => {
+    touchedRuntimes.current.add(draft.runtime);
+    setDraft((d) => resetToRepoDefaults(d, repoRow));
   };
   const modelLabel = modelId
     ? (providerModels?.find((m) => m.id === modelId)?.label ??
@@ -913,107 +955,58 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
             id="session-who"
           >
             <div className="space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 rounded-lg bg-bg border border-border">
-                {runtimes.map((r) => (
-                  <button
-                    key={r.value || "terminal"}
-                    type="button"
-                    title={
-                      r.disabled
-                        ? `${r.value === TERMINAL ? "Terminal" : runtimeLabel(r.value)} ${r.disabled}`
-                        : undefined
+              <AgentChoice
+                runtime={draft.runtime}
+                agentOptions={draft.agentOptions}
+                runtimes={runtimes}
+                onRuntimeChange={(runtime) => setDraft((d) => startOptions(d, runtime))}
+                onOptionsChange={(agentOptions) => {
+                  touchedRuntimes.current.add(draft.runtime);
+                  setDraft({ agentOptions });
+                }}
+                note={
+                  isTerminal
+                    ? "Just you at a shell prompt — no agent, no prompt."
+                    : kind === "pod-session"
+                      ? "A pod session opens a terminal and a Claude Code chat side by side — you type the first message there."
+                      : local
+                        ? "Uses the CLI and login already on the machine."
+                        : "Runs with the server's agent credentials."
+                }
+                paramsHint={
+                  local
+                    ? "What the machine's CLI takes — the rest comes from its own config"
+                    : draft.withRepo
+                      ? "Starts from the repo's defaults; applies to this run only"
+                      : "Blank means the runtime's default"
+                }
+                providers={{
+                  choices: providerChoices,
+                  picked: provider,
+                  disabledReason: (p) => providerDisabled(draft, p, machine),
+                  onPick: (p) => {
+                    if (p && p.ownerUserId !== null && !local && draft.owner !== "me") {
+                      setOwnerNote(`${p.name} is yours, so this work now runs as you.`);
                     }
-                    disabled={!!r.disabled}
-                    onClick={() => setDraft((d) => startOptions(d, r.value))}
-                    className={cn(
-                      "flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-sm transition-colors whitespace-nowrap",
-                      draft.runtime === r.value
-                        ? "bg-primary text-white"
-                        : r.disabled
-                          ? "text-text-muted/40 cursor-not-allowed"
-                          : "text-text-muted hover:text-text",
-                    )}
-                  >
-                    <AgentIcon runtime={r.value} />
-                    {r.value === TERMINAL ? "Terminal" : runtimeLabel(r.value)}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-text-muted/80">
-                {isTerminal
-                  ? "Just you at a shell prompt — no agent, no prompt."
-                  : kind === "pod-session"
-                    ? "A pod session opens a terminal and a Claude Code chat side by side — you type the first message there."
-                    : local
-                      ? "Uses the CLI and login already on the machine."
-                      : "Runs with the server's agent credentials."}
-                {disabledRuntimes.length > 0 &&
-                  ` ${disabledRuntimes
-                    .map((r) => (r.value === TERMINAL ? "Terminal" : runtimeLabel(r.value)))
-                    .join(", ")} — ${disabledRuntimes[0].disabled!.replace(/\.$/, "")}.`}
-              </p>
-
-              {!isTerminal && (
-                <div className="pt-3 border-t border-border">
-                  <div className="flex items-baseline justify-between mb-2">
-                    <span className="inline-flex items-center gap-1.5 text-sm text-text-muted">
-                      <AgentIcon runtime={draft.runtime} />
-                      {runtimeLabel(draft.runtime)} parameters
-                    </span>
-                    <span className="text-[11px] text-text-muted/70">
-                      {local
-                        ? "What the machine's CLI takes — the rest comes from its own config"
-                        : draft.withRepo
-                          ? "Starts from the repo's defaults; applies to this run only"
-                          : "Blank means the runtime's default"}
-                    </span>
-                  </div>
-                  {providerChoices.length > 0 && (
-                    <div className="mb-3">
-                      <ProviderRow
-                        providers={providerChoices}
-                        picked={provider}
-                        disabledReason={(p) => providerDisabled(draft, p, machine)}
-                        onPick={(p) => {
-                          if (p && p.ownerUserId !== null && !local && draft.owner !== "me") {
-                            setOwnerNote(`${p.name} is yours, so this work now runs as you.`);
-                          }
-                          touchedRuntimes.current.add(draft.runtime);
-                          setDraft((d) => withProvider(d, p));
-                        }}
-                      />
-                    </div>
-                  )}
-                  <AgentOptionsPicker
-                    key={draft.runtime}
-                    providerModels={providerModels}
-                    provider={providerForAgentType(draft.runtime)}
-                    values={draft.agentOptions}
-                    onChange={(agentOptions) => {
-                      touchedRuntimes.current.add(draft.runtime);
-                      setDraft({ agentOptions });
-                    }}
-                    runsOn={fullOptionsApply(draft) ? "pod" : "local"}
-                    hostId={local ? draft.location.localHostId || undefined : undefined}
-                    hideRefresh
-                  />
-                  {lastSettingsShown && (
-                    <p
-                      className="mt-2 text-[11px] text-text-muted/70"
-                      data-testid="work-last-settings"
-                    >
-                      Your last settings ·{" "}
-                      <button
-                        type="button"
-                        onClick={resetLastSettings}
-                        className="text-primary hover:underline"
-                      >
-                        Reset
-                      </button>
-                    </p>
-                  )}
-                </div>
-              )}
+                    touchedRuntimes.current.add(draft.runtime);
+                    setDraft((d) => withProvider(d, p));
+                  },
+                }}
+                providerModels={providerModels}
+                runsOn={fullOptionsApply(draft) ? "pod" : "local"}
+                hostId={local ? draft.location.localHostId || undefined : undefined}
+                footer={
+                  lastSettingsShown ? (
+                    <DefaultsHint testId="work-last-settings" onReset={resetLastSettings}>
+                      Your last settings
+                    </DefaultsHint>
+                  ) : repoHint ? (
+                    <DefaultsHint testId="work-repo-defaults" onReset={resetRepoDefaults}>
+                      {repoHint === "same" ? "Repo defaults" : "Changed from the repo's defaults"}
+                    </DefaultsHint>
+                  ) : null
+                }
+              />
 
               {showOwner && (
                 <div className="pt-3 border-t border-border">

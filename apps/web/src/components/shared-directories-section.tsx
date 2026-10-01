@@ -1,18 +1,10 @@
 "use client";
 
+import { SectionCard } from "@/components/ui/section-card";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import {
-  HardDrive,
-  Plus,
-  X,
-  Trash2,
-  RotateCcw,
-  RefreshCw,
-  AlertTriangle,
-  Loader2,
-} from "lucide-react";
+import { Plus, X, Trash2, RotateCcw, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
 
 interface SharedDirectory {
   id: string;
@@ -247,12 +239,15 @@ export function SharedDirectoriesSection({
   if (loading) return null;
 
   return (
-    <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <HardDrive className="w-4 h-4 text-text-muted" />
-          <h2 className="text-sm font-medium">Cache Directories</h2>
-        </div>
+    <SectionCard
+      label="Cache directories"
+      hint="Persistent storage that survives across tasks"
+      summary={
+        directories.length > 0
+          ? `${directories.length} ${directories.length === 1 ? "directory" : "directories"}`
+          : "none"
+      }
+      actions={
         <button
           onClick={() => setShowAdd(!showAdd)}
           className="flex items-center gap-1 text-xs text-primary hover:underline"
@@ -260,10 +255,12 @@ export function SharedDirectoriesSection({
           <Plus className="w-3.5 h-3.5" />
           Add Cache
         </button>
-      </div>
+      }
+      bodyClassName="p-4 space-y-3"
+    >
       <p className="text-xs text-text-muted">
-        Persistent storage that survives across tasks. Use for package caches, build artifacts,
-        model downloads, etc. Each pod instance gets its own copy.
+        Use for package caches, build artifacts, model downloads, etc. Each pod instance gets its
+        own copy.
       </p>
 
       {(maxPodInstances ?? 1) > 1 && (
@@ -459,6 +456,6 @@ export function SharedDirectoriesSection({
           </div>
         </div>
       )}
-    </section>
+    </SectionCard>
   );
 }

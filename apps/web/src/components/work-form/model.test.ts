@@ -640,3 +640,81 @@ suite("Work until merged — PR follow-through", () => {
     expect(followThrough({ ...base, then: "waits-for-me" }, null)).toBeNull();
   });
 });
+
+import {
+  matchesRepoDefaults,
+  resetToRepoDefaults,
+  startingOptions,
+  startWith,
+  withRepoDefaults,
+} from "./model";
+
+suite("repo defaults vs your last settings — the precedence", () => {
+  const factory = {
+    defaultAgentType: "claude-code",
+    claudeModel: "opus",
+    claudeContextWindow: "1m",
+    claudeThinking: true,
+    claudeEffort: "high",
+    geminiModel: "gemini-2.5-pro",
+    geminiApprovalMode: "yolo",
+  };
+  const configured = { ...factory, claudeModel: "sonnet", claudeEffort: "max" };
+  const saved = { claudeModel: "haiku" };
+  const pod = { ...EMPTY_DRAFT, repoId: "r1" };
+
+  it("a repo with settings of its own wins for pod work with that repo", () => {
+    const s = startingOptions(pod, "claude-code", configured, saved);
+    expect(s.from).toBe("repo");
+    expect(s.options).toMatchObject({ claudeModel: "sonnet", claudeEffort: "max" });
+  });
+
+  it("your last settings win over a repo nobody configured", () => {
+    expect(startingOptions(pod, "claude-code", factory, saved)).toEqual({
+      options: saved,
+      from: "saved",
+    });
+  });
+
+  it("with nothing saved, a repo's column defaults still seed the picker", () => {
+    expect(startingOptions(pod, "claude-code", factory, null).from).toBe("repo");
+  });
+
+  it("remembered settings apply off a repo (no repo, or on your machine)", () => {
+    expect(
+      startingOptions({ ...pod, withRepo: false }, "claude-code", configured, saved).from,
+    ).toBe("saved");
+    expect(startingOptions(local(pod), "claude-code", configured, saved).from).toBe("saved");
+    expect(startingOptions(local(pod), "claude-code", configured, null).from).toBe("none");
+  });
+
+  it("startWith switches runtime and starts its parameters by the same rule", () => {
+    const d = startWith(pod, "gemini", { ...factory, geminiModel: "gemini-2.5-flash" }, null, []);
+    expect(d.runtime).toBe("gemini");
+    expect(d.agentOptions).toMatchObject({ geminiModel: "gemini-2.5-flash" });
+  });
+
+  it("picking a configured repo takes its default agent and parameters", () => {
+    const repo = { ...factory, defaultAgentType: "gemini", geminiModel: "gemini-2.5-flash" };
+    const d = withRepoDefaults({ ...pod, agentOptions: saved }, repo);
+    expect(d.runtime).toBe("gemini");
+    expect(d.agentOptions).toMatchObject({ geminiModel: "gemini-2.5-flash" });
+    // A repo nobody configured leaves your settings standing.
+    const kept = { ...pod, agentOptions: saved };
+    expect(withRepoDefaults(kept, factory)).toBe(kept);
+    // Off a repo nothing changes.
+    const off = { ...pod, withRepo: false, agentOptions: saved };
+    expect(withRepoDefaults(off, repo)).toBe(off);
+  });
+
+  it("knows whether the draft still matches the repo, and resets to it", () => {
+    const d = withRepoDefaults(pod, configured);
+    expect(matchesRepoDefaults(d, configured)).toBe(true);
+    const changed = { ...d, agentOptions: { ...d.agentOptions, claudeEffort: "low" } };
+    expect(matchesRepoDefaults(changed, configured)).toBe(false);
+    expect(matchesRepoDefaults({ ...d, runtime: "gemini" }, configured)).toBe(false);
+    const back = resetToRepoDefaults({ ...changed, runtime: "gemini" }, configured);
+    expect(back.runtime).toBe("claude-code");
+    expect(matchesRepoDefaults(back, configured)).toBe(true);
+  });
+});
