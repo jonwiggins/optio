@@ -290,7 +290,6 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
     public let taskFilePath: String?
     public let claudeModel: String?
     public let claudeContextWindow: String?
-    public let claudeThinking: Bool?
     public let claudeEffort: String?
     public let copilotModel: String?
     public let copilotEffort: String?
@@ -330,7 +329,6 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         case taskFilePath = "taskFilePath"
         case claudeModel = "claudeModel"
         case claudeContextWindow = "claudeContextWindow"
-        case claudeThinking = "claudeThinking"
         case claudeEffort = "claudeEffort"
         case copilotModel = "copilotModel"
         case copilotEffort = "copilotEffort"
@@ -368,7 +366,6 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         taskFilePath: String? = nil,
         claudeModel: String? = nil,
         claudeContextWindow: String? = nil,
-        claudeThinking: Bool? = nil,
         claudeEffort: String? = nil,
         copilotModel: String? = nil,
         copilotEffort: String? = nil,
@@ -404,7 +401,6 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         self.taskFilePath = taskFilePath
         self.claudeModel = claudeModel
         self.claudeContextWindow = claudeContextWindow
-        self.claudeThinking = claudeThinking
         self.claudeEffort = claudeEffort
         self.copilotModel = copilotModel
         self.copilotEffort = copilotEffort
