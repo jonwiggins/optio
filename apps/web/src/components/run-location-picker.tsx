@@ -36,7 +36,7 @@ export interface RunLocationValue {
   runTarget: RunTarget;
   /** Local only: `local_hosts.id`. */
   localHostId: string;
-  /** Local only: an allowlisted directory on the host. */
+  /** Local only: an allowlisted directory on the host, or a subdirectory of one. */
   localDir: string;
   /** Local only: exit when the agent's turn is done, or keep the session open. */
   localSessionMode: LocalSessionMode;
@@ -103,10 +103,65 @@ export function usableDir(kind: "task" | "job", dir: HostDir): boolean {
   return kind === "job" || !!dir.repoUrl;
 }
 
+function trimSlash(p: string): string {
+  return p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
+}
+
+/**
+ * The allowlisted directory `dir` is (or sits under): the longest match, as
+ * the server's `allowlistEntryFor` picks it. Undefined when none contains it.
+ */
+export function rootDirFor(dirs: HostDir[], dir: string): HostDir | undefined {
+  if (!dir) return undefined;
+  const requested = trimSlash(dir);
+  let best: HostDir | undefined;
+  for (const d of dirs) {
+    const root = trimSlash(d.path);
+    const under = root === "/" ? requested.startsWith("/") : requested.startsWith(`${root}/`);
+    if ((requested === root || under) && (!best || root.length > trimSlash(best.path).length)) {
+      best = d;
+    }
+  }
+  return best;
+}
+
+/** The part of `dir` below `root` ("" when `dir` is the root itself). */
+export function subpathOf(root: string, dir: string): string {
+  const r = trimSlash(root);
+  const d = trimSlash(dir);
+  if (d === r) return "";
+  return d.slice(r === "/" ? 1 : r.length + 1);
+}
+
+/**
+ * Why a subdirectory entered under an allowlisted root can't be used, or null
+ * when it's fine (empty means the root itself). Relative only, no `..` — the
+ * server and the daemon re-check, this just says so before submitting.
+ */
+export function subpathError(sub: string): string | null {
+  const s = sub.trim();
+  if (!s) return null;
+  if (s.startsWith("/") || s.startsWith("~")) return "Enter a path relative to the directory";
+  if (s.split("/").includes("..")) return "The path can't leave the directory (no ..)";
+  return null;
+}
+
+/** `root` + a relative `sub` (already checked with `subpathError`), normalized. */
+export function joinSubpath(root: string, sub: string): string {
+  const parts = sub
+    .trim()
+    .split("/")
+    .filter((p) => p && p !== ".");
+  if (parts.length === 0) return root;
+  const base = trimSlash(root);
+  return `${base === "/" ? "" : base}/${parts.join("/")}`;
+}
+
 /** Pick the directory a freshly selected host should start on, or "" when none fits. */
 export function defaultDir(kind: "task" | "job", dirs: HostDir[], current: string): string {
-  const keep = dirs.find((d) => d.path === current);
-  if (keep && usableDir(kind, keep)) return keep.path;
+  // Keep the current choice — an allowlisted dir or a subdirectory of one.
+  const keep = rootDirFor(dirs, current);
+  if (keep && usableDir(kind, keep)) return current;
   return dirs.find((d) => usableDir(kind, d))?.path ?? "";
 }
 
@@ -178,7 +233,24 @@ export function RunLocationPicker({
   useEffect(() => setWaitingForHost(isLocal && noHosts), [isLocal, noHosts]);
   const [addingDir, setAddingDir] = useState(false);
   const dirsLocked = host ? dirsLockedReason(host) : null;
-  const selectedDir = dirs.find((d) => d.path === value.localDir);
+  // The allowlisted root the run's directory is (or sits under), and the
+  // optional subdirectory of it the user typed.
+  const selectedDir = rootDirFor(dirs, value.localDir);
+  const [subInput, setSubInput] = useState(() =>
+    selectedDir ? subpathOf(selectedDir.path, value.localDir) : "",
+  );
+  // A directory that changes from outside (another host, a loaded row) resets it.
+  useEffect(() => {
+    if (!selectedDir) return;
+    const current = subpathOf(selectedDir.path, value.localDir);
+    if (
+      subpathError(subInput) === null &&
+      joinSubpath(selectedDir.path, subInput) !== value.localDir
+    ) {
+      setSubInput(current);
+    }
+  }, [selectedDir?.path, value.localDir]);
+  const subError = subpathError(subInput);
   const localRepoUrl = isLocal ? repoUrlFromRemote(selectedDir?.repoUrl) : null;
 
   // Adopt a host / directory once the list is known: the first online host
@@ -318,12 +390,12 @@ export function RunLocationPicker({
                 {kind === "task" ? "Checkout" : "Directory"}
               </label>
               <select
-                value={value.localDir}
-                onChange={(e) =>
-                  e.target.value === ADD_DIR
-                    ? setAddingDir(true)
-                    : onChange({ ...value, localDir: e.target.value })
-                }
+                value={selectedDir?.path ?? value.localDir}
+                onChange={(e) => {
+                  if (e.target.value === ADD_DIR) return setAddingDir(true);
+                  setSubInput("");
+                  onChange({ ...value, localDir: e.target.value });
+                }}
                 className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary"
               >
                 {!value.localDir && (
@@ -369,6 +441,46 @@ export function RunLocationPicker({
               )}
             </div>
           </div>
+
+          {selectedDir && (
+            <div>
+              <label className="block text-sm text-text-muted mb-1.5" htmlFor="local-subdir">
+                Subdirectory <span className="text-text-muted/70">(optional)</span>
+              </label>
+              <div className="flex items-center gap-1 rounded-lg bg-bg border border-border px-3 py-2 text-sm font-mono focus-within:border-primary">
+                <span className="text-text-muted/70 shrink-0 truncate max-w-[50%]">
+                  {selectedDir.path.endsWith("/") ? selectedDir.path : `${selectedDir.path}/`}
+                </span>
+                <input
+                  id="local-subdir"
+                  value={subInput}
+                  onChange={(e) => {
+                    const sub = e.target.value;
+                    setSubInput(sub);
+                    // An invalid path still goes through (unnormalized) so the
+                    // server refuses it rather than silently running in the root.
+                    onChange({
+                      ...value,
+                      localDir:
+                        subpathError(sub) === null
+                          ? joinSubpath(selectedDir.path, sub)
+                          : `${trimSlash(selectedDir.path)}/${sub.trim()}`,
+                    });
+                  }}
+                  placeholder="e.g. packages/api"
+                  spellCheck={false}
+                  className="flex-1 min-w-0 bg-transparent focus:outline-none"
+                />
+              </div>
+              {subError ? (
+                <p className="text-[11px] text-error mt-1">{subError}</p>
+              ) : (
+                <p className="text-[11px] text-text-muted/80 mt-1">
+                  Run in a folder inside it instead of the directory itself.
+                </p>
+              )}
+            </div>
+          )}
 
           {showAddDir && host && (
             <AddDirForm
