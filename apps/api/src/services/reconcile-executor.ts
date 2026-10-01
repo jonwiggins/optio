@@ -1,4 +1,5 @@
-import { and, eq, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { updatedAtMatches } from "../utils/pg-timestamp.js";
 import { db } from "../db/client.js";
 import { tasks, workflowRuns, prReviews, persistentAgents } from "../db/schema.js";
 import type {
@@ -215,60 +216,26 @@ async function applyStandaloneTransition(
     return { status: "error", reason: "wrong_kind", error: new Error("not standalone") };
   }
   const id = snapshot.run.ref.id;
-  const version = snapshot.run.status.updatedAt;
-  const fromState = snapshot.run.status.state;
-  const workflowId = snapshot.run.spec.workflowId;
-
-  const patch: Record<string, unknown> = {
-    state: action.to,
-    updatedAt: new Date(),
+  const fields: Record<string, unknown> = {
     reconcileBackoffUntil: null,
     reconcileAttempts: 0,
     ...(action.statusPatch ?? {}),
+    ...(action.clearControlIntent ? { controlIntent: null } : {}),
   };
-  if (action.clearControlIntent) {
-    patch.controlIntent = null;
-  }
-  const rows = await db
-    .update(workflowRuns)
-    .set(patch)
-    .where(
-      and(
-        eq(workflowRuns.id, id),
-        // Ms-truncating comparison, NOT a plain eq — see updatedAtMatches. A
-        // raw eq() silently never matches rows whose updated_at carries
-        // microseconds (e.g. stamped by PG's now()/defaultNow()), which made
-        // every standalone transition from such rows permanently stale.
-        updatedAtMatches(workflowRuns.updatedAt, version),
-        eq(workflowRuns.state, fromState),
-      ),
-    )
-    .returning();
-
-  if (rows.length === 0) {
-    return { status: "stale", reason: "cas_failed_standalone_transition" };
-  }
-
-  // A local run failed from the server side (cancel intent, disabled
-  // workflow): its agent is still alive in a terminal on the owner's
-  // machine — stop it. No-op when the terminal already exited.
-  if (action.to === WorkflowRunState.FAILED && rows[0].localTerminalId) {
-    const terminalId = rows[0].localTerminalId;
-    import("./local-run-service.js")
-      .then(({ killLinkedTerminal }) =>
-        killLinkedTerminal(terminalId, `reconcile:${action.trigger}`),
-      )
-      .catch((err) => logger.warn({ err, runId: id }, "failed to kill local terminal for run"));
-  }
-
-  // Publish state-change event + outbound webhook so subscribers see the
-  // transition. Mirrors workflow-worker's transitionRun helper.
-  await publishStandaloneStateChange(id, workflowId, fromState, action.to).catch((err) =>
-    logger.warn({ err, runId: id }, "standalone state-change publish failed"),
+  // The one Job-run transition: CAS on the observed state and version, then
+  // the WS event, the outbound webhook, and stopping a failed local run's
+  // terminal. This pass already reconciles the run, so no wake.
+  const { transitionWorkflowRunCas } = await import("./workflow-service.js");
+  const row = await transitionWorkflowRunCas(
+    id,
+    snapshot.run.status.state,
+    action.to,
+    fields as Parameters<typeof transitionWorkflowRunCas>[3],
+    { version: snapshot.run.status.updatedAt, wakeReconciler: false },
   );
+  if (!row) return { status: "stale", reason: "cas_failed_standalone_transition" };
 
-  await scheduleBackoffReconcile(snapshot.run.ref, patch.reconcileBackoffUntil);
-
+  await scheduleBackoffReconcile(snapshot.run.ref, fields.reconcileBackoffUntil);
   return { status: "applied", reason: `standalone_transition:${action.to}` };
 }
 
@@ -567,84 +534,7 @@ function inferPrLabel(prUrl: string | null): string {
   return prUrl.includes("gitlab") ? "MR" : "PR";
 }
 
-async function publishStandaloneStateChange(
-  runId: string,
-  workflowId: string,
-  fromState: WorkflowRunState,
-  toState: WorkflowRunState,
-): Promise<void> {
-  const { publishWorkflowRunEvent } = await import("./event-bus.js");
-  await publishWorkflowRunEvent({
-    type: "workflow_run:state_changed",
-    workflowRunId: runId,
-    workflowId,
-    fromState,
-    toState,
-    timestamp: new Date().toISOString(),
-  });
-
-  const webhookEventMap: Partial<Record<WorkflowRunState, string>> = {
-    [WorkflowRunState.RUNNING]: "workflow_run.started",
-    [WorkflowRunState.COMPLETED]: "workflow_run.completed",
-    [WorkflowRunState.FAILED]: "workflow_run.failed",
-  };
-  const webhookEvent = webhookEventMap[toState];
-  if (!webhookEvent) return;
-
-  const [workflowService, webhookWorker] = await Promise.all([
-    import("./workflow-service.js"),
-    import("../workers/webhook-worker.js"),
-  ]);
-  const [run, workflow] = await Promise.all([
-    workflowService.getWorkflowRun(runId),
-    workflowService.getWorkflow(workflowId),
-  ]);
-  if (!run || !workflow) return;
-
-  const durationMs =
-    run.startedAt && run.finishedAt
-      ? new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()
-      : run.startedAt
-        ? Date.now() - new Date(run.startedAt).getTime()
-        : undefined;
-
-  await webhookWorker.enqueueWebhookEvent(webhookEvent as never, {
-    runId: run.id,
-    workflowId: workflow.id,
-    workflowName: workflow.name,
-    state: run.state,
-    fromState,
-    params: run.params ?? null,
-    output: run.output ?? null,
-    costUsd: run.costUsd ?? undefined,
-    inputTokens: run.inputTokens ?? undefined,
-    outputTokens: run.outputTokens ?? undefined,
-    modelUsed: run.modelUsed ?? undefined,
-    errorMessage: run.errorMessage ?? undefined,
-    retryCount: run.retryCount,
-    durationMs,
-    startedAt: run.startedAt?.toISOString() ?? null,
-    finishedAt: run.finishedAt?.toISOString() ?? null,
-  });
-}
-
 // ── CAS helpers ─────────────────────────────────────────────────────────────
-
-/**
- * Millisecond-precision `updated_at` comparison — the ONE way every CAS guard
- * in this file must compare versions. Postgres `timestamptz` columns store
- * microseconds, but JavaScript's Date type only carries milliseconds — so a
- * JS-side `eq(updated_at, version)` against a row whose updated_at was set by
- * PG's `now()`/`defaultNow()` (microsecond precision) will silently never
- * match, leaving the row permanently "stale" to the executor. We truncate
- * both sides to milliseconds so the round-trip is symmetric. JS-originated
- * writes are already ms-precision so this is exactly the comparison we want
- * everywhere.
- */
-function updatedAtMatches(column: SQLWrapper, version: Date): SQL {
-  return sql`date_trunc('milliseconds', ${column})
-      = date_trunc('milliseconds', ${version.toISOString()}::timestamptz)`;
-}
 
 async function casUpdate(
   table: "tasks" | "workflow_runs" | "pr_reviews" | "persistent_agents",

@@ -9,15 +9,15 @@
  *     const task = await insertTask({ state: "queued", priority: 1 });
  */
 import { randomBytes } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import {
   interactiveSessions,
   repos,
   sessionChatEvents,
   tasks,
-  taskConfigs,
+  workDefinitions,
   workflowRuns,
-  workflows,
   workflowTriggers,
   workspaces,
 } from "../../db/schema.js";
@@ -61,27 +61,65 @@ export async function insertTask(overrides: Insert<typeof tasks> = {}) {
   return row;
 }
 
-export async function insertTaskConfig(overrides: Insert<typeof taskConfigs> = {}) {
+type DefinitionInsert = Insert<typeof workDefinitions>;
+
+/** A scheduled Task (`repo-blueprint` work definition); `title` is its run title, as in the API. */
+export async function insertTaskConfig(overrides: DefinitionInsert & { title?: string } = {}) {
+  const { title, ...rest } = overrides;
   const [row] = await db
-    .insert(taskConfigs)
+    .insert(workDefinitions)
     .values({
+      kind: "repo-blueprint",
       name: `it task config ${uniq()}`,
-      title: "it task config task",
+      runTitle: title ?? "it task config task",
       prompt: "integration test blueprint prompt",
       repoUrl: `https://github.com/it-org/it-repo-${uniq()}`,
-      ...overrides,
+      repoBranch: "main",
+      maxRetries: 3,
+      ...rest,
     })
     .returning();
   return row;
 }
 
-export async function insertWorkflow(overrides: Insert<typeof workflows> = {}) {
+/** A Job (`standalone` work definition); `promptTemplate` is its prompt, as in the API. */
+export async function insertWorkflow(
+  overrides: DefinitionInsert & { promptTemplate?: string } = {},
+) {
+  const { promptTemplate, ...rest } = overrides;
   const [row] = await db
-    .insert(workflows)
+    .insert(workDefinitions)
     .values({
+      kind: "standalone",
       name: `it workflow ${uniq()}`,
-      promptTemplate: "integration test workflow prompt {{PARAM}}",
-      ...overrides,
+      prompt: promptTemplate ?? "integration test workflow prompt {{PARAM}}",
+      agentType: "claude-code",
+      localSessionMode: "headless",
+      ...rest,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * A Local automation (`local-blueprint` work definition), with its API
+ * names: `commandTemplate` is its prompt, `hostId` / `dir` its machine.
+ */
+export async function insertLocalBlueprint(
+  overrides: DefinitionInsert & { commandTemplate?: string; hostId?: string; dir?: string } = {},
+) {
+  const { commandTemplate, hostId, dir, ...rest } = overrides;
+  const [row] = await db
+    .insert(workDefinitions)
+    .values({
+      kind: "local-blueprint",
+      name: `it automation ${uniq()}`,
+      prompt: commandTemplate ?? "echo integration",
+      runTarget: "local",
+      localHostId: hostId,
+      localDir: dir,
+      localSessionMode: "interactive",
+      ...rest,
     })
     .returning();
   return row;
@@ -98,13 +136,23 @@ export async function insertWorkflowTrigger(
   return row;
 }
 
+/** A Job run; like `createWorkflowRun`, it takes its workspace and owner from its Job. */
 export async function insertWorkflowRun(
   workflowId: string,
   overrides: Insert<typeof workflowRuns> = {},
 ) {
+  const [job] = await db
+    .select({
+      workspaceId: workDefinitions.workspaceId,
+      ownerUserId: workDefinitions.ownerUserId,
+      runTarget: workDefinitions.runTarget,
+      maxRetries: workDefinitions.maxRetries,
+    })
+    .from(workDefinitions)
+    .where(eq(workDefinitions.id, workflowId));
   const [row] = await db
     .insert(workflowRuns)
-    .values({ workflowId, ...overrides })
+    .values({ workflowId, ...job, ...overrides })
     .returning();
   return row;
 }

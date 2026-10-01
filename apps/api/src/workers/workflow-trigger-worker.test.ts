@@ -25,27 +25,41 @@ vi.mock("../logger.js", () => ({
 }));
 
 const mockGetDueScheduleTriggersAll = vi.fn();
-const mockGetWorkflow = vi.fn();
 const mockCreateWorkflowRun = vi.fn();
 const mockMarkTriggerFired = vi.fn();
-const mockGetTaskConfig = vi.fn();
 const mockInstantiateTask = vi.fn();
 
+/** Work definitions the dispatcher can find, by id (each row carries its `kind`). */
+const definitionRows = new Map<string, { id: string; kind: string; enabled: boolean }>();
+function seedDefinition(row: { id: string; kind: string; enabled: boolean; name?: string }) {
+  definitionRows.set(row.id, row);
+}
+
 // The worker finds due schedules through the trigger service and fires them
-// through the dispatcher, which reaches the per-kind services mocked here.
+// through the dispatcher, which looks the target up as a work definition and
+// starts it through the per-kind services mocked here.
 vi.mock("../services/trigger-service.js", () => ({
   listDueScheduleTriggers: (...args: unknown[]) => mockGetDueScheduleTriggersAll(...args),
   advanceSchedule: (...args: unknown[]) => mockMarkTriggerFired(...args),
   markTriggerFired: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../services/work-definition-service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/work-definition-service.js")>();
+  return {
+    definitionKindOf: actual.definitionKindOf,
+    getDefinition: async (id: string, kind?: string) => {
+      const row = definitionRows.get(id);
+      return row && (!kind || row.kind === kind) ? row : null;
+    },
+  };
+});
+
 vi.mock("../services/workflow-service.js", () => ({
-  getWorkflow: (...args: unknown[]) => mockGetWorkflow(...args),
   createWorkflowRun: (...args: unknown[]) => mockCreateWorkflowRun(...args),
 }));
 
 vi.mock("../services/task-config-service.js", () => ({
-  getTaskConfig: (...args: unknown[]) => mockGetTaskConfig(...args),
   instantiateTask: (...args: unknown[]) => mockInstantiateTask(...args),
 }));
 
@@ -82,6 +96,7 @@ describe("workflow-trigger-worker", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    definitionRows.clear();
     const worker = startWorkflowTriggerWorker();
     processor = (Worker as any).mock.calls[0][1];
   });
@@ -97,7 +112,7 @@ describe("workflow-trigger-worker", () => {
     mockGetDueScheduleTriggersAll.mockResolvedValue([
       jobTrigger({ paramMapping: { env: "production" } }),
     ]);
-    mockGetWorkflow.mockResolvedValue({ id: "w-1", name: "Deploy", enabled: true });
+    seedDefinition({ id: "w-1", kind: "standalone", name: "Deploy", enabled: true });
     mockCreateWorkflowRun.mockResolvedValue({ id: "run-1" });
 
     await processor();
@@ -111,7 +126,7 @@ describe("workflow-trigger-worker", () => {
 
   it("skips disabled workflow targets but still marks fired", async () => {
     mockGetDueScheduleTriggersAll.mockResolvedValue([jobTrigger()]);
-    mockGetWorkflow.mockResolvedValue({ id: "w-1", name: "Off", enabled: false });
+    seedDefinition({ id: "w-1", kind: "standalone", name: "Off", enabled: false });
 
     await processor();
 
@@ -121,7 +136,7 @@ describe("workflow-trigger-worker", () => {
 
   it("dispatches task_config targets to instantiateTask", async () => {
     mockGetDueScheduleTriggersAll.mockResolvedValue([taskConfigTrigger()]);
-    mockGetTaskConfig.mockResolvedValue({ id: "tc-1", name: "CVE patch", enabled: true });
+    seedDefinition({ id: "tc-1", kind: "repo-blueprint", name: "CVE patch", enabled: true });
     mockInstantiateTask.mockResolvedValue({ id: "task-9" });
 
     await processor();
@@ -136,7 +151,7 @@ describe("workflow-trigger-worker", () => {
 
   it("skips disabled task_config targets but still marks fired", async () => {
     mockGetDueScheduleTriggersAll.mockResolvedValue([taskConfigTrigger()]);
-    mockGetTaskConfig.mockResolvedValue({ id: "tc-1", name: "Off", enabled: false });
+    seedDefinition({ id: "tc-1", kind: "repo-blueprint", name: "Off", enabled: false });
 
     await processor();
 
@@ -161,7 +176,7 @@ describe("workflow-trigger-worker", () => {
     mockGetDueScheduleTriggersAll.mockResolvedValue([
       jobTrigger({ config: { cronExpression: "*/5 * * * *" } }),
     ]);
-    mockGetWorkflow.mockResolvedValue({ id: "w-1", enabled: true });
+    seedDefinition({ id: "w-1", kind: "standalone", enabled: true });
     mockCreateWorkflowRun.mockRejectedValue(new Error("DB error"));
 
     await processor();
@@ -178,8 +193,8 @@ describe("workflow-trigger-worker", () => {
       jobTrigger({ id: "t-a", targetId: "w-a" }),
       taskConfigTrigger({ id: "t-b", targetId: "tc-b" }),
     ]);
-    mockGetWorkflow.mockResolvedValue({ id: "w-a", name: "A", enabled: true });
-    mockGetTaskConfig.mockResolvedValue({ id: "tc-b", name: "B", enabled: true });
+    seedDefinition({ id: "w-a", kind: "standalone", name: "A", enabled: true });
+    seedDefinition({ id: "tc-b", kind: "repo-blueprint", name: "B", enabled: true });
     mockCreateWorkflowRun.mockResolvedValue({ id: "run-a" });
     mockInstantiateTask.mockResolvedValue({ id: "task-b" });
 

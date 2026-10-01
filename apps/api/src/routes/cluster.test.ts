@@ -56,7 +56,13 @@ vi.mock("../db/client.js", () => ({
 }));
 
 vi.mock("../db/schema.js", () => ({
-  repoPods: { id: "id", workspaceId: "workspaceId" },
+  agentPods: {
+    id: "id",
+    pool: "pool",
+    poolKey: "poolKey",
+    workspaceId: "workspaceId",
+    activeCount: "activeCount",
+  },
   tasks: {
     id: "id",
     title: "title",
@@ -82,7 +88,46 @@ vi.mock("../services/container-service.js", () => ({
   }),
 }));
 
+// Pod rows live in agent_pods behind agent-pod-pool; repo-pool-service's
+// views (real) turn them back into the repo-pod shape the cluster API serves.
+const mockGetPod = vi.fn();
+const mockListPods = vi.fn();
+const mockDeletePod = vi.fn();
+
+vi.mock("../services/agent-pod-pool.js", () => ({
+  getPod: (...args: unknown[]) => mockGetPod(...args),
+  listPods: (...args: unknown[]) => mockListPods(...args),
+  deletePod: (...args: unknown[]) => mockDeletePod(...args),
+}));
+
 import { clusterRoutes } from "./cluster.js";
+
+/** An `agent_pods` row. */
+function agentPod(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "pod-1",
+    pool: "repo",
+    poolKey: "https://github.com/org/repo",
+    instanceIndex: 0,
+    workspaceId: null,
+    repoBranch: "main",
+    podName: "optio-repo-1",
+    podId: "k8s-pod-1",
+    state: "ready",
+    activeCount: 1,
+    lastUsedAt: null,
+    keepWarmUntil: null,
+    errorMessage: null,
+    managedBy: "bare-pod",
+    statefulSetName: null,
+    jobName: null,
+    cachePvcName: null,
+    cachePvcState: null,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    updatedAt: new Date("2026-01-01T00:00:00Z"),
+    ...overrides,
+  };
+}
 
 // ─── Helpers ───
 
@@ -91,6 +136,12 @@ async function buildTestApp(): Promise<FastifyInstance> {
     user: { id: "u1", workspaceId: null, workspaceRole: "admin" },
   });
 }
+
+beforeEach(() => {
+  mockGetPod.mockReset().mockResolvedValue(null);
+  mockListPods.mockReset().mockResolvedValue([]);
+  mockDeletePod.mockReset().mockResolvedValue(undefined);
+});
 
 describe("GET /api/cluster/overview", () => {
   let app: FastifyInstance;
@@ -140,18 +191,8 @@ describe("GET /api/cluster/pods", () => {
   });
 
   it("returns pods from database", async () => {
-    // Reset the chainable mock to return pods
-    mockDbSelectChain.then.mockImplementation((resolve: any) =>
-      resolve([
-        {
-          id: "pod-1",
-          repoUrl: "https://github.com/org/repo",
-          podName: "optio-repo-1",
-          state: "ready",
-        },
-      ]),
-    );
-    // For the recentTasks sub-query, the second time through the chain
+    mockListPods.mockResolvedValue([agentPod()]);
+    // For the recentTasks sub-query
     mockDbSelectChain.limit.mockReturnValue({
       then: vi.fn().mockImplementation((resolve: any) => resolve([])),
       [Symbol.toStringTag]: "Promise",
@@ -160,8 +201,19 @@ describe("GET /api/cluster/pods", () => {
     const res = await app.inject({ method: "GET", url: "/api/cluster/pods" });
 
     expect(res.statusCode).toBe(200);
-    // The response should contain a pods array
-    expect(res.json().pods).toBeDefined();
+    expect(mockListPods).toHaveBeenCalledWith("repo");
+    // The response keeps the repo-pod shape clients decode
+    const pods = res.json().pods;
+    expect(pods).toHaveLength(1);
+    expect(pods[0]).toMatchObject({
+      id: "pod-1",
+      repoUrl: "https://github.com/org/repo",
+      repoBranch: "main",
+      podName: "optio-repo-1",
+      state: "ready",
+      activeTaskCount: 1,
+      recentTasks: [],
+    });
   });
 });
 
@@ -174,15 +226,13 @@ describe("GET /api/cluster/pods/:id", () => {
   });
 
   it("returns 404 for nonexistent pod", async () => {
-    mockDbSelectChain.where.mockReturnValueOnce({
-      then: vi.fn().mockImplementation((resolve: any) => resolve([])),
-      [Symbol.toStringTag]: "Promise",
-    });
+    mockGetPod.mockResolvedValueOnce(null);
 
     const res = await app.inject({ method: "GET", url: "/api/cluster/pods/nonexistent" });
 
     expect(res.statusCode).toBe(404);
     expect(res.json().error).toBe("Pod not found");
+    expect(mockGetPod).toHaveBeenCalledWith("nonexistent");
   });
 });
 
@@ -220,14 +270,13 @@ describe("POST /api/cluster/pods/:id/restart", () => {
   });
 
   it("returns 404 for nonexistent pod", async () => {
-    mockDbSelectChain.where.mockReturnValueOnce({
-      then: vi.fn().mockImplementation((resolve: any) => resolve([])),
-      [Symbol.toStringTag]: "Promise",
-    });
+    mockGetPod.mockResolvedValueOnce(null);
 
     const res = await app.inject({ method: "POST", url: "/api/cluster/pods/nonexistent/restart" });
 
     expect(res.statusCode).toBe(404);
     expect(res.json().error).toBe("Pod not found");
+    expect(mockGetPod).toHaveBeenCalledWith("nonexistent");
+    expect(mockDeletePod).not.toHaveBeenCalled();
   });
 });

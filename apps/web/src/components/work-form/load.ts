@@ -125,79 +125,64 @@ function optionsFromRow(runtime: string, row: any): WorkDraft["agentOptions"] {
 }
 
 /**
- * The draft a saved row is the point for — the inverse of `createWork`'s
- * branch for its kind. `normalize` then confirms the draft sits inside the
+ * The draft a saved definition is the point for — the inverse of `specFor`.
+ * One mapping for every kind: the stored row (`GET /api/work/:id`) names
+ * each attribute once. `normalize` then confirms the draft sits inside the
  * space, which it does for anything the form itself saved.
  */
-export function draftFromRow(
-  kind: EditableKind,
-  row: any,
-  trigger: any | null,
-  meId?: string | null,
-): WorkDraft {
-  const when = whenFromTrigger(trigger);
-  const common = {
+export function draftFromRow(row: any, trigger: any | null, meId?: string | null): WorkDraft {
+  const kind = row.kind as EditableKind;
+  const automation = kind === "local-blueprint";
+  // No agent is a terminal: a command Job, or an automation's shell / command.
+  // (Only a scheduled Task always has one — Claude Code for the oldest rows.)
+  const runtime = row.agentType
+    ? String(row.agentType)
+    : kind === "repo-blueprint"
+      ? "claude-code"
+      : TERMINAL;
+  const prompt = String(row.prompt ?? "");
+  const interactive = row.localSessionMode !== "headless";
+  const name = String(row.name ?? "");
+  // Older forms saved `run title = name` when no run name was set.
+  const runTitle = row.runTitle && row.runTitle !== name ? String(row.runTitle) : "";
+  return normalize({
     ...EMPTY_DRAFT,
-    ...when,
+    ...whenFromTrigger(trigger),
     owner: ownerFromRow(row, meId).owner,
     podSecrets: podSecretsFromRow(row),
-    name: String(row.name ?? row.title ?? ""),
+    settings: row.settings && typeof row.settings === "object" ? row.settings : {},
+    name,
     description: String(row.description ?? ""),
-  };
-  switch (kind) {
-    case "repo-blueprint":
-      return normalize({
-        ...common,
-        // The form saves `title = name` when no run name is set.
-        runName: row.title && row.title !== row.name ? String(row.title) : "",
-        location: runLocationFromRow(row),
-        withRepo: true,
-        repoUrl: String(row.repoUrl ?? ""),
-        repoBranch: String(row.repoBranch ?? "main"),
-        runtime: String(row.agentType ?? "claude-code"),
-        agentOptions: optionsFromRow(String(row.agentType ?? "claude-code"), row),
-        prompt: String(row.prompt ?? ""),
-        // A row saved with its own follow-through is "Works until merged".
-        then: row.autoResume === true ? "until-merged" : "exits",
-        mergeWhenReady: row.autoMerge !== false,
-        priority: typeof row.priority === "number" ? row.priority : EMPTY_DRAFT.priority,
-        maxRetries: typeof row.maxRetries === "number" ? row.maxRetries : EMPTY_DRAFT.maxRetries,
-      });
-    case "standalone": {
-      const runtime = String(row.agentRuntime ?? "claude-code");
-      return normalize({
-        ...common,
-        runName: String(row.runTitle ?? ""),
-        location: runLocationFromRow(row),
-        withRepo: false,
-        runtime,
-        agentOptions: optionsFromRow(runtime, row),
-        prompt: String(row.promptTemplate ?? ""),
-        then: "exits",
-        maxRetries: typeof row.maxRetries === "number" ? row.maxRetries : EMPTY_DRAFT.maxRetries,
-      });
-    }
-    case "local-blueprint": {
-      const interactive = row.sessionMode !== "headless";
-      return normalize({
-        ...common,
-        runName: String(row.runTitle ?? ""),
-        location: {
+    runName: runTitle,
+    location: automation
+      ? {
           runTarget: "local",
-          localHostId: String(row.hostId ?? ""),
-          localDir: String(row.dir ?? ""),
+          localHostId: String(row.localHostId ?? ""),
+          localDir: String(row.localDir ?? ""),
           localSessionMode: interactive ? "interactive" : "headless",
-        },
-        withRepo: !!row.baseBranch,
-        repoUrl: String(row.repoUrl ?? ""),
-        repoBranch: String(row.baseBranch ?? "main"),
-        runtime: row.agent ? String(row.agent) : TERMINAL,
-        agentOptions: row.agent ? { ...(row.agentOptions ?? {}) } : {},
-        prompt: String(row.commandTemplate ?? ""),
-        then: interactive ? "waits-for-me" : "exits",
-      });
-    }
-  }
+        }
+      : runLocationFromRow(row),
+    // A scheduled Task works in its repo; a Local automation with a base branch on a new branch.
+    withRepo: kind === "repo-blueprint" || (automation && !!row.repoBranch),
+    repoUrl: String(row.repoUrl ?? ""),
+    repoBranch: String(row.repoBranch ?? "main"),
+    runtime,
+    agentOptions: runtime === TERMINAL ? {} : optionsFromRow(runtime, row),
+    prompt,
+    // A row saved with its own follow-through is "Works until merged". An
+    // automation with no agent that runs a command is a command (it exits);
+    // with none it opens a shell that waits for you.
+    then: automation
+      ? (runtime === TERMINAL ? !prompt.trim() : interactive)
+        ? "waits-for-me"
+        : "exits"
+      : row.autoResume === true
+        ? "until-merged"
+        : "exits",
+    mergeWhenReady: row.autoMerge !== false,
+    priority: typeof row.priority === "number" ? row.priority : EMPTY_DRAFT.priority,
+    maxRetries: typeof row.maxRetries === "number" ? row.maxRetries : EMPTY_DRAFT.maxRetries,
+  });
 }
 
 /** The trigger the form should show: the first enabled one, else the first. */
@@ -206,50 +191,30 @@ export function pickTrigger(triggers: any[]): any | null {
 }
 
 /**
- * Resolve an id to something the form can edit. The unified `/api/tasks`
- * resolver covers scheduled Tasks and Jobs; Local automations live under
- * `/api/local/blueprints`. Anything else (a one-shot Task, a run) is not a
- * definition and has no edit form.
+ * Resolve an id to something the form can edit (`GET /api/work/:id`): a
+ * saved definition — a scheduled Task, a Job, or a Local automation.
+ * Anything else (a one-shot Task, a run, a session) is not a definition and
+ * has no edit form.
  */
 export async function loadEditTarget(id: string): Promise<EditTarget> {
   const meId = await Promise.resolve()
     .then(() => api.getCurrentUser())
     .then((r) => r.user.id)
     .catch(() => null);
-  const unified = await api.getTaskUnified(id).catch((err: { status?: number }) => {
-    if (err?.status === 404) return null;
-    throw err;
-  });
-  if (unified) {
-    const kind = String(unified.task.type);
-    if (!isEditableKind(kind)) {
-      throw Object.assign(new Error("Only recurring sessions can be edited"), { status: 405 });
-    }
-    const { triggers } = await api.listTaskTriggers(id);
-    const trigger = pickTrigger(triggers);
-    return {
-      id,
-      kind,
-      row: unified.task,
-      trigger,
-      triggers,
-      draft: draftFromRow(kind, unified.task, trigger, meId),
-      foreignOwnerId: ownerFromRow(unified.task, meId).foreignOwnerId,
-    };
+  const { source, work } = await api.getWork(id);
+  if (!isEditableKind(source)) {
+    throw Object.assign(new Error("Only recurring sessions can be edited"), { status: 405 });
   }
-  const [{ blueprint }, { triggers }] = await Promise.all([
-    api.getLocalBlueprint(id),
-    api.listLocalBlueprintTriggers(id),
-  ]);
+  const { triggers } = await api.listWorkTriggers(id);
   const trigger = pickTrigger(triggers);
   return {
     id,
-    kind: "local-blueprint",
-    row: blueprint,
+    kind: source,
+    row: work,
     trigger,
     triggers,
-    draft: draftFromRow("local-blueprint", blueprint, trigger, meId),
+    draft: draftFromRow(work, trigger, meId),
     // Automations live on your own machine; they are always yours.
-    foreignOwnerId: null,
+    foreignOwnerId: source === "local-blueprint" ? null : ownerFromRow(work, meId).foreignOwnerId,
   };
 }

@@ -256,6 +256,16 @@ async function requireWorkflowRunInWorkspace(req: FastifyRequest, runId: string)
   return run;
 }
 
+/** Whether the caller may act on a Job's run, by the Job's current owner. */
+async function runChangeError(
+  workflowId: string,
+  req: FastifyRequest,
+  action: "run" | "delete",
+): Promise<string | null> {
+  const job = await workflowService.getWorkflow(workflowId);
+  return workChangeError(job?.ownerUserId, workActor(req), action);
+}
+
 export async function workflowRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
@@ -438,7 +448,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
               input.localSessionMode !== undefined
                 ? input.localSessionMode
                 : existing.localSessionMode,
-            agentType: input.agentRuntime ?? existing.agentRuntime,
+            // A command Job ("shell") runs anywhere: there is no agent to check.
+            agentType: workflowService.agentTypeOf(input.agentRuntime ?? existing.agentRuntime),
           },
           req.user?.id,
         );
@@ -666,12 +677,13 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         operationId: "retryWorkflowRun",
         summary: "Retry a workflow run",
         description:
-          "Re-queue a failed workflow run. Returns 400 if the run is not retryable. " +
-          "Requires `member` role.",
+          "Re-queue a failed workflow run. Returns 400 if the run is not retryable, 403 if " +
+          "the Job is someone else's personal work. Requires `member` role.",
         tags: ["Workflows"],
         params: IdParamsSchema,
         response: {
           200: WorkflowRunResponseSchema,
+          403: ErrorResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
@@ -681,6 +693,9 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const existing = await requireWorkflowRunInWorkspace(req, id);
       if (!existing) return reply.status(404).send({ error: "Workflow run not found" });
+      // A retry runs again with the Job owner's credentials: only they may.
+      const changeErr = await runChangeError(existing.workflowId, req, "run");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
       try {
         const run = await workflowService.retryWorkflowRun(id);
         logAction({
@@ -705,12 +720,13 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         operationId: "cancelWorkflowRun",
         summary: "Cancel a workflow run",
         description:
-          "Cancel a running workflow run. Returns 400 if the run is not cancellable. " +
-          "Requires `member` role.",
+          "Cancel a running workflow run. Returns 400 if the run is not cancellable, 403 if " +
+          "the Job is someone else's personal work (admins may). Requires `member` role.",
         tags: ["Workflows"],
         params: IdParamsSchema,
         response: {
           200: WorkflowRunResponseSchema,
+          403: ErrorResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
@@ -720,6 +736,9 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const existing = await requireWorkflowRunInWorkspace(req, id);
       if (!existing) return reply.status(404).send({ error: "Workflow run not found" });
+      // Stopping a personal Job's run is its owner's (or an admin's) to do.
+      const changeErr = await runChangeError(existing.workflowId, req, "delete");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
       try {
         const run = await workflowService.cancelWorkflowRun(id);
         logAction({

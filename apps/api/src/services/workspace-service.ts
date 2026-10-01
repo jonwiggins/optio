@@ -2,6 +2,7 @@ import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workspaces, workspaceMembers, users } from "../db/schema.js";
 import { revokeAllUserSessions } from "./session-service.js";
+import { deleteWorkspaceDefinitions } from "./work-definition-service.js";
 import type {
   Workspace,
   WorkspaceMemberWithUser,
@@ -86,8 +87,12 @@ export async function updateWorkspace(
   return (ws as Workspace) ?? null;
 }
 
+/** Delete a workspace, and with it its scheduled Tasks and Jobs (and their triggers). */
 export async function deleteWorkspace(id: string): Promise<void> {
-  await db.delete(workspaces).where(eq(workspaces.id, id));
+  await db.transaction(async (tx) => {
+    await deleteWorkspaceDefinitions(id, tx);
+    await tx.delete(workspaces).where(eq(workspaces.id, id));
+  });
 }
 
 /** List workspaces a user belongs to, with their role in each. */

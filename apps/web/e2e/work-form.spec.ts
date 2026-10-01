@@ -33,6 +33,10 @@ async function open(page: Page) {
   await expect(page.getByRole("heading", { name: "New work" })).toBeVisible({
     timeout: 30_000,
   });
+  // The heading is server-rendered; a click before hydration is lost (an
+  // example chip that never applied). The repo picker only renders once the
+  // client has fetched the repos.
+  await expect(page.locator("#session-where select").first()).toBeVisible({ timeout: 30_000 });
 }
 
 const preset = (page: Page, label: string) =>
@@ -48,6 +52,24 @@ const then = (page: Page, title: string) => page.getByRole("button", { name: new
 const prompt = (page: Page) => page.locator("#session-prompt textarea");
 const nameInput = (page: Page) => page.locator("#session-name input").first();
 const submit = (page: Page) => page.locator('form button[type="submit"]');
+
+/**
+ * The writes the page sends to the API ("POST /api/work"), in order. The form
+ * creates and saves every kind through `/api/work`; the server writes the
+ * row and its trigger together.
+ */
+function recordWrites(page: Page): string[] {
+  const writes: string[] = [];
+  page.on("request", (req) => {
+    const { pathname } = new URL(req.url());
+    if (req.method() !== "GET" && pathname.startsWith("/api/")) {
+      writes.push(`${req.method()} ${pathname}`);
+    }
+  });
+  return writes;
+}
+/** Remembering your agent settings is a write of its own, beside the work. */
+const workWrites = (writes: string[]) => writes.filter((w) => w !== "PUT /api/me/work-defaults");
 
 async function pickMachine(page: Page, dir: string) {
   await where(page, "My machine").click();
@@ -81,6 +103,7 @@ test.describe("New work form creates every kind", () => {
   test("repo-blueprint: a scheduled pod Task saves the blueprint and its cron trigger", async ({
     page,
   }) => {
+    const writes = recordWrites(page);
     await open(page);
     await preset(page, "Open a PR").click();
     await when(page, "Schedule").click();
@@ -88,6 +111,8 @@ test.describe("New work form creates every kind", () => {
     await nameInput(page).fill(named("blueprint"));
     await submit(page).click();
     await expect(page).toHaveURL(/\/tasks\/scheduled\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    // The blueprint and its trigger in one request.
+    expect(workWrites(writes)).toEqual(["POST /api/work"]);
 
     const id = page.url().split("/").pop()!;
     const { task } = await api(`/api/tasks/${id}`);
@@ -162,6 +187,40 @@ test.describe("New work form creates every kind", () => {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-"),
     );
+  });
+
+  test("persistent-agent with a repo: it works in a checkout of one of your repos", async ({
+    page,
+  }) => {
+    await open(page);
+    await preset(page, "Persistent agent").click();
+    await page.getByRole("button", { name: "A repository", exact: true }).click();
+    await prompt(page).fill("Keep the docs in this repo current.");
+    await nameInput(page).fill(named("repo agent"));
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/agents\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    const id = page.url().split("/").pop()!;
+    const { agent } = await api(`/api/persistent-agents/${id}`);
+    expect(agent.repoId).toBeTruthy();
+    expect(agent.branch).toBe("main");
+  });
+
+  test("standalone command: a Terminal that exits runs a shell command on a schedule", async ({
+    page,
+  }) => {
+    await open(page);
+    await preset(page, "Scheduled run").click();
+    await who(page, "Terminal").click();
+    // A terminal that exits asks for a command, not a prompt.
+    await expect(page.locator("#session-prompt")).toContainText("Command");
+    await prompt(page).fill("./scripts/nightly-report.sh");
+    await nameInput(page).fill(named("command"));
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    const id = page.url().split("/").pop()!;
+    const { workflow } = await api(`/api/jobs/${id}`);
+    expect(workflow.agentRuntime).toBe("shell");
+    expect(workflow.promptTemplate).toBe("./scripts/nightly-report.sh");
   });
 
   test("pod-session: waiting for me in a pod keeps the name, and only chats with Claude Code", async ({
@@ -329,7 +388,8 @@ test.describe("New work form creates every kind", () => {
 
 /**
  * Editing reopens the same form on saved recurring work: prefilled from
- * the row, kind locked, Save patches the row and its trigger in place.
+ * the row, kind locked, Save patches the row and its trigger in place —
+ * one `PATCH /api/work/:id`, whatever the kind.
  */
 test.describe("Editing recurring work", () => {
   test("a Job opens from the Recurring view, keeps its kind, and saves prompt + schedule", async ({
@@ -357,6 +417,7 @@ test.describe("Editing recurring work", () => {
     });
 
     // The Recurring view's row has an Edit action beside it.
+    const writes = recordWrites(page);
     await page.goto("/work?view=recurring");
     await page.getByRole("button", { name: `Edit ${named("editable job")}` }).click();
     await expect(page).toHaveURL(new RegExp(`/work/${task.id}/edit$`), { timeout: 30_000 });
@@ -378,6 +439,7 @@ test.describe("Editing recurring work", () => {
     await page.locator("#session-when").getByRole("button", { name: "Every hour" }).click();
     await submit(page).click();
     await expect(page).toHaveURL(new RegExp(`/jobs/${task.id}$`), { timeout: 30_000 });
+    expect(writes).toEqual([`PATCH /api/work/${task.id}`]);
 
     const saved = await api(`/api/tasks/${task.id}`);
     expect(saved.task.promptTemplate).toBe("After");
@@ -410,6 +472,7 @@ test.describe("Editing recurring work", () => {
       }),
     });
 
+    const writes = recordWrites(page);
     await page.goto(`/work/${blueprint.id}/edit`);
     await expect(page.getByRole("heading", { name: "Edit work" })).toBeVisible({
       timeout: 30_000,
@@ -426,6 +489,7 @@ test.describe("Editing recurring work", () => {
     });
     await expect(page.getByRole("heading", { name: named("renamed automation") })).toBeVisible();
     await expect(page.getByText("C0999ZZZZ")).toBeVisible();
+    expect(writes).toEqual([`PATCH /api/work/${blueprint.id}`]);
 
     const after = await api(`/api/local/blueprints/${blueprint.id}`);
     expect(after.blueprint.name).toBe(named("renamed automation"));
@@ -492,5 +556,62 @@ test.describe("Remembered agent settings", () => {
     await page.getByTestId("work-last-settings").getByRole("button", { name: "Reset" }).click();
     await expect(page.getByTestId("work-last-settings")).toHaveCount(0);
     await expect(whoCard.getByLabel("Model")).not.toHaveValue("claude-sonnet-4-6");
+  });
+});
+
+test.describe("Where → Environment", () => {
+  test("environment: a Job leaves out a workspace MCP server and runs its own setup commands", async ({
+    page,
+  }) => {
+    const { server } = await api("/api/mcp-servers", {
+      method: "POST",
+      body: JSON.stringify({ name: named("mcp"), command: "e2e-mcp" }),
+    });
+    await open(page);
+    await preset(page, "Scheduled run").click();
+    await prompt(page).fill("Report");
+    await nameInput(page).fill(named("env job"));
+    await page
+      .locator("#session-where")
+      .getByRole("button", { name: /^Environment/ })
+      .click();
+    const mcp = page.getByRole("group", { name: "MCP servers" });
+    const chip = mcp.getByRole("button", { name: new RegExp(named("mcp")) });
+    // A workspace server is on by default; this work turns it off.
+    await expect(chip).toHaveAttribute("aria-pressed", "true");
+    await chip.click();
+    await expect(chip).toHaveAttribute("aria-pressed", "false");
+    await page.getByLabel("Setup commands").fill("echo ready");
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+
+    const id = page.url().split("/").pop()!;
+    const { work } = await api(`/api/work/${id}`);
+    expect(work.settings).toEqual({
+      mcpServers: { remove: [server.id] },
+      setupCommands: "echo ready",
+    });
+  });
+
+  test("environment: a pod Task asks for a review as its PR opens, over the repo", async ({
+    page,
+  }) => {
+    await open(page);
+    await preset(page, "Open a PR").click();
+    await prompt(page).fill("Fix the flaky test");
+    await nameInput(page).fill(named("env task"));
+    await page
+      .locator("#session-where")
+      .getByRole("button", { name: /^Environment/ })
+      .click();
+    await page.getByRole("button", { name: "Review when the PR opens", exact: true }).click();
+    // The plan under Then follows the work's own setting.
+    await expect(page.getByText("As soon as the PR opens.")).toBeVisible();
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+
+    const id = page.url().split("/").pop()!;
+    const { work } = await api(`/api/work/${id}`);
+    expect(work.settings).toEqual({ review: { enabled: true, trigger: "on_pr" } });
   });
 });

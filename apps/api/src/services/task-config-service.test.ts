@@ -10,7 +10,7 @@ vi.mock("../db/client.js", () => ({
 }));
 
 vi.mock("../db/schema.js", () => ({
-  taskConfigs: { id: "task_configs.id" },
+  workDefinitions: { workspaceId: "work_definitions.workspace_id" },
   workflowTriggers: {
     id: "workflow_triggers.id",
     targetType: "workflow_triggers.target_type",
@@ -19,6 +19,14 @@ vi.mock("../db/schema.js", () => ({
     enabled: "workflow_triggers.enabled",
     createdAt: "workflow_triggers.created_at",
   },
+}));
+
+vi.mock("./work-definition-service.js", () => ({
+  getDefinition: vi.fn(),
+  listDefinitions: vi.fn(),
+  createDefinition: vi.fn(),
+  updateDefinition: vi.fn(),
+  deleteDefinition: vi.fn(),
 }));
 
 vi.mock("./task-service.js", () => ({
@@ -44,23 +52,21 @@ vi.mock("../logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { db } from "../db/client.js";
 import * as taskService from "./task-service.js";
 import { getRepoByUrl } from "./repo-service.js";
+import { getDefinition } from "./work-definition-service.js";
 import { instantiateTask } from "./task-config-service.js";
 
-function mockGetTaskConfig(config: Record<string, unknown>) {
-  (db.select as any) = vi.fn().mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue([config]),
-    }),
-  });
+function mockGetTaskConfig(definition: Record<string, unknown>) {
+  vi.mocked(getDefinition).mockResolvedValue(definition as any);
 }
 
+/** A `repo-blueprint` work definition, in the unified row shape. */
 const baseConfig = {
   id: "cfg-1",
+  kind: "repo-blueprint",
   name: "Nightly",
-  title: "Nightly task",
+  runTitle: "Nightly task",
   prompt: "Do the thing",
   promptTemplateId: null,
   repoUrl: "https://github.com/o/r",
@@ -83,10 +89,39 @@ describe("task-config-service instantiateTask", () => {
 
     await instantiateTask("cfg-1");
 
+    expect(getDefinition).toHaveBeenCalledWith("cfg-1", "repo-blueprint");
     expect(taskService.createTask).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: "ws-config" }),
     );
     expect(getRepoByUrl).not.toHaveBeenCalled();
+  });
+
+  it("points the spawned task at its definition and renders the run title", async () => {
+    mockGetTaskConfig({ ...baseConfig, workspaceId: "ws-config" });
+
+    await instantiateTask("cfg-1", { triggerId: "trig-1" });
+
+    expect(taskService.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Nightly task",
+        prompt: "Do the thing",
+        workId: "cfg-1",
+        metadata: expect.objectContaining({
+          taskConfigId: "cfg-1",
+          taskConfigName: "Nightly",
+          triggerId: "trig-1",
+        }),
+      }),
+    );
+  });
+
+  it("refuses a missing or disabled definition", async () => {
+    vi.mocked(getDefinition).mockResolvedValueOnce(null);
+    await expect(instantiateTask("cfg-1")).rejects.toThrow(/not found/);
+
+    mockGetTaskConfig({ ...baseConfig, enabled: false, workspaceId: null });
+    await expect(instantiateTask("cfg-1")).rejects.toThrow(/disabled/);
+    expect(taskService.createTask).not.toHaveBeenCalled();
   });
 
   it("falls back to the repo's workspaceId when the config has none (issue #544)", async () => {

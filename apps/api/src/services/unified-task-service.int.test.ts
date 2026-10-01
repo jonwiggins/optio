@@ -5,9 +5,9 @@
  *
  * Covers:
  *   - resolveAnyTaskById resolving rows from each backing table with the
- *     right `type` discriminator (tasks / task_configs / workflows, plus the
- *     fourth pr_reviews table the service actually checks), and null for an
- *     unknown UUID.
+ *     right `type` discriminator (tasks / work_definitions of kind
+ *     repo-blueprint or standalone, plus the pr_reviews table the service
+ *     also checks), and null for an unknown UUID.
  *   - listUnifiedTasks returning all kinds tagged with `type`, and honoring
  *     the type filter and per-kind limit.
  *   - Workspace scoping semantics as implemented:
@@ -91,7 +91,7 @@ describe("resolveAnyTaskById", () => {
     expect(resolved!.data.prompt).toBe(taskGlobal.prompt);
   });
 
-  it("resolves a task_configs row as repo-blueprint", async () => {
+  it("resolves a repo-blueprint work definition as repo-blueprint", async () => {
     const resolved = await resolveAnyTaskById(configGlobal.id);
     expect(resolved).not.toBeNull();
     expect(resolved!.type).toBe("repo-blueprint");
@@ -99,7 +99,7 @@ describe("resolveAnyTaskById", () => {
     expect(resolved!.data.name).toBe(configGlobal.name);
   });
 
-  it("resolves a workflows row as standalone", async () => {
+  it("resolves a standalone work definition as standalone", async () => {
     const resolved = await resolveAnyTaskById(workflowGlobal.id);
     expect(resolved).not.toBeNull();
     expect(resolved!.type).toBe("standalone");
@@ -183,7 +183,7 @@ describe("listUnifiedTasks", () => {
     expect(idsOf(rows)).not.toContain(workflowGlobal.id);
   });
 
-  it("type=repo-blueprint returns only task_configs rows", async () => {
+  it("type=repo-blueprint returns only scheduled-Task definitions", async () => {
     const rows = await listUnifiedTasks({ type: "repo-blueprint", workspaceId: null });
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.type === "repo-blueprint")).toBe(true);
@@ -191,7 +191,7 @@ describe("listUnifiedTasks", () => {
     expect(idsOf(rows)).not.toContain(taskGlobal.id);
   });
 
-  it("type=standalone returns only workflows rows", async () => {
+  it("type=standalone returns only Job definitions", async () => {
     const rows = await listUnifiedTasks({ type: "standalone", workspaceId: null });
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.type === "standalone")).toBe(true);

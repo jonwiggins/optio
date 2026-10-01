@@ -9,14 +9,7 @@ import {
   type LocalHostDir,
 } from "@optio/shared";
 import { db } from "../db/client.js";
-import {
-  localBlueprints,
-  localHosts,
-  localTerminals,
-  taskConfigs,
-  tasks,
-  workflows,
-} from "../db/schema.js";
+import { localHosts, localTerminals, tasks, workDefinitions } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { publishLocalChanged } from "./event-bus.js";
 import * as relay from "./local-relay.js";
@@ -186,26 +179,17 @@ export async function mergeHosts(sourceId: string, targetId: string): Promise<Ho
       .set({ hostId: targetId })
       .where(eq(localTerminals.hostId, sourceId))
       .returning({ id: localTerminals.id });
-    const automations = await tx
-      .update(localBlueprints)
-      .set({ hostId: targetId, updatedAt: new Date() })
-      .where(eq(localBlueprints.hostId, sourceId))
-      .returning({ id: localBlueprints.id });
+    const movedDefinitions = await tx
+      .update(workDefinitions)
+      .set({ localHostId: targetId, updatedAt: new Date() })
+      .where(eq(workDefinitions.localHostId, sourceId))
+      .returning({ kind: workDefinitions.kind });
+    const automations = movedDefinitions.filter((d) => d.kind === "local-blueprint").length;
     const movedTasks = await tx
       .update(tasks)
       .set({ localHostId: targetId })
       .where(eq(tasks.localHostId, sourceId))
       .returning({ id: tasks.id });
-    const movedConfigs = await tx
-      .update(taskConfigs)
-      .set({ localHostId: targetId })
-      .where(eq(taskConfigs.localHostId, sourceId))
-      .returning({ id: taskConfigs.id });
-    const movedJobs = await tx
-      .update(workflows)
-      .set({ localHostId: targetId })
-      .where(eq(workflows.localHostId, sourceId))
-      .returning({ id: workflows.id });
     const [source] = await tx
       .delete(localHosts)
       .where(eq(localHosts.id, sourceId))
@@ -214,8 +198,8 @@ export async function mergeHosts(sourceId: string, targetId: string): Promise<Ho
       userId: source?.userId ?? null,
       moved: {
         terminals: terminals.length,
-        automations: automations.length,
-        runLocations: movedTasks.length + movedConfigs.length + movedJobs.length,
+        automations,
+        runLocations: movedTasks.length + movedDefinitions.length - automations,
       },
     };
   });

@@ -4,7 +4,6 @@
  * ownership miss is a 404. See docs/optio-local.md.
  */
 import { LimitsRefreshError, refreshHostLimits } from "../services/local-limits-service.js";
-import { providerSelectionError } from "../services/model-provider-service.js";
 import { modelProviderIdFrom } from "@optio/shared";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -38,7 +37,6 @@ import {
 } from "../schemas/trigger.js";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import { buildTicketPrompt } from "../services/ticket-context.js";
-import { getPromptTemplateById } from "../services/prompt-template-service.js";
 
 const registerHostSchema = z
   .object({
@@ -165,28 +163,6 @@ const TriggersResponse = z.object({ triggers: z.array(LocalTriggerSchema) });
  * caller's own machine (a member could otherwise run commands on a
  * teammate's laptop by guessing its host id).
  */
-async function checkBlueprintBody(
-  body: {
-    commandTemplate?: string;
-    promptTemplateId?: string | null;
-    hostId?: string | null;
-  },
-  userId: string | null | undefined,
-): Promise<string | null> {
-  if (!body.commandTemplate?.trim() && !body.promptTemplateId) {
-    return "Give the automation a prompt / command, or pick a saved prompt";
-  }
-  if (body.promptTemplateId) {
-    const saved = await getPromptTemplateById(body.promptTemplateId);
-    if (!saved) return "Saved prompt not found";
-  }
-  if (body.hostId) {
-    const host = await hostService.getHost(body.hostId);
-    if (!host || !hostService.canAccessHost(host, userId)) return "Host not found";
-  }
-  return null;
-}
-
 /** A host row plus what its connected daemon can do right now. */
 function withLiveCapabilities<T extends { id: string }>(host: T) {
   return {
@@ -911,17 +887,10 @@ export async function localRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const problem =
-        (await checkBlueprintBody(req.body, req.user?.id)) ??
-        (req.body.agent
-          ? await providerSelectionError({
-              agentType: req.body.agent,
-              agentOptions: req.body.agentOptions,
-              workspaceId: req.user?.workspaceId ?? null,
-              ownerUserId: req.user?.id ?? null,
-              runsOn: "local",
-            })
-          : null);
+      const problem = await blueprintService.checkBlueprint(req.body, {
+        userId: req.user?.id,
+        workspaceId: req.user?.workspaceId ?? null,
+      });
       if (problem) return reply.status(400).send({ error: problem });
       try {
         const blueprint = await blueprintService.createBlueprint({
@@ -980,7 +949,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
-      const problem = await checkBlueprintBody(
+      const problem = await blueprintService.checkBlueprint(
         {
           commandTemplate: req.body.commandTemplate ?? blueprint.commandTemplate,
           promptTemplateId:
@@ -988,22 +957,13 @@ export async function localRoutes(rawApp: FastifyInstance) {
               ? blueprint.promptTemplateId
               : req.body.promptTemplateId,
           hostId: req.body.hostId === undefined ? blueprint.hostId : req.body.hostId,
-        },
-        req.user?.id,
-      );
-      if (problem) return reply.status(400).send({ error: problem });
-      const agent = req.body.agent !== undefined ? req.body.agent : blueprint.agent;
-      if (agent && (req.body.agentOptions !== undefined || req.body.agent !== undefined)) {
-        const providerProblem = await providerSelectionError({
-          agentType: agent,
+          agent: req.body.agent !== undefined ? req.body.agent : blueprint.agent,
           agentOptions:
             req.body.agentOptions !== undefined ? req.body.agentOptions : blueprint.agentOptions,
-          workspaceId: blueprint.workspaceId,
-          ownerUserId: blueprint.userId,
-          runsOn: "local",
-        });
-        if (providerProblem) return reply.status(400).send({ error: providerProblem });
-      }
+        },
+        { userId: blueprint.userId, workspaceId: blueprint.workspaceId },
+      );
+      if (problem) return reply.status(400).send({ error: problem });
       const updated = await blueprintService.updateBlueprint(blueprint.id, req.body);
       reply.send({ blueprint: updated! });
     },

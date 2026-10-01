@@ -1,6 +1,7 @@
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { repoSharedDirectories, repos, repoPods } from "../db/schema.js";
+import { repoSharedDirectories, repos } from "../db/schema.js";
+import { listPods } from "./agent-pod-pool.js";
 import { logger } from "../logger.js";
 import { MAX_CACHE_SIZE_PER_DIR_GI, MAX_CACHE_SIZE_TOTAL_GI } from "@optio/shared";
 
@@ -271,10 +272,7 @@ spec:
  * Clear the contents of a shared directory across all ready pods for a repo.
  */
 export async function clearSharedDirectory(dir: SharedDirectory, repoUrl: string): Promise<void> {
-  const pods = await db
-    .select()
-    .from(repoPods)
-    .where(and(eq(repoPods.repoUrl, repoUrl), eq(repoPods.state, "ready")));
+  const pods = (await listPods("repo", repoUrl)).filter((p) => p.state === "ready");
 
   const mountPath = getMountPath(dir.mountLocation, dir.mountSubPath);
 
@@ -322,10 +320,7 @@ export async function getSharedDirectoryUsage(
   dir: SharedDirectory,
   repoUrl: string,
 ): Promise<string | null> {
-  const [pod] = await db
-    .select()
-    .from(repoPods)
-    .where(and(eq(repoPods.repoUrl, repoUrl), eq(repoPods.state, "ready")));
+  const pod = (await listPods("repo", repoUrl)).find((p) => p.state === "ready");
 
   if (!pod?.podName) return null;
 

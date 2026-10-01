@@ -32,11 +32,11 @@ import {
   prReviewRuns,
   prReviewEvents,
   prReviewChatMessages,
-  taskLogs,
 } from "../db/schema.js";
 import { eq, and, sql, asc, desc, inArray } from "drizzle-orm";
 import { getGitPlatformForRepo } from "./git-token-service.js";
 import { enqueueReconcile } from "./reconcile-queue.js";
+import * as runLogService from "./run-log-service.js";
 import { publishEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
 
@@ -598,10 +598,7 @@ export async function parseReviewOutput(runId: string): Promise<void> {
   const [review] = await db.select().from(prReviews).where(eq(prReviews.id, run.prReviewId));
   if (!review) return;
 
-  const logs = await db
-    .select({ content: taskLogs.content })
-    .from(taskLogs)
-    .where(eq(taskLogs.prReviewRunId, runId));
+  const logs = await runLogService.listLogs({ prReviewRunId: runId });
 
   const parsed = extractVerdictJson(logs.map((l) => l.content).join("\n"));
 
@@ -917,10 +914,7 @@ export async function appendChatReplyFromRun(runId: string): Promise<void> {
   const [review] = await db.select().from(prReviews).where(eq(prReviews.id, run.prReviewId));
   if (!review) return;
 
-  const logs = await db
-    .select({ content: taskLogs.content })
-    .from(taskLogs)
-    .where(eq(taskLogs.prReviewRunId, runId));
+  const logs = await runLogService.listLogs({ prReviewRunId: runId });
   const allContent = logs.map((l) => l.content).join("\n");
 
   const parsed = extractVerdictJson(allContent);

@@ -137,7 +137,7 @@ cd optio
             description: "Full installation guide for local and production",
           },
           {
-            title: "Sessions",
+            title: "Work",
             href: "/docs/sessions",
             description: "The five attributes and the kinds they derive",
           },

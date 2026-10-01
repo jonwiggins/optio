@@ -30,20 +30,13 @@ vi.mock("../services/trigger-service.js", async () => {
   };
 });
 
-const mockDbSelect = vi.fn();
-vi.mock("../db/client.js", () => ({
-  db: {
-    select: (...args: unknown[]) => mockDbSelect(...args),
-  },
+// A Job is a `standalone` work definition.
+const mockGetDefinition = vi.fn();
+vi.mock("../services/work-definition-service.js", () => ({
+  getDefinition: (...args: unknown[]) => mockGetDefinition(...args),
 }));
 
-vi.mock("../db/schema.js", () => ({
-  workflows: "workflows_table",
-}));
-
-vi.mock("drizzle-orm", () => ({
-  eq: vi.fn((...args: unknown[]) => args),
-}));
+vi.mock("../db/client.js", () => ({ db: {} }));
 
 import { workflowTriggerRoutes } from "./workflow-triggers.js";
 
@@ -55,6 +48,7 @@ async function buildTestApp(): Promise<FastifyInstance> {
 
 const mockWorkflow = {
   id: "wf-1",
+  kind: "standalone",
   name: "Deploy",
   workspaceId: "ws-1",
 };
@@ -62,11 +56,9 @@ const mockWorkflow = {
 const mockTriggerData = { ...mockWorkflowTrigger };
 
 function mockGetWorkflowReturns(workflow: Record<string, unknown> | null) {
-  mockDbSelect.mockReturnValue({
-    from: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue(workflow ? [workflow] : []),
-    }),
-  });
+  mockGetDefinition.mockImplementation(async (id: string, kind: string) =>
+    workflow && kind === "standalone" && id === workflow.id ? workflow : null,
+  );
 }
 
 // ─── GET /api/jobs/:id/triggers ───

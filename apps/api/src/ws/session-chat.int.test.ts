@@ -10,7 +10,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client.js";
-import { interactiveSessions, repoPods } from "../db/schema.js";
+import { agentPods, interactiveSessions } from "../db/schema.js";
 import { listenWsApp, WsTestClient, type WsFrame } from "../test-utils/integration/ws-client.js";
 import { listSessionChatEvents } from "../services/interactive-session-service.js";
 import { insertSessionWithChatEvents } from "../test-utils/integration/fixtures.js";
@@ -41,8 +41,14 @@ afterAll(async () => {
 async function seedSession(costUsd: string | null) {
   const repoUrl = `https://github.com/it-org/chat-${randomBytes(3).toString("hex")}`;
   const [pod] = await db
-    .insert(repoPods)
-    .values({ repoUrl, podName: "chat-pod", podId: "chat-pod", state: "ready" })
+    .insert(agentPods)
+    .values({
+      pool: "repo",
+      poolKey: repoUrl,
+      podName: "chat-pod",
+      podId: "chat-pod",
+      state: "ready",
+    })
     .returning();
   const [session] = await db
     .insert(interactiveSessions)
@@ -78,14 +84,14 @@ describe("session chat cost", () => {
     expect(first.ready.costUsd).toBe(1.5);
     expect((await turn(first.chat, "0.25")).costUsd).toBeCloseTo(1.75, 6);
     await first.chat.close();
-    await vi.waitFor(async () => expect(await storedCost(session.id)).toBe("1.7500"));
+    await vi.waitFor(async () => expect(await storedCost(session.id)).toBe("1.75"));
 
     // A new socket reports what the session already cost, and adds to it.
     const second = await open(session.id);
     expect(second.ready.costUsd).toBe(1.75);
     expect((await turn(second.chat, "0.25")).costUsd).toBeCloseTo(2, 6);
     await second.chat.close();
-    await vi.waitFor(async () => expect(await storedCost(session.id)).toBe("2.0000"));
+    await vi.waitFor(async () => expect(await storedCost(session.id)).toBe("2"));
   });
 
   it("adds every connection's turns to the stored total", async () => {
@@ -94,9 +100,9 @@ describe("session chat cost", () => {
     const a = await open(session.id);
     const b = await open(session.id);
     await turn(a.chat, "0.25");
-    await vi.waitFor(async () => expect(await storedCost(session.id)).toBe("0.2500"));
+    await vi.waitFor(async () => expect(await storedCost(session.id)).toBe("0.25"));
     await turn(b.chat, "0.5");
-    await vi.waitFor(async () => expect(await storedCost(session.id)).toBe("0.7500"));
+    await vi.waitFor(async () => expect(await storedCost(session.id)).toBe("0.75"));
     await a.chat.close();
     await b.chat.close();
   });
@@ -126,8 +132,14 @@ describe("session chat replay of a long session", () => {
     const session = await insertSessionWithChatEvents(1200);
     // The chat handler needs a pod; a replay needs nothing else.
     const [pod] = await db
-      .insert(repoPods)
-      .values({ repoUrl: session.repoUrl, podName: "long-pod", podId: "long-pod", state: "ready" })
+      .insert(agentPods)
+      .values({
+        pool: "repo",
+        poolKey: session.repoUrl,
+        podName: "long-pod",
+        podId: "long-pod",
+        state: "ready",
+      })
       .returning();
     await db
       .update(interactiveSessions)

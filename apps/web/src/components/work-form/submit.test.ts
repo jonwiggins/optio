@@ -1,70 +1,139 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { kindOfSpec, localAgentParams, type WorkCreated, type WorkSpec } from "@optio/shared";
 
 const api = vi.hoisted(() => ({
-  createTaskUnified: vi.fn(),
-  createTaskTrigger: vi.fn(),
-  createTaskRun: vi.fn(),
-  deleteWorkflow: vi.fn(),
-  deleteTaskConfig: vi.fn(),
-  deleteLocalBlueprint: vi.fn(),
-  createLocalBlueprint: vi.fn(),
-  createLocalBlueprintTrigger: vi.fn(),
-  updateTaskConfig: vi.fn(),
-  updateWorkflow: vi.fn(),
-  updateTaskTrigger: vi.fn(),
-  deleteTaskTrigger: vi.fn(),
-  updateLocalBlueprint: vi.fn(),
-  updateLocalBlueprintTrigger: vi.fn(),
-  deleteLocalBlueprintTrigger: vi.fn(),
-  createLocalTerminal: vi.fn(),
+  createWork: vi.fn(),
+  updateWork: vi.fn(),
   putWorkDefaults: vi.fn(),
 }));
 vi.mock("@/lib/api-client", () => ({ api }));
-vi.mock("@/lib/persistent-agent-defaults", () => ({ defaultAgentsMd: () => "" }));
+vi.mock("@/lib/persistent-agent-defaults", () => ({ defaultAgentsMd: () => "DEFAULT AGENTS.MD" }));
 
-import { createWork, rememberWorkDefaults, updateWork, workDefaultsFrom } from "./submit";
-import { EMPTY_DRAFT, normalize, type WorkDraft } from "./model";
+import { createWork, rememberWorkDefaults, specFor, updateWork, workDefaultsFrom } from "./submit";
+import {
+  deriveKind,
+  EMPTY_DRAFT,
+  normalize,
+  TERMINAL,
+  type WorkDraft,
+  type WorkKind,
+} from "./model";
 import type { EditTarget } from "./load";
 
-const conflict = () => Object.assign(new Error("A Job named x already exists"), { status: 409 });
+const REPO = "https://github.com/acme/app";
 
-describe("createWork", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    api.createTaskRun.mockResolvedValue({ runId: "run-1" });
+const draft = (patch: Partial<WorkDraft>): WorkDraft => normalize({ ...EMPTY_DRAFT, ...patch });
+
+const onMachine = (localSessionMode: "interactive" | "headless" = "interactive") => ({
+  runTarget: "local" as const,
+  localHostId: "h1",
+  localDir: "/Users/dev/app",
+  localSessionMode,
+});
+
+const schedule = {
+  when: "schedule" as const,
+  trigger: { type: "schedule" as const, cronExpression: "0 9 * * *" },
+};
+
+/** The spec the last `POST /api/work` carried. */
+const sent = (): WorkSpec => api.createWork.mock.calls.at(-1)![0];
+
+/** What the server answers a create with. */
+const made = (kind: WorkKind, id: string, href: string, run?: WorkCreated["run"]): WorkCreated => ({
+  kind,
+  id,
+  href,
+  ...(run ? { run } : {}),
+});
+
+const taken = (details: string) =>
+  Object.assign(new Error("A Job named x already exists"), { status: 409, details });
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  api.createWork.mockResolvedValue(made("standalone", "w-1", "/jobs/w-1"));
+  api.updateWork.mockResolvedValue(made("standalone", "w-1", "/jobs/w-1"));
+});
+
+describe("specFor — the draft as the five attributes", () => {
+  /** One draft per kind, as the form would submit it. */
+  const kinds: [WorkKind, WorkDraft][] = [
+    ["repo-task", draft({ prompt: "Fix it", repoUrl: REPO })],
+    ["repo-blueprint", draft({ ...schedule, prompt: "Sweep", repoUrl: REPO })],
+    ["standalone", draft({ withRepo: false, prompt: "Say hello" })],
+    [
+      "local-blueprint",
+      draft({
+        ...schedule,
+        withRepo: false,
+        location: onMachine(),
+        prompt: "Tidy",
+        then: "waits-for-me",
+      }),
+    ],
+    [
+      "local-terminal",
+      draft({ withRepo: false, location: onMachine(), runtime: TERMINAL, then: "waits-for-me" }),
+    ],
+    ["pod-session", draft({ repoUrl: REPO, runtime: TERMINAL, then: "waits-for-me" })],
+    ["persistent-agent", draft({ withRepo: false, prompt: "Hi", then: "waits-for-messages" })],
+  ];
+
+  it.each(kinds)("the server derives the kind the form previews: %s", (kind, d) => {
+    expect(deriveKind(d)).toBe(kind);
+    expect(kindOfSpec(specFor(d, { repoUrl: REPO, name: "N" }))).toBe(kind);
   });
 
-  it("bumps an automatic name on a 409 and keeps the user's own name as an error", async () => {
-    const job: WorkDraft = normalize({
-      ...EMPTY_DRAFT,
-      withRepo: false,
-      prompt: "hi",
-      when: "schedule",
-      trigger: { type: "schedule", cronExpression: "0 9 * * *" },
+  it("a pod Task: its repo, branch, agent, set options, prompt, dependencies and owner", () => {
+    const d = draft({
+      repoUrl: REPO,
+      repoBranch: "develop",
+      runtime: "codex",
+      // A blank select means "default": not sent.
+      agentOptions: { copilotModel: "gpt-5.5", copilotEffort: "" },
+      prompt: "  Fix it  ",
+      description: "  Why  ",
+      dependsOn: ["t-0"],
+      priority: 7,
+      maxRetries: 1,
     });
-    api.createTaskUnified
-      .mockRejectedValueOnce(conflict())
-      .mockResolvedValueOnce({ task: { id: "w-1" } });
-    api.createTaskTrigger.mockResolvedValue({});
-
-    const created = await createWork(job, { repoUrl: "", autoName: "Session 4" });
-    expect(created.href).toBe("/jobs/w-1");
-    expect(api.createTaskUnified).toHaveBeenCalledTimes(2);
-    expect(api.createTaskUnified.mock.calls[0][0].name).toBe("Session 4");
-    expect(api.createTaskUnified.mock.calls[1][0].name).toBe("Session 4 (2)");
-
-    api.createTaskUnified.mockReset().mockRejectedValue(conflict());
-    await expect(
-      createWork({ ...job, name: "Nightly" }, { repoUrl: "", autoName: "Session 4" }),
-    ).rejects.toThrow(/already exists/);
-    expect(api.createTaskUnified).toHaveBeenCalledTimes(1);
+    expect(specFor(d, { repoUrl: REPO, name: "Fix" })).toEqual({
+      name: "Fix",
+      description: "Why",
+      when: { type: "manual" },
+      where: {
+        runTarget: "cluster",
+        repoUrl: REPO,
+        repoBranch: "develop",
+        localHostId: null,
+        localDir: null,
+      },
+      who: { runtime: "codex", agentOptions: { copilotModel: "gpt-5.5" }, model: "gpt-5.5" },
+      what: { prompt: "Fix it", runTitle: null },
+      then: "exits",
+      mergeWhenReady: true,
+      maxRetries: 1,
+      priority: 7,
+      dependsOn: ["t-0"],
+      owner: "workspace",
+      podSecrets: [],
+      settings: null,
+    });
   });
 
-  it("sends the run name as each kind's run-title template", async () => {
-    api.createTaskUnified.mockResolvedValue({ task: { id: "w-1" } });
-    api.createTaskTrigger.mockResolvedValue({});
-    const linear: WorkDraft = normalize({
-      ...EMPTY_DRAFT,
+  it("a Job has no repo, even with one still picked from before, and no dependencies", () => {
+    const spec = specFor(
+      draft({ withRepo: false, repoId: "r-1", repoUrl: REPO, dependsOn: ["t-0"], prompt: "hi" }),
+      { repoUrl: REPO, name: "Job 1" },
+    );
+    expect(spec.where).toMatchObject({ runTarget: "cluster", repoUrl: null, repoBranch: null });
+    expect(spec).not.toHaveProperty("dependsOn");
+    expect(spec.description).toBeNull();
+  });
+
+  it("sends the run name as each kind's run-title template", () => {
+    const linear = draft({
       name: "Linear triage",
       runName: "  Triage: {{ticketTitle}} ",
       withRepo: false,
@@ -72,311 +141,423 @@ describe("createWork", () => {
       when: "linear",
       event: { type: "linear", config: { events: ["mentioned"], user: "jon" } },
     });
-    await createWork(linear, { repoUrl: "", autoName: "Job 1" });
-    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
-      type: "standalone",
-      name: "Linear triage",
-      runTitle: "Triage: {{ticketTitle}}",
-    });
+    const job = specFor(linear, { repoUrl: "", name: "Linear triage" });
+    expect(kindOfSpec(job)).toBe("standalone");
+    expect(job.name).toBe("Linear triage");
+    expect(job.what.runTitle).toBe("Triage: {{ticketTitle}}");
 
-    api.createTaskUnified.mockClear();
-    await createWork(
-      { ...linear, withRepo: true, repoUrl: "https://github.com/a/b" },
-      { repoUrl: "https://github.com/a/b", autoName: "Task 1" },
+    const task = specFor(
+      { ...linear, withRepo: true, repoUrl: REPO },
+      { repoUrl: REPO, name: "Linear triage" },
     );
-    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
-      type: "repo-blueprint",
-      name: "Linear triage",
-      title: "Triage: {{ticketTitle}}",
-    });
+    expect(kindOfSpec(task)).toBe("repo-blueprint");
+    expect(task.what.runTitle).toBe("Triage: {{ticketTitle}}");
+
+    // Blank: each run takes the work's name.
+    expect(specFor({ ...linear, runName: "  " }, { repoUrl: "", name: "x" }).what.runTitle).toBe(
+      null,
+    );
   });
 
-  const onMachine = {
-    runTarget: "local" as const,
-    localHostId: "h1",
-    localDir: "/Users/dev/app",
-    localSessionMode: "interactive" as const,
-  };
+  it("each When is the same trigger shape whatever it starts", () => {
+    const job = (patch: Partial<WorkDraft>) =>
+      specFor(draft({ withRepo: false, prompt: "p", ...patch }), { repoUrl: "", name: "J" }).when;
+    expect(
+      job({ when: "schedule", trigger: { type: "schedule", cronExpression: " 0 9 * * 1 " } }),
+    ).toEqual({ type: "schedule", config: { cronExpression: "0 9 * * 1" } });
+    expect(job({ when: "webhook", trigger: { type: "webhook", webhookPath: "hook-1" } })).toEqual({
+      type: "webhook",
+      config: { path: "hook-1" },
+    });
+    expect(
+      job({
+        when: "ticket",
+        trigger: { type: "ticket", ticketSource: "linear", ticketLabels: ["bug"] },
+      }),
+    ).toEqual({ type: "ticket", config: { source: "linear", labels: ["bug"] } });
+    expect(job({ when: "ticket", trigger: { type: "ticket", ticketLabels: [] } })).toEqual({
+      type: "ticket",
+      config: { source: "github" },
+    });
+    const event = { events: ["pr_opened"], repos: ["acme/app"] };
+    expect(job({ when: "github", event: { type: "github", config: event } })).toEqual({
+      type: "github",
+      config: event,
+    });
+    expect(job({})).toEqual({ type: "manual" });
+  });
 
-  it("hands a session on a machine its model, effort and permission mode", async () => {
-    api.createLocalTerminal.mockResolvedValue({ terminal: { id: "t-9" } });
-    const session: WorkDraft = normalize({
-      ...EMPTY_DRAFT,
+  it("a terminal sends no agent, options, or model; a pod session carries its repo", () => {
+    const session = specFor(
+      draft({
+        repoUrl: REPO,
+        runtime: TERMINAL,
+        then: "waits-for-me",
+        agentOptions: { claudeModel: "opus" },
+      }),
+      { repoUrl: REPO, name: "Session 1" },
+    );
+    expect(session.who).toEqual({ runtime: null, agentOptions: null, model: null });
+    expect(session.where.repoUrl).toBe(REPO);
+    // Only Tasks, Jobs, and agents have an owner.
+    expect(session).not.toHaveProperty("owner");
+    expect(session).not.toHaveProperty("podSecrets");
+  });
+
+  it("a persistent agent's slug comes from its name, and it ships the default agents.md", () => {
+    const agent = draft({ withRepo: false, prompt: "Hi", then: "waits-for-messages" });
+    expect(specFor(agent, { repoUrl: "", name: "Release Bot" }).agent).toEqual({
+      slug: "release-bot",
+      systemPrompt: null,
+      agentsMd: "DEFAULT AGENTS.MD",
+      podLifecycle: "sticky",
+    });
+    const own = specFor(
+      {
+        ...agent,
+        agent: { slug: " rb ", podLifecycle: "always-on", systemPrompt: "Be terse", agentsMd: "M" },
+      },
+      { repoUrl: "", name: "Release Bot" },
+    );
+    expect(own.agent).toEqual({
+      slug: "rb",
+      systemPrompt: "Be terse",
+      agentsMd: "M",
+      podLifecycle: "always-on",
+    });
+    // Nothing else carries an agent block.
+    expect(specFor(draft({ prompt: "p" }), { repoUrl: REPO, name: "T" })).not.toHaveProperty(
+      "agent",
+    );
+  });
+});
+
+describe("work on a machine", () => {
+  it("hands a session its model, effort and permission mode through its options", async () => {
+    api.createWork.mockResolvedValue(made("local-terminal", "t-9", "/local/t-9"));
+    const session = draft({
       withRepo: false,
       runtime: "claude-code",
       agentOptions: {
         claudeModel: "opus",
         claudeEffort: "high",
         claudePermissionMode: "bypassPermissions",
-        // Pod-only: never reaches the machine.
         claudeThinking: true,
       },
-      location: onMachine,
+      location: onMachine(),
       prompt: "Tidy up",
       then: "waits-for-me",
     });
     const created = await createWork(session, { repoUrl: "", autoName: "Session 1" });
     expect(created.href).toBe("/local/t-9");
-    expect(api.createLocalTerminal.mock.calls[0][0].spec).toEqual({
-      kind: "agent",
-      agent: "claude-code",
-      prompt: "Tidy up",
+    expect(sent().where).toEqual({
+      runTarget: "local",
+      repoUrl: null,
+      repoBranch: null,
+      localHostId: "h1",
+      localDir: "/Users/dev/app",
+    });
+    expect(sent().who.runtime).toBe("claude-code");
+    expect(sent().what.prompt).toBe("Tidy up");
+    // What the daemon passes the CLI; Thinking is pod-only and never reaches the machine.
+    expect(localAgentParams("claude-code", sent().who.agentOptions)).toEqual({
       model: "opus",
       effort: "high",
       permissionMode: "bypassPermissions",
     });
   });
 
-  it("runs Codex on a machine with --yolo when every check is skipped", async () => {
-    api.createLocalTerminal.mockResolvedValue({ terminal: { id: "t-10" } });
-    const session: WorkDraft = normalize({
-      ...EMPTY_DRAFT,
+  it("runs Codex with --yolo when every check is skipped", async () => {
+    api.createWork.mockResolvedValue(made("local-terminal", "t-10", "/local/t-10"));
+    const session = draft({
       withRepo: false,
       runtime: "codex",
       agentOptions: { copilotModel: "gpt-5.6-sol", codexPermissionMode: "bypassPermissions" },
-      location: onMachine,
+      location: onMachine(),
       prompt: "Fix the flaky test",
       then: "waits-for-me",
     });
     await createWork(session, { repoUrl: "", autoName: "Session 2" });
-    expect(api.createLocalTerminal.mock.calls.at(-1)![0].spec).toEqual({
-      kind: "agent",
-      agent: "codex",
-      prompt: "Fix the flaky test",
+    expect(sent().who).toEqual({
+      runtime: "codex",
+      agentOptions: { copilotModel: "gpt-5.6-sol", codexPermissionMode: "bypassPermissions" },
+      model: "gpt-5.6-sol",
+    });
+    expect(localAgentParams("codex", sent().who.agentOptions)).toEqual({
       model: "gpt-5.6-sol",
       permissionMode: "bypassPermissions",
     });
   });
 
   it("saves a Local automation's agent options", async () => {
-    api.createLocalBlueprint.mockResolvedValue({ blueprint: { id: "b-2" } });
-    api.createLocalBlueprintTrigger.mockResolvedValue({});
-    const auto: WorkDraft = normalize({
-      ...EMPTY_DRAFT,
+    api.createWork.mockResolvedValue(made("local-blueprint", "b-2", "/local/automations/b-2"));
+    const auto = draft({
+      ...schedule,
       withRepo: false,
       runtime: "codex",
       agentOptions: { copilotModel: "gpt-5.6-sol", copilotEffort: "xhigh" },
-      location: onMachine,
+      location: onMachine(),
       prompt: "Nightly cleanup",
       then: "waits-for-me",
-      when: "schedule",
-      trigger: { type: "schedule", cronExpression: "0 9 * * *" },
     });
-    await createWork(auto, { repoUrl: "", autoName: "Automation 1" });
-    expect(api.createLocalBlueprint.mock.calls[0][0]).toMatchObject({
-      agent: "codex",
+    const created = await createWork(auto, { repoUrl: "", autoName: "Automation 1" });
+    expect(kindOfSpec(sent())).toBe("local-blueprint");
+    expect(sent().who).toEqual({
+      runtime: "codex",
       agentOptions: { copilotModel: "gpt-5.6-sol", copilotEffort: "xhigh" },
+      model: "gpt-5.6-sol",
     });
+    expect(sent().when).toEqual({ type: "schedule", config: { cronExpression: "0 9 * * *" } });
+    expect(created).toMatchObject({ href: "/local/automations/b-2", toast: "Automation 1 saved" });
   });
 
-  it("rolls a Job back when its trigger is rejected", async () => {
-    const job: WorkDraft = normalize({
-      ...EMPTY_DRAFT,
+  it("a base branch is what says 'on a new branch'; the directory as it is sends none", () => {
+    const chat = draft({
       withRepo: false,
-      prompt: "hi",
-      when: "webhook",
-      trigger: { type: "webhook", webhookPath: "hook-1" },
+      location: onMachine(),
+      prompt: "Rename it",
+      then: "waits-for-me",
     });
-    api.createTaskUnified.mockResolvedValue({ task: { id: "w-2" } });
-    api.createTaskTrigger.mockRejectedValue(
-      Object.assign(new Error("Webhook path is already in use"), { status: 409 }),
+    // The checkout's remote is known, but the work happens in the directory as it is.
+    expect(specFor(chat, { repoUrl: REPO, name: "Chat" }).where).toMatchObject({
+      repoUrl: null,
+      repoBranch: null,
+    });
+    const branched = specFor(
+      { ...chat, withRepo: true, repoBranch: "" },
+      { repoUrl: REPO, name: "Chat" },
     );
-    api.deleteWorkflow.mockResolvedValue(undefined);
+    expect(branched.where).toMatchObject({ repoUrl: REPO, repoBranch: "main" });
+    expect(kindOfSpec(branched)).toBe("local-terminal");
+    // An unknown remote still makes it a new branch.
+    expect(
+      specFor({ ...chat, withRepo: true, repoBranch: "dev" }, { repoUrl: "", name: "Chat" }).where,
+    ).toMatchObject({ repoUrl: null, repoBranch: "dev" });
+  });
+});
 
-    await expect(createWork(job, { repoUrl: "", autoName: "Session 1" })).rejects.toThrow(
+describe("createWork", () => {
+  const job = draft({ ...schedule, withRepo: false, prompt: "hi" });
+
+  it("bumps an automatic name on a name clash and keeps the user's own name as an error", async () => {
+    api.createWork
+      .mockRejectedValueOnce(taken("name_taken"))
+      .mockResolvedValueOnce(made("standalone", "w-1", "/jobs/w-1"));
+    const created = await createWork(job, { repoUrl: "", autoName: "Session 4" });
+    expect(created.href).toBe("/jobs/w-1");
+    expect(api.createWork.mock.calls.map(([spec]) => spec.name)).toEqual([
+      "Session 4",
+      "Session 4 (2)",
+    ]);
+
+    api.createWork.mockReset().mockRejectedValue(taken("name_taken"));
+    await expect(
+      createWork({ ...job, name: "Nightly" }, { repoUrl: "", autoName: "Session 4" }),
+    ).rejects.toThrow(/already exists/);
+    expect(api.createWork).toHaveBeenCalledTimes(1);
+  });
+
+  it("doesn't retry a clash a new name can't fix, and gives up after five names", async () => {
+    api.createWork.mockRejectedValue(
+      Object.assign(new Error('Webhook path "hook-1" is already in use'), {
+        status: 409,
+        details: "webhook_path_taken",
+      }),
+    );
+    await expect(createWork(job, { repoUrl: "", autoName: "Job 1" })).rejects.toThrow(
       /Webhook path/,
     );
-    expect(api.deleteWorkflow).toHaveBeenCalledWith("w-2");
-    // A trigger 409 is not a name clash — no retry loop.
-    expect(api.createTaskUnified).toHaveBeenCalledTimes(1);
+    expect(api.createWork).toHaveBeenCalledTimes(1);
+
+    api.createWork.mockReset().mockRejectedValue(taken("name_taken"));
+    await expect(createWork(job, { repoUrl: "", autoName: "Job 1" })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(api.createWork.mock.calls.map(([spec]) => spec.name)).toEqual([
+      "Job 1",
+      "Job 1 (2)",
+      "Job 1 (3)",
+      "Job 1 (4)",
+      "Job 1 (5)",
+    ]);
+  });
+
+  it("a Job started now lands on its first run; a triggered one on its own page", async () => {
+    api.createWork.mockResolvedValue(
+      made("standalone", "w-1", "/jobs/w-1", { id: "r-1", href: "/jobs/w-1/runs/r-1" }),
+    );
+    const now = await createWork(draft({ withRepo: false, prompt: "hi" }), {
+      repoUrl: "",
+      autoName: "Job 1",
+    });
+    expect(now).toEqual({
+      kind: "standalone",
+      href: "/jobs/w-1/runs/r-1",
+      toast: "Job 1 started",
+    });
+
+    api.createWork.mockResolvedValue(made("standalone", "w-2", "/jobs/w-2"));
+    const later = await createWork(job, { repoUrl: "", autoName: "Job 2" });
+    expect(later).toEqual({ kind: "standalone", href: "/jobs/w-2", toast: "Job 2 saved" });
+  });
+
+  it("goes where the server says the new work lives", async () => {
+    api.createWork.mockResolvedValue(made("repo-task", "t-1", "/tasks/t-1"));
+    const task = await createWork(draft({ prompt: "Fix", name: "Fixer" }), {
+      repoUrl: REPO,
+      autoName: "Task 1",
+    });
+    expect(task).toEqual({
+      kind: "repo-task",
+      href: "/tasks/t-1",
+      toast: "Fixer started — it will open a PR",
+    });
+
+    api.createWork.mockResolvedValue(made("persistent-agent", "a-1", "/agents/a-1"));
+    const agent = await createWork(
+      draft({ withRepo: false, prompt: "Hi", then: "waits-for-messages" }),
+      { repoUrl: "", autoName: "Agent 1" },
+    );
+    expect(agent).toEqual({
+      kind: "persistent-agent",
+      href: "/agents/a-1",
+      toast: "Agent 1 created",
+    });
   });
 });
 
 describe("updateWork", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    for (const fn of Object.values(api)) fn.mockResolvedValue({});
-  });
-
-  const job: WorkDraft = normalize({
-    ...EMPTY_DRAFT,
+  const job = draft({
+    ...schedule,
     name: "Digest",
     withRepo: false,
     prompt: "Summarize",
-    when: "schedule",
-    trigger: { type: "schedule", cronExpression: "0 9 * * *" },
   });
-  const target = (trigger: any, kind: EditTarget["kind"] = "standalone"): EditTarget => ({
+  const target = (patch: Partial<EditTarget> = {}): EditTarget => ({
     id: "w-1",
-    kind,
-    row: { id: "w-1", name: "Digest" },
-    trigger,
-    triggers: trigger ? [trigger] : [],
+    kind: "standalone",
+    row: { id: "w-1", kind: "standalone", name: "Digest" },
+    trigger: { id: "t1", type: "schedule", config: { cronExpression: "0 8 * * *" } },
+    triggers: [],
     draft: job,
     foreignOwnerId: null,
+    ...patch,
   });
 
-  it("patches the row and, for the same trigger type, the trigger in place", async () => {
-    const t = target({ id: "t1", type: "schedule", config: { cronExpression: "0 8 * * *" } });
-    const saved = await updateWork(t, job, { repoUrl: "" });
-    expect(api.updateWorkflow).toHaveBeenCalledWith(
+  it("PATCHes the target with the draft's spec and returns its page", async () => {
+    const saved = await updateWork(target(), job, { repoUrl: "" });
+    expect(api.updateWork).toHaveBeenCalledTimes(1);
+    expect(api.updateWork).toHaveBeenCalledWith(
       "w-1",
-      expect.objectContaining({
-        name: "Digest",
-        promptTemplate: "Summarize",
-        runTarget: "cluster",
-      }),
+      specFor(job, { repoUrl: "", name: "Digest" }),
     );
-    expect(api.updateTaskTrigger).toHaveBeenCalledWith("w-1", "t1", {
-      config: { cronExpression: "0 9 * * *" },
+    expect(api.updateWork.mock.calls[0][1]).toMatchObject({
+      name: "Digest",
+      when: { type: "schedule", config: { cronExpression: "0 9 * * *" } },
+      what: { prompt: "Summarize" },
+      where: { runTarget: "cluster" },
     });
-    expect(api.createTaskTrigger).not.toHaveBeenCalled();
-    expect(api.deleteTaskTrigger).not.toHaveBeenCalled();
-    expect(saved.href).toBe("/jobs/w-1");
+    expect(api.createWork).not.toHaveBeenCalled();
+    expect(saved).toEqual({ kind: "standalone", href: "/jobs/w-1", toast: "Digest saved" });
   });
 
-  it("creates the new trigger before retiring the old one when the type changes", async () => {
-    const t = target({ id: "t1", type: "webhook", config: { path: "hook-1" } });
-    const order: string[] = [];
-    api.createTaskTrigger.mockImplementation(async () => void order.push("create"));
-    api.deleteTaskTrigger.mockImplementation(async () => void order.push("delete"));
-    await updateWork(t, job, { repoUrl: "" });
-    expect(api.createTaskTrigger).toHaveBeenCalledWith("w-1", {
-      type: "schedule",
-      config: { cronExpression: "0 9 * * *" },
-      enabled: true,
-    });
-    expect(api.deleteTaskTrigger).toHaveBeenCalledWith("w-1", "t1");
-    expect(order).toEqual(["create", "delete"]);
+  it("a blank name keeps the saved one", async () => {
+    await updateWork(target(), { ...job, name: "  " }, { repoUrl: "" });
+    expect(api.updateWork.mock.calls[0][1].name).toBe("Digest");
   });
 
-  it("keeps the row when a replacement trigger is rejected", async () => {
-    const t = target({ id: "t1", type: "webhook", config: { path: "hook-1" } });
-    api.createTaskTrigger.mockRejectedValue(new Error("bad cron"));
-    await expect(updateWork(t, job, { repoUrl: "" })).rejects.toThrow(/bad cron/);
-    expect(api.deleteTaskTrigger).not.toHaveBeenCalled();
-  });
-
-  it("removes the loaded trigger when the edit goes back to Now", async () => {
-    const t = target({ id: "t1", type: "schedule", config: { cronExpression: "0 9 * * *" } });
-    await updateWork(t, { ...job, when: "manual", trigger: { type: "manual" } }, { repoUrl: "" });
-    expect(api.deleteTaskTrigger).toHaveBeenCalledWith("w-1", "t1");
-    expect(api.createTaskTrigger).not.toHaveBeenCalled();
+  it("going back to Now asks for no trigger", async () => {
+    await updateWork(
+      target(),
+      { ...job, when: "manual", trigger: { type: "manual" } },
+      {
+        repoUrl: "",
+      },
+    );
+    expect(api.updateWork.mock.calls[0][1].when).toEqual({ type: "manual" });
   });
 
   it("saves a Local automation's event trigger and base branch", async () => {
-    const auto: WorkDraft = normalize({
-      ...EMPTY_DRAFT,
+    const auto = draft({
       name: "Reviews",
       when: "github",
-      trigger: { type: "manual" },
       event: { type: "github", config: { events: ["mentioned"], login: "octocat" } },
-      location: {
-        runTarget: "local",
-        localHostId: "h1",
-        localDir: "/Users/dev/repos/app",
-        localSessionMode: "interactive",
-      },
+      location: { ...onMachine(), localDir: "/Users/dev/repos/app" },
       withRepo: true,
       repoBranch: "main",
       prompt: "Look at {{url}}",
       then: "waits-for-me",
     });
-    const t: EditTarget = {
-      ...target({ id: "t1", type: "linear", config: {} }, "local-blueprint"),
-      id: "b-1",
-      draft: auto,
-    };
-    const saved = await updateWork(t, auto, { repoUrl: "https://github.com/acme/app" });
-    expect(api.updateLocalBlueprint).toHaveBeenCalledWith(
-      "b-1",
-      expect.objectContaining({
-        name: "Reviews",
-        baseBranch: "main",
-        repoUrl: "https://github.com/acme/app",
-        commandTemplate: "Look at {{url}}",
-        agent: "claude-code",
-        sessionMode: "interactive",
-      }),
+    const saved = await updateWork(
+      target({ id: "b-1", kind: "local-blueprint", row: { name: "Reviews" }, draft: auto }),
+      auto,
+      { repoUrl: REPO },
     );
-    expect(api.createLocalBlueprintTrigger).toHaveBeenCalledWith("b-1", {
-      type: "github",
-      config: { events: ["mentioned"], login: "octocat" },
-      enabled: true,
+    const [id, spec] = api.updateWork.mock.calls[0];
+    expect(id).toBe("b-1");
+    expect(kindOfSpec(spec)).toBe("local-blueprint");
+    expect(spec).toMatchObject({
+      name: "Reviews",
+      when: { type: "github", config: { events: ["mentioned"], login: "octocat" } },
+      where: {
+        runTarget: "local",
+        localHostId: "h1",
+        localDir: "/Users/dev/repos/app",
+        repoUrl: REPO,
+        repoBranch: "main",
+      },
+      who: { runtime: "claude-code" },
+      what: { prompt: "Look at {{url}}" },
+      then: "waits-for-me",
     });
-    expect(api.deleteLocalBlueprintTrigger).toHaveBeenCalledWith("b-1", "t1");
     expect(saved.href).toBe("/local/automations/b-1");
   });
 });
 
 describe("owner and pod secrets on the wire", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    api.createTaskRun.mockResolvedValue({ runId: "run-1" });
-  });
-
   it("a new pod Job sends its owner and an array of secrets, even empty", async () => {
-    api.createTaskUnified.mockResolvedValue({ task: { id: "w-1" } });
-    await createWork(normalize({ ...EMPTY_DRAFT, withRepo: false, prompt: "hi" }), {
+    await createWork(draft({ withRepo: false, prompt: "hi" }), {
       repoUrl: "",
       autoName: "Job 1",
     });
-    expect(api.createTaskUnified).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: "workspace", podSecrets: [] }),
-    );
+    expect(sent()).toMatchObject({ owner: "workspace", podSecrets: [] });
   });
 
   it("a personal repo Task with secrets and a provider sends them all", async () => {
-    api.createTaskUnified.mockResolvedValue({ task: { id: "t-1" } });
+    api.createWork.mockResolvedValue(made("repo-task", "t-1", "/tasks/t-1"));
     await createWork(
-      normalize({
-        ...EMPTY_DRAFT,
+      draft({
         prompt: "fix it",
         owner: "me",
         podSecrets: ["NPM_TOKEN"],
         agentOptions: { modelProvider: "p-1", claudeModel: "us.anthropic.claude-opus-5-5" },
       }),
-      { repoUrl: "https://github.com/acme/app", autoName: "Task 1" },
+      { repoUrl: REPO, autoName: "Task 1" },
     );
-    expect(api.createTaskUnified).toHaveBeenCalledWith(
-      expect.objectContaining({
-        owner: "me",
-        podSecrets: ["NPM_TOKEN"],
-        metadata: {
-          agentOptions: { modelProvider: "p-1", claudeModel: "us.anthropic.claude-opus-5-5" },
-        },
-      }),
-    );
+    expect(sent()).toMatchObject({
+      owner: "me",
+      podSecrets: ["NPM_TOKEN"],
+      who: {
+        runtime: "claude-code",
+        agentOptions: { modelProvider: "p-1", claudeModel: "us.anthropic.claude-opus-5-5" },
+      },
+    });
   });
 
   it("a Job on a machine is always mine and sends no pod secrets", async () => {
-    api.createTaskUnified.mockResolvedValue({ task: { id: "w-2" } });
     await createWork(
-      normalize({
-        ...EMPTY_DRAFT,
-        withRepo: false,
-        prompt: "hi",
-        podSecrets: ["X"],
-        location: {
-          runTarget: "local",
-          localHostId: "h",
-          localDir: "/d",
-          localSessionMode: "headless",
-        },
-      }),
+      draft({ withRepo: false, prompt: "hi", podSecrets: ["X"], location: onMachine("headless") }),
       { repoUrl: "", autoName: "Job 2" },
     );
-    const body = api.createTaskUnified.mock.calls[0][0];
-    expect(body.owner).toBe("me");
-    expect(body).not.toHaveProperty("podSecrets");
+    expect(kindOfSpec(sent())).toBe("standalone");
+    expect(sent().owner).toBe("me");
+    expect(sent()).not.toHaveProperty("podSecrets");
   });
 
   it("a persistent agent carries them; a local terminal carries only the provider", async () => {
-    const createPersistentAgent = vi.fn().mockResolvedValue({ agent: { id: "a-1" } });
-    (api as any).createPersistentAgent = createPersistentAgent;
+    api.createWork.mockResolvedValue(made("persistent-agent", "a-1", "/agents/a-1"));
     await createWork(
-      normalize({
-        ...EMPTY_DRAFT,
+      draft({
         withRepo: false,
         prompt: "hi",
         then: "waits-for-messages",
@@ -385,34 +566,32 @@ describe("owner and pod secrets on the wire", () => {
       }),
       { repoUrl: "", autoName: "Agent 1" },
     );
-    expect(createPersistentAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: "me", podSecrets: ["A"] }),
-    );
+    expect(sent()).toMatchObject({ owner: "me", podSecrets: ["A"] });
 
-    api.createLocalTerminal.mockResolvedValue({ terminal: { id: "lt-1" } });
+    api.createWork.mockResolvedValue(made("local-terminal", "lt-1", "/local/lt-1"));
     await createWork(
-      normalize({
-        ...EMPTY_DRAFT,
+      draft({
         withRepo: false,
         then: "waits-for-me",
         agentOptions: { modelProvider: "p-1", claudeModel: "us.anthropic.claude-opus-5-5" },
-        location: {
-          runTarget: "local",
-          localHostId: "h",
-          localDir: "/d",
-          localSessionMode: "interactive",
-        },
+        location: onMachine(),
       }),
       { repoUrl: "", autoName: "Terminal 1" },
     );
-    const body = api.createLocalTerminal.mock.calls[0][0];
-    expect(body.agentOptions).toEqual({ modelProvider: "p-1" });
-    expect(body.spec.model).toBe("us.anthropic.claude-opus-5-5");
-    expect(body).not.toHaveProperty("owner");
+    expect(kindOfSpec(sent())).toBe("local-terminal");
+    expect(sent()).not.toHaveProperty("owner");
+    expect(sent()).not.toHaveProperty("podSecrets");
+    expect(sent().who.agentOptions).toEqual({
+      modelProvider: "p-1",
+      claudeModel: "us.anthropic.claude-opus-5-5",
+    });
+    expect(localAgentParams("claude-code", sent().who.agentOptions).model).toBe(
+      "us.anthropic.claude-opus-5-5",
+    );
   });
 
   it("an edit keeps a legacy null secret list and sends the owner", async () => {
-    const draft = normalize({ ...EMPTY_DRAFT, withRepo: false, prompt: "hi", podSecrets: null });
+    const d = draft({ withRepo: false, prompt: "hi", podSecrets: null });
     await updateWork(
       {
         id: "w-1",
@@ -420,16 +599,75 @@ describe("owner and pod secrets on the wire", () => {
         row: { id: "w-1", name: "Digest" },
         trigger: null,
         triggers: [],
-        draft,
+        draft: d,
         foreignOwnerId: null,
       },
-      draft,
+      d,
       { repoUrl: "" },
     );
-    expect(api.updateWorkflow).toHaveBeenCalledWith(
-      "w-1",
-      expect.objectContaining({ owner: "workspace", podSecrets: null }),
+    expect(api.updateWork.mock.calls[0][1]).toMatchObject({ owner: "workspace", podSecrets: null });
+  });
+});
+
+describe("environment settings on the wire", () => {
+  const settings = {
+    connections: { add: ["c1", "c1"], remove: [] },
+    setupCommands: "  npm ci ",
+    review: { enabled: true },
+    cautiousMode: true,
+  };
+
+  it("pod work that opens a PR sends only its changes, PR follow-through included", () => {
+    const spec = specFor(draft({ repoUrl: REPO, prompt: "Fix", settings }), {
+      repoUrl: REPO,
+      name: "Fix",
+    });
+    expect(spec.settings).toEqual({
+      connections: { add: ["c1"] },
+      setupCommands: "npm ci",
+      review: { enabled: true },
+      cautiousMode: true,
+    });
+  });
+
+  it("a Job and a persistent agent send their changes too (the server drops PR follow-through)", () => {
+    const cleaned = {
+      connections: { add: ["c1"] },
+      setupCommands: "npm ci",
+      review: { enabled: true },
+      cautiousMode: true,
+    };
+    const job = specFor(draft({ withRepo: false, prompt: "Hi", settings }), {
+      repoUrl: REPO,
+      name: "Job",
+    });
+    expect(job.settings).toEqual(cleaned);
+    const agent = specFor(
+      draft({ withRepo: false, prompt: "Hi", then: "waits-for-messages", settings }),
+      { repoUrl: REPO, name: "Forge" },
     );
+    expect(agent.settings).toEqual(cleaned);
+  });
+
+  it("work on a machine sends none (it runs with the machine's own configuration)", () => {
+    const spec = specFor(
+      draft({
+        location: onMachine("headless"),
+        withRepo: false,
+        prompt: "Hi",
+        settings,
+      }),
+      { repoUrl: "", name: "Local" },
+    );
+    expect(spec).not.toHaveProperty("settings");
+  });
+
+  it("nothing changed is null, so the work keeps following the repo", () => {
+    const spec = specFor(draft({ repoUrl: REPO, prompt: "Fix", settings: { skills: {} } }), {
+      repoUrl: REPO,
+      name: "Fix",
+    });
+    expect(spec.settings).toBeNull();
   });
 });
 
@@ -448,7 +686,6 @@ describe("remembering the agent settings", () => {
   });
 
   it("is fire-and-forget: a failing PUT never throws", async () => {
-    api.putWorkDefaults.mockReset();
     api.putWorkDefaults.mockRejectedValue(new Error("boom"));
     expect(() => rememberWorkDefaults(normalize({ ...EMPTY_DRAFT }))).not.toThrow();
     expect(api.putWorkDefaults).toHaveBeenCalledTimes(1);
@@ -457,74 +694,49 @@ describe("remembering the agent settings", () => {
 });
 
 describe("Work until merged", () => {
-  beforeEach(() => vi.clearAllMocks());
-  const draft: WorkDraft = normalize({
-    ...EMPTY_DRAFT,
-    prompt: "fix it",
-    repoUrl: "https://github.com/a/b",
-    then: "until-merged",
-  });
+  const untilMerged = draft({ prompt: "fix it", repoUrl: REPO, then: "until-merged" });
+
+  beforeEach(() => api.createWork.mockResolvedValue(made("repo-task", "t-1", "/tasks/t-1")));
 
   it("a Task carries its own follow-through", async () => {
-    api.createTaskUnified.mockResolvedValue({ task: { id: "t-1" } });
-    await createWork(draft, { repoUrl: "https://github.com/a/b", autoName: "Task 1" });
-    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
-      type: "repo-task",
-      autoResume: true,
-      autoMerge: true,
-    });
+    const created = await createWork(untilMerged, { repoUrl: REPO, autoName: "Task 1" });
+    expect(sent()).toMatchObject({ then: "until-merged", mergeWhenReady: true });
+    expect(kindOfSpec(sent())).toBe("repo-task");
+    expect(created.toast).toBe("Task 1 started — it will work the PR until it merges");
   });
 
   it("'you merge it' keeps resuming but doesn't merge", async () => {
-    api.createTaskUnified.mockResolvedValue({ task: { id: "t-1" } });
     await createWork(
-      { ...draft, mergeWhenReady: false },
-      { repoUrl: "https://github.com/a/b", autoName: "Task 1" },
+      { ...untilMerged, mergeWhenReady: false },
+      { repoUrl: REPO, autoName: "Task 1" },
     );
-    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
-      autoResume: true,
-      autoMerge: false,
-    });
+    expect(sent()).toMatchObject({ then: "until-merged", mergeWhenReady: false });
   });
 
   it("Exit when done leaves the PR to the repo's settings", async () => {
-    api.createTaskUnified.mockResolvedValue({ task: { id: "t-1" } });
-    await createWork(
-      { ...draft, then: "exits" },
-      { repoUrl: "https://github.com/a/b", autoName: "Task 1" },
-    );
-    const body = api.createTaskUnified.mock.calls[0][0];
-    expect(body.autoResume).toBeUndefined();
-    expect(body.autoMerge).toBeUndefined();
+    await createWork({ ...untilMerged, then: "exits" }, { repoUrl: REPO, autoName: "Task 1" });
+    expect(sent().then).toBe("exits");
   });
 
-  it("a scheduled Task saves it, and switching back to Exit when done clears it", async () => {
-    const ticket = {
-      ...draft,
-      when: "ticket" as const,
-      trigger: { type: "ticket" as const, ticketSource: "github" as const },
-    };
-    api.createTaskUnified.mockResolvedValue({ task: { id: "c-1" } });
-    api.createTaskTrigger.mockResolvedValue({});
-    await createWork(ticket, { repoUrl: "https://github.com/a/b", autoName: "Task 1" });
-    expect(api.createTaskUnified.mock.calls[0][0]).toMatchObject({
-      type: "repo-blueprint",
-      autoResume: true,
-      autoMerge: true,
+  it("a scheduled Task saves it, and switching back to Exit when done says so", async () => {
+    const ticket = draft({
+      ...untilMerged,
+      when: "ticket",
+      trigger: { type: "ticket", ticketSource: "github" },
     });
+    api.createWork.mockResolvedValue(made("repo-blueprint", "c-1", "/tasks/scheduled/c-1"));
+    await createWork(ticket, { repoUrl: REPO, autoName: "Task 1" });
+    expect(kindOfSpec(sent())).toBe("repo-blueprint");
+    expect(sent()).toMatchObject({ then: "until-merged", mergeWhenReady: true });
 
-    api.updateTaskConfig.mockResolvedValue({});
-    api.updateTaskTrigger.mockResolvedValue({});
     const target = {
       id: "c-1",
       kind: "repo-blueprint",
       row: { name: "Task 1" },
       trigger: { id: "tr-1", type: "ticket" },
     } as unknown as EditTarget;
-    await updateWork(target, { ...ticket, then: "exits" }, { repoUrl: "https://github.com/a/b" });
-    expect(api.updateTaskConfig.mock.calls[0][1]).toMatchObject({
-      autoResume: null,
-      autoMerge: null,
-    });
+    const saved = await updateWork(target, { ...ticket, then: "exits" }, { repoUrl: REPO });
+    expect(api.updateWork.mock.calls[0][1].then).toBe("exits");
+    expect(saved.href).toBe("/tasks/scheduled/c-1");
   });
 });

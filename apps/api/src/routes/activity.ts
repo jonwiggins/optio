@@ -174,7 +174,7 @@ export async function activityRoutes(rawApp: FastifyInstance) {
               'Task transitioned to ' || te.to_state::text || ' via ' || te.trigger AS summary,
               jsonb_build_object('fromState', te.from_state::text, 'toState', te.to_state::text, 'trigger', te.trigger) AS details
             FROM task_events te
-            JOIN tasks t ON te.task_id = t.id
+            JOIN repo_tasks t ON te.task_id = t.id
             LEFT JOIN users u ON te.user_id = u.id
             WHERE ${sql.join(conds, sql` AND `)}
           `);

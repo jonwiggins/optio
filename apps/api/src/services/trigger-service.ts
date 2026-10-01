@@ -20,6 +20,8 @@ import {
 import { db } from "../db/client.js";
 import { workflowTriggers } from "../db/schema.js";
 import { computeNextFire } from "../utils/cron.js";
+// The pool, or a transaction — so a trigger can be written with the row it starts.
+import type { Db } from "./work-definition-service.js";
 
 export type TriggerRow = typeof workflowTriggers.$inferSelect;
 
@@ -107,8 +109,9 @@ export function validateTriggerConfig(
 export async function listTriggers(
   targetType: TriggerTargetType,
   targetId: string,
+  tx: Db = db,
 ): Promise<TriggerRow[]> {
-  return db
+  return tx
     .select()
     .from(workflowTriggers)
     .where(
@@ -138,8 +141,8 @@ export async function getWebhookTriggerByPath(path: string): Promise<TriggerRow 
   return rows.find((t) => (t.config as Record<string, unknown> | null)?.path === path) ?? null;
 }
 
-async function assertWebhookPathFree(path: string, exceptId?: string): Promise<void> {
-  const rows = await db.select().from(workflowTriggers).where(eq(workflowTriggers.type, "webhook"));
+async function assertWebhookPathFree(path: string, exceptId?: string, tx: Db = db): Promise<void> {
+  const rows = await tx.select().from(workflowTriggers).where(eq(workflowTriggers.type, "webhook"));
   const clash = rows.find(
     (t) => t.id !== exceptId && (t.config as Record<string, unknown> | null)?.path === path,
   );
@@ -161,19 +164,19 @@ export interface CreateTriggerInput {
  * both to a 4xx. A schedule gets its first `next_fire_at` here so the poller
  * picks it up.
  */
-export async function createTrigger(input: CreateTriggerInput): Promise<TriggerRow> {
+export async function createTrigger(input: CreateTriggerInput, tx: Db = db): Promise<TriggerRow> {
   const allowed = TRIGGER_TYPES_FOR_TARGET[input.targetType] as readonly string[];
   if (!allowed.includes(input.type)) throw new Error("unsupported_type");
   const config = input.config ?? {};
   if (input.type === "webhook" && typeof config.path === "string") {
-    await assertWebhookPathFree(config.path);
+    await assertWebhookPathFree(config.path, undefined, tx);
   }
   const enabled = input.enabled ?? true;
   const nextFireAt =
     input.type === "schedule" && enabled && typeof config.cronExpression === "string"
       ? computeNextFire(config.cronExpression)
       : null;
-  const [row] = await db
+  const [row] = await tx
     .insert(workflowTriggers)
     .values({
       // Legacy FK for workflow_runs.trigger_id joins: mirrors target_id for Jobs.
@@ -203,11 +206,12 @@ export interface UpdateTriggerInput {
 export async function updateTrigger(
   id: string,
   input: UpdateTriggerInput,
+  tx: Db = db,
 ): Promise<TriggerRow | null> {
-  const existing = await getTrigger(id);
+  const [existing] = await tx.select().from(workflowTriggers).where(eq(workflowTriggers.id, id));
   if (!existing) return null;
   if (existing.type === "webhook" && input.config && typeof input.config.path === "string") {
-    await assertWebhookPathFree(input.config.path, id);
+    await assertWebhookPathFree(input.config.path, id, tx);
   }
   const updates: Partial<typeof workflowTriggers.$inferInsert> = { updatedAt: new Date() };
   if (input.config !== undefined) updates.config = input.config;
@@ -220,7 +224,7 @@ export async function updateTrigger(
     const cron = config?.cronExpression;
     updates.nextFireAt = enabled && typeof cron === "string" ? computeNextFire(cron) : null;
   }
-  const [row] = await db
+  const [row] = await tx
     .update(workflowTriggers)
     .set(updates)
     .where(eq(workflowTriggers.id, id))
@@ -228,8 +232,8 @@ export async function updateTrigger(
   return row ?? null;
 }
 
-export async function deleteTrigger(id: string): Promise<boolean> {
-  const deleted = await db.delete(workflowTriggers).where(eq(workflowTriggers.id, id)).returning();
+export async function deleteTrigger(id: string, tx: Db = db): Promise<boolean> {
+  const deleted = await tx.delete(workflowTriggers).where(eq(workflowTriggers.id, id)).returning();
   return deleted.length > 0;
 }
 

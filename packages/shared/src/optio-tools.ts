@@ -398,7 +398,7 @@ const get_pod_health: OptioToolSchema = {
     properties: {
       id: {
         type: "string",
-        description: "The pod UUID (from repo_pods table)",
+        description: "The pod UUID (an `id` from list_pods)",
       },
     },
     required: ["id"],

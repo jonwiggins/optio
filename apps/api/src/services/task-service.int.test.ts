@@ -19,11 +19,13 @@ import { eq } from "drizzle-orm";
 import { Redis } from "ioredis";
 import { TaskState, InvalidTransitionError } from "@optio/shared";
 import { db } from "../db/client.js";
-import { taskEvents, users } from "../db/schema.js";
+import { taskEvents, tasks, users } from "../db/schema.js";
 import { insertTask } from "../test-utils/integration/fixtures.js";
 import {
+  TaskInputError,
   getTask,
   getTaskEvents,
+  submitTask,
   transitionTask,
   tryTransitionTask,
   updateTaskResult,
@@ -56,7 +58,10 @@ async function waitFor(cond: () => boolean, timeoutMs = 10_000, intervalMs = 25)
 }
 
 afterAll(async () => {
-  // Close the event-bus publisher so the fork doesn't wait on it at teardown.
+  // submitTask loads the task worker's queue; close it and the event-bus
+  // publisher so the fork doesn't wait on them at teardown.
+  const { taskQueue } = await import("../workers/task-worker.js");
+  await taskQueue.close();
   await getRedisClient().quit();
 });
 
@@ -265,5 +270,44 @@ describe("Redis event publication", () => {
     } finally {
       await sub.quit();
     }
+  });
+});
+
+describe("submitTask", () => {
+  const repoUrl = () => `https://github.com/it-org/submit-${uniq()}`;
+
+  it("queues the task and hands it to the worker's queue", async () => {
+    const task = await submitTask({ title: "t", prompt: "p", repoUrl: repoUrl() });
+    expect(task.state).toBe(TaskState.QUEUED);
+    expect(task.agentType).toBe("claude-code");
+    const { taskQueue } = await import("../workers/task-worker.js");
+    expect(await taskQueue.getJob(task.id)).toBeTruthy();
+  });
+
+  it("waits on its dependencies instead of queueing", async () => {
+    const dep = await insertTask();
+    const task = await submitTask({
+      title: "t",
+      prompt: "p",
+      repoUrl: repoUrl(),
+      dependsOn: [dep.id],
+    });
+    expect(task.state).toBe(TaskState.WAITING_ON_DEPS);
+    const { taskQueue } = await import("../workers/task-worker.js");
+    expect(await taskQueue.getJob(task.id)).toBeFalsy();
+  });
+
+  it("refuses an agent that can't run on a machine before creating anything", async () => {
+    const url = repoUrl();
+    await expect(
+      submitTask({
+        title: "t",
+        prompt: "p",
+        repoUrl: url,
+        agentType: "copilot",
+        runTarget: "local",
+      }),
+    ).rejects.toBeInstanceOf(TaskInputError);
+    expect(await db.select().from(tasks).where(eq(tasks.repoUrl, url))).toEqual([]);
   });
 });

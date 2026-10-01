@@ -61,6 +61,68 @@ describe("PR follow-through in the repo snapshot", () => {
   });
 });
 
+describe("a task's own settings over the repo's", () => {
+  it("turns review on with its own trigger, holds back merges, and caps resumes", async () => {
+    const repo = await insertRepo({
+      reviewEnabled: false,
+      reviewTrigger: "on_ci_pass",
+      cautiousMode: false,
+      maxAutoResumes: 10,
+    });
+    const task = await insertTask({
+      repoUrl: repo.repoUrl,
+      settings: {
+        review: { enabled: true, trigger: "on_pr" },
+        cautiousMode: true,
+        maxAutoResumes: 1,
+      },
+    });
+    const s = await settingsFor(task.id);
+    expect(s.reviewEnabled).toBe(true);
+    expect(s.reviewTrigger).toBe("on_pr");
+    expect(s.cautiousMode).toBe(true);
+    expect(s.maxAutoResumes).toBe(1);
+  });
+
+  it("can't loosen the repo's (admin-only) settings: no dropping review, drafts, or the cap", async () => {
+    const repo = await insertRepo({
+      reviewEnabled: true,
+      reviewTrigger: "on_pr",
+      cautiousMode: true,
+      maxAutoResumes: 3,
+    });
+    const task = await insertTask({
+      repoUrl: repo.repoUrl,
+      settings: { review: { enabled: false }, cautiousMode: false, maxAutoResumes: 50 },
+    });
+    const s = await settingsFor(task.id);
+    expect(s.reviewEnabled).toBe(true);
+    expect(s.reviewTrigger).toBe("on_pr");
+    expect(s.cautiousMode).toBe(true);
+    expect(s.maxAutoResumes).toBe(3);
+  });
+
+  it("keeps the repo's trigger when it only says 'on'", async () => {
+    const repo = await insertRepo({ reviewEnabled: true, reviewTrigger: "on_pr" });
+
+    const on = await insertTask({ repoUrl: repo.repoUrl, settings: { review: { enabled: true } } });
+    const s = await settingsFor(on.id);
+    expect(s.reviewEnabled).toBe(true);
+    expect(s.reviewTrigger).toBe("on_pr");
+  });
+
+  it("a repo with review set to manual still reviews when the task asks", async () => {
+    const repo = await insertRepo({ reviewEnabled: false, reviewTrigger: "manual" });
+    const task = await insertTask({
+      repoUrl: repo.repoUrl,
+      settings: { review: { enabled: true } },
+    });
+    const s = await settingsFor(task.id);
+    expect(s.reviewEnabled).toBe(true);
+    expect(s.reviewTrigger).toBe("on_ci_pass");
+  });
+});
+
 describe("scheduled Tasks pass their follow-through to spawned tasks", () => {
   it("instantiateTask copies auto_resume / auto_merge", async () => {
     const repo = await insertRepo();

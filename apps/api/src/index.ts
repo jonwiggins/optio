@@ -129,7 +129,7 @@ async function main() {
   // Register observable metric gauge callbacks now that DB is available.
   // OTel SDK invokes callbacks synchronously at export time, so we maintain
   // cached counts refreshed every 30s.
-  const { tasks: tasksTable, repoPods } = await import("./db/schema.js");
+  const { tasks: tasksTable, agentPods } = await import("./db/schema.js");
   const { sql: sqlFn } = await import("drizzle-orm");
 
   let cachedQueueDepth: Record<string, number> = {};
@@ -156,9 +156,10 @@ async function main() {
     }
     try {
       const podRows = await db
-        .select({ state: repoPods.state, count: sqlFn<number>`count(*)` })
-        .from(repoPods)
-        .groupBy(repoPods.state);
+        .select({ state: agentPods.state, count: sqlFn<number>`count(*)` })
+        .from(agentPods)
+        .where(sqlFn`${agentPods.pool} = 'repo'`)
+        .groupBy(agentPods.state);
       cachedPodCount = {};
       for (const row of podRows) {
         cachedPodCount[row.state] = Number(row.count);

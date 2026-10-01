@@ -159,8 +159,8 @@ describe("persistent agent e2e", () => {
     expect(agent.lastTurnAt).not.toBeNull();
     expect(agent.consecutiveFailures).toBe(0);
     expect(agent.sessionId).not.toBeNull();
-    // addToTotalCost stores toFixed(6); fake runtime default cost is 0.0123.
-    expect(agent.totalCostUsd).toBe("0.012300");
+    // addToTotalCost adds exactly in Postgres; fake runtime default cost is 0.0123.
+    expect(agent.totalCostUsd).toBe("0.0123");
     expect(inbox.pending).toBe(0);
 
     const [turn] = turns;
@@ -229,8 +229,8 @@ describe("persistent agent e2e", () => {
 
     expect(agent.state).toBe("idle");
     expect(agent.consecutiveFailures).toBe(0);
-    // 0.0123 (turn 1) + 0.05 (turn 2), stored toFixed(6).
-    expect(agent.totalCostUsd).toBe("0.062300");
+    // 0.0123 (turn 1) + 0.05 (turn 2), added exactly.
+    expect(agent.totalCostUsd).toBe("0.0623");
 
     const messages = await listMessages(created.id);
     expect(messages).toHaveLength(2);

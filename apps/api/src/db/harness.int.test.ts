@@ -34,11 +34,10 @@ describe("integration harness", () => {
       "tasks",
       "repos",
       "workspaces",
-      "workflows",
+      "work_definitions",
       "workflow_runs",
       "workflow_triggers",
       "persistent_agents",
-      "task_configs",
     ]) {
       expect(names).toContain(expected);
     }

@@ -9,12 +9,14 @@ import {
 } from "../services/interactive-session-service.js";
 import { getSettings } from "../services/optio-settings-service.js";
 import { db } from "../db/client.js";
-import { repoPods, repos, interactiveSessions } from "../db/schema.js";
-import { eq, sql } from "drizzle-orm";
+import { repos, interactiveSessions } from "../db/schema.js";
+import { getPod } from "../services/agent-pod-pool.js";
+import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import type { AgentLogEntry, ExecSession } from "@optio/shared";
-import { shellSingleQuote } from "../utils/pod-env.js";
+import { shellQuote } from "@optio/shared";
+import { plusCost } from "../services/run-usage.js";
 import {
   buildClaudeChatCommand,
   inspectClaudeLine,
@@ -100,7 +102,7 @@ export async function sessionChatWs(app: FastifyInstance) {
     if (!session.podId) return reject("Session has no pod assigned");
 
     // Get pod info
-    const [pod] = await db.select().from(repoPods).where(eq(repoPods.id, session.podId));
+    const pod = await getPod(session.podId);
     if (!pod || !pod.podName) {
       return reject(
         "Session pod was cleaned up due to inactivity. Please end this session and start a new one.",
@@ -273,11 +275,11 @@ export async function sessionChatWs(app: FastifyInstance) {
         // Wait for repo to be ready
         "for i in $(seq 1 30); do [ -f /workspace/.ready ] && break; sleep 1; done",
         '[ -f /workspace/.ready ] || { echo "Repo not ready"; exit 1; }',
-        `cd ${shellSingleQuote(worktreePath)}`,
+        `cd ${shellQuote(worktreePath)}`,
         // Set auth env vars for the Claude process
-        ...Object.entries(authEnv).map(([k, v]) => `export ${k}=${shellSingleQuote(v)}`),
+        ...Object.entries(authEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
         // Set auth passthrough env vars for Optio API calls
-        ...Object.entries(passthroughEnv).map(([k, v]) => `export ${k}=${shellSingleQuote(v)}`),
+        ...Object.entries(passthroughEnv).map(([k, v]) => `export ${k}=${shellQuote(v)}`),
         // Run claude in one-shot prompt mode with streaming JSON output,
         // resuming the stored conversation when we have one.
         buildClaudeChatCommand({ prompt: fullPrompt, model: currentModel, resumeSessionId }),
@@ -563,7 +565,7 @@ async function addSessionCost(sessionId: string, turnCostUsd: number) {
   await db
     .update(interactiveSessions)
     .set({
-      costUsd: sql`ROUND(COALESCE(NULLIF(${interactiveSessions.costUsd}, ''), '0')::numeric + ${turnCostUsd}::numeric, 4)::text`,
+      costUsd: plusCost(interactiveSessions.costUsd, turnCostUsd),
     })
     .where(eq(interactiveSessions.id, sessionId));
 }

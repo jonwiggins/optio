@@ -1,8 +1,16 @@
-import { eq, and, desc, sql } from "drizzle-orm";
+/**
+ * Scheduled Tasks — `repo-blueprint` work definitions: a saved Repo Task that
+ * each trigger firing spawns as a fresh task. Rows live in work_definitions
+ * (work-definition-service); this module keeps the shape /api/task-configs
+ * has always returned (`toTaskConfig`) and spawns the tasks.
+ */
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { taskConfigs, workflowTriggers } from "../db/schema.js";
+import { workDefinitions, workflowTriggers } from "../db/schema.js";
 import { TaskState, type LocalAgentSessionMode, type RunTarget } from "@optio/shared";
 import * as taskService from "./task-service.js";
+import * as definitions from "./work-definition-service.js";
+import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
 import {
   getPromptTemplateById,
   renderRunTitle,
@@ -63,63 +71,102 @@ export interface UpdateTaskConfigInput {
   autoMerge?: boolean | null;
 }
 
+/** A scheduled Task as /api/task-configs has always returned it. */
+export function toTaskConfig(d: WorkDefinition) {
+  return {
+    id: d.id,
+    name: d.name,
+    description: d.description,
+    workspaceId: d.workspaceId,
+    title: d.runTitle ?? d.name,
+    prompt: d.prompt,
+    promptTemplateId: d.promptTemplateId,
+    repoUrl: d.repoUrl!,
+    repoBranch: d.repoBranch ?? "main",
+    agentType: d.agentType,
+    maxRetries: d.maxRetries,
+    priority: d.priority,
+    agentOptions: d.agentOptions,
+    runTarget: d.runTarget,
+    localHostId: d.localHostId,
+    localDir: d.localDir,
+    localSessionMode: d.localSessionMode,
+    autoResume: d.autoResume,
+    autoMerge: d.autoMerge,
+    enabled: d.enabled,
+    ownerUserId: d.ownerUserId,
+    podSecrets: d.podSecrets,
+    settings: d.settings,
+    createdBy: d.createdBy,
+    createdAt: d.createdAt,
+    updatedAt: d.updatedAt,
+  };
+}
+
+export type TaskConfig = ReturnType<typeof toTaskConfig>;
+
+/** The work_definitions columns a create / update input sets (legacy names → one name each). */
+function columns(input: UpdateTaskConfigInput): Partial<WorkDefinitionValues> {
+  const { title, ...rest } = input;
+  return { ...rest, ...(title !== undefined ? { runTitle: title } : {}) };
+}
+
 export async function createTaskConfig(input: CreateTaskConfigInput) {
-  const [row] = await db
-    .insert(taskConfigs)
-    .values({
-      name: input.name,
-      description: input.description ?? null,
-      title: input.title,
-      prompt: input.prompt,
-      promptTemplateId: input.promptTemplateId ?? null,
-      repoUrl: input.repoUrl,
-      repoBranch: input.repoBranch ?? "main",
-      agentType: input.agentType ?? null,
-      maxRetries: input.maxRetries ?? 3,
-      priority: input.priority ?? 100,
-      agentOptions: input.agentOptions ?? null,
-      runTarget: input.runTarget ?? "cluster",
-      localHostId: input.runTarget === "local" ? (input.localHostId ?? null) : null,
-      localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
-      localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
-      autoResume: input.autoResume ?? null,
-      autoMerge: input.autoMerge ?? null,
-      enabled: input.enabled ?? true,
-      workspaceId: input.workspaceId ?? null,
-      createdBy: input.createdBy ?? null,
-      ownerUserId: input.ownerUserId ?? null,
-      podSecrets: input.podSecrets ?? null,
-    })
-    .returning();
-  return row;
+  const local = input.runTarget === "local";
+  const row = await definitions.createDefinition("repo-blueprint", {
+    name: input.name,
+    description: input.description ?? null,
+    runTitle: input.title,
+    prompt: input.prompt,
+    promptTemplateId: input.promptTemplateId ?? null,
+    repoUrl: input.repoUrl,
+    repoBranch: input.repoBranch ?? "main",
+    agentType: input.agentType ?? null,
+    maxRetries: input.maxRetries ?? 3,
+    priority: input.priority ?? 100,
+    agentOptions: input.agentOptions ?? null,
+    runTarget: input.runTarget ?? "cluster",
+    localHostId: local ? (input.localHostId ?? null) : null,
+    localDir: local ? (input.localDir ?? null) : null,
+    localSessionMode: local ? (input.localSessionMode ?? "headless") : null,
+    autoResume: input.autoResume ?? null,
+    autoMerge: input.autoMerge ?? null,
+    enabled: input.enabled ?? true,
+    workspaceId: input.workspaceId ?? null,
+    createdBy: input.createdBy ?? null,
+    ownerUserId: input.ownerUserId ?? null,
+    podSecrets: input.podSecrets ?? null,
+  });
+  return toTaskConfig(row);
 }
 
 export async function getTaskConfig(id: string) {
-  const [row] = await db.select().from(taskConfigs).where(eq(taskConfigs.id, id));
-  return row ?? null;
+  const row = await definitions.getDefinition(id, "repo-blueprint");
+  return row && toTaskConfig(row);
 }
 
 export async function listTaskConfigs(opts?: { workspaceId?: string | null }) {
-  const conditions = [];
-  if (opts?.workspaceId) conditions.push(eq(taskConfigs.workspaceId, opts.workspaceId));
-
-  let q = db.select().from(taskConfigs).orderBy(desc(taskConfigs.createdAt));
-  if (conditions.length > 0) q = q.where(and(...conditions)) as typeof q;
-  return q;
+  const rows = await definitions.listDefinitions(
+    "repo-blueprint",
+    opts?.workspaceId ? eq(workDefinitions.workspaceId, opts.workspaceId) : undefined,
+  );
+  return rows.map(toTaskConfig);
 }
 
 export async function listTaskConfigsWithTriggers(opts?: { workspaceId?: string | null }) {
   const configs = await listTaskConfigs(opts);
   if (configs.length === 0) return [];
 
-  const ids = configs.map((c) => c.id);
   const triggers = await db
     .select()
     .from(workflowTriggers)
     .where(
       and(
         eq(workflowTriggers.targetType, "task_config"),
-        sql`${workflowTriggers.targetId} in ${ids}`,
+        inArray(
+          workflowTriggers.targetId,
+          configs.map((c) => c.id),
+        ),
       ),
     );
 
@@ -134,44 +181,18 @@ export async function listTaskConfigsWithTriggers(opts?: { workspaceId?: string 
 }
 
 export async function updateTaskConfig(id: string, input: UpdateTaskConfigInput) {
-  const updates: Record<string, unknown> = { updatedAt: new Date() };
-  if (input.name !== undefined) updates.name = input.name;
-  if (input.description !== undefined) updates.description = input.description;
-  if (input.title !== undefined) updates.title = input.title;
-  if (input.prompt !== undefined) updates.prompt = input.prompt;
-  if (input.promptTemplateId !== undefined) updates.promptTemplateId = input.promptTemplateId;
-  if (input.repoUrl !== undefined) updates.repoUrl = input.repoUrl;
-  if (input.repoBranch !== undefined) updates.repoBranch = input.repoBranch;
-  if (input.agentType !== undefined) updates.agentType = input.agentType;
-  if (input.maxRetries !== undefined) updates.maxRetries = input.maxRetries;
-  if (input.priority !== undefined) updates.priority = input.priority;
-  if (input.agentOptions !== undefined) updates.agentOptions = input.agentOptions;
-  if (input.enabled !== undefined) updates.enabled = input.enabled;
-  if (input.runTarget !== undefined) updates.runTarget = input.runTarget;
-  if (input.localHostId !== undefined) updates.localHostId = input.localHostId;
-  if (input.localDir !== undefined) updates.localDir = input.localDir;
-  if (input.localSessionMode !== undefined) updates.localSessionMode = input.localSessionMode;
-  if (input.ownerUserId !== undefined) updates.ownerUserId = input.ownerUserId;
-  if (input.podSecrets !== undefined) updates.podSecrets = input.podSecrets;
-  if (input.autoResume !== undefined) updates.autoResume = input.autoResume;
-  if (input.autoMerge !== undefined) updates.autoMerge = input.autoMerge;
-
-  const [row] = await db.update(taskConfigs).set(updates).where(eq(taskConfigs.id, id)).returning();
-  return row ?? null;
+  const row = await definitions.updateDefinition(id, "repo-blueprint", columns(input));
+  return row && toTaskConfig(row);
 }
 
+/** Delete a scheduled Task and its triggers; the tasks it spawned stay. */
 export async function deleteTaskConfig(id: string): Promise<boolean> {
-  // Delete any triggers pointing at this task_config first.
-  await db
-    .delete(workflowTriggers)
-    .where(and(eq(workflowTriggers.targetType, "task_config"), eq(workflowTriggers.targetId, id)));
-  const deleted = await db.delete(taskConfigs).where(eq(taskConfigs.id, id)).returning();
-  return deleted.length > 0;
+  return definitions.deleteDefinition(id, "repo-blueprint");
 }
 
 /**
- * Create a concrete task from a task_config blueprint, transition it into
- * the queue, and enqueue the BullMQ job. Mirrors the flow used by the
+ * Create a concrete task from a scheduled Task (a repo-blueprint), transition
+ * it into the queue, and enqueue the BullMQ job. Mirrors the flow used by the
  * ticket-sync worker and the POST /api/tasks route.
  */
 export async function instantiateTask(
@@ -233,6 +254,8 @@ export async function instantiateTask(
     // Spawned tasks run as the blueprint's owner, with the secrets it picked.
     ownerUserId: config.ownerUserId,
     podSecrets: config.podSecrets,
+    // Each spawned task keeps the environment settings it started with.
+    settings: config.settings,
     runTarget: config.runTarget,
     localHostId: config.localHostId,
     localDir: config.localDir,
@@ -242,6 +265,7 @@ export async function instantiateTask(
     ...(opts?.ticket
       ? { ticketSource: opts.ticket.source, ticketExternalId: opts.ticket.externalId }
       : {}),
+    workId: config.id,
     metadata: {
       taskConfigId: config.id,
       taskConfigName: config.name,

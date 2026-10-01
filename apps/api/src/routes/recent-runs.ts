@@ -70,44 +70,26 @@ export async function recentRunsRoutes(app: FastifyInstance) {
       try {
         const query = sql`
           SELECT * FROM (
+            -- Repo tasks and Job runs (one table; a Job run is shown by its
+            -- Job's name and agent, and its workspace is its Job's).
             SELECT
               t.id::text AS id,
-              'task' AS kind,
-              t.title AS title,
+              CASE WHEN t.kind = 'standalone' THEN 'job-run' ELSE 'task' END AS kind,
+              CASE WHEN t.kind = 'standalone' THEN w.name ELSE t.title END AS title,
               t.state::text AS state,
-              t.repo_url AS parent_id,
-              t.repo_url AS "where",
+              CASE WHEN t.kind = 'standalone' THEN w.id::text ELSE t.repo_url END AS parent_id,
+              CASE WHEN t.kind = 'standalone' THEN NULL ELSE t.repo_url END AS "where",
               t.error_message AS detail,
-              t.agent_type AS agent_type,
+              CASE WHEN t.kind = 'standalone' THEN w.agent_type ELSE t.agent_type END AS agent_type,
               t.cost_usd AS cost_usd,
               t.updated_at AS at,
               t.started_at AS started_at,
               t.completed_at AS ended_at
             FROM tasks t
+            LEFT JOIN work_definitions w ON t.kind = 'standalone' AND w.id = t.work_id
             WHERE ${scopeTo(sql`t.workspace_id`)}
               AND t.parent_task_id IS NULL
             ORDER BY t.updated_at DESC
-            LIMIT ${limit}
-          ) tasks_part
-          UNION ALL
-          SELECT * FROM (
-            SELECT
-              r.id::text AS id,
-              'job-run' AS kind,
-              w.name AS title,
-              r.state AS state,
-              w.id::text AS parent_id,
-              NULL AS "where",
-              r.error_message AS detail,
-              w.agent_runtime AS agent_type,
-              r.cost_usd AS cost_usd,
-              r.updated_at AS at,
-              r.started_at AS started_at,
-              r.finished_at AS ended_at
-            FROM workflow_runs r
-            JOIN workflows w ON w.id = r.workflow_id
-            WHERE ${scopeTo(sql`w.workspace_id`)}
-            ORDER BY r.updated_at DESC
             LIMIT ${limit}
           ) runs_part
           UNION ALL

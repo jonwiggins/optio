@@ -25,12 +25,13 @@ vi.mock("../db/schema.js", () => ({
     id: "repos.id",
     repoUrl: "repos.repo_url",
   },
-  repoPods: {
-    id: "repo_pods.id",
-    repoUrl: "repo_pods.repo_url",
-    state: "repo_pods.state",
-    cachePvcName: "repo_pods.cache_pvc_name",
-    cachePvcState: "repo_pods.cache_pvc_state",
+  agentPods: {
+    id: "agent_pods.id",
+    pool: "agent_pods.pool",
+    poolKey: "agent_pods.pool_key",
+    state: "agent_pods.state",
+    cachePvcName: "agent_pods.cache_pvc_name",
+    cachePvcState: "agent_pods.cache_pvc_state",
   },
 }));
 

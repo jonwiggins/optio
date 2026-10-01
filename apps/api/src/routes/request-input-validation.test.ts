@@ -113,7 +113,6 @@ vi.mock("../services/task-service.js", () => ({
   transitionTask: vi.fn(),
   updateTask: vi.fn(),
   searchTasks: vi.fn().mockResolvedValue([]),
-  getAllTaskLogs: vi.fn().mockResolvedValue([]),
   getTaskLogs: vi.fn().mockResolvedValue([]),
 }));
 

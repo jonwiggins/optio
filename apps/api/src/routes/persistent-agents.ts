@@ -24,6 +24,7 @@ import { logAction } from "../services/optio-action-service.js";
 import * as triggerService from "../services/trigger-service.js";
 import { CreateTriggerBodySchema, replyTriggerError } from "../schemas/trigger.js";
 import { requireRole } from "../plugins/auth.js";
+import { getRepo } from "../services/repo-service.js";
 
 /**
  * Resolve an agent that belongs to the caller's workspace, or send a 404 and
@@ -114,6 +115,13 @@ const controlSchema = z.object({
 });
 
 const idParamsSchema = z.object({ id: z.string().uuid() });
+
+/** An agent's repo must be one of its workspace's: its turns check the repo out. */
+async function foreignRepo(repoId: string | null | undefined, workspaceId: string | null) {
+  if (!repoId) return false;
+  const repo = await getRepo(repoId);
+  return !repo || (repo.workspaceId ?? null) !== workspaceId;
+}
 const turnParamsSchema = z.object({
   id: z.string().uuid(),
   turnId: z.string().uuid(),
@@ -194,6 +202,9 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       const { owner: _owner, podSecrets: _podSecrets, ...body } = req.body;
       const workspaceId = req.user?.workspaceId ?? null;
+      if (await foreignRepo(body.repoId, workspaceId)) {
+        return reply.code(400).send({ error: "Pick one of your repos" });
+      }
       const plan = await planNewWork(req.body, workActor(req), {
         agentType: body.agentRuntime ?? "claude-code",
         agentOptions: body.agentOptions,
@@ -256,6 +267,9 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const existing = await requireAgent(req, reply, id);
       if (!existing) return;
+      if (await foreignRepo(body.repoId, workspaceId)) {
+        return reply.code(400).send({ error: "Pick one of your repos" });
+      }
       const { owner: _owner, podSecrets: _podSecrets, ...fields } = body;
       const plan = await planWorkUpdate(existing, body, workActor(req), {
         agentType: fields.agentRuntime ?? existing.agentRuntime,

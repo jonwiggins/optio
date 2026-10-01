@@ -3,7 +3,9 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { KubeConfig, CoreV1Api, AppsV1Api, CustomObjectsApi } from "@kubernetes/client-node";
 import { db } from "../db/client.js";
-import { repoPods, tasks, podHealthEvents, repos } from "../db/schema.js";
+import { tasks, podHealthEvents, repos } from "../db/schema.js";
+import { getRepoPodView, listRepoPodViews } from "../services/repo-pool-service.js";
+import { deletePod } from "../services/agent-pod-pool.js";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { requireRole } from "../plugins/auth.js";
 import { getVersionInfo, isLocalDev } from "../services/version-service.js";
@@ -279,9 +281,7 @@ export async function clusterRoutes(rawApp: FastifyInstance) {
 
         // Get Optio-specific data (scoped to workspace if available)
         const workspaceId = req.user?.workspaceId;
-        const repoPodRecords = workspaceId
-          ? await db.select().from(repoPods).where(eq(repoPods.workspaceId, workspaceId))
-          : await db.select().from(repoPods);
+        const repoPodRecords = await listRepoPodViews(workspaceId);
 
         // Get per-repo task indicators: queued counts and maxConcurrentTasks
         const repoUrls = repoPodRecords.map((rp) => rp.repoUrl);
@@ -391,9 +391,7 @@ export async function clusterRoutes(rawApp: FastifyInstance) {
     async (req, reply) => {
       try {
         const workspaceId = req.user?.workspaceId;
-        const pods = workspaceId
-          ? await db.select().from(repoPods).where(eq(repoPods.workspaceId, workspaceId))
-          : await db.select().from(repoPods);
+        const pods = await listRepoPodViews(workspaceId);
         const podStatuses = await Promise.all(
           pods.map(async (pod) => {
             const recentTasks = await db
@@ -436,7 +434,7 @@ export async function clusterRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const [pod] = await db.select().from(repoPods).where(eq(repoPods.id, id));
+      const pod = await getRepoPodView(id);
       if (!pod) return reply.status(404).send({ error: "Pod not found" });
       const wsId = req.user?.workspaceId;
       if (wsId && pod.workspaceId !== wsId) {
@@ -532,7 +530,7 @@ export async function clusterRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params;
-      const [pod] = await db.select().from(repoPods).where(eq(repoPods.id, id));
+      const pod = await getRepoPodView(id);
       if (!pod) return reply.status(404).send({ error: "Pod not found" });
       const wsId = req.user?.workspaceId;
       if (wsId && pod.workspaceId !== wsId) {
@@ -549,7 +547,7 @@ export async function clusterRoutes(rawApp: FastifyInstance) {
       }
 
       // Clear the record — next task will recreate it
-      await db.delete(repoPods).where(eq(repoPods.id, id));
+      await deletePod(id);
 
       await db.insert(podHealthEvents).values({
         repoPodId: id,

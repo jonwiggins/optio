@@ -6,11 +6,16 @@ vi.mock("../db/client.js", () => ({
     insert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    transaction: vi.fn(),
   },
 }));
 
 vi.mock("./session-service.js", () => ({
   revokeAllUserSessions: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("./work-definition-service.js", () => ({
+  deleteWorkspaceDefinitions: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../db/schema.js", () => ({
@@ -36,6 +41,7 @@ vi.mock("../db/schema.js", () => ({
 
 import { db } from "../db/client.js";
 import { revokeAllUserSessions } from "./session-service.js";
+import { deleteWorkspaceDefinitions } from "./work-definition-service.js";
 import {
   createWorkspace,
   getWorkspace,
@@ -207,13 +213,26 @@ describe("workspace-service", () => {
   });
 
   describe("deleteWorkspace", () => {
-    it("deletes a workspace", async () => {
-      (db.delete as any) = vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue(undefined),
+    it("deletes a workspace and its scheduled Tasks and Jobs in one transaction", async () => {
+      const order: string[] = [];
+      const tx = {
+        delete: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(async () => {
+            order.push("workspace");
+          }),
+        }),
+      };
+      (db.transaction as any) = vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx));
+      vi.mocked(deleteWorkspaceDefinitions).mockImplementation(async () => {
+        order.push("definitions");
       });
 
       await deleteWorkspace("ws-1");
-      expect(db.delete).toHaveBeenCalled();
+
+      expect(db.transaction).toHaveBeenCalledTimes(1);
+      expect(deleteWorkspaceDefinitions).toHaveBeenCalledWith("ws-1", tx);
+      expect(tx.delete).toHaveBeenCalledWith(expect.objectContaining({ id: "workspaces.id" }));
+      expect(order).toEqual(["definitions", "workspace"]);
     });
   });
 

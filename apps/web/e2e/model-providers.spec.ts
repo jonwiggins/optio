@@ -56,8 +56,11 @@ test.describe("Model providers", () => {
     await expect(who.locator("select").first()).toHaveValue("us.anthropic.claude-opus-5-5");
     await expect(who.locator("header")).toContainText(providerName);
 
-    await who.getByLabel("Add secret").selectOption(`workspace:${secretName}`);
-    await expect(who.getByText(secretName)).toBeVisible();
+    // Pod secrets live with the rest of the pod's environment, under Where.
+    const where = page.locator("#session-where");
+    await where.getByRole("button", { name: /^Environment/ }).click();
+    await where.getByLabel("Add secret").selectOption(`workspace:${secretName}`);
+    await expect(where.getByText(secretName)).toBeVisible();
 
     await page.locator("#session-prompt textarea").fill("Say hello");
     await page.locator("#session-name input").first().fill(`E2E provider job ${stamp}`);

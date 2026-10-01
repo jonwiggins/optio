@@ -42,8 +42,8 @@ no Anthropic / OpenAI key is required. Machines: see "Model providers" in
 
 ## Owners
 
-Model providers, secrets (`scope: "user"`), connections and work (`tasks`, `task_configs`,
-`workflows`, `persistent_agents`) have an owner: the organization (null) or one person
+Model providers, secrets (`scope: "user"`), connections and work (`tasks`, `work_definitions`,
+`persistent_agents`) have an owner: the organization (null) or one person
 (`owner_user_id`). The rules (`services/work-ownership.ts`):
 
 - Personal work runs with its owner's secrets, providers and connections. Everyone in the
@@ -59,7 +59,7 @@ Model providers, secrets (`scope: "user"`), connections and work (`tasks`, `task
 
 ## Pod secrets
 
-`podSecrets` (on `tasks`, `task_configs`, `workflows`, `persistent_agents`) is the list of secret
+`podSecrets` (on `tasks`, `work_definitions`, `persistent_agents`) is the list of secret
 names a piece of work gives its agent. `GET /api/secrets/pickable` lists what a viewer can pick:
 the organization's global secrets and their own; identity tokens (`ANTHROPIC_API_KEY`, …) and
 Optio's own settings (`*_AUTH_MODE`, Vertex settings) are never offered. At run time

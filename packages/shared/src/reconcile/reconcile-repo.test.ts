@@ -28,7 +28,6 @@ function makeSpec(overrides: Partial<RepoRunSpec> = {}): RepoRunSpec {
     parentTaskId: null,
     blocksParent: false,
     workspaceId: "ws-1",
-    workflowRunId: null,
     runTarget: "cluster",
     ...overrides,
   };

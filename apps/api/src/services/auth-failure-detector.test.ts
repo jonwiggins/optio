@@ -22,8 +22,14 @@ vi.mock("../db/client.js", () => ({
 
 vi.mock("../db/schema.js", () => ({
   taskLogs: {
+    taskId: "task_logs.task_id",
+    persistentAgentTurnId: "task_logs.persistent_agent_turn_id",
     content: "task_logs.content",
     timestamp: "task_logs.timestamp",
+  },
+  workRuns: {
+    id: "tasks.id",
+    kind: "tasks.kind",
   },
   secrets: {
     name: "secrets.name",
@@ -102,7 +108,7 @@ describe("hasRecentClaudeAuthFailure (backward compat)", () => {
     limitMock.mockResolvedValueOnce([]);
     // 2. GitHub watermark
     limitMock.mockResolvedValueOnce([]);
-    // 3. Claude task_logs — no match (logs live in workflow_run_logs)
+    // 3. Claude task_logs — no match (a Job run's lines are not counted here)
     limitMock.mockResolvedValueOnce([]);
     // 4. Claude auth_events — match! (recorded by workflow-worker)
     limitMock.mockResolvedValueOnce([{ exists: 1 }]);

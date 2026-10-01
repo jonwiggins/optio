@@ -15,7 +15,7 @@
  * local-relay.ts), and the worst case after a restart is one duplicate alert
  * that the collapse id folds on the device.
  */
-import { and, count, eq, inArray, ne } from "drizzle-orm";
+import { and, count, eq, inArray, ne, or } from "drizzle-orm";
 import {
   appleSeconds,
   buildWatchState,
@@ -27,12 +27,10 @@ import {
 import type { TaskState } from "@optio/shared";
 import { db } from "../db/client.js";
 import {
-  localBlueprints,
   persistentAgentMessages,
   persistentAgents,
-  taskConfigs,
   tasks,
-  workflows,
+  workDefinitions,
   workspaceMembers,
 } from "../db/schema.js";
 import { logger } from "../logger.js";
@@ -219,7 +217,8 @@ export function taskToWatchItem(task: {
   runTarget?: string | null;
   localDir?: string | null;
   updatedAt: Date;
-  metadata?: { taskConfigId?: string | null } | null;
+  /** The scheduled Task that spawned it, if any. */
+  workId?: string | null;
 }): WatchItem {
   const local = task.runTarget === "local";
   const reason =
@@ -241,7 +240,7 @@ export function taskToWatchItem(task: {
     link: `optio://tasks/${task.id}`,
     prUrl: task.prUrl ?? null,
     source: "repo-task",
-    when: task.metadata?.taskConfigId ? "on a trigger" : "now",
+    when: task.workId ? "on a trigger" : "now",
     where: local
       ? { target: "machine", detail: shortDir(task.localDir) }
       : { target: "pod", detail: shortRepo(task.repoUrl) },
@@ -343,8 +342,8 @@ export async function computeWatchState(userId: string, now = new Date()): Promi
 }
 
 /**
- * The board tiles the Watch cannot see in its own items (sessions-feed.ts
- * `countSessions`): recurring = enabled blueprints / jobs in the user's
+ * The board tiles the Watch cannot see in its own items (the Work list's
+ * counts): recurring = enabled scheduled Tasks / Jobs in the user's
  * workspaces plus their enabled Local automations; agents = persistent agents
  * not archived; waiting = the user's tasks sitting at an open PR (idle
  * terminals are added by the caller, which already has them).
@@ -357,28 +356,28 @@ export async function countSessionTiles(userId: string): Promise<WatchTileCounts
   const ws = memberships.map((m) => m.workspaceId);
   const n = async (q: PromiseLike<{ n: number }[]>) => Number((await q)[0]?.n ?? 0);
 
-  const [blueprints, jobs, automations, agents, prOpen] = await Promise.all([
-    ws.length === 0
-      ? 0
-      : n(
-          db
-            .select({ n: count() })
-            .from(taskConfigs)
-            .where(and(eq(taskConfigs.enabled, true), inArray(taskConfigs.workspaceId, ws))),
-        ),
-    ws.length === 0
-      ? 0
-      : n(
-          db
-            .select({ n: count() })
-            .from(workflows)
-            .where(and(eq(workflows.enabled, true), inArray(workflows.workspaceId, ws))),
-        ),
+  const [recurring, agents, prOpen] = await Promise.all([
     n(
       db
         .select({ n: count() })
-        .from(localBlueprints)
-        .where(and(eq(localBlueprints.userId, userId), eq(localBlueprints.enabled, true))),
+        .from(workDefinitions)
+        .where(
+          and(
+            eq(workDefinitions.enabled, true),
+            or(
+              ws.length === 0
+                ? undefined
+                : and(
+                    inArray(workDefinitions.kind, ["repo-blueprint", "standalone"]),
+                    inArray(workDefinitions.workspaceId, ws),
+                  ),
+              and(
+                eq(workDefinitions.kind, "local-blueprint"),
+                eq(workDefinitions.ownerUserId, userId),
+              ),
+            ),
+          ),
+        ),
     ),
     ws.length === 0
       ? 0
@@ -400,7 +399,7 @@ export async function countSessionTiles(userId: string): Promise<WatchTileCounts
         .where(and(eq(tasks.createdBy, userId), eq(tasks.state, "pr_opened"))),
     ),
   ]);
-  return { waiting: prOpen, recurring: blueprints + jobs + automations, agents };
+  return { waiting: prOpen, recurring, agents };
 }
 
 // ── Shared push helpers ─────────────────────────────────────────────────────

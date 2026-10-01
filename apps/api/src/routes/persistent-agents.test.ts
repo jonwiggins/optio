@@ -16,6 +16,11 @@ const mockListRecentMessages = vi.fn();
 const mockListPersistentAgentTurns = vi.fn();
 const mockGetPersistentAgentTurn = vi.fn();
 const mockListTurnLogs = vi.fn();
+const mockGetRepo = vi.fn();
+
+vi.mock("../services/repo-service.js", () => ({
+  getRepo: (...args: unknown[]) => mockGetRepo(...args),
+}));
 
 vi.mock("../services/persistent-agent-service.js", () => ({
   listPersistentAgents: (...args: unknown[]) => mockListPersistentAgents(...args),
@@ -204,6 +209,27 @@ describe("persistent-agent routes enforce workspace scoping", () => {
       });
       expect(res.statusCode).toBe(404);
       expect(mockUpdatePersistentAgent).not.toHaveBeenCalled();
+    });
+
+    it("refuses a repo from another workspace (its turns would check it out)", async () => {
+      const REPO_ID = "44444444-4444-4444-4444-444444444444";
+      mockGetRepo.mockResolvedValue({ id: REPO_ID, workspaceId: "ws-2" });
+      const res = await sameWsApp.inject({
+        method: "PATCH",
+        url: `/api/persistent-agents/${AGENT_ID}`,
+        payload: { repoId: REPO_ID },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(mockUpdatePersistentAgent).not.toHaveBeenCalled();
+
+      mockGetRepo.mockResolvedValue({ id: REPO_ID, workspaceId: "ws-1" });
+      mockUpdatePersistentAgent.mockResolvedValue({ ...AGENT, repoId: REPO_ID });
+      const ok = await sameWsApp.inject({
+        method: "PATCH",
+        url: `/api/persistent-agents/${AGENT_ID}`,
+        payload: { repoId: REPO_ID },
+      });
+      expect(ok.statusCode).toBe(200);
     });
 
     it("updates for a same-workspace caller and passes the workspace to the scoped update", async () => {

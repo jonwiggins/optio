@@ -16,7 +16,9 @@ Plus a **name** (or "Job N" / "Terminal N" for its kind).
 
 **Every When works with every Where.** A schedule, a webhook, a ticket, or a GitHub / Slack / Linear event can start work in a pod or on a machine; the trigger is stored the same way whatever it attaches to (see [Triggers](#triggers)).
 
-The New work form (`/work/new`, `apps/web/src/components/work-form/`) asks these in order, each answer narrowing the next: a trigger never starts a bare terminal, a bare terminal skips the prompt, a persistent agent lives in a pod. `normalize()` keeps a draft consistent when an upstream answer changes; `describe()` renders the draft as a sentence whose gaps double as validation:
+**Every Who works with every When and Where it fits.** A Terminal is a shell you open (a pod session; a terminal on your machine, by hand or on a trigger) or a command that runs and exits — a Job with no agent, in a pod or on a machine, on any trigger. A persistent agent can have a repo and works in one checkout of it across turns. What stays apart is only what makes no sense: "works until merged" needs an agent and a repo, a pod session needs a repo and a person, a persistent agent lives in a pod.
+
+The New work form (`/work/new`, `apps/web/src/components/work-form/`) asks these in order, each answer narrowing the next. `normalize()` keeps a draft consistent when an upstream answer changes; `describe()` renders the draft as a sentence whose gaps double as validation:
 
 > Started by GitHub events, a Claude Code run in an Optio pod with acme/app that opens a PR and exits when done.
 
@@ -41,20 +43,24 @@ then = exits, no repo                              → standalone
 | Kind               | Backing table                                 | What it is                                                                                    | Spawns runs?            | Legacy name           |
 | ------------------ | --------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------- | --------------------- |
 | `repo-task`        | `tasks`                                       | One run in a repo worktree that ends by opening a PR (or in a local checkout on a new branch) | No — it _is_ a run      | Task / Repo Task      |
-| `repo-blueprint`   | `task_configs` + `workflow_triggers`          | A saved PR-session definition; each trigger firing spawns a `tasks` row                       | Yes (`tasks`)           | Scheduled Task        |
-| `standalone`       | `workflows` + `workflow_runs` (+ trigger)     | Agent work with no repo on a pooled pod (or a machine); run now or on a trigger               | Yes (`workflow_runs`)   | Job / Standalone Task |
-| `local-blueprint`  | `local_blueprints` + `workflow_triggers`      | "When X happens, open this agent on my machine and wait for me" — an interactive automation   | Yes (`local_terminals`) | Local Automation      |
+| `repo-blueprint`   | `work_definitions` + `workflow_triggers`      | A saved PR-session definition; each trigger firing spawns a `tasks` row                       | Yes (`tasks`)           | Scheduled Task        |
+| `standalone`       | `work_definitions` (+ trigger)                | An agent or a shell command with no repo on a pooled pod (or a machine); now or on a trigger  | Yes (`tasks`)           | Job / Standalone Task |
+| `local-blueprint`  | `work_definitions` + `workflow_triggers`      | "When X happens, open this agent on my machine and wait for me" — an interactive automation   | Yes (`local_terminals`) | Local Automation      |
 | `local-terminal`   | `local_terminals`                             | An interactive terminal or agent on a paired machine                                          | No                      | Local session         |
 | `pod-session`      | `interactive_sessions`                        | An interactive terminal + agent chat inside a repo pod                                        | No                      | Session (v0.4)        |
 | `persistent-agent` | `persistent_agents` + turns / messages / pods | Long-lived, named, message-driven agent                                                       | Turns                   | Agent                 |
 
-Each branch of `submit.ts` calls the same service the dedicated form for that kind used to call, so nothing about how a kind runs changed — only where you make it and where you see it.
+`submit.ts` turns the draft into a `WorkSpec` and `POST`s it to `/api/work`, which derives the same kind (`kindOfSpec`) and writes the row and its trigger in one transaction (`services/work-write-service.ts`); a saved definition goes back through `PATCH /api/work/:id`. Each kind still runs the way it always has — only where you make it and where you see it changed.
+
+## Where → Environment
+
+Pod work's **Where** also says what its pod has besides the code. The repo's and the workspace's settings are the defaults; a piece of work can switch connections, MCP servers, and skills on or off by id, pick its pod secrets, and add setup commands that run before the agent (`WorkSettings`, `packages/shared/src/work/settings.ts`, stored only as the changes in a `settings` column on `tasks`, `work_definitions`, and `persistent_agents`). `buildAgentEnvironment` (`services/agent-environment-service.ts`) turns defaults plus changes into `.mcp.json`, skill files, and env for every pod worker — Repo Task, PR review, Job, persistent agent; a command Job gets only its setup commands. Work that opens a PR can also make its follow-through **more careful** than its repo's — ask for a review, open draft PRs, resume fewer times — but never less: the repo's settings are an admin's (`effectivePrSettings`). Work on a machine runs with the machine's own CLI configuration and takes none of it.
 
 `repo-task`, `repo-blueprint`, and `standalone` all carry a **run location** (`run_target` = `cluster` | `local`, with `local_host_id` / `local_dir` / `local_session_mode`). A local run is the same row, executed by a `local_terminals` row through the daemon instead of a pod; the terminal's frames drive the run's state (PR link → `pr_opened`, exit → `completed` / `failed`). See [optio-local.md](optio-local.md#local-runs-tasks-and-jobs-on-your-machine).
 
 ## The Work feed
 
-`/work` merges every kind into one list (`apps/web/src/lib/work-feed.ts`). Each row is projected onto the same shape — When, Where, Who, Then, and a **status** on one scale:
+`/work` shows every kind in one list, built server-side by `GET /api/work` (`apps/api/src/services/work-service.ts`; the row vocabulary — `WorkRow`, `inView`, `countWork` — lives in `@optio/shared`). Each row is projected onto the same shape — When, Where, Who, Then, and a **status** on one scale:
 
 | Status      | Meaning                                                             |
 | ----------- | ------------------------------------------------------------------- |
@@ -69,7 +75,7 @@ Each branch of `submit.ts` calls the same service the dedicated form for that ki
 
 Views: **Active** (`needs_you` / `running` / `queued` / `waiting`), **Recurring** (definitions that spawn runs), **Agents** (persistent agents), **History** (`done` / `failed`). Rows sort needs-you first, then live, then by recency. The Overview's board and the iOS app's Work tab consume the same projection.
 
-Today the feed is a client-side merge of the per-kind endpoints (unified tasks, local terminals + automations, pod sessions, persistent agents). A server-side `/api/work` read model can replace `collectWork` without touching the pages.
+The server scopes each kind the way its own endpoint does — workspace rows by workspace, a person's machines and pod sessions by person — and `GET /api/work/:id` resolves an id of any kind. The iOS and Android apps still merge the per-kind endpoints client-side: they also talk to self-hosted servers older than `/api/work`, and every endpoint they read keeps its shape.
 
 ## Surfaces
 
@@ -108,9 +114,9 @@ Each tool-call PR is confirmed on the git platform before it is adopted: same re
 
 Every PR is a `task_prs` row (`source`: `tool_call`, `branch` or `attached`). `tasks.pr_url` stays the **primary** PR — the first one adopted — and is what the PR watcher, reviews, auto-resume and auto-merge follow; other PRs are tracked alongside. `GET /api/tasks/:id` returns them as `task.prs`; `POST /api/tasks/:id/prs` attaches one by hand (member role; personal work only by its owner) and `DELETE /api/tasks/:id/prs/:prId` stops tracking one — the primary only while another can take its place. The task page lists them once a task has more than one.
 
-## Pod sessions without a repo (`standalone`)
+## Jobs: work without a repo (`standalone`)
 
-An agent runs in a pooled job pod with no checkout and produces logs and side effects: querying Slack, writing to a database, posting a report, calling an MCP server, triaging a ticket queue. Pods are shared across runs of the same definition, keyed on `(workflow_id, instance_index)`, with `maxPodInstances` replicas × `maxAgentsPerPod` concurrent runs. Runs auto-retry with exponential backoff.
+An agent — or a shell command — runs in a pooled job pod with no checkout and produces logs and side effects: querying Slack, writing to a database, posting a report, calling an MCP server, triaging a ticket queue. A command's exit status settles the run (`services/command-run.ts`). Pods are shared across runs of the same definition, keyed on `(workflow_id, instance_index)`, with `maxPodInstances` replicas × `maxAgentsPerPod` concurrent runs. Runs auto-retry with exponential backoff.
 
 ## Triggers
 
@@ -118,7 +124,7 @@ Triggers live in one polymorphic table, `workflow_triggers`, keyed by `(target_t
 
 | `target_type`      | `fireTrigger` calls                    | Produces                                       |
 | ------------------ | -------------------------------------- | ---------------------------------------------- |
-| `job`              | `workflowService.createWorkflowRun()`  | a `workflow_runs` row                          |
+| `job`              | `workflowService.createWorkflowRun()`  | a Job run (`tasks` row, `kind = 'standalone'`) |
 | `task_config`      | `taskConfigService.instantiateTask()`  | a `tasks` row, queued and enqueued             |
 | `local_blueprint`  | `local-blueprint-service` → the daemon | a `local_terminals` row on the host            |
 | `persistent_agent` | `wakeAgent()`                          | an inbox message; the reconciler starts a turn |
@@ -132,7 +138,7 @@ Ticket triggers fire from the ticket-sync sweep (`ticket-sync-service.ts`) rathe
 
 ## Templates and parameters
 
-Every kind uses the same template engine: `{{param}}` substitution and `{{#if param}}...{{/if}}` blocks, rendered lazily at firing time so the trigger payload (ticket fields, webhook body, event details) substitutes into the prompt before the agent sees it. The form lists the params each **When** provides (`TRIGGER_PARAMS` in `model.ts`). For local automations, params are shell-single-quoted before substitution so payloads can never inject commands.
+Every kind uses the same template engine: `{{param}}` substitution and `{{#if param}}...{{/if}}` blocks, rendered lazily at firing time so the trigger payload (ticket fields, webhook body, event details) substitutes into the prompt before the agent sees it. The form lists the params each **When** provides (`TRIGGER_PARAMS` in `model.ts`). Commands (a command Job, a Local automation) render through `renderCommandTemplate`: each param becomes a shell variable assigned on the first line and each `{{param}}` only references it, so a payload is never parsed as shell code wherever the template puts it.
 
 Reusable templates live in `prompt_templates` with a `kind` discriminator (`prompt` / `review` / `job` / `task`), managed under **Library → Prompts**. Precedence: repo override → global default → hardcoded fallback.
 
@@ -145,14 +151,14 @@ The three pod-side kinds are reachable through one polymorphic resource. The ser
 | `GET /api/tasks?type=repo-task\|repo-blueprint\|standalone\|all` | Unified list, filterable by type                                                                                                         |
 | `POST /api/tasks`                                                | Create. Body takes `{ type, ... }` (+ `runTarget` / `localHostId` / `localDir` / `localSessionMode`) and dispatches to the right service |
 | `GET /api/tasks/:id`                                             | Resolve across tables; returns the native row tagged with `type`                                                                         |
-| `GET/POST /api/tasks/:id/runs[/:runId]`                          | List/start runs (spawned `tasks` for blueprints, `workflow_runs` for standalone, 405 for ad-hoc)                                         |
+| `GET/POST /api/tasks/:id/runs[/:runId]`                          | List/start runs (spawned Repo Tasks for blueprints, Job runs for standalone, 405 for ad-hoc)                                             |
 | `GET/POST/PATCH/DELETE /api/tasks/:id/triggers[/:triggerId]`     | Manage triggers (405 for ad-hoc repo-task)                                                                                               |
 
-The resolver lives in `apps/api/src/services/unified-task-service.ts` (`resolveAnyTaskById`) and checks `tasks` → `task_configs` → `workflows` in order. The polymorphic routes are in `apps/api/src/routes/tasks-unified.ts`. Legacy `/api/jobs/*` and `/api/task-configs/*` endpoints still work as thin aliases.
+The resolver lives in `apps/api/src/services/unified-task-service.ts` (`resolveAnyTaskById`) and checks `tasks` → `work_definitions` (scheduled Tasks, Jobs) → PR reviews in order. `/api/work` (`routes/work.ts`) is the newer resource over every kind: list, any id, create from a `WorkSpec`, save, delete, runs, triggers. The polymorphic routes are in `apps/api/src/routes/tasks-unified.ts`. Legacy `/api/jobs/*` and `/api/task-configs/*` endpoints still work as thin aliases.
 
 The other kinds have their own resources: `/api/local/*` (hosts, terminals, blueprints), `/api/sessions/*` (pod sessions), `/api/persistent-agents/*` and the inter-agent `/api/internal/persistent-agents/*`.
 
-> **Backend-naming note.** The schema still says `tasks`, `task_configs`, `workflows`, `workflow_runs`, `workflow_triggers`, and `local_blueprints` for historical reasons, and older UI copy called these Tasks, Scheduled Tasks, Jobs, and Local Automations. v0.5 collapsed them into one list ("Sessions"), v0.6 renamed the noun to Work and unified the trigger layer; the storage tables and per-kind execution services are unchanged. A table-level unification (one `work` + `work_runs` pair replacing the six tables) is the natural next step and would remove the client-side feed merge, but it touches every worker and the reconciler, so it hasn't been done.
+> **Backend-naming note.** The tables kept some historical names. Every saved definition — scheduled Task, Job, Local automation — is a `work_definitions` row (`kind` = `repo-blueprint` | `standalone` | `local-blueprint`), and every run — a Repo Task or a Job run — is a `tasks` row (`kind` = `repo` | `standalone`), read through the `repo_tasks` / `workflow_runs` views by code about one kind; `workflow_triggers` is the one trigger table, `agent_pods` the one pod table, `task_logs` the one log table. The legacy per-kind endpoints project rows back to their old shapes, and `/api/work` serves every kind as one resource (`docs/plans/work-unification.md`).
 
 ## Service map
 
@@ -166,6 +172,6 @@ The other kinds have their own resources: `/api/local/*` (hosts, terminals, blue
 | Persistent agents      | `services/persistent-agent-service.ts`, `workers/persistent-agent-worker.ts`                                           | `routes/persistent-agents.ts`, `routes/persistent-agent-internal.ts`          |
 | Triggers               | `services/trigger-service.ts`, `trigger-dispatch.ts`, `event-trigger-service.ts`, `workers/workflow-trigger-worker.ts` | trigger sub-routes of the above, `routes/hooks.ts`, `routes/event-ingress.ts` |
 | Templates              | `services/prompt-template-service.ts`                                                                                  | `routes/prompt-templates.ts`                                                  |
-| Work feed (web)        | `apps/web/src/lib/work-feed.ts`, `components/work-form/`                                                               | `/work`, `/work/new`, `/work/:id/edit`                                        |
+| Work list / resolver   | `services/work-service.ts` (rows), `@optio/shared` `work/feed.ts` (vocabulary), web `components/work-form/`            | `routes/work.ts` (`/api/work`); web `/work`, `/work/new`, `/work/:id/edit`    |
 
 State changes for every kind flow through the [reconciliation control plane](./reconciliation.md); local runs skip its capacity / stall / pod checks because the terminal is the source of truth.
