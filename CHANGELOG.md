@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Work until merged.** The New work form's **Then** has a fourth answer for work that opens a PR: **Work until merged**. The agent opens the PR, then Optio brings it back to fix failing CI, merge conflicts, and review feedback, and squash-merges once it's green, whatever the repo's own auto-resume and auto-merge settings say. Untick **Merge it for me** to have the agent keep the PR green and leave the merge to you. Under Then, **What happens to the PR** lists each step (review, CI fixes, requested changes, merge) for any work that opens a PR, so **Exit when done** now shows what the repo's settings will do too. A repo in cautious mode (draft PRs) still never merges. Scheduled Tasks pass the setting to every run, the Work list shows "until merged", and a new **Assign to Optio** preset turns issues labeled `optio` into PRs worked until they merge.
 - **Reply from Chat in the web app.** A running session's conversation now has a reply box at the bottom: type and press Enter (Shift+Enter for a new line) and your message goes to the agent as if you had typed it in the terminal. While the agent is mid-turn it says so, and your message waits for it. Until now the web's conversation view was read-only, and replying meant switching back to the terminal.
 
 ### Changed
