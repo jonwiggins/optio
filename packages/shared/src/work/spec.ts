@@ -10,6 +10,13 @@ import type { ResourceOwner } from "../types/model-provider.js";
 import type { WorkSource, WorkThen } from "./feed.js";
 import type { WorkSettings } from "./settings.js";
 
+/**
+ * What a Job that runs a shell command instead of an agent reports as its
+ * runtime where an agent name is expected (`agentRuntime` in /api/jobs). It
+ * is stored as no agent (null) — a terminal, in the attributes' terms.
+ */
+export const SHELL_RUNTIME = "shell";
+
 /** The kind of row a piece of work is stored as — the same names the Work list uses. */
 export type WorkKind = WorkSource;
 

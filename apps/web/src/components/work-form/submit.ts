@@ -15,6 +15,7 @@ import {
   isEventWhen,
   isLocal,
   isPodWork,
+  asksForPrompt,
   prSettingsApply,
   slugify,
   takesOwner,
@@ -154,7 +155,8 @@ export function specFor(d: WorkDraft, ctx: { repoUrl: string; name: string }): W
       agentOptions: d.runtime === TERMINAL ? null : options,
       model: pickedModel(d) ?? null,
     },
-    what: { prompt: d.prompt.trim(), runTitle: runNameFor(d) },
+    // A terminal that waits for you opens a shell: it has nothing to run.
+    what: { prompt: asksForPrompt(d) ? d.prompt.trim() : "", runTitle: runNameFor(d) },
     then: d.then,
     mergeWhenReady: d.mergeWhenReady,
     maxRetries: d.maxRetries,

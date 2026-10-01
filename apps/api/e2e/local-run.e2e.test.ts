@@ -240,6 +240,37 @@ describe("local runs e2e", () => {
     expect(done.output?.agentSessionId).toBe("sess-e2e-1");
   });
 
+  it("runs a command Job on a local host as a command terminal, params shell-quoted", async () => {
+    const { hostId, daemon } = await onlineHost("e2e-local-command", cleanups);
+    const { status, body } = await api<{ id: string; kind: string }>("/api/work", {
+      method: "POST",
+      body: JSON.stringify({
+        name: `e2e local command ${Math.random().toString(36).slice(2, 8)}`,
+        when: { type: "webhook", config: { path: `e2e-cmd-${Date.now()}` } },
+        where: { runTarget: "local", localHostId: hostId, localDir: "/tmp/e2e-scratch" },
+        who: { runtime: null },
+        what: { prompt: "./report.sh {{who}}" },
+        then: "exits",
+        maxRetries: 0,
+      }),
+    });
+    expect(status).toBe(201);
+    expect(body.kind).toBe("standalone");
+    const runId = await startRun(body.id, { who: "Ada; rm -rf ~" });
+
+    const spawn = await daemon.next((m) => m.type === "spawn");
+    expect(spawn.spec).toEqual({ kind: "command", command: "./report.sh 'Ada; rm -rf ~'" });
+    const terminalId = String(spawn.terminalId);
+    daemon.send({ type: "started", terminalId });
+    daemon.send({ type: "exit", terminalId, exitCode: 3 });
+
+    const done = await waitFor(async () => {
+      const run = await getRun(runId);
+      return run.state === "completed" || run.state === "failed" ? run : null;
+    });
+    expect(done.state).toBe("failed");
+  });
+
   it("parks a local Job run while the host is offline and starts it on reconnect", async () => {
     const hostId = await registerHost("e2e-local-offline");
     const jobId = await createLocalJob(hostId);

@@ -371,16 +371,23 @@ export function whereOptions(_d: WorkDraft): Choice<"cluster" | "local">[] {
   return [{ value: "cluster" }, { value: "local" }];
 }
 
-/** The terminal and the runtimes the picked Where allows. */
+/**
+ * The terminal and the runtimes the picked Where allows. A terminal is a
+ * shell you open (a pod session, a terminal on your machine) or a command
+ * that runs and exits (a Job, in a pod or on your machine) — whatever starts
+ * it — so it is offered wherever one of those fits.
+ */
 export function runtimeOptions(d: WorkDraft): Choice<string>[] {
   const local = isLocal(d);
+  const terminalFits = thenOptions({ ...d, runtime: TERMINAL }).some((t) => !t.disabled);
   const terminal: Choice<string> = {
     value: TERMINAL,
-    ...(isTriggered(d)
-      ? { disabled: "A trigger starts an agent — a terminal is opened by hand, pick Now above." }
-      : !local && !d.withRepo
-        ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
-        : {}),
+    ...(terminalFits
+      ? {}
+      : {
+          disabled:
+            "In a repo pod a trigger starts an agent — pick No repo to run a command instead.",
+        }),
   };
   const agents: Choice<string>[] = RUNTIMES.map((r) => ({
     value: r.value,
@@ -395,8 +402,16 @@ export function thenOptions(d: WorkDraft): Choice<Then>[] {
   const terminal = d.runtime === TERMINAL;
   return [
     {
+      // A terminal that exits runs a command — in a pod with no checkout, or
+      // in the machine's directory as it is.
       value: "exits",
-      ...(terminal ? { disabled: "A terminal with no agent waits for you." } : {}),
+      ...(terminal && d.withRepo
+        ? {
+            disabled: local
+              ? "A command runs in the directory as it is — pick “Current directory”, or an agent to work on a new branch."
+              : "A command runs without a checkout — pick No repo, or an agent to change the repo.",
+          }
+        : {}),
     },
     {
       value: "until-merged",
@@ -426,14 +441,14 @@ export function thenOptions(d: WorkDraft): Choice<Then>[] {
             : {}),
     },
     {
+      // In a pod, with or without a repo (it then works in a checkout of
+      // it, turn after turn).
       value: "waits-for-messages",
       ...(local
         ? { disabled: "Persistent agents run in an Optio pod so they stay reachable." }
         : terminal
           ? { disabled: "A persistent agent needs an agent runtime." }
-          : d.withRepo
-            ? { disabled: "Persistent agents don't attach to a repo — pick No repo above." }
-            : {}),
+          : {}),
     },
   ];
 }
@@ -750,7 +765,12 @@ export function describe(
   ctx: { repoName?: string | null; machineName?: string | null } = {},
 ): SentencePart[] {
   const parts: SentencePart[] = [...whenPhrase(d)];
-  const who = d.runtime === TERMINAL ? "a terminal" : `a ${runtimeLabel(d.runtime)}`;
+  const command = d.runtime === TERMINAL && d.then === "exits";
+  const who = command
+    ? "a command"
+    : d.runtime === TERMINAL
+      ? "a terminal"
+      : `a ${runtimeLabel(d.runtime)}`;
   // Plain English for the exit condition: a run finishes, a session waits
   // for you, an agent stays.
   const noun =
@@ -759,6 +779,13 @@ export function describe(
 
   if (d.then === "waits-for-messages") {
     parts.push({ text: "in an Optio pod" });
+    if (d.withRepo) {
+      parts.push(
+        d.repoUrl
+          ? { text: `with ${ctx.repoName ?? d.repoUrl}` }
+          : { missing: "a repo", field: "repo" },
+      );
+    }
   } else if (isLocal(d)) {
     parts.push(
       d.location.localHostId
@@ -785,7 +812,11 @@ export function describe(
 
   if (d.then === "exits") {
     parts.push({
-      text: d.withRepo ? "that opens a PR and exits when done." : "that exits when done.",
+      text: command
+        ? "that runs and exits."
+        : d.withRepo
+          ? "that opens a PR and exits when done."
+          : "that exits when done.",
     });
   } else if (d.then === "until-merged") {
     parts.push({
@@ -801,16 +832,26 @@ export function describe(
   return parts;
 }
 
-/** What the sentence can't fill in, plus the prompt when the work needs one. */
+/** What the sentence can't fill in, plus the prompt (or command) when the work needs one. */
 export function missingFields(d: WorkDraft, ctx: Parameters<typeof describe>[1] = {}) {
   const gaps = describe(d, ctx).flatMap((p) => ("missing" in p ? [p.field] : []));
-  const kind = deriveKind(d);
-  // A terminal you open by hand needs no prompt; everything an agent runs
-  // unattended does.
-  const adHocTerminal = kind === "pod-session" || kind === "local-terminal";
-  if (!adHocTerminal && d.runtime !== TERMINAL && !d.prompt.trim()) gaps.push("prompt");
+  // A terminal that opens a shell needs nothing to run; a command needs its
+  // command; and everything an agent runs unattended needs a prompt.
+  if (asksForPrompt(d) && !d.prompt.trim()) {
+    const kind = deriveKind(d);
+    const adHoc = kind === "pod-session" || kind === "local-terminal";
+    if (!adHoc) gaps.push("prompt");
+  }
   return gaps;
 }
+
+/** Whether the What section asks for anything: an agent's prompt, or a command to run. */
+export function asksForPrompt(d: WorkDraft): boolean {
+  return d.runtime !== TERMINAL || d.then === "exits";
+}
+
+/** The What answer is a shell command (a terminal that runs and exits), not a prompt. */
+export const isCommand = (d: WorkDraft): boolean => d.runtime === TERMINAL && d.then === "exits";
 
 // ── Editing: the kind is fixed ───────────────────────────────────────────────
 
@@ -861,9 +902,12 @@ export function kindLock(
 
 // ── Owner, pod secrets, model providers ─────────────────────────────────────
 
-/** Work that runs in an Optio pod with an agent: the kinds that take an owner and pod secrets. */
+/**
+ * Work that runs unattended in an Optio pod — an agent, or a command — the
+ * kinds that take an owner, pod secrets, and environment settings.
+ */
 export function isPodWork(d: WorkDraft): boolean {
-  if (isLocal(d) || d.runtime === TERMINAL) return false;
+  if (isLocal(d) || (d.runtime === TERMINAL && d.then !== "exits")) return false;
   const kind = deriveKind(d);
   return (
     kind === "repo-task" ||

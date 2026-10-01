@@ -40,6 +40,9 @@ import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { agentOptionsEnv } from "../services/agent-options-env.js";
 import { buildPooledAgentCommand } from "../services/pooled-agent-command.js";
 import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
+import { gitAccessEnv } from "../services/git-access-env.js";
+import { isGitHubAppConfigured } from "../services/github-app-service.js";
+import { getRepo } from "../services/repo-service.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -310,11 +313,28 @@ export function startPersistentAgentWorker() {
           if (tok) env.CLAUDE_CODE_OAUTH_TOKEN = tok as string;
         }
 
+        // An agent with a repo works in a checkout of it, signed in to git
+        // the way repo pods are.
+        const repo = claimedAgent.repoId
+          ? await getRepo(claimedAgent.repoId).catch(() => null)
+          : null;
+        if (repo) {
+          Object.assign(
+            env,
+            {
+              OPTIO_REPO_URL: repo.repoUrl,
+              OPTIO_REPO_BRANCH: claimedAgent.branch || repo.defaultBranch,
+            },
+            await gitAccessEnv({ workspaceId: claimedAgent.workspaceId ?? null, present: env }),
+          );
+          if (isGitHubAppConfigured()) delete env.GITHUB_TOKEN;
+        }
+
         // The agent's environment: MCP servers, connections, and skills with
         // its settings applied, and its setup commands — as every pod run gets.
         const environment = await buildAgentEnvironment(
           {
-            repoUrl: null,
+            repoUrl: repo?.repoUrl ?? null,
             agentType: claimedAgent.agentRuntime,
             workspaceId: claimedAgent.workspaceId ?? null,
             ownerUserId: agentOwnerUserId,

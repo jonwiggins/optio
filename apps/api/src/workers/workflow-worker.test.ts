@@ -51,6 +51,7 @@ vi.mock("../services/workflow-service.js", () => ({
   getWorkflow: vi.fn(),
   getWorkflowRun: vi.fn(),
   appendWorkflowRunLog: vi.fn().mockResolvedValue({}),
+  isCommandJob: (w: { agentRuntime: string }) => w.agentRuntime === "shell",
 }));
 
 vi.mock("../services/workflow-pool-service.js", () => ({
@@ -86,7 +87,11 @@ vi.mock("../logger.js", () => ({
 }));
 
 // Import after mocks
-import { buildWorkflowAgentCommand, renderWorkflowPrompt } from "./workflow-worker.js";
+import {
+  buildWorkflowAgentCommand,
+  renderJobInput,
+  renderWorkflowPrompt,
+} from "./workflow-worker.js";
 
 describe("renderWorkflowPrompt", () => {
   it("replaces param variables in the template", () => {
@@ -189,5 +194,17 @@ describe("buildWorkflowAgentCommand", () => {
       expect(cmds.some((c) => c.includes("Unknown agent type"))).toBe(true);
       expect(cmds.some((c) => c.includes("exit 1"))).toBe(true);
     });
+  });
+});
+
+describe("renderJobInput", () => {
+  it("quotes a command Job's params and leaves an agent's prompt as written", () => {
+    const params = { name: "a b" };
+    expect(renderJobInput({ agentRuntime: "shell", promptTemplate: "echo {{name}}" }, params)).toBe(
+      "echo 'a b'",
+    );
+    expect(
+      renderJobInput({ agentRuntime: "claude-code", promptTemplate: "Greet {{name}}" }, params),
+    ).toBe("Greet a b");
   });
 });

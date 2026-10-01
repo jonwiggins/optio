@@ -17,7 +17,7 @@ import {
   workflowRuns,
   workflowTriggers,
 } from "../db/schema.js";
-import { insertWorkspace } from "../test-utils/integration/fixtures.js";
+import { insertRepo, insertWorkspace } from "../test-utils/integration/fixtures.js";
 import {
   WorkError,
   createWork,
@@ -224,9 +224,14 @@ describe("createWork", () => {
         )
       ).message,
     ).toMatch(/session can't be started by a trigger/);
-    expect((await rejection(createWork(spec({ who: { runtime: null } }), actor))).message).toMatch(
-      /needs an agent/,
-    );
+    // A Task works on a repo, which takes an agent (a Job with none runs a command).
+    expect(
+      (await rejection(createWork(spec({ where: repo(), who: { runtime: null } }), actor))).message,
+    ).toMatch(/needs an agent/);
+    expect(
+      (await rejection(createWork(spec({ who: { runtime: null }, what: { prompt: "" } }), actor)))
+        .message,
+    ).toMatch(/needs a command/);
   });
 
   it("creates a persistent agent and its trigger, then wakes it", async () => {
@@ -253,6 +258,58 @@ describe("createWork", () => {
     expect(agent.slug).toMatch(/^forge-/);
     const [trigger] = await triggersOf(created.id);
     expect(trigger).toMatchObject({ targetType: "persistent_agent", type: "schedule" });
+  });
+
+  it("gives a persistent agent one of the workspace's repos to work in", async () => {
+    const ws = await insertWorkspace();
+    const actor = { workspaceId: ws.id, userId: null, isAdmin: false };
+    const repo = await insertRepo({ workspaceId: ws.id, defaultBranch: "trunk" });
+    const created = await createWork(
+      spec({
+        name: `Keeper ${uniq()}`,
+        then: "waits-for-messages",
+        where: { runTarget: "cluster", repoUrl: repo.repoUrl },
+      }),
+      actor,
+    );
+    const [agent] = await db
+      .select()
+      .from(persistentAgents)
+      .where(eq(persistentAgents.id, created.id));
+    expect(agent).toMatchObject({ repoId: repo.id, branch: "trunk" });
+
+    const err = await rejection(
+      createWork(
+        spec({
+          name: `Stray ${uniq()}`,
+          then: "waits-for-messages",
+          where: { runTarget: "cluster", repoUrl: "https://github.com/acme/not-registered" },
+        }),
+        actor,
+      ),
+    );
+    expect(err.status).toBe(400);
+    expect(err.message).toMatch(/one of your repos/);
+  });
+
+  it("makes a Job with no agent a shell command", async () => {
+    const ws = await insertWorkspace();
+    const created = await createWork(
+      spec({
+        when: { type: "schedule", config: { cronExpression: "0 3 * * *" } },
+        who: { runtime: null, agentOptions: { claudeModel: "opus" }, model: "opus" },
+        what: { prompt: "./nightly.sh" },
+      }),
+      { workspaceId: ws.id, userId: null, isAdmin: false },
+    );
+    expect(created.kind).toBe("standalone");
+    const [row] = await db.select().from(workDefinitions).where(eq(workDefinitions.id, created.id));
+    expect(row).toMatchObject({
+      agentType: null,
+      model: null,
+      agentOptions: null,
+      prompt: "./nightly.sh",
+    });
   });
 });
 

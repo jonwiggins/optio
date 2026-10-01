@@ -6,13 +6,15 @@ import {
   parseIntEnv,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
-import { getEventParser } from "../services/event-parsers.js";
+import { getEventParser, type AgentEventParser } from "../services/event-parsers.js";
 import { db } from "../db/client.js";
 import { workflowRuns } from "../db/schema.js";
 import { and, eq } from "drizzle-orm";
 import { updatedAtMatches } from "../utils/pg-timestamp.js";
 import * as workflowService from "../services/workflow-service.js";
-import { transitionWorkflowRunCas } from "../services/workflow-service.js";
+import { transitionWorkflowRunCas, type Workflow } from "../services/workflow-service.js";
+import { COMMAND_SCRIPT, commandResult, parseCommandLine } from "../services/command-run.js";
+import { renderCommandTemplate } from "../services/prompt-template-service.js";
 import * as workflowPool from "../services/workflow-pool-service.js";
 import { addUsage } from "../services/run-usage.js";
 import { activityFlusher } from "../services/activity-flush.js";
@@ -56,6 +58,21 @@ export function renderWorkflowPrompt(
 }
 
 /**
+ * What a Job run executes, rendered with its params: the agent's prompt, or
+ * — for a command Job — the shell command, its params shell-quoted so a
+ * trigger payload can never inject shell syntax.
+ */
+export function renderJobInput(
+  workflow: Pick<Workflow, "agentRuntime" | "promptTemplate">,
+  params: unknown,
+): string {
+  const values = (params ?? null) as Record<string, unknown> | null;
+  return workflowService.isCommandJob(workflow)
+    ? renderCommandTemplate(workflow.promptTemplate, values)
+    : renderWorkflowPrompt(workflow.promptTemplate, values);
+}
+
+/**
  * Build the agent command for a workflow run. Similar to task-worker's
  * buildAgentCommand but simplified — no resume, no review mode.
  */
@@ -83,6 +100,92 @@ function buildInitialStreamMessage(prompt: string): string {
       },
     }) + "\n"
   );
+}
+
+/**
+ * What an agent needs in its pod for a Job run: its sign-in (an API key, an
+ * OAuth token, or the model provider the Job picked) and its parameters
+ * (model, effort, approval mode, …) as the env the command builder reads.
+ */
+async function agentRunEnv(
+  workflow: Workflow,
+  prompt: string,
+  workspaceId: string | null,
+  ownerUserId: string | null,
+): Promise<Record<string, string>> {
+  const adapter = getAdapter(workflow.agentRuntime);
+  // A model provider (Bedrock) picked for the job replaces the agent's own
+  // sign-in: no Anthropic / OpenAI key is needed then.
+  const providerRow = await resolveProviderForWork({
+    agentType: workflow.agentRuntime,
+    agentOptions: workflow.agentOptions,
+    workspaceId,
+    ownerUserId,
+    runsOn: "pod",
+  });
+  const providerRuntime = providerRow
+    ? podProviderRuntime(providerRow, workflow.agentRuntime)
+    : null;
+  const resolvedSecrets = providerRuntime
+    ? {}
+    : await resolveSecretsForTask(
+        adapter.validateSecrets([]).missing,
+        "",
+        workspaceId,
+        ownerUserId,
+      );
+  const claudeAuthMode = providerRuntime
+    ? "bedrock"
+    : (((await retrieveSecretWithFallback(
+        "CLAUDE_AUTH_MODE",
+        "global",
+        workspaceId,
+        ownerUserId,
+      ).catch(() => null)) as string | null) ?? "api-key");
+
+  const env: Record<string, string> = {
+    ...resolvedSecrets,
+    ...(providerRuntime?.env ?? {}),
+    ...(providerRuntime?.codexConfig.length
+      ? { OPTIO_CODEX_PROVIDER_CONFIG: JSON.stringify(providerRuntime.codexConfig) }
+      : {}),
+    OPTIO_PROMPT: prompt,
+    OPTIO_AGENT_TYPE: workflow.agentRuntime,
+    OPTIO_AUTH_MODE: claudeAuthMode,
+    // `model` is the legacy field.
+    ...agentOptionsEnv(workflow.agentRuntime, workflow.agentOptions, workflow.model),
+  };
+
+  if (claudeAuthMode === "api-key") {
+    const apiKey = await retrieveSecretWithFallback(
+      "ANTHROPIC_API_KEY",
+      "global",
+      workspaceId,
+      ownerUserId,
+    ).catch(() => null);
+    if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
+  }
+  if (claudeAuthMode === "oauth-token") {
+    const oauthToken = await retrieveSecretWithFallback(
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "global",
+      workspaceId,
+      ownerUserId,
+    ).catch(() => null);
+    if (!oauthToken) {
+      throw new Error("OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found");
+    }
+    env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+  }
+  if (claudeAuthMode === "max-subscription") {
+    const { getClaudeAuthToken } = await import("../services/auth-service.js");
+    const authResult = getClaudeAuthToken();
+    if (!authResult.available || !authResult.token) {
+      throw new Error(`Max subscription auth failed: ${authResult.error ?? "Token not available"}`);
+    }
+    env.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
+  }
+  return env;
 }
 
 // ── Concurrency lock ───────────────────────────────────────────────────────────
@@ -142,12 +245,12 @@ export function startWorkflowWorker() {
         // run stays queued while the host is offline (terminal parked) and
         // a re-enqueue for an already-dispatched run is a no-op.
         if (workflow.runTarget === "local") {
-          const renderedPrompt = renderWorkflowPrompt(
-            workflow.promptTemplate,
-            run.params as Record<string, unknown> | null,
-          );
           const { dispatchLocalWorkflowRun } = await import("../services/local-run-service.js");
-          const terminal = await dispatchLocalWorkflowRun(run, workflow, renderedPrompt);
+          const terminal = await dispatchLocalWorkflowRun(
+            run,
+            workflow,
+            renderJobInput(workflow, run.params),
+          );
           log.info(
             { terminalId: terminal?.id ?? null, terminalState: terminal?.state ?? null },
             "Workflow run dispatched to a local host",
@@ -210,16 +313,14 @@ export function startWorkflowWorker() {
           );
         log.info("Workflow run claimed, provisioning pod");
 
-        // ── Render prompt ─────────────────────────────────────────────
-        const renderedPrompt = renderWorkflowPrompt(
-          workflow.promptTemplate,
-          run.params as Record<string, unknown> | null,
-        );
+        // ── Render the prompt (or the command) ────────────────────────
+        const command = workflowService.isCommandJob(workflow);
+        const rendered = renderJobInput(workflow, run.params);
         // What this attempt runs (the Job is read live, so it can differ per
         // attempt). Not a state change: the reconciler's version is left alone.
         await db
           .update(workflowRuns)
-          .set({ prompt: renderedPrompt, agentType: workflow.agentRuntime })
+          .set({ prompt: rendered, agentType: command ? null : workflow.agentRuntime })
           .where(thisAttempt());
 
         // ── Resolve secrets ───────────────────────────────────────────
@@ -227,27 +328,6 @@ export function startWorkflowWorker() {
         // Personal work runs with its owner's secrets; organization work never
         // sees anyone's (see services/work-ownership.ts).
         const workflowUserId = workflow.ownerUserId ?? null;
-        const adapter = getAdapter(workflow.agentRuntime);
-        // A model provider (Bedrock) picked for the job replaces the agent's
-        // own sign-in: no Anthropic / OpenAI key is needed then.
-        const providerRow = await resolveProviderForWork({
-          agentType: workflow.agentRuntime,
-          agentOptions: workflow.agentOptions,
-          workspaceId,
-          ownerUserId: workflowUserId,
-          runsOn: "pod",
-        });
-        const providerRuntime = providerRow
-          ? podProviderRuntime(providerRow, workflow.agentRuntime)
-          : null;
-        const resolvedSecrets = providerRuntime
-          ? {}
-          : await resolveSecretsForTask(
-              adapter.validateSecrets([]).missing,
-              "",
-              workspaceId,
-              workflowUserId,
-            );
         const picked = await resolvePodSecrets(workflow.podSecrets, {
           workspaceId,
           ownerUserId: workflowUserId,
@@ -255,78 +335,15 @@ export function startWorkflowWorker() {
         if (picked.missing.length > 0) {
           log.warn({ missing: picked.missing }, "Picked pod secrets not found");
         }
-
-        // Resolve auth mode for the agent runtime
-        const claudeAuthMode = providerRuntime
-          ? "bedrock"
-          : (((await retrieveSecretWithFallback(
-              "CLAUDE_AUTH_MODE",
-              "global",
-              workspaceId,
-              workflowUserId,
-            ).catch(() => null)) as any) ?? "api-key");
-
-        // Build env vars
+        // A command runs with the picked secrets alone; an agent also needs
+        // its sign-in and its parameters.
         const env: Record<string, string> = {
           ...picked.env,
-          ...resolvedSecrets,
-          ...(providerRuntime?.env ?? {}),
-          ...(providerRuntime?.codexConfig.length
-            ? { OPTIO_CODEX_PROVIDER_CONFIG: JSON.stringify(providerRuntime.codexConfig) }
-            : {}),
-          OPTIO_PROMPT: renderedPrompt,
+          ...(command
+            ? { OPTIO_COMMAND: rendered }
+            : await agentRunEnv(workflow, rendered, workspaceId, workflowUserId)),
           OPTIO_WORKFLOW_RUN_ID: workflowRunId,
-          OPTIO_AGENT_TYPE: workflow.agentRuntime,
-          OPTIO_AUTH_MODE: claudeAuthMode,
         };
-
-        // The job's agent parameters (model, effort, approval mode, …) as the
-        // env the command builder turns into flags. `model` is the legacy field.
-        Object.assign(
-          env,
-          agentOptionsEnv(workflow.agentRuntime, workflow.agentOptions, workflow.model),
-        );
-
-        // For api-key mode, resolve the API key
-        if (claudeAuthMode === "api-key") {
-          const apiKey = await retrieveSecretWithFallback(
-            "ANTHROPIC_API_KEY",
-            "global",
-            workspaceId,
-            workflowUserId,
-          ).catch(() => null);
-          if (apiKey) env.ANTHROPIC_API_KEY = apiKey as string;
-        }
-
-        // For oauth-token mode, resolve the OAuth token
-        if (claudeAuthMode === "oauth-token") {
-          const oauthToken = await retrieveSecretWithFallback(
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            "global",
-            workspaceId,
-            workflowUserId,
-          ).catch(() => null);
-          if (oauthToken) {
-            env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
-          } else {
-            throw new Error(
-              "OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found",
-            );
-          }
-        }
-
-        // For max-subscription mode, fetch from auth service
-        if (claudeAuthMode === "max-subscription") {
-          const { getClaudeAuthToken } = await import("../services/auth-service.js");
-          const authResult = getClaudeAuthToken();
-          if (authResult.available && authResult.token) {
-            env.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
-          } else {
-            throw new Error(
-              `Max subscription auth failed: ${authResult.error ?? "Token not available"}`,
-            );
-          }
-        }
 
         // The agent's environment: the workspace's MCP servers, connections,
         // and skills with the Job's settings applied, and its setup commands.
@@ -373,19 +390,21 @@ export function startWorkflowWorker() {
 
         log.info({ podName: pod.podName }, "Workflow pod ready, executing agent");
 
-        // ── Build and execute agent command ────────────────────────────
-        const agentCommand = buildWorkflowAgentCommand(workflow.agentRuntime, env, {
-          maxTurns: workflow.maxTurns ?? undefined,
-        });
+        // ── Build and execute the agent (or the command) ──────────────
+        const agentCommand = command
+          ? [...COMMAND_SCRIPT]
+          : buildWorkflowAgentCommand(workflow.agentRuntime, env, {
+              maxTurns: workflow.maxTurns ?? undefined,
+            });
 
         const execSession = await workflowPool.execRunInPod(pod, workflowRunId, agentCommand, env);
         // The attempt holds a slot on the pod from here; the finally gives it back.
         workflowPodId = pod.id;
 
         // For claude-code, deliver prompt via stdin (stream-json mode)
-        if (workflow.agentRuntime === "claude-code") {
+        if (!command && workflow.agentRuntime === "claude-code") {
           try {
-            execSession.stdin.write(buildInitialStreamMessage(renderedPrompt));
+            execSession.stdin.write(buildInitialStreamMessage(rendered));
           } catch (err) {
             log.warn({ err }, "Failed to write initial prompt to agent stdin");
           }
@@ -396,8 +415,16 @@ export function startWorkflowWorker() {
         let sessionId: string | undefined;
         let lineBuf = "";
 
-        // Pick the right event parser for the agent type
-        const parseEvent = getEventParser(workflow.agentRuntime);
+        // Pick the right event parser for the agent type; a command's output
+        // is plain lines, the last one its exit status.
+        let exitCode: number | undefined;
+        const agentParser = getEventParser(workflow.agentRuntime);
+        const parseEvent: AgentEventParser = (line, id) => {
+          if (!command) return agentParser(line, id);
+          const parsed = parseCommandLine(line, id);
+          if (parsed.exitCode !== undefined) exitCode = parsed.exitCode;
+          return { entries: parsed.entries };
+        };
 
         // Capture stderr for diagnostics
         let stderrData = "";
@@ -414,6 +441,14 @@ export function startWorkflowWorker() {
           (at) => db.update(workflowRuns).set({ lastActivityAt: at }).where(thisAttempt()),
           ACTIVITY_FLUSH_MS,
         );
+        // A command can work quietly for a long time; while its stream is
+        // open, it is alive.
+        const keepAlive = command
+          ? setInterval(() => {
+              activity.mark("system");
+              void activity.maybeFlush().catch(() => {});
+            }, ACTIVITY_FLUSH_MS)
+          : null;
 
         for await (const chunk of execSession.stdout as AsyncIterable<Buffer>) {
           const text = chunk.toString();
@@ -459,6 +494,7 @@ export function startWorkflowWorker() {
           }
           await activity.maybeFlush();
         }
+        if (keepAlive) clearInterval(keepAlive);
         await activity.flush();
 
         // Flush remaining buffer
@@ -480,13 +516,17 @@ export function startWorkflowWorker() {
         }
 
         // ── Parse result and update run ───────────────────────────────
-        const result = adapter.parseResult(0, allLogs);
+        const result = command
+          ? commandResult(exitCode)
+          : getAdapter(workflow.agentRuntime).parseResult(0, allLogs);
 
         // Override a nominally-successful result if the agent emitted an auth
         // failure mid-run. Claude CLIs typically catch the 401 internally and
         // exit 0, which would otherwise mark the run as completed despite no
-        // useful work being done.
-        const authDetection = detectAuthFailureInLogs(allLogs);
+        // useful work being done. (A command's output is its own business.)
+        const authDetection = command
+          ? { matched: false as const, pattern: undefined, excerpt: undefined }
+          : detectAuthFailureInLogs(allLogs);
         let effectiveSuccess = result.success;
         let effectiveError = result.error;
         if (authDetection.matched) {
@@ -506,10 +546,11 @@ export function startWorkflowWorker() {
         // This attempt's spend is ADDED to the run's — whatever became of
         // the run meanwhile (cancelled, retried): it was spent. Not a state
         // change, so it doesn't touch the reconciler's version.
-        await db
-          .update(workflowRuns)
-          .set(addUsage(workflowRuns, result))
-          .where(eq(workflowRuns.id, workflowRunId));
+        // (A command spends nothing.)
+        const usage = addUsage(workflowRuns, result);
+        if (Object.keys(usage).length > 0) {
+          await db.update(workflowRuns).set(usage).where(eq(workflowRuns.id, workflowRunId));
+        }
 
         const finished = effectiveSuccess
           ? await transitionWorkflowRunCas(
@@ -523,7 +564,11 @@ export function startWorkflowWorker() {
               workflowRunId,
               WorkflowRunState.RUNNING,
               WorkflowRunState.FAILED,
-              { errorMessage: effectiveError ?? "Agent execution failed", finishedAt: new Date() },
+              {
+                errorMessage:
+                  effectiveError ?? (command ? "Command failed" : "Agent execution failed"),
+                finishedAt: new Date(),
+              },
               { startedAt: attemptStartedAt },
             );
         // The reconciler's decideFailed handles the FAILED→QUEUED retry +

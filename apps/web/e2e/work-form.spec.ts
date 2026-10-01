@@ -189,6 +189,40 @@ test.describe("New work form creates every kind", () => {
     );
   });
 
+  test("persistent-agent with a repo: it works in a checkout of one of your repos", async ({
+    page,
+  }) => {
+    await open(page);
+    await preset(page, "Persistent agent").click();
+    await page.getByRole("button", { name: "A repository", exact: true }).click();
+    await prompt(page).fill("Keep the docs in this repo current.");
+    await nameInput(page).fill(named("repo agent"));
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/agents\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    const id = page.url().split("/").pop()!;
+    const { agent } = await api(`/api/persistent-agents/${id}`);
+    expect(agent.repoId).toBeTruthy();
+    expect(agent.branch).toBe("main");
+  });
+
+  test("standalone command: a Terminal that exits runs a shell command on a schedule", async ({
+    page,
+  }) => {
+    await open(page);
+    await preset(page, "Scheduled run").click();
+    await who(page, "Terminal").click();
+    // A terminal that exits asks for a command, not a prompt.
+    await expect(page.locator("#session-prompt")).toContainText("Command");
+    await prompt(page).fill("./scripts/nightly-report.sh");
+    await nameInput(page).fill(named("command"));
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    const id = page.url().split("/").pop()!;
+    const { workflow } = await api(`/api/jobs/${id}`);
+    expect(workflow.agentRuntime).toBe("shell");
+    expect(workflow.promptTemplate).toBe("./scripts/nightly-report.sh");
+  });
+
   test("pod-session: waiting for me in a pod keeps the name, and only chats with Claude Code", async ({
     page,
   }) => {

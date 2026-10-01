@@ -6,6 +6,9 @@ import { join } from "node:path";
 import {
   shellSingleQuote,
   buildEnvExports,
+  buildPooledExecScript,
+  CHECKOUT_REPO,
+  POOLED_CHECKOUT_DIR,
   RUN_WORK_SETUP_COMMANDS,
   WRITE_SETUP_FILES,
 } from "./pod-env.js";
@@ -167,5 +170,65 @@ describe("WRITE_SETUP_FILES / RUN_WORK_SETUP_COMMANDS", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("CHECKOUT_REPO", () => {
+  it("clones the repo at its branch once, then only fetches — the agent's changes stay", () => {
+    const root = mkdtempSync(join(tmpdir(), "optio-checkout-"));
+    try {
+      const origin = join(root, "origin");
+      const git = (args: string[], cwd = root) =>
+        execFileSync("git", args, { cwd, env: { ...process.env, HOME: root }, stdio: "pipe" });
+      git(["init", "-q", "-b", "dev", origin]);
+      git(
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "one"],
+        origin,
+      );
+
+      const checkout = join(root, "checkout");
+      const script = [
+        ...buildEnvExports({ OPTIO_REPO_URL: origin, OPTIO_REPO_BRANCH: "dev" }),
+        ...CHECKOUT_REPO,
+        `cd ${checkout}`,
+        "git rev-parse --abbrev-ref HEAD",
+      ]
+        .join("\n")
+        .replaceAll(POOLED_CHECKOUT_DIR, checkout);
+      const run = () =>
+        execFileSync("bash", ["-c", script], {
+          cwd: root,
+          encoding: "utf8",
+          // Its own HOME: the script configures git globally, as in a pod.
+          env: { ...process.env, HOME: root },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+
+      expect(run().trim().split("\n").pop()).toBe("dev");
+      execFileSync("bash", ["-c", `echo note > ${join(checkout, "agent-notes.md")}`]);
+      run();
+      expect(readFileSync(join(checkout, "agent-notes.md"), "utf8")).toBe("note\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("buildPooledExecScript", () => {
+  const base = { env: { A: "1" }, workDir: "/workspace/turns/t1", agentCommand: ["run-agent"] };
+
+  it("runs in the run's own directory, after its setup files and commands", () => {
+    const script = buildPooledExecScript(base);
+    expect(script).toContain(`mkdir -p '/workspace/turns/t1'`);
+    expect(script).toContain(`cd '/workspace/turns/t1'`);
+    expect(script.indexOf(WRITE_SETUP_FILES[0])).toBeLessThan(script.indexOf("run-agent"));
+    expect(script.indexOf(RUN_WORK_SETUP_COMMANDS[0])).toBeLessThan(script.indexOf("run-agent"));
+  });
+
+  it("with a repo, works in the pod's one checkout of it", () => {
+    const script = buildPooledExecScript({ ...base, checkout: true });
+    expect(script).toContain(CHECKOUT_REPO.join("\n"));
+    expect(script).toContain(`cd '${POOLED_CHECKOUT_DIR}'`);
+    expect(script).not.toContain("/workspace/turns/t1");
   });
 });

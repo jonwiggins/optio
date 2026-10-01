@@ -193,7 +193,8 @@ function buildInitScript(): string {
 /**
  * Execute a turn inside the agent's pod. Each turn isolates its working
  * directory under `/workspace/turns/<turnId>` so multiple turns over time
- * leave a clean per-turn artifact trail.
+ * leave a clean per-turn artifact trail — unless the agent has a repo: then
+ * every turn works in the pod's one checkout of it (`OPTIO_REPO_URL`).
  */
 export async function execTurnInPod(
   pod: PersistentAgentPodHandle,
@@ -205,6 +206,7 @@ export async function execTurnInPod(
     env: { ...env, OPTIO_PERSISTENT_AGENT_TURN_ID: turnId },
     workDir: `/workspace/turns/${turnId}`,
     agentCommand,
+    checkout: !!env.OPTIO_REPO_URL,
   });
   return getRuntime().exec(podPool.podHandle(pod), ["bash", "-c", script], { tty: false });
 }

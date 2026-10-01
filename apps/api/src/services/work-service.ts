@@ -332,7 +332,8 @@ function definitionRow(d: WorkDefinition, at: Context): WorkRow {
         href: `/jobs/${d.id}`,
         when: "on a trigger",
         where: whereOf(d, null, at),
-        who: d.agentType ?? "claude-code",
+        // No agent: the Job runs a shell command.
+        who: d.agentType ?? "terminal",
         then: "exits",
         note: null,
       };
@@ -442,7 +443,7 @@ function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Context): WorkRow {
     name: r.title ?? job.name,
     when: r.triggerId ? "on a trigger" : "now",
     where: whereOf(job, null, at),
-    who: job.agentType ?? "claude-code",
+    who: job.agentType ?? "terminal",
     then: "exits",
     status,
     statusLabel,

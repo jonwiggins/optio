@@ -34,7 +34,6 @@ import {
 } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
-import { getCredentialSecret } from "../services/credential-secret-service.js";
 import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
 import { subscribeToTaskMessages } from "../services/task-message-bus.js";
 import { registerActiveExec, unregisterActiveExec } from "../services/task-cancellation-service.js";
@@ -55,6 +54,7 @@ import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { codexModelFlags } from "../services/pooled-agent-command.js";
 import { addUsage } from "../services/run-usage.js";
 import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
+import { gitAccessEnv } from "../services/git-access-env.js";
 import { activityFlusher } from "../services/activity-flush.js";
 
 const connectionOpts = getBullMQConnectionOptions();
@@ -511,36 +511,13 @@ export function startTaskWorker() {
           ...resolvedSecrets,
         };
 
-        // Resolve git platform tokens (not part of adapter requiredSecrets since they're infra-level)
-        for (const secretName of ["GITHUB_TOKEN", "GITLAB_TOKEN", "GITLAB_HOST"]) {
-          if (!allEnv[secretName]) {
-            const val = await retrieveSecretWithFallback(
-              secretName,
-              "global",
-              taskWorkspaceId,
-            ).catch(() => null);
-            if (val) allEnv[secretName] = val as string;
-          }
-        }
-
-        // Inject credential URLs for dynamic GitHub token resolution.
-        // OPTIO_API_INTERNAL_URL is the K8s service URL (set by Helm chart).
-        // Falls back to localhost for local dev where API_HOST is the bind address.
-        const apiInternalUrl =
-          process.env.OPTIO_API_INTERNAL_URL ??
-          `http://localhost:${process.env.API_PORT ?? "4000"}`;
-        // Pod-level URL (no taskId): used by repo-init.sh for git clone with installation token
-        allEnv.OPTIO_GIT_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials`;
-        // Task-level URL (with taskId): injected at exec time for user-scoped git operations
-        allEnv.OPTIO_GIT_TASK_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials?taskId=${task.id}`;
-        // Shared secret for authenticating credential requests from pods
-        allEnv.OPTIO_CREDENTIAL_SECRET = getCredentialSecret();
-
-        // Only inject static GITHUB_TOKEN when GitHub App is not configured
-        // and the credential helper scripts may not be available (old images)
-        if (isGitHubAppConfigured() && allEnv.GITHUB_TOKEN) {
-          delete allEnv.GITHUB_TOKEN;
-        }
+        // Git sign-in (platform tokens are infra-level, not adapter secrets).
+        Object.assign(
+          allEnv,
+          await gitAccessEnv({ workspaceId: taskWorkspaceId, runId: task.id, present: allEnv }),
+        );
+        // With a GitHub App the credential helper mints tokens; never ship a static one.
+        if (isGitHubAppConfigured()) delete allEnv.GITHUB_TOKEN;
 
         // Force-restart: tell the exec script to use the existing PR branch
         if (restartFromBranch) {

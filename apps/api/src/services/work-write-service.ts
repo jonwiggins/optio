@@ -37,6 +37,7 @@ import * as sessionService from "./interactive-session-service.js";
 import * as paService from "./persistent-agent-service.js";
 import { validateRunLocation } from "./local-run-service.js";
 import { planNewWork, planWorkUpdate, workChangeError, type WorkActor } from "./work-ownership.js";
+import { getRepoByUrl } from "./repo-service.js";
 import { isUniqueViolation } from "../utils/db-errors.js";
 
 /** A request the caller has to fix: the route answers with `status`. */
@@ -106,16 +107,18 @@ function triggerOf(spec: WorkSpec, kind: WorkKind) {
 }
 
 function check(spec: WorkSpec, kind: WorkKind): void {
+  // A Job with no agent runs its prompt as a shell command; the other
+  // unattended kinds need an agent.
   const needsAgent =
-    kind === "repo-task" ||
-    kind === "repo-blueprint" ||
-    kind === "standalone" ||
-    kind === "persistent-agent";
+    kind === "repo-task" || kind === "repo-blueprint" || kind === "persistent-agent";
   if (needsAgent && !spec.who.runtime) {
     throw new WorkError(400, `A ${NOUN[kind]} needs an agent`);
   }
-  if (needsAgent && !spec.what.prompt.trim()) {
-    throw new WorkError(400, `A ${NOUN[kind]} needs a prompt`);
+  if ((needsAgent || kind === "standalone") && !spec.what.prompt.trim()) {
+    throw new WorkError(
+      400,
+      `A ${NOUN[kind]} needs ${spec.who.runtime ? "a prompt" : "a command"}`,
+    );
   }
   if (
     (kind === "repo-task" || kind === "repo-blueprint" || kind === "pod-session") &&
@@ -225,9 +228,10 @@ async function definitionColumns(
       return {
         ...common,
         ...(await runLocation(spec, kind, actor)),
+        // No runtime: the Job runs its prompt as a shell command.
         agentType: spec.who.runtime,
-        model: spec.who.model ?? null,
-        agentOptions: options(spec),
+        model: spec.who.runtime ? (spec.who.model ?? null) : null,
+        agentOptions: spec.who.runtime ? options(spec) : null,
         maxRetries: spec.maxRetries ?? 1,
         settings: settingsOf(spec, kind),
       };
@@ -408,6 +412,11 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
     case "persistent-agent": {
       const slug = spec.agent?.slug?.trim() || slugify(spec.name);
       if (!slug) throw new WorkError(400, "Give the agent a name with letters or digits");
+      // An agent with a repo works in a checkout of it, turn after turn.
+      const repo = spec.where.repoUrl
+        ? await getRepoByUrl(spec.where.repoUrl, actor.workspaceId)
+        : null;
+      if (spec.where.repoUrl && !repo) throw new WorkError(400, "Pick one of your repos");
       let agent: Awaited<ReturnType<typeof paService.createPersistentAgent>>;
       try {
         agent = await db.transaction(async (tx) => {
@@ -423,6 +432,8 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
               agentsMd: spec.agent?.agentsMd || null,
               initialPrompt: spec.what.prompt.trim(),
               podLifecycle: spec.agent?.podLifecycle as PersistentAgentPodLifecycle | undefined,
+              repoId: repo?.id ?? null,
+              branch: repo ? spec.where.repoBranch || repo.defaultBranch : null,
               settings: settingsOf(spec, kind),
               workspaceId: actor.workspaceId,
               createdBy: actor.userId,

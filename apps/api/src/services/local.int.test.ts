@@ -942,6 +942,23 @@ describe("local blueprints", () => {
     expect(spawn.spec.command).toBe(`claude 'review PR; echo '\\''$(whoami)'\\'''`);
   });
 
+  it("a blueprint with no agent and nothing to run opens a shell that waits for you", async () => {
+    const host = await makeHost();
+    const daemon = new FakeDaemonSocket();
+    relay.registerDaemon(host.id, null, daemon);
+    const blueprint = await createBlueprint({
+      userId: null,
+      workspaceId: null,
+      name: `bp-shell-${Math.random().toString(36).slice(2, 8)}`,
+      hostId: host.id,
+      dir: "/home/dev/optio",
+      commandTemplate: "",
+    });
+    await spawnFromBlueprint(blueprint, {});
+    const spawn = daemon.messages().find((m) => m.type === "spawn") as { spec: { kind: string } };
+    expect(spawn.spec).toEqual({ kind: "shell" });
+  });
+
   it("agent-mode blueprints emit an agent spec with a raw (un-shell-quoted) prompt", async () => {
     const host = await makeHost();
     const daemon = new FakeDaemonSocket();

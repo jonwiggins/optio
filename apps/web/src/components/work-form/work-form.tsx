@@ -99,6 +99,8 @@ import {
   type WhenType,
   prSettingsApply,
   withOverride,
+  asksForPrompt,
+  isCommand,
 } from "./model";
 import { createWork, rememberWorkDefaults, updateWork } from "./submit";
 import { detailHref, type EditTarget } from "./load";
@@ -401,7 +403,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const sentenceCtx = { repoName: repoRow?.fullName ?? null, machineName: machine?.name ?? null };
   const sentence = useMemo(() => describe(draft, sentenceCtx), [draft, repoRow, machine]);
   const gaps = missingFields(draft, sentenceCtx);
-  const wantsRepoUrl = draft.withRepo && draft.then !== "waits-for-messages";
+  const wantsRepoUrl = draft.withRepo;
   // The repo whose settings decide what happens to the PR (on a machine, the
   // registered repo the checkout belongs to, if any).
   const policyRepo =
@@ -954,6 +956,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                     agentType={draft.runtime}
                     owner={draft.owner}
                     prApplies={prSettingsApply(draft)}
+                    command={isCommand(draft)}
                     secrets={
                       showSecrets ? (
                         <SecretsRow
@@ -1082,17 +1085,26 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
           </Section>
 
           {/* ── What ────────────────────────────────────────────────────── */}
-          {!isTerminal && kind !== "pod-session" && (
-            <Section step={4} label="What" hint="The prompt" id="session-prompt">
+          {asksForPrompt(draft) && kind !== "pod-session" && (
+            <Section
+              step={4}
+              label="What"
+              hint={isCommand(draft) ? "The command" : "The prompt"}
+              id="session-prompt"
+            >
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-sm text-text-muted">
-                    {draft.then === "waits-for-messages" ? "Initial prompt" : "Prompt"}
+                    {isCommand(draft)
+                      ? "Command"
+                      : draft.then === "waits-for-messages"
+                        ? "Initial prompt"
+                        : "Prompt"}
                     {kind === "local-terminal" && (
                       <span className="text-text-muted/60"> (optional)</span>
                     )}
                   </label>
-                  {templates.length > 0 && (
+                  {templates.length > 0 && !isCommand(draft) && (
                     <select
                       value=""
                       onChange={(e) => {
@@ -1116,15 +1128,17 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   value={draft.prompt}
                   onChange={(e) => setDraft({ prompt: e.target.value })}
                   placeholder={
-                    draft.when === "ticket" || draft.when === "linear"
-                      ? "{{ticketUrl}}, please triage this ticket."
-                      : draft.when === "github"
-                        ? "Review {{url}} and leave comments on anything risky."
-                        : draft.then === "waits-for-messages"
-                          ? "Who this agent is and what it should do on its first turn."
-                          : draft.withRepo
-                            ? "Describe the change. Be specific about files to modify and expected behavior."
-                            : "Describe what the agent should do. Reference Connections for external systems."
+                    isCommand(draft)
+                      ? "./scripts/nightly-report.sh --since yesterday"
+                      : draft.when === "ticket" || draft.when === "linear"
+                        ? "{{ticketUrl}}, please triage this ticket."
+                        : draft.when === "github"
+                          ? "Review {{url}} and leave comments on anything risky."
+                          : draft.then === "waits-for-messages"
+                            ? "Who this agent is and what it should do on its first turn."
+                            : draft.withRepo
+                              ? "Describe the change. Be specific about files to modify and expected behavior."
+                              : "Describe what the agent should do. Reference Connections for external systems."
                   }
                   className={cn(INPUT, "resize-y font-mono")}
                 />
@@ -1132,7 +1146,10 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   <div className="mt-2">
                     <p className="text-xs text-text-muted/60 mb-1.5">
                       {params.length > 0 ? (
-                        <>From the {WHEN_META[draft.when].label} trigger — click to insert:</>
+                        <>
+                          From the {WHEN_META[draft.when].label} trigger — click to insert
+                          {isCommand(draft) ? " (each value is shell-quoted)" : ""}:
+                        </>
                       ) : draft.when === "webhook" ? (
                         <>
                           Each top-level field of the POSTed JSON is available as{" "}
@@ -1165,7 +1182,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
 
           {/* ── Then ─────────────────────────────────────────── */}
           <Section
-            step={isTerminal ? 4 : 5}
+            step={asksForPrompt(draft) ? 5 : 4}
             label="Then"
             hint="What happens when a turn ends?"
             summary={summaries.then}
@@ -1317,7 +1334,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
 
           {/* ── Name ────────────────────────────────────────────────────── */}
           <Section
-            step={isTerminal ? 5 : 6}
+            step={asksForPrompt(draft) ? 6 : 5}
             label="Name"
             summary={summaries.name}
             id="session-name"

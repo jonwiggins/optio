@@ -29,6 +29,7 @@ export function EnvironmentPanel({
   agentType,
   owner,
   prApplies,
+  command = false,
   secrets,
   onToggle,
   onChange,
@@ -40,6 +41,8 @@ export function EnvironmentPanel({
   owner: "workspace" | "me";
   /** The work opens a PR, so its follow-through settings apply. */
   prApplies: boolean;
+  /** A command, not an agent: only secrets and setup commands mean anything. */
+  command?: boolean;
   /** The pod secrets row, rendered first. */
   secrets?: ReactNode;
   onToggle: (part: EnvironmentPart, item: WorkEnvironmentItem, on: boolean) => void;
@@ -62,13 +65,15 @@ export function EnvironmentPanel({
 
   const count = (part: EnvironmentPart) =>
     options?.[part].filter((i) => overrideOn(settings[part], i.id, i.default)).length ?? 0;
-  const summary = options
-    ? [
-        plural(count("mcpServers"), "MCP server"),
-        plural(count("connections"), "connection"),
-        plural(count("skills"), "skill"),
-      ].join(" · ")
-    : "Loading…";
+  const summary = command
+    ? "secrets and setup commands"
+    : options
+      ? [
+          plural(count("mcpServers"), "MCP server"),
+          plural(count("connections"), "connection"),
+          plural(count("skills"), "skill"),
+        ].join(" · ")
+      : "Loading…";
 
   return (
     <div data-testid="work-environment">
@@ -87,33 +92,37 @@ export function EnvironmentPanel({
       >
         <div className="space-y-4">
           {secrets}
-          <Toggles
-            part="connections"
-            label="Connections"
-            icon={<Plug className="w-3 h-3" />}
-            items={options?.connections}
-            settings={settings}
-            onToggle={onToggle}
-            empty="No connections in this workspace — add them under Library → Connections."
-          />
-          <Toggles
-            part="mcpServers"
-            label="MCP servers"
-            icon={<Server className="w-3 h-3" />}
-            items={options?.mcpServers}
-            settings={settings}
-            onToggle={onToggle}
-            empty="No MCP servers configured — add them in a repo's or the workspace's settings."
-          />
-          <Toggles
-            part="skills"
-            label="Skills"
-            icon={<Sparkles className="w-3 h-3" />}
-            items={options?.skills}
-            settings={settings}
-            onToggle={onToggle}
-            empty="No custom skills configured."
-          />
+          {!command && (
+            <>
+              <Toggles
+                part="connections"
+                label="Connections"
+                icon={<Plug className="w-3 h-3" />}
+                items={options?.connections}
+                settings={settings}
+                onToggle={onToggle}
+                empty="No connections in this workspace — add them under Library → Connections."
+              />
+              <Toggles
+                part="mcpServers"
+                label="MCP servers"
+                icon={<Server className="w-3 h-3" />}
+                items={options?.mcpServers}
+                settings={settings}
+                onToggle={onToggle}
+                empty="No MCP servers configured — add them in a repo's or the workspace's settings."
+              />
+              <Toggles
+                part="skills"
+                label="Skills"
+                icon={<Sparkles className="w-3 h-3" />}
+                items={options?.skills}
+                settings={settings}
+                onToggle={onToggle}
+                empty="No custom skills configured."
+              />
+            </>
+          )}
 
           <div>
             <label className="flex items-center gap-1.5 text-xs text-text-muted mb-1">

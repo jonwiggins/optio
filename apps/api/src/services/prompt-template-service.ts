@@ -1,7 +1,7 @@
 import { eq, and, isNull, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { promptTemplates, repos } from "../db/schema.js";
-import { DEFAULT_PROMPT_TEMPLATE, normalizeRepoUrl } from "@optio/shared";
+import { DEFAULT_PROMPT_TEMPLATE, normalizeRepoUrl, shellQuote } from "@optio/shared";
 
 /**
  * Get the prompt template for a repo. Priority:
@@ -188,6 +188,22 @@ export function renderTemplateString(template: string, params: Record<string, un
   });
 
   return rendered;
+}
+
+/**
+ * A shell command from a `{{param}}` template: each value is single-quoted
+ * before it is substituted, so a trigger payload can never inject shell
+ * syntax. `{{#if}}` blocks are decided on the raw values first — a quoted
+ * empty string is `''`, which would otherwise read as present.
+ */
+export function renderCommandTemplate(
+  template: string,
+  params: Record<string, unknown> | null | undefined,
+): string {
+  const raw = params ?? {};
+  const quoted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) quoted[key] = shellQuote(String(value ?? ""));
+  return renderTemplateString(resolveTemplateConditionals(template, raw), quoted).trim();
 }
 
 const RUN_TITLE_MAX = 200;

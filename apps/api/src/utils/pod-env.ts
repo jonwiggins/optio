@@ -77,6 +77,39 @@ export const RUN_WORK_SETUP_COMMANDS: readonly string[] = [
   `fi`,
 ];
 
+/** Where a pooled pod keeps the checkout of a persistent agent's repo. */
+export const POOLED_CHECKOUT_DIR = "/workspace/repo";
+
+/**
+ * Script lines that give a pooled pod a checkout of `$OPTIO_REPO_URL` at
+ * `POOLED_CHECKOUT_DIR`: cloned on first use at `$OPTIO_REPO_BRANCH`, then
+ * only fetched, so whatever the agent left in it between turns stays. Git
+ * signs in the way repo pods do (repo-init.sh): Optio's credential helper,
+ * else a GitHub / GitLab token.
+ */
+export const CHECKOUT_REPO: readonly string[] = [
+  `if [ -n "\${OPTIO_GIT_CREDENTIAL_URL:-}" ] && [ -f /usr/local/bin/optio-git-credential ]; then`,
+  `  git config --global credential.helper '/usr/local/bin/optio-git-credential'`,
+  `elif [ -n "\${GITHUB_TOKEN:-}" ] || [ -n "\${GITLAB_TOKEN:-}" ]; then`,
+  `  git config --global credential.helper store`,
+  `  : > ~/.git-credentials && chmod 600 ~/.git-credentials`,
+  `  if [ -n "\${GITHUB_TOKEN:-}" ]; then`,
+  `    echo "https://x-access-token:\${GITHUB_TOKEN}@github.com" >> ~/.git-credentials`,
+  `  fi`,
+  `  if [ -n "\${GITLAB_TOKEN:-}" ]; then`,
+  `    echo "https://oauth2:\${GITLAB_TOKEN}@$(echo "$OPTIO_REPO_URL" | sed -E 's|.*://([^/]+).*|\\1|')" >> ~/.git-credentials`,
+  `  fi`,
+  `fi`,
+  `git config --global user.name "\${GITHUB_APP_BOT_NAME:-Optio Agent}"`,
+  `git config --global user.email "\${GITHUB_APP_BOT_EMAIL:-optio-agent@noreply.github.com}"`,
+  `if [ ! -d ${POOLED_CHECKOUT_DIR}/.git ]; then`,
+  `  echo "[optio] Cloning $OPTIO_REPO_URL ($OPTIO_REPO_BRANCH)..."`,
+  `  git clone --branch "$OPTIO_REPO_BRANCH" "$OPTIO_REPO_URL" ${POOLED_CHECKOUT_DIR} || { echo "[optio] ERROR: clone failed"; exit 1; }`,
+  `else`,
+  `  git -C ${POOLED_CHECKOUT_DIR} fetch origin --quiet || echo "[optio] Warning: fetch failed"`,
+  `fi`,
+];
+
 /**
  * The exec script that runs one agent in a pooled pod (a Job's or a
  * persistent agent's): export the run's env, wait for the pod's init to
@@ -87,10 +120,14 @@ export const RUN_WORK_SETUP_COMMANDS: readonly string[] = [
  */
 export function buildPooledExecScript(input: {
   env: Record<string, string>;
+  /** The run's directory; ignored with `checkout` (the run works in the checkout). */
   workDir: string;
   agentCommand: string[];
   label?: string;
+  /** Work in a checkout of `$OPTIO_REPO_URL` (`CHECKOUT_REPO`). */
+  checkout?: boolean;
 }): string {
+  const dir = input.checkout ? POOLED_CHECKOUT_DIR : input.workDir;
   const what = input.label ?? "pod";
   return [
     "set -e",
@@ -101,8 +138,8 @@ export function buildPooledExecScript(input: {
     `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
     `[ -f /workspace/.ready ] || { echo "[optio] ERROR: ${what} not ready after 120s"; exit 1; }`,
     ...(input.label ? [`echo "[optio] ${what[0].toUpperCase()}${what.slice(1)} ready"`] : []),
-    `mkdir -p ${shellSingleQuote(input.workDir)}`,
-    `cd ${shellSingleQuote(input.workDir)}`,
+    ...(input.checkout ? CHECKOUT_REPO : [`mkdir -p ${shellSingleQuote(dir)}`]),
+    `cd ${shellSingleQuote(dir)}`,
     ...WRITE_SETUP_FILES,
     ...RUN_WORK_SETUP_COMMANDS,
     `set +e`,

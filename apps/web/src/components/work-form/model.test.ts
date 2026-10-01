@@ -97,36 +97,75 @@ suite("constraints flow downstream", () => {
     expect(normalize(local({ ...EMPTY_DRAFT, runtime: "copilot" })).runtime).toBe("claude-code");
   });
 
-  it("a pod terminal needs a repo and is opened by hand", () => {
-    expect(enabled(runtimeOptions({ ...EMPTY_DRAFT, withRepo: false }))).not.toContain(TERMINAL);
-    expect(enabled(runtimeOptions({ ...EMPTY_DRAFT, when: "schedule" }))).not.toContain(TERMINAL);
+  it("a terminal is a shell you open, or a command that runs and exits — whatever starts it", () => {
+    // In a pod: a session in a repo, or a command with no checkout.
     expect(enabled(runtimeOptions(EMPTY_DRAFT))).toContain(TERMINAL);
+    expect(enabled(runtimeOptions({ ...EMPTY_DRAFT, withRepo: false }))).toContain(TERMINAL);
+    expect(
+      enabled(runtimeOptions({ ...EMPTY_DRAFT, withRepo: false, when: "schedule" })),
+    ).toContain(TERMINAL);
+    // A trigger can't open a pod session, and a command has no checkout to
+    // work in: in a repo pod a trigger starts an agent.
+    const repoPodTerminal = runtimeOptions({ ...EMPTY_DRAFT, when: "schedule" }).find(
+      (r) => r.value === TERMINAL,
+    );
+    expect(repoPodTerminal?.disabled).toMatch(/pick No repo/);
+    // On a machine every trigger can start one.
+    for (const when of ["schedule", "slack", "github"] as const) {
+      expect(enabled(runtimeOptions(local({ ...EMPTY_DRAFT, when })))).toContain(TERMINAL);
+    }
   });
 
-  it("a trigger never starts a bare terminal, on a pod or a machine", () => {
-    expect(enabled(runtimeOptions(local({ ...EMPTY_DRAFT, when: "schedule" })))).not.toContain(
-      TERMINAL,
+  it("a terminal that exits runs a command (a Job); one that waits is a shell", () => {
+    const command = normalize({
+      ...EMPTY_DRAFT,
+      withRepo: false,
+      runtime: TERMINAL,
+      then: "exits",
+    });
+    expect(command.runtime).toBe(TERMINAL);
+    expect(deriveKind(command)).toBe("standalone");
+    expect(missingFields(command)).toEqual(["prompt"]);
+    expect(missingFields({ ...command, prompt: "./nightly.sh" })).toEqual([]);
+    expect(text({ ...command, prompt: "./nightly.sh" })).toBe(
+      "Started now, a command in an Optio pod that runs and exits.",
     );
-    expect(enabled(runtimeOptions(local({ ...EMPTY_DRAFT, when: "slack" })))).not.toContain(
-      TERMINAL,
+
+    const onMachine = normalize(
+      local({
+        ...EMPTY_DRAFT,
+        withRepo: false,
+        runtime: TERMINAL,
+        when: "schedule",
+        trigger: { type: "schedule", cronExpression: "0 9 * * *" },
+      }),
     );
-    expect(normalize(local({ ...EMPTY_DRAFT, when: "schedule", runtime: TERMINAL })).runtime).toBe(
-      "claude-code",
-    );
+    expect(enabled(thenOptions(onMachine))).toEqual(["exits", "waits-for-me"]);
+    // A shell that opens on a schedule needs nothing to run.
+    const shell = normalize({ ...onMachine, then: "waits-for-me" });
+    expect(deriveKind(shell)).toBe("local-blueprint");
+    expect(missingFields(shell)).toEqual([]);
+    expect(shell.location.localSessionMode).toBe("interactive");
+
+    // A command never works on a branch: that's an agent's job.
+    const onBranch = thenOptions(local({ ...EMPTY_DRAFT, runtime: TERMINAL }));
+    expect(onBranch.find((t) => t.value === "exits")?.disabled).toMatch(/Current directory/);
   });
 
-  it("a terminal with no agent waits for you", () => {
-    const d = normalize(local({ ...EMPTY_DRAFT, withRepo: false, runtime: TERMINAL }));
-    expect(enabled(thenOptions(d))).toEqual(["waits-for-me"]);
-    expect(d.then).toBe("waits-for-me");
-    expect(d.location.localSessionMode).toBe("interactive");
-  });
-
-  it("a persistent agent lives in a pod, with no repo, and not on event triggers", () => {
+  it("a persistent agent lives in a pod, with a repo or without one", () => {
     expect(enabled(thenOptions(local(EMPTY_DRAFT)))).not.toContain("waits-for-messages");
-    expect(enabled(thenOptions(EMPTY_DRAFT))).not.toContain("waits-for-messages");
+    expect(enabled(thenOptions(EMPTY_DRAFT))).toContain("waits-for-messages");
     expect(enabled(thenOptions({ ...EMPTY_DRAFT, withRepo: false }))).toContain(
       "waits-for-messages",
+    );
+    const withRepo = normalize({
+      ...EMPTY_DRAFT,
+      repoUrl: "https://github.com/acme/app",
+      then: "waits-for-messages",
+    });
+    expect(deriveKind(withRepo)).toBe("persistent-agent");
+    expect(text(withRepo, { repoName: "acme/app" })).toBe(
+      "Woken by messages, a Claude Code agent in an Optio pod with acme/app that keeps its memory between turns.",
     );
     const flipped = normalize(
       local({ ...EMPTY_DRAFT, withRepo: false, then: "waits-for-messages" }),
@@ -416,7 +455,9 @@ suite("owner and pod secrets", () => {
 
   it("pod work takes secrets; a machine run is always mine and takes none", () => {
     expect(isPodWork(job)).toBe(true);
-    expect(isPodWork({ ...job, runtime: "" })).toBe(false);
+    // A command Job in a pod takes them too; a terminal you open doesn't.
+    expect(isPodWork({ ...job, runtime: "" })).toBe(true);
+    expect(isPodWork({ ...job, runtime: "", then: "waits-for-me" })).toBe(false);
     const local = normalize({ ...job, location: { ...job.location, runTarget: "local" } });
     expect(isPodWork(local)).toBe(false);
     expect(effectiveOwner(local)).toBe("me");

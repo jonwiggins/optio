@@ -15,7 +15,6 @@ import { modelProviderIdFrom } from "@optio/shared";
 import { eq, isNull } from "drizzle-orm";
 import {
   localAgentParams,
-  shellQuote,
   type LocalAgentKind,
   type LocalAgentSessionMode,
   type LocalTerminalSpec,
@@ -26,9 +25,9 @@ import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-ser
 import { logger } from "../logger.js";
 import {
   getPromptTemplateById,
+  renderCommandTemplate,
   renderRunTitle,
   renderTemplateString,
-  resolveTemplateConditionals,
 } from "./prompt-template-service.js";
 import { isAuthDisabled } from "./oauth/index.js";
 import {
@@ -368,20 +367,11 @@ export async function spawnFromBlueprint(
       ...(blueprint.baseBranch ? { baseBranch: blueprint.baseBranch } : {}),
     };
   } else {
-    // Command mode: params are shell-single-quoted before substitution so a
-    // trigger payload can never inject shell syntax. `{{#if}}` blocks are
-    // decided on the raw values first — a quoted empty string is `''`, which
-    // would otherwise read as present.
-    const quotedParams: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(rawParams)) {
-      quotedParams[key] = shellQuote(String(value));
-    }
-    const command = renderTemplateString(
-      resolveTemplateConditionals(template, rawParams),
-      quotedParams,
-    ).trim();
-    if (!command) throw new Error("Blueprint command rendered empty");
-    spec = { kind: "command", command };
+    // Command mode: the command with its params shell-quoted, so a trigger
+    // payload can never inject shell syntax (renderCommandTemplate). No
+    // command opens a shell in the directory that waits for you.
+    const command = renderCommandTemplate(template, rawParams);
+    spec = command ? { kind: "command", command } : { kind: "shell" };
   }
 
   return createTerminal({

@@ -39,7 +39,6 @@ import {
   retrieveSecretWithFallback,
 } from "../services/secret-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
-import { getCredentialSecret } from "../services/credential-secret-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -49,6 +48,7 @@ import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { resolveReviewConfig } from "../services/review-config.js";
 import * as optioSettingsService from "../services/optio-settings-service.js";
 import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
+import { gitAccessEnv } from "../services/git-access-env.js";
 import {
   buildAgentCommand,
   buildInitialClaudeStreamMessage,
@@ -361,23 +361,8 @@ export function startPrReviewWorker() {
         );
         const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
 
-        for (const secretName of ["GITHUB_TOKEN", "GITLAB_TOKEN", "GITLAB_HOST"]) {
-          if (!allEnv[secretName]) {
-            const val = await retrieveSecretWithFallback(secretName, "global", workspaceId).catch(
-              () => null,
-            );
-            if (val) allEnv[secretName] = val as string;
-          }
-        }
-
-        const apiInternalUrl =
-          process.env.OPTIO_API_INTERNAL_URL ??
-          `http://localhost:${process.env.API_PORT ?? "4000"}`;
-        allEnv.OPTIO_GIT_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials`;
-        allEnv.OPTIO_GIT_TASK_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials?taskId=${run.id}`;
-        allEnv.OPTIO_CREDENTIAL_SECRET = getCredentialSecret();
-
-        if (isGitHubAppConfigured() && allEnv.GITHUB_TOKEN) delete allEnv.GITHUB_TOKEN;
+        Object.assign(allEnv, await gitAccessEnv({ workspaceId, runId: run.id, present: allEnv }));
+        if (isGitHubAppConfigured()) delete allEnv.GITHUB_TOKEN;
 
         if (repoConfig.extraPackages) allEnv.OPTIO_EXTRA_PACKAGES = repoConfig.extraPackages;
         if (repoConfig.setupCommands) allEnv.OPTIO_SETUP_COMMANDS = repoConfig.setupCommands;

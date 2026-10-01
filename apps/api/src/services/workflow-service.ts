@@ -5,7 +5,12 @@
  */
 import { eq, desc, sql, and, inArray } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
-import { parseIntEnv, type LocalAgentSessionMode, type RunTarget } from "@optio/shared";
+import {
+  parseIntEnv,
+  SHELL_RUNTIME,
+  type LocalAgentSessionMode,
+  type RunTarget,
+} from "@optio/shared";
 import { db } from "../db/client.js";
 import { workDefinitions, workflowRuns, workflowTriggers } from "../db/schema.js";
 import * as runLogs from "./run-log-service.js";
@@ -31,7 +36,8 @@ export function toWorkflow(d: WorkDefinition) {
     promptTemplate: d.prompt,
     paramsSchema: d.paramsSchema,
     runTitle: d.runTitle,
-    agentRuntime: d.agentType ?? "claude-code",
+    // No agent: a Job that runs a shell command.
+    agentRuntime: d.agentType ?? SHELL_RUNTIME,
     model: d.model,
     agentOptions: d.agentOptions,
     maxTurns: d.maxTurns,
@@ -56,6 +62,14 @@ export function toWorkflow(d: WorkDefinition) {
 }
 
 export type Workflow = ReturnType<typeof toWorkflow>;
+
+/** The stored agent for a runtime name: none for a shell command. */
+const agentTypeOf = (runtime: string): string | null =>
+  runtime === SHELL_RUNTIME ? null : runtime;
+
+/** A Job that runs a shell command (its params shell-quoted) instead of an agent. */
+export const isCommandJob = (w: Pick<Workflow, "agentRuntime">): boolean =>
+  w.agentRuntime === SHELL_RUNTIME;
 
 export async function listWorkflows(workspaceId?: string) {
   const rows = await definitions.listDefinitions(
@@ -110,7 +124,7 @@ export async function createWorkflow(input: CreateWorkflowInput) {
     description: input.description,
     prompt: input.promptTemplate,
     runTitle: input.runTitle?.trim() || null,
-    agentType: input.agentRuntime ?? "claude-code",
+    agentType: agentTypeOf(input.agentRuntime ?? "claude-code"),
     model: input.model,
     agentOptions: input.agentOptions ?? null,
     maxTurns: input.maxTurns,
@@ -166,7 +180,7 @@ export async function updateWorkflow(id: string, input: UpdateWorkflowInput) {
   const patch: Partial<WorkDefinitionValues> = {
     ...rest,
     ...(promptTemplate !== undefined ? { prompt: promptTemplate } : {}),
-    ...(agentRuntime !== undefined ? { agentType: agentRuntime } : {}),
+    ...(agentRuntime !== undefined ? { agentType: agentTypeOf(agentRuntime) } : {}),
     ...(runTitle !== undefined ? { runTitle: runTitle?.trim() || null } : {}),
     // A null from a "cluster" location means "back to the default".
     ...(localSessionMode !== undefined ? { localSessionMode: localSessionMode ?? "headless" } : {}),

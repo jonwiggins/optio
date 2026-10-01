@@ -175,12 +175,12 @@ describe("workflow-service", () => {
       const result = await getWorkflow("w-1");
 
       expect(definitions.getDefinition).toHaveBeenCalledWith("w-1", "standalone");
-      // The legacy shape: null agent / session mode read as their defaults.
+      // The legacy shape: no agent is a shell command; no session mode is headless.
       expect(result).toMatchObject({
         id: "w-1",
         name: "Deploy",
         promptTemplate: "Deploy it",
-        agentRuntime: "claude-code",
+        agentRuntime: "shell",
         localSessionMode: "headless",
       });
     });
