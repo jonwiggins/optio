@@ -26,8 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Agent logos** for Claude Code, Codex, Copilot, Gemini, Cursor and OpenCode in the New work form's Who picker and on Work rows.
 - **A task can open several PRs.** Every PR a task opens is tracked: the ones its agent's `gh pr create` / `glab mr create` / MCP `create_pull_request` calls created, and any open PR on a branch under the task's (`optio/task-<id>-<slug>`; the prompt now asks for that naming when the work needs more than one PR). The task page lists them once there's more than one, with **Stop tracking** and **Add PR** for one Optio missed. The first stays the PR Optio follows for CI, reviews and merge. `GET /api/tasks/:id` returns them as `prs`.
 
+- **Text size and column width in Chat.** A session's Chat view has A− / A+ and Narrower / Wider controls (and ⌘/Ctrl + = / − / 0), remembered per browser for every chat.
+- **Refresh Codex's usage.** The Codex usage pill has a refresh button like Claude's: the machine's daemon asks Codex for its current limits instead of waiting for the next Codex turn. Restart `optio local up` to get it.
+
 ### Changed
 
+- **Repo settings on iOS and Android use the live agent picker** (same models and per-model effort levels as New work); New work on mobile starts from the picked repo's defaults.
 - **Repo settings pick the agent the way New work does.** The repo page's default agent and its model, effort and other parameters use the same picker as the New work form, with the same live model and effort options; the new-repo wizard offers every agent. Picking a repo in New work starts from the repo's defaults ("Repo defaults · Reset"); a repo's own defaults win over your remembered settings for pod work on it. The repo settings and new-repo pages are refreshed to the newer layout.
 - **Every effort level Claude supports.** The Claude Code effort picker now offers Low, Medium, High, Extra high and Max, narrowed to what the chosen model takes, and it's hidden for models without an effort setting (Haiku 4.5, Sonnet 4.5). Optio reads each model's levels from Anthropic's Models API (`capabilities.effort`) along with the model list; on a machine, an effort the installed `claude` doesn't list is left out instead of stopping it from starting.
 - **Logos are one colour.** Slack, Claude and Gemini follow the text colour like every other mark; only pull request and issue glyphs keep their state colours.

@@ -13,6 +13,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.modelFieldForRuntime
+import dev.optio.core.ui.agent.OptionValue
 
 // Port of `apps/web/src/components/work-form/load.ts`: a saved recurring definition reopened in the
 // same form (iOS has no edit mode; the web does, per CLAUDE.md "Recurring work is edited in the

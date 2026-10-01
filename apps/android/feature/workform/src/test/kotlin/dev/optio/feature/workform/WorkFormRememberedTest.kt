@@ -14,6 +14,8 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.OptionValue
 
 class WorkFormRememberedTest {
     private fun provider(

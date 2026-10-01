@@ -588,3 +588,32 @@ html.light .recharts-custom-tooltip {
 .local-xterm .xterm {
   padding: 8px 12px 4px;
 }
+
+/*
+ * The Chat face's markdown follows the chat's font size (set on its column,
+ * components/local/chat-display-store.ts) instead of LogMarkdown's fixed px.
+ * Unlayered, so it wins over the utility classes.
+ */
+.chat-md p,
+.chat-md ul,
+.chat-md ol,
+.chat-md blockquote,
+.chat-md h4,
+.chat-md h5,
+.chat-md h6 {
+  font-size: 1em;
+}
+.chat-md :not(pre) > code,
+.chat-md pre {
+  font-size: 0.85em;
+}
+.chat-md table {
+  font-size: 0.92em;
+}
+.chat-md h1 {
+  font-size: 1.23em;
+}
+.chat-md h2,
+.chat-md h3 {
+  font-size: 1.08em;
+}

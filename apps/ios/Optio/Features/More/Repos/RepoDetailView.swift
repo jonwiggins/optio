@@ -82,8 +82,10 @@ struct RepoDetailView: View {
 
             Section("Agent") {
                 MoreInfoRow(label: "Default agent", value: MoreAgentTypes.label(repo.defaultAgentType ?? "claude-code"))
-                if repo.defaultAgentType ?? "claude-code" == "claude-code" {
-                    MoreInfoRow(label: "Model", value: "\(repo.claudeModel ?? "opus") · \(repo.claudeContextWindow ?? "1m") · \(repo.claudeEffort ?? "high")")
+                let runtime = repo.defaultAgentType ?? "claude-code"
+                let summary = WorkForm.agentSummary(runtime: runtime, values: WorkForm.repoAgentValues(repo.agentColumns))
+                if summary != WorkForm.runtimeLabel(runtime) {
+                    MoreInfoRow(label: "Parameters", value: summary.components(separatedBy: " · ").dropFirst().joined(separator: " · "))
                 }
                 MoreInfoRow(label: "Max turns", value: String(repo.maxTurnsCoding ?? 250))
             }

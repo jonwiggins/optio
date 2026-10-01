@@ -1,4 +1,4 @@
-package dev.optio.feature.workform
+package dev.optio.core.ui.agent
 
 import dev.optio.core.model.boolValue
 import dev.optio.core.model.stringValue
@@ -34,6 +34,14 @@ data class ProviderCatalog(
         val latest: Boolean? = null,
         val preview: Boolean? = null,
         val source: String? = null,
+        /**
+         * The reasoning efforts this model accepts, in order (Codex's catalog; Anthropic's
+         * `capabilities.effort`). An effort field with [Option.modelEfforts] offers only these while
+         * this model is selected; an empty list means the model takes no effort setting at all.
+         */
+        val efforts: List<String>? = null,
+        /** The effort the CLI uses for this model when none is set. */
+        val defaultEffort: String? = null,
     ) {
         val displayLabel: String
             get() = buildString {
@@ -64,6 +72,8 @@ data class ProviderCatalog(
         val runsOn: List<String>? = null,
         /** On a machine, the agent spec field the value becomes: "effort" or "permissionMode". */
         val localParam: String? = null,
+        /** An effort field whose choices depend on the model ([Model.efforts]). */
+        val modelEfforts: Boolean? = null,
     ) {
         /** The field reaches a run in an Optio pod (a machine-only one, like Claude's permissions, doesn't). */
         val appliesToPods: Boolean
@@ -84,9 +94,46 @@ data class ProviderCatalog(
     val optionKeys: List<String>
         get() = listOf(modelField) + options.map { it.key }
 
+    /** The model field plus the options a pod run takes: the repo columns (no machine-only permission modes). */
+    val podOptionKeys: List<String>
+        get() = listOf(modelField) + options.filter { it.appliesToPods }.map { it.key }
+
+    /** The catalog's entry for a stored model value (an alias resolves first), or null. */
+    fun model(raw: String?): Model? {
+        val id = resolveModel(raw.orEmpty(), aliases)
+        return models.firstOrNull { it.id == id }
+    }
+
+    /**
+     * The option keys to blank when the model changes to [modelId]: an effort the new model doesn't
+     * take goes back to its default rather than riding along into a run it would fail
+     * (`agent-options-picker.tsx` `setField`).
+     */
+    fun effortResets(values: Map<String, OptionValue>, modelId: String): List<String> {
+        val efforts = model(modelId)?.efforts ?: return emptyList()
+        return options.filter { f ->
+            val v = values[f.key]?.stringValue
+            f.modelEfforts == true && !v.isNullOrEmpty() && v !in efforts
+        }.map { it.key }
+    }
+
     /** Models grouped by family in first-seen order (`groupModelsByFamily`). */
     val families: List<Pair<String, List<Model>>>
         get() = models.groupBy { it.family ?: it.id }.toList()
+}
+
+/**
+ * The choices [field] offers while [model] is selected (`optionChoicesFor` in packages/shared): a
+ * per-model effort field narrows to the model's own efforts, in its order; a model that takes no
+ * effort offers none (the field is hidden).
+ */
+fun optionChoicesFor(field: ProviderCatalog.Option, model: ProviderCatalog.Model?): List<ProviderCatalog.Choice> {
+    val choices = field.choices.orEmpty()
+    val efforts = model?.efforts
+    if (field.modelEfforts != true || efforts == null) return choices
+    return efforts.map { e ->
+        choices.firstOrNull { it.value == e } ?: ProviderCatalog.Choice(e, e.replaceFirstChar { it.uppercase() })
+    }
 }
 
 @Serializable

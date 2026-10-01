@@ -11,6 +11,8 @@ import dev.optio.feature.library.repos.RepoSettingsForm
 import dev.optio.feature.library.repos.SharedDirectoryDraft
 import dev.optio.feature.library.repos.reviewerLabel
 import dev.optio.feature.library.repos.volumesFooter
+import dev.optio.core.ui.agent.OptionValue
+import dev.optio.core.ui.agent.repoAgentPatch
 import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -180,9 +182,57 @@ class LibraryModelsTest {
     fun settingsFormDefaultsMatchIos() {
         val form = RepoSettingsForm.from(RepoRow(id = "x"))
         assertEquals(RepoSettingsForm(), form)
-        assertEquals("opus", form.claudeModel)
+        assertEquals(OptionValue.Str("opus"), form.agentValues["claudeModel"])
         assertEquals(250, form.maxTurnsCoding)
         assertEquals("on_ci_pass", form.reviewTrigger)
+    }
+
+    @Test
+    fun settingsAgentComesFromTheRawRowAndSavesTheCatalogKeys() {
+        val raw = buildJsonObject {
+            put("id", "x")
+            put("defaultAgentType", "copilot")
+            put("claudeModel", "sonnet")
+            put("claudeThinking", true)
+            put("copilotModel", "gpt-5")
+            put("copilotEffort", "high")
+            put("opencodeBaseUrl", JsonNull)
+        }
+        val form = RepoSettingsForm.from(RepoRow(id = "x", defaultAgentType = "copilot"), raw)
+        assertEquals(OptionValue.Str("gpt-5"), form.agentValues["copilotModel"])
+        assertEquals(OptionValue.Str("sonnet"), form.agentValues["claudeModel"])
+        // Columns left null read as their defaults; the removed Thinking toggle isn't an agent column.
+        assertEquals(OptionValue.Str("high"), form.agentValues["claudeEffort"])
+        assertFalse("claudeThinking" in form.agentValues)
+
+        val copilot = form.patch()
+        assertEquals("copilot", copilot["defaultAgentType"])
+        assertEquals("gpt-5", copilot["copilotModel"])
+        assertEquals("high", copilot["copilotEffort"])
+        assertFalse(copilot.containsKey("claudeModel"))
+        assertFalse(copilot.containsKey("claudeThinking"))
+
+        // Claude Code with its live catalog: the pod keys only (no machine-only permission mode),
+        // a blank effort sent as "" (the model's own).
+        val claude = form.copy(defaultAgentType = "claude-code", agentValues = form.agentValues + ("claudeEffort" to OptionValue.Str("")))
+            .patch(LibrarySamples.anthropicCatalog.podOptionKeys)
+        assertEquals("sonnet", claude["claudeModel"])
+        assertEquals("", claude["claudeEffort"])
+        assertEquals("1m", claude["claudeContextWindow"])
+        assertFalse(claude.containsKey("claudePermissionMode"))
+        assertFalse(claude.containsKey("claudeThinking"))
+
+        // Codex keeps no repo settings: just the agent.
+        assertEquals(mapOf<String, Any?>("defaultAgentType" to "codex"), repoAgentPatch("codex", form.agentValues, listOf("copilotModel", "copilotEffort")))
+        // OpenCode: a blank base URL clears it, other blanks are left alone.
+        val opencode = repoAgentPatch(
+            "opencode",
+            mapOf("opencodeModel" to OptionValue.Str(""), "opencodeBaseUrl" to OptionValue.Str("")),
+            listOf("opencodeModel", "opencodeAgent", "opencodeBaseUrl"),
+        )
+        assertTrue(opencode.containsKey("opencodeBaseUrl"))
+        assertNull(opencode["opencodeBaseUrl"])
+        assertFalse(opencode.containsKey("opencodeModel"))
     }
 
     @Test

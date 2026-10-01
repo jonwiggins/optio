@@ -19,6 +19,8 @@ import kotlinx.serialization.json.put
 import dev.optio.core.model.ModelProviderModels
 import dev.optio.core.model.ModelProviderModel
 import org.junit.Test
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.OptionValue
 
 class WorkFormProvidersTest {
     private fun provider(

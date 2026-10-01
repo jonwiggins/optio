@@ -14,6 +14,11 @@ struct ProviderCatalog: Decodable, Hashable, Sendable {
         let latest: Bool?
         let preview: Bool?
         let source: String?
+        /// Reasoning efforts this model accepts, in order (nil = not scoped per model;
+        /// empty = the model takes no effort setting).
+        var efforts: [String]? = nil
+        /// The effort the CLI uses for this model when none is set.
+        var defaultEffort: String? = nil
 
         var displayLabel: String {
             var s = label
@@ -42,6 +47,8 @@ struct ProviderCatalog: Decodable, Hashable, Sendable {
         let runsOn: [String]?
         /// On a machine, the agent spec field the value becomes: "effort" or "permissionMode".
         let localParam: String?
+        /// An effort field whose choices are the selected model's `efforts`.
+        var modelEfforts: Bool? = nil
         var id: String { key }
 
         /// The field reaches a run in an Optio pod (a machine-only one, like Claude's permissions, doesn't).
@@ -64,8 +71,6 @@ struct ProviderCatalog: Decodable, Hashable, Sendable {
     let options: [Option]
     let liveRefreshSupported: Bool?
 
-    /// Keys `optionsFromRepo` reads off a repo row.
-    var optionKeys: [String] { [modelField] + options.map(\.key) }
 
     /// Models grouped by family in first-seen order (`groupModelsByFamily`).
     var families: [(family: String, models: [Model])] {

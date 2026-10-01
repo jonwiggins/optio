@@ -19,6 +19,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.junit.Test
+import dev.optio.core.ui.agent.ProviderOptionsResponse
+import dev.optio.core.ui.agent.CatalogState
+import dev.optio.core.ui.agent.catalog
 
 /**
  * The form in its main states, light and dark, from fixtures captured on the private test API

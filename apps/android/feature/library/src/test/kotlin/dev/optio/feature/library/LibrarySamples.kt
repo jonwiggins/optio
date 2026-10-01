@@ -1,5 +1,7 @@
 package dev.optio.feature.library
 
+import dev.optio.core.ui.agent.ProviderCatalog
+import dev.optio.core.ui.agent.ProviderOptionsResponse
 import dev.optio.core.testing.Fixtures
 import dev.optio.core.testing.Samples
 
@@ -62,7 +64,6 @@ object LibrarySamples {
             defaultAgentType = "claude-code",
             claudeModel = "opus",
             claudeContextWindow = "1m",
-            claudeThinking = true,
             claudeEffort = "high",
             maxTurnsCoding = 250,
             autoResume = true,
@@ -92,6 +93,9 @@ object LibrarySamples {
     )
 
     val mainRepo: RepoRow = repos[0]
+
+    /** The Claude Code catalog as `GET /api/agents/anthropic/options` serves it (captured; per-model efforts). */
+    val anthropicCatalog: ProviderCatalog = Fixtures.decode<ProviderOptionsResponse>("agent-options-anthropic.json").catalog
 
     /** The built-in catalogue as the DevLab API serves it (captured). */
     val providers: List<ConnectionProviderRow> = Fixtures.decode<ProvidersFixture>("connection-providers.json").providers

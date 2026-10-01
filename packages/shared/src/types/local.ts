@@ -114,6 +114,11 @@ export interface LocalHost {
   modelProviders?: boolean;
   /** AWS profiles on the machine, as its daemon last reported them (names only). */
   awsProfiles?: string[] | null;
+  /**
+   * Whether the connected daemon can refresh agent limits on request (Codex's
+   * usage pill refresh button). Live, so false whenever the host is offline.
+   */
+  refreshLimits?: boolean;
   state: LocalHostState;
   lastSeenAt: string | null;
   createdAt: string;
@@ -446,6 +451,15 @@ export type LocalDaemonMessage =
       modelProviders?: boolean;
       /** AWS profile names in the machine's ~/.aws/config and credentials (names only). */
       awsProfiles?: string[];
+      /** The daemon answers `limits-refresh` (reads Codex's limits on request). */
+      refreshLimits?: boolean;
+    }
+  /** Answer to `limits-refresh`: the limits it read, or why it couldn't. */
+  | {
+      type: "limits-refresh-result";
+      requestId: string;
+      limits?: LocalHostAgentLimits;
+      error?: string;
     }
   /**
    * Answer to `dirs`: the allowlist after the change (the host's `dirs` from
@@ -552,6 +566,13 @@ export type LocalServerMessage =
    * Only ever sent to a host owned by an admin (or in auth-disabled dev).
    */
   | { type: "credentials"; requestId: string }
+  /**
+   * Ask the daemon for the machine's current agent limits now (Codex's, from
+   * its app server — the session log only moves when Codex runs). Only sent
+   * to daemons whose hello set `refreshLimits`; answered with
+   * `limits-refresh-result` (and an `agent-limits` frame when they changed).
+   */
+  | { type: "limits-refresh"; requestId: string }
   /**
    * Read a finished agent session's conversation off disk, for a session
    * whose transcript was never streamed (it ran under a daemon that predates

@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import org.junit.Rule
 import org.junit.Test
+import dev.optio.core.ui.agent.OptionValue
 
 /**
  * Ports `apps/web/src/components/work-form/load.test.ts`: a saved row reopened in the form must

@@ -4,6 +4,9 @@ import dev.optio.core.model.ModelProvider
 import dev.optio.core.model.ModelProviderPodCredential
 import dev.optio.core.model.WorkFormDefaults
 import dev.optio.core.network.MODEL_PROVIDER_OPTION_KEY
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.modelFieldForRuntime
+import dev.optio.core.ui.agent.OptionValue
 
 // "Your last settings": the New work form remembers the runtime and, per runtime, the agent
 // options last submitted (`/api/me/work-defaults`), and starts a blank form from them. Pure

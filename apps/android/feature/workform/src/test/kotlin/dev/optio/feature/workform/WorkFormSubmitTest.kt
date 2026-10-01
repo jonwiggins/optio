@@ -23,6 +23,8 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import dev.optio.core.ui.agent.OptionValue
+import dev.optio.core.ui.agent.ProviderCatalog
 
 /**
  * The submit layer against a fake API: the exact body each kind sends, and the vectors of

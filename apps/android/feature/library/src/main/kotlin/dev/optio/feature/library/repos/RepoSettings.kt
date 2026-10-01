@@ -13,7 +13,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.lifecycle.viewModelScope
 import dev.optio.core.network.ApiClient
+import dev.optio.core.ui.agent.ALL_RUNTIME_CHOICES
+import dev.optio.core.ui.agent.AgentCatalogCache
+import dev.optio.core.ui.agent.AgentOptionsPicker
+import dev.optio.core.ui.agent.CatalogState
+import dev.optio.core.ui.agent.NO_REPO_SETTINGS
+import dev.optio.core.ui.agent.OptionValue
+import dev.optio.core.ui.agent.REPO_FACTORY_OPTIONS
+import dev.optio.core.ui.agent.RuntimeMenuRow
+import dev.optio.core.ui.agent.catalog
+import dev.optio.core.ui.agent.catalogFootnote
+import dev.optio.core.ui.agent.providerFor
+import dev.optio.core.ui.agent.repoAgentPatch
+import dev.optio.core.ui.agent.repoAgentValues
+import dev.optio.core.ui.agent.repoKeysForProvider
+import dev.optio.core.ui.agent.runtimeLabel
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.state.LoadState
 import dev.optio.feature.library.AgentTypes
@@ -32,14 +53,16 @@ import dev.optio.feature.library.ScreenEffects
 import dev.optio.feature.library.libraryViewModel
 import dev.optio.feature.library.StepperRow
 import dev.optio.feature.library.SwitchRow
-import dev.optio.feature.library.getRepo
+import dev.optio.feature.library.getRepoWithRaw
 import dev.optio.feature.library.updateRepo
 import kotlinx.coroutines.Job
 
 /**
  * The editable repo settings (iOS `RepoSettingsView`): the subset of the web's repo page that fits
- * a phone form — general, container image, Claude Code, PR lifecycle, review, external review,
- * concurrency and pod policy — with iOS's defaults for unset columns.
+ * a phone form — general, container image, coding agent, PR lifecycle, review, external review,
+ * concurrency and pod policy — with iOS's defaults for unset columns. The coding agent uses the New
+ * work form's runtime + parameters picker over the live catalog (`GET /api/agents/:provider/options`),
+ * like the web's repo page.
  */
 data class RepoSettingsForm(
     val defaultBranch: String = "main",
@@ -47,10 +70,11 @@ data class RepoSettingsForm(
     val imagePreset: String = "base",
     val extraPackages: String = "",
     val setupCommands: String = "",
-    val claudeModel: String = "opus",
-    val claudeContextWindow: String = "1m",
-    val claudeThinking: Boolean = true,
-    val claudeEffort: String = "high",
+    /**
+     * The agent columns as the shared agent picker's values (keys = the catalog's model field and
+     * option keys = the repo column names), every runtime's at once so switching agents keeps them.
+     */
+    val agentValues: Map<String, OptionValue> = REPO_FACTORY_OPTIONS,
     val maxTurnsCoding: Int = 250,
     val maxTurnsReview: Int = 10,
     val cautiousMode: Boolean = false,
@@ -85,18 +109,15 @@ data class RepoSettingsForm(
      * The PATCH body (iOS `RepoUpdateInput`). An empty review agent is an explicit `null`
      * (inherit); an empty review model is omitted (the API takes no null there); an empty extra
      * packages / setup commands is sent as "" so clearing sticks (iOS omits it, and the old value
-     * came back; the workers treat "" as none).
+     * came back; the workers treat "" as none). The agent part is [repoAgentPatch] over
+     * [agentKeys], the default agent's pod option keys (the catalog's, else the static columns).
      */
-    fun patch(): Map<String, Any?> = buildMap {
+    fun patch(agentKeys: List<String> = repoKeysForProvider(providerFor(defaultAgentType))): Map<String, Any?> = buildMap {
         put("defaultBranch", defaultBranch.trim())
-        put("defaultAgentType", defaultAgentType)
+        putAll(repoAgentPatch(defaultAgentType, agentValues, agentKeys))
         put("imagePreset", imagePreset)
         put("extraPackages", extraPackages)
         put("setupCommands", setupCommands)
-        put("claudeModel", claudeModel)
-        put("claudeContextWindow", claudeContextWindow)
-        put("claudeThinking", claudeThinking)
-        put("claudeEffort", claudeEffort)
         put("maxTurnsCoding", maxTurnsCoding)
         put("maxTurnsReview", maxTurnsReview)
         put("maxConcurrentTasks", maxConcurrentTasks)
@@ -120,17 +141,14 @@ data class RepoSettingsForm(
     }
 
     companion object {
-        /** iOS `populate()`. */
-        fun from(repo: RepoRow): RepoSettingsForm = RepoSettingsForm(
+        /** iOS `populate()`; [raw] (the whole row) carries every agent column. */
+        fun from(repo: RepoRow, raw: JsonObject? = null): RepoSettingsForm = RepoSettingsForm(
             defaultBranch = repo.defaultBranch ?: "main",
             defaultAgentType = repo.defaultAgentType ?: "claude-code",
             imagePreset = repo.imagePreset ?: "base",
             extraPackages = repo.extraPackages.orEmpty(),
             setupCommands = repo.setupCommands.orEmpty(),
-            claudeModel = repo.claudeModel ?: "opus",
-            claudeContextWindow = repo.claudeContextWindow ?: "1m",
-            claudeThinking = repo.claudeThinking ?: true,
-            claudeEffort = repo.claudeEffort ?: "high",
+            agentValues = repoAgentValues(raw ?: typedAgentColumns(repo)),
             maxTurnsCoding = repo.maxTurnsCoding ?: 250,
             maxTurnsReview = repo.maxTurnsReview ?: 10,
             cautiousMode = repo.cautiousMode ?: false,
@@ -152,12 +170,30 @@ data class RepoSettingsForm(
             offPeakOnly = repo.offPeakOnly ?: false,
             dockerInDocker = repo.dockerInDocker ?: false,
         )
+
+        /** The agent columns [RepoRow] types, as a row (when the raw row isn't at hand). */
+        private fun typedAgentColumns(repo: RepoRow): JsonObject = buildJsonObject {
+            repo.claudeModel?.let { put("claudeModel", it) }
+            repo.claudeContextWindow?.let { put("claudeContextWindow", it) }
+            repo.claudeEffort?.let { put("claudeEffort", it) }
+        }
     }
 }
 
 /** Edits a repo's settings with one PATCH, like the web. */
-class RepoSettingsViewModel(private val api: ApiClient, val repoId: String) : LibraryViewModel<RepoRow>() {
+class RepoSettingsViewModel(
+    private val api: ApiClient,
+    val repoId: String,
+    private val loadCatalog: suspend (ApiClient, String) -> CatalogState = AgentCatalogCache::load,
+) : LibraryViewModel<RepoRow>() {
     var form by mutableStateOf(RepoSettingsForm())
+
+    /** Per-provider agent catalogs, as the New work form loads them. */
+    val catalogs = mutableStateMapOf<String, CatalogState>()
+
+    /** The default agent's catalog. */
+    val catalogState: CatalogState?
+        get() = catalogs[providerFor(form.defaultAgentType)]
 
     var saving by mutableStateOf(false)
         private set
@@ -165,13 +201,33 @@ class RepoSettingsViewModel(private val api: ApiClient, val repoId: String) : Li
     private var populated = false
 
     override suspend fun fetch(): RepoRow {
-        val repo = api.getRepo(repoId)
+        val (repo, raw) = api.getRepoWithRaw(repoId)
         if (!populated) {
-            form = RepoSettingsForm.from(repo)
+            form = RepoSettingsForm.from(repo, raw)
             populated = true
         }
+        loadCatalog(form.defaultAgentType)
         return repo
     }
+
+    /** Fetches [runtime]'s catalog once per provider (again after a failure). */
+    fun loadCatalog(runtime: String) {
+        val provider = providerFor(runtime)
+        if (catalogs[provider] != null && catalogs[provider] !is CatalogState.Failed) return
+        catalogs[provider] = CatalogState.Loading
+        viewModelScope.launch { catalogs[provider] = loadCatalog(api, provider) }
+    }
+
+    fun setAgent(runtime: String) {
+        update { it.copy(defaultAgentType = runtime) }
+        loadCatalog(runtime)
+    }
+
+    fun setAgentOption(key: String, value: OptionValue) = update { it.copy(agentValues = it.agentValues + (key to value)) }
+
+    /** The default agent's pod option keys: the loaded catalog's, else the known columns. */
+    private val agentKeys: List<String>
+        get() = catalogState.catalog?.podOptionKeys ?: repoKeysForProvider(providerFor(form.defaultAgentType))
 
     fun update(transform: (RepoSettingsForm) -> RepoSettingsForm) {
         form = transform(form)
@@ -182,7 +238,7 @@ class RepoSettingsViewModel(private val api: ApiClient, val repoId: String) : Li
         saving = true
         return action {
             try {
-                api.updateRepo(repoId, form.patch())
+                api.updateRepo(repoId, form.patch(agentKeys))
                 toast("Settings saved.")
                 close()
             } finally {
@@ -192,9 +248,6 @@ class RepoSettingsViewModel(private val api: ApiClient, val repoId: String) : Li
     }
 }
 
-internal val ClaudeModels = listOf("opus" to "Opus", "sonnet" to "Sonnet", "haiku" to "Haiku")
-internal val ContextWindows = listOf("200k" to "200k", "1m" to "1m")
-internal val Efforts = listOf("low" to "Low", "medium" to "Medium", "high" to "High")
 internal val ExternalReviewModes = listOf(
     "off" to "Off",
     "on_request" to "On request",
@@ -221,7 +274,10 @@ internal fun RepoSettingsScreen(
         RepoSettingsContent(
             state = state,
             form = vm.form,
+            catalog = vm.catalogState,
             onChange = vm::update,
+            onAgent = vm::setAgent,
+            onAgentOption = vm::setAgentOption,
             onRetry = vm::refresh,
             contentPadding = padding,
         )
@@ -233,7 +289,10 @@ internal fun RepoSettingsScreen(
 internal fun RepoSettingsContent(
     state: LoadState<RepoRow>,
     form: RepoSettingsForm,
+    catalog: CatalogState?,
     onChange: ((RepoSettingsForm) -> RepoSettingsForm) -> Unit,
+    onAgent: (String) -> Unit,
+    onAgentOption: (String, OptionValue) -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
@@ -247,8 +306,6 @@ internal fun RepoSettingsContent(
                 keyboardOptions = CodeKeyboard,
                 modifier = Modifier.testTag("default-branch"),
             )
-            InsetDivider()
-            PickerRow("Default agent", AgentTypes.all, form.defaultAgentType, { v -> onChange { it.copy(defaultAgentType = v) } })
         }
         GroupedCard(header = "Container image", footer = "Setup commands run inside the pod after cloning.") {
             PickerRow(
@@ -277,12 +334,32 @@ internal fun RepoSettingsContent(
                 keyboardOptions = CodeKeyboard,
             )
         }
-        GroupedCard(header = "Claude Code") {
-            PickerRow("Model", ClaudeModels, form.claudeModel, { v -> onChange { it.copy(claudeModel = v) } })
+        GroupedCard(
+            header = "Coding agent",
+            footer = listOfNotNull(
+                "New work on this repo starts from these — anyone can change them per run.",
+                catalogFootnote(catalog).takeIf { form.defaultAgentType !in NO_REPO_SETTINGS },
+            ).joinToString(" "),
+        ) {
+            RuntimeMenuRow(
+                label = "Default agent",
+                runtime = form.defaultAgentType,
+                choices = ALL_RUNTIME_CHOICES,
+                onPick = onAgent,
+                modifier = Modifier.testTag("default-agent"),
+            )
             InsetDivider()
-            PickerRow("Context window", ContextWindows, form.claudeContextWindow, { v -> onChange { it.copy(claudeContextWindow = v) } })
-            InsetDivider()
-            PickerRow("Effort", Efforts, form.claudeEffort, { v -> onChange { it.copy(claudeEffort = v) } })
+            if (form.defaultAgentType in NO_REPO_SETTINGS) {
+                NoteRow("${runtimeLabel(form.defaultAgentType)} uses its built-in defaults. No per-repo configuration is required.")
+            } else {
+                AgentOptionsPicker(
+                    provider = providerFor(form.defaultAgentType),
+                    state = catalog,
+                    values = form.agentValues,
+                    local = false,
+                    onChange = onAgentOption,
+                )
+            }
             InsetDivider()
             StepperRow("Max turns", form.maxTurnsCoding, { v -> onChange { it.copy(maxTurnsCoding = v) } }, range = 1..1000, step = 10)
         }

@@ -361,6 +361,14 @@ struct WhoSection: View {
                     }
                     .font(.footnote)
                     .accessibilityIdentifier("work-last-settings")
+                } else if let hint = state.repoHint {
+                    HStack(spacing: 4) {
+                        Text(hint == .same ? "Repo defaults ·" : "Changed from the repo's defaults ·").foregroundStyle(.secondary)
+                        Button("Reset") { withAnimation(.snappy) { state.resetRepoDefaults() } }
+                            .buttonStyle(.borderless)
+                    }
+                    .font(.footnote)
+                    .accessibilityIdentifier("work-repo-defaults")
                 }
             }
         } header: {
@@ -369,7 +377,6 @@ struct WhoSection: View {
             Text(footer)
         }
         .task(id: state.draft.runtime) { state.loadCatalog() }
-        .onChange(of: state.catalogs.states.count) { _, _ in state.seedOptionsIfNeeded() }
     }
 
     private var footer: String {

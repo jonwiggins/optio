@@ -32,6 +32,22 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.runtimeLabel
+import dev.optio.core.ui.agent.providerFor
+import dev.optio.core.ui.agent.modelFieldForRuntime
+import dev.optio.core.ui.agent.resolveModel
+import dev.optio.core.ui.agent.OptionValue
+import dev.optio.core.ui.agent.optionsFromRepo
+import dev.optio.core.ui.agent.ProviderCatalog
+import dev.optio.core.ui.agent.CatalogState
+import dev.optio.core.ui.agent.AgentCatalogCache
+import dev.optio.core.ui.agent.catalog
+import dev.optio.core.ui.agent.repoHasOwnOptions
+import dev.optio.core.ui.agent.repoKeysForProvider
+import dev.optio.core.ui.agent.repoOwnRuntime
+import dev.optio.core.ui.agent.repoRuntime
+import dev.optio.core.ui.agent.sameOptions
 
 /**
  * Everything the form screen holds (iOS `WorkFormState`, the hooks in `work-form.tsx`): the draft
@@ -223,6 +239,7 @@ class WorkFormState(
                 agentOptions = keepProvider(d, optionsFromRepo(d.runtime, repo.raw, optionKeys(d.runtime))),
             )
         }
+        takeRepoDefaults(repo)
         applyRememberedOptions()
     }
 
@@ -435,6 +452,7 @@ class WorkFormState(
                     d.agentOptions
                 },
             )
+            takeRepoDefaults(first)
         }
         seedOptionsIfNeeded()
     }
@@ -474,7 +492,7 @@ class WorkFormState(
         val repo = repoRow ?: return seedOptionsIfNeeded()
         val d = draft
         if (fullOptionsApply(d) && d.withRepo && edit == null &&
-            d.agentOptions == optionsFromRepo(d.runtime, repo.raw, listOf(modelFieldForRuntime(d.runtime)))
+            d.agentOptions == optionsFromRepo(d.runtime, repo.raw, repoKeysForProvider(provider))
         ) {
             draft = d.copy(agentOptions = optionsFromRepo(d.runtime, repo.raw, catalog.optionKeys))
         } else {
@@ -715,7 +733,8 @@ class WorkFormState(
     @androidx.annotation.VisibleForTesting
     internal fun applyRemembered(defaults: WorkFormDefaults) {
         remembered = defaults
-        if (!runtimePicked) {
+        // A repo with its own default agent keeps it for pod work with the repo.
+        if (!runtimePicked && repoOwnRuntimeHere() == null) {
             val runtime = rememberedRuntime(defaults, draft)
             if (runtime != null && runtime != draft.runtime) {
                 draft = normalize(draft.copy(runtime = runtime, agentOptions = emptyMap()))
@@ -734,7 +753,8 @@ class WorkFormState(
     private fun applyRememberedOptions() {
         val saved = remembered ?: return
         val d = draft
-        if (d.runtime == TERMINAL || d.runtime in touchedRuntimes) {
+        // A repo with settings of its own for the runtime wins over your last settings (pod work).
+        if (d.runtime == TERMINAL || d.runtime in touchedRuntimes || repoOwnsOptions(d)) {
             usingRemembered = false
             return
         }
@@ -771,10 +791,81 @@ class WorkFormState(
 
     // endregion
 
+    // region Repo defaults
+
+    /** The repo's saved agent defaults apply: new pod work with a repo, driven by an agent. */
+    private fun repoDefaultsApply(d: WorkDraft): Boolean = edit == null && fullOptionsApply(d) && d.withRepo
+
+    /** The picked repo's own default agent, when it has one and it can run here; else null. */
+    private fun repoOwnRuntimeHere(d: WorkDraft = draft): String? {
+        val repo = repoRow ?: return null
+        if (!repoDefaultsApply(d)) return null
+        val own = repoOwnRuntime(repo.raw, ::optionKeys) ?: return null
+        return own.takeIf { o -> runtimeOptions(d).any { it.value == o && it.isEnabled } }
+    }
+
+    /** The repo has parameters of its own for [d]'s runtime (not just the column defaults). */
+    private fun repoOwnsOptions(d: WorkDraft): Boolean {
+        val repo = repoRow ?: return false
+        return repoDefaultsApply(d) && repoHasOwnOptions(d.runtime, repo.raw, optionKeys(d.runtime))
+    }
+
+    /**
+     * A repo with saved defaults of its own takes over the agent (the web's `withRepoDefaults`):
+     * its default agent (when that can run here — a bare terminal stays one) and that agent's
+     * parameters. A repo nobody configured (Claude Code · opus · high) leaves the draft alone, so
+     * your last settings stand.
+     */
+    private fun takeRepoDefaults(repo: FormRepo) {
+        val d = draft
+        if (d.repoId != repo.id || !repoDefaultsApply(d) || d.runtime == TERMINAL) return
+        val runtime = repoOwnRuntimeHere(d) ?: d.runtime
+        if (runtime == d.runtime && !repoHasOwnOptions(runtime, repo.raw, optionKeys(runtime))) return
+        draft = normalize(d.copy(runtime = runtime, agentOptions = optionsFromRepo(runtime, repo.raw, optionKeys(runtime))))
+        usingRemembered = false
+        if (runtime != d.runtime) {
+            adoptHostIfNeeded()
+            loadCatalog()
+        }
+    }
+
+    /**
+     * Under the parameters, for new pod work with a repo (unless "Your last settings" shows):
+     * "Repo defaults" while the agent and its parameters are still the repo's, else "Changed from
+     * the repo's defaults". Null when it doesn't apply.
+     */
+    val repoDefaultsHint: String?
+        get() {
+            val d = draft
+            if (showsRememberedHint || isTerminal || kind == WorkKind.POD_SESSION || !repoDefaultsApply(d)) return null
+            val repo = repoRow ?: return null
+            val same = d.runtime == repoRuntime(repo.raw) &&
+                sameOptions(d.agentOptions, optionsFromRepo(d.runtime, repo.raw, optionKeys(d.runtime)))
+            return if (same) "Repo defaults" else "Changed from the repo's defaults"
+        }
+
+    /** "Reset": back to the repo's defaults — its agent (when it can run here) and that agent's parameters. */
+    fun resetRepoDefaults() {
+        val repo = repoRow ?: return
+        touchOptions()
+        val wanted = repoRuntime(repo.raw)
+        val runtime = if (runtimeChoices.any { it.value == wanted && it.isEnabled }) wanted else draft.runtime
+        touchedRuntimes += runtime
+        if (ownerFromRemembered) {
+            ownerFromRemembered = false
+            ownerNote = null
+            draft = draft.copy(owner = WorkOwner.WORKSPACE)
+        }
+        update { it.copy(runtime = runtime, agentOptions = optionsFromRepo(runtime, repo.raw, optionKeys(runtime))) }
+        loadCatalog()
+    }
+
+    // endregion
+
     // region Host adoption and option seeding
 
     private fun optionKeys(runtime: String): List<String> =
-        catalogs[providerFor(runtime)].catalog?.optionKeys ?: listOf(modelFieldForRuntime(runtime))
+        catalogs[providerFor(runtime)].catalog?.optionKeys ?: repoKeysForProvider(providerFor(runtime))
 
     /**
      * Adopts a host / directory once the list is known: the first online host and its first

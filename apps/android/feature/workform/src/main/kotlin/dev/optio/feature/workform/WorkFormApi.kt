@@ -7,6 +7,7 @@ import dev.optio.core.network.ApiClient
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import dev.optio.core.ui.agent.optionsFromRepo
 
 // The endpoints the work form reads and writes (the web's `api-client.ts` calls behind
 // `work-form.tsx`, `submit.ts` and `load.ts`; iOS `WorkFormState` / `WorkFormSubmitter`). Rows the

@@ -13,6 +13,7 @@ import dev.optio.core.testing.ScreenSize
 import dev.optio.core.testing.ScreenshotTest
 import dev.optio.core.testing.ThemeMode
 import dev.optio.core.testing.captureScreens
+import dev.optio.core.ui.agent.CatalogState
 import dev.optio.core.ui.state.LoadState
 import dev.optio.feature.library.repos.NewRepoScreen
 import dev.optio.feature.library.repos.NewRepoViewModel
@@ -127,6 +128,7 @@ class RepoScreensTest : ScreenshotTest() {
     private fun settingsVm() = RepoSettingsViewModel(ApiClient(), "r-main").apply {
         form = RepoSettingsForm.from(LibrarySamples.mainRepo).copy(setupCommands = "pnpm install --frozen-lockfile\npnpm build")
         seed(LoadState.Loaded(LibrarySamples.mainRepo))
+        catalogs["anthropic"] = CatalogState.Loaded(LibrarySamples.anthropicCatalog)
     }
 
     @Test

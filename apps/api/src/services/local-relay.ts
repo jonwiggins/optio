@@ -42,6 +42,8 @@ interface DaemonConn {
   manageDirs: boolean;
   /** From the hello: the daemon runs agents through a model provider (`spec.provider`). */
   modelProviders: boolean;
+  /** From the hello: the daemon refreshes agent limits on request (`limits-refresh`). */
+  refreshLimits: boolean;
 }
 
 interface PendingAttach {
@@ -80,6 +82,7 @@ export function registerDaemon(
     transcriptBackfill?: boolean;
     manageDirs?: boolean;
     modelProviders?: boolean;
+    refreshLimits?: boolean;
   } = {},
 ): void {
   const existing = daemonsByHost.get(hostId);
@@ -98,6 +101,7 @@ export function registerDaemon(
     transcriptBackfill: capabilities.transcriptBackfill === true,
     manageDirs: capabilities.manageDirs === true,
     modelProviders: capabilities.modelProviders === true,
+    refreshLimits: capabilities.refreshLimits === true,
   });
 }
 
@@ -123,6 +127,12 @@ export function hostCanManageDirs(hostId: string): boolean {
 export function hostCanUseModelProviders(hostId: string): boolean {
   const conn = daemonsByHost.get(hostId);
   return conn !== undefined && conn.socket.readyState === WS_OPEN && conn.modelProviders;
+}
+
+/** Whether the host's connected daemon refreshes agent limits on request (false when offline). */
+export function hostCanRefreshLimits(hostId: string): boolean {
+  const conn = daemonsByHost.get(hostId);
+  return conn !== undefined && conn.socket.readyState === WS_OPEN && conn.refreshLimits;
 }
 
 /** Online hosts whose daemon advertised Claude credentials. */

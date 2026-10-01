@@ -1552,6 +1552,11 @@ data class LocalHost(
     val modelProviders: Boolean? = null,
     /** AWS profiles on the machine, as its daemon last reported them (names only). */
     val awsProfiles: List<String>? = null,
+    /**
+     * Whether the connected daemon can refresh agent limits on request (Codex's
+     * usage pill refresh button). Live, so false whenever the host is offline.
+     */
+    val refreshLimits: Boolean? = null,
     val state: LocalHostState,
     val lastSeenAt: String? = null,
     val createdAt: String,
@@ -1965,6 +1970,15 @@ sealed interface LocalDaemonMessage {
         val modelProviders: Boolean? = null,
         /** AWS profile names in the machine's ~/.aws/config and credentials (names only). */
         val awsProfiles: List<String>? = null,
+        /** The daemon answers `limits-refresh` (reads Codex's limits on request). */
+        val refreshLimits: Boolean? = null,
+    ) : LocalDaemonMessage
+
+    @Serializable
+    data class LimitsRefreshResult(
+        val requestId: String,
+        val limits: LocalHostAgentLimits? = null,
+        val error: String? = null,
     ) : LocalDaemonMessage
 
     @Serializable
@@ -2102,6 +2116,7 @@ sealed interface LocalDaemonMessage {
     object Serializer : DiscriminatedUnionSerializer<LocalDaemonMessage>("dev.optio.core.model.LocalDaemonMessage", "type") {
         override fun decode(tag: String, element: JsonObject, json: Json): LocalDaemonMessage? = when (tag) {
             "hello" -> json.decodeFromJsonElement(Hello.serializer(), element.withoutDiscriminator())
+            "limits-refresh-result" -> json.decodeFromJsonElement(LimitsRefreshResult.serializer(), element.withoutDiscriminator())
             "dirs-result" -> json.decodeFromJsonElement(DirsResult.serializer(), element.withoutDiscriminator())
             "credentials-result" -> json.decodeFromJsonElement(CredentialsResult.serializer(), element.withoutDiscriminator())
             "started" -> json.decodeFromJsonElement(Started.serializer(), element.withoutDiscriminator())
@@ -2127,6 +2142,7 @@ sealed interface LocalDaemonMessage {
 
         override fun encode(value: LocalDaemonMessage, json: Json): JsonElement = when (value) {
             is Hello -> tagged("hello", json.encodeToJsonElement(Hello.serializer(), value))
+            is LimitsRefreshResult -> tagged("limits-refresh-result", json.encodeToJsonElement(LimitsRefreshResult.serializer(), value))
             is DirsResult -> tagged("dirs-result", json.encodeToJsonElement(DirsResult.serializer(), value))
             is CredentialsResult -> tagged("credentials-result", json.encodeToJsonElement(CredentialsResult.serializer(), value))
             is Started -> tagged("started", json.encodeToJsonElement(Started.serializer(), value))
@@ -2201,6 +2217,11 @@ sealed interface LocalServerMessage {
     ) : LocalServerMessage
 
     @Serializable
+    data class LimitsRefresh(
+        val requestId: String,
+    ) : LocalServerMessage
+
+    @Serializable
     data class TranscriptRequest(
         val requestId: String,
         val terminalId: String,
@@ -2231,6 +2252,7 @@ sealed interface LocalServerMessage {
             "attach" -> json.decodeFromJsonElement(Attach.serializer(), element.withoutDiscriminator())
             "detach" -> json.decodeFromJsonElement(Detach.serializer(), element.withoutDiscriminator())
             "credentials" -> json.decodeFromJsonElement(Credentials.serializer(), element.withoutDiscriminator())
+            "limits-refresh" -> json.decodeFromJsonElement(LimitsRefresh.serializer(), element.withoutDiscriminator())
             "transcript-request" -> json.decodeFromJsonElement(TranscriptRequest.serializer(), element.withoutDiscriminator())
             "dirs" -> json.decodeFromJsonElement(Dirs.serializer(), element.withoutDiscriminator())
             "pong" -> Pong
@@ -2245,6 +2267,7 @@ sealed interface LocalServerMessage {
             is Attach -> tagged("attach", json.encodeToJsonElement(Attach.serializer(), value))
             is Detach -> tagged("detach", json.encodeToJsonElement(Detach.serializer(), value))
             is Credentials -> tagged("credentials", json.encodeToJsonElement(Credentials.serializer(), value))
+            is LimitsRefresh -> tagged("limits-refresh", json.encodeToJsonElement(LimitsRefresh.serializer(), value))
             is TranscriptRequest -> tagged("transcript-request", json.encodeToJsonElement(TranscriptRequest.serializer(), value))
             is Dirs -> tagged("dirs", json.encodeToJsonElement(Dirs.serializer(), value))
             is Pong -> tagged("pong")

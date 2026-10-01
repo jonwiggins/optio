@@ -348,23 +348,57 @@ function windowName(label: string): string {
 export function CodexLimitsPill({
   limits,
   hostName,
+  hostId,
+  canRefresh,
   className,
   collapsible,
 }: {
   limits: CodexLimits;
   hostName?: string;
+  /** The machine the limits are from: with `canRefresh`, the card offers a refresh. */
+  hostId?: string;
+  /** Its daemon can ask Codex for current limits (hello `refreshLimits`). */
+  canRefresh?: boolean;
   className?: string;
   collapsible?: boolean;
 }) {
+  const [refreshing, setRefreshing] = useState(false);
   const buckets = codexBuckets(limits);
   if (buckets.length === 0) return null;
   const worst = Math.max(...buckets.map(([, b]) => b.utilization ?? 0));
   const plan = limits.planType
     ? limits.planType.charAt(0).toUpperCase() + limits.planType.slice(1)
     : null;
+  const onRefresh = async () => {
+    if (!hostId) return;
+    setRefreshing(true);
+    try {
+      // The host row updates through the usual change event.
+      await api.refreshLocalHostLimits(hostId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't refresh Codex's limits");
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const card = (
     <>
-      <span className="block font-medium text-text mb-1">Codex usage limits</span>
+      <span className="flex items-center justify-between gap-4 mb-1">
+        <span className="font-medium text-text">Codex usage limits</span>
+        {hostId && canRefresh && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            title={`Ask Codex${hostName ? ` on ${hostName}` : ""} for its current limits`}
+            aria-label="Refresh Codex usage"
+            className="inline-flex items-center gap-1 -mr-1 px-1.5 py-0.5 rounded text-[10px] text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
+            refresh
+          </button>
+        )}
+      </span>
       {buckets.map(([l, b]) => {
         const pct = Math.round(b.utilization ?? 0);
         const r = resetsIn(b.resetsAt);
@@ -378,8 +412,8 @@ export function CodexLimitsPill({
         );
       })}
       <span className="block mt-1 text-[10px] text-text-muted/70">
-        {plan ? `${plan} plan · ` : ""}as of {staleAge(limits.observedAt)} ago — Codex logs these
-        after each turn{hostName ? ` on ${hostName}` : ""}
+        {plan ? `${plan} plan · ` : ""}as of {staleAge(limits.observedAt)} ago — updated after each
+        Codex turn{hostName ? ` on ${hostName}` : ""}
       </span>
     </>
   );
@@ -428,7 +462,15 @@ export function SessionLimitsPills({
   collapsible,
 }: {
   terminal: { spec?: { kind?: string; agent?: string } | null } | null | undefined;
-  host: { name?: string; agentLimits?: LocalHostAgentLimits | null } | null | undefined;
+  host:
+    | {
+        id?: string;
+        name?: string;
+        agentLimits?: LocalHostAgentLimits | null;
+        refreshLimits?: boolean;
+      }
+    | null
+    | undefined;
   className?: string;
   collapsible?: boolean;
 }) {
@@ -442,6 +484,8 @@ export function SessionLimitsPills({
         <CodexLimitsPill
           limits={codex}
           hostName={host?.name}
+          hostId={host?.id}
+          canRefresh={host?.refreshLimits}
           collapsible={collapsible}
           className={className}
         />

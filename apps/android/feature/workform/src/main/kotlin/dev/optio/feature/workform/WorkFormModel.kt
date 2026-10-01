@@ -9,6 +9,9 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import dev.optio.core.ui.agent.RUNTIMES
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.OptionValue
 
 // Port of `apps/web/src/components/work-form/model.ts` (the reference implementation; iOS
 // `Features/Work/Feed/New/WorkFormModel.swift` ports the same file). Pure data and pure functions:
@@ -201,38 +204,6 @@ data class RunLocation(
     }
 }
 
-/** A model / provider option value (string or boolean), keyed like the repo columns. */
-sealed interface OptionValue {
-    data class Str(val value: String) : OptionValue
-
-    data class Bool(val value: Boolean) : OptionValue
-
-    val stringValue: String?
-        get() = (this as? Str)?.value
-
-    val boolValue: Boolean?
-        get() = (this as? Bool)?.value
-
-    /** A blank select means "the runtime's default". */
-    val isBlank: Boolean
-        get() = this is Str && value.isEmpty()
-
-    val json: JsonPrimitive
-        get() = when (this) {
-            is Str -> JsonPrimitive(value)
-            is Bool -> JsonPrimitive(value)
-        }
-
-    companion object {
-        /** A JSON string or boolean as an option value; null for anything else. */
-        fun fromJson(element: JsonElement?): OptionValue? {
-            val primitive = element as? JsonPrimitive ?: return null
-            if (primitive.isString) return Str(primitive.content)
-            return primitive.booleanOrNull?.let(::Bool)
-        }
-    }
-}
-
 /** The persistent-agent-only answers. */
 data class AgentExtras(
     val slug: String = "",
@@ -296,60 +267,13 @@ data class WorkDraft(
 
 // region Runtimes
 
-data class Runtime(val value: String, val label: String)
-
-val RUNTIMES: List<Runtime> = listOf(
-    Runtime("claude-code", "Claude Code"),
-    Runtime("codex", "OpenAI Codex"),
-    Runtime("copilot", "GitHub Copilot"),
-    Runtime("gemini", "Google Gemini"),
-    Runtime("cursor", "Cursor"),
-    Runtime("opencode", "OpenCode"),
-    Runtime("openclaw", "OpenClaw"),
-)
-
-/** The runtime value of "a terminal with no agent". */
-const val TERMINAL = ""
-
-/** "Claude Code" for a runtime, "terminal" for [TERMINAL]. */
-fun runtimeLabel(runtime: String): String {
-    if (runtime == TERMINAL) return "terminal"
-    return RUNTIMES.firstOrNull { it.value == runtime }?.label ?: runtime
-}
+// The runtimes themselves (RUNTIMES, TERMINAL, providerFor, …) live in :core:ui
+// (`dev.optio.core.ui.agent`), shared with the repo settings.
 
 /** `LOCAL_AGENT_KINDS` in packages/shared: the CLIs the daemon can launch. */
 val LOCAL_AGENT_KINDS: Set<String> = setOf("claude-code", "codex", "cursor", "gemini", "opencode")
 
 fun runsLocally(runtime: String): Boolean = runtime in LOCAL_AGENT_KINDS
-
-/** `providerForAgentType` in packages/shared/src/agent-options. */
-fun providerFor(runtime: String): String = when (runtime) {
-    "codex" -> "openai"
-    "gemini" -> "gemini"
-    "copilot" -> "copilot"
-    "opencode" -> "opencode"
-    "openclaw" -> "openclaw"
-    "cursor" -> "cursor"
-    else -> "anthropic"
-}
-
-/**
- * `ProviderCatalog.modelField` per provider: the repo column the model lives in. Known statically
- * so the form can carry a model even when the catalog fetch fails.
- */
-fun modelFieldForProvider(provider: String): String = when (provider) {
-    "openai", "copilot" -> "copilotModel"
-    "gemini" -> "geminiModel"
-    "opencode" -> "opencodeModel"
-    "openclaw" -> "openclawModel"
-    "cursor" -> "cursorModel"
-    else -> "claudeModel"
-}
-
-fun modelFieldForRuntime(runtime: String): String = modelFieldForProvider(providerFor(runtime))
-
-/** A stored alias ("opus") shows as the model it resolves to (`agent-options-picker.tsx`). */
-fun resolveModel(raw: String, aliases: Map<String, String>?): String = aliases?.get(raw) ?: raw
 
 // endregion
 
@@ -669,17 +593,6 @@ fun normalize(d: WorkDraft): WorkDraft {
  * daemon passes the CLI just a model; its other settings come from the machine's own config.
  */
 fun fullOptionsApply(d: WorkDraft): Boolean = !isLocal(d) && d.runtime != TERMINAL
-
-/**
- * The repo's configured values for this runtime's options, to seed the picker. [keys] = the
- * catalog's model field plus its option keys (the web reads them off the static catalog).
- */
-fun optionsFromRepo(runtime: String, repo: JsonObject?, keys: List<String>): Map<String, OptionValue> {
-    if (repo == null || runtime == TERMINAL) return emptyMap()
-    val out = LinkedHashMap<String, OptionValue>()
-    for (k in keys) OptionValue.fromJson(repo[k])?.let { out[k] = it }
-    return out
-}
 
 private val NON_SLUG = Regex("[^a-z0-9]+")
 

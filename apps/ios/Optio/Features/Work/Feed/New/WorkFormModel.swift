@@ -508,18 +508,6 @@ enum WorkForm {
         !isLocal(d) && d.runtime != terminal
     }
 
-    /// The repo's configured values for this runtime's options, to seed the picker.
-    /// `keys` = the catalog's model field plus its option keys.
-    static func optionsFromRepo(runtime: String, repo: [String: AnyCodable]?, keys: [String]) -> AgentOptions {
-        guard let repo, runtime != terminal else { return [:] }
-        var out: AgentOptions = [:]
-        for k in keys {
-            if let s = repo[k]?.stringValue { out[k] = .string(s) }
-            else if let b = repo[k]?.boolValue { out[k] = .bool(b) }
-        }
-        return out
-    }
-
     /// A slug for a persistent agent, from its name.
     static func slugify(_ name: String) -> String {
         var out = ""

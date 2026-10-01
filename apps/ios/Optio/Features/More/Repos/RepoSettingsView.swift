@@ -1,9 +1,16 @@
 import SwiftUI
 
 /// Editable repo settings — the subset of the web's repo page that fits a phone form:
-/// general, container image, agent (Claude Code options), PR lifecycle, review,
-/// concurrency, and pod policy. Saved with one PATCH like the web.
+/// general, container image, coding agent, PR lifecycle, review, concurrency,
+/// and pod policy. Saved with one PATCH like the web.
+///
+/// The coding agent uses the New work form's controls — the runtime menu with
+/// its marks and `AgentOptionsPickerView` over the live catalog from
+/// `GET /api/agents/:provider/options` — so the models and parameters offered
+/// are the same; the values save to the repo's agent columns, whose names are
+/// the picker's keys (`WorkForm.repoAgentPatch`).
 struct RepoSettingsView: View {
+    private typealias F = WorkForm
     @Environment(APIClient.self) private var api
     @Environment(\.dismiss) private var dismiss
     let repo: RepoRow
@@ -14,10 +21,9 @@ struct RepoSettingsView: View {
     @State private var imagePreset = "base"
     @State private var extraPackages = ""
     @State private var setupCommands = ""
-    @State private var claudeModel = "opus"
-    @State private var claudeContextWindow = "1m"
-    @State private var claudeThinking = true
-    @State private var claudeEffort = "high"
+    /// Every agent column (claudeModel, copilotEffort, …) in one picker map.
+    @State private var agentValues: WorkForm.AgentOptions = [:]
+    private let catalogs = AgentCatalogStore.shared
     @State private var maxTurnsCoding = 250
     @State private var maxTurnsReview = 10
     @State private var cautiousMode = false
@@ -46,10 +52,9 @@ struct RepoSettingsView: View {
             Section("General") {
                 TextField("Default branch", text: $defaultBranch)
                     .autocorrectionDisabled().textInputAutocapitalization(.never)
-                Picker("Default agent", selection: $defaultAgentType) {
-                    ForEach(MoreAgentTypes.all, id: \.0) { Text($0.1).tag($0.0) }
-                }
             }
+
+            agentSection
 
             Section {
                 Picker("Preset", selection: $imagePreset) {
@@ -68,19 +73,6 @@ struct RepoSettingsView: View {
                 Text("Container image")
             } footer: {
                 Text("Setup commands run inside the pod after cloning.")
-            }
-
-            Section("Claude Code") {
-                Picker("Model", selection: $claudeModel) {
-                    Text("Opus").tag("opus"); Text("Sonnet").tag("sonnet"); Text("Haiku").tag("haiku")
-                }
-                Picker("Context window", selection: $claudeContextWindow) {
-                    Text("200k").tag("200k"); Text("1m").tag("1m")
-                }
-                Picker("Effort", selection: $claudeEffort) {
-                    Text("Low").tag("low"); Text("Medium").tag("medium"); Text("High").tag("high")
-                }
-                Stepper("Max turns: \(maxTurnsCoding)", value: $maxTurnsCoding, in: 1...1000, step: 10)
             }
 
             Section {
@@ -179,16 +171,54 @@ struct RepoSettingsView: View {
         .moreErrorAlert($errorMessage)
     }
 
+    private var provider: String { F.provider(for: defaultAgentType) }
+
+    /// The coding agent: runtime menu, then "<agent> parameters" from the catalog.
+    private var agentSection: some View {
+        Section {
+            MenuRow(label: "Default agent", value: F.runtimeLabel(defaultAgentType), glyph: .agent(defaultAgentType, fallback: "cpu")) {
+                ForEach(F.runtimes, id: \.value) { r in
+                    MenuChoice(title: r.label, selected: r.value == defaultAgentType, glyph: .agent(r.value, fallback: "cpu")) {
+                        defaultAgentType = r.value
+                    }
+                }
+            }
+            if !F.noRepoSettings.contains(defaultAgentType) {
+                AgentOptionsPickerView(
+                    provider: provider,
+                    state: catalogs.state(provider),
+                    values: agentValues,
+                    local: false,
+                    onChange: { key, value in agentValues[key] = value }
+                )
+            }
+            if defaultAgentType == "claude-code" {
+                Stepper("Max turns: \(maxTurnsCoding)", value: $maxTurnsCoding, in: 1...1000, step: 10)
+            }
+        } header: {
+            Text("Coding agent")
+        } footer: {
+            Text(agentFooter)
+        }
+        .task(id: defaultAgentType) { catalogs.load(provider, api: api) }
+    }
+
+    private var agentFooter: String {
+        if F.noRepoSettings.contains(defaultAgentType) {
+            return "\(F.runtimeLabel(defaultAgentType)) uses its built-in defaults. No per-repo configuration is required."
+        }
+        var lines = ["New work on this repo starts from these — anyone can change them per run."]
+        if let note = AgentOptionsPickerView.footnote(catalogs.state(provider)) { lines.append(note) }
+        return lines.joined(separator: " ")
+    }
+
     private func populate() {
         defaultBranch = repo.defaultBranch ?? "main"
         defaultAgentType = repo.defaultAgentType ?? "claude-code"
         imagePreset = repo.imagePreset ?? "base"
         extraPackages = repo.extraPackages ?? ""
         setupCommands = repo.setupCommands ?? ""
-        claudeModel = repo.claudeModel ?? "opus"
-        claudeContextWindow = repo.claudeContextWindow ?? "1m"
-        claudeThinking = repo.claudeThinking ?? true
-        claudeEffort = repo.claudeEffort ?? "high"
+        agentValues = F.repoAgentValues(repo.agentColumns)
         maxTurnsCoding = repo.maxTurnsCoding ?? 250
         maxTurnsReview = repo.maxTurnsReview ?? 10
         cautiousMode = repo.cautiousMode ?? false
@@ -216,14 +246,9 @@ struct RepoSettingsView: View {
         defer { saving = false }
         let input = RepoUpdateInput(
             defaultBranch: defaultBranch.trimmingCharacters(in: .whitespaces),
-            defaultAgentType: defaultAgentType,
             imagePreset: imagePreset,
             extraPackages: extraPackages.isEmpty ? nil : extraPackages,
             setupCommands: setupCommands.isEmpty ? nil : setupCommands,
-            claudeModel: claudeModel,
-            claudeContextWindow: claudeContextWindow,
-            claudeThinking: claudeThinking,
-            claudeEffort: claudeEffort,
             maxTurnsCoding: maxTurnsCoding,
             maxTurnsReview: maxTurnsReview,
             maxConcurrentTasks: maxConcurrentTasks,
@@ -243,7 +268,8 @@ struct RepoSettingsView: View {
             networkPolicy: networkPolicy,
             secretProxy: secretProxy,
             offPeakOnly: offPeakOnly,
-            dockerInDocker: dockerInDocker
+            dockerInDocker: dockerInDocker,
+            agent: F.repoAgentPatch(runtime: defaultAgentType, values: agentValues)
         )
         do {
             _ = try await api.updateRepo(repo.id, input)

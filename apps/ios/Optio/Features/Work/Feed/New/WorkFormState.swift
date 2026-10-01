@@ -100,11 +100,13 @@ final class WorkFormState {
         dropUnusableProvider()
     }
 
-    /// A runtime's parameters start from your saved ones unless you've changed them here.
+    /// Blank parameters start where `startingOptions` says: for pod work with a
+    /// repo that has defaults of its own, the repo's; else your saved ones
+    /// (unless you've changed them here); else the repo's column defaults.
     private func startFromSavedOptions() {
-        guard !touchedRuntimes.contains(draft.runtime),
-              let saved = F.savedOptions(savedDefaults, runtime: draft.runtime, providers: providers) else { return }
-        draft = F.withSavedOptions(draft, saved, providers: providers)
+        guard draft.agentOptions.isEmpty else { return }
+        let saved = touchedRuntimes.contains(draft.runtime) ? nil : F.savedOptions(savedDefaults, runtime: draft.runtime, providers: providers)
+        draft = F.startWith(draft, runtime: draft.runtime, repo: repoRow?.raw, saved: saved, providers: providers)
     }
 
     /// The parameters are still your saved ones ("Your last settings · Reset").
@@ -118,6 +120,22 @@ final class WorkFormState {
     func resetLastSettings() {
         touchedRuntimes.insert(draft.runtime)
         edit { $0.agentOptions = [:] }
+    }
+
+    enum RepoHint { case same, changed }
+
+    /// For pod work with a repo (and not your last settings): are the agent and
+    /// its parameters still the repo's defaults? ("Repo defaults · Reset")
+    var repoHint: RepoHint? {
+        guard !isTerminal, !lastSettingsShown, F.repoDefaultsApply(draft), let repo = repoRow else { return nil }
+        return F.matchesRepoDefaults(draft, repo: repo.raw) ? .same : .changed
+    }
+
+    /// Back to the repo's defaults: its agent (when it can run here) and that agent's parameters.
+    func resetRepoDefaults() {
+        touchedRuntimes.insert(draft.runtime)
+        let repo = repoRow?.raw
+        edit { d in d = F.resetToRepoDefaults(d, repo: repo) }
     }
 
     /// A provider that can't run here any more (new host, pod vs machine) goes back to Default.
@@ -202,6 +220,7 @@ final class WorkFormState {
         edit { d in
             d.location.runTarget = target
             d.withRepo = target == .cluster
+            d.agentOptions = [:]
         }
         adoptHostIfNeeded()
     }
@@ -228,14 +247,17 @@ final class WorkFormState {
     /// "Work until merged": merge the PR once it's ready (vs. you merge it).
     func setMergeWhenReady(_ merge: Bool) { edit { $0.mergeWhenReady = merge } }
 
+    /// The agent and its parameters start from the repo's saved defaults.
     func setRepo(_ repoId: String) {
         guard let repo = repos.first(where: { $0.id == repoId }) else { return }
         edit { d in
             d.repoId = repo.id
             d.repoUrl = repo.repoUrl
             d.repoBranch = repo.defaultBranch
-            d.agentOptions = F.optionsFromRepo(runtime: d.runtime, repo: repo.raw, keys: optionKeys(for: d.runtime))
+            d.agentOptions = [:]
         }
+        draft = F.withRepoDefaults(draft, repo: repo.raw)
+        dropUnusableProvider()
     }
 
     func setHost(_ hostId: String) {
@@ -270,11 +292,13 @@ final class WorkFormState {
             d.repoId = first.id
             d.repoUrl = first.repoUrl
             d.repoBranch = first.defaultBranch
-            // (or keeps your saved settings, when those were applied first).
-            if d.agentOptions.isEmpty {
-                d.agentOptions = F.optionsFromRepo(runtime: d.runtime, repo: first.raw, keys: optionKeys(for: d.runtime))
+            // (or keeps your saved settings, when those were applied first);
+            // a repo with defaults of its own takes over the agent.
+            if d.agentOptions.isEmpty, F.repoDefaultsApply(d) {
+                d.agentOptions = F.optionsFromRepo(runtime: d.runtime, repo: first.raw)
             }
-            draft = d
+            draft = F.withRepoDefaults(d, repo: first.raw)
+            dropUnusableProvider()
         }
     }
 
@@ -309,7 +333,8 @@ final class WorkFormState {
         savedDefaults = defaults
         guard let preset else { return }
         if preset == F.presets[0].id {
-            draft = F.applyDefaults(draft, defaults, providers: providers)
+            // A repo with saved defaults of its own still wins for pod work with it.
+            draft = F.withRepoDefaults(F.applyDefaults(draft, defaults, providers: providers), repo: repoRow?.raw)
         } else if draft.agentOptions.isEmpty {
             // Another chip picked before the settings loaded: fill its blank options.
             startFromSavedOptions()
@@ -411,10 +436,6 @@ final class WorkFormState {
     /// Which of a host's directories a run can use: a new branch / PR needs a git checkout.
     func usableDir(_ dir: LocalHostDir) -> Bool { !draft.withRepo || dir.repoUrl != nil }
 
-    private func optionKeys(for runtime: String) -> [String] {
-        catalogs.catalog(F.provider(for: runtime))?.optionKeys ?? [F.modelField(forRuntime: runtime)]
-    }
-
     /// Adopt a host / directory once the list is known: the first online host
     /// and its first usable directory (`RunLocationPicker`'s effect).
     func adoptHostIfNeeded() {
@@ -438,7 +459,7 @@ final class WorkFormState {
     /// runtime, so the picker shows what will actually run.
     func seedOptionsIfNeeded() {
         guard fullOptionsApply, draft.withRepo, draft.agentOptions.isEmpty, let repo = repoRow else { return }
-        let seeded = F.optionsFromRepo(runtime: draft.runtime, repo: repo.raw, keys: optionKeys(for: draft.runtime))
+        let seeded = F.optionsFromRepo(runtime: draft.runtime, repo: repo.raw)
         if !seeded.isEmpty {
             var d = draft
             d.agentOptions = seeded

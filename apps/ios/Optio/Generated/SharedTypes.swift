@@ -3244,6 +3244,9 @@ public struct LocalHost: Codable, Hashable, Sendable {
     public let modelProviders: Bool?
     /// AWS profiles on the machine, as its daemon last reported them (names only).
     public let awsProfiles: [String]?
+    /// Whether the connected daemon can refresh agent limits on request (Codex's
+    /// usage pill refresh button). Live, so false whenever the host is offline.
+    public let refreshLimits: Bool?
     public let state: LocalHostState
     public let lastSeenAt: String?
     public let createdAt: String
@@ -3264,6 +3267,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         case manageDirs = "manageDirs"
         case modelProviders = "modelProviders"
         case awsProfiles = "awsProfiles"
+        case refreshLimits = "refreshLimits"
         case state = "state"
         case lastSeenAt = "lastSeenAt"
         case createdAt = "createdAt"
@@ -3285,6 +3289,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         manageDirs: Bool? = nil,
         modelProviders: Bool? = nil,
         awsProfiles: [String]? = nil,
+        refreshLimits: Bool? = nil,
         state: LocalHostState,
         lastSeenAt: String? = nil,
         createdAt: String,
@@ -3304,6 +3309,7 @@ public struct LocalHost: Codable, Hashable, Sendable {
         self.manageDirs = manageDirs
         self.modelProviders = modelProviders
         self.awsProfiles = awsProfiles
+        self.refreshLimits = refreshLimits
         self.state = state
         self.lastSeenAt = lastSeenAt
         self.createdAt = createdAt
@@ -4000,6 +4006,7 @@ public struct LocalDaemonTerminalSync: Codable, Hashable, Sendable {
 
 public enum LocalDaemonMessage: Codable, Hashable, Sendable {
     case hello(HelloPayload)
+    case limitsRefreshResult(LimitsRefreshResultPayload)
     case dirsResult(DirsResultPayload)
     case credentialsResult(CredentialsResultPayload)
     case started(StartedPayload)
@@ -4038,6 +4045,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         public let modelProviders: Bool?
         /// AWS profile names in the machine's ~/.aws/config and credentials (names only).
         public let awsProfiles: [String]?
+        /// The daemon answers `limits-refresh` (reads Codex's limits on request).
+        public let refreshLimits: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case hostId = "hostId"
@@ -4049,6 +4058,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             case manageDirs = "manageDirs"
             case modelProviders = "modelProviders"
             case awsProfiles = "awsProfiles"
+            case refreshLimits = "refreshLimits"
         }
 
         public init(
@@ -4060,7 +4070,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             transcriptBackfill: Bool? = nil,
             manageDirs: Bool? = nil,
             modelProviders: Bool? = nil,
-            awsProfiles: [String]? = nil
+            awsProfiles: [String]? = nil,
+            refreshLimits: Bool? = nil
         ) {
             self.hostId = hostId
             self.daemonVersion = daemonVersion
@@ -4071,6 +4082,25 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             self.manageDirs = manageDirs
             self.modelProviders = modelProviders
             self.awsProfiles = awsProfiles
+            self.refreshLimits = refreshLimits
+        }
+    }
+
+    public struct LimitsRefreshResultPayload: Codable, Hashable, Sendable {
+        public let requestId: String
+        public let limits: LocalHostAgentLimits?
+        public let error: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case requestId = "requestId"
+            case limits = "limits"
+            case error = "error"
+        }
+
+        public init(requestId: String, limits: LocalHostAgentLimits? = nil, error: String? = nil) {
+            self.requestId = requestId
+            self.limits = limits
+            self.error = error
         }
     }
 
@@ -4429,6 +4459,7 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         let discriminator = try container.decodeIfPresent(String.self, forKey: .type) ?? ""
         switch discriminator {
         case "hello": self = .hello(try HelloPayload(from: decoder))
+        case "limits-refresh-result": self = .limitsRefreshResult(try LimitsRefreshResultPayload(from: decoder))
         case "dirs-result": self = .dirsResult(try DirsResultPayload(from: decoder))
         case "credentials-result": self = .credentialsResult(try CredentialsResultPayload(from: decoder))
         case "started": self = .started(try StartedPayload(from: decoder))
@@ -4458,6 +4489,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         case .hello(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("hello", forKey: .type)
+            try payload.encode(to: encoder)
+        case .limitsRefreshResult(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("limits-refresh-result", forKey: .type)
             try payload.encode(to: encoder)
         case .dirsResult(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
@@ -4552,6 +4587,7 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
     case attach(AttachPayload)
     case detach(DetachPayload)
     case credentials(CredentialsPayload)
+    case limitsRefresh(LimitsRefreshPayload)
     case transcriptRequest(TranscriptRequestPayload)
     case dirs(DirsPayload)
     case pong
@@ -4675,6 +4711,18 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         }
     }
 
+    public struct LimitsRefreshPayload: Codable, Hashable, Sendable {
+        public let requestId: String
+
+        private enum CodingKeys: String, CodingKey {
+            case requestId = "requestId"
+        }
+
+        public init(requestId: String) {
+            self.requestId = requestId
+        }
+    }
+
     public struct TranscriptRequestPayload: Codable, Hashable, Sendable {
         public let requestId: String
         public let terminalId: String
@@ -4739,6 +4787,7 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         case "attach": self = .attach(try AttachPayload(from: decoder))
         case "detach": self = .detach(try DetachPayload(from: decoder))
         case "credentials": self = .credentials(try CredentialsPayload(from: decoder))
+        case "limits-refresh": self = .limitsRefresh(try LimitsRefreshPayload(from: decoder))
         case "transcript-request": self = .transcriptRequest(try TranscriptRequestPayload(from: decoder))
         case "dirs": self = .dirs(try DirsPayload(from: decoder))
         case "pong": self = .pong
@@ -4775,6 +4824,10 @@ public enum LocalServerMessage: Codable, Hashable, Sendable {
         case .credentials(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)
             try container.encode("credentials", forKey: .type)
+            try payload.encode(to: encoder)
+        case .limitsRefresh(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("limits-refresh", forKey: .type)
             try payload.encode(to: encoder)
         case .transcriptRequest(let payload):
             var container = encoder.container(keyedBy: DiscriminatorKey.self)

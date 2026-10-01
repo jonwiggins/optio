@@ -156,7 +156,10 @@ class RepoViewModelsTest {
         assertEquals("false", patch["autoMerge"].toString())
         assertTrue(patch["reviewAgentType"]!!.isNull)
         assertEquals("sonnet", patch["reviewModel"]?.stringValue)
-        assertEquals(29, patch.size)
+        // The Thinking toggle is gone product-wide: never sent.
+        assertFalse(patch.containsKey("claudeThinking"))
+        assertEquals("opus", patch["claudeModel"]?.stringValue)
+        assertEquals(28, patch.size)
         assertEquals(ScreenEvent.Toast("Settings saved.", Tone.SUCCESS), vm.nextEvent())
         assertEquals(ScreenEvent.Close, vm.nextEvent())
     }
