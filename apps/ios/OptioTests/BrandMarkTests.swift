@@ -6,12 +6,22 @@ import UIKit
 final class BrandMarkTests: XCTestCase {
     func testEveryAssetLoads() {
         for b in Brand.allCases {
-            XCTAssertNotNil(UIImage(named: b.assetName()), b.rawValue)
-            XCTAssertNotNil(UIImage(named: b.assetName(mono: true)), b.rawValue)
+            XCTAssertNotNil(UIImage(named: b.assetName), b.rawValue)
         }
         for name in ["pr.open", "pr.merged", "pr.closed", "pr.draft", "issue.open", "issue.closed"] {
             XCTAssertNotNil(UIImage(named: name), name)
         }
+    }
+
+    /// Brand marks are monochrome: template images tinted with the text colour,
+    /// never a brand colour (Slack's four, Claude's orange, Gemini's gradient).
+    func testBrandMarksAreMonochrome() {
+        for b in Brand.allCases {
+            XCTAssertEqual(UIImage(named: b.assetName)?.renderingMode, .alwaysTemplate, b.rawValue)
+            XCTAssertNil(Glyph.brand(b).tint, b.rawValue)
+        }
+        XCTAssertNotNil(Glyph.pr(.merged).tint)
+        XCTAssertNotNil(Glyph.issue(open: true).tint)
     }
 
     func testTriggerGlyphs() {

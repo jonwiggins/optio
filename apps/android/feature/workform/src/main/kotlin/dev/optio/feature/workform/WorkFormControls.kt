@@ -78,7 +78,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.optio.core.ui.components.InsetDivider
-import dev.optio.core.ui.components.GlyphIcon
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Radius
 import dev.optio.core.ui.theme.Spacing
@@ -259,7 +258,7 @@ internal fun MenuRow(
             Spacer(Modifier.width(Spacing.xs))
             if (leadingIcon != null && !placeholder) {
                 Spacer(Modifier.weight(1f))
-                GlyphIcon(leadingIcon, contentDescription = null, tint = colors.secondaryLabel, modifier = Modifier.size(16.dp))
+                Icon(leadingIcon, contentDescription = null, tint = colors.secondaryLabel, modifier = Modifier.size(16.dp))
             }
             Text(
                 value,
@@ -307,7 +306,7 @@ internal fun MenuScope.MenuChoice(
         leadingIcon = {
             when {
                 selected -> Icon(Icons.Filled.Check, contentDescription = "Selected", tint = colors.accent)
-                icon != null -> GlyphIcon(icon, contentDescription = null)
+                icon != null -> Icon(icon, contentDescription = null)
                 else -> Spacer(Modifier.size(24.dp))
             }
         },

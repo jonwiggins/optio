@@ -8,10 +8,12 @@ import UIKit
 //
 // Vector imagesets live in `Assets.xcassets/Brands` (SVG, preserved vector
 // data): brand marks from Simple Icons (CC0), PR / issue glyphs from GitHub
-// Primer Octicons (MIT). They are template images, so they take
-// `foregroundStyle` like an SF Symbol; Slack keeps its four brand colours
-// unless `mono`. Marks are decorative unless given an accessibility label —
-// keep a text label beside them or pass `label:`.
+// Primer Octicons (MIT). Every brand mark is a single-colour template image,
+// so it takes `foregroundStyle` like an SF Symbol and reads in the surrounding
+// text colour — no brand colours (Slack's four, Claude's orange). Only PR /
+// issue glyphs carry a colour, and that is state, not brand. Marks are
+// decorative unless given an accessibility label — keep a text label beside
+// them or pass `label:`.
 
 enum Brand: String, CaseIterable, Hashable, Sendable {
     case github, gitlab, slack, linear, jira, notion, sentry
@@ -68,9 +70,7 @@ enum Brand: String, CaseIterable, Hashable, Sendable {
         else { return nil }
     }
 
-    func assetName(mono: Bool = false) -> String {
-        self == .slack && mono ? "brand.slack.mono" : "brand.\(rawValue)"
-    }
+    var assetName: String { "brand.\(rawValue)" }
 }
 
 /// Pull-request state as the glyph shows it (GitHub's colours).
@@ -116,9 +116,9 @@ enum Glyph: Hashable, Sendable {
 
     /// For menus and `Label`s, where only an `Image` fits (a `UIMenu` item
     /// renders the template image tinted like a symbol).
-    func image(mono: Bool = false) -> Image {
+    func image() -> Image {
         switch self {
-        case .brand(let b): return Image(b.assetName(mono: mono))
+        case .brand(let b): return Image(b.assetName)
         case .pr(let s): return Image("pr.\(s.rawValue)")
         case .issue(let open): return Image(open ? "issue.open" : "issue.closed")
         case .symbol(let name): return Image(systemName: name)
@@ -172,7 +172,6 @@ enum Glyph: Hashable, Sendable {
 struct GlyphView: View {
     let glyph: Glyph
     var size: CGFloat = 13
-    var mono = false
     var tinted = true
     /// Accessibility name; without it the mark is decorative.
     var label: String? = nil
@@ -189,7 +188,7 @@ struct GlyphView: View {
         case .symbol(let name):
             Image(systemName: name).font(.system(size: size * scale * 0.9))
         default:
-            let image = glyph.image(mono: mono).resizable().scaledToFit().frame(width: size * scale, height: size * scale)
+            let image = glyph.image().resizable().scaledToFit().frame(width: size * scale, height: size * scale)
             if tinted, let tint = glyph.tint { image.foregroundStyle(tint) } else { image }
         }
     }
@@ -199,17 +198,15 @@ struct GlyphView: View {
 struct BrandMark: View {
     let brand: Brand
     var size: CGFloat = 13
-    var mono = false
     var label: String? = nil
 
-    init(_ brand: Brand, size: CGFloat = 13, mono: Bool = false, label: String? = nil) {
+    init(_ brand: Brand, size: CGFloat = 13, label: String? = nil) {
         self.brand = brand
         self.size = size
-        self.mono = mono
         self.label = label
     }
 
-    var body: some View { GlyphView(glyph: .brand(brand), size: size, mono: mono, label: label) }
+    var body: some View { GlyphView(glyph: .brand(brand), size: size, label: label) }
 }
 
 /// `AgentMark(runtime: "codex")` — the agent runtime's logo, sized like a symbol.
@@ -271,7 +268,7 @@ extension Text {
     @MainActor
     static func agent(_ runtime: String?, _ label: String, textStyle: UIFont.TextStyle = .subheadline) -> Text {
         guard let brand = Brand(agentType: runtime),
-              let image = InlineMark.image(brand.assetName(), pointSize: UIFontMetrics(forTextStyle: textStyle).scaledValue(for: 12))
+              let image = InlineMark.image(brand.assetName, pointSize: UIFontMetrics(forTextStyle: textStyle).scaledValue(for: 12))
         else { return Text(label) }
         return Text(image).baselineOffset(-1.5) + Text(" \(label)")
     }

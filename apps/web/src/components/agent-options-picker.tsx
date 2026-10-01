@@ -310,6 +310,8 @@ export function AgentOptionsPicker({
           .filter((f) => f.kind === "select")
           .map((field) => {
             const choices = optionChoicesFor(field, selectedModel);
+            // A model without that setting (Claude Haiku 4.5 takes no effort): no field.
+            if (field.modelEfforts && choices.length === 0) return null;
             // A field shared with pods carries the pod default; on a machine,
             // unset means the machine's own config (no flag is passed).
             const fieldDefault =

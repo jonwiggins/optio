@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
  * Path data is copied inline (no dependency): the brand marks from Simple
  * Icons (CC0, 24×24 viewBox), the PR / issue glyphs from GitHub Primer
  * Octicons (MIT, 16×16 viewBox). Monochrome marks paint with `currentColor`
- * so they follow the theme; Slack keeps its four brand colors unless `mono`.
+ * so they follow the theme (Slack included). Only PR / issue glyphs carry color,
+ * for their state.
  * Size them like lucide icons, via `className` ("w-3.5 h-3.5"). Marks are
  * decorative (`aria-hidden`) unless a `title` is passed; keep a text label
  * or a `title` on the surrounding element.
@@ -52,7 +53,7 @@ const BRAND_PATHS: Record<Exclude<Brand, "slack">, string> = {
     "M.778 1.213a.768.768 0 00-.768.892l3.263 19.81c.084.5.515.868 1.022.873H19.95a.772.772 0 00.77-.646l3.27-20.03a.768.768 0 00-.768-.891zM14.52 15.53H9.522L8.17 8.466h7.561z",
 };
 
-/** Slack's hash, one path per color: blue, green, yellow, red. */
+/** Slack's hash, four paths (drawn in currentColor, like every other mark). */
 const SLACK_PATHS: Array<[string, string]> = [
   [
     "#36C5F0",
@@ -101,18 +102,18 @@ function Svg({
 
 export function BrandIcon({
   brand,
-  mono,
+  mono: _mono,
   ...props
 }: MarkProps & {
   brand: Brand;
-  /** Paint Slack in currentColor instead of its brand colors. */
+  /** Kept for callers; every mark is drawn in currentColor. */
   mono?: boolean;
 }) {
   if (brand === "slack") {
     return (
       <Svg viewBox="0 0 24 24" {...props}>
         {SLACK_PATHS.map(([color, d]) => (
-          <path key={color} d={d} fill={mono ? undefined : color} />
+          <path key={color} d={d} />
         ))}
       </Svg>
     );
@@ -295,66 +296,48 @@ const AGENT_PATHS: Record<AgentRuntime, string> = {
   opencode: "M22 24H2V0h20zM17 4.8H7v14.4h10z",
 };
 
-/** Brand colors, used when a mark is drawn `colored` (the rest stay currentColor). */
-const AGENT_TINT: Partial<Record<AgentRuntime, string>> = {
-  "claude-code": "#D97757",
-  gemini: "#8E75B2",
-};
-
 function agentRuntimeOf(runtime: string | null | undefined): AgentRuntime | null {
   const r = (runtime ?? "").toLowerCase();
   return Object.hasOwn(AGENT_PATHS, r) ? (r as AgentRuntime) : null;
 }
 
-export function AgentMark({
-  runtime,
-  colored,
-  ...props
-}: MarkProps & { runtime: AgentRuntime; colored?: boolean }) {
+/** An agent's mark, in currentColor like every other mark. */
+export function AgentMark({ runtime, ...props }: MarkProps & { runtime: AgentRuntime }) {
   return (
     <Svg viewBox="0 0 24 24" {...props}>
-      <path d={AGENT_PATHS[runtime]} fill={colored ? AGENT_TINT[runtime] : undefined} />
+      <path d={AGENT_PATHS[runtime]} />
     </Svg>
   );
 }
 
 const AGENT_COMPONENTS = Object.fromEntries(
-  (Object.keys(AGENT_PATHS) as AgentRuntime[]).flatMap((r) => {
+  (Object.keys(AGENT_PATHS) as AgentRuntime[]).map((r) => {
     const Mono = (p: MarkProps) => <AgentMark runtime={r} {...p} />;
     Mono.displayName = `AgentMark(${r})`;
-    const Colored = (p: MarkProps) => <AgentMark runtime={r} colored {...p} />;
-    Colored.displayName = `AgentMark(${r}, colored)`;
-    return [
-      [r, Mono],
-      [`${r}:colored`, Colored],
-    ];
+    return [r, Mono];
   }),
 ) as Record<string, ComponentType<MarkProps>>;
 
 /**
  * The icon for an agent type ("claude-code", "codex", …): its brand mark, lucide
  * Terminal for the terminal option ("" or "terminal"), Bot for anything else.
- * `colored` paints the marks that have a brand color (Claude, Gemini) in it.
  */
 export function agentRuntimeIcon(
   runtime: string | null | undefined,
-  opts?: { colored?: boolean },
 ): ComponentType<{ className?: string }> {
   if (runtime === "" || runtime === "terminal") return Terminal;
   const r = agentRuntimeOf(runtime);
   if (!r) return Bot;
-  return AGENT_COMPONENTS[opts?.colored ? `${r}:colored` : r];
+  return AGENT_COMPONENTS[r];
 }
 
 export function AgentIcon({
   runtime,
-  colored,
   className,
 }: {
   runtime: string | null | undefined;
-  colored?: boolean;
   className?: string;
 }) {
-  const Icon = agentRuntimeIcon(runtime, { colored });
+  const Icon = agentRuntimeIcon(runtime);
   return <Icon className={cn("w-3.5 h-3.5 shrink-0", className)} />;
 }

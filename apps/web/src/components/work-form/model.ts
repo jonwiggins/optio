@@ -14,6 +14,14 @@ import {
 import type { TriggerConfig } from "@/components/trigger-selector";
 import type { AgentOptionsValues } from "@/components/agent-options-picker";
 import { CLUSTER_RUN_LOCATION, type RunLocationValue } from "@/components/run-location-picker";
+import {
+  RUNTIMES,
+  TERMINAL,
+  optionsFromRepo,
+  repoHasOwnOptions,
+  repoOwnRuntime,
+  runtimeLabel,
+} from "@/components/agent-choice-model";
 
 /**
  * One piece of work, five attributes. Every kind of work Optio runs — a Task
@@ -138,22 +146,7 @@ export interface WorkDraft {
   podSecrets: string[] | null;
 }
 
-export const RUNTIMES: Array<{ value: string; label: string }> = [
-  { value: "claude-code", label: "Claude Code" },
-  { value: "codex", label: "OpenAI Codex" },
-  { value: "copilot", label: "GitHub Copilot" },
-  { value: "gemini", label: "Google Gemini" },
-  { value: "cursor", label: "Cursor" },
-  { value: "opencode", label: "OpenCode" },
-  { value: "openclaw", label: "OpenClaw" },
-];
-
-export const TERMINAL = "";
-
-export function runtimeLabel(runtime: string): string {
-  if (runtime === TERMINAL) return "terminal";
-  return RUNTIMES.find((r) => r.value === runtime)?.label ?? runtime;
-}
+export { RUNTIMES, TERMINAL, runtimeLabel, optionsFromRepo };
 
 export const EMPTY_DRAFT: WorkDraft = {
   when: "manual",
@@ -478,25 +471,6 @@ export function normalize(d: WorkDraft): WorkDraft {
  */
 export function fullOptionsApply(d: WorkDraft): boolean {
   return !isLocal(d) && d.runtime !== TERMINAL;
-}
-
-/** The repo's configured values for this runtime's options, to seed the picker. */
-export function optionsFromRepo(
-  runtime: string,
-  repo: Record<string, unknown> | null | undefined,
-): AgentOptionsValues {
-  // Codex shares Copilot's copilotModel / copilotEffort columns, but a repo's
-  // values there are Copilot's settings — Codex has none per repo.
-  if (!repo || runtime === TERMINAL || runtime === "codex") return {};
-  const catalog = getProviderCatalog(providerForAgentType(runtime));
-  if (!catalog) return {};
-  const keys = [catalog.modelField, ...catalog.options.map((o) => o.key)];
-  const out: AgentOptionsValues = {};
-  for (const k of keys) {
-    const v = repo[k];
-    if (typeof v === "string" || typeof v === "boolean") out[k] = v;
-  }
-  return out;
 }
 
 /** A slug for a persistent agent, from its name. */
@@ -1063,9 +1037,93 @@ export function applyPreset(
   defaults: WorkFormDefaults | null | undefined,
   providers: ModelProvider[],
   touched: ReadonlySet<string> = new Set(),
+  repo?: RepoRow,
 ): WorkDraft {
   const next = normalize(preset.apply(d));
   if (Object.keys(next.agentOptions).length > 0 || touched.has(next.runtime)) return next;
   const saved = savedOptionsFor(defaults, next.runtime, providers);
-  return saved ? normalize(withSavedOptions(next, saved, providers)) : next;
+  return startWith(next, next.runtime, repo, saved, providers);
+}
+
+type RepoRow = Record<string, unknown> | null | undefined;
+
+/** The repo's saved agent defaults apply: pod work, with a repo, driven by an agent. */
+export function repoDefaultsApply(d: WorkDraft): boolean {
+  return fullOptionsApply(d) && d.withRepo;
+}
+
+/**
+ * Where a runtime's parameters start — the precedence. For pod work with a
+ * repo, a repo with settings of its own for the runtime wins; otherwise the
+ * settings you used last (`saved`); otherwise the repo's (its column
+ * defaults), or nothing.
+ */
+export function startingOptions(
+  d: WorkDraft,
+  runtime: string,
+  repo: RepoRow,
+  saved: AgentOptionsValues | null,
+): { options: AgentOptionsValues; from: "repo" | "saved" | "none" } {
+  const repoApplies = !!repo && repoDefaultsApply({ ...d, runtime });
+  if (repoApplies && repoHasOwnOptions(runtime, repo)) {
+    return { options: optionsFromRepo(runtime, repo), from: "repo" };
+  }
+  if (saved) return { options: saved, from: "saved" };
+  if (repoApplies) return { options: optionsFromRepo(runtime, repo), from: "repo" };
+  return { options: {}, from: "none" };
+}
+
+/** The draft on `runtime`, its parameters started by `startingOptions`. */
+export function startWith(
+  d: WorkDraft,
+  runtime: string,
+  repo: RepoRow,
+  saved: AgentOptionsValues | null,
+  providers: ModelProvider[],
+): WorkDraft {
+  const fresh: WorkDraft = { ...d, runtime, agentOptions: {} };
+  const { options, from } = startingOptions(fresh, runtime, repo, saved);
+  if (from === "saved") return normalize(withSavedOptions(fresh, options, providers));
+  return normalize({ ...fresh, agentOptions: options });
+}
+
+/**
+ * A repo with saved defaults of its own takes over the agent: its default
+ * agent (when that can run here — a bare terminal stays one) and that
+ * agent's parameters. A repo nobody configured leaves the draft alone, so
+ * your last settings stand.
+ */
+export function withRepoDefaults(d: WorkDraft, repo: RepoRow): WorkDraft {
+  if (!repo || !repoDefaultsApply(d)) return d;
+  const own = repoOwnRuntime(repo);
+  const runtime =
+    own && runtimeOptions(d).some((r) => r.value === own && !r.disabled) ? own : d.runtime;
+  if (runtime === d.runtime && !repoHasOwnOptions(runtime, repo)) return d;
+  return normalize({ ...d, runtime, agentOptions: optionsFromRepo(runtime, repo) });
+}
+
+/** The repo's default agent as the form names it ("claude-code" when unset). */
+function repoRuntime(repo: Record<string, unknown>): string {
+  const agent = repo.defaultAgentType;
+  return typeof agent === "string" && RUNTIMES.some((r) => r.value === agent)
+    ? agent
+    : "claude-code";
+}
+
+/** Whether the draft's agent and its parameters are still the repo's defaults. */
+export function matchesRepoDefaults(d: WorkDraft, repo: RepoRow): boolean {
+  if (!repo) return false;
+  return (
+    d.runtime === repoRuntime(repo) && sameOptions(d.agentOptions, optionsFromRepo(d.runtime, repo))
+  );
+}
+
+/** Back to the repo's defaults: its agent (when it can run here) and that agent's parameters. */
+export function resetToRepoDefaults(d: WorkDraft, repo: RepoRow): WorkDraft {
+  if (!repo) return d;
+  const wanted = repoRuntime(repo);
+  const runtime = runtimeOptions(d).some((r) => r.value === wanted && !r.disabled)
+    ? wanted
+    : d.runtime;
+  return normalize({ ...d, runtime, agentOptions: optionsFromRepo(runtime, repo) });
 }

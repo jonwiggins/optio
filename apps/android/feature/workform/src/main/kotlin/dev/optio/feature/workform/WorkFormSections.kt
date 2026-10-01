@@ -91,7 +91,7 @@ internal val WhenType.icon: ImageVector
         WhenType.WEBHOOK -> Icons.Outlined.Webhook
         WhenType.TICKET -> Icons.Outlined.ConfirmationNumber
         WhenType.GITHUB -> BrandIcons.GitHub
-        WhenType.SLACK -> BrandIcons.SlackColor
+        WhenType.SLACK -> BrandIcons.Slack
         WhenType.LINEAR -> BrandIcons.Linear
     }
 
