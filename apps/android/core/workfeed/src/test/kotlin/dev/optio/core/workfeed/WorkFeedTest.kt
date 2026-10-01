@@ -84,7 +84,7 @@ class WorkFeedTest {
         assertEquals(listOf(WorkStatus.NEEDS_YOU, WorkStatus.NEEDS_YOU), rows.take(2).map { it.status })
         assertEquals("terminal-lt1", rows.first().key, "most recent needs-you first")
 
-        assertEquals(WorkWhere(WorkWhere.Target.MACHINE, "M1 · ~/app"), rows.row("task-t2").where)
+        assertEquals(WorkWhere(WorkWhere.Target.MACHINE, "M1 · ~/app", "h1", "/Users/dev/app"), rows.row("task-t2").where)
         assertEquals("PR 7", rows.row("task-t1").note)
         assertEquals("/tasks/t1", rows.row("task-t1").href)
         assertEquals(WorkStatus.PAUSED, rows.row("job-j1").status)
@@ -284,7 +284,7 @@ class WorkFeedTest {
             assertNull(it.prUrl, "an empty PR link is no link")
         }
         rows.row("job-j").let {
-            assertEquals(WorkWhere(WorkWhere.Target.MACHINE, "/srv/jobs"), it.where, "an unknown host drops out")
+            assertEquals(WorkWhere(WorkWhere.Target.MACHINE, "/srv/jobs", "h9", "/srv/jobs"), it.where, "an unknown host drops out of the label")
             assertEquals(WhenKind.TRIGGER, it.whenKind)
             assertEquals("Claude Code", it.whoLabel)
         }

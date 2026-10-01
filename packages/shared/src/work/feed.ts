@@ -44,6 +44,12 @@ export interface WorkWhere {
   target: "pod" | "machine";
   /** Repo, `@slug`, or "machine · ~/dir"; null when there is nothing to say. */
   detail: string | null;
+  /** On a machine: the `local_hosts` id it runs on (null when none is set). */
+  hostId?: string | null;
+  /** On a machine: its name, when it is one of the caller's machines. */
+  hostName?: string | null;
+  /** On a machine: the directory it runs in, as stored. */
+  dir?: string | null;
 }
 
 /** A trigger that starts (or started) a piece of work: its type, and a ticket trigger's source. */
