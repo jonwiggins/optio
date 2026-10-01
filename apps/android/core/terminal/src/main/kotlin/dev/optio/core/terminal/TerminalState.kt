@@ -17,7 +17,7 @@ import java.io.ByteArrayOutputStream
  * One terminal: a Termux [TerminalEmulator] plus everything a screen needs to drive it. Create it
  * where the stream lives (a ViewModel, or `remember` in a screen) and show it with
  * [TerminalSurface] (Compose) or [OptioTerminalView]. The emulator, its scrollback and any held
- * bytes live here, not in the view, so a rotation or a Transcript ⇄ Screen switch keeps the screen.
+ * bytes live here, not in the view, so a rotation or a Chat ⇄ Terminal switch keeps the screen.
  *
  * Data in: [feed] (and [reset]). Data out: [onInput] carries every byte meant for the PTY. The
  * other callbacks and the observable properties (Compose snapshot state) report what the terminal

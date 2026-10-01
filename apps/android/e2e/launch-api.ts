@@ -640,7 +640,7 @@ class ScriptedDaemon {
 
 const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
 
-/** The final screen of the recorded agent session (ANSI, CRLF), replayed by the Screen face. */
+/** The final screen of the recorded agent session (ANSI, CRLF), replayed by the Terminal face. */
 function agentScreen(prUrl: string): string {
   const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
   const lines = [
@@ -779,7 +779,7 @@ function agentTranscript(prUrl: string, startedAt: number) {
   ];
 }
 
-/** A failed build command's final screen (a non-agent session: Screen face only). */
+/** A failed build command's final screen (a non-agent session: Terminal face only). */
 function commandScreen(): string {
   return (
     "\x1b[2J\x1b[H$ npm run build\r\n\r\n> e2e-repo@1.0.0 build\r\n> tsc -p .\r\n\r\n" +
@@ -1511,7 +1511,7 @@ async function seedLocal(): Promise<Json> {
     });
     const transcript = await api(`/api/local/terminals/${agentId}/transcript`);
 
-    // 2. A build command that failed: a non-agent session (Screen face only).
+    // 2. A build command that failed: a non-agent session (Terminal face only).
     const { terminal: cmd } = await api("/api/local/terminals", {
       hostId: host.id,
       dir: LAPTOP_DIRS[0].path,

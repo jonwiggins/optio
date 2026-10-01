@@ -35,7 +35,7 @@ import kotlinx.serialization.json.put
  *
  * One PTY, one grid, and the server gives it to the screen in use
  * (`apps/api/src/services/local-grid.ts`). This phone reports the grid that fits it, whether the
- * Screen face is showing ([setShowing]), and how long since it was used ([viewFrame]). A stream
+ * Terminal face is showing ([setShowing]), and how long since it was used ([viewFrame]). A stream
  * that opens with the Screen showing, or the Screen coming on, asks for the grid (`open`), granted
  * unless another screen showing the session was used in the last minute. An explicit interaction
  * (a tap or focus on the terminal, a key-bar key, "Use this screen": [claim]) takes it outright. A
@@ -68,7 +68,7 @@ class LocalTerminalStream(
         DISCONNECTED("disconnected"),
     }
 
-    /** What the Screen face and the header read. */
+    /** What the Terminal face and the header read. */
     data class State(
         val conn: ConnState = ConnState.CONNECTING,
         /** From the last `status` frame. */
@@ -144,7 +144,7 @@ class LocalTerminalStream(
     /** Whether the last announced grid was ours; null when the server didn't say. */
     private var announcedYours: Boolean? = null
 
-    /** The Screen face is showing ([setShowing]). */
+    /** The Terminal face is showing ([setShowing]). */
     private var showing = false
 
     /** When this phone last used the terminal (ms); the stream opening counts. */
@@ -491,7 +491,7 @@ class LocalTerminalStream(
     }
 
     /**
-     * The Screen face came on or went away. Coming on is arriving: it asks for the grid unless
+     * The Terminal face came on or went away. Coming on is arriving: it asks for the grid unless
      * another screen is in use.
      */
     fun setShowing(on: Boolean) {
@@ -503,7 +503,7 @@ class LocalTerminalStream(
 
     /**
      * Our fit changed (first layout, rotation, the keyboard, the strip coming or going). Unclaimed or
-     * passive: judge the PTY's grid again against it (a grid announced while the Screen face was
+     * passive: judge the PTY's grid again against it (a grid announced while the Terminal face was
      * hidden was judged without knowing our fit). The owner never does: the last announcement
      * predates its own resizes, and judging it would demote the phone, whose strip would then change
      * the fit again.

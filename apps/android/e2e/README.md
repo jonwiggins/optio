@@ -226,7 +226,7 @@ Names are stable; ids change on every fresh start, so read them from `seed.json`
 | Derived        | Costs, recent runs, cluster pods and overview fill in from the above                                                                                                                                                                                                                                                                                                                                                  |
 
 The "recorded" Local sessions are played over the real daemon protocol by a scripted daemon
-during seeding (no daemon, no LLM): the Transcript and Screen faces render exactly as for a real
+during seeding (no daemon, no LLM): the Transcript and Terminal faces render exactly as for a real
 session. For a live session, use the test daemon below.
 
 ### `seed.json`
