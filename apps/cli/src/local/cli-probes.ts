@@ -22,6 +22,11 @@ export interface ClaudeCliCaps {
   permissionModes: string[] | null;
   /** Whether it has `--effort`. */
   effort: boolean;
+  /**
+   * The `--effort` levels its help lists ("(low, medium, high, xhigh, max)"),
+   * or null when it doesn't list them (then any level is passed).
+   */
+  effortLevels?: string[] | null;
 }
 
 const EFFORT_NAME = /^[A-Za-z0-9_-]{1,32}$/;
@@ -32,9 +37,17 @@ export function parseClaudeHelp(help: string): ClaudeCliCaps | null {
   if (!help.includes("--permission-mode")) return null;
   const listed = help.match(/--permission-mode\s+<mode>[\s\S]*?\(choices:([^)]*)\)/);
   const modes = listed ? [...listed[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : null;
+  const effortList = help.match(/--effort\s+<level>[^(]*\(([^)]*)\)/);
+  const effortLevels = effortList
+    ? effortList[1]
+        .split(",")
+        .map((l) => l.trim())
+        .filter((l) => EFFORT_NAME.test(l))
+    : null;
   return {
     permissionModes: modes ? [...new Set([...modes, "default"])] : null,
     effort: /(^|\s)--effort\b/m.test(help),
+    effortLevels: effortLevels?.length ? effortLevels : null,
   };
 }
 

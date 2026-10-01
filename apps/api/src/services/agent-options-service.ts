@@ -41,6 +41,35 @@ const MAX_PROBE_PAGES = 10;
  */
 const PROBE_TIMEOUT_MS = 8_000;
 
+/** Effort levels in the order Claude Code lists them. */
+const ANTHROPIC_EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"];
+
+/**
+ * The effort levels a model supports, from the Models API's
+ * `capabilities.effort` (`{ supported, low: { supported }, … }`): `[]` when
+ * the model takes no effort setting, undefined when the API doesn't say.
+ */
+export function anthropicEfforts(
+  effort: (Record<string, unknown> & { supported?: boolean }) | undefined,
+): string[] | undefined {
+  if (!effort || typeof effort !== "object") return undefined;
+  if (effort.supported === false) return [];
+  const levels = Object.entries(effort)
+    .filter(
+      ([k, v]) =>
+        k !== "supported" &&
+        typeof v === "object" &&
+        v !== null &&
+        (v as { supported?: boolean }).supported === true,
+    )
+    .map(([k]) => k);
+  const rank = (k: string) => {
+    const i = ANTHROPIC_EFFORT_ORDER.indexOf(k);
+    return i === -1 ? ANTHROPIC_EFFORT_ORDER.length : i;
+  };
+  return levels.sort((a, b) => rank(a) - rank(b));
+}
+
 /** Anthropic: GET /v1/models → data[].{id,display_name}, paginated via after_id. */
 async function probeAnthropic(credential: ProbeCredential): Promise<LiveModel[]> {
   const headers: Record<string, string> = { "anthropic-version": "2023-06-01" };
@@ -60,12 +89,23 @@ async function probeAnthropic(credential: ProbeCredential): Promise<LiveModel[]>
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`Anthropic /v1/models returned ${res.status}`);
     const body = (await res.json()) as {
-      data?: Array<{ id?: string; display_name?: string }>;
+      data?: Array<{
+        id?: string;
+        display_name?: string;
+        capabilities?: { effort?: Record<string, unknown> & { supported?: boolean } };
+      }>;
       has_more?: boolean;
       last_id?: string;
     };
     for (const m of body.data ?? []) {
-      if (m.id) models.push({ id: m.id, displayName: m.display_name });
+      if (m.id) {
+        const efforts = anthropicEfforts(m.capabilities?.effort);
+        models.push({
+          id: m.id,
+          displayName: m.display_name,
+          ...(efforts ? { efforts } : {}),
+        });
+      }
     }
     if (!body.has_more || !body.last_id) break;
     afterId = body.last_id;

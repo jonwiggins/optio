@@ -43,8 +43,9 @@ export interface ModelOption {
   description?: string;
   /**
    * The reasoning efforts this model accepts, in order, for providers that
-   * scope effort per model (Codex). An effort field with `modelEfforts`
-   * offers only these while this model is selected.
+   * scope effort per model (Codex's catalog; Anthropic's capabilities.effort).
+   * An effort field with `modelEfforts` offers only these while this model is
+   * selected; an empty list means the model takes no effort setting at all.
    */
   efforts?: string[];
   /** The effort the CLI uses for this model when none is set. */

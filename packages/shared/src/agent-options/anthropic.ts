@@ -15,18 +15,21 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
       label: "Opus 4.8",
       family: "opus",
       latest: true,
+      efforts: ["low", "medium", "high", "xhigh", "max"],
       source: "baseline",
     },
     {
       id: "claude-opus-4-7",
       label: "Opus 4.7",
       family: "opus",
+      efforts: ["low", "medium", "high", "xhigh", "max"],
       source: "baseline",
     },
     {
       id: "claude-opus-4-6",
       label: "Opus 4.6",
       family: "opus",
+      efforts: ["low", "medium", "high", "max"],
       source: "baseline",
     },
     {
@@ -34,12 +37,14 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
       label: "Sonnet 4.6",
       family: "sonnet",
       latest: true,
+      efforts: ["low", "medium", "high", "max"],
       source: "baseline",
     },
     {
       id: "claude-sonnet-4-5",
       label: "Sonnet 4.5",
       family: "sonnet",
+      efforts: [],
       source: "baseline",
     },
     {
@@ -47,12 +52,14 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
       label: "Haiku 4.5",
       family: "haiku",
       latest: true,
+      efforts: [],
       source: "baseline",
     },
     {
       id: "claude-fable-5",
       label: "Fable 5",
       family: "fable",
+      efforts: ["low", "medium", "high", "xhigh", "max"],
       source: "baseline",
     },
   ],
@@ -80,10 +87,15 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
       default: "high",
       runsOn: ["pod", "local"],
       localParam: "effort",
+      // Narrowed to the selected model's own efforts (Anthropic's Models API
+      // reports them as capabilities.effort); hidden for a model without any.
+      modelEfforts: true,
       choices: [
         { value: "low", label: "Low" },
         { value: "medium", label: "Medium" },
         { value: "high", label: "High" },
+        { value: "xhigh", label: "Extra high" },
+        { value: "max", label: "Max" },
       ],
     },
     {

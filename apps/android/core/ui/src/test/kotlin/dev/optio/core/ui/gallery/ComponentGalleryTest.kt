@@ -327,10 +327,9 @@ class ComponentGalleryTest : ScreenshotTest() {
     @Test
     fun brands() = captureScreens("Gallery_9_Brands") {
         Page {
-            Caption("BrandMark (tinted; Slack in colour, then mono)")
+            Caption("BrandMark (monochrome, content-tinted)")
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.l), verticalAlignment = Alignment.CenterVertically) {
                 dev.optio.core.ui.components.Brand.entries.forEach { dev.optio.core.ui.components.BrandMark(it, size = 24.dp, tint = OptioTheme.colors.label) }
-                dev.optio.core.ui.components.BrandMark(dev.optio.core.ui.components.Brand.Slack, size = 24.dp, mono = true, tint = OptioTheme.colors.label)
             }
             Caption("PrGlyph / IssueGlyph")
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.l), verticalAlignment = Alignment.CenterVertically) {

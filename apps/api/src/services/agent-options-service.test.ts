@@ -391,3 +391,21 @@ describe("getProviderOptions for Codex", () => {
     expect(ids).not.toContain("whisper-1");
   });
 });
+
+describe("anthropicEfforts", () => {
+  it("reads a model's supported effort levels in Claude Code's order", async () => {
+    const { anthropicEfforts } = await import("./agent-options-service.js");
+    expect(
+      anthropicEfforts({
+        supported: true,
+        max: { supported: true },
+        low: { supported: true },
+        xhigh: { supported: false },
+        high: { supported: true },
+        medium: { supported: true },
+      }),
+    ).toEqual(["low", "medium", "high", "max"]);
+    expect(anthropicEfforts({ supported: false })).toEqual([]);
+    expect(anthropicEfforts(undefined)).toBeUndefined();
+  });
+});

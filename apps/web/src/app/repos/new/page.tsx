@@ -20,9 +20,19 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { AgentOptionsPicker, type AgentOptionsValues } from "@/components/agent-options-picker";
+import type { AgentOptionsValues } from "@/components/agent-options-picker";
 import type { AgentType } from "@optio/shared";
-import { ReviewAgentPicker } from "@/components/review-agent-picker";
+import { PageHeader } from "@/components/page-header";
+import { SectionCard } from "@/components/ui/section-card";
+import { Segmented } from "@/components/ui/segmented";
+import { Disclosure } from "@/components/ui/disclosure";
+import { AgentChoice, ReviewAgentChoice } from "@/components/agent-choice";
+import {
+  REPO_FACTORY_AGENT,
+  REPO_FACTORY_OPTIONS,
+  agentSummary,
+  repoAgentPatch,
+} from "@/components/agent-choice-model";
 import { GitHubRepoBrowser } from "@/components/github-repo-browser";
 
 const STEPS = [
@@ -57,10 +67,8 @@ export default function NewRepoPage() {
   const [detected, setDetected] = useState(false);
 
   // Step 3: Agent
-  const [claudeModel, setClaudeModel] = useState("opus");
-  const [claudeContextWindow, setClaudeContextWindow] = useState("1m");
-  const [claudeThinking, setClaudeThinking] = useState(true);
-  const [claudeEffort, setClaudeEffort] = useState("high");
+  const [agentType, setAgentType] = useState(REPO_FACTORY_AGENT);
+  const [agentValues, setAgentValues] = useState<AgentOptionsValues>({ ...REPO_FACTORY_OPTIONS });
   const [maxTurnsCoding, setMaxTurnsCoding] = useState(250);
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(2);
 
@@ -128,10 +136,7 @@ export default function NewRepoPage() {
         imagePreset,
         extraPackages: extraPackages || undefined,
         setupCommands: setupCommands || undefined,
-        claudeModel,
-        claudeContextWindow,
-        claudeThinking,
-        claudeEffort,
+        ...repoAgentPatch(agentType, agentValues),
         maxTurnsCoding,
         maxConcurrentTasks,
         reviewEnabled,
@@ -179,21 +184,25 @@ export default function NewRepoPage() {
 
   const inputClass =
     "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
-  const selectClass = inputClass;
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <Link href="/repos" className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted">
-          <ArrowLeft className="w-4 h-4" />
-        </Link>
-        <FolderGit2 className="w-5 h-5 text-text-muted" />
-        <h1 className="text-2xl font-semibold tracking-tight">Add Repository</h1>
-      </div>
+      <PageHeader
+        icon={FolderGit2}
+        title="Add Repository"
+        description="Point Optio at a repository, then pick its container, agent, and what happens to the PRs it opens."
+        actions={
+          <Link
+            href="/repos"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover hover:text-text transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" /> Repos
+          </Link>
+        }
+      />
 
       {/* Step indicator */}
-      <div className="flex items-center gap-1 mb-8">
+      <div className="flex items-center gap-1 mb-6">
         {STEPS.map((step, i) => (
           <div key={step.id} className="flex items-center gap-1 flex-1">
             <button
@@ -264,19 +273,14 @@ export default function NewRepoPage() {
 
         {currentStep.id === "agent" && (
           <AgentStep
-            claudeModel={claudeModel}
-            setClaudeModel={setClaudeModel}
-            claudeContextWindow={claudeContextWindow}
-            setClaudeContextWindow={setClaudeContextWindow}
-            claudeThinking={claudeThinking}
-            setClaudeThinking={setClaudeThinking}
-            claudeEffort={claudeEffort}
-            setClaudeEffort={setClaudeEffort}
+            agentType={agentType}
+            setAgentType={setAgentType}
+            agentValues={agentValues}
+            setAgentValues={setAgentValues}
             maxTurnsCoding={maxTurnsCoding}
             setMaxTurnsCoding={setMaxTurnsCoding}
             maxConcurrentTasks={maxConcurrentTasks}
             setMaxConcurrentTasks={setMaxConcurrentTasks}
-            selectClass={selectClass}
             inputClass={inputClass}
           />
         )}
@@ -297,14 +301,13 @@ export default function NewRepoPage() {
             setAutoResume={setAutoResume}
             autoMerge={autoMerge}
             setAutoMerge={setAutoMerge}
-            selectClass={selectClass}
             inputClass={inputClass}
           />
         )}
       </div>
 
       {/* Navigation */}
-      <div className="flex items-center justify-between mt-8 pt-6 border-t border-border/50">
+      <div className="flex items-center justify-between mt-6">
         <button
           onClick={back}
           disabled={stepIndex === 0}
@@ -370,14 +373,17 @@ function RepoStep({
   inputClass: string;
 }) {
   return (
-    <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
-      <div>
-        <h2 className="text-sm font-medium mb-1">Repository URL</h2>
-        <p className="text-xs text-text-muted">
-          Pick one of the repositories Optio's GitHub credentials can access, or paste any
-          repository URL. Optio will fetch the repo metadata automatically.
-        </p>
-      </div>
+    <SectionCard
+      step={1}
+      label="Repository"
+      hint="Pick one or paste a URL"
+      summary={validated ? fullName : undefined}
+      bodyClassName="p-4 space-y-4"
+    >
+      <p className="text-xs text-text-muted">
+        Pick one of the repositories Optio's GitHub credentials can access, or paste any repository
+        URL. Optio will fetch the repo metadata automatically.
+      </p>
 
       <GitHubRepoBrowser selected={validated ? fullName : null} onPick={onPick} />
 
@@ -430,7 +436,7 @@ function RepoStep({
           </div>
         </div>
       )}
-    </section>
+    </SectionCard>
   );
 }
 
@@ -460,15 +466,17 @@ function ImageStep({
   inputClass: string;
 }) {
   return (
-    <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
-      <div>
-        <h2 className="text-sm font-medium mb-1">Container Image</h2>
-        <p className="text-xs text-text-muted">
-          Choose the base image for agent pods working on this repo.
-          {detected && " Auto-detected from repository contents."}
-        </p>
-      </div>
-
+    <SectionCard
+      step={2}
+      label="Container"
+      hint={
+        detected
+          ? "Auto-detected from repository contents"
+          : "The base image for agent pods on this repo"
+      }
+      summary={PRESET_IMAGES[imagePreset as PresetImageId]?.label ?? imagePreset}
+      bodyClassName="p-4 space-y-4"
+    >
       <div className="grid gap-1.5">
         {(
           Object.entries(PRESET_IMAGES) as [PresetImageId, (typeof PRESET_IMAGES)[PresetImageId]][]
@@ -511,96 +519,77 @@ function ImageStep({
         />
       </div>
 
-      <button
-        onClick={() => setShowAdvanced(!showAdvanced)}
-        className="text-xs text-primary hover:underline"
+      <Disclosure
+        open={showAdvanced}
+        onToggle={() => setShowAdvanced(!showAdvanced)}
+        label="Setup commands"
       >
-        {showAdvanced ? "Hide advanced options" : "Show advanced options"}
-      </button>
-
-      {showAdvanced && (
-        <div className="space-y-4 pt-2 border-t border-border">
-          <div>
-            <label className="block text-xs text-text-muted mb-1">Setup commands</label>
-            <p className="text-[10px] text-text-muted/60 mb-1.5">
-              Shell commands run inside the pod after cloning. Use this to install dependencies,
-              build tools, or configure the environment.
-            </p>
-            <textarea
-              value={setupCommands}
-              onChange={(e) => setSetupCommands(e.target.value)}
-              rows={4}
-              placeholder={"npm install\nnpx playwright install --with-deps\ncargo build"}
-              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y leading-relaxed"
-            />
-          </div>
+        <div>
+          <label className="block text-xs text-text-muted mb-1">Setup commands</label>
+          <p className="text-[10px] text-text-muted/60 mb-1.5">
+            Shell commands run inside the pod after cloning. Use this to install dependencies, build
+            tools, or configure the environment.
+          </p>
+          <textarea
+            value={setupCommands}
+            onChange={(e) => setSetupCommands(e.target.value)}
+            rows={4}
+            placeholder={"npm install\nnpx playwright install --with-deps\ncargo build"}
+            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y leading-relaxed"
+          />
         </div>
-      )}
-    </section>
+      </Disclosure>
+    </SectionCard>
   );
 }
 
 /* ── Step 3: Agent Settings ─────────────────────────────────── */
 
 function AgentStep({
-  claudeModel,
-  setClaudeModel,
-  claudeContextWindow,
-  setClaudeContextWindow,
-  claudeThinking,
-  setClaudeThinking,
-  claudeEffort,
-  setClaudeEffort,
+  agentType,
+  setAgentType,
+  agentValues,
+  setAgentValues,
   maxTurnsCoding,
   setMaxTurnsCoding,
   maxConcurrentTasks,
   setMaxConcurrentTasks,
-  selectClass,
   inputClass,
 }: {
-  claudeModel: string;
-  setClaudeModel: (v: string) => void;
-  claudeContextWindow: string;
-  setClaudeContextWindow: (v: string) => void;
-  claudeThinking: boolean;
-  setClaudeThinking: (v: boolean) => void;
-  claudeEffort: string;
-  setClaudeEffort: (v: string) => void;
+  agentType: string;
+  setAgentType: (v: string) => void;
+  agentValues: AgentOptionsValues;
+  setAgentValues: (v: AgentOptionsValues) => void;
   maxTurnsCoding: number;
   setMaxTurnsCoding: (v: number) => void;
   maxConcurrentTasks: number;
   setMaxConcurrentTasks: (v: number) => void;
-  selectClass: string;
   inputClass: string;
 }) {
   return (
-    <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
-      <div>
-        <h2 className="text-sm font-medium mb-1">Agent Settings</h2>
-        <p className="text-xs text-text-muted">
-          Configure the Claude Code model and behavior for this repo.
-        </p>
-      </div>
-
-      <AgentOptionsPicker
-        provider="anthropic"
-        values={{
-          claudeModel,
-          claudeContextWindow,
-          claudeEffort,
-          claudeThinking,
-        }}
-        onChange={(v: AgentOptionsValues) => {
-          if (typeof v.claudeModel === "string") setClaudeModel(v.claudeModel);
-          if (typeof v.claudeContextWindow === "string")
-            setClaudeContextWindow(v.claudeContextWindow);
-          if (typeof v.claudeEffort === "string") setClaudeEffort(v.claudeEffort);
-          if (typeof v.claudeThinking === "boolean") setClaudeThinking(v.claudeThinking);
-        }}
-        inputClass={selectClass}
+    <SectionCard
+      step={3}
+      label="Agent"
+      hint="New work on this repo starts from these"
+      summary={agentSummary(agentType, agentValues)}
+      bodyClassName="p-4 space-y-4"
+    >
+      <AgentChoice
+        aria-label="Default agent"
+        runtime={agentType}
+        agentOptions={agentValues}
+        onRuntimeChange={setAgentType}
+        onOptionsChange={setAgentValues}
+        note="The default for new work with this repo — anyone can change it per run."
+        paramsHint="Saved as this repo's defaults"
+        paramsNote={
+          agentType === "codex"
+            ? "OpenAI Codex uses its built-in defaults. No per-repo configuration is required."
+            : undefined
+        }
       />
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4 pt-3 border-t border-border">
         <div>
           <label className="block text-xs text-text-muted mb-1">Max Turns</label>
           <NumberInput
@@ -625,7 +614,7 @@ function AgentStep({
           />
         </div>
       </div>
-    </section>
+    </SectionCard>
   );
 }
 
@@ -646,7 +635,6 @@ function ReviewStep({
   setAutoResume,
   autoMerge,
   setAutoMerge,
-  selectClass,
   inputClass,
 }: {
   reviewEnabled: boolean;
@@ -663,18 +651,23 @@ function ReviewStep({
   setAutoResume: (v: boolean) => void;
   autoMerge: boolean;
   setAutoMerge: (v: boolean) => void;
-  selectClass: string;
   inputClass: string;
 }) {
   return (
-    <section className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-5">
-      <div>
-        <h2 className="text-sm font-medium mb-1">PR Lifecycle</h2>
-        <p className="text-xs text-text-muted">
-          Configure what happens after the coding agent opens a pull request. These settings can be
-          changed later.
-        </p>
-      </div>
+    <SectionCard
+      step={4}
+      label="PR lifecycle"
+      hint="Can be changed later"
+      summary={
+        [reviewEnabled && "review", autoResume && "auto-resume", autoMerge && "auto-merge"]
+          .filter(Boolean)
+          .join(" · ") || "opens the PR, then waits"
+      }
+      bodyClassName="p-4 space-y-5"
+    >
+      <p className="text-xs text-text-muted">
+        What happens after the coding agent opens a pull request.
+      </p>
 
       {/* Code Review */}
       <div className="space-y-3">
@@ -692,25 +685,25 @@ function ReviewStep({
           <div className="space-y-3 ml-6 pl-4 border-l-2 border-primary/20">
             <div>
               <label className="block text-xs text-text-muted mb-1">Trigger</label>
-              <select
+              <Segmented
                 value={reviewTrigger}
-                onChange={(e) => setReviewTrigger(e.target.value)}
-                className={selectClass}
-              >
-                <option value="on_ci_pass">After CI passes</option>
-                <option value="on_pr">Immediately on PR open</option>
-                <option value="manual">Manual only</option>
-              </select>
+                onChange={setReviewTrigger}
+                options={[
+                  { value: "on_ci_pass", label: "After CI passes" },
+                  { value: "on_pr", label: "On PR open" },
+                  { value: "manual", label: "Manual only" },
+                ]}
+              />
             </div>
 
-            <ReviewAgentPicker
+            <ReviewAgentChoice
               agentType={reviewAgentType}
-              onAgentTypeChange={setReviewAgentType}
               model={reviewModel}
-              onModelChange={setReviewModel}
-              allowInherit
+              onChange={(agentType, model) => {
+                setReviewAgentType(agentType);
+                setReviewModel(model);
+              }}
               inheritedHint="Reviews will run with the repo's default agent unless overridden."
-              selectClass={selectClass}
             />
 
             <div>
@@ -758,6 +751,6 @@ function ReviewStep({
           <span className="text-sm">Auto-merge PR when checks pass and review completes</span>
         </label>
       </div>
-    </section>
+    </SectionCard>
   );
 }

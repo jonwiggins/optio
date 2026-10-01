@@ -37,13 +37,11 @@ describe("brand-icon", () => {
     for (const r of ["claude-code", "codex", "copilot", "gemini", "cursor", "opencode"]) {
       expect(agentRuntimeIcon(r)).not.toBe(Bot);
     }
-    expect(agentRuntimeIcon("claude-code", { colored: true })).not.toBe(
-      agentRuntimeIcon("claude-code"),
-    );
-    const { container } = render(<AgentIcon runtime="claude-code" colored />);
+    // Every mark is drawn in currentColor: no brand fills.
+    const { container } = render(<AgentIcon runtime="claude-code" />);
     const svg = container.querySelector("svg")!;
     expect(svg.getAttribute("aria-hidden")).toBe("true");
-    expect(svg.querySelector("path")!.getAttribute("fill")).toBe("#D97757");
+    expect(svg.querySelector("path")!.getAttribute("fill")).toBeNull();
   });
 
   it("labels triggers by their source", () => {
