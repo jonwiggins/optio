@@ -35,3 +35,35 @@ export function buildEnvExports(env: Record<string, string>): string[] {
     return `export ${key}=${shellSingleQuote(String(value))}`;
   });
 }
+
+/**
+ * The exec script that runs one agent in a pooled pod (a Job's or a
+ * persistent agent's): export the run's env, wait for the pod's init to
+ * finish, then run the agent command in the run's own working directory and
+ * exit with its status. `label` names the pod in the progress lines; without
+ * it the script only speaks up on failure.
+ */
+export function buildPooledExecScript(input: {
+  env: Record<string, string>;
+  workDir: string;
+  agentCommand: string[];
+  label?: string;
+}): string {
+  const what = input.label ?? "pod";
+  return [
+    "set -e",
+    // Env values (including the prompt) are embedded as inert single-quoted
+    // exports — see buildEnvExports.
+    ...buildEnvExports(input.env),
+    ...(input.label ? [`echo "[optio] Waiting for ${what} to be ready..."`] : []),
+    `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
+    `[ -f /workspace/.ready ] || { echo "[optio] ERROR: ${what} not ready after 120s"; exit 1; }`,
+    ...(input.label ? [`echo "[optio] ${what[0].toUpperCase()}${what.slice(1)} ready"`] : []),
+    `mkdir -p ${shellSingleQuote(input.workDir)}`,
+    `cd ${shellSingleQuote(input.workDir)}`,
+    `set +e`,
+    ...input.agentCommand,
+    `AGENT_EXIT=$?`,
+    `exit $AGENT_EXIT`,
+  ].join("\n");
+}

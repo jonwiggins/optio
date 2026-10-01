@@ -1,4 +1,4 @@
-import { and, desc, gt, lt, ilike, or, sql, inArray, eq } from "drizzle-orm";
+import { and, desc, gt, lt, ilike, isNull, or, sql, inArray, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { taskLogs, secrets, authEvents } from "../db/schema.js";
 
@@ -69,6 +69,13 @@ function effectiveCutoff(windowMs: number, watermark: Date | null): Date {
 }
 
 /**
+ * Only the logs of Optio's own coding work — Repo Tasks and PR reviews — say
+ * whether Optio's credentials work. A persistent agent's output legitimately
+ * carries other services' "invalid api key" / "bad credentials" errors.
+ */
+const ownWorkLogs = () => isNull(taskLogs.persistentAgentTurnId);
+
+/**
  * Check if any Claude auth failures exist in task_logs after the cutoff.
  */
 async function hasClaudeFailuresInLogs(cutoff: Date): Promise<boolean> {
@@ -76,7 +83,7 @@ async function hasClaudeFailuresInLogs(cutoff: Date): Promise<boolean> {
   const rows = await db
     .select({ exists: sql<number>`1` })
     .from(taskLogs)
-    .where(and(gt(taskLogs.timestamp, cutoff), or(...patternClauses)))
+    .where(and(gt(taskLogs.timestamp, cutoff), ownWorkLogs(), or(...patternClauses)))
     .limit(1);
   return rows.length > 0;
 }
@@ -125,7 +132,7 @@ async function hasGithubFailuresInLogs(cutoff: Date): Promise<boolean> {
   const rows = await db
     .select({ exists: sql<number>`1` })
     .from(taskLogs)
-    .where(and(gt(taskLogs.timestamp, cutoff), or(...patternClauses)))
+    .where(and(gt(taskLogs.timestamp, cutoff), ownWorkLogs(), or(...patternClauses)))
     .limit(1);
   return rows.length > 0;
 }

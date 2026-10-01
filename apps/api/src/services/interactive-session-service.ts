@@ -1,13 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { eq, and, desc, gte, isNull, lte, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import {
-  interactiveSessions,
-  sessionPrs,
-  sessionChatEvents,
-  repos,
-  repoPods,
-} from "../db/schema.js";
+import { getPod } from "./agent-pod-pool.js";
+import { interactiveSessions, sessionPrs, sessionChatEvents, repos } from "../db/schema.js";
 import { publishEvent, publishSessionEvent } from "./event-bus.js";
 import { InteractiveSessionState, normalizeRepoUrl, type PresetImageId } from "@optio/shared";
 import { getOrCreateRepoPod } from "./repo-pool-service.js";
@@ -114,7 +109,7 @@ export async function getSession(id: string) {
   // Get pod info
   let podName: string | null = null;
   if (session.podId) {
-    const [pod] = await db.select().from(repoPods).where(eq(repoPods.id, session.podId));
+    const pod = await getPod(session.podId);
     podName = pod?.podName ?? null;
   }
 

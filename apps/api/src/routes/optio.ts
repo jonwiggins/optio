@@ -236,14 +236,14 @@ export async function optioRoutes(rawApp: FastifyInstance) {
         WHERE 1=1 ${wsFilter}
       `);
 
-        // Pod health from repo_pods table
+        // Repo pod health
         const podRows = await db.execute<{
           state: string;
           count: string;
         }>(sql`
         SELECT state, COUNT(*)::text AS count
-        FROM repo_pods
-        WHERE 1=1
+        FROM agent_pods
+        WHERE pool = 'repo'
           ${workspaceId ? sql`AND workspace_id = ${workspaceId}` : sql``}
         GROUP BY state
       `);

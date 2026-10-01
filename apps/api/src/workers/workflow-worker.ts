@@ -11,10 +11,9 @@ import { db } from "../db/client.js";
 import { workflowRuns, workflows } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import * as workflowService from "../services/workflow-service.js";
+import { transitionWorkflowRunCas } from "../services/workflow-service.js";
 import * as workflowPool from "../services/workflow-pool-service.js";
-import { publishWorkflowRunEvent } from "../services/event-bus.js";
-import { enqueueWebhookEvent } from "./webhook-worker.js";
-import type { WebhookEvent } from "../services/webhook-service.js";
+import { addUsage } from "../services/run-usage.js";
 import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
 import { agentOptionsEnv } from "../services/agent-options-env.js";
@@ -75,110 +74,6 @@ function buildInitialStreamMessage(prompt: string): string {
   );
 }
 
-// ── State transition helpers ───────────────────────────────────────────────────
-
-async function transitionRun(
-  runId: string,
-  workflowId: string,
-  currentState: WorkflowRunState,
-  newState: WorkflowRunState,
-  fields?: Record<string, unknown>,
-): Promise<boolean> {
-  if (!canTransitionWorkflowRun(currentState, newState)) {
-    logger.warn(
-      { runId, from: currentState, to: newState },
-      "Invalid workflow run state transition",
-    );
-    return false;
-  }
-
-  await db
-    .update(workflowRuns)
-    .set({
-      state: newState,
-      updatedAt: new Date(),
-      ...fields,
-    })
-    .where(eq(workflowRuns.id, runId));
-
-  await publishWorkflowRunEvent({
-    type: "workflow_run:state_changed",
-    workflowRunId: runId,
-    workflowId,
-    fromState: currentState,
-    toState: newState,
-    timestamp: new Date().toISOString(),
-  });
-
-  // Fire outbound webhook for relevant state transitions
-  const webhookEventMap: Partial<Record<WorkflowRunState, WebhookEvent>> = {
-    [WorkflowRunState.RUNNING]: "workflow_run.started",
-    [WorkflowRunState.COMPLETED]: "workflow_run.completed",
-    [WorkflowRunState.FAILED]: "workflow_run.failed",
-  };
-  const webhookEvent = webhookEventMap[newState];
-  if (webhookEvent) {
-    fireWorkflowRunWebhook(runId, workflowId, webhookEvent, currentState).catch((err) =>
-      logger.warn({ err, runId, event: webhookEvent }, "Failed to enqueue workflow run webhook"),
-    );
-  }
-
-  // Wake the reconciler so it observes the new state on the next pass.
-  import("../services/reconcile-queue.js")
-    .then(({ enqueueReconcile }) =>
-      enqueueReconcile(
-        { kind: "standalone", id: runId },
-        { reason: `transition:${currentState}->${newState}` },
-      ),
-    )
-    .catch((err) => logger.warn({ err, runId }, "Failed to enqueue reconcile"));
-
-  return true;
-}
-
-/**
- * Build the webhook payload for a workflow run event and enqueue delivery.
- * Fetches the current run + workflow to produce a self-contained payload.
- */
-async function fireWorkflowRunWebhook(
-  runId: string,
-  workflowId: string,
-  event: WebhookEvent,
-  fromState: WorkflowRunState,
-): Promise<void> {
-  const [run, workflow] = await Promise.all([
-    workflowService.getWorkflowRun(runId),
-    workflowService.getWorkflow(workflowId),
-  ]);
-  if (!run || !workflow) return;
-
-  const durationMs =
-    run.startedAt && run.finishedAt
-      ? new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()
-      : run.startedAt
-        ? Date.now() - new Date(run.startedAt).getTime()
-        : undefined;
-
-  await enqueueWebhookEvent(event, {
-    runId: run.id,
-    workflowId: workflow.id,
-    workflowName: workflow.name,
-    state: run.state,
-    fromState,
-    params: run.params ?? null,
-    output: run.output ?? null,
-    costUsd: run.costUsd ?? undefined,
-    inputTokens: run.inputTokens ?? undefined,
-    outputTokens: run.outputTokens ?? undefined,
-    modelUsed: run.modelUsed ?? undefined,
-    errorMessage: run.errorMessage ?? undefined,
-    retryCount: run.retryCount,
-    durationMs,
-    startedAt: run.startedAt?.toISOString() ?? null,
-    finishedAt: run.finishedAt?.toISOString() ?? null,
-  });
-}
-
 // ── Concurrency lock ───────────────────────────────────────────────────────────
 
 let claimLockChain: Promise<void> = Promise.resolve();
@@ -219,14 +114,11 @@ export function startWorkflowWorker() {
         }
         if (!workflow.enabled) {
           log.info("Workflow is disabled, failing run");
-          await transitionRun(
+          await transitionWorkflowRunCas(
             workflowRunId,
-            run.workflowId,
             WorkflowRunState.QUEUED,
             WorkflowRunState.FAILED,
-            {
-              errorMessage: "Workflow is disabled",
-            },
+            { errorMessage: "Workflow is disabled" },
           );
           return;
         }
@@ -280,15 +172,15 @@ export function startWorkflowWorker() {
             return false;
           }
 
-          // Claim: transition to running
-          const transitioned = await transitionRun(
+          // Claim: transition to running. CAS — a second worker holding the
+          // same run (a reconcile re-enqueue) loses here instead of running it twice.
+          const claimedRow = await transitionWorkflowRunCas(
             workflowRunId,
-            workflow.id,
             WorkflowRunState.QUEUED,
             WorkflowRunState.RUNNING,
             { startedAt: new Date() },
           );
-          return transitioned;
+          return claimedRow != null;
         });
 
         if (!claimed) {
@@ -527,40 +419,32 @@ export function startWorkflowWorker() {
           ).catch(() => {});
         }
 
-        const costFields: Record<string, unknown> = {};
-        if (result.costUsd != null) costFields.costUsd = String(result.costUsd);
-        if (result.inputTokens != null) costFields.inputTokens = result.inputTokens;
-        if (result.outputTokens != null) costFields.outputTokens = result.outputTokens;
-        if (result.model) costFields.modelUsed = result.model;
+        // This attempt's spend is ADDED to the run's: a retried run keeps
+        // what its earlier attempts spent (they were spent).
+        const usage = addUsage(workflowRuns, result);
 
         if (effectiveSuccess) {
-          await transitionRun(
+          await transitionWorkflowRunCas(
             workflowRunId,
-            workflow.id,
             WorkflowRunState.RUNNING,
             WorkflowRunState.COMPLETED,
-            {
-              ...costFields,
-              output: { summary: result.summary },
-              finishedAt: new Date(),
-            },
+            { ...usage, output: { summary: result.summary }, finishedAt: new Date() },
           );
           log.info("Workflow run completed");
         } else {
-          await transitionRun(
+          await transitionWorkflowRunCas(
             workflowRunId,
-            workflow.id,
             WorkflowRunState.RUNNING,
             WorkflowRunState.FAILED,
             {
-              ...costFields,
+              ...usage,
               errorMessage: effectiveError ?? "Agent execution failed",
               finishedAt: new Date(),
             },
           );
           log.warn({ error: effectiveError }, "Workflow run failed");
           // The reconciler's decideFailed handles the FAILED→QUEUED retry +
-          // exponential backoff. transitionRun above wakes it.
+          // exponential backoff. The transition above wakes it.
         }
       } catch (err) {
         log.error({ err }, "Workflow worker error");
@@ -577,18 +461,11 @@ export function startWorkflowWorker() {
                   { provisioningRetryCount: provisioningRetryCount + 1 },
                   "Provisioning error, re-queuing",
                 );
-                await transitionRun(
+                await transitionWorkflowRunCas(workflowRunId, fromState, WorkflowRunState.FAILED, {
+                  errorMessage: String(err),
+                });
+                await transitionWorkflowRunCas(
                   workflowRunId,
-                  currentRun.workflowId,
-                  fromState,
-                  WorkflowRunState.FAILED,
-                  {
-                    errorMessage: String(err),
-                  },
-                );
-                await transitionRun(
-                  workflowRunId,
-                  currentRun.workflowId,
                   WorkflowRunState.FAILED,
                   WorkflowRunState.QUEUED,
                 );
@@ -610,16 +487,10 @@ export function startWorkflowWorker() {
 
             // Terminal failure
             if (canTransitionWorkflowRun(fromState, WorkflowRunState.FAILED)) {
-              await transitionRun(
-                workflowRunId,
-                currentRun.workflowId,
-                fromState,
-                WorkflowRunState.FAILED,
-                {
-                  errorMessage: String(err),
-                  finishedAt: new Date(),
-                },
-              );
+              await transitionWorkflowRunCas(workflowRunId, fromState, WorkflowRunState.FAILED, {
+                errorMessage: String(err),
+                finishedAt: new Date(),
+              });
             }
           }
         } catch {

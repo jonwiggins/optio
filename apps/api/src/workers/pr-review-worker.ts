@@ -28,7 +28,9 @@ import {
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { db } from "../db/client.js";
-import { prReviews, prReviewRuns, taskLogs } from "../db/schema.js";
+import { prReviews, prReviewRuns } from "../db/schema.js";
+import { insertLog } from "../services/run-log-service.js";
+import { addUsage } from "../services/run-usage.js";
 import { getEventParser } from "../services/event-parsers.js";
 import * as repoPool from "../services/repo-pool-service.js";
 import {
@@ -66,16 +68,7 @@ export async function appendRunLog(
   logType?: string,
   metadata?: Record<string, unknown>,
 ) {
-  const [row] = await db
-    .insert(taskLogs)
-    .values({
-      prReviewRunId: run.id,
-      content,
-      stream,
-      logType,
-      metadata,
-    })
-    .returning();
+  const row = await insertLog({ prReviewRunId: run.id }, { content, stream, logType, metadata });
   await publishEvent({
     type: "pr_review_run:log",
     prReviewId: run.prReviewId,
@@ -642,16 +635,14 @@ export function startPrReviewWorker() {
         const inferredExitCode = inferExitCode(agentType, allLogs);
         const result = adapter.parseResult(inferredExitCode, allLogs);
 
-        const costFields: Record<string, unknown> = {
-          resultSummary: result.summary,
-          errorMessage: result.error ?? null,
-        };
-        if (result.costUsd != null) costFields.costUsd = String(result.costUsd);
-        if (result.inputTokens != null) costFields.inputTokens = result.inputTokens;
-        if (result.outputTokens != null) costFields.outputTokens = result.outputTokens;
-        if (result.model) costFields.modelUsed = result.model;
-
-        await db.update(prReviewRuns).set(costFields).where(eq(prReviewRuns.id, run.id));
+        await db
+          .update(prReviewRuns)
+          .set({
+            resultSummary: result.summary,
+            errorMessage: result.error ?? null,
+            ...addUsage(prReviewRuns, result),
+          })
+          .where(eq(prReviewRuns.id, run.id));
 
         if (result.success) {
           await transitionRun(runId, PrReviewRunState.COMPLETED);

@@ -13,8 +13,6 @@ import {
   parseRepoUrl,
   parsePrUrl,
   parseIntEnv,
-  addCostStrings,
-  addTokenCounts,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { shellSingleQuote } from "../utils/pod-env.js";
@@ -56,6 +54,7 @@ import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { codexModelFlags } from "../services/pooled-agent-command.js";
+import { addUsage } from "../services/run-usage.js";
 
 const connectionOpts = getBullMQConnectionOptions();
 
@@ -1118,57 +1117,16 @@ export function startTaskWorker() {
 
         await taskService.updateTaskResult(taskId, result.summary, result.error);
 
-        // Persist cost, token usage, and model data.
-        //
-        // On a resume or force-restart, Claude runs as a FRESH process (either
-        // `claude --resume <session>` or a brand-new session on the existing
-        // branch). Its result reports only its OWN turns' total_cost_usd / token
-        // usage — it has no knowledge of what the prior run already spent. So the
-        // recorded value must ACCUMULATE (prior + this run), not overwrite.
-        // Overwriting is what caused issue #541: /api/analytics/costs sums
-        // tasks.cost_usd, so replacing the original cost with just the resumed
-        // invocation's spend undercounts total spend.
-        //
-        // A genuine first run has no prior spend to preserve, so it writes its
-        // value directly. Accumulating never double-counts: each relaunch is a
-        // distinct process reporting only its own cost, so prior + current is
-        // always the true total.
-        //
-        // Continuation signals: `resumeSessionId` (/resume, --resume), a
-        // `restartFromBranch` fresh session on the existing PR (/force-restart,
-        // auto-resume), or a `resumePrompt` (set by every relaunch path —
-        // including message-resume where the stored session id may be absent).
-        //
-        // Prior recorded usage counts as a continuation signal too (issue
-        // #580): retry-without-a-PR and BullMQ auto-retries enqueue a bare
-        // `{taskId}` job, but a failed attempt's tokens were still spent, so
-        // its cost must survive the relaunch even though the work restarts
-        // from scratch. Only a task with no recorded spend writes directly.
-        const isContinuation = !!(resumeSessionId || restartFromBranch || resumePrompt);
-        const hasPriorUsage =
-          parseFloat(taskAfterExec.costUsd ?? "0") > 0 ||
-          (taskAfterExec.inputTokens ?? 0) > 0 ||
-          (taskAfterExec.outputTokens ?? 0) > 0;
-        const accumulate = isContinuation || hasPriorUsage;
-        const costFields: Record<string, unknown> = {};
-        if (result.costUsd != null) {
-          costFields.costUsd = accumulate
-            ? addCostStrings(taskAfterExec.costUsd, result.costUsd)
-            : String(result.costUsd);
-        }
-        if (result.inputTokens != null) {
-          costFields.inputTokens = accumulate
-            ? addTokenCounts(taskAfterExec.inputTokens, result.inputTokens)
-            : result.inputTokens;
-        }
-        if (result.outputTokens != null) {
-          costFields.outputTokens = accumulate
-            ? addTokenCounts(taskAfterExec.outputTokens, result.outputTokens)
-            : result.outputTokens;
-        }
-        if (result.model) costFields.modelUsed = result.model;
-        if (Object.keys(costFields).length > 0) {
-          await db.update(tasks).set(costFields).where(eq(tasks.id, taskId));
+        // Persist cost, token usage, and model data, ADDED to what the task
+        // already recorded. Each launch — a first run, a retry (issue #580: a
+        // failed attempt's tokens were still spent), a resume or force-restart
+        // (issue #541: `claude --resume` reports only its own turns) — is a
+        // distinct process reporting only its own spend, so prior + this run
+        // is always the true total; a first run adds onto nothing. Postgres
+        // does the addition, so it is exact and atomic.
+        const usage = addUsage(tasks, result);
+        if (Object.keys(usage).length > 0) {
+          await db.update(tasks).set(usage).where(eq(tasks.id, taskId));
         }
 
         // ── Telemetry: record cost and token metrics ──────────────────

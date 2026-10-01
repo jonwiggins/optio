@@ -194,11 +194,12 @@ export const taskEvents = pgTable(
   (table) => [index("task_events_task_id_idx").on(table.taskId)],
 );
 
+// The one log table for every agent run (services/run-log-service.ts): a row
+// belongs to exactly one of a task, a PR-review run, or a persistent-agent turn.
 export const taskLogs = pgTable(
   "task_logs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    // Nullable: logs may belong to a task, a workflow run, or a pr_review_run.
     taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
     stream: text("stream").notNull().default("stdout"),
     content: text("content").notNull(),
@@ -206,12 +207,21 @@ export const taskLogs = pgTable(
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     workflowRunId: uuid("workflow_run_id"), // nullable FK to workflow_runs for aggregating logs across a run
     prReviewRunId: uuid("pr_review_run_id"), // nullable FK to pr_review_runs
+    // A persistent agent's turn (its agent is the turn's). Deleting the turn
+    // or the agent deletes its logs.
+    persistentAgentTurnId: uuid("persistent_agent_turn_id").references(
+      () => persistentAgentTurns.id,
+      { onDelete: "cascade" },
+    ),
     timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("task_logs_task_id_timestamp_idx").on(table.taskId, table.timestamp),
     index("task_logs_workflow_run_id_idx").on(table.workflowRunId),
     index("task_logs_pr_review_run_id_idx").on(table.prReviewRunId, table.timestamp),
+    index("task_logs_persistent_agent_turn_id_idx")
+      .on(table.persistentAgentTurnId, table.timestamp)
+      .where(sql`${table.persistentAgentTurnId} IS NOT NULL`),
   ],
 );
 
@@ -362,38 +372,59 @@ export const ticketProviders = pgTable("ticket_providers", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const repoPodStateEnum = pgEnum("repo_pod_state", [
+export const agentPodStateEnum = pgEnum("agent_pod_state", [
   "provisioning",
   "ready",
   "error",
   "terminating",
 ]);
 
-export const repoPods = pgTable(
-  "repo_pods",
+/**
+ * Every pod Optio runs agents in (services/agent-pod-pool.ts). A pool is what
+ * pods are shared across; `poolKey` names its member:
+ *   pool = "repo"             poolKey = the normalized repo URL (no workspace —
+ *                             StatefulSet / PVC names derive from the URL)
+ *   pool = "standalone"       poolKey = the Job (definition) id
+ *   pool = "persistent-agent" poolKey = the agent id
+ * Repo and Job pools scale out to maxPodInstances replicas (`instanceIndex`)
+ * each hosting up to maxAgentsPerPod concurrent runs (`activeCount`); an
+ * agent's pod is single-tenant and kept warm until `keepWarmUntil` (null =
+ * always-on).
+ */
+export const agentPods = pgTable(
+  "agent_pods",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    repoUrl: text("repo_url").notNull(),
-    workspaceId: uuid("workspace_id"), // nullable for backward compat
-    repoBranch: text("repo_branch").notNull().default("main"),
+    pool: text("pool").$type<"repo" | "standalone" | "persistent-agent">().notNull(),
+    poolKey: text("pool_key").notNull(),
     instanceIndex: integer("instance_index").notNull().default(0),
+    workspaceId: uuid("workspace_id"),
+    repoBranch: text("repo_branch"), // repo pods
     podName: text("pod_name"),
     podId: text("pod_id"),
-    state: repoPodStateEnum("state").notNull().default("provisioning"),
-    activeTaskCount: integer("active_task_count").notNull().default(0),
-    lastTaskAt: timestamp("last_task_at", { withTimezone: true }),
+    state: agentPodStateEnum("state").notNull().default("provisioning"),
+    activeCount: integer("active_count").notNull().default(0),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    keepWarmUntil: timestamp("keep_warm_until", { withTimezone: true }), // persistent-agent pods
     errorMessage: text("error_message"),
-    cachePvcName: text("cache_pvc_name"),
+    managedBy: text("managed_by").notNull().default("bare-pod"), // "bare-pod" | "statefulset" | "job"
+    statefulSetName: text("statefulset_name"), // repo pods
+    jobName: text("job_name"), // Job and persistent-agent pods
+    cachePvcName: text("cache_pvc_name"), // repo pods
     cachePvcState: text("cache_pvc_state"), // "pending" | "bound" | "error"
-    statefulSetName: text("statefulset_name"),
-    managedBy: text("managed_by").notNull().default("bare-pod"), // "bare-pod" | "statefulset"
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index("repo_pods_repo_url_idx").on(table.repoUrl),
-    index("repo_pods_workspace_id_idx").on(table.workspaceId),
-    index("repo_pods_statefulset_name_idx").on(table.statefulSetName),
+    index("agent_pods_pool_key_idx").on(table.pool, table.poolKey),
+    index("agent_pods_workspace_id_idx").on(table.workspaceId),
+    index("agent_pods_statefulset_name_idx").on(table.statefulSetName),
+    index("agent_pods_keep_warm_idx")
+      .on(table.keepWarmUntil)
+      .where(sql`${table.keepWarmUntil} IS NOT NULL`),
+    uniqueIndex("agent_pods_standalone_instance_key")
+      .on(table.poolKey, table.instanceIndex)
+      .where(sql`${table.pool} = 'standalone'`),
   ],
 );
 
@@ -1381,45 +1412,6 @@ export const repoSharedDirectories = pgTable(
   ],
 );
 
-// ── Workflow Pods ──────────────────────────────────────────────────────────────
-
-export const workflowPodStateEnum = pgEnum("workflow_pod_state", [
-  "provisioning",
-  "ready",
-  "error",
-  "terminating",
-]);
-
-// Workflow pods are pooled per-workflow, scaled out to workflows.maxPodInstances
-// replicas, each hosting up to workflows.maxAgentsPerPod concurrent runs. Keyed
-// by (workflow_id, instance_index) — mirrors repo_pods shape.
-export const workflowPods = pgTable(
-  "workflow_pods",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    workflowId: uuid("workflow_id")
-      .notNull()
-      .references(() => workflows.id, { onDelete: "cascade" }),
-    instanceIndex: integer("instance_index").notNull().default(0),
-    workspaceId: uuid("workspace_id"),
-    podName: text("pod_name"),
-    podId: text("pod_id"),
-    state: workflowPodStateEnum("state").notNull().default("provisioning"),
-    activeRunCount: integer("active_run_count").notNull().default(0),
-    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
-    errorMessage: text("error_message"),
-    jobName: text("job_name"),
-    managedBy: text("managed_by").notNull().default("bare-pod"), // "bare-pod" | "job"
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    unique("workflow_pods_workflow_instance_key").on(table.workflowId, table.instanceIndex),
-    index("workflow_pods_workflow_id_idx").on(table.workflowId),
-    index("workflow_pods_workspace_id_idx").on(table.workspaceId),
-  ],
-);
-
 // ── Persistent Agents ───────────────────────────────────────────────────────────
 //
 // Long-lived, named, addressable agent processes. Unlike Tasks (Repo or
@@ -1543,28 +1535,6 @@ export const persistentAgentTurns = pgTable(
   ],
 );
 
-export const persistentAgentTurnLogs = pgTable(
-  "persistent_agent_turn_logs",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    turnId: uuid("turn_id")
-      .notNull()
-      .references(() => persistentAgentTurns.id, { onDelete: "cascade" }),
-    agentId: uuid("agent_id")
-      .notNull()
-      .references(() => persistentAgents.id, { onDelete: "cascade" }),
-    stream: text("stream").notNull().default("stdout"),
-    content: text("content").notNull(),
-    logType: text("log_type"),
-    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-    timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    index("persistent_agent_turn_logs_turn_idx").on(table.turnId, table.timestamp),
-    index("persistent_agent_turn_logs_agent_idx").on(table.agentId, table.timestamp),
-  ],
-);
-
 export const persistentAgentMessageSenderTypeEnum = pgEnum("persistent_agent_message_sender_type", [
   "user",
   "agent",
@@ -1597,37 +1567,6 @@ export const persistentAgentMessages = pgTable(
     index("persistent_agent_messages_inbox_idx").on(table.agentId, table.processedAt),
     index("persistent_agent_messages_received_idx").on(table.agentId, table.receivedAt),
     index("persistent_agent_messages_turn_idx").on(table.turnId),
-  ],
-);
-
-// Pods owned by a single Persistent Agent. Distinct from workflow_pods because
-// these are not pooled across runs of one workflow — they're long-lived
-// per-agent (or short-lived per-turn for on-demand). The keep_warm_until
-// timestamp drives the cleanup worker: nullable means always-on, past =
-// reapable, future = warm window in progress.
-export const persistentAgentPods = pgTable(
-  "persistent_agent_pods",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    agentId: uuid("agent_id")
-      .notNull()
-      .references(() => persistentAgents.id, { onDelete: "cascade" }),
-    workspaceId: uuid("workspace_id"),
-    podName: text("pod_name"),
-    podId: text("pod_id"),
-    state: workflowPodStateEnum("state").notNull().default("provisioning"),
-    lastTurnAt: timestamp("last_turn_at", { withTimezone: true }),
-    keepWarmUntil: timestamp("keep_warm_until", { withTimezone: true }),
-    errorMessage: text("error_message"),
-    jobName: text("job_name"),
-    managedBy: text("managed_by").notNull().default("bare-pod"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    index("persistent_agent_pods_agent_idx").on(table.agentId),
-    index("persistent_agent_pods_workspace_idx").on(table.workspaceId),
-    index("persistent_agent_pods_keep_warm_idx").on(table.keepWarmUntil),
   ],
 );
 

@@ -14,15 +14,11 @@ vi.mock("./container-service.js", () => ({
 }));
 
 vi.mock("./workflow-service.js", () => ({
-  getWorkflow: vi.fn(),
+  transitionWorkflowRunCas: vi.fn(),
 }));
 
 vi.mock("./workflow-pool-service.js", () => ({
   releaseRun: vi.fn(),
-}));
-
-vi.mock("./event-bus.js", () => ({
-  publishWorkflowRunEvent: vi.fn(),
 }));
 
 vi.mock("../logger.js", () => ({
@@ -34,20 +30,12 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
-vi.mock("../workers/workflow-worker.js", () => ({
-  workflowRunQueue: {
-    add: vi.fn(),
-  },
-}));
-
 // ── Imports (after mocks) ──────────────────────────────────────────────────────
 
 import { db } from "../db/client.js";
 import { getRuntime } from "./container-service.js";
-import { getWorkflow } from "./workflow-service.js";
+import { transitionWorkflowRunCas } from "./workflow-service.js";
 import { releaseRun } from "./workflow-pool-service.js";
-import { publishWorkflowRunEvent } from "./event-bus.js";
-import { workflowRunQueue } from "../workers/workflow-worker.js";
 import { cleanupZombieWorkflowRuns } from "./zombie-cleanup-service.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -67,16 +55,6 @@ function makeRun(overrides: Record<string, unknown> = {}) {
     startedAt: OLD_DATE,
     finishedAt: null,
     errorMessage: null,
-    ...overrides,
-  };
-}
-
-function makeWorkflow(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "wf-1",
-    name: "Test Workflow",
-    maxRetries: 2,
-    enabled: true,
     ...overrides,
   };
 }
@@ -115,114 +93,81 @@ function mockRuntimeStatus(state: string, reason?: string) {
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
+const transition = transitionWorkflowRunCas as ReturnType<typeof vi.fn>;
+
 describe("cleanupZombieWorkflowRuns", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: db.update chain
     mockUpdateChain();
+    transition.mockResolvedValue({ id: "run-1", state: "failed" });
   });
 
+  const expectFailed = (id = "run-1") =>
+    expect(transition).toHaveBeenCalledWith(id, "running", "failed", {
+      errorMessage: expect.stringContaining("Zombie run detected"),
+      finishedAt: expect.any(Date),
+    });
+
   it("skips runs that are recent (within threshold)", async () => {
-    const run = makeRun({ updatedAt: RECENT_DATE });
-    mockSelectChain([run]);
+    mockSelectChain([makeRun({ updatedAt: RECENT_DATE })]);
     const statusFn = mockRuntimeStatus("running");
 
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    expect(cleaned).toBe(0);
+    expect(await cleanupZombieWorkflowRuns()).toBe(0);
     expect(statusFn).not.toHaveBeenCalled();
   });
 
   it("skips runs whose pod is still running", async () => {
-    const run = makeRun();
-    mockSelectChain([run]);
+    mockSelectChain([makeRun()]);
     mockRuntimeStatus("running");
 
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    expect(cleaned).toBe(0);
-    expect(db.update).not.toHaveBeenCalled();
+    expect(await cleanupZombieWorkflowRuns()).toBe(0);
+    expect(transition).not.toHaveBeenCalled();
   });
 
-  it("fails a run whose pod is in failed state", async () => {
-    const run = makeRun();
-    mockSelectChain([run]);
+  it("never checks a local run: its agent lives on the owner's machine, not in a pod", async () => {
+    mockSelectChain([makeRun({ podName: null, localTerminalId: "term-1" })]);
+
+    expect(await cleanupZombieWorkflowRuns()).toBe(0);
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it("fails a run whose pod is in failed state, through the one Job-run transition", async () => {
+    mockSelectChain([makeRun()]);
     mockRuntimeStatus("failed", "OOMKilled");
-    (getWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    expect(cleaned).toBe(1);
-    expect(db.update).toHaveBeenCalled();
-    expect(publishWorkflowRunEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "workflow_run:state_changed",
-        workflowRunId: "run-1",
-        toState: "failed",
-      }),
-    );
+    expect(await cleanupZombieWorkflowRuns()).toBe(1);
+    expectFailed();
   });
 
   it("fails a run whose pod is not found (throws)", async () => {
-    const run = makeRun();
-    mockSelectChain([run]);
+    mockSelectChain([makeRun()]);
     const statusFn = vi.fn().mockRejectedValue(new Error("pod not found"));
     (getRuntime as ReturnType<typeof vi.fn>).mockReturnValue({ status: statusFn });
-    (getWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    expect(cleaned).toBe(1);
-    expect(db.update).toHaveBeenCalled();
+    expect(await cleanupZombieWorkflowRuns()).toBe(1);
+    expectFailed();
   });
 
-  it("fails a run with no podName that is stale", async () => {
-    const run = makeRun({ podName: null });
-    mockSelectChain([run]);
-    (getWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+  it("fails a cluster run with no podName that is stale", async () => {
+    mockSelectChain([makeRun({ podName: null })]);
 
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    expect(cleaned).toBe(1);
-    expect(db.update).toHaveBeenCalled();
+    expect(await cleanupZombieWorkflowRuns()).toBe(1);
+    expectFailed();
   });
 
-  it("retries a zombie run when retryCount < maxRetries", async () => {
-    const run = makeRun({ retryCount: 0 });
-    mockSelectChain([run]);
+  it("does not count a run someone else moved first", async () => {
+    mockSelectChain([makeRun({ podId: "pod-1" })]);
     mockRuntimeStatus("failed", "OOMKilled");
-    (getWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue(makeWorkflow({ maxRetries: 2 }));
+    transition.mockResolvedValue(null);
 
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    expect(cleaned).toBe(1);
-    // Should have been re-enqueued
-    expect(workflowRunQueue.add).toHaveBeenCalledWith(
-      "process-workflow-run",
-      { workflowRunId: "run-1" },
-      expect.objectContaining({ jobId: expect.stringContaining("run-1-zombie-retry") }),
-    );
-  });
-
-  it("does not retry when retryCount >= maxRetries", async () => {
-    const run = makeRun({ retryCount: 2 });
-    mockSelectChain([run]);
-    mockRuntimeStatus("failed", "OOMKilled");
-    (getWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue(makeWorkflow({ maxRetries: 2 }));
-
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    expect(cleaned).toBe(1);
-    expect(workflowRunQueue.add).not.toHaveBeenCalled();
+    expect(await cleanupZombieWorkflowRuns()).toBe(0);
+    expect(releaseRun).not.toHaveBeenCalled();
   });
 
   it("releases the workflow pod on zombie detection", async () => {
     // Runs carry their pod assignment directly on the row (podId column).
-    // Zombie cleanup reads that pointer rather than looking up workflow_pods.
-    const run = makeRun({ podId: "pod-1" });
-    mockSelectChain([run]);
+    mockSelectChain([makeRun({ podId: "pod-1" })]);
     mockRuntimeStatus("failed", "Terminated");
-    (getWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
     await cleanupZombieWorkflowRuns();
 
@@ -231,56 +176,24 @@ describe("cleanupZombieWorkflowRuns", () => {
 
   it("handles empty running runs list", async () => {
     mockSelectChain([]);
-
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    expect(cleaned).toBe(0);
+    expect(await cleanupZombieWorkflowRuns()).toBe(0);
   });
 
-  it("continues processing other runs if one fails", async () => {
-    const run1 = makeRun({ id: "run-1" });
-    const run2 = makeRun({ id: "run-2" });
+  it("continues with the other runs when one throws", async () => {
+    mockSelectChain([makeRun({ id: "run-1" }), makeRun({ id: "run-2" })]);
+    mockRuntimeStatus("failed", "OOM");
+    transition
+      .mockRejectedValueOnce(new Error("db hiccup"))
+      .mockResolvedValueOnce({ id: "run-2", state: "failed" });
 
-    // First select returns both runs
-    let selectCallCount = 0;
-    const selectMock = {
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockImplementation(() => {
-          selectCallCount++;
-          if (selectCallCount === 1) return Promise.resolve([run1, run2]);
-          // Pod lookups
-          return Promise.resolve([]);
-        }),
-      }),
-    };
-    (db.select as ReturnType<typeof vi.fn>).mockReturnValue(selectMock);
-
-    // Runtime: first call throws (error during processing), second succeeds
-    let statusCallCount = 0;
-    const statusFn = vi.fn().mockImplementation(() => {
-      statusCallCount++;
-      if (statusCallCount === 1) {
-        // Make the update throw for run1 to simulate a failure in processing
-        return Promise.resolve({ state: "failed", reason: "OOM" });
-      }
-      return Promise.resolve({ state: "failed", reason: "OOM" });
-    });
-    (getRuntime as ReturnType<typeof vi.fn>).mockReturnValue({ status: statusFn });
-    (getWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    // Both should be cleaned
-    expect(cleaned).toBe(2);
+    expect(await cleanupZombieWorkflowRuns()).toBe(1);
+    expectFailed("run-2");
   });
 
   it("does not fail a run whose pod is in unknown state but recently updated", async () => {
-    const run = makeRun({ updatedAt: RECENT_DATE });
-    mockSelectChain([run]);
+    mockSelectChain([makeRun({ updatedAt: RECENT_DATE })]);
     mockRuntimeStatus("unknown");
 
-    const cleaned = await cleanupZombieWorkflowRuns();
-
-    expect(cleaned).toBe(0);
+    expect(await cleanupZombieWorkflowRuns()).toBe(0);
   });
 });

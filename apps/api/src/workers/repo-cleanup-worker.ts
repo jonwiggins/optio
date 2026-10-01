@@ -1,11 +1,13 @@
 import { Queue, Worker } from "bullmq";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { repoPods, podHealthEvents, tasks, taskEvents, repos } from "../db/schema.js";
+import { agentPods, podHealthEvents, tasks, taskEvents, repos } from "../db/schema.js";
+import { deletePod } from "../services/agent-pod-pool.js";
 import {
   cleanupIdleRepoPods,
   updateWorktreeState,
   reconcileActiveTaskCounts,
+  listRepoPods,
   deleteNetworkPolicy,
   killOrphanedAgentInPod,
 } from "../services/repo-pool-service.js";
@@ -80,7 +82,7 @@ export function startRepoCleanupWorker() {
     "repo-cleanup",
     instrumentWorkerProcessor("repo-cleanup", async () => {
       const rt = getRuntime();
-      const pods = await db.select().from(repoPods);
+      const pods = (await listRepoPods()).map((p) => ({ ...p, repoUrl: p.poolKey }));
 
       for (const pod of pods) {
         // Skip pods without a K8s name. For bare pods, also skip "provisioning"
@@ -129,14 +131,14 @@ export function startRepoCleanupWorker() {
               // StatefulSet pods auto-restart (restartPolicy: Always).
               // Mark as provisioning and wait for recovery rather than deleting.
               await db
-                .update(repoPods)
+                .update(agentPods)
                 .set({
                   state: "provisioning",
-                  activeTaskCount: 0,
+                  activeCount: 0,
                   errorMessage: message,
                   updatedAt: new Date(),
                 })
-                .where(eq(repoPods.id, pod.id));
+                .where(eq(agentPods.id, pod.id));
 
               logger.warn(
                 { repoUrl: pod.repoUrl, podName: pod.podName, eventType },
@@ -145,19 +147,19 @@ export function startRepoCleanupWorker() {
             } else {
               // Bare pod: delete and clear record for auto-recreation
               await db
-                .update(repoPods)
+                .update(agentPods)
                 .set({
                   state: "error",
                   errorMessage: message,
                   updatedAt: new Date(),
                 })
-                .where(eq(repoPods.id, pod.id));
+                .where(eq(agentPods.id, pod.id));
 
               try {
                 await deleteNetworkPolicy(pod.podName).catch(() => {});
                 await rt.destroy({ id: pod.podId ?? pod.podName, name: pod.podName });
               } catch {}
-              await db.delete(repoPods).where(eq(repoPods.id, pod.id));
+              await deletePod(pod.id);
               await recordHealthEvent(
                 pod.id,
                 pod.repoUrl,
@@ -177,29 +179,29 @@ export function startRepoCleanupWorker() {
           ) {
             // Pod recovered (StatefulSet auto-restart, or unexpected recovery)
             await db
-              .update(repoPods)
+              .update(agentPods)
               .set({ state: "ready", errorMessage: null, updatedAt: new Date() })
-              .where(eq(repoPods.id, pod.id));
+              .where(eq(agentPods.id, pod.id));
             await recordHealthEvent(pod.id, pod.repoUrl, "healthy", pod.podName, "Pod recovered");
           }
         } catch (err) {
           if (pod.managedBy === "statefulset") {
             // StatefulSet pod not found — it may be restarting. Mark as provisioning.
             await db
-              .update(repoPods)
+              .update(agentPods)
               .set({
                 state: "provisioning",
-                activeTaskCount: 0,
+                activeCount: 0,
                 errorMessage: `Pod not found, may be restarting: ${String(err)}`,
                 updatedAt: new Date(),
               })
-              .where(eq(repoPods.id, pod.id));
+              .where(eq(agentPods.id, pod.id));
           } else {
             // Bare pod not found — clean up the record
             if (pod.podName) {
               await deleteNetworkPolicy(pod.podName).catch(() => {});
             }
-            await db.delete(repoPods).where(eq(repoPods.id, pod.id));
+            await deletePod(pod.id);
             await recordHealthEvent(
               pod.id,
               pod.repoUrl,

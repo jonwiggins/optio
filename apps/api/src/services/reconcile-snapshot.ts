@@ -4,16 +4,14 @@ import {
   tasks,
   workflowRuns,
   workflows,
-  repoPods,
   repos,
   taskEvents,
-  workflowPods,
   prReviews,
   prReviewRuns,
   prReviewEvents,
   persistentAgents,
   persistentAgentMessages,
-  persistentAgentPods,
+  agentPods,
   persistentAgentTurns,
 } from "../db/schema.js";
 import {
@@ -115,7 +113,7 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
           readErrors.push({ source: "pr", message: String(err) });
           return null;
         }),
-    loadPodStatusForRepo(row.lastPodId ?? null).catch((err) => {
+    loadPodStatus(row.lastPodId ?? null).catch((err) => {
       readErrors.push({ source: "pod", message: String(err) });
       return null;
     }),
@@ -341,30 +339,30 @@ async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus |
 }
 
 async function loadPodStatusForWorkflowRun(runId: string): Promise<PodStatus | null> {
-  // Runs now share pods across a workflow; find the assigned pod via the
-  // `pod_id` pointer on workflow_runs. Null when the run has been released
-  // (terminal) or hasn't been scheduled onto a pod yet.
+  // Runs share pods across a workflow; the assigned pod is the run's
+  // `pod_id`. Null when the run has been released (terminal) or hasn't been
+  // scheduled onto a pod yet.
   const [runRow] = await db
     .select({ podId: workflowRuns.podId })
     .from(workflowRuns)
     .where(eq(workflowRuns.id, runId))
     .limit(1);
-  if (!runRow?.podId) return null;
+  return loadPodStatus(runRow?.podId ?? null);
+}
 
-  const [pod] = await db
-    .select()
-    .from(workflowPods)
-    .where(eq(workflowPods.id, runRow.podId))
-    .limit(1);
+/** A pod's observed status, from its `agent_pods` row. */
+async function loadPodStatus(podId: string | null): Promise<PodStatus | null> {
+  if (!podId) return null;
+  const [pod] = await db.select().from(agentPods).where(eq(agentPods.id, podId)).limit(1);
   if (!pod) return null;
   return {
     podName: pod.podName ?? pod.id,
-    phase: mapWorkflowPodPhase(pod.state),
+    phase: mapPodPhase(pod.state),
     lastError: pod.errorMessage ?? null,
   };
 }
 
-function mapWorkflowPodPhase(state: string): PodStatus["phase"] {
+function mapPodPhase(state: string): PodStatus["phase"] {
   switch (state) {
     case "provisioning":
       return "pending";
@@ -373,34 +371,6 @@ function mapWorkflowPodPhase(state: string): PodStatus["phase"] {
     case "error":
       return "error";
     case "terminating":
-      return "terminated";
-    default:
-      return "unknown";
-  }
-}
-
-async function loadPodStatusForRepo(podId: string | null): Promise<PodStatus | null> {
-  if (!podId) return null;
-  const [row] = await db.select().from(repoPods).where(eq(repoPods.id, podId));
-  if (!row) return null;
-  const phase = mapRepoPodPhase(row.state);
-  return {
-    podName: row.podName ?? podId,
-    phase,
-    lastError: row.errorMessage ?? null,
-  };
-}
-
-function mapRepoPodPhase(state: string): PodStatus["phase"] {
-  switch (state) {
-    case "provisioning":
-      return "pending";
-    case "ready":
-      return "ready";
-    case "error":
-      return "error";
-    case "terminating":
-    case "terminated":
       return "terminated";
     default:
       return "unknown";
@@ -876,14 +846,14 @@ async function loadGlobalPersistentAgentCapacity() {
 async function loadActivePodForPersistentAgent(agentId: string): Promise<PodStatus | null> {
   const [pod] = await db
     .select()
-    .from(persistentAgentPods)
-    .where(eq(persistentAgentPods.agentId, agentId))
-    .orderBy(desc(persistentAgentPods.updatedAt))
+    .from(agentPods)
+    .where(and(eq(agentPods.pool, "persistent-agent"), eq(agentPods.poolKey, agentId)))
+    .orderBy(desc(agentPods.updatedAt))
     .limit(1);
   if (!pod || !pod.podName) return null;
   return {
     podName: pod.podName,
-    phase: mapWorkflowPodPhase(pod.state),
+    phase: mapPodPhase(pod.state),
     lastError: pod.errorMessage ?? null,
   };
 }

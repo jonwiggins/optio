@@ -1,6 +1,7 @@
 import { eq, desc, and, or, ilike, gte, lte, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { tasks, taskEvents, taskLogs, users, repos } from "../db/schema.js";
+import * as runLogService from "./run-log-service.js";
 import {
   TaskState,
   transition,
@@ -535,10 +536,7 @@ export async function appendTaskLog(
   logType?: string,
   metadata?: Record<string, unknown>,
 ) {
-  const [row] = await db
-    .insert(taskLogs)
-    .values({ taskId, content, stream, logType, metadata })
-    .returning();
+  const row = await runLogService.insertLog({ taskId }, { content, stream, logType, metadata });
 
   // The live frame is the stored row — id, timestamp, type, metadata as
   // GET /api/tasks/:id/logs returns them — so clients that merge REST
@@ -559,36 +557,11 @@ export async function getTaskLogs(
   taskId: string,
   opts?: { limit?: number; offset?: number; search?: string; logType?: string },
 ) {
-  const conditions = [eq(taskLogs.taskId, taskId)];
-  if (opts?.logType) {
-    conditions.push(eq(taskLogs.logType, opts.logType));
-  }
-  if (opts?.search) {
-    conditions.push(ilike(taskLogs.content, `%${opts.search}%`));
-  }
-  let query = db
-    .select()
-    .from(taskLogs)
-    .where(and(...conditions))
-    .orderBy(taskLogs.timestamp);
-  if (opts?.limit) query = query.limit(opts.limit) as typeof query;
-  if (opts?.offset) query = query.offset(opts.offset) as typeof query;
-  return query;
+  return runLogService.listLogs({ taskId }, opts);
 }
 
 export async function getAllTaskLogs(taskId: string, opts?: { search?: string; logType?: string }) {
-  const conditions = [eq(taskLogs.taskId, taskId)];
-  if (opts?.logType) {
-    conditions.push(eq(taskLogs.logType, opts.logType));
-  }
-  if (opts?.search) {
-    conditions.push(ilike(taskLogs.content, `%${opts.search}%`));
-  }
-  return db
-    .select()
-    .from(taskLogs)
-    .where(and(...conditions))
-    .orderBy(taskLogs.timestamp);
+  return runLogService.listLogs({ taskId }, opts);
 }
 
 export async function forceRedoTask(id: string) {

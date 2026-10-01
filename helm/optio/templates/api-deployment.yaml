@@ -8,6 +8,10 @@ metadata:
     {{- include "optio.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.api.replicas }}
+  {{- with .Values.api.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       app: optio-api
@@ -125,6 +129,15 @@ spec:
                   fieldPath: spec.serviceAccountName
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
+          # Database migrations run at boot, before the server listens. The
+          # startup probe holds off liveness until /api/health first answers,
+          # so a long migration isn't killed half-way and retried in a loop.
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.api.port }}
+            periodSeconds: 10
+            failureThreshold: {{ .Values.api.startupProbe.failureThreshold }}
           readinessProbe:
             httpGet:
               path: /api/health

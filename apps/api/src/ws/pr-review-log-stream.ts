@@ -1,12 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
 import { createSubscriber } from "../services/event-bus.js";
 import { authenticateWs } from "./ws-auth.js";
 import { assertWorkspace } from "./ws-authz.js";
 import { getPrReview, getLatestRun } from "../services/pr-review-service.js";
-import { db } from "../db/client.js";
-import { taskLogs } from "../db/schema.js";
+import { listLogs } from "../services/run-log-service.js";
 import { acceptWs } from "./ws-connection.js";
 
 export async function prReviewLogStreamWs(app: FastifyInstance) {
@@ -35,12 +33,7 @@ export async function prReviewLogStreamWs(app: FastifyInstance) {
     try {
       const latest = await getLatestRun(id);
       if (latest) {
-        const recent = await db
-          .select()
-          .from(taskLogs)
-          .where(eq(taskLogs.prReviewRunId, latest.id))
-          .orderBy(taskLogs.timestamp)
-          .limit(50);
+        const recent = await listLogs({ prReviewRunId: latest.id }, { limit: 50 });
         for (const log of recent) {
           socket.send(
             JSON.stringify({

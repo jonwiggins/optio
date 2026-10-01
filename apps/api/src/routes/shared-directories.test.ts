@@ -38,10 +38,17 @@ vi.mock("../services/repo-pool-service.js", () => ({
   deleteEnvoyConfigMap: (...args: unknown[]) => mockDeleteEnvoyConfigMap(...args),
 }));
 
+const mockDestroy = vi.fn().mockResolvedValue(undefined);
 vi.mock("../services/container-service.js", () => ({
   getRuntime: vi.fn().mockReturnValue({
-    destroy: vi.fn().mockResolvedValue(undefined),
+    destroy: (...args: unknown[]) => mockDestroy(...args),
   }),
+}));
+
+// A recycled pod's row is removed through agent-pod-pool.
+const mockDeletePod = vi.fn().mockResolvedValue(undefined);
+vi.mock("../services/agent-pod-pool.js", () => ({
+  deletePod: (...args: unknown[]) => mockDeletePod(...args),
 }));
 
 vi.mock("../db/client.js", () => ({
@@ -53,7 +60,7 @@ vi.mock("../db/client.js", () => ({
 }));
 
 vi.mock("../db/schema.js", () => ({
-  repoPods: { id: "repo_pods.id" },
+  agentPods: { id: "agent_pods.id" },
 }));
 
 import { sharedDirectoryRoutes } from "./shared-directories.js";
@@ -313,8 +320,12 @@ describe("POST /api/repos/:id/pods/recycle", () => {
 
   it("recycles idle pods", async () => {
     mockGetRepo.mockResolvedValue(mockRepoData);
+    mockDeleteNetworkPolicy.mockResolvedValue(undefined);
+    mockDeleteEnvoyConfigMap.mockResolvedValue(undefined);
     mockListRepoPodsForRepo.mockResolvedValue([
-      { id: "pod-1", podName: "test-pod", podId: "pod-1", state: "ready", activeTaskCount: 0 },
+      { id: "pod-1", podName: "test-pod", podId: "pod-1", state: "ready", activeCount: 0 },
+      // Busy pods are left alone
+      { id: "pod-2", podName: "busy-pod", podId: "pod-2", state: "ready", activeCount: 1 },
     ]);
 
     const res = await app.inject({
@@ -323,6 +334,11 @@ describe("POST /api/repos/:id/pods/recycle", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().ok).toBe(true);
+    expect(res.json()).toEqual({ ok: true, recycled: 1 });
+    expect(mockListRepoPodsForRepo).toHaveBeenCalledWith("https://github.com/org/repo");
+    expect(mockDestroy).toHaveBeenCalledTimes(1);
+    expect(mockDestroy).toHaveBeenCalledWith({ id: "pod-1", name: "test-pod" });
+    expect(mockDeletePod).toHaveBeenCalledTimes(1);
+    expect(mockDeletePod).toHaveBeenCalledWith("pod-1");
   });
 });

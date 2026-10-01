@@ -77,7 +77,6 @@ import {
   cancelWorkflowRun,
   getWorkflowRunLogs,
   insertWorkflowRunLog,
-  transitionWorkflowRunState,
   appendWorkflowRunLog,
 } from "./workflow-service.js";
 
@@ -711,85 +710,6 @@ describe("workflow-service", () => {
         content: "test",
       });
       expect(capturedValues.stream).toBe("stdout");
-    });
-  });
-
-  describe("transitionWorkflowRunState", () => {
-    it("transitions state and publishes event", async () => {
-      const run = { id: "wr-1", workflowId: "w-1", state: "queued" };
-      (db.select as any) = vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([run]),
-        }),
-      });
-      const mockSet = vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue(undefined),
-      });
-      (db.update as any) = vi.fn().mockReturnValue({ set: mockSet });
-
-      await transitionWorkflowRunState("wr-1", "running" as any);
-
-      expect(db.update).toHaveBeenCalled();
-      expect(mockPublishWorkflowRunEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "workflow_run:state_changed",
-          workflowRunId: "wr-1",
-          workflowId: "w-1",
-          fromState: "queued",
-          toState: "running",
-        }),
-      );
-    });
-
-    it("throws when workflow run not found", async () => {
-      (db.select as any) = vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([]),
-        }),
-      });
-
-      await expect(transitionWorkflowRunState("nonexistent", "running" as any)).rejects.toThrow(
-        "Workflow run nonexistent not found",
-      );
-    });
-
-    it("throws on invalid state transition", async () => {
-      const run = { id: "wr-1", workflowId: "w-1", state: "completed" };
-      (db.select as any) = vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([run]),
-        }),
-      });
-
-      await expect(transitionWorkflowRunState("wr-1", "running" as any)).rejects.toThrow(
-        "Invalid workflow run transition",
-      );
-    });
-
-    it("includes extras in the published event", async () => {
-      const run = { id: "wr-1", workflowId: "w-1", state: "running" };
-      (db.select as any) = vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue([run]),
-        }),
-      });
-      (db.update as any) = vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue(undefined),
-        }),
-      });
-
-      await transitionWorkflowRunState("wr-1", "completed" as any, {
-        costUsd: "1.50",
-        modelUsed: "claude-sonnet",
-      });
-
-      expect(mockPublishWorkflowRunEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          costUsd: "1.50",
-          modelUsed: "claude-sonnet",
-        }),
-      );
     });
   });
 

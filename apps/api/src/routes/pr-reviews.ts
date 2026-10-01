@@ -10,9 +10,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { requireRole } from "../plugins/auth.js";
-import { eq } from "drizzle-orm";
-import { db } from "../db/client.js";
-import { taskLogs } from "../db/schema.js";
+import { listLogs } from "../services/run-log-service.js";
 import * as prReviewService from "../services/pr-review-service.js";
 import { logger } from "../logger.js";
 import { logAction } from "../services/optio-action-service.js";
@@ -495,11 +493,7 @@ export async function prReviewRoutes(rawApp: FastifyInstance) {
         if (!latest) return reply.send({ logs: [] });
         runId = latest.id;
       }
-      const rows = await db
-        .select()
-        .from(taskLogs)
-        .where(eq(taskLogs.prReviewRunId, runId))
-        .orderBy(taskLogs.timestamp);
+      const rows = await listLogs({ prReviewRunId: runId });
       reply.send({ logs: rows, runId });
     },
   );

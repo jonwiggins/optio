@@ -9,12 +9,14 @@ import {
 } from "../services/interactive-session-service.js";
 import { getSettings } from "../services/optio-settings-service.js";
 import { db } from "../db/client.js";
-import { repoPods, repos, interactiveSessions } from "../db/schema.js";
-import { eq, sql } from "drizzle-orm";
+import { repos, interactiveSessions } from "../db/schema.js";
+import { getPod } from "../services/agent-pod-pool.js";
+import { eq } from "drizzle-orm";
 import { logger } from "../logger.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import type { AgentLogEntry, ExecSession } from "@optio/shared";
 import { shellSingleQuote } from "../utils/pod-env.js";
+import { plusCost } from "../services/run-usage.js";
 import {
   buildClaudeChatCommand,
   inspectClaudeLine,
@@ -100,7 +102,7 @@ export async function sessionChatWs(app: FastifyInstance) {
     if (!session.podId) return reject("Session has no pod assigned");
 
     // Get pod info
-    const [pod] = await db.select().from(repoPods).where(eq(repoPods.id, session.podId));
+    const pod = await getPod(session.podId);
     if (!pod || !pod.podName) {
       return reject(
         "Session pod was cleaned up due to inactivity. Please end this session and start a new one.",
@@ -563,7 +565,7 @@ async function addSessionCost(sessionId: string, turnCostUsd: number) {
   await db
     .update(interactiveSessions)
     .set({
-      costUsd: sql`ROUND(COALESCE(NULLIF(${interactiveSessions.costUsd}, ''), '0')::numeric + ${turnCostUsd}::numeric, 4)::text`,
+      costUsd: plusCost(interactiveSessions.costUsd, turnCostUsd),
     })
     .where(eq(interactiveSessions.id, sessionId));
 }

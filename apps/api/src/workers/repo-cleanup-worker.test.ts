@@ -15,8 +15,9 @@ vi.mock("bullmq", () => ({
 
 // ── DB mock ────────────────────────────────────────────────────────────────
 
-// We need to track which table each chained query targets so we can return
-// different result sets for repoPods vs tasks vs taskEvents queries.
+// db.select() calls are answered in order from `selectResults` (tasks,
+// taskEvents, repos queries). The repo pods themselves come from
+// repo-pool-service's listRepoPods (mockListRepoPods), not a db.select().
 
 let selectResults: unknown[][] = [];
 let selectCallIndex = 0;
@@ -52,7 +53,7 @@ vi.mock("../db/client.js", () => ({
       return {
         from: vi.fn().mockImplementation(() => ({
           where: vi.fn().mockResolvedValue(rows),
-          // Bare from() with no where returns the rows (repoPods query)
+          // Bare from() with no where returns the rows
           then: (res: (v: unknown) => void) => Promise.resolve(rows).then(res),
           [Symbol.iterator]: function* () {
             yield* rows;
@@ -69,7 +70,13 @@ vi.mock("../db/client.js", () => ({
 // ── Schema mock — just need exported table references for eq() calls ───────
 
 vi.mock("../db/schema.js", () => ({
-  repoPods: { id: "repoPods.id", repoUrl: "repoPods.repoUrl", state: "repoPods.state" },
+  agentPods: {
+    id: "agentPods.id",
+    pool: "agentPods.pool",
+    poolKey: "agentPods.poolKey",
+    state: "agentPods.state",
+    activeCount: "agentPods.activeCount",
+  },
   podHealthEvents: { id: "podHealthEvents.id" },
   tasks: {
     id: "tasks.id",
@@ -101,13 +108,22 @@ const mockUpdateWorktree = vi.fn().mockResolvedValue(undefined);
 const mockReconcile = vi.fn().mockResolvedValue(0);
 const mockDeleteNetPolicy = vi.fn().mockResolvedValue(undefined);
 const mockKillOrphanedAgent = vi.fn().mockResolvedValue(false);
+const mockListRepoPods = vi.fn().mockResolvedValue([]);
 
 vi.mock("../services/repo-pool-service.js", () => ({
   cleanupIdleRepoPods: (...args: unknown[]) => mockCleanupIdle(...args),
   updateWorktreeState: (...args: unknown[]) => mockUpdateWorktree(...args),
   reconcileActiveTaskCounts: (...args: unknown[]) => mockReconcile(...args),
+  listRepoPods: (...args: unknown[]) => mockListRepoPods(...args),
   deleteNetworkPolicy: (...args: unknown[]) => mockDeleteNetPolicy(...args),
   killOrphanedAgentInPod: (...args: unknown[]) => mockKillOrphanedAgent(...args),
+}));
+
+// Removing a pod's row is agent-pod-pool's deletePod.
+const mockDeletePod = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("../services/agent-pod-pool.js", () => ({
+  deletePod: (...args: unknown[]) => mockDeletePod(...args),
 }));
 
 const mockRtStatus = vi.fn();
@@ -188,14 +204,16 @@ vi.mock("drizzle-orm", () => ({
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+/** A repo pod as listRepoPods returns it: an `agent_pods` row in the repo pool. */
 function makePod(overrides: Record<string, unknown> = {}) {
   return {
     id: "pod-1",
-    repoUrl: "https://github.com/test/repo",
+    pool: "repo",
+    poolKey: "https://github.com/test/repo",
     podName: "optio-test-repo-0",
     podId: "pod-id-1",
     state: "ready",
-    activeTaskCount: 0,
+    activeCount: 0,
     instanceIndex: 0,
     errorMessage: null,
     managedBy: "bare-pod",
@@ -257,6 +275,8 @@ beforeEach(() => {
   mockReconcile.mockReset().mockResolvedValue(0);
   mockDeleteNetPolicy.mockReset().mockResolvedValue(undefined);
   mockKillOrphanedAgent.mockReset().mockResolvedValue(false);
+  mockListRepoPods.mockReset().mockResolvedValue([]);
+  mockDeletePod.mockReset().mockResolvedValue(undefined);
   mockCleanupExpiredSessions.mockReset().mockResolvedValue(0);
   mockTaskQueueAdd.mockReset().mockResolvedValue(undefined);
   mockPublishEvent.mockReset().mockResolvedValue(undefined);
@@ -283,10 +303,9 @@ describe("repo-cleanup-worker", () => {
 
   describe("pod health monitoring", () => {
     it("skips pods in provisioning state", async () => {
-      // select #0: repoPods returns one pod in provisioning
-      // select #1: staleTasks returns empty
+      // listRepoPods returns one pod in provisioning; the task queries return empty
+      mockListRepoPods.mockResolvedValue([makePod({ state: "provisioning" })]);
       selectResults = [
-        [makePod({ state: "provisioning" })],
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -297,8 +316,8 @@ describe("repo-cleanup-worker", () => {
     });
 
     it("skips pods without podName", async () => {
+      mockListRepoPods.mockResolvedValue([makePod({ podName: null })]);
       selectResults = [
-        [makePod({ podName: null })],
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -310,8 +329,8 @@ describe("repo-cleanup-worker", () => {
 
     it("detects crashed pod and marks as error", async () => {
       const pod = makePod();
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod], // repoPods
         [], // active tasks on the dead pod
         [], // soft stall detection: running tasks
         [], // stale tasks
@@ -330,8 +349,8 @@ describe("repo-cleanup-worker", () => {
 
     it("detects OOM killed pod", async () => {
       const pod = makePod();
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod], // repoPods
         [], // active tasks
         [], // soft stall detection: running tasks
         [], // stale tasks
@@ -345,16 +364,21 @@ describe("repo-cleanup-worker", () => {
       // insert should be called for health events — check the first call contains "oom_killed"
       expect(mockInsert).toHaveBeenCalled();
       const firstInsert = mockInsert.mock.results[0].value;
+      // The health event still names the repo: the pod's pool key
       expect(firstInsert.values).toHaveBeenCalledWith(
-        expect.objectContaining({ eventType: "oom_killed" }),
+        expect.objectContaining({
+          eventType: "oom_killed",
+          repoPodId: pod.id,
+          repoUrl: "https://github.com/test/repo",
+        }),
       );
     });
 
     it("marks worktrees dirty and wakes the reconciler on dead pod", async () => {
       const pod = makePod();
       const task = makeTask({ id: "task-dead-1", state: "running" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod], // repoPods
         [task], // active tasks on the dead pod
         [], // soft stall detection: running tasks
         [], // stale tasks
@@ -383,8 +407,8 @@ describe("repo-cleanup-worker", () => {
 
     it("auto-restarts dead pod — destroys and deletes record", async () => {
       const pod = makePod();
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod], // repoPods
         [], // active tasks
         [], // soft stall detection: running tasks
         [], // stale tasks
@@ -399,14 +423,14 @@ describe("repo-cleanup-worker", () => {
         id: pod.podId,
         name: pod.podName,
       });
-      expect(mockDelete).toHaveBeenCalled();
+      expect(mockDeletePod).toHaveBeenCalledWith(pod.id);
       expect(mockDeleteNetPolicy).toHaveBeenCalledWith(pod.podName);
     });
 
     it("detects pod recovery from error state", async () => {
       const pod = makePod({ state: "error" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod], // repoPods
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -432,8 +456,8 @@ describe("repo-cleanup-worker", () => {
 
     it("handles pod not found — cleans up record", async () => {
       const pod = makePod();
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod], // repoPods
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -443,7 +467,7 @@ describe("repo-cleanup-worker", () => {
       await processorFn();
 
       expect(mockDeleteNetPolicy).toHaveBeenCalledWith(pod.podName);
-      expect(mockDelete).toHaveBeenCalled();
+      expect(mockDeletePod).toHaveBeenCalledWith(pod.id);
       // Should record a "crashed" health event
       expect(mockInsert).toHaveBeenCalled();
       const insertCall = mockInsert.mock.results[0].value;
@@ -458,8 +482,8 @@ describe("repo-cleanup-worker", () => {
   describe("worktree cleanup", () => {
     it("skips non-ready pods for worktree cleanup", async () => {
       const pod = makePod({ state: "error" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod], // repoPods
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -482,8 +506,8 @@ describe("repo-cleanup-worker", () => {
 
     it("removes orphan worktrees when no task found in DB", async () => {
       const pod = makePod({ state: "ready" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod], // repoPods
         [], // task lookup for orphan worktree (no task found)
         [], // soft stall detection: running tasks
         [], // stale tasks
@@ -507,8 +531,8 @@ describe("repo-cleanup-worker", () => {
 
     it("preserves active worktrees", async () => {
       const pod = makePod({ state: "ready" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod], // repoPods
         [
           {
             state: "running",
@@ -535,8 +559,8 @@ describe("repo-cleanup-worker", () => {
 
     it("preserves preserved worktrees", async () => {
       const pod = makePod({ state: "ready" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [
           {
             state: "completed",
@@ -563,8 +587,8 @@ describe("repo-cleanup-worker", () => {
 
     it("preserves worktrees for running tasks", async () => {
       const pod = makePod({ state: "ready" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [
           {
             state: "running",
@@ -590,8 +614,8 @@ describe("repo-cleanup-worker", () => {
 
     it("preserves dirty worktrees for failed tasks with retries remaining", async () => {
       const pod = makePod({ state: "ready" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [
           {
             state: "failed",
@@ -620,8 +644,8 @@ describe("repo-cleanup-worker", () => {
       const pod = makePod({ state: "ready" });
       // updatedAt 3 minutes ago — past the 2min grace period
       const oldDate = new Date(Date.now() - 180_000).toISOString();
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [
           {
             state: "completed",
@@ -652,8 +676,8 @@ describe("repo-cleanup-worker", () => {
       const pod = makePod({ state: "ready" });
       // updatedAt 30 seconds ago — within the 2min grace period
       const recentDate = new Date(Date.now() - 30_000).toISOString();
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [
           {
             state: "completed",
@@ -681,8 +705,8 @@ describe("repo-cleanup-worker", () => {
 
     it("preserves worktrees for pr_opened tasks", async () => {
       const pod = makePod({ state: "ready" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [
           {
             state: "pr_opened",
@@ -708,8 +732,8 @@ describe("repo-cleanup-worker", () => {
 
     it("preserves worktrees for needs_attention tasks", async () => {
       const pod = makePod({ state: "ready" });
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [
           {
             state: "needs_attention",
@@ -744,7 +768,6 @@ describe("repo-cleanup-worker", () => {
         updatedAt: new Date(Date.now() - 700_000).toISOString(),
       });
       selectResults = [
-        [], // repoPods — no pods
         [], // soft stall detection: running tasks with lastActivityAt
         [staleTask], // stale tasks query
         [{ count: 1 }], // staleRetryCount < MAX_STALE_RETRIES (3)
@@ -781,7 +804,6 @@ describe("repo-cleanup-worker", () => {
         updatedAt: new Date(Date.now() - 700_000).toISOString(),
       });
       selectResults = [
-        [], // repoPods
         [], // soft stall detection: running tasks
         [staleTask], // stale tasks
         [{ count: 3 }], // staleRetryCount >= MAX_STALE_RETRIES
@@ -808,7 +830,6 @@ describe("repo-cleanup-worker", () => {
         updatedAt: new Date(Date.now() - 700_000).toISOString(),
       });
       selectResults = [
-        [], // repoPods
         [], // soft stall detection: running tasks
         [staleTask], // stale tasks
         [{ count: 0 }], // staleRetryCount = 0 (first stale detection)
@@ -834,7 +855,6 @@ describe("repo-cleanup-worker", () => {
         updatedAt: new Date(Date.now() - 700_000).toISOString(),
       });
       selectResults = [
-        [], // repoPods
         [], // soft stall detection: running tasks
         [staleTask], // stale tasks
         [{ count: 1 }], // staleRetryCount = 1 (already retried once)
@@ -866,7 +886,6 @@ describe("repo-cleanup-worker", () => {
         updatedAt: new Date(Date.now() - 700_000).toISOString(),
       });
       selectResults = [
-        [], // repoPods
         [], // soft stall detection: running tasks
         [staleTask], // stale tasks
         [{ count: 0 }], // staleRetryCount = 0 (first time)
@@ -893,7 +912,6 @@ describe("repo-cleanup-worker", () => {
         updatedAt: new Date(Date.now() - 700_000).toISOString(),
       });
       selectResults = [
-        [], // repoPods
         [], // soft stall detection: running tasks
         [staleTask], // stale tasks
         [{ count: 0 }], // staleRetryCount = 0
@@ -915,7 +933,6 @@ describe("repo-cleanup-worker", () => {
   describe("reconciliation and cleanup", () => {
     it("calls reconcileActiveTaskCounts", async () => {
       selectResults = [
-        [], // repoPods
         [], // soft stall detection: running tasks
         [], // soft stall detection: running tasks
         [], // stale tasks
@@ -928,7 +945,6 @@ describe("repo-cleanup-worker", () => {
 
     it("calls cleanupIdleRepoPods", async () => {
       selectResults = [
-        [], // repoPods
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -940,7 +956,6 @@ describe("repo-cleanup-worker", () => {
 
     it("handles cleanupExpiredSessions error gracefully", async () => {
       selectResults = [
-        [], // repoPods
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -953,7 +968,6 @@ describe("repo-cleanup-worker", () => {
 
     it("calls cleanupExpiredSessions", async () => {
       selectResults = [
-        [], // repoPods
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -970,8 +984,8 @@ describe("repo-cleanup-worker", () => {
 
   describe("edge cases", () => {
     it("handles empty pod list gracefully", async () => {
+      mockListRepoPods.mockResolvedValue([]); // no repo pods at all
       selectResults = [
-        [], // repoPods — no pods at all
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -984,8 +998,8 @@ describe("repo-cleanup-worker", () => {
       const readyPod = makePod({ id: "pod-ready", state: "ready", podName: "p2" });
       const noPodName = makePod({ id: "pod-no-name", podName: null });
 
+      mockListRepoPods.mockResolvedValue([provisioningPod, readyPod, noPodName]);
       selectResults = [
-        [provisioningPod, readyPod, noPodName], // repoPods
         [], // soft stall detection: running tasks
         [], // stale tasks
       ];
@@ -1005,8 +1019,8 @@ describe("repo-cleanup-worker", () => {
 
     it("handles status returning unknown state", async () => {
       const pod = makePod();
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [], // active tasks
         [], // soft stall detection: running tasks
         [], // stale tasks
@@ -1019,14 +1033,14 @@ describe("repo-cleanup-worker", () => {
 
       // Should treat "unknown" same as "failed" — record health event and clean up
       expect(mockInsert).toHaveBeenCalled();
-      expect(mockDelete).toHaveBeenCalled();
+      expect(mockDeletePod).toHaveBeenCalledWith(pod.id);
     });
 
     it("removes worktrees for cancelled tasks after grace period", async () => {
       const pod = makePod({ state: "ready" });
       const oldDate = new Date(Date.now() - 180_000).toISOString();
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [
           {
             state: "cancelled",
@@ -1055,8 +1069,8 @@ describe("repo-cleanup-worker", () => {
     it("removes worktrees for failed tasks with no retries left after grace period", async () => {
       const pod = makePod({ state: "ready" });
       const oldDate = new Date(Date.now() - 180_000).toISOString();
+      mockListRepoPods.mockResolvedValue([pod]);
       selectResults = [
-        [pod],
         [
           {
             state: "failed",
@@ -1094,7 +1108,6 @@ describe("repo-cleanup-worker", () => {
       };
 
       selectResults = [
-        [], // pods
         [stalledTask], // running tasks with lastActivityAt (stall detection query)
         [], // repo config lookup
         [], // soft stall detection: running tasks
@@ -1127,7 +1140,6 @@ describe("repo-cleanup-worker", () => {
       };
 
       selectResults = [
-        [], // pods
         [activeTask], // running tasks
         [], // repo config
         [], // soft stall detection: running tasks
@@ -1155,7 +1167,6 @@ describe("repo-cleanup-worker", () => {
       };
 
       selectResults = [
-        [], // pods
         [alreadyStalled], // running tasks
         [], // repo config
         [], // soft stall detection: running tasks

@@ -325,23 +325,21 @@ export async function sharedDirectoryRoutes(rawApp: FastifyInstance) {
       const { getRuntime } = await import("../services/container-service.js");
       const { deleteNetworkPolicy, deleteEnvoyConfigMap } =
         await import("../services/repo-pool-service.js");
-      const { db: dbClient } = await import("../db/client.js");
-      const { repoPods: repoPodsTable } = await import("../db/schema.js");
-      const { eq: eqOp } = await import("drizzle-orm");
+      const { deletePod } = await import("../services/agent-pod-pool.js");
 
       const pods = await listRepoPodsForRepo(repo.repoUrl);
       const rt = getRuntime();
       let recycled = 0;
 
       for (const pod of pods) {
-        if (pod.state !== "ready" || pod.activeTaskCount > 0) continue;
+        if (pod.state !== "ready" || pod.activeCount > 0) continue;
         try {
           if (pod.podName) {
             await deleteNetworkPolicy(pod.podName).catch(() => {});
             await deleteEnvoyConfigMap(pod.podName).catch(() => {});
             await rt.destroy({ id: pod.podId ?? pod.podName, name: pod.podName });
           }
-          await dbClient.delete(repoPodsTable).where(eqOp(repoPodsTable.id, pod.id));
+          await deletePod(pod.id);
           recycled++;
         } catch {
           // Skip pods that can't be recycled

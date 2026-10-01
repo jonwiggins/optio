@@ -1,4 +1,5 @@
 import { eq, desc, sql, and, lte } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import type { LocalAgentSessionMode, RunTarget } from "@optio/shared";
 import { db } from "../db/client.js";
 import {
@@ -8,12 +9,12 @@ import {
   workflowRunLogs,
   taskLogs,
 } from "../db/schema.js";
-import { WorkflowRunState, canTransitionWorkflowRun, transitionWorkflowRun } from "@optio/shared";
+import { WorkflowRunState, canTransitionWorkflowRun } from "@optio/shared";
 import { publishWorkflowRunEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
 import * as triggerService from "./trigger-service.js";
 import { renderRunTitle } from "./prompt-template-service.js";
-import { pgDate } from "../utils/pg-timestamp.js";
+import { pgDate, updatedAtMatches } from "../utils/pg-timestamp.js";
 
 // ── Workflow CRUD ────────────────────────────────────────────────────────────
 
@@ -484,37 +485,28 @@ export async function createWorkflowRun(
 // ── Workflow Run Operations ─────────────────────────────────────────────────
 
 /**
- * Retry a failed workflow run by transitioning it back to queued.
+ * Retry a failed workflow run by transitioning it back to queued. The
+ * transition wakes the reconciler, which enqueues the run.
  */
 export async function retryWorkflowRun(id: string) {
   const run = await getWorkflowRun(id);
   if (!run) throw new Error("Workflow run not found");
 
-  const currentState = run.state as WorkflowRunState;
-  if (!canTransitionWorkflowRun(currentState, WorkflowRunState.QUEUED)) {
-    throw new Error(`Cannot retry workflow run in state "${run.state}"`);
-  }
-
-  transitionWorkflowRun(currentState, WorkflowRunState.QUEUED);
-
-  const [updated] = await db
-    .update(workflowRuns)
-    .set({
-      state: WorkflowRunState.QUEUED,
-      retryCount: (run.retryCount ?? 0) + 1,
-      errorMessage: null,
-      finishedAt: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(workflowRuns.id, id))
-    .returning();
+  const updated = await transitionWorkflowRunCas(
+    id,
+    run.state as WorkflowRunState,
+    WorkflowRunState.QUEUED,
+    { retryCount: (run.retryCount ?? 0) + 1, errorMessage: null, finishedAt: null },
+  );
+  if (!updated) throw new Error(`Cannot retry workflow run in state "${run.state}"`);
 
   logger.info({ workflowRunId: id }, "Workflow run retried");
   return updated;
 }
 
 /**
- * Cancel a running workflow run by transitioning it to failed.
+ * Cancel a running workflow run by transitioning it to failed (which also
+ * stops a local run's terminal).
  *
  * Also exhausts the run's retry budget (retryCount = workflow.maxRetries):
  * the reconciler's decideFailed auto-retries any FAILED run with budget left
@@ -527,60 +519,54 @@ export async function cancelWorkflowRun(id: string) {
   const run = await getWorkflowRun(id);
   if (!run) throw new Error("Workflow run not found");
 
-  const currentState = run.state as WorkflowRunState;
-  if (!canTransitionWorkflowRun(currentState, WorkflowRunState.FAILED)) {
-    throw new Error(`Cannot cancel workflow run in state "${run.state}"`);
-  }
-
-  transitionWorkflowRun(currentState, WorkflowRunState.FAILED);
-
   const workflow = await getWorkflow(run.workflowId);
-
-  const [updated] = await db
-    .update(workflowRuns)
-    .set({
-      state: WorkflowRunState.FAILED,
+  const updated = await transitionWorkflowRunCas(
+    id,
+    run.state as WorkflowRunState,
+    WorkflowRunState.FAILED,
+    {
       errorMessage: "Cancelled by user",
       finishedAt: new Date(),
       retryCount: Math.max(run.retryCount ?? 0, workflow?.maxRetries ?? 0),
-      updatedAt: new Date(),
-    })
-    .where(eq(workflowRuns.id, id))
-    .returning();
+    },
+  );
+  if (!updated) throw new Error(`Cannot cancel workflow run in state "${run.state}"`);
 
   logger.info({ workflowRunId: id }, "Workflow run cancelled");
-
-  // A local run has a live agent on the owner's machine: stop it. Dynamic
-  // import — local-run-service imports this module.
-  if (updated?.localTerminalId) {
-    import("./local-run-service.js")
-      .then(({ killLinkedTerminal }) =>
-        killLinkedTerminal(updated.localTerminalId, "run_cancelled"),
-      )
-      .catch((err) => logger.warn({ err, runId: id }, "Failed to kill local terminal for run"));
-  }
   return updated;
 }
 
 /**
- * Compare-and-swap state transition for a workflow run: lands only while the
- * row is still in `from`, so concurrent writers (daemon frames for local
- * runs, the reconciler, the worker) can't clobber each other. Publishes the
- * WS state-change event, the outbound webhook, and wakes the reconciler —
- * the same fan-out as the worker's own transitions. Returns the updated row,
- * or null when the transition is invalid or someone else moved the run.
+ * The one way a Job run changes state. Compare-and-swap: it lands only while
+ * the row is still in `from` (and, for the reconciler, still at `version`),
+ * so concurrent writers — the worker, daemon frames for local runs, the
+ * reconciler, zombie detection, user actions — can't clobber each other.
+ * One fan-out for every caller: the WS state-change event, the outbound
+ * webhook, stopping a local run's terminal when the run fails, and (unless
+ * the reconciler itself is the caller) a reconcile wake. Returns the updated
+ * row, or null when the transition is invalid or someone else moved the run.
  */
 export async function transitionWorkflowRunCas(
   runId: string,
   from: WorkflowRunState,
   to: WorkflowRunState,
-  fields: Partial<typeof workflowRuns.$inferInsert> = {},
+  fields: PgUpdateSetSource<typeof workflowRuns> = {},
+  opts: { version?: Date; wakeReconciler?: boolean } = {},
 ) {
-  if (!canTransitionWorkflowRun(from, to)) return null;
+  if (!canTransitionWorkflowRun(from, to)) {
+    logger.warn({ runId, from, to }, "Invalid workflow run state transition");
+    return null;
+  }
   const [row] = await db
     .update(workflowRuns)
     .set({ ...fields, state: to, updatedAt: new Date() })
-    .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.state, from)))
+    .where(
+      and(
+        eq(workflowRuns.id, runId),
+        eq(workflowRuns.state, from),
+        opts.version ? updatedAtMatches(workflowRuns.updatedAt, opts.version) : undefined,
+      ),
+    )
     .returning();
   if (!row) return null;
 
@@ -608,6 +594,9 @@ export async function transitionWorkflowRunCas(
   if (webhookEvent) {
     const workflow = await getWorkflow(row.workflowId).catch(() => null);
     if (workflow) {
+      const durationMs = row.startedAt
+        ? (row.finishedAt ?? new Date()).getTime() - row.startedAt.getTime()
+        : undefined;
       import("../workers/webhook-worker.js")
         .then(({ enqueueWebhookEvent }) =>
           enqueueWebhookEvent(webhookEvent as never, {
@@ -624,10 +613,7 @@ export async function transitionWorkflowRunCas(
             modelUsed: row.modelUsed ?? undefined,
             errorMessage: row.errorMessage ?? undefined,
             retryCount: row.retryCount,
-            durationMs:
-              row.startedAt && row.finishedAt
-                ? row.finishedAt.getTime() - row.startedAt.getTime()
-                : undefined,
+            durationMs,
             startedAt: row.startedAt?.toISOString() ?? null,
             finishedAt: row.finishedAt?.toISOString() ?? null,
           }),
@@ -636,11 +622,27 @@ export async function transitionWorkflowRunCas(
     }
   }
 
-  import("./reconcile-queue.js")
-    .then(({ enqueueReconcile }) =>
-      enqueueReconcile({ kind: "standalone", id: runId }, { reason: `transition:${from}->${to}` }),
-    )
-    .catch((err) => logger.warn({ err, runId }, "Failed to enqueue reconcile"));
+  // A local run failed from the server side (a cancel, a disabled Job, the
+  // reconciler): its agent may still be alive in a terminal on the owner's
+  // machine — stop it. A no-op when the terminal already exited. Dynamic
+  // import — local-run-service imports this module.
+  if (to === WorkflowRunState.FAILED && row.localTerminalId) {
+    const terminalId = row.localTerminalId;
+    import("./local-run-service.js")
+      .then(({ killLinkedTerminal }) => killLinkedTerminal(terminalId, `run_failed:${from}`))
+      .catch((err) => logger.warn({ err, runId }, "Failed to kill local terminal for run"));
+  }
+
+  if (opts.wakeReconciler !== false) {
+    import("./reconcile-queue.js")
+      .then(({ enqueueReconcile }) =>
+        enqueueReconcile(
+          { kind: "standalone", id: runId },
+          { reason: `transition:${from}->${to}` },
+        ),
+      )
+      .catch((err) => logger.warn({ err, runId }, "Failed to enqueue reconcile"));
+  }
 
   return row;
 }
@@ -688,49 +690,6 @@ export async function insertWorkflowRunLog(input: {
     })
     .returning();
   return log;
-}
-
-// ── Workflow Triggers ─────────────────────────────────────────────────────────
-
-// ── State transitions + event publishing ─────────────────────────────────────
-
-export async function transitionWorkflowRunState(
-  workflowRunId: string,
-  toState: WorkflowRunState,
-  extras?: {
-    costUsd?: string;
-    inputTokens?: number;
-    outputTokens?: number;
-    modelUsed?: string;
-    errorMessage?: string;
-  },
-) {
-  const run = await getWorkflowRun(workflowRunId);
-  if (!run) throw new Error(`Workflow run ${workflowRunId} not found`);
-
-  const fromState = run.state as WorkflowRunState;
-  transitionWorkflowRun(fromState, toState);
-
-  const updates: Record<string, unknown> = { state: toState, updatedAt: new Date() };
-  if (toState === "running") updates.startedAt = new Date();
-  if (toState === "completed" || toState === "failed") updates.finishedAt = new Date();
-  if (extras?.costUsd !== undefined) updates.costUsd = extras.costUsd;
-  if (extras?.inputTokens !== undefined) updates.inputTokens = extras.inputTokens;
-  if (extras?.outputTokens !== undefined) updates.outputTokens = extras.outputTokens;
-  if (extras?.modelUsed !== undefined) updates.modelUsed = extras.modelUsed;
-  if (extras?.errorMessage !== undefined) updates.errorMessage = extras.errorMessage;
-
-  await db.update(workflowRuns).set(updates).where(eq(workflowRuns.id, workflowRunId));
-
-  await publishWorkflowRunEvent({
-    type: "workflow_run:state_changed",
-    workflowRunId,
-    workflowId: run.workflowId,
-    fromState,
-    toState,
-    timestamp: new Date().toISOString(),
-    ...(extras ?? {}),
-  });
 }
 
 export async function appendWorkflowRunLog(input: {

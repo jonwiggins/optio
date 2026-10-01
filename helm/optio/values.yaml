@@ -32,6 +32,15 @@ api:
       memory: 1Gi
   env:
     LOG_LEVEL: info
+  # Rollout strategy for the API Deployment ({} = Kubernetes' RollingUpdate).
+  # Upgrades whose migrations move data between tables (see CHANGELOG) are
+  # safest with `{ type: Recreate }`: no old replica keeps serving against
+  # tables the new one just replaced.
+  strategy: {}
+  # Migrations run at boot, before the API listens: the startup probe allows
+  # failureThreshold × 10s for them before liveness checks begin.
+  startupProbe:
+    failureThreshold: 60
   # Pod anti-affinity spreads API replicas across nodes.
   # "soft" = preferredDuringSchedulingIgnoredDuringExecution (default)
   # "hard" = requiredDuringSchedulingIgnoredDuringExecution

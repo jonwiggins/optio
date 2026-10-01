@@ -168,10 +168,12 @@ See migration `1777200001_persistent_agents.sql`. Tables:
 
 - `persistent_agents` — the agent itself
 - `persistent_agent_turns` — per-turn record
-- `persistent_agent_turn_logs` — log lines per turn
 - `persistent_agent_messages` — inbox (pending + processed)
-- `persistent_agent_pods` — per-agent pods, with `keep_warm_until` for
-  the cleanup worker
+
+A turn's log lines live in the one log table every run uses, `task_logs`,
+keyed by `persistent_agent_turn_id`; an agent's pod lives in the one pod
+table, `agent_pods` (`pool = 'persistent-agent'`, `pool_key` = the agent's
+id), with `keep_warm_until` for the cleanup worker (null = always-on).
 
 ## Open follow-ups
 

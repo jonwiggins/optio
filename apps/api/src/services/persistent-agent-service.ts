@@ -10,9 +10,7 @@ import { db } from "../db/client.js";
 import {
   persistentAgents,
   persistentAgentTurns,
-  persistentAgentTurnLogs,
   persistentAgentMessages,
-  persistentAgentPods,
   workflowTriggers,
 } from "../db/schema.js";
 import {
@@ -26,6 +24,8 @@ import {
   buildSenderId,
 } from "@optio/shared";
 import { publishPersistentAgentEvent } from "./event-bus.js";
+import * as runLogService from "./run-log-service.js";
+import { plusCost } from "./run-usage.js";
 import { logger } from "../logger.js";
 
 // ── CRUD ────────────────────────────────────────────────────────────────────
@@ -187,7 +187,14 @@ export async function deletePersistentAgent(
     .delete(persistentAgents)
     .where(and(eq(persistentAgents.id, id), wsPredicate(workspaceId)))
     .returning({ id: persistentAgents.id });
-  return deleted.length > 0;
+  if (deleted.length === 0) return false;
+  // Its pod (an always-on one would never idle out) goes with it. Dynamic
+  // import: the pool service is about pods, this module about agents.
+  const { reapPodsForAgent } = await import("./persistent-agent-pool-service.js");
+  await reapPodsForAgent(id).catch((err) =>
+    logger.warn({ err, agentId: id }, "Failed to reap a deleted agent's pods"),
+  );
+  return true;
 }
 
 // ── Control intent ──────────────────────────────────────────────────────────
@@ -548,17 +555,15 @@ export interface AppendLogInput {
 }
 
 export async function appendPersistentAgentLog(input: AppendLogInput) {
-  const [log] = await db
-    .insert(persistentAgentTurnLogs)
-    .values({
-      turnId: input.turnId,
-      agentId: input.agentId,
-      stream: input.stream ?? "stdout",
+  const log = await runLogService.insertLog(
+    { persistentAgentTurnId: input.turnId },
+    {
       content: input.content,
-      logType: input.logType ?? null,
-      metadata: input.metadata ?? null,
-    })
-    .returning();
+      stream: input.stream,
+      logType: input.logType,
+      metadata: input.metadata,
+    },
+  );
 
   const agent = await getPersistentAgentUnscoped(input.agentId);
   if (agent) {
@@ -577,13 +582,18 @@ export async function appendPersistentAgentLog(input: AppendLogInput) {
   return log;
 }
 
+/** A turn's log lines, oldest first, in the turn-log shape the agent routes have always served. */
 export async function listTurnLogs(turnId: string, limit = 1000) {
-  return db
-    .select()
-    .from(persistentAgentTurnLogs)
-    .where(eq(persistentAgentTurnLogs.turnId, turnId))
-    .orderBy(asc(persistentAgentTurnLogs.timestamp))
-    .limit(limit);
+  const rows = await runLogService.listLogs({ persistentAgentTurnId: turnId }, { limit });
+  return rows.map((r) => ({
+    id: r.id,
+    turnId,
+    stream: r.stream,
+    content: r.content,
+    logType: r.logType,
+    metadata: r.metadata,
+    timestamp: r.timestamp,
+  }));
 }
 
 // ── wakeAgent: canonical entry point ───────────────────────────────────────
@@ -651,33 +661,17 @@ function deriveSenderType(source: PersistentAgentWakeSource): PersistentAgentMes
   }
 }
 
-// ── Pods ────────────────────────────────────────────────────────────────────
-//
-// Persistent Agent pods are managed by persistent-agent-pool-service. This
-// file exposes only read helpers for the snapshot builder.
-
-export async function getActivePodForAgent(agentId: string) {
-  const [row] = await db
-    .select()
-    .from(persistentAgentPods)
-    .where(eq(persistentAgentPods.agentId, agentId))
-    .orderBy(desc(persistentAgentPods.updatedAt))
-    .limit(1);
-  return row ?? null;
-}
-
 // ── Cost accumulation ──────────────────────────────────────────────────────
 
+/**
+ * Add a turn's spend to the agent's running total. Exact and atomic (Postgres
+ * adds), and it leaves `updated_at` alone: that is the reconciler's CAS
+ * version, and a cost tally is not a state change.
+ */
 export async function addToTotalCost(agentId: string, addUsd: string) {
-  const [agent] = await db
-    .select({ totalCostUsd: persistentAgents.totalCostUsd })
-    .from(persistentAgents)
-    .where(eq(persistentAgents.id, agentId));
-  if (!agent) return;
-  const total = (Number(agent.totalCostUsd ?? "0") + Number(addUsd ?? "0")).toFixed(6);
   await db
     .update(persistentAgents)
-    .set({ totalCostUsd: total, updatedAt: new Date() })
+    .set({ totalCostUsd: plusCost(persistentAgents.totalCostUsd, addUsd) })
     .where(eq(persistentAgents.id, agentId));
 }
 

@@ -62,9 +62,15 @@ vi.mock("../db/client.js", () => ({
 }));
 
 vi.mock("../db/schema.js", () => ({
-  repoPods: {},
   repos: {},
   interactiveSessions: {},
+}));
+
+// The session's pod is read through agent-pod-pool. None is found here, so an
+// authorized connection gets as far as the pod lookup and stops there.
+const mockGetPod = vi.fn();
+vi.mock("../services/agent-pod-pool.js", () => ({
+  getPod: (...args: unknown[]) => mockGetPod(...args),
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -130,6 +136,7 @@ async function invokeHandler(registerFn: (app: any) => Promise<void>, socket: an
 describe("session-chat WS authentication", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetPod.mockResolvedValue(null);
   });
 
   it("rejects unauthenticated connections", async () => {
@@ -164,6 +171,7 @@ describe("session-chat WS authentication", () => {
     await invokeHandler(sessionChatWs, socket, req);
 
     expect(socket.close).toHaveBeenCalledWith(4403, "Not authorized for this session");
+    expect(mockGetPod).not.toHaveBeenCalled();
   });
 
   it("allows access when user owns the session", async () => {
@@ -185,6 +193,8 @@ describe("session-chat WS authentication", () => {
 
     // Should NOT close with 4403
     expect(socket.close).not.toHaveBeenCalledWith(4403, expect.any(String));
+    // ...and goes on to look up the session's pod
+    expect(mockGetPod).toHaveBeenCalledWith("pod-1");
   });
 
   it("allows access when session has no userId (legacy sessions)", async () => {
@@ -206,12 +216,15 @@ describe("session-chat WS authentication", () => {
 
     // Should NOT close with 4403
     expect(socket.close).not.toHaveBeenCalledWith(4403, expect.any(String));
+    // ...and goes on to look up the session's pod
+    expect(mockGetPod).toHaveBeenCalledWith("pod-1");
   });
 });
 
 describe("session-terminal WS authentication", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetPod.mockResolvedValue(null);
   });
 
   it("rejects unauthenticated connections", async () => {
@@ -244,6 +257,7 @@ describe("session-terminal WS authentication", () => {
     await invokeHandler(sessionTerminalWs, socket, req);
 
     expect(socket.close).toHaveBeenCalledWith(4403, "Not authorized for this session");
+    expect(mockGetPod).not.toHaveBeenCalled();
   });
 
   it("allows access when user owns the session", async () => {
@@ -264,6 +278,8 @@ describe("session-terminal WS authentication", () => {
 
     // Should NOT close with 4403
     expect(socket.close).not.toHaveBeenCalledWith(4403, expect.any(String));
+    // ...and goes on to look up the session's pod
+    expect(mockGetPod).toHaveBeenCalledWith("pod-1");
   });
 
   it("allows access when session has no userId (legacy sessions)", async () => {
@@ -284,5 +300,7 @@ describe("session-terminal WS authentication", () => {
 
     // Should NOT close with 4403
     expect(socket.close).not.toHaveBeenCalledWith(4403, expect.any(String));
+    // ...and goes on to look up the session's pod
+    expect(mockGetPod).toHaveBeenCalledWith("pod-1");
   });
 });
