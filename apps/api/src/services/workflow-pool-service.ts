@@ -1,8 +1,14 @@
-import { eq, and, lt, sql, asc } from "drizzle-orm";
+/**
+ * Pods for Jobs (standalone runs): runs of one Job share pods, scaling out to
+ * the Job's `maxPodInstances` replicas each hosting up to `maxAgentsPerPod`
+ * concurrent runs. Rows live in `agent_pods` (pool "standalone", keyed by the
+ * Job's id); picking, slots, and count repair are agent-pod-pool's.
+ */
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { workflowPods, workflowRuns } from "../db/schema.js";
+import { workflowRuns } from "../db/schema.js";
 import { getRuntime } from "./container-service.js";
-import type { ContainerHandle, ContainerSpec, ExecSession } from "@optio/shared";
+import type { ContainerSpec, ExecSession } from "@optio/shared";
 import {
   generateWorkflowPodName,
   generateWorkflowJobName,
@@ -12,22 +18,13 @@ import {
 import { logger } from "../logger.js";
 import { resolveImage } from "./repo-pool-service.js";
 import { getWorkloadManager, isStatefulSetEnabled } from "./k8s-workload-service.js";
-import { buildEnvExports } from "../utils/pod-env.js";
+import * as podPool from "./agent-pod-pool.js";
+import { buildPooledExecScript } from "../utils/pod-env.js";
+import { updatedAtMatches } from "../utils/pg-timestamp.js";
 
 const IDLE_TIMEOUT_MS = parseIntEnv("OPTIO_WORKFLOW_POD_IDLE_MS", 600000); // 10 min default
 
-export interface WorkflowPod {
-  id: string;
-  workflowId: string;
-  instanceIndex: number;
-  podName: string | null;
-  podId: string | null;
-  state: string;
-  activeRunCount: number;
-  jobName?: string | null;
-  managedBy?: string;
-  errorMessage?: string | null;
-}
+export type WorkflowPod = podPool.AgentPod;
 
 export interface GetOrCreateOpts {
   preferredPodId?: string;
@@ -41,129 +38,20 @@ export interface GetOrCreateOpts {
   memoryLimit?: string | null;
 }
 
-/**
- * Select (or create) a pooled pod for a standalone workflow.
- *
- * Shared with repo pods: runs within a workflow share pods, scaling out to
- * `maxPodInstances` replicas each hosting up to `maxAgentsPerPod` concurrent
- * runs. Selection mirrors repo-pool-service:
- *   1. Same-pod retry affinity (`preferredPodId`)
- *   2. Least-loaded ready pod with capacity
- *   3. Scale up (create another instance) if under `maxPodInstances`
- *   4. Fall back to the least-loaded ready pod (caller concurrency gates above)
- *      or wait for a provisioning pod to come up.
- */
+/** Pick (or create) a pod for a run of `workflowId` — see agent-pod-pool's pickPod. */
 export async function getOrCreateWorkflowPod(
   workflowId: string,
   opts: GetOrCreateOpts = {},
 ): Promise<WorkflowPod> {
-  const maxAgentsPerPod = opts.maxAgentsPerPod ?? 2;
-  const maxPodInstances = opts.maxPodInstances ?? 1;
-  const rt = getRuntime();
-
-  // 1. Preferred pod (same-pod retry affinity)
-  if (opts.preferredPodId) {
-    const [preferred] = await db
-      .select()
-      .from(workflowPods)
-      .where(eq(workflowPods.id, opts.preferredPodId));
-    if (preferred && preferred.state === "ready" && preferred.podName) {
-      try {
-        const status = await rt.status({
-          id: preferred.podId ?? preferred.podName,
-          name: preferred.podName,
-        });
-        if (status.state === "running" && preferred.activeRunCount < maxAgentsPerPod) {
-          return preferred as WorkflowPod;
-        }
-      } catch {
-        // Pod gone — fall through to general selection
-      }
-    }
-  }
-
-  // 2. All pods for this workflow, sorted by least-loaded first
-  const existingPods = await db
-    .select()
-    .from(workflowPods)
-    .where(eq(workflowPods.workflowId, workflowId))
-    .orderBy(asc(workflowPods.activeRunCount));
-
-  for (const pod of existingPods) {
-    if (pod.state === "ready" && pod.podName && pod.activeRunCount < maxAgentsPerPod) {
-      try {
-        const status = await rt.status({
-          id: pod.podId ?? pod.podName,
-          name: pod.podName,
-        });
-        if (status.state === "running") {
-          return pod as WorkflowPod;
-        }
-      } catch {
-        // Pod gone
-      }
-      await db.delete(workflowPods).where(eq(workflowPods.id, pod.id));
-    } else if (pod.state === "provisioning") {
-      return waitForPodReady(pod.id);
-    } else if (pod.state === "error") {
-      await db.delete(workflowPods).where(eq(workflowPods.id, pod.id));
-    }
-  }
-
-  // 3. At instance limit? Return least-loaded or wait for provisioning.
-  const [{ count: currentPodCount }] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(workflowPods)
-    .where(eq(workflowPods.workflowId, workflowId));
-
-  if (Number(currentPodCount) >= maxPodInstances) {
-    const [busyPod] = await db
-      .select()
-      .from(workflowPods)
-      .where(and(eq(workflowPods.workflowId, workflowId), eq(workflowPods.state, "ready")))
-      .orderBy(asc(workflowPods.activeRunCount))
-      .limit(1);
-    if (busyPod) {
-      return busyPod as WorkflowPod;
-    }
-    const [provisioningPod] = await db
-      .select()
-      .from(workflowPods)
-      .where(and(eq(workflowPods.workflowId, workflowId), eq(workflowPods.state, "provisioning")));
-    if (provisioningPod) {
-      return waitForPodReady(provisioningPod.id);
-    }
-    throw new Error(`All ${maxPodInstances} pod instances for workflow ${workflowId} unavailable`);
-  }
-
-  // 4. Scale up — next instance index.
-  const nextInstanceIndex = await pickNextInstanceIndex(workflowId);
-  const createFn = isStatefulSetEnabled() ? createWorkflowPodViaJob : createWorkflowPod;
-  try {
-    return await createFn(workflowId, nextInstanceIndex, opts);
-  } catch (err: any) {
-    if (err?.message?.includes("unique") || err?.code === "23505") {
-      logger.info({ workflowId }, "Concurrent pod creation detected, retrying lookup");
-      return getOrCreateWorkflowPod(workflowId, opts);
-    }
-    throw err;
-  }
-}
-
-/**
- * Pick the lowest unused instance index for a workflow. When pods are removed
- * after being scaled up, we reuse the gap rather than always incrementing — so
- * that LIFO idle cleanup stays matched with LIFO scale-down semantics.
- */
-async function pickNextInstanceIndex(workflowId: string): Promise<number> {
-  const rows = await db
-    .select({ idx: workflowPods.instanceIndex })
-    .from(workflowPods)
-    .where(eq(workflowPods.workflowId, workflowId));
-  const taken = new Set(rows.map((r) => r.idx));
-  let i = 0;
-  while (taken.has(i)) i++;
-  return i;
+  return podPool.pickPod("standalone", workflowId, {
+    preferredPodId: opts.preferredPodId,
+    maxAgentsPerPod: opts.maxAgentsPerPod ?? 2,
+    maxPodInstances: opts.maxPodInstances ?? 1,
+    create: (instanceIndex) =>
+      isStatefulSetEnabled()
+        ? createWorkflowPodViaJob(workflowId, instanceIndex, opts)
+        : createWorkflowPod(workflowId, instanceIndex, opts),
+  });
 }
 
 function buildInitScript(): string {
@@ -176,93 +64,62 @@ function buildInitScript(): string {
   ].join("\n");
 }
 
+function podSpec(
+  name: string,
+  workflowId: string,
+  instanceIndex: number,
+  opts: GetOrCreateOpts,
+): ContainerSpec {
+  return {
+    name,
+    image: resolveImage(opts.imageConfig),
+    command: ["bash", "-c", buildInitScript()],
+    env: {
+      OPTIO_WORKFLOW_ID: workflowId,
+      OPTIO_POD_INSTANCE_INDEX: String(instanceIndex),
+    },
+    workDir: "/workspace",
+    imagePullPolicy: (process.env.OPTIO_IMAGE_PULL_POLICY as any) ?? "Never",
+    cpuRequest: opts.cpuRequest ?? undefined,
+    cpuLimit: opts.cpuLimit ?? undefined,
+    memoryRequest: opts.memoryRequest ?? undefined,
+    memoryLimit: opts.memoryLimit ?? undefined,
+    labels: {
+      "optio.workflow-id": workflowId.slice(0, 63),
+      "optio.instance-index": String(instanceIndex),
+      "optio.type": "workflow-pod",
+      "managed-by": "optio",
+    },
+  };
+}
+
 export async function createWorkflowPod(
   workflowId: string,
   instanceIndex: number,
   opts: GetOrCreateOpts,
 ): Promise<WorkflowPod> {
-  const [record] = await db
-    .insert(workflowPods)
-    .values({
-      workflowId,
-      instanceIndex,
-      workspaceId: opts.workspaceId ?? undefined,
-      state: "provisioning",
-    })
-    .returning();
+  const record = await podPool.insertPod({
+    pool: "standalone",
+    poolKey: workflowId,
+    instanceIndex,
+    workspaceId: opts.workspaceId ?? undefined,
+  });
 
   const rt = getRuntime();
-  const image = resolveImage(opts.imageConfig);
   const podName = generateWorkflowPodName(workflowId, instanceIndex);
-
-  let podNameForCleanup: string | undefined;
   try {
-    podNameForCleanup = podName;
-
-    const spec: ContainerSpec = {
-      name: podName,
-      image,
-      command: ["bash", "-c", buildInitScript()],
-      env: {
-        OPTIO_WORKFLOW_ID: workflowId,
-        OPTIO_POD_INSTANCE_INDEX: String(instanceIndex),
-      },
-      workDir: "/workspace",
-      imagePullPolicy: (process.env.OPTIO_IMAGE_PULL_POLICY as any) ?? "Never",
-      cpuRequest: opts.cpuRequest ?? undefined,
-      cpuLimit: opts.cpuLimit ?? undefined,
-      memoryRequest: opts.memoryRequest ?? undefined,
-      memoryLimit: opts.memoryLimit ?? undefined,
-      labels: {
-        "optio.workflow-id": workflowId.slice(0, 63),
-        "optio.instance-index": String(instanceIndex),
-        "optio.type": "workflow-pod",
-        "managed-by": "optio",
-      },
-    };
-
-    const handle = await rt.create(spec);
-
-    await db
-      .update(workflowPods)
-      .set({
-        podName: handle.name,
-        podId: handle.id,
-        state: "ready",
-        updatedAt: new Date(),
-      })
-      .where(eq(workflowPods.id, record.id));
-
+    const handle = await rt.create(podSpec(podName, workflowId, instanceIndex, opts));
+    const ready = await podPool.markPodReady(record.id, { podName: handle.name, podId: handle.id });
     logger.info({ workflowId, instanceIndex, podName: handle.name }, "Workflow pod created");
-
-    return {
-      ...record,
-      podName: handle.name,
-      podId: handle.id,
-      state: "ready",
-    };
+    return ready;
   } catch (err) {
-    await db
-      .update(workflowPods)
-      .set({
-        state: "error",
-        errorMessage: String(err),
-        updatedAt: new Date(),
-      })
-      .where(eq(workflowPods.id, record.id));
-
-    if (podNameForCleanup) {
-      try {
-        await rt.destroy({ id: podNameForCleanup, name: podNameForCleanup });
-        logger.info({ podName: podNameForCleanup }, "Cleaned up failed workflow pod");
-      } catch (cleanupErr) {
-        logger.warn(
-          { err: cleanupErr, podName: podNameForCleanup },
-          "Failed to cleanup errored workflow pod",
-        );
-      }
+    await podPool.markPodError(record.id, err);
+    try {
+      await rt.destroy({ id: podName, name: podName });
+      logger.info({ podName }, "Cleaned up failed workflow pod");
+    } catch (cleanupErr) {
+      logger.warn({ err: cleanupErr, podName }, "Failed to cleanup errored workflow pod");
     }
-
     throw err;
   }
 }
@@ -276,108 +133,48 @@ async function createWorkflowPodViaJob(
   opts: GetOrCreateOpts,
 ): Promise<WorkflowPod> {
   const jobName = generateWorkflowJobName(workflowId, instanceIndex);
-
-  const [record] = await db
-    .insert(workflowPods)
-    .values({
-      workflowId,
-      instanceIndex,
-      workspaceId: opts.workspaceId ?? undefined,
-      state: "provisioning",
-      jobName,
-      managedBy: "job",
-    })
-    .returning();
+  const record = await podPool.insertPod({
+    pool: "standalone",
+    poolKey: workflowId,
+    instanceIndex,
+    workspaceId: opts.workspaceId ?? undefined,
+    jobName,
+    managedBy: "job",
+  });
 
   try {
-    const image = resolveImage(opts.imageConfig);
-    const manager = getWorkloadManager();
-
-    const spec: ContainerSpec = {
+    const result = await getWorkloadManager().createJob({
       name: jobName,
-      image,
-      command: ["bash", "-c", buildInitScript()],
-      env: {
-        OPTIO_WORKFLOW_ID: workflowId,
-        OPTIO_POD_INSTANCE_INDEX: String(instanceIndex),
-      },
-      workDir: "/workspace",
-      imagePullPolicy: (process.env.OPTIO_IMAGE_PULL_POLICY as any) ?? "Never",
-      cpuRequest: opts.cpuRequest ?? undefined,
-      cpuLimit: opts.cpuLimit ?? undefined,
-      memoryRequest: opts.memoryRequest ?? undefined,
-      memoryLimit: opts.memoryLimit ?? undefined,
-      labels: {
-        "optio.workflow-id": workflowId.slice(0, 63),
-        "optio.instance-index": String(instanceIndex),
-        "optio.type": "workflow-pod",
-        "managed-by": "optio",
-      },
-    };
-
-    const result = await manager.createJob({ name: jobName, spec });
-
-    await db
-      .update(workflowPods)
-      .set({
-        podName: result.podName,
-        podId: result.podId,
-        state: "ready",
-        updatedAt: new Date(),
-      })
-      .where(eq(workflowPods.id, record.id));
-
+      spec: podSpec(jobName, workflowId, instanceIndex, opts),
+    });
+    const ready = await podPool.markPodReady(record.id, {
+      podName: result.podName,
+      podId: result.podId,
+    });
     logger.info(
       { workflowId, instanceIndex, podName: result.podName, jobName },
       "Workflow pod created via Job",
     );
-
-    return {
-      ...record,
-      podName: result.podName,
-      podId: result.podId,
-      state: "ready",
-    };
+    return ready;
   } catch (err) {
-    await db
-      .update(workflowPods)
-      .set({
-        state: "error",
-        errorMessage: String(err),
-        updatedAt: new Date(),
-      })
-      .where(eq(workflowPods.id, record.id));
-
+    await podPool.markPodError(record.id, err);
     try {
-      const manager = getWorkloadManager();
-      await manager.deleteJob(jobName);
+      await getWorkloadManager().deleteJob(jobName);
       logger.info({ jobName }, "Cleaned up failed workflow Job");
     } catch (cleanupErr) {
       logger.warn({ err: cleanupErr, jobName }, "Failed to cleanup errored workflow Job");
     }
-
     throw err;
   }
-}
-
-async function waitForPodReady(podId: string, timeoutMs = 120_000): Promise<WorkflowPod> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const [pod] = await db.select().from(workflowPods).where(eq(workflowPods.id, podId));
-    if (!pod) throw new Error(`Workflow pod record ${podId} disappeared`);
-    if (pod.state === "ready") return pod as WorkflowPod;
-    if (pod.state === "error") throw new Error(`Workflow pod failed: ${pod.errorMessage}`);
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  throw new Error(`Timed out waiting for workflow pod ${podId}`);
 }
 
 /**
  * Execute a workflow run inside a pooled workflow pod. Each run isolates its
  * working dir to `/workspace/runs/<runId>` and injects per-run env vars
  * (including `OPTIO_PROMPT`) via the exec stream — nothing about the run is
- * baked into the pod spec. Increments activeRunCount; callers must call
- * `releaseRun(pod.id)` on completion.
+ * baked into the pod spec. Takes a slot when the exec starts (and gives it
+ * back if it doesn't); callers that got a session call `releaseRun` when the
+ * run's attempt ends.
  */
 export async function execRunInPod(
   pod: WorkflowPod,
@@ -385,107 +182,75 @@ export async function execRunInPod(
   agentCommand: string[],
   env: Record<string, string>,
 ): Promise<ExecSession> {
-  const rt = getRuntime();
-  const handle: ContainerHandle = { id: pod.podId ?? pod.podName!, name: pod.podName! };
-
-  await db
-    .update(workflowPods)
-    .set({
-      activeRunCount: sql`${workflowPods.activeRunCount} + 1`,
-      lastRunAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(workflowPods.id, pod.id));
-
-  const script = [
-    "set -e",
-    // Env values (including the prompt) are embedded as inert single-quoted
-    // exports — see buildEnvExports.
-    ...buildEnvExports({ ...env, OPTIO_WORKFLOW_RUN_ID: runId }),
-    `echo "[optio] Waiting for workflow pod to be ready..."`,
-    `for i in $(seq 1 120); do [ -f /workspace/.ready ] && break; sleep 1; done`,
-    `[ -f /workspace/.ready ] || { echo "[optio] ERROR: workflow pod not ready after 120s"; exit 1; }`,
-    `echo "[optio] Workflow pod ready"`,
-    `mkdir -p /workspace/runs/${runId}`,
-    `cd /workspace/runs/${runId}`,
-    `export OPTIO_WORKFLOW_RUN_ID="${runId}"`,
-    `set +e`,
-    ...agentCommand,
-    `AGENT_EXIT=$?`,
-    `exit $AGENT_EXIT`,
-  ].join("\n");
-
-  return rt.exec(handle, ["bash", "-c", script], { tty: false });
+  await podPool.acquireSlot(pod.id);
+  const script = buildPooledExecScript({
+    env: { ...env, OPTIO_WORKFLOW_RUN_ID: runId },
+    workDir: `/workspace/runs/${runId}`,
+    agentCommand,
+    label: "workflow pod",
+  });
+  try {
+    return await getRuntime().exec(podPool.podHandle(pod), ["bash", "-c", script], {
+      tty: false,
+    });
+  } catch (err) {
+    await podPool.releaseSlot(pod.id);
+    throw err;
+  }
 }
 
 /**
- * Decrement the active run count for a workflow pod. Clamped at zero so a
- * double-release (e.g. zombie cleanup + worker finally) can't drive it negative.
+ * A run's attempt on the pod ended: free the slot it took, and clear the
+ * run's pod while the run still points at this attempt's (a retry may hold it
+ * by now; `lastPodId` stays for retry affinity). Each step stands alone.
  */
-export async function releaseRun(podId: string): Promise<void> {
+export async function releaseRun(runId: string, podId: string, startedAt?: Date): Promise<void> {
+  await podPool
+    .releaseSlot(podId)
+    .catch((err) => logger.warn({ err, runId, podId }, "Failed to release workflow pod slot"));
   await db
-    .update(workflowPods)
-    .set({
-      activeRunCount: sql`GREATEST(${workflowPods.activeRunCount} - 1, 0)`,
-      updatedAt: new Date(),
-    })
-    .where(eq(workflowPods.id, podId));
-}
-
-/**
- * Reap idle workflow pods: those in state=ready with activeRunCount=0 and no
- * update within IDLE_TIMEOUT_MS. Scales down higher-index pods first so the
- * pool contracts LIFO — matching repo-pool semantics.
- */
-export async function cleanupIdleWorkflowPods(): Promise<number> {
-  const cutoff = new Date(Date.now() - IDLE_TIMEOUT_MS);
-
-  const idlePods = await db
-    .select()
-    .from(workflowPods)
+    .update(workflowRuns)
+    .set({ podId: null, updatedAt: new Date() })
     .where(
       and(
-        eq(workflowPods.activeRunCount, 0),
-        eq(workflowPods.state, "ready"),
-        lt(workflowPods.updatedAt, cutoff),
+        eq(workflowRuns.id, runId),
+        eq(workflowRuns.podId, podId),
+        startedAt ? updatedAtMatches(workflowRuns.startedAt, startedAt) : undefined,
       ),
-    );
+    )
+    .catch((err) => logger.warn({ err, runId, podId }, "Failed to clear the run's pod"));
+}
 
+/**
+ * Reap idle workflow pods: ready, nothing running, and no use within
+ * IDLE_TIMEOUT_MS. Higher instance indices go first so the pool contracts
+ * LIFO, matching repo pods.
+ */
+export async function cleanupIdleWorkflowPods(): Promise<number> {
+  const idle = await podPool.idlePods("standalone", new Date(Date.now() - IDLE_TIMEOUT_MS));
   const rt = getRuntime();
   let cleaned = 0;
 
-  // Group by workflow so we can reap higher instance indices first.
-  const byWorkflow = new Map<string, typeof idlePods>();
-  for (const pod of idlePods) {
-    const existing = byWorkflow.get(pod.workflowId) ?? [];
-    existing.push(pod);
-    byWorkflow.set(pod.workflowId, existing);
-  }
-
-  for (const [, pods] of byWorkflow) {
-    const sorted = [...pods].sort((a, b) => b.instanceIndex - a.instanceIndex);
-    for (const pod of sorted) {
-      try {
-        if (pod.managedBy === "job" && pod.jobName) {
-          const manager = getWorkloadManager();
-          await manager.deleteJob(pod.jobName);
-        } else if (pod.podName) {
-          await rt.destroy({ id: pod.podId ?? pod.podName, name: pod.podName });
-        }
-        await db.delete(workflowPods).where(eq(workflowPods.id, pod.id));
-        logger.info(
-          {
-            workflowId: pod.workflowId,
-            instanceIndex: pod.instanceIndex,
-            podName: pod.podName,
-            managedBy: pod.managedBy,
-          },
-          "Cleaned up idle workflow pod",
-        );
-        cleaned++;
-      } catch (err) {
-        logger.warn({ err, podId: pod.id }, "Failed to cleanup workflow pod");
+  for (const pod of [...idle].sort((a, b) => b.instanceIndex - a.instanceIndex)) {
+    try {
+      if (pod.managedBy === "job" && pod.jobName) {
+        await getWorkloadManager().deleteJob(pod.jobName);
+      } else if (pod.podName) {
+        await rt.destroy(podPool.podHandle(pod));
       }
+      await podPool.deletePod(pod.id);
+      logger.info(
+        {
+          workflowId: pod.poolKey,
+          instanceIndex: pod.instanceIndex,
+          podName: pod.podName,
+          managedBy: pod.managedBy,
+        },
+        "Cleaned up idle workflow pod",
+      );
+      cleaned++;
+    } catch (err) {
+      logger.warn({ err, podId: pod.id }, "Failed to cleanup workflow pod");
     }
   }
 
@@ -493,54 +258,23 @@ export async function cleanupIdleWorkflowPods(): Promise<number> {
 }
 
 /**
- * List all workflow pods.
- */
-export async function listWorkflowPods(): Promise<WorkflowPod[]> {
-  return db.select().from(workflowPods) as Promise<WorkflowPod[]>;
-}
-
-/**
- * List workflow pods for a specific workflow.
- */
-export async function listWorkflowPodsForWorkflow(workflowId: string): Promise<WorkflowPod[]> {
-  return db.select().from(workflowPods).where(eq(workflowPods.workflowId, workflowId)) as Promise<
-    WorkflowPod[]
-  >;
-}
-
-/**
- * Reconcile activeRunCount on all workflow pods to the actual number of runs
- * in running/provisioning state that hold a pod_id. Compensates for drift when
- * the worker crashes between decrement and DB update. Mirrors
+ * Repair each Job pod's active count from the runs actually holding it
+ * (running / provisioning with this pod_id). Mirrors
  * repo-pool-service.reconcileActiveTaskCounts.
  */
 export async function reconcileActiveRunCounts(): Promise<number> {
-  const allPods = await db
-    .select({ id: workflowPods.id, activeRunCount: workflowPods.activeRunCount })
-    .from(workflowPods);
-  if (allPods.length === 0) return 0;
-
-  let corrected = 0;
-  for (const pod of allPods) {
-    const [{ count: actual }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(workflowRuns)
-      .where(
-        sql`${workflowRuns.state} IN ('running', 'provisioning') AND ${workflowRuns.podId} = ${pod.id}`,
-      );
-
-    if (pod.activeRunCount !== actual) {
-      await db
-        .update(workflowPods)
-        .set({ activeRunCount: actual, updatedAt: new Date() })
-        .where(eq(workflowPods.id, pod.id));
-      logger.info(
-        { podId: pod.id, was: pod.activeRunCount, now: actual },
-        "Reconciled workflow pod activeRunCount",
-      );
-      corrected++;
-    }
-  }
-
-  return corrected;
+  const rows = await db
+    .select({ podId: workflowRuns.podId, n: sql<number>`count(*)::int` })
+    .from(workflowRuns)
+    .where(
+      and(
+        inArray(workflowRuns.state, ["running", "provisioning"]),
+        sql`${workflowRuns.podId} IS NOT NULL`,
+      ),
+    )
+    .groupBy(workflowRuns.podId);
+  return podPool.reconcileActiveCounts(
+    "standalone",
+    new Map(rows.map((r) => [r.podId as string, r.n])),
+  );
 }

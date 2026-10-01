@@ -162,6 +162,17 @@ interface MigratedRoute {
 }
 
 const MIGRATED_ROUTES: MigratedRoute[] = [
+  // Work — the one resource for every kind of work
+  { method: "get", path: "/api/work" },
+  { method: "post", path: "/api/work" },
+  { method: "get", path: "/api/work/{id}" },
+  { method: "patch", path: "/api/work/{id}" },
+  { method: "delete", path: "/api/work/{id}" },
+  { method: "get", path: "/api/work/{id}/runs" },
+  { method: "get", path: "/api/work/{id}/triggers" },
+  { method: "post", path: "/api/work/{id}/triggers" },
+  { method: "patch", path: "/api/work/{id}/triggers/{triggerId}" },
+  { method: "delete", path: "/api/work/{id}/triggers/{triggerId}" },
   // Phase 1 — tasks.ts (16 routes)
   { method: "get", path: "/api/tasks" },
   { method: "get", path: "/api/tasks/stats" },
@@ -433,7 +444,9 @@ describe("OpenAPI spec — migrated routes are fully documented", () => {
     // routes (validate/aws-credentials and repos/codecommit) → 171. Then the
     // pickable-secrets route, 4 model-provider routes and 2 work-defaults
     // routes → 178. Then the two task PR routes (attach / stop tracking) → 180.
-    expect(MIGRATED_ROUTES).toHaveLength(180);
+    // Then the Work resource (list, create, get, save, delete, runs,
+    // triggers ×4) → 190.
+    expect(MIGRATED_ROUTES).toHaveLength(190);
   });
 
   it("components.schemas contains the Task domain types", () => {

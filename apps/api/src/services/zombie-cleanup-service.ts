@@ -2,22 +2,23 @@
  * Zombie run cleanup service.
  *
  * Detects workflow_runs stuck in "running" whose backing pod has terminated,
- * failed, or disappeared. Transitions them to "failed" with a cleanup reason
- * and optionally retries within the workflow's maxRetries budget.
+ * failed, or disappeared, and fails them; the reconciler retries them within
+ * the workflow's maxRetries budget like any other failed run. Local runs are
+ * not checked: they have no pod, and the Optio Local daemon is the authority
+ * on whether their agent is alive.
  *
  * Also detects repo tasks stuck in "running"/"provisioning" whose pod record
  * has been cleaned up (no matching repoPod), failing them so they can retry
  * through the normal stale-task path.
  */
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { workflowRuns, tasks, repoPods } from "../db/schema.js";
+import { workflowRuns, tasks } from "../db/schema.js";
+import { getPod } from "./agent-pod-pool.js";
 import { WorkflowRunState, TaskState } from "@optio/shared";
 import { getRuntime } from "./container-service.js";
-import { getWorkflow } from "./workflow-service.js";
-import { releaseRun } from "./workflow-pool-service.js";
-import { publishWorkflowRunEvent } from "./event-bus.js";
+import { transitionWorkflowRunCas } from "./workflow-service.js";
 import * as taskService from "./task-service.js";
 import { logger } from "../logger.js";
 
@@ -42,6 +43,8 @@ export async function cleanupZombieWorkflowRuns(): Promise<number> {
 
   for (const run of runningRuns) {
     try {
+      // A local run's agent lives on its owner's machine (no pod to check).
+      if (run.localTerminalId) continue;
       // Skip recently updated runs (might still be actively running)
       const age = Date.now() - new Date(run.updatedAt).getTime();
       if (age < cutoffMs) continue;
@@ -72,8 +75,7 @@ export async function cleanupZombieWorkflowRuns(): Promise<number> {
 
       if (!isZombie) continue;
 
-      await failZombieRun(run, reason);
-      cleaned++;
+      if (await failZombieRun(run, reason)) cleaned++;
     } catch (err) {
       logger.warn({ err, runId: run.id }, "Error during zombie workflow run check — continuing");
     }
@@ -83,96 +85,41 @@ export async function cleanupZombieWorkflowRuns(): Promise<number> {
 }
 
 /**
- * Transition a zombie workflow_run to failed, release its pod, and
- * optionally retry within the workflow's maxRetries budget.
+ * Fail a zombie Job run and let go of its pod. The transition wakes the
+ * reconciler, whose decideFailed retries the run within the Job's maxRetries.
  */
-async function failZombieRun(run: typeof workflowRuns.$inferSelect, reason: string): Promise<void> {
-  const errorMessage = `Zombie run detected: ${reason}`;
-
-  // 1. Transition to FAILED
-  await db
-    .update(workflowRuns)
-    .set({
-      state: WorkflowRunState.FAILED,
-      errorMessage,
-      finishedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(workflowRuns.id, run.id));
-
-  await publishWorkflowRunEvent({
-    type: "workflow_run:state_changed",
-    workflowRunId: run.id,
-    workflowId: run.workflowId,
-    fromState: WorkflowRunState.RUNNING,
-    toState: WorkflowRunState.FAILED,
-    timestamp: new Date().toISOString(),
-  });
+async function failZombieRun(
+  run: typeof workflowRuns.$inferSelect,
+  reason: string,
+): Promise<boolean> {
+  const failed = await transitionWorkflowRunCas(
+    run.id,
+    WorkflowRunState.RUNNING,
+    WorkflowRunState.FAILED,
+    { errorMessage: `Zombie run detected: ${reason}`, finishedAt: new Date() },
+    // Only the attempt that was seen dead — not a retry that claimed the run since.
+    { startedAt: run.startedAt ?? undefined },
+  );
+  if (!failed) return false; // someone else moved it first
 
   logger.info({ runId: run.id, workflowId: run.workflowId, reason }, "Zombie workflow run failed");
 
-  // 2. Release the workflow pod's activeRunCount. The run points at its
-  //    assigned pod via podId; once released we clear it so the counter
-  //    and pod assignment stay consistent.
+  // The run no longer holds its pod. Its slot is the worker's to give back
+  // when the attempt ends; a dead worker's is repaired by the cleanup
+  // sweep's count reconciliation, which counts only runs that hold a pod.
   if (run.podId) {
-    try {
-      await releaseRun(run.podId);
-      await db
-        .update(workflowRuns)
-        .set({ podId: null, updatedAt: new Date() })
-        .where(eq(workflowRuns.id, run.id));
-    } catch (err) {
-      logger.warn({ err, runId: run.id }, "Failed to release workflow pod for zombie run");
-    }
+    await db
+      .update(workflowRuns)
+      .set({ podId: null, updatedAt: new Date() })
+      .where(and(eq(workflowRuns.id, run.id), eq(workflowRuns.podId, run.podId)))
+      .catch((err) => logger.warn({ err, runId: run.id }, "Failed to clear zombie run's pod"));
   }
-
-  // 3. Retry if within budget
-  try {
-    const workflow = await getWorkflow(run.workflowId);
-    if (workflow && run.retryCount < workflow.maxRetries) {
-      await db
-        .update(workflowRuns)
-        .set({
-          state: WorkflowRunState.QUEUED,
-          retryCount: run.retryCount + 1,
-          errorMessage: null,
-          finishedAt: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(workflowRuns.id, run.id));
-
-      await publishWorkflowRunEvent({
-        type: "workflow_run:state_changed",
-        workflowRunId: run.id,
-        workflowId: run.workflowId,
-        fromState: WorkflowRunState.FAILED,
-        toState: WorkflowRunState.QUEUED,
-        timestamp: new Date().toISOString(),
-      });
-
-      const { workflowRunQueue } = await import("../workers/workflow-worker.js");
-      await workflowRunQueue.add(
-        "process-workflow-run",
-        { workflowRunId: run.id },
-        {
-          jobId: `${run.id}-zombie-retry-${Date.now()}`,
-          delay: 5000 * Math.pow(2, run.retryCount),
-        },
-      );
-
-      logger.info(
-        { runId: run.id, retryCount: run.retryCount + 1, maxRetries: workflow.maxRetries },
-        "Zombie workflow run re-queued for retry",
-      );
-    }
-  } catch (err) {
-    logger.warn({ err, runId: run.id }, "Failed to retry zombie workflow run");
-  }
+  return true;
 }
 
 /**
  * Detect repo tasks stuck in running/provisioning whose pod record has been
- * removed from repoPods (pod was cleaned up but task was never transitioned).
+ * removed from agent_pods (pod was cleaned up but task was never transitioned).
  * Transitions them to FAILED so the existing stale-retry logic can re-queue.
  * Returns the number of orphaned tasks failed.
  */
@@ -196,10 +143,7 @@ export async function cleanupOrphanedRepoTasks(): Promise<number> {
   for (const task of activeTasks) {
     try {
       // Check if the referenced repoPod record still exists
-      const [pod] = await db
-        .select({ id: repoPods.id })
-        .from(repoPods)
-        .where(eq(repoPods.id, task.lastPodId!));
+      const pod = await getPod(task.lastPodId!);
 
       if (pod) continue; // Pod record exists — skip (health check handles live pod status)
 

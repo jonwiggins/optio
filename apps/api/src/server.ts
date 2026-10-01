@@ -53,6 +53,7 @@ import { persistentAgentRoutes } from "./routes/persistent-agents.js";
 import { persistentAgentInternalRoutes } from "./routes/persistent-agent-internal.js";
 import { taskConfigRoutes } from "./routes/task-configs.js";
 import { tasksUnifiedRoutes } from "./routes/tasks-unified.js";
+import { workRoutes } from "./routes/work.js";
 import { sharedDirectoryRoutes } from "./routes/shared-directories.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { optioRoutes } from "./routes/optio.js";
@@ -209,6 +210,11 @@ export async function buildServer() {
           description:
             "Core task lifecycle: create, list, retrieve, retry, cancel, subtasks, dependencies, bulk operations, comments, and messages.",
         },
+        {
+          name: "Work",
+          description:
+            "Every kind of work as one resource: the Work list, creation from When / Where / Who / What / Then, saved definitions, their runs and triggers.",
+        },
         { name: "Workflows", description: "Workflow templates, runs, and triggers." },
         {
           name: "Sessions",
@@ -315,6 +321,7 @@ export async function buildServer() {
   await app.register(persistentAgentInternalRoutes);
   await app.register(taskConfigRoutes);
   await app.register(tasksUnifiedRoutes);
+  await app.register(workRoutes);
   await app.register(sharedDirectoryRoutes);
   await app.register(notificationRoutes);
   await app.register(optioRoutes);

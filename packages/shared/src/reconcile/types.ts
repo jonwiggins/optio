@@ -57,7 +57,6 @@ export interface RepoRunSpec {
   parentTaskId: string | null;
   blocksParent: boolean;
   workspaceId: string | null;
-  workflowRunId: string | null;
   /**
    * `local` runs execute on the owner's machine via the Optio Local daemon:
    * no pod, no cluster capacity, and liveness comes from the daemon (the

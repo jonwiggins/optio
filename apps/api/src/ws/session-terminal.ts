@@ -2,9 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { getRuntime } from "../services/container-service.js";
 import { getSession, addSessionPr } from "../services/interactive-session-service.js";
-import { db } from "../db/client.js";
-import { repoPods } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { getPod } from "../services/agent-pod-pool.js";
 import { logger } from "../logger.js";
 import type { ContainerHandle, ExecSession } from "@optio/shared";
 import { authenticateWs } from "./ws-auth.js";
@@ -51,7 +49,7 @@ export async function sessionTerminalWs(app: FastifyInstance) {
     if (!session.podId) return reject("Session has no pod assigned");
 
     // Get pod info
-    const [pod] = await db.select().from(repoPods).where(eq(repoPods.id, session.podId));
+    const pod = await getPod(session.podId);
     if (!pod || !pod.podName) {
       return reject(
         "Session pod was cleaned up due to inactivity. Please end this session and start a new one.",

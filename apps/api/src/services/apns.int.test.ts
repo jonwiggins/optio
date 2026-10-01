@@ -11,12 +11,12 @@ import {
   apnsDevices,
   liveActivityStartTokens,
   liveActivityTokens,
-  localBlueprints,
   persistentAgents,
   users,
   workspaceMembers,
 } from "../db/schema.js";
 import {
+  insertLocalBlueprint,
   insertTask,
   insertTaskConfig,
   insertWorkflow,
@@ -313,11 +313,9 @@ describe("terminal snooze → Watch queue", () => {
     await insertTaskConfig({ workspaceId: ws.id, enabled: false }); // paused: not recurring
     await insertTaskConfig({ workspaceId: foreign.id }); // not my workspace
     await insertWorkflow({ workspaceId: ws.id });
-    await db.insert(localBlueprints).values([
-      { userId: u.id, name: "nightly", commandTemplate: "echo hi" },
-      { userId: u.id, name: "off", commandTemplate: "echo hi", enabled: false },
-      { userId: other.id, name: "theirs", commandTemplate: "echo hi" },
-    ]);
+    await insertLocalBlueprint({ ownerUserId: u.id, name: "nightly" });
+    await insertLocalBlueprint({ ownerUserId: u.id, name: "off", enabled: false });
+    await insertLocalBlueprint({ ownerUserId: other.id, name: "theirs" });
     await db.insert(persistentAgents).values([
       { workspaceId: ws.id, slug: "vesper", name: "Vesper", initialPrompt: "hi" },
       { workspaceId: ws.id, slug: "old", name: "Old", initialPrompt: "hi", state: "archived" },

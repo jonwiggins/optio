@@ -31,7 +31,7 @@ import {
   localTerminals,
   persistentAgents,
   prReviews,
-  repoPods,
+  agentPods,
   sessionChatEvents,
   taskEvents,
   taskLogs,
@@ -235,8 +235,15 @@ async function seedLocal() {
 async function seedSession(opts: { userId: string | null; history?: string[] }) {
   const repoUrl = `https://github.com/it-org/ws-${randomBytes(3).toString("hex")}`;
   const [pod] = await db
-    .insert(repoPods)
-    .values({ repoUrl, workspaceId, podName: "it-pod", podId: "it-pod", state: "ready" })
+    .insert(agentPods)
+    .values({
+      pool: "repo",
+      poolKey: repoUrl,
+      workspaceId,
+      podName: "it-pod",
+      podId: "it-pod",
+      state: "ready",
+    })
     .returning();
   const [session] = await db
     .insert(interactiveSessions)

@@ -77,9 +77,11 @@ vi.mock("../workers/webhook-worker.js", () => ({
   enqueueWebhookEvent: (...args: unknown[]) => mockEnqueueWebhookEvent(...args),
 }));
 
+const mockTransitionWorkflowRunCas = vi.fn();
 vi.mock("./workflow-service.js", () => ({
   getWorkflowRun: (...args: unknown[]) => mockGetWorkflowRun(...args),
   getWorkflow: (...args: unknown[]) => mockGetWorkflow(...args),
+  transitionWorkflowRunCas: (...args: unknown[]) => mockTransitionWorkflowRunCas(...args),
 }));
 
 const mockEnqueueReconcile = vi.fn().mockResolvedValue(undefined);
@@ -126,7 +128,6 @@ function repoSnapshot(overrides: Partial<WorldSnapshot> = {}): WorldSnapshot {
       parentTaskId: null,
       blocksParent: false,
       workspaceId: "ws-1",
-      workflowRunId: null,
       runTarget: "cluster",
     },
     status: {
@@ -349,20 +350,8 @@ describe("reconcile-executor", () => {
   });
 
   describe("standalone transition", () => {
-    it("applies state + patch + CAS and publishes event", async () => {
-      const chain = chainable([{ id: "run-1" }]);
-      mockDbUpdate.mockReturnValue(chain);
-      mockGetWorkflowRun.mockResolvedValue({
-        id: "run-1",
-        state: WorkflowRunState.FAILED,
-        params: null,
-        output: null,
-        retryCount: 0,
-        startedAt: null,
-        finishedAt: null,
-      });
-      mockGetWorkflow.mockResolvedValue({ id: "wf-1", name: "Test workflow" });
-
+    it("goes through the one Job-run transition, CAS'd on the observed state and version", async () => {
+      mockTransitionWorkflowRunCas.mockResolvedValue({ id: "run-1", state: "failed" });
       const action: StandaloneAction = {
         kind: "transition",
         to: WorkflowRunState.FAILED,
@@ -373,22 +362,22 @@ describe("reconcile-executor", () => {
       };
       const outcome = await executeAction(action, standaloneSnapshot());
       expect(outcome.status).toBe("applied");
-      expect(mockPublishWorkflowRunEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "workflow_run:state_changed",
-          workflowRunId: "run-1",
-          fromState: WorkflowRunState.QUEUED,
-          toState: WorkflowRunState.FAILED,
-        }),
-      );
-      expect(mockEnqueueWebhookEvent).toHaveBeenCalledWith(
-        "workflow_run.failed",
-        expect.objectContaining({ runId: "run-1", workflowId: "wf-1" }),
+      expect(mockTransitionWorkflowRunCas).toHaveBeenCalledWith(
+        "run-1",
+        WorkflowRunState.QUEUED,
+        WorkflowRunState.FAILED,
+        {
+          reconcileBackoffUntil: null,
+          reconcileAttempts: 0,
+          errorMessage: "Cancelled by user",
+          controlIntent: null,
+        },
+        { version: BASE_VERSION, wakeReconciler: false },
       );
     });
 
-    it("returns stale when CAS finds newer row", async () => {
-      mockDbUpdate.mockReturnValue(chainable([]));
+    it("returns stale when the transition finds a newer row", async () => {
+      mockTransitionWorkflowRunCas.mockResolvedValue(null);
       const action: StandaloneAction = {
         kind: "transition",
         to: WorkflowRunState.RUNNING,
@@ -397,22 +386,11 @@ describe("reconcile-executor", () => {
       };
       const outcome = await executeAction(action, standaloneSnapshot());
       expect(outcome.status).toBe("stale");
-      expect(mockPublishWorkflowRunEvent).not.toHaveBeenCalled();
+      expect(mockEnqueueReconcile).not.toHaveBeenCalled();
     });
 
     it("schedules a delayed reconcile when statusPatch carries a future backoff", async () => {
-      mockDbUpdate.mockReturnValue(chainable([{ id: "run-1" }]));
-      mockGetWorkflowRun.mockResolvedValue({
-        id: "run-1",
-        state: WorkflowRunState.QUEUED,
-        params: null,
-        output: null,
-        retryCount: 1,
-        startedAt: null,
-        finishedAt: null,
-      });
-      mockGetWorkflow.mockResolvedValue({ id: "wf-1", name: "wf" });
-
+      mockTransitionWorkflowRunCas.mockResolvedValue({ id: "run-1", state: "queued" });
       // scheduleBackoffReconcile uses Date.now(), not the snapshot's NOW,
       // so the backoff must be in the real wall-clock future.
       const futureBackoff = new Date(Date.now() + 30_000);

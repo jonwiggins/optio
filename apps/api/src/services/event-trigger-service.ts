@@ -37,6 +37,7 @@ import { db } from "../db/client.js";
 import { repos } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { listEnabledTriggersOfType, type TriggerRow } from "./trigger-service.js";
+import { definitionKindOf, getDefinition } from "./work-definition-service.js";
 import { fireTrigger, type TriggerFireResult, type TriggerFiring } from "./trigger-dispatch.js";
 
 type Obj = Record<string, unknown>;
@@ -710,30 +711,25 @@ interface TargetFacts {
 }
 
 async function targetFacts(trigger: TriggerRow): Promise<TargetFacts | null> {
-  switch (trigger.targetType) {
-    case "job": {
-      const { getWorkflow } = await import("./workflow-service.js");
-      const row = await getWorkflow(trigger.targetId);
-      return row ? { workspaceId: row.workspaceId ?? null, repoUrl: null } : null;
-    }
-    case "task_config": {
-      const { getTaskConfig } = await import("./task-config-service.js");
-      const row = await getTaskConfig(trigger.targetId);
-      return row ? { workspaceId: row.workspaceId ?? null, repoUrl: row.repoUrl } : null;
-    }
-    case "local_blueprint": {
-      const { getBlueprint } = await import("./local-blueprint-service.js");
-      const row = await getBlueprint(trigger.targetId);
-      return row ? { workspaceId: row.workspaceId ?? null, repoUrl: null } : null;
-    }
-    case "persistent_agent": {
-      const { getPersistentAgentUnscoped } = await import("./persistent-agent-service.js");
-      const row = await getPersistentAgentUnscoped(trigger.targetId);
-      return row ? { workspaceId: row.workspaceId ?? null, repoUrl: null } : null;
-    }
-    default:
-      return null;
+  const kind = definitionKindOf(trigger.targetType);
+  if (kind) {
+    const row = await getDefinition(trigger.targetId, kind);
+    if (!row) return null;
+    return {
+      workspaceId: row.workspaceId ?? null,
+      repoUrl: kind === "repo-blueprint" ? row.repoUrl : null,
+    };
   }
+  if (trigger.targetType === "persistent_agent") {
+    const { getPersistentAgentUnscoped } = await import("./persistent-agent-service.js");
+    const row = await getPersistentAgentUnscoped(trigger.targetId);
+    if (!row) return null;
+    // An agent with a repo listens to that repo, like a scheduled Task.
+    const { getRepo } = await import("./repo-service.js");
+    const repo = row.repoId ? await getRepo(row.repoId).catch(() => null) : null;
+    return { workspaceId: row.workspaceId ?? null, repoUrl: repo?.repoUrl ?? null };
+  }
+  return null;
 }
 
 /** The event, matched against one trigger's filters, as what its target gets. */
@@ -844,8 +840,9 @@ export async function fireEventTriggers<S extends EventTriggerType>(
         );
         continue;
       }
-      // A scheduled Task listens to its own repo unless the trigger names
-      // others — a PR in some other repo shouldn't start work in this one.
+      // A scheduled Task (or an agent with a repo) listens to its own repo
+      // unless the trigger names others — a PR in some other repo shouldn't
+      // start work in this one.
       const repoFilter = Array.isArray(config.repos) ? (config.repos as string[]) : [];
       if (
         source === "github" &&

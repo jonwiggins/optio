@@ -6,7 +6,7 @@
  *   - createWorkflow / updateWorkflow / deleteWorkflow roundtrip, including
  *     the (workspace_id, name) unique constraint
  *   - createWorkflowRun: queued row insert + BullMQ enqueue on "workflow-runs"
- *   - transitionWorkflowRunState state-machine enforcement
+ *   - transitionWorkflowRunCas: the one Job-run transition (state machine, CAS)
  *   - appendWorkflowRunLog / getWorkflowRunLogs roundtrip incl. logType filter
  *   - retryWorkflowRun / cancelWorkflowRun state rules, incl. cancel
  *     exhausting the retry budget so the reconciler cannot auto-retry
@@ -18,8 +18,10 @@ import { Queue } from "bullmq";
 import { eq } from "drizzle-orm";
 import { WorkflowRunState, reconcileStandalone } from "@optio/shared";
 import { db } from "../db/client.js";
-import { workflowRuns } from "../db/schema.js";
+import { agentPods, workflowRuns } from "../db/schema.js";
+import { releaseRun } from "./workflow-pool-service.js";
 import * as workflowService from "./workflow-service.js";
+import * as taskConfigService from "./task-config-service.js";
 import { buildWorldSnapshot } from "./reconcile-snapshot.js";
 import { getBullMQConnectionOptions } from "./redis-config.js";
 import {
@@ -32,9 +34,13 @@ import {
 // connection options must match workers/workflow-worker.ts). No worker is
 // started in this file, so enqueued jobs stay waiting and are inspectable.
 const workflowRunsQueue = new Queue("workflow-runs", { connection: getBullMQConnectionOptions() });
+const reconcileJobs = new Queue("reconcile", { connection: getBullMQConnectionOptions() });
 
 afterAll(async () => {
   await workflowRunsQueue.close();
+  await reconcileJobs.close();
+  const { reconcileQueue } = await import("./reconcile-queue.js");
+  await reconcileQueue.close();
   // createWorkflowRun dynamically imports the worker module (for its queue
   // singleton) and the event bus publisher; close both so the fork exits.
   const { workflowRunQueue } = await import("../workers/workflow-worker.js");
@@ -101,14 +107,24 @@ describe("workflow CRUD", () => {
       );
     expect(err).toBeInstanceOf(Error);
     expect(String((err as Error).cause ?? err)).toMatch(
-      /duplicate key value.*workflows_workspace_name_key/,
+      /duplicate key value.*work_definitions_workspace_name_key/,
     );
 
-    // Actual behavior: the unique constraint is (workspace_id, name) and
+    // Actual behavior: the unique index is (kind, workspace_id, name) and
     // Postgres treats NULLs as distinct, so workspace-less duplicates insert.
     const a = await workflowService.createWorkflow({ name, promptTemplate: "p" });
     const b = await workflowService.createWorkflow({ name, promptTemplate: "p" });
     expect(a.id).not.toBe(b.id);
+
+    // Each kind is its own namespace: a scheduled Task may share a Job's name.
+    const config = await taskConfigService.createTaskConfig({
+      name,
+      title: name,
+      prompt: "p",
+      repoUrl: "https://github.com/acme/app",
+      workspaceId: ws.id,
+    });
+    expect(config.name).toBe(name);
   });
 
   it("updateWorkflow updates fields and returns null for an unknown id", async () => {
@@ -128,7 +144,7 @@ describe("workflow CRUD", () => {
     expect(updated!.enabled).toBe(false);
     // untouched fields survive
     expect(updated!.name).toBe(wf.name);
-    expect(updated!.promptTemplate).toBe(wf.promptTemplate);
+    expect(updated!.promptTemplate).toBe(wf.prompt);
     expect(updated!.updatedAt.getTime()).toBeGreaterThanOrEqual(wf.updatedAt.getTime());
 
     expect(await workflowService.updateWorkflow(randomUUID(), { description: "x" })).toBeNull();
@@ -185,55 +201,180 @@ describe("createWorkflowRun", () => {
   });
 });
 
-describe("transitionWorkflowRunState", () => {
-  it("walks queued → running → completed, stamping timestamps and extras", async () => {
+describe("transitionWorkflowRunCas", () => {
+  it("walks queued → running → completed, writing the fields it is given", async () => {
     const wf = await insertWorkflow();
     const run = await insertWorkflowRun(wf.id); // state defaults to "queued"
 
-    await workflowService.transitionWorkflowRunState(run.id, WorkflowRunState.RUNNING);
-    let current = await workflowService.getWorkflowRun(run.id);
-    expect(current!.state).toBe("running");
-    expect(current!.startedAt).toBeInstanceOf(Date);
-    expect(current!.finishedAt).toBeNull();
+    const running = await workflowService.transitionWorkflowRunCas(
+      run.id,
+      WorkflowRunState.QUEUED,
+      WorkflowRunState.RUNNING,
+      { startedAt: new Date() },
+    );
+    expect(running).toMatchObject({ state: "running", finishedAt: null });
+    expect(running!.startedAt).toBeInstanceOf(Date);
 
-    await workflowService.transitionWorkflowRunState(run.id, WorkflowRunState.COMPLETED, {
+    const done = await workflowService.transitionWorkflowRunCas(
+      run.id,
+      WorkflowRunState.RUNNING,
+      WorkflowRunState.COMPLETED,
+      {
+        finishedAt: new Date(),
+        costUsd: "0.0421",
+        inputTokens: 111,
+        outputTokens: 222,
+        modelUsed: "claude-sonnet-4-5",
+      },
+    );
+    expect(done).toMatchObject({
+      state: "completed",
       costUsd: "0.0421",
       inputTokens: 111,
       outputTokens: 222,
       modelUsed: "claude-sonnet-4-5",
     });
-    current = await workflowService.getWorkflowRun(run.id);
-    expect(current!.state).toBe("completed");
-    expect(current!.finishedAt).toBeInstanceOf(Date);
-    expect(current!.costUsd).toBe("0.0421");
-    expect(current!.inputTokens).toBe(111);
-    expect(current!.outputTokens).toBe(222);
-    expect(current!.modelUsed).toBe("claude-sonnet-4-5");
   });
 
-  it("rejects illegal transitions and leaves the row untouched", async () => {
+  it("refuses illegal transitions and leaves the row untouched", async () => {
     const wf = await insertWorkflow();
-
-    // queued → completed skips running
     const queued = await insertWorkflowRun(wf.id);
-    await expect(
-      workflowService.transitionWorkflowRunState(queued.id, WorkflowRunState.COMPLETED),
-    ).rejects.toThrow("Invalid workflow run transition: queued → completed");
+    expect(
+      await workflowService.transitionWorkflowRunCas(
+        queued.id,
+        WorkflowRunState.QUEUED,
+        WorkflowRunState.COMPLETED,
+      ),
+    ).toBeNull();
     expect((await workflowService.getWorkflowRun(queued.id))!.state).toBe("queued");
 
-    // completed is terminal
     const completed = await insertWorkflowRun(wf.id, { state: "completed" });
-    await expect(
-      workflowService.transitionWorkflowRunState(completed.id, WorkflowRunState.RUNNING),
-    ).rejects.toThrow("Invalid workflow run transition: completed → running");
+    expect(
+      await workflowService.transitionWorkflowRunCas(
+        completed.id,
+        WorkflowRunState.COMPLETED,
+        WorkflowRunState.RUNNING,
+      ),
+    ).toBeNull();
     expect((await workflowService.getWorkflowRun(completed.id))!.state).toBe("completed");
   });
 
-  it("rejects an unknown run id", async () => {
-    const missing = randomUUID();
-    await expect(
-      workflowService.transitionWorkflowRunState(missing, WorkflowRunState.RUNNING),
-    ).rejects.toThrow(`Workflow run ${missing} not found`);
+  it("loses to a writer that moved the run first (a cancelled run is not completed)", async () => {
+    const wf = await insertWorkflow();
+    const run = await insertWorkflowRun(wf.id, { state: "running" });
+    await workflowService.cancelWorkflowRun(run.id);
+
+    expect(
+      await workflowService.transitionWorkflowRunCas(
+        run.id,
+        WorkflowRunState.RUNNING,
+        WorkflowRunState.COMPLETED,
+      ),
+    ).toBeNull();
+    expect(await workflowService.getWorkflowRun(run.id)).toMatchObject({
+      state: "failed",
+      errorMessage: "Cancelled by user",
+    });
+  });
+
+  it("with a version, lands only while the row is still at that version", async () => {
+    const wf = await insertWorkflow();
+    const run = await insertWorkflowRun(wf.id, { state: "failed" });
+    const stale = new Date(run.updatedAt.getTime() - 60_000);
+
+    expect(
+      await workflowService.transitionWorkflowRunCas(
+        run.id,
+        WorkflowRunState.FAILED,
+        WorkflowRunState.QUEUED,
+        {},
+        { version: stale, wakeReconciler: false },
+      ),
+    ).toBeNull();
+    expect(
+      await workflowService.transitionWorkflowRunCas(
+        run.id,
+        WorkflowRunState.FAILED,
+        WorkflowRunState.QUEUED,
+        {},
+        { version: run.updatedAt, wakeReconciler: false },
+      ),
+    ).toMatchObject({ state: "queued" });
+  });
+
+  it("rejects nothing for an unknown run id — there is just nothing to move", async () => {
+    expect(
+      await workflowService.transitionWorkflowRunCas(
+        randomUUID(),
+        WorkflowRunState.QUEUED,
+        WorkflowRunState.RUNNING,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("a worker's attempt", () => {
+  it("only finishes and lets go of the attempt it claimed, never a retry that replaced it", async () => {
+    const wf = await insertWorkflow();
+    const [pod] = await db
+      .insert(agentPods)
+      .values({ pool: "standalone", poolKey: wf.id, state: "ready", podName: "p", activeCount: 2 })
+      .returning();
+    const first = await workflowService.createWorkflowRun(wf.id);
+    const claimed = await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.QUEUED,
+      WorkflowRunState.RUNNING,
+      { startedAt: new Date(Date.now() - 60_000), podId: pod.id },
+    );
+    const attempt1 = claimed!.startedAt!;
+
+    // Failed as stalled and retried: attempt 2 holds the run (and the same pod).
+    await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.RUNNING,
+      WorkflowRunState.FAILED,
+    );
+    await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.FAILED,
+      WorkflowRunState.QUEUED,
+    );
+    await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.QUEUED,
+      WorkflowRunState.RUNNING,
+      { startedAt: new Date() },
+    );
+
+    // Attempt 1's agent finishes late: its result doesn't land, and it gives
+    // back its own slot without taking attempt 2's pod away.
+    expect(
+      await workflowService.transitionWorkflowRunCas(
+        first.id,
+        WorkflowRunState.RUNNING,
+        WorkflowRunState.COMPLETED,
+        {},
+        { startedAt: attempt1 },
+      ),
+    ).toBeNull();
+    await releaseRun(first.id, pod.id, attempt1);
+    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, first.id));
+    expect(run).toMatchObject({ state: "running", podId: pod.id });
+    const [after] = await db.select().from(agentPods).where(eq(agentPods.id, pod.id));
+    expect(after.activeCount).toBe(1);
+
+    // Attempt 2 finishes and lets go.
+    await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.RUNNING,
+      WorkflowRunState.COMPLETED,
+      {},
+      { startedAt: run.startedAt! },
+    );
+    await releaseRun(first.id, pod.id, run.startedAt!);
+    const [done] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, first.id));
+    expect(done).toMatchObject({ state: "completed", podId: null });
   });
 });
 
@@ -313,6 +454,23 @@ describe("workflow run logs", () => {
 });
 
 describe("retryWorkflowRun / cancelWorkflowRun", () => {
+  it("a retried run wakes the reconciler right away (no wait for the periodic resync)", async () => {
+    const wf = await insertWorkflow();
+    const run = await insertWorkflowRun(wf.id, { state: "failed" });
+
+    await workflowService.retryWorkflowRun(run.id);
+
+    // The wake is fire-and-forget; give it a moment to land.
+    let jobs: Awaited<ReturnType<typeof reconcileJobs.getJobs>> = [];
+    for (let i = 0; i < 50 && jobs.length === 0; i++) {
+      jobs = (await reconcileJobs.getJobs(["waiting", "delayed", "prioritized"])).filter((j) =>
+        j.id?.startsWith(`standalone__${run.id}`),
+      );
+      if (jobs.length === 0) await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(jobs).not.toHaveLength(0);
+  });
+
   it("retry flips a failed run to queued, bumps retryCount, and clears error state", async () => {
     const wf = await insertWorkflow();
     const run = await insertWorkflowRun(wf.id, {
@@ -376,6 +534,27 @@ describe("retryWorkflowRun / cancelWorkflowRun", () => {
       kind: "noop",
       reason: "failed_no_retry_intent",
     });
+  });
+
+  it("a retried run's heartbeat starts at its claim, not the last attempt's activity", async () => {
+    const wf = await insertWorkflow();
+    const hourAgo = new Date(Date.now() - 60 * 60_000);
+    // The previous attempt went quiet an hour ago; this attempt was just claimed.
+    const run = await insertWorkflowRun(wf.id, {
+      state: "running",
+      startedAt: new Date(),
+      lastActivityAt: hourAgo,
+    });
+    const snapshot = await buildWorldSnapshot({ kind: "standalone", id: run.id });
+    expect(snapshot!.heartbeat.isStale).toBe(false);
+
+    const quiet = await insertWorkflowRun(wf.id, {
+      state: "running",
+      startedAt: hourAgo,
+      lastActivityAt: hourAgo,
+    });
+    const stale = await buildWorldSnapshot({ kind: "standalone", id: quiet.id });
+    expect(stale!.heartbeat.isStale).toBe(true);
   });
 
   it("cancel never lowers a retryCount already above the workflow's maxRetries", async () => {

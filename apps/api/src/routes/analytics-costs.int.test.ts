@@ -5,7 +5,15 @@
  */
 import { describe, expect, it } from "vitest";
 import { db } from "../db/client.js";
-import { localHosts, localTerminals } from "../db/schema.js";
+import {
+  interactiveSessions,
+  localHosts,
+  localTerminals,
+  persistentAgents,
+  persistentAgentTurns,
+  prReviewRuns,
+  prReviews,
+} from "../db/schema.js";
 import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 import {
   insertTask,
@@ -108,6 +116,99 @@ describe("GET /api/analytics/costs (integration)", () => {
       modelUsed: "claude-sonnet-5",
       inputTokens: 1000,
     });
+  });
+
+  it("counts persistent-agent turns, PR-review runs, and pod sessions, each linking to its page", async () => {
+    const ws = await insertWorkspace();
+    const [agent] = await db
+      .insert(persistentAgents)
+      .values({ workspaceId: ws.id, slug: "forge", name: "Forge", initialPrompt: "hi" })
+      .returning();
+    await db.insert(persistentAgentTurns).values([
+      {
+        agentId: agent.id,
+        turnNumber: 1,
+        wakeSource: "initial",
+        costUsd: "0.5",
+        finishedAt: new Date(),
+        haltReason: "natural",
+      },
+      {
+        agentId: agent.id,
+        turnNumber: 2,
+        wakeSource: "user",
+        costUsd: "0.25",
+        finishedAt: new Date(),
+        haltReason: "error",
+      },
+    ]);
+    const [review] = await db
+      .insert(prReviews)
+      .values({
+        workspaceId: ws.id,
+        prUrl: "https://github.com/acme/app/pull/3",
+        prNumber: 3,
+        repoOwner: "acme",
+        repoName: "app",
+        repoUrl: "https://github.com/acme/app",
+        headSha: "abc",
+      })
+      .returning();
+    const [reviewRun] = await db
+      .insert(prReviewRuns)
+      .values({
+        prReviewId: review.id,
+        kind: "initial",
+        state: "completed",
+        costUsd: "1",
+        modelUsed: "claude-sonnet-5",
+      })
+      .returning();
+    const [session] = await db
+      .insert(interactiveSessions)
+      .values({
+        workspaceId: ws.id,
+        repoUrl: "https://github.com/acme/app",
+        branch: "s",
+        costUsd: "2",
+      })
+      .returning();
+    // A session that has not spent anything yet stores an empty string.
+    await db.insert(interactiveSessions).values({
+      workspaceId: ws.id,
+      repoUrl: "https://github.com/acme/app",
+      branch: "t",
+      costUsd: "",
+    });
+
+    const app = await buildRouteTestApp(analyticsRoutes, {
+      user: { id: "u", workspaceId: ws.id, workspaceRole: "admin" },
+    });
+    const res = await app.inject({ method: "GET", url: "/api/analytics/costs" });
+    expect(res.statusCode, res.body).toBe(200);
+    const body = res.json();
+
+    expect(body.summary.totalCost).toBe("3.7500");
+    const byType = Object.fromEntries(
+      body.costByType.map((r: { taskType: string; totalCost: number }) => [
+        r.taskType,
+        r.totalCost,
+      ]),
+    );
+    expect(byType).toEqual({ "agent-turn": 0.75, "pr-review": 1, "pod-session": 2 });
+
+    const hrefOf = (taskType: string) =>
+      body.topTasks
+        .filter((t: { taskType: string }) => t.taskType === taskType)
+        .map((t: { href: string }) => t.href);
+    expect(hrefOf("agent-turn")).toEqual([`/agents/${agent.id}`, `/agents/${agent.id}`]);
+    expect(hrefOf("pr-review")).toEqual([`/reviews/${review.id}`]);
+    expect(hrefOf("pod-session")).toEqual([`/sessions/${session.id}`]);
+    expect(body.topTasks.find((t: { id: string }) => t.id === reviewRun.id)).toMatchObject({
+      title: "Review acme/app#3",
+      modelUsed: "claude-sonnet-5",
+    });
+    await app.close();
   });
 
   it("filters every breakdown by repoUrl (the anomalies join used to make it ambiguous)", async () => {

@@ -13,11 +13,17 @@
  *  1. **Out-of-order timestamps**: checks by hash, not watermark.
  *  2. **Multi-replica races**: uses a PostgreSQL advisory lock so only
  *     one pod runs migrations at a time.
+ *
+ * It also keeps the views over the runs table (`run-views.ts`) in step with
+ * it: they are dropped before each migration and made again after, inside
+ * the migration's transaction, so a migration can alter `tasks` freely and
+ * the views always carry its columns.
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { sql } from "drizzle-orm";
 import type { Database } from "./client.js";
+import { HAS_RUN_KINDS, RUN_VIEWS_CURRENT, RUN_VIEWS_SQL } from "./run-views.js";
 
 interface MigrationEntry {
   sql: string[];
@@ -26,6 +32,16 @@ interface MigrationEntry {
 }
 
 const ADVISORY_LOCK_ID = 8_675_309; // arbitrary, unique to optio migrations
+
+/** Drop the run views if they are views (before the runs table, `workflow_runs` was a table). */
+const DROP_RUN_VIEWS = sql.raw(`DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_views WHERE schemaname = current_schema() AND viewname = 'workflow_runs') THEN
+    DROP VIEW "workflow_runs";
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_views WHERE schemaname = current_schema() AND viewname = 'repo_tasks') THEN
+    DROP VIEW "repo_tasks";
+  END IF;
+END $$`);
 
 function readMigrations(migrationsFolder: string): MigrationEntry[] {
   const journalPath = `${migrationsFolder}/meta/_journal.json`;
@@ -74,9 +90,15 @@ export async function migrateSafe(db: Database, migrationsFolder: string): Promi
 
       // Apply each missing migration in its own transaction
       await db.transaction(async (tx) => {
+        await tx.execute(DROP_RUN_VIEWS);
         for (const stmt of migration.sql) {
           const trimmed = stmt.trim();
           if (trimmed) await tx.execute(sql.raw(trimmed));
+        }
+        const [{ has }] = await tx.execute<{ has: boolean }>(HAS_RUN_KINDS);
+        if (has) {
+          await tx.execute(DROP_RUN_VIEWS);
+          for (const stmt of RUN_VIEWS_SQL) await tx.execute(sql.raw(stmt));
         }
         await tx.execute(
           sql`INSERT INTO "drizzle"."__drizzle_migrations" ("hash", "created_at") VALUES (${migration.hash}, ${migration.folderMillis})`,
@@ -84,6 +106,18 @@ export async function migrateSafe(db: Database, migrationsFolder: string): Promi
       });
 
       applied++;
+    }
+
+    // The views' definition can change without a migration (run-views.ts).
+    const [{ has }] = await db.execute<{ has: boolean }>(HAS_RUN_KINDS);
+    const [{ current }] = has
+      ? await db.execute<{ current: boolean }>(RUN_VIEWS_CURRENT)
+      : [{ current: true }];
+    if (!current) {
+      await db.transaction(async (tx) => {
+        await tx.execute(DROP_RUN_VIEWS);
+        for (const stmt of RUN_VIEWS_SQL) await tx.execute(sql.raw(stmt));
+      });
     }
   } finally {
     await db.execute(sql`SELECT pg_advisory_unlock(${sql.raw(String(ADVISORY_LOCK_ID))})`);

@@ -39,7 +39,6 @@ function repoSnapshot(
       parentTaskId: null,
       blocksParent: false,
       workspaceId: "ws-1",
-      workflowRunId: null,
       runTarget: "cluster",
       ...spec,
     },

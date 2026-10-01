@@ -3,17 +3,15 @@ import { db } from "../db/client.js";
 import {
   tasks,
   workflowRuns,
-  workflows,
-  repoPods,
+  workDefinitions,
   repos,
   taskEvents,
-  workflowPods,
   prReviews,
   prReviewRuns,
   prReviewEvents,
   persistentAgents,
   persistentAgentMessages,
-  persistentAgentPods,
+  agentPods,
   persistentAgentTurns,
 } from "../db/schema.js";
 import {
@@ -24,6 +22,7 @@ import {
   PersistentAgentState,
   PersistentAgentPodLifecycle,
   DEFAULT_STALL_THRESHOLD_MS,
+  effectivePrSettings,
   getOffPeakInfo,
   parseIntEnv,
   parsePrUrl,
@@ -51,6 +50,8 @@ import type {
 import { getGitPlatformForRepo } from "./git-token-service.js";
 import { determineCheckStatus, determineReviewStatus } from "../workers/pr-watcher-worker.js";
 import { checkBlockingSubtasks } from "./subtask-service.js";
+import { getPod } from "./agent-pod-pool.js";
+import { jobRunCapacity } from "./workflow-service.js";
 import { logger } from "../logger.js";
 
 /**
@@ -115,7 +116,7 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
           readErrors.push({ source: "pr", message: String(err) });
           return null;
         }),
-    loadPodStatusForRepo(row.lastPodId ?? null).catch((err) => {
+    loadPodStatus(row.lastPodId ?? null).catch((err) => {
       readErrors.push({ source: "pod", message: String(err) });
       return null;
     }),
@@ -136,6 +137,11 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
   );
 
   const offPeak = getOffPeakInfo(now);
+  const prSettings = effectivePrSettings(
+    row.settings,
+    repoConfig,
+    parseIntEnv("OPTIO_MAX_AUTO_RESUMES", 10),
+  );
   const hasReviewSubtask = subtaskCounts.some(
     (s) => s.state !== TaskState.FAILED && s.blocksParent,
   );
@@ -158,23 +164,25 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
       // repo's; null on the task means the repo decides. Cautious mode still
       // holds back the merge either way (reconcile-repo).
       autoMerge: row.autoMerge ?? repoConfig?.autoMerge ?? false,
-      cautiousMode: repoConfig?.cautiousMode ?? false,
+      // The task's own settings (WorkSettings) win over the repo's the same way.
+      ...prSettings,
       autoResume: row.autoResume ?? repoConfig?.autoResume ?? false,
-      reviewEnabled: repoConfig?.reviewEnabled ?? false,
-      reviewTrigger:
-        repoConfig?.reviewTrigger === "on_pr" || repoConfig?.reviewTrigger === "on_ci_pass"
-          ? (repoConfig.reviewTrigger as "on_pr" | "on_ci_pass")
-          : null,
       offPeakOnly: repoConfig?.offPeakOnly ?? false,
       offPeakActive: offPeak.isOffPeak,
       hasReviewSubtask,
-      maxAutoResumes: repoConfig?.maxAutoResumes ?? parseIntEnv("OPTIO_MAX_AUTO_RESUMES", 10),
       recentAutoResumeCount,
     },
     readErrors,
   };
 
   return Object.freeze(snapshot);
+}
+
+/** The later of two times (either may be missing). */
+function latest(a: Date | null | undefined, b: Date | null | undefined): Date | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return a.getTime() >= b.getTime() ? a : b;
 }
 
 /**
@@ -213,7 +221,6 @@ function loadRepoRun(row: typeof tasks.$inferSelect, ref: RunRef): Run {
     parentTaskId: row.parentTaskId ?? null,
     blocksParent: row.blocksParent,
     workspaceId: row.workspaceId ?? null,
-    workflowRunId: row.workflowRunId ?? null,
     runTarget: row.runTarget === "local" ? "local" : "cluster",
   };
   const status: RepoRunStatus = {
@@ -340,31 +347,19 @@ async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus |
   };
 }
 
-async function loadPodStatusForWorkflowRun(runId: string): Promise<PodStatus | null> {
-  // Runs now share pods across a workflow; find the assigned pod via the
-  // `pod_id` pointer on workflow_runs. Null when the run has been released
-  // (terminal) or hasn't been scheduled onto a pod yet.
-  const [runRow] = await db
-    .select({ podId: workflowRuns.podId })
-    .from(workflowRuns)
-    .where(eq(workflowRuns.id, runId))
-    .limit(1);
-  if (!runRow?.podId) return null;
-
-  const [pod] = await db
-    .select()
-    .from(workflowPods)
-    .where(eq(workflowPods.id, runRow.podId))
-    .limit(1);
+/** A pod's observed status, from its `agent_pods` row. */
+async function loadPodStatus(podId: string | null): Promise<PodStatus | null> {
+  if (!podId) return null;
+  const pod = await getPod(podId);
   if (!pod) return null;
   return {
     podName: pod.podName ?? pod.id,
-    phase: mapWorkflowPodPhase(pod.state),
+    phase: mapPodPhase(pod.state),
     lastError: pod.errorMessage ?? null,
   };
 }
 
-function mapWorkflowPodPhase(state: string): PodStatus["phase"] {
+function mapPodPhase(state: string): PodStatus["phase"] {
   switch (state) {
     case "provisioning":
       return "pending";
@@ -373,34 +368,6 @@ function mapWorkflowPodPhase(state: string): PodStatus["phase"] {
     case "error":
       return "error";
     case "terminating":
-      return "terminated";
-    default:
-      return "unknown";
-  }
-}
-
-async function loadPodStatusForRepo(podId: string | null): Promise<PodStatus | null> {
-  if (!podId) return null;
-  const [row] = await db.select().from(repoPods).where(eq(repoPods.id, podId));
-  if (!row) return null;
-  const phase = mapRepoPodPhase(row.state);
-  return {
-    podName: row.podName ?? podId,
-    phase,
-    lastError: row.errorMessage ?? null,
-  };
-}
-
-function mapRepoPodPhase(state: string): PodStatus["phase"] {
-  switch (state) {
-    case "provisioning":
-      return "pending";
-    case "ready":
-      return "ready";
-    case "error":
-      return "error";
-    case "terminating":
-    case "terminated":
       return "terminated";
     default:
       return "unknown";
@@ -437,7 +404,10 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
   const [row] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, ref.id));
   if (!row) return null;
 
-  const [workflowRow] = await db.select().from(workflows).where(eq(workflows.id, row.workflowId));
+  const [workflowRow] = await db
+    .select()
+    .from(workDefinitions)
+    .where(eq(workDefinitions.id, row.workflowId));
   if (!workflowRow) {
     logger.warn({ runId: ref.id, workflowId: row.workflowId }, "workflow not found for run");
     return null;
@@ -445,31 +415,28 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
 
   const run = loadStandaloneRun(row, workflowRow, ref);
 
-  const [globalCap, workflowCap, podResult] = await Promise.all([
-    loadGlobalWorkflowCapacity().catch((err) => {
+  const [capacity, podResult] = await Promise.all([
+    // Cluster runs only — local runs don't occupy job pods.
+    jobRunCapacity(row.workflowId, workflowRow.maxConcurrent).catch((err) => {
       readErrors.push({ source: "capacity", message: String(err) });
       return null;
     }),
-    loadPerWorkflowCapacity(row.workflowId, workflowRow.maxConcurrent).catch((err) => {
-      readErrors.push({ source: "capacity", message: String(err) });
-      return null;
-    }),
-    loadPodStatusForWorkflowRun(ref.id).catch((err) => {
+    // Runs share pods across a workflow; the assigned pod is the run's
+    // `pod_id`. Null when the run has been released (terminal) or hasn't
+    // been scheduled onto a pod yet.
+    loadPodStatus(row.podId ?? null).catch((err) => {
       readErrors.push({ source: "pod", message: String(err) });
       return null;
     }),
   ]);
 
   const stallThresholdMs = parseIntEnv("OPTIO_STALL_THRESHOLD_MS", DEFAULT_STALL_THRESHOLD_MS);
-  // workflow_runs doesn't have lastActivityAt — use startedAt for
-  // coarse stall detection until a richer signal exists. Local runs are
-  // exempt: the daemon owns liveness and interactive sessions idle by design.
-  if (run.kind !== "standalone") {
-    throw new Error("expected standalone run for standalone snapshot");
-  }
+  // The worker writes the attempt's last agent event (else the claim stands
+  // in for it). Local runs are exempt: the daemon owns liveness and
+  // interactive sessions idle by design.
   const heartbeat = computeHeartbeat(
-    run.status.startedAt,
-    run.status.state === WorkflowRunState.RUNNING && workflowRow.runTarget !== "local",
+    latest(row.lastActivityAt, row.startedAt),
+    row.state === WorkflowRunState.RUNNING && workflowRow.runTarget !== "local",
     stallThresholdMs,
     now,
   );
@@ -482,11 +449,11 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
     dependencies: [],
     blockingSubtasks: [],
     capacity: {
-      global: globalCap ?? {
+      global: capacity?.global ?? {
         running: 0,
         max: parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5),
       },
-      repo: workflowCap ?? undefined,
+      repo: capacity?.job,
     },
     heartbeat,
     settings: {
@@ -510,14 +477,14 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
 
 function loadStandaloneRun(
   row: typeof workflowRuns.$inferSelect,
-  workflowRow: typeof workflows.$inferSelect,
+  workflowRow: typeof workDefinitions.$inferSelect,
   ref: RunRef,
 ): Run {
   const spec: StandaloneRunSpec = {
     workflowId: workflowRow.id,
     workflowEnabled: workflowRow.enabled,
-    agentRuntime: workflowRow.agentRuntime,
-    promptRendered: workflowRow.promptTemplate,
+    agentRuntime: workflowRow.agentType ?? "claude-code",
+    promptRendered: workflowRow.prompt,
     params: row.params ?? null,
     maxConcurrent: workflowRow.maxConcurrent,
     maxRetries: workflowRow.maxRetries,
@@ -545,29 +512,6 @@ function loadStandaloneRun(
     updatedAt: row.updatedAt,
   };
   return { kind: "standalone", ref, spec, status };
-}
-
-async function loadGlobalWorkflowCapacity() {
-  const max = parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5);
-  // Cluster runs only — local runs don't occupy job pods.
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(workflowRuns)
-    .innerJoin(workflows, eq(workflows.id, workflowRuns.workflowId))
-    .where(
-      sql`${workflowRuns.state} = ${WorkflowRunState.RUNNING} AND ${workflows.runTarget} <> 'local'`,
-    );
-  return { running: Number(count), max };
-}
-
-async function loadPerWorkflowCapacity(workflowId: string, max: number) {
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(workflowRuns)
-    .where(
-      sql`${workflowRuns.state} = ${WorkflowRunState.RUNNING} AND ${workflowRuns.workflowId} = ${workflowId}`,
-    );
-  return { running: Number(count), max };
 }
 
 // ── Heartbeat helper ────────────────────────────────────────────────────────
@@ -876,14 +820,14 @@ async function loadGlobalPersistentAgentCapacity() {
 async function loadActivePodForPersistentAgent(agentId: string): Promise<PodStatus | null> {
   const [pod] = await db
     .select()
-    .from(persistentAgentPods)
-    .where(eq(persistentAgentPods.agentId, agentId))
-    .orderBy(desc(persistentAgentPods.updatedAt))
+    .from(agentPods)
+    .where(and(eq(agentPods.pool, "persistent-agent"), eq(agentPods.poolKey, agentId)))
+    .orderBy(desc(agentPods.updatedAt))
     .limit(1);
   if (!pod || !pod.podName) return null;
   return {
     podName: pod.podName,
-    phase: mapWorkflowPodPhase(pod.state),
+    phase: mapPodPhase(pod.state),
     lastError: pod.errorMessage ?? null,
   };
 }

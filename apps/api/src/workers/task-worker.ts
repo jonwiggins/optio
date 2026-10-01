@@ -12,12 +12,10 @@ import {
   classifyError,
   parseRepoUrl,
   parseIntEnv,
-  addCostStrings,
-  addTokenCounts,
   PrToolCallTracker,
+  shellQuote,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
-import { shellSingleQuote } from "../utils/pod-env.js";
 import { getEventParser } from "../services/event-parsers.js";
 import { checkExistingPr, type ExistingPr } from "../services/pr-detection-service.js";
 import { detectTaskPrs } from "../services/task-pr-service.js";
@@ -29,14 +27,11 @@ import * as repoPool from "../services/repo-pool-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import {
   resolveSecretsForTask,
-  resolveSecretsForSetup,
   resolvePodSecrets,
   retrieveSecretWithFallback,
-  workspaceRestrictsPodSecrets,
 } from "../services/secret-service.js";
 import { getPromptTemplate } from "../services/prompt-template-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
-import { getCredentialSecret } from "../services/credential-secret-service.js";
 import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
 import { subscribeToTaskMessages } from "../services/task-message-bus.js";
 import { registerActiveExec, unregisterActiveExec } from "../services/task-cancellation-service.js";
@@ -54,7 +49,14 @@ import { withSpan, injectTraceContextIntoJob } from "../telemetry/spans.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
-import { codexModelFlags } from "../services/pooled-agent-command.js";
+import {
+  buildInitialClaudeStreamMessage,
+  codexModelFlags,
+} from "../services/pooled-agent-command.js";
+import { addUsage } from "../services/run-usage.js";
+import { buildAgentEnvironment } from "../services/agent-environment-service.js";
+import { applyGitAccess } from "../services/git-access-env.js";
+import { activityFlusher } from "../services/activity-flush.js";
 
 const connectionOpts = getBullMQConnectionOptions();
 
@@ -358,6 +360,8 @@ export function startTaskWorker() {
         const isPlanningRun =
           !!repoConfig?.planningModeEnabled && !resumeSessionId && !reviewOverride;
 
+        // Draft PRs when the repo or the task's own settings ask for them.
+        const cautious = task.settings?.cautiousMode === true || !!promptConfig.cautiousMode;
         const renderedPrompt = renderPromptTemplate(promptConfig.template, {
           TASK_FILE: taskFilePath,
           BRANCH_NAME: branchName,
@@ -366,10 +370,8 @@ export function startTaskWorker() {
           REPO_NAME: repoName,
           // The task's own follow-through wins over the repo's; cautious mode
           // (draft PRs) never merges.
-          AUTO_MERGE: String(
-            promptConfig.cautiousMode ? false : (task.autoMerge ?? promptConfig.autoMerge),
-          ),
-          DRAFT_PR: String(promptConfig.cautiousMode),
+          AUTO_MERGE: String(cautious ? false : (task.autoMerge ?? promptConfig.autoMerge)),
+          DRAFT_PR: String(cautious),
           ISSUE_NUMBER: task.ticketExternalId ?? "",
           GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
           GIT_PLATFORM_CODECOMMIT: isCodeCommit ? "true" : "",
@@ -462,230 +464,23 @@ export function startTaskWorker() {
           claudeVertexServiceAccountKey,
         });
 
-        // ── MCP servers & custom skills injection ────────────────────
-        const { getMcpServersForTask, buildMcpJsonContent } =
-          await import("../services/mcp-server-service.js");
-        const { getSkillsForTask, buildSkillSetupFiles } =
-          await import("../services/skill-service.js");
-
-        const mcpServers = await getMcpServersForTask(task.repoUrl, taskWorkspaceId);
-        if (mcpServers.length > 0) {
-          const mcpJsonContent = await buildMcpJsonContent(mcpServers, task.repoUrl);
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          agentConfig.setupFiles.push({
-            path: ".mcp.json",
-            content: mcpJsonContent,
-          });
-
-          // Collect install commands
-          const installCommands = mcpServers
-            .filter((s) => s.installCommand)
-            .map((s) => s.installCommand!);
-          if (installCommands.length > 0) {
-            agentConfig.env.OPTIO_MCP_INSTALL_COMMANDS = installCommands.join(" && ");
-          }
-          log.info({ count: mcpServers.length }, "Injecting MCP servers");
-        }
-
-        // ── Connection-based MCP injection ─────────────────────────
-        const { getConnectionsForTask } = await import("../services/connection-service.js");
-        const resolvedConnections = await getConnectionsForTask(
-          task.repoUrl,
-          task.agentType,
-          taskWorkspaceId,
-          runOwnerUserId,
+        // ── The agent's environment: MCP servers, connections, skills, and
+        // the work's own setup commands — the repo's defaults with the
+        // task's settings applied (agent-environment-service).
+        Object.assign(
+          agentConfig.env,
+          await buildAgentEnvironment(
+            {
+              repoUrl: task.repoUrl,
+              agentType: task.agentType,
+              workspaceId: taskWorkspaceId,
+              ownerUserId: runOwnerUserId,
+              settings: task.settings,
+            },
+            log,
+            agentConfig.setupFiles,
+          ),
         );
-        if (resolvedConnections.length > 0) {
-          // Build MCP entries from connections and merge into .mcp.json
-          const connectionMcpEntries: Record<
-            string,
-            { command: string; args: string[]; env?: Record<string, string> }
-          > = {};
-          const connectionInstallCommands: string[] = [];
-
-          for (const conn of resolvedConnections) {
-            if (!conn.mcpConfig) continue;
-            const mcpCfg = conn.mcpConfig;
-
-            // Resolve env vars by mapping config values through envMapping
-            const resolvedEnv: Record<string, string> = {};
-            for (const [envKey, configKey] of Object.entries(mcpCfg.envMapping)) {
-              const value = conn.config[configKey];
-              if (typeof value === "string") {
-                // Check if it's a secret reference
-                if (value.startsWith("${{") && value.endsWith("}}")) {
-                  const secretName = value.slice(3, -2).trim();
-                  try {
-                    let secretValue: string;
-                    try {
-                      secretValue = await retrieveSecretWithFallback(
-                        secretName,
-                        task.repoUrl,
-                        taskWorkspaceId,
-                        runOwnerUserId,
-                      );
-                    } catch {
-                      secretValue = await retrieveSecretWithFallback(
-                        secretName,
-                        "global",
-                        taskWorkspaceId,
-                        runOwnerUserId,
-                      );
-                    }
-                    resolvedEnv[envKey] = secretValue;
-                  } catch {
-                    // Secret not found — try the config key as a secret name directly
-                    try {
-                      resolvedEnv[envKey] = await retrieveSecretWithFallback(
-                        configKey,
-                        task.repoUrl,
-                        taskWorkspaceId,
-                        runOwnerUserId,
-                      );
-                    } catch {
-                      try {
-                        resolvedEnv[envKey] = await retrieveSecretWithFallback(
-                          configKey,
-                          "global",
-                          taskWorkspaceId,
-                          runOwnerUserId,
-                        );
-                      } catch {
-                        // Leave unresolved
-                      }
-                    }
-                  }
-                } else {
-                  resolvedEnv[envKey] = value;
-                }
-              } else {
-                // Try resolving the config key as a secret name
-                try {
-                  resolvedEnv[envKey] = await retrieveSecretWithFallback(
-                    configKey,
-                    task.repoUrl,
-                    taskWorkspaceId,
-                    runOwnerUserId,
-                  );
-                } catch {
-                  try {
-                    resolvedEnv[envKey] = await retrieveSecretWithFallback(
-                      configKey,
-                      "global",
-                      taskWorkspaceId,
-                      runOwnerUserId,
-                    );
-                  } catch {
-                    // Leave unresolved
-                  }
-                }
-              }
-            }
-
-            // Resolve template args (e.g., {{ROOT_PATH}})
-            const resolvedArgs = mcpCfg.args.map((arg) =>
-              arg.replace(/\{\{(\w+)\}\}/g, (_match, key) => {
-                const val = conn.config[key];
-                return typeof val === "string" ? val : arg;
-              }),
-            );
-
-            connectionMcpEntries[conn.connectionName] = {
-              command: mcpCfg.command,
-              args: resolvedArgs,
-              ...(Object.keys(resolvedEnv).length > 0 ? { env: resolvedEnv } : {}),
-            };
-
-            if (mcpCfg.installCommand) {
-              connectionInstallCommands.push(mcpCfg.installCommand);
-            }
-          }
-
-          if (Object.keys(connectionMcpEntries).length > 0) {
-            // Find existing .mcp.json in setup files and merge, or create new
-            agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-            const existingIdx = agentConfig.setupFiles.findIndex((f) => f.path === ".mcp.json");
-
-            if (existingIdx >= 0) {
-              // Merge with existing MCP servers
-              const existing = JSON.parse(agentConfig.setupFiles[existingIdx].content);
-              existing.mcpServers = {
-                ...existing.mcpServers,
-                ...connectionMcpEntries,
-              };
-              agentConfig.setupFiles[existingIdx].content = JSON.stringify(existing, null, 2);
-            } else {
-              agentConfig.setupFiles.push({
-                path: ".mcp.json",
-                content: JSON.stringify({ mcpServers: connectionMcpEntries }, null, 2),
-              });
-            }
-
-            // Merge install commands
-            if (connectionInstallCommands.length > 0) {
-              const existing = agentConfig.env.OPTIO_MCP_INSTALL_COMMANDS;
-              agentConfig.env.OPTIO_MCP_INSTALL_COMMANDS = existing
-                ? `${existing} && ${connectionInstallCommands.join(" && ")}`
-                : connectionInstallCommands.join(" && ");
-            }
-
-            log.info(
-              { count: Object.keys(connectionMcpEntries).length },
-              "Injecting connections as MCP servers",
-            );
-          }
-        }
-
-        const skills = await getSkillsForTask(task.repoUrl, taskWorkspaceId, task.agentType);
-        if (skills.length > 0) {
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          const skillFiles = buildSkillSetupFiles(skills);
-          agentConfig.setupFiles.push(...skillFiles);
-          log.info({ count: skills.length, agentType: task.agentType }, "Injecting custom skills");
-        }
-
-        // ── Marketplace-installed skills (Claude Code only for now) ─────
-        if (task.agentType === "claude-code") {
-          const { getInstalledSkillsForTask } =
-            await import("../services/installed-skill-service.js");
-          const { readInstalledSkillFiles } = await import("../workers/skill-sync-worker.js");
-          const installed = await getInstalledSkillsForTask(
-            task.repoUrl,
-            taskWorkspaceId,
-            task.agentType,
-          );
-          if (installed.length > 0) {
-            agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-            let injected = 0;
-            for (const skill of installed) {
-              try {
-                const files = await readInstalledSkillFiles(skill.resolvedSha!, skill.subpath);
-                for (const f of files) {
-                  agentConfig.setupFiles.push({
-                    path: `.claude/skills/${skill.name}/${f.relativePath}`,
-                    content: "",
-                    contentBase64: f.content.toString("base64"),
-                    executable: f.executable,
-                  });
-                }
-                injected++;
-              } catch (err) {
-                log.warn(
-                  { err, skillId: skill.id, name: skill.name },
-                  "Skipping installed skill — cache miss or read error",
-                );
-              }
-            }
-            log.info({ injected, total: installed.length }, "Injecting marketplace skills");
-          }
-        }
-
-        // Encode setup files
-        if (agentConfig.setupFiles && agentConfig.setupFiles.length > 0) {
-          agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(
-            JSON.stringify(agentConfig.setupFiles),
-          ).toString("base64");
-        }
 
         // Resolve secrets (workspace → repo-scoped → global fallback)
         // Only require GITHUB_TOKEN when GitHub App auth is not configured
@@ -716,36 +511,8 @@ export function startTaskWorker() {
           ...resolvedSecrets,
         };
 
-        // Resolve git platform tokens (not part of adapter requiredSecrets since they're infra-level)
-        for (const secretName of ["GITHUB_TOKEN", "GITLAB_TOKEN", "GITLAB_HOST"]) {
-          if (!allEnv[secretName]) {
-            const val = await retrieveSecretWithFallback(
-              secretName,
-              "global",
-              taskWorkspaceId,
-            ).catch(() => null);
-            if (val) allEnv[secretName] = val as string;
-          }
-        }
-
-        // Inject credential URLs for dynamic GitHub token resolution.
-        // OPTIO_API_INTERNAL_URL is the K8s service URL (set by Helm chart).
-        // Falls back to localhost for local dev where API_HOST is the bind address.
-        const apiInternalUrl =
-          process.env.OPTIO_API_INTERNAL_URL ??
-          `http://localhost:${process.env.API_PORT ?? "4000"}`;
-        // Pod-level URL (no taskId): used by repo-init.sh for git clone with installation token
-        allEnv.OPTIO_GIT_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials`;
-        // Task-level URL (with taskId): injected at exec time for user-scoped git operations
-        allEnv.OPTIO_GIT_TASK_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials?taskId=${task.id}`;
-        // Shared secret for authenticating credential requests from pods
-        allEnv.OPTIO_CREDENTIAL_SECRET = getCredentialSecret();
-
-        // Only inject static GITHUB_TOKEN when GitHub App is not configured
-        // and the credential helper scripts may not be available (old images)
-        if (isGitHubAppConfigured() && allEnv.GITHUB_TOKEN) {
-          delete allEnv.GITHUB_TOKEN;
-        }
+        // Git sign-in (platform tokens are infra-level, not adapter secrets).
+        await applyGitAccess(allEnv, { workspaceId: taskWorkspaceId, runId: task.id });
 
         // Force-restart: tell the exec script to use the existing PR branch
         if (restartFromBranch) {
@@ -811,39 +578,8 @@ export function startTaskWorker() {
           }
         }
 
-        // Split env into pod-level (for repo-init.sh) and task-level (for exec).
-        // Pod env must NOT contain user-specific secrets (API keys, OAuth tokens)
-        // since the pod is shared across users. Secrets are only in task exec env.
-        const podEnv: Record<string, string> = {
-          OPTIO_GIT_CREDENTIAL_URL: allEnv.OPTIO_GIT_CREDENTIAL_URL,
-          OPTIO_CREDENTIAL_SECRET: allEnv.OPTIO_CREDENTIAL_SECRET,
-          ...(allEnv.GITHUB_TOKEN ? { GITHUB_TOKEN: allEnv.GITHUB_TOKEN } : {}),
-          ...(allEnv.GITLAB_TOKEN ? { GITLAB_TOKEN: allEnv.GITLAB_TOKEN } : {}),
-          ...(allEnv.GITLAB_HOST ? { GITLAB_HOST: allEnv.GITLAB_HOST } : {}),
-          ...(process.env.GITHUB_APP_BOT_NAME
-            ? { GITHUB_APP_BOT_NAME: process.env.GITHUB_APP_BOT_NAME }
-            : {}),
-          ...(process.env.GITHUB_APP_BOT_EMAIL
-            ? { GITHUB_APP_BOT_EMAIL: process.env.GITHUB_APP_BOT_EMAIL }
-            : {}),
-          ...(allEnv.OPTIO_EXTRA_PACKAGES
-            ? { OPTIO_EXTRA_PACKAGES: allEnv.OPTIO_EXTRA_PACKAGES }
-            : {}),
-          ...(allEnv.OPTIO_SETUP_COMMANDS
-            ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
-            : {}),
-        };
-
-        // Inject secrets into pod env for setup commands (global + repo-scoped).
-        // Repo-scoped secrets override global secrets with the same name.
-        const setupSecrets = await resolveSecretsForSetup(task.repoUrl, taskWorkspaceId, {
-          orgSecrets: !(await workspaceRestrictsPodSecrets(taskWorkspaceId)),
-        });
-        const setupSecretCount = Object.keys(setupSecrets).length;
-        if (setupSecretCount > 0) {
-          Object.assign(podEnv, setupSecrets);
-          log.info({ count: setupSecretCount }, "Injected secrets for setup");
-        }
+        // The pod's own env (repo-init.sh): no run's secrets — the pod is shared.
+        const podEnv = await repoPool.repoPodEnv(allEnv, task.repoUrl, taskWorkspaceId);
 
         // Get or create a repo pod (with multi-pod scheduling)
         log.info("Getting repo pod");
@@ -951,9 +687,7 @@ export function startTaskWorker() {
         let lastHeartbeat = Date.now();
         const HEARTBEAT_INTERVAL_MS = 60_000;
         // Stall detection: debounced activity timestamp flush
-        let pendingActivityAt: Date | null = null;
-        let lastActivityFlushAt = 0;
-        const ACTIVITY_FLUSH_INTERVAL_MS = 5_000;
+        const activity = activityFlusher((at) => taskService.updateTaskActivity(taskId, at), 5_000);
         // Buffer for partial NDJSON lines split across chunks
         let lineBuf = "";
 
@@ -1055,25 +789,16 @@ export function startTaskWorker() {
               );
 
               // Stall detection: mark activity on meaningful parsed events
-              if (["text", "tool_use", "tool_result", "thinking", "system"].includes(entry.type)) {
-                pendingActivityAt = new Date();
-              }
+              activity.mark(entry.type);
             }
           }
 
           // Debounced flush of lastActivityAt to avoid per-event DB writes
-          if (pendingActivityAt && Date.now() - lastActivityFlushAt > ACTIVITY_FLUSH_INTERVAL_MS) {
-            await taskService.updateTaskActivity(taskId, pendingActivityAt);
-            lastActivityFlushAt = Date.now();
-            pendingActivityAt = null;
-          }
+          await activity.maybeFlush();
         }
 
         // Final flush of pending activity timestamp
-        if (pendingActivityAt) {
-          await taskService.updateTaskActivity(taskId, pendingActivityAt);
-          pendingActivityAt = null;
-        }
+        await activity.flush();
 
         // Flush any remaining partial line in the buffer
         if (lineBuf.trim()) {
@@ -1133,57 +858,16 @@ export function startTaskWorker() {
 
         await taskService.updateTaskResult(taskId, result.summary, result.error);
 
-        // Persist cost, token usage, and model data.
-        //
-        // On a resume or force-restart, Claude runs as a FRESH process (either
-        // `claude --resume <session>` or a brand-new session on the existing
-        // branch). Its result reports only its OWN turns' total_cost_usd / token
-        // usage — it has no knowledge of what the prior run already spent. So the
-        // recorded value must ACCUMULATE (prior + this run), not overwrite.
-        // Overwriting is what caused issue #541: /api/analytics/costs sums
-        // tasks.cost_usd, so replacing the original cost with just the resumed
-        // invocation's spend undercounts total spend.
-        //
-        // A genuine first run has no prior spend to preserve, so it writes its
-        // value directly. Accumulating never double-counts: each relaunch is a
-        // distinct process reporting only its own cost, so prior + current is
-        // always the true total.
-        //
-        // Continuation signals: `resumeSessionId` (/resume, --resume), a
-        // `restartFromBranch` fresh session on the existing PR (/force-restart,
-        // auto-resume), or a `resumePrompt` (set by every relaunch path —
-        // including message-resume where the stored session id may be absent).
-        //
-        // Prior recorded usage counts as a continuation signal too (issue
-        // #580): retry-without-a-PR and BullMQ auto-retries enqueue a bare
-        // `{taskId}` job, but a failed attempt's tokens were still spent, so
-        // its cost must survive the relaunch even though the work restarts
-        // from scratch. Only a task with no recorded spend writes directly.
-        const isContinuation = !!(resumeSessionId || restartFromBranch || resumePrompt);
-        const hasPriorUsage =
-          parseFloat(taskAfterExec.costUsd ?? "0") > 0 ||
-          (taskAfterExec.inputTokens ?? 0) > 0 ||
-          (taskAfterExec.outputTokens ?? 0) > 0;
-        const accumulate = isContinuation || hasPriorUsage;
-        const costFields: Record<string, unknown> = {};
-        if (result.costUsd != null) {
-          costFields.costUsd = accumulate
-            ? addCostStrings(taskAfterExec.costUsd, result.costUsd)
-            : String(result.costUsd);
-        }
-        if (result.inputTokens != null) {
-          costFields.inputTokens = accumulate
-            ? addTokenCounts(taskAfterExec.inputTokens, result.inputTokens)
-            : result.inputTokens;
-        }
-        if (result.outputTokens != null) {
-          costFields.outputTokens = accumulate
-            ? addTokenCounts(taskAfterExec.outputTokens, result.outputTokens)
-            : result.outputTokens;
-        }
-        if (result.model) costFields.modelUsed = result.model;
-        if (Object.keys(costFields).length > 0) {
-          await db.update(tasks).set(costFields).where(eq(tasks.id, taskId));
+        // Persist cost, token usage, and model data, ADDED to what the task
+        // already recorded. Each launch — a first run, a retry (issue #580: a
+        // failed attempt's tokens were still spent), a resume or force-restart
+        // (issue #541: `claude --resume` reports only its own turns) — is a
+        // distinct process reporting only its own spend, so prior + this run
+        // is always the true total; a first run adds onto nothing. Postgres
+        // does the addition, so it is exact and atomic.
+        const usage = addUsage(tasks, result);
+        if (Object.keys(usage).length > 0) {
+          await db.update(tasks).set(usage).where(eq(tasks.id, taskId));
         }
 
         // ── Telemetry: record cost and token metrics ──────────────────
@@ -1719,7 +1403,7 @@ export async function reconcileOrphanedTasks() {
     logger.info({ count: enqueued }, "Reconciled orphaned tasks after startup");
   }
 
-  // Reset activeTaskCount on all repo pods to match actual running tasks.
+  // Reset each repo pod's active count to match actual running tasks.
   // The counter can drift if the server crashes before the finally block
   // in the task worker decrements it.
   const corrected = await repoPool.reconcileActiveTaskCounts();
@@ -1780,29 +1464,6 @@ export function ingestPrToolCallLine(
   if (agentType === "codex") tracker.ingestCodexLine(line);
   else tracker.ingestClaudeLine(line);
 }
-
-export function buildInitialClaudeStreamMessage(prompt: string): string {
-  return (
-    JSON.stringify({
-      type: "user",
-      message: {
-        role: "user",
-        content: [{ type: "text", text: prompt }],
-      },
-    }) + "\n"
-  );
-}
-
-/**
- * Quote a value as a single shell word. Wraps in single quotes (inside which
- * bash performs no expansion at all) and escapes embedded single quotes with
- * the standard '\'' close/escape/reopen sequence.
- *
- * JSON.stringify is NOT safe for this: it produces double quotes, and bash
- * still performs `$VAR` expansion and backtick/`$()` command substitution
- * inside double quotes.
- */
-export const shellQuote = shellSingleQuote;
 
 export function buildAgentCommand(
   agentType: string,

@@ -36,7 +36,6 @@ vi.mock("../services/task-service.js", () => ({
   getTaskEvents: vi.fn().mockResolvedValue([]),
   createTask: vi.fn(),
   transitionTask: vi.fn(),
-  getAllTaskLogs: vi.fn().mockResolvedValue([]),
   forceRedoTask: vi.fn(),
   hydratePrReviewPrUrls: async (rows: unknown[]) => rows,
 }));

@@ -2,6 +2,7 @@ import { eq, desc, and, or, ilike, gte, lte, sql } from "drizzle-orm";
 import { ensurePrimaryPrRow, prNumberFromUrl } from "./task-pr-service.js";
 import { db } from "../db/client.js";
 import { tasks, taskEvents, taskLogs, users, repos } from "../db/schema.js";
+import * as runLogService from "./run-log-service.js";
 import {
   TaskState,
   transition,
@@ -9,7 +10,9 @@ import {
   normalizeRepoUrl,
   DEFAULT_STALL_THRESHOLD_MS,
   parseIntEnv,
+  toLocalAgentKind,
   type CreateTaskInput,
+  type WorkSettings,
 } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
@@ -38,10 +41,14 @@ export class StateRaceError extends Error {
 export async function createTask(
   input: CreateTaskInput & {
     workspaceId?: string | null;
+    /** The work definition (scheduled Task) spawning it. */
+    workId?: string | null;
     /** Null = the organization's; see services/work-ownership.ts. */
     ownerUserId?: string | null;
     /** Secrets (by name) the agent gets in its pod; null = the workspace's default. */
     podSecrets?: string[] | null;
+    /** What it changes about the repo's agent environment; null = the repo's. */
+    settings?: WorkSettings | null;
   },
 ) {
   const [task] = await db
@@ -66,8 +73,10 @@ export async function createTask(
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
       ownerUserId: input.ownerUserId ?? null,
       podSecrets: input.podSecrets ?? null,
+      settings: input.settings ?? null,
       autoResume: input.autoResume ?? null,
       autoMerge: input.autoMerge ?? null,
+      workId: input.workId ?? null,
     })
     .returning();
 
@@ -79,6 +88,94 @@ export async function createTask(
   });
 
   return task;
+}
+
+/** Why a task can't be submitted as asked (the caller answers 400). */
+export class TaskInputError extends Error {}
+
+/**
+ * The agent a new task runs: the one asked for, else the repo's default.
+ * Throws `TaskInputError` when it can't run on a machine and the task would.
+ */
+export async function resolveTaskAgent(input: {
+  agentType?: string | null;
+  repoUrl: string;
+  workspaceId?: string | null;
+  runTarget?: string;
+}): Promise<string> {
+  let agentType = input.agentType ?? "";
+  if (!agentType) {
+    const { getRepoByUrl } = await import("./repo-service.js");
+    const repo = await getRepoByUrl(input.repoUrl, input.workspaceId ?? null);
+    agentType = repo?.defaultAgentType ?? "claude-code";
+  }
+  if (input.runTarget === "local" && !toLocalAgentKind(agentType)) {
+    throw new TaskInputError(
+      `${agentType} can't run on your machine — pick Claude Code, Codex, Cursor, Gemini, or OpenCode`,
+    );
+  }
+  return agentType;
+}
+
+/**
+ * Create a one-off repo task and put it in line: queued (and handed to the
+ * task worker), or waiting on the tasks it depends on. The agent defaults to
+ * the repo's. Returns the task in the state it moved to. Throws
+ * `TaskInputError` before creating anything when the agent can't run where
+ * asked, and after when a dependency can't be added (the task stays
+ * pending, as the HTTP route always left it).
+ */
+export async function submitTask(
+  input: Omit<CreateTaskInput, "agentType" | "dependsOn"> & {
+    agentType?: string | null;
+    workspaceId?: string | null;
+    ownerUserId?: string | null;
+    podSecrets?: string[] | null;
+    settings?: WorkSettings | null;
+    dependsOn?: string[];
+  },
+  userId?: string,
+) {
+  const agentType = await resolveTaskAgent(input);
+  const { dependsOn, ...rest } = input;
+  const task = await createTask({ ...rest, agentType, createdBy: userId ?? input.createdBy });
+  if (dependsOn && dependsOn.length > 0) {
+    const { addDependencies } = await import("./dependency-service.js");
+    try {
+      await addDependencies(task.id, dependsOn);
+    } catch (err) {
+      throw new TaskInputError(err instanceof Error ? err.message : String(err));
+    }
+    return (
+      (await transitionTask(
+        task.id,
+        TaskState.WAITING_ON_DEPS,
+        "task_submitted_with_deps",
+        undefined,
+        userId,
+      )) ?? task
+    );
+  }
+  const queued = await transitionTask(
+    task.id,
+    TaskState.QUEUED,
+    "task_submitted",
+    undefined,
+    userId,
+  );
+  // Dynamic import: the task worker imports this module.
+  const { taskQueue } = await import("../workers/task-worker.js");
+  await taskQueue.add(
+    "process-task",
+    { taskId: task.id },
+    {
+      jobId: task.id,
+      priority: task.priority ?? 100,
+      attempts: task.maxRetries + 1,
+      backoff: { type: "exponential", delay: 5000 },
+    },
+  );
+  return queued ?? task;
 }
 
 export async function getTask(id: string) {
@@ -119,6 +216,8 @@ export async function listTasks(opts?: {
   limit?: number;
   offset?: number;
   workspaceId?: string | null;
+  /** Only the tasks this definition (a scheduled Task) spawned. */
+  workId?: string;
 }) {
   const conditions = [];
   if (opts?.state) {
@@ -126,6 +225,9 @@ export async function listTasks(opts?: {
   }
   if (opts?.workspaceId) {
     conditions.push(eq(tasks.workspaceId, opts.workspaceId));
+  }
+  if (opts?.workId) {
+    conditions.push(eq(tasks.workId, opts.workId));
   }
 
   let query = db.select().from(tasks).orderBy(desc(tasks.createdAt));
@@ -551,10 +653,7 @@ export async function appendTaskLog(
   logType?: string,
   metadata?: Record<string, unknown>,
 ) {
-  const [row] = await db
-    .insert(taskLogs)
-    .values({ taskId, content, stream, logType, metadata })
-    .returning();
+  const row = await runLogService.insertLog({ taskId }, { content, stream, logType, metadata });
 
   // The live frame is the stored row — id, timestamp, type, metadata as
   // GET /api/tasks/:id/logs returns them — so clients that merge REST
@@ -575,36 +674,7 @@ export async function getTaskLogs(
   taskId: string,
   opts?: { limit?: number; offset?: number; search?: string; logType?: string },
 ) {
-  const conditions = [eq(taskLogs.taskId, taskId)];
-  if (opts?.logType) {
-    conditions.push(eq(taskLogs.logType, opts.logType));
-  }
-  if (opts?.search) {
-    conditions.push(ilike(taskLogs.content, `%${opts.search}%`));
-  }
-  let query = db
-    .select()
-    .from(taskLogs)
-    .where(and(...conditions))
-    .orderBy(taskLogs.timestamp);
-  if (opts?.limit) query = query.limit(opts.limit) as typeof query;
-  if (opts?.offset) query = query.offset(opts.offset) as typeof query;
-  return query;
-}
-
-export async function getAllTaskLogs(taskId: string, opts?: { search?: string; logType?: string }) {
-  const conditions = [eq(taskLogs.taskId, taskId)];
-  if (opts?.logType) {
-    conditions.push(eq(taskLogs.logType, opts.logType));
-  }
-  if (opts?.search) {
-    conditions.push(ilike(taskLogs.content, `%${opts.search}%`));
-  }
-  return db
-    .select()
-    .from(taskLogs)
-    .where(and(...conditions))
-    .orderBy(taskLogs.timestamp);
+  return runLogService.listLogs({ taskId }, opts);
 }
 
 export async function forceRedoTask(id: string) {

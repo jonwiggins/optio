@@ -29,9 +29,11 @@ vi.mock("../db/schema.js", () => ({
   repos: {
     repoUrl: "repos.repo_url",
   },
-  repoPods: {
-    id: "repo_pods.id",
-  },
+}));
+
+// The session's pod is read through agent-pod-pool.
+vi.mock("./agent-pod-pool.js", () => ({
+  getPod: vi.fn(),
 }));
 
 vi.mock("./event-bus.js", () => ({
@@ -63,6 +65,7 @@ vi.mock("../routes/github-app.js", () => ({
 import { db } from "../db/client.js";
 import { publishEvent, publishSessionEvent } from "./event-bus.js";
 import { getOrCreateRepoPod } from "./repo-pool-service.js";
+import { getPod } from "./agent-pod-pool.js";
 import {
   createSession,
   getSession,
@@ -198,23 +201,32 @@ describe("interactive-session-service", () => {
 
   describe("getSession", () => {
     it("returns session with pod info", async () => {
-      let selectCallCount = 0;
-      (db.select as any) = vi.fn().mockImplementation(() => ({
+      (db.select as any) = vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
-          where: vi.fn().mockImplementation(() => {
-            selectCallCount++;
-            if (selectCallCount === 1) {
-              return Promise.resolve([{ id: "session-1", state: "active", podId: "pod-1" }]);
-            }
-            // Pod lookup
-            return Promise.resolve([{ podName: "optio-pod-1" }]);
-          }),
+          where: vi.fn().mockResolvedValue([{ id: "session-1", state: "active", podId: "pod-1" }]),
         }),
-      }));
+      });
+      // Pod lookup
+      vi.mocked(getPod).mockResolvedValueOnce({ id: "pod-1", podName: "optio-pod-1" } as any);
 
       const result = await getSession("session-1");
       expect(result).not.toBeNull();
       expect(result!.podName).toBe("optio-pod-1");
+      expect(getPod).toHaveBeenCalledWith("pod-1");
+    });
+
+    it("returns null podName when the session's pod is gone", async () => {
+      (db.select as any) = vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi
+            .fn()
+            .mockResolvedValue([{ id: "session-1", state: "active", podId: "pod-gone" }]),
+        }),
+      });
+      vi.mocked(getPod).mockResolvedValueOnce(null);
+
+      const result = await getSession("session-1");
+      expect(result!.podName).toBeNull();
     });
 
     it("returns null when not found", async () => {
@@ -237,6 +249,7 @@ describe("interactive-session-service", () => {
 
       const result = await getSession("session-1");
       expect(result!.podName).toBeNull();
+      expect(getPod).not.toHaveBeenCalled();
     });
   });
 
@@ -297,13 +310,12 @@ describe("interactive-session-service", () => {
             if (selectCallCount === 1) {
               return Promise.resolve([{ id: "session-1", state: "active", podId: "pod-1" }]);
             }
-            if (selectCallCount === 2) {
-              return Promise.resolve([{ podName: "pod-1" }]);
-            }
             return Promise.resolve([]);
           }),
         }),
       }));
+      // getSession's pod lookup
+      vi.mocked(getPod).mockResolvedValueOnce({ id: "pod-1", podName: "pod-1" } as any);
 
       (db.update as any) = vi.fn().mockReturnValue({
         set: vi.fn().mockReturnValue({

@@ -4226,33 +4226,6 @@ data class WorkflowRun(
     val updatedAt: Instant,
 )
 
-@Serializable(with = WorkflowPodState.Companion::class)
-enum class WorkflowPodState(override val raw: String) : RawEnum {
-    PROVISIONING("provisioning"),
-    READY("ready"),
-    ERROR("error"),
-    TERMINATING("terminating"),
-    /** Fallback for raw values this client does not know about yet. */
-    UNKNOWN("__unknown__");
-
-    companion object : RawEnumSerializer<WorkflowPodState>("dev.optio.core.model.WorkflowPodState", entries, UNKNOWN)
-}
-
-@Serializable
-data class WorkflowPod(
-    val id: String,
-    val workflowRunId: String,
-    val workspaceId: String? = null,
-    val podName: String? = null,
-    val podId: String? = null,
-    val state: WorkflowPodState,
-    val activeRunCount: Double,
-    val lastRunAt: Instant? = null,
-    val errorMessage: String? = null,
-    val createdAt: Instant,
-    val updatedAt: Instant,
-)
-
 // endregion
 
 // region workspace.ts

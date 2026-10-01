@@ -97,10 +97,14 @@ import {
   type WorkDraft,
   type Then,
   type WhenType,
+  prSettingsApply,
+  asksForPrompt,
+  isCommand,
 } from "./model";
 import { createWork, rememberWorkDefaults, updateWork } from "./submit";
 import { detailHref, type EditTarget } from "./load";
 import { OwnerRow, SecretsRow } from "./who-extras";
+import { EnvironmentPanel } from "./environment-panel";
 
 /**
  * The one creation form. Six groups in dependency order — When, Where, Who,
@@ -398,14 +402,13 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const sentenceCtx = { repoName: repoRow?.fullName ?? null, machineName: machine?.name ?? null };
   const sentence = useMemo(() => describe(draft, sentenceCtx), [draft, repoRow, machine]);
   const gaps = missingFields(draft, sentenceCtx);
-  const wantsRepoUrl = draft.withRepo && draft.then !== "waits-for-messages";
   // The repo whose settings decide what happens to the PR (on a machine, the
   // registered repo the checkout belongs to, if any).
   const policyRepo =
     repoRow ?? (effectiveRepoUrl ? repos.find((r: any) => r.repoUrl === effectiveRepoUrl) : null);
   const prPlan = followThrough(draft, policyRepo);
   const canSubmit =
-    !readOnly && !submitting && gaps.length === 0 && (!wantsRepoUrl || !!effectiveRepoUrl);
+    !readOnly && !submitting && gaps.length === 0 && (!draft.withRepo || !!effectiveRepoUrl);
   // Named for what it is ("Job 12", "Terminal 12"), numbered after everything
   // the unified list counts; while the count is unknown (or the API predates
   // `total`) fall back to a timestamp so two unnamed rows never collide.
@@ -942,6 +945,57 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   </>
                 )}
               </div>
+
+              {podWork && (
+                <div className="pt-3 border-t border-border">
+                  <EnvironmentPanel
+                    settings={draft.settings}
+                    repoUrl={draft.withRepo ? effectiveRepoUrl || null : null}
+                    agentType={draft.runtime}
+                    owner={draft.owner}
+                    prApplies={prSettingsApply(draft)}
+                    command={isCommand(draft)}
+                    secrets={
+                      showSecrets ? (
+                        <SecretsRow
+                          picked={draft.podSecrets ?? []}
+                          pickable={pickable}
+                          addable={addableSecrets(draft, pickable)}
+                          canCreateOrg={me?.role === "admin"}
+                          onAdd={(x) => {
+                            if (
+                              x.owner === "me" &&
+                              draft.owner !== "me" &&
+                              isPersonalOnlySecret(x.name, pickable)
+                            ) {
+                              setOwnerNote(
+                                `${x.name} is your own secret, so this work now runs as you.`,
+                              );
+                            }
+                            setDraft((d) =>
+                              // A name the org also has stays org-safe.
+                              x.owner === "me" && !isPersonalOnlySecret(x.name, pickable)
+                                ? withSecret(d, { ...x, owner: "workspace" })
+                                : withSecret(d, x),
+                            );
+                          }}
+                          onRemove={(name) => setDraft((d) => withoutSecret(d, name))}
+                          onCreated={(x) => {
+                            setPickable((list) => [...list, x]);
+                            if (x.owner === "me" && draft.owner !== "me") {
+                              setOwnerNote(
+                                `${x.name} is your own secret, so this work now runs as you.`,
+                              );
+                            }
+                            setDraft((d) => withSecret(d, x));
+                          }}
+                        />
+                      ) : null
+                    }
+                    onChange={(settings) => setDraft((d) => ({ ...d, settings }))}
+                  />
+                </div>
+              )}
             </div>
           </Section>
 
@@ -1020,55 +1074,30 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   />
                 </div>
               )}
-
-              {showSecrets && (
-                <div className="pt-3 border-t border-border">
-                  <SecretsRow
-                    picked={draft.podSecrets ?? []}
-                    pickable={pickable}
-                    addable={addableSecrets(draft, pickable)}
-                    canCreateOrg={me?.role === "admin"}
-                    onAdd={(x) => {
-                      if (
-                        x.owner === "me" &&
-                        draft.owner !== "me" &&
-                        isPersonalOnlySecret(x.name, pickable)
-                      ) {
-                        setOwnerNote(`${x.name} is your own secret, so this work now runs as you.`);
-                      }
-                      setDraft((d) =>
-                        // A name the org also has stays org-safe.
-                        x.owner === "me" && !isPersonalOnlySecret(x.name, pickable)
-                          ? withSecret(d, { ...x, owner: "workspace" })
-                          : withSecret(d, x),
-                      );
-                    }}
-                    onRemove={(name) => setDraft((d) => withoutSecret(d, name))}
-                    onCreated={(x) => {
-                      setPickable((list) => [...list, x]);
-                      if (x.owner === "me" && draft.owner !== "me") {
-                        setOwnerNote(`${x.name} is your own secret, so this work now runs as you.`);
-                      }
-                      setDraft((d) => withSecret(d, x));
-                    }}
-                  />
-                </div>
-              )}
             </div>
           </Section>
 
           {/* ── What ────────────────────────────────────────────────────── */}
-          {!isTerminal && kind !== "pod-session" && (
-            <Section step={4} label="What" hint="The prompt" id="session-prompt">
+          {asksForPrompt(draft) && (
+            <Section
+              step={4}
+              label="What"
+              hint={isCommand(draft) ? "The command" : "The prompt"}
+              id="session-prompt"
+            >
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-sm text-text-muted">
-                    {draft.then === "waits-for-messages" ? "Initial prompt" : "Prompt"}
+                    {isCommand(draft)
+                      ? "Command"
+                      : draft.then === "waits-for-messages"
+                        ? "Initial prompt"
+                        : "Prompt"}
                     {kind === "local-terminal" && (
                       <span className="text-text-muted/60"> (optional)</span>
                     )}
                   </label>
-                  {templates.length > 0 && (
+                  {templates.length > 0 && !isCommand(draft) && (
                     <select
                       value=""
                       onChange={(e) => {
@@ -1092,15 +1121,17 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   value={draft.prompt}
                   onChange={(e) => setDraft({ prompt: e.target.value })}
                   placeholder={
-                    draft.when === "ticket" || draft.when === "linear"
-                      ? "{{ticketUrl}}, please triage this ticket."
-                      : draft.when === "github"
-                        ? "Review {{url}} and leave comments on anything risky."
-                        : draft.then === "waits-for-messages"
-                          ? "Who this agent is and what it should do on its first turn."
-                          : draft.withRepo
-                            ? "Describe the change. Be specific about files to modify and expected behavior."
-                            : "Describe what the agent should do. Reference Connections for external systems."
+                    isCommand(draft)
+                      ? "./scripts/nightly-report.sh --since yesterday"
+                      : draft.when === "ticket" || draft.when === "linear"
+                        ? "{{ticketUrl}}, please triage this ticket."
+                        : draft.when === "github"
+                          ? "Review {{url}} and leave comments on anything risky."
+                          : draft.then === "waits-for-messages"
+                            ? "Who this agent is and what it should do on its first turn."
+                            : draft.withRepo
+                              ? "Describe the change. Be specific about files to modify and expected behavior."
+                              : "Describe what the agent should do. Reference Connections for external systems."
                   }
                   className={cn(INPUT, "resize-y font-mono")}
                 />
@@ -1108,7 +1139,10 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   <div className="mt-2">
                     <p className="text-xs text-text-muted/60 mb-1.5">
                       {params.length > 0 ? (
-                        <>From the {WHEN_META[draft.when].label} trigger — click to insert:</>
+                        <>
+                          From the {WHEN_META[draft.when].label} trigger — click to insert
+                          {isCommand(draft) ? " (each value is shell-quoted)" : ""}:
+                        </>
                       ) : draft.when === "webhook" ? (
                         <>
                           Each top-level field of the POSTed JSON is available as{" "}
@@ -1141,7 +1175,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
 
           {/* ── Then ─────────────────────────────────────────── */}
           <Section
-            step={isTerminal ? 4 : 5}
+            step={asksForPrompt(draft) ? 5 : 4}
             label="Then"
             hint="What happens when a turn ends?"
             summary={summaries.then}
@@ -1293,7 +1327,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
 
           {/* ── Name ────────────────────────────────────────────────────── */}
           <Section
-            step={isTerminal ? 5 : 6}
+            step={asksForPrompt(draft) ? 6 : 5}
             label="Name"
             summary={summaries.name}
             id="session-name"
@@ -1310,7 +1344,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                     type="text"
                     value={draft.name}
                     onChange={(e) => setDraft({ name: e.target.value })}
-                    placeholder={edit ? String(edit.row.name ?? edit.row.title ?? "") : autoName}
+                    placeholder={edit ? String(edit.row.name ?? "") : autoName}
                     className={INPUT}
                   />
                   <p className="text-xs text-text-muted/60 mt-1">
@@ -1418,17 +1452,22 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                           </p>
                         </div>
                       )}
-                      <div>
-                        <label className="block text-sm text-text-muted mb-1.5">Max retries</label>
-                        <NumberInput
-                          min={0}
-                          max={10}
-                          value={draft.maxRetries}
-                          onChange={(v) => setDraft({ maxRetries: v })}
-                          fallback={3}
-                          className="w-24 px-3 py-2 rounded-lg bg-bg border border-border text-sm"
-                        />
-                      </div>
+                      {/* A Local automation's runs are terminals; they don't retry. */}
+                      {locked !== "local-blueprint" && (
+                        <div>
+                          <label className="block text-sm text-text-muted mb-1.5">
+                            Max retries
+                          </label>
+                          <NumberInput
+                            min={0}
+                            max={10}
+                            value={draft.maxRetries}
+                            onChange={(v) => setDraft({ maxRetries: v })}
+                            fallback={3}
+                            className="w-24 px-3 py-2 rounded-lg bg-bg border border-border text-sm"
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                   {kind === "repo-task" && (

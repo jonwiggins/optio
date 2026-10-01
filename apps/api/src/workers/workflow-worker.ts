@@ -6,30 +6,35 @@ import {
   parseIntEnv,
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
-import { getEventParser } from "../services/event-parsers.js";
+import { getEventParser, type AgentEventParser } from "../services/event-parsers.js";
 import { db } from "../db/client.js";
-import { workflowRuns, workflows } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { workflowRuns } from "../db/schema.js";
+import { and, eq } from "drizzle-orm";
+import { updatedAtMatches } from "../utils/pg-timestamp.js";
 import * as workflowService from "../services/workflow-service.js";
+import { transitionWorkflowRunCas, type Workflow } from "../services/workflow-service.js";
+import { COMMAND_SCRIPT, commandResult, parseCommandLine } from "../services/command-run.js";
+import { renderCommandTemplate } from "../services/prompt-template-service.js";
 import * as workflowPool from "../services/workflow-pool-service.js";
-import { publishWorkflowRunEvent } from "../services/event-bus.js";
-import { enqueueWebhookEvent } from "./webhook-worker.js";
-import type { WebhookEvent } from "../services/webhook-service.js";
-import {
-  resolvePodSecrets,
-  resolveSecretsForTask,
-  retrieveSecretWithFallback,
-} from "../services/secret-service.js";
-import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
+import { addUsage } from "../services/run-usage.js";
+import { activityFlusher } from "../services/activity-flush.js";
+import { resolvePodSecrets } from "../services/secret-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
-import { agentOptionsEnv } from "../services/agent-options-env.js";
-import { buildPooledAgentCommand } from "../services/pooled-agent-command.js";
+import {
+  buildInitialClaudeStreamMessage,
+  buildPooledAgentCommand,
+} from "../services/pooled-agent-command.js";
+import { pooledAgentEnv } from "../services/pooled-agent-env.js";
+import { buildAgentEnvironment } from "../services/agent-environment-service.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
 const connectionOpts = getBullMQConnectionOptions();
+
+/** How often a run's last-activity time is written while its agent works. */
+const ACTIVITY_FLUSH_MS = 10_000;
 
 export const workflowRunQueue = new Queue("workflow-runs", { connection: connectionOpts });
 
@@ -51,6 +56,21 @@ export function renderWorkflowPrompt(
 }
 
 /**
+ * What a Job run executes, rendered with its params: the agent's prompt, or
+ * — for a command Job — the shell command, its params shell-quoted so a
+ * trigger payload can never inject shell syntax.
+ */
+export function renderJobInput(
+  workflow: Pick<Workflow, "agentRuntime" | "promptTemplate">,
+  params: unknown,
+): string {
+  const values = (params ?? null) as Record<string, unknown> | null;
+  return workflowService.isCommandJob(workflow)
+    ? renderCommandTemplate(workflow.promptTemplate, values)
+    : renderWorkflowPrompt(workflow.promptTemplate, values);
+}
+
+/**
  * Build the agent command for a workflow run. Similar to task-worker's
  * buildAgentCommand but simplified — no resume, no review mode.
  */
@@ -62,125 +82,6 @@ export function buildWorkflowAgentCommand(
   return buildPooledAgentCommand(agentType, env, {
     maxTurns: opts?.maxTurns ?? DEFAULT_MAX_TURNS_CODING,
     label: "workflow agent",
-  });
-}
-
-/**
- * Build the initial stdin message for Claude Code's stream-json input format.
- */
-function buildInitialStreamMessage(prompt: string): string {
-  return (
-    JSON.stringify({
-      type: "user",
-      message: {
-        role: "user",
-        content: [{ type: "text", text: prompt }],
-      },
-    }) + "\n"
-  );
-}
-
-// ── State transition helpers ───────────────────────────────────────────────────
-
-async function transitionRun(
-  runId: string,
-  workflowId: string,
-  currentState: WorkflowRunState,
-  newState: WorkflowRunState,
-  fields?: Record<string, unknown>,
-): Promise<boolean> {
-  if (!canTransitionWorkflowRun(currentState, newState)) {
-    logger.warn(
-      { runId, from: currentState, to: newState },
-      "Invalid workflow run state transition",
-    );
-    return false;
-  }
-
-  await db
-    .update(workflowRuns)
-    .set({
-      state: newState,
-      updatedAt: new Date(),
-      ...fields,
-    })
-    .where(eq(workflowRuns.id, runId));
-
-  await publishWorkflowRunEvent({
-    type: "workflow_run:state_changed",
-    workflowRunId: runId,
-    workflowId,
-    fromState: currentState,
-    toState: newState,
-    timestamp: new Date().toISOString(),
-  });
-
-  // Fire outbound webhook for relevant state transitions
-  const webhookEventMap: Partial<Record<WorkflowRunState, WebhookEvent>> = {
-    [WorkflowRunState.RUNNING]: "workflow_run.started",
-    [WorkflowRunState.COMPLETED]: "workflow_run.completed",
-    [WorkflowRunState.FAILED]: "workflow_run.failed",
-  };
-  const webhookEvent = webhookEventMap[newState];
-  if (webhookEvent) {
-    fireWorkflowRunWebhook(runId, workflowId, webhookEvent, currentState).catch((err) =>
-      logger.warn({ err, runId, event: webhookEvent }, "Failed to enqueue workflow run webhook"),
-    );
-  }
-
-  // Wake the reconciler so it observes the new state on the next pass.
-  import("../services/reconcile-queue.js")
-    .then(({ enqueueReconcile }) =>
-      enqueueReconcile(
-        { kind: "standalone", id: runId },
-        { reason: `transition:${currentState}->${newState}` },
-      ),
-    )
-    .catch((err) => logger.warn({ err, runId }, "Failed to enqueue reconcile"));
-
-  return true;
-}
-
-/**
- * Build the webhook payload for a workflow run event and enqueue delivery.
- * Fetches the current run + workflow to produce a self-contained payload.
- */
-async function fireWorkflowRunWebhook(
-  runId: string,
-  workflowId: string,
-  event: WebhookEvent,
-  fromState: WorkflowRunState,
-): Promise<void> {
-  const [run, workflow] = await Promise.all([
-    workflowService.getWorkflowRun(runId),
-    workflowService.getWorkflow(workflowId),
-  ]);
-  if (!run || !workflow) return;
-
-  const durationMs =
-    run.startedAt && run.finishedAt
-      ? new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()
-      : run.startedAt
-        ? Date.now() - new Date(run.startedAt).getTime()
-        : undefined;
-
-  await enqueueWebhookEvent(event, {
-    runId: run.id,
-    workflowId: workflow.id,
-    workflowName: workflow.name,
-    state: run.state,
-    fromState,
-    params: run.params ?? null,
-    output: run.output ?? null,
-    costUsd: run.costUsd ?? undefined,
-    inputTokens: run.inputTokens ?? undefined,
-    outputTokens: run.outputTokens ?? undefined,
-    modelUsed: run.modelUsed ?? undefined,
-    errorMessage: run.errorMessage ?? undefined,
-    retryCount: run.retryCount,
-    durationMs,
-    startedAt: run.startedAt?.toISOString() ?? null,
-    finishedAt: run.finishedAt?.toISOString() ?? null,
   });
 }
 
@@ -208,6 +109,7 @@ export function startWorkflowWorker() {
       };
       const log = logger.child({ workflowRunId, jobId: job.id });
       let workflowPodId: string | null = null;
+      let attemptStartedAt: Date | undefined;
 
       try {
         // ── Verify run is in queued state ──────────────────────────────
@@ -224,14 +126,11 @@ export function startWorkflowWorker() {
         }
         if (!workflow.enabled) {
           log.info("Workflow is disabled, failing run");
-          await transitionRun(
+          await transitionWorkflowRunCas(
             workflowRunId,
-            run.workflowId,
             WorkflowRunState.QUEUED,
             WorkflowRunState.FAILED,
-            {
-              errorMessage: "Workflow is disabled",
-            },
+            { errorMessage: "Workflow is disabled" },
           );
           return;
         }
@@ -243,12 +142,12 @@ export function startWorkflowWorker() {
         // run stays queued while the host is offline (terminal parked) and
         // a re-enqueue for an already-dispatched run is a no-op.
         if (workflow.runTarget === "local") {
-          const renderedPrompt = renderWorkflowPrompt(
-            workflow.promptTemplate,
-            run.params as Record<string, unknown> | null,
-          );
           const { dispatchLocalWorkflowRun } = await import("../services/local-run-service.js");
-          const terminal = await dispatchLocalWorkflowRun(run, workflow, renderedPrompt);
+          const terminal = await dispatchLocalWorkflowRun(
+            run,
+            workflow,
+            renderJobInput(workflow, run.params),
+          );
           log.info(
             { terminalId: terminal?.id ?? null, terminalState: terminal?.state ?? null },
             "Workflow run dispatched to a local host",
@@ -258,42 +157,38 @@ export function startWorkflowWorker() {
 
         // ── Concurrency check ─────────────────────────────────────────
         const claimed = await withClaimLock(async () => {
-          // Global workflow concurrency — cluster runs only; local runs
-          // don't occupy pods.
-          const globalMax = parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5);
-          const runningRows = await db
-            .select({ workflowId: workflowRuns.workflowId, runTarget: workflows.runTarget })
-            .from(workflowRuns)
-            .innerJoin(workflows, eq(workflows.id, workflowRuns.workflowId))
-            .where(eq(workflowRuns.state, WorkflowRunState.RUNNING));
-          const allRuns = runningRows.filter((r) => r.runTarget !== "local");
-          if (allRuns.length >= globalMax) {
+          // Global workflow concurrency (cluster runs only; local runs don't
+          // occupy pods), then this workflow's own.
+          const capacity = await workflowService.jobRunCapacity(
+            workflow.id,
+            workflow.maxConcurrent,
+          );
+          if (capacity.global.running >= capacity.global.max) {
             log.info(
-              { activeCount: allRuns.length, globalMax },
+              { activeCount: capacity.global.running, globalMax: capacity.global.max },
               "Global workflow concurrency saturated",
             );
             return false;
           }
-
-          // Per-workflow concurrency
-          const workflowActiveRuns = allRuns.filter((r) => r.workflowId === workflow.id);
-          if (workflowActiveRuns.length >= workflow.maxConcurrent) {
+          if (capacity.job.running >= capacity.job.max) {
             log.info(
-              { activeCount: workflowActiveRuns.length, max: workflow.maxConcurrent },
+              { activeCount: capacity.job.running, max: capacity.job.max },
               "Per-workflow concurrency saturated",
             );
             return false;
           }
 
-          // Claim: transition to running
-          const transitioned = await transitionRun(
+          // Claim: transition to running. CAS — a second worker holding the
+          // same run (a reconcile re-enqueue) loses here instead of running it twice.
+          // The claim is the attempt's first sign of life: a retried run must
+          // not be judged stalled by the previous attempt's last activity.
+          const now = new Date();
+          return transitionWorkflowRunCas(
             workflowRunId,
-            workflow.id,
             WorkflowRunState.QUEUED,
             WorkflowRunState.RUNNING,
-            { startedAt: new Date() },
+            { startedAt: now, lastActivityAt: now },
           );
-          return transitioned;
         });
 
         if (!claimed) {
@@ -305,40 +200,31 @@ export function startWorkflowWorker() {
           });
           return;
         }
+        // This attempt — every later write is conditional on still owning it.
+        attemptStartedAt = claimed.startedAt!;
+        const attempt = attemptStartedAt;
+        const thisAttempt = () =>
+          and(
+            eq(workflowRuns.id, workflowRunId),
+            updatedAtMatches(workflowRuns.startedAt, attempt),
+          );
         log.info("Workflow run claimed, provisioning pod");
 
-        // ── Render prompt ─────────────────────────────────────────────
-        const renderedPrompt = renderWorkflowPrompt(
-          workflow.promptTemplate,
-          run.params as Record<string, unknown> | null,
-        );
+        // ── Render the prompt (or the command) ────────────────────────
+        const command = workflowService.isCommandJob(workflow);
+        const rendered = renderJobInput(workflow, run.params);
+        // What this attempt runs (the Job is read live, so it can differ per
+        // attempt). Not a state change: the reconciler's version is left alone.
+        await db
+          .update(workflowRuns)
+          .set({ prompt: rendered, agentType: command ? null : workflow.agentRuntime })
+          .where(thisAttempt());
 
         // ── Resolve secrets ───────────────────────────────────────────
         const workspaceId = workflow.workspaceId ?? null;
         // Personal work runs with its owner's secrets; organization work never
         // sees anyone's (see services/work-ownership.ts).
         const workflowUserId = workflow.ownerUserId ?? null;
-        const adapter = getAdapter(workflow.agentRuntime);
-        // A model provider (Bedrock) picked for the job replaces the agent's
-        // own sign-in: no Anthropic / OpenAI key is needed then.
-        const providerRow = await resolveProviderForWork({
-          agentType: workflow.agentRuntime,
-          agentOptions: workflow.agentOptions,
-          workspaceId,
-          ownerUserId: workflowUserId,
-          runsOn: "pod",
-        });
-        const providerRuntime = providerRow
-          ? podProviderRuntime(providerRow, workflow.agentRuntime)
-          : null;
-        const resolvedSecrets = providerRuntime
-          ? {}
-          : await resolveSecretsForTask(
-              adapter.validateSecrets([]).missing,
-              "",
-              workspaceId,
-              workflowUserId,
-            );
         const picked = await resolvePodSecrets(workflow.podSecrets, {
           workspaceId,
           ownerUserId: workflowUserId,
@@ -346,78 +232,31 @@ export function startWorkflowWorker() {
         if (picked.missing.length > 0) {
           log.warn({ missing: picked.missing }, "Picked pod secrets not found");
         }
-
-        // Resolve auth mode for the agent runtime
-        const claudeAuthMode = providerRuntime
-          ? "bedrock"
-          : (((await retrieveSecretWithFallback(
-              "CLAUDE_AUTH_MODE",
-              "global",
-              workspaceId,
-              workflowUserId,
-            ).catch(() => null)) as any) ?? "api-key");
-
-        // Build env vars
+        // A command runs with the picked secrets alone; an agent also needs
+        // its sign-in and its parameters.
         const env: Record<string, string> = {
           ...picked.env,
-          ...resolvedSecrets,
-          ...(providerRuntime?.env ?? {}),
-          ...(providerRuntime?.codexConfig.length
-            ? { OPTIO_CODEX_PROVIDER_CONFIG: JSON.stringify(providerRuntime.codexConfig) }
-            : {}),
-          OPTIO_PROMPT: renderedPrompt,
-          OPTIO_WORKFLOW_RUN_ID: workflowRunId,
-          OPTIO_AGENT_TYPE: workflow.agentRuntime,
-          OPTIO_AUTH_MODE: claudeAuthMode,
+          ...(command
+            ? { OPTIO_COMMAND: rendered }
+            : await pooledAgentEnv(workflow, rendered, workspaceId, workflowUserId)),
         };
 
-        // The job's agent parameters (model, effort, approval mode, …) as the
-        // env the command builder turns into flags. `model` is the legacy field.
+        // The agent's environment: the workspace's MCP servers, connections,
+        // and skills with the Job's settings applied, and its setup commands
+        // (a command gets only those).
         Object.assign(
           env,
-          agentOptionsEnv(workflow.agentRuntime, workflow.agentOptions, workflow.model),
+          await buildAgentEnvironment(
+            {
+              repoUrl: null,
+              agentType: command ? null : workflow.agentRuntime,
+              workspaceId,
+              ownerUserId: workflowUserId,
+              settings: workflow.settings,
+            },
+            log,
+          ),
         );
-
-        // For api-key mode, resolve the API key
-        if (claudeAuthMode === "api-key") {
-          const apiKey = await retrieveSecretWithFallback(
-            "ANTHROPIC_API_KEY",
-            "global",
-            workspaceId,
-            workflowUserId,
-          ).catch(() => null);
-          if (apiKey) env.ANTHROPIC_API_KEY = apiKey as string;
-        }
-
-        // For oauth-token mode, resolve the OAuth token
-        if (claudeAuthMode === "oauth-token") {
-          const oauthToken = await retrieveSecretWithFallback(
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            "global",
-            workspaceId,
-            workflowUserId,
-          ).catch(() => null);
-          if (oauthToken) {
-            env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken as string;
-          } else {
-            throw new Error(
-              "OAuth token mode selected but no CLAUDE_CODE_OAUTH_TOKEN secret found",
-            );
-          }
-        }
-
-        // For max-subscription mode, fetch from auth service
-        if (claudeAuthMode === "max-subscription") {
-          const { getClaudeAuthToken } = await import("../services/auth-service.js");
-          const authResult = getClaudeAuthToken();
-          if (authResult.available && authResult.token) {
-            env.CLAUDE_CODE_OAUTH_TOKEN = authResult.token;
-          } else {
-            throw new Error(
-              `Max subscription auth failed: ${authResult.error ?? "Token not available"}`,
-            );
-          }
-        }
 
         // ── Provision pod (shared across runs within the workflow) ────
         const envSpec = workflow.environmentSpec as Record<string, string> | null;
@@ -432,7 +271,6 @@ export function startWorkflowWorker() {
           memoryRequest: envSpec?.memoryRequest ?? null,
           memoryLimit: envSpec?.memoryLimit ?? null,
         });
-        workflowPodId = pod.id;
 
         // Record the assigned pod on the run so reconcile/zombie code can find
         // it, and remember it as lastPodId for retry affinity.
@@ -448,17 +286,21 @@ export function startWorkflowWorker() {
 
         log.info({ podName: pod.podName }, "Workflow pod ready, executing agent");
 
-        // ── Build and execute agent command ────────────────────────────
-        const agentCommand = buildWorkflowAgentCommand(workflow.agentRuntime, env, {
-          maxTurns: workflow.maxTurns ?? undefined,
-        });
+        // ── Build and execute the agent (or the command) ──────────────
+        const agentCommand = command
+          ? [...COMMAND_SCRIPT]
+          : buildWorkflowAgentCommand(workflow.agentRuntime, env, {
+              maxTurns: workflow.maxTurns ?? undefined,
+            });
 
         const execSession = await workflowPool.execRunInPod(pod, workflowRunId, agentCommand, env);
+        // The attempt holds a slot on the pod from here; the finally gives it back.
+        workflowPodId = pod.id;
 
         // For claude-code, deliver prompt via stdin (stream-json mode)
-        if (workflow.agentRuntime === "claude-code") {
+        if (!command && workflow.agentRuntime === "claude-code") {
           try {
-            execSession.stdin.write(buildInitialStreamMessage(renderedPrompt));
+            execSession.stdin.write(buildInitialClaudeStreamMessage(rendered));
           } catch (err) {
             log.warn({ err }, "Failed to write initial prompt to agent stdin");
           }
@@ -469,8 +311,16 @@ export function startWorkflowWorker() {
         let sessionId: string | undefined;
         let lineBuf = "";
 
-        // Pick the right event parser for the agent type
-        const parseEvent = getEventParser(workflow.agentRuntime);
+        // Pick the right event parser for the agent type; a command's output
+        // is plain lines, the last one its exit status.
+        let exitCode: number | undefined;
+        const agentParser = getEventParser(workflow.agentRuntime);
+        const parseEvent: AgentEventParser = (line, id) => {
+          if (!command) return agentParser(line, id);
+          const parsed = parseCommandLine(line, id);
+          if (parsed.exitCode !== undefined) exitCode = parsed.exitCode;
+          return { entries: parsed.entries };
+        };
 
         // Capture stderr for diagnostics
         let stderrData = "";
@@ -480,47 +330,71 @@ export function startWorkflowWorker() {
           }
         })().catch(() => {});
 
-        for await (const chunk of execSession.stdout as AsyncIterable<Buffer>) {
-          const text = chunk.toString();
-          allLogs += text;
+        // Signs of life, written at most every ACTIVITY_FLUSH_MS.
+        // Only this attempt's: a zombie earlier attempt still streaming must
+        // not keep a stalled retry looking alive.
+        const activity = activityFlusher(
+          (at) => db.update(workflowRuns).set({ lastActivityAt: at }).where(thisAttempt()),
+          ACTIVITY_FLUSH_MS,
+        );
+        // A command can work quietly for a long time; while its stream is
+        // open, it is alive.
+        const keepAlive = command
+          ? setInterval(() => {
+              activity.mark("system");
+              void activity.maybeFlush().catch(() => {});
+            }, ACTIVITY_FLUSH_MS)
+          : null;
 
-          const parts = (lineBuf + text).split("\n");
-          lineBuf = parts.pop() ?? "";
+        try {
+          for await (const chunk of execSession.stdout as AsyncIterable<Buffer>) {
+            const text = chunk.toString();
+            allLogs += text;
 
-          for (const line of parts) {
-            if (!line.trim()) continue;
+            const parts = (lineBuf + text).split("\n");
+            lineBuf = parts.pop() ?? "";
 
-            const parsed = parseEvent(line, workflowRunId);
-            if (parsed.sessionId && !sessionId) {
-              sessionId = parsed.sessionId;
-              await db
-                .update(workflowRuns)
-                .set({ sessionId, updatedAt: new Date() })
-                .where(eq(workflowRuns.id, workflowRunId));
-              log.info({ sessionId }, "Session ID captured");
-            }
+            for (const line of parts) {
+              if (!line.trim()) continue;
 
-            // Close stdin on terminal event so agent exits cleanly
-            if (parsed.isTerminal) {
-              try {
-                execSession.stdin.end();
-              } catch (err) {
-                log.warn({ err }, "Failed to close agent stdin on terminal event");
+              const parsed = parseEvent(line, workflowRunId);
+              if (parsed.sessionId && !sessionId) {
+                sessionId = parsed.sessionId;
+                await db
+                  .update(workflowRuns)
+                  .set({ sessionId, updatedAt: new Date() })
+                  .where(eq(workflowRuns.id, workflowRunId));
+                log.info({ sessionId }, "Session ID captured");
+              }
+
+              // Close stdin on terminal event so agent exits cleanly
+              if (parsed.isTerminal) {
+                try {
+                  execSession.stdin.end();
+                } catch (err) {
+                  log.warn({ err }, "Failed to close agent stdin on terminal event");
+                }
+              }
+
+              // Persist + publish log entries (historical DB + live WS)
+              for (const entry of parsed.entries) {
+                // Stall detection: meaningful agent events are signs of life.
+                activity.mark(entry.type);
+                await workflowService.appendWorkflowRunLog({
+                  workflowRunId,
+                  stream: "stdout",
+                  content: entry.content,
+                  logType: entry.type,
+                  metadata: entry.metadata,
+                });
               }
             }
-
-            // Persist + publish log entries (historical DB + live WS)
-            for (const entry of parsed.entries) {
-              await workflowService.appendWorkflowRunLog({
-                workflowRunId,
-                stream: "stdout",
-                content: entry.content,
-                logType: entry.type,
-                metadata: entry.metadata,
-              });
-            }
+            await activity.maybeFlush();
           }
+        } finally {
+          if (keepAlive) clearInterval(keepAlive);
         }
+        await activity.flush();
 
         // Flush remaining buffer
         if (lineBuf.trim()) {
@@ -541,16 +415,18 @@ export function startWorkflowWorker() {
         }
 
         // ── Parse result and update run ───────────────────────────────
-        const result = adapter.parseResult(0, allLogs);
+        const result = command
+          ? commandResult(exitCode)
+          : getAdapter(workflow.agentRuntime).parseResult(0, allLogs);
 
         // Override a nominally-successful result if the agent emitted an auth
         // failure mid-run. Claude CLIs typically catch the 401 internally and
         // exit 0, which would otherwise mark the run as completed despite no
-        // useful work being done.
-        const authDetection = detectAuthFailureInLogs(allLogs);
+        // useful work being done. (A command's output is its own business.)
+        const authDetection = command ? null : detectAuthFailureInLogs(allLogs);
         let effectiveSuccess = result.success;
         let effectiveError = result.error;
-        if (authDetection.matched) {
+        if (authDetection?.matched) {
           effectiveSuccess = false;
           effectiveError = `Agent authentication failed: ${authDetection.excerpt ?? authDetection.pattern}`;
           log.warn(
@@ -564,41 +440,39 @@ export function startWorkflowWorker() {
           ).catch(() => {});
         }
 
-        const costFields: Record<string, unknown> = {};
-        if (result.costUsd != null) costFields.costUsd = String(result.costUsd);
-        if (result.inputTokens != null) costFields.inputTokens = result.inputTokens;
-        if (result.outputTokens != null) costFields.outputTokens = result.outputTokens;
-        if (result.model) costFields.modelUsed = result.model;
-
-        if (effectiveSuccess) {
-          await transitionRun(
-            workflowRunId,
-            workflow.id,
-            WorkflowRunState.RUNNING,
-            WorkflowRunState.COMPLETED,
-            {
-              ...costFields,
-              output: { summary: result.summary },
-              finishedAt: new Date(),
-            },
-          );
-          log.info("Workflow run completed");
-        } else {
-          await transitionRun(
-            workflowRunId,
-            workflow.id,
-            WorkflowRunState.RUNNING,
-            WorkflowRunState.FAILED,
-            {
-              ...costFields,
-              errorMessage: effectiveError ?? "Agent execution failed",
-              finishedAt: new Date(),
-            },
-          );
-          log.warn({ error: effectiveError }, "Workflow run failed");
-          // The reconciler's decideFailed handles the FAILED→QUEUED retry +
-          // exponential backoff. transitionRun above wakes it.
+        // This attempt's spend is ADDED to the run's — whatever became of
+        // the run meanwhile (cancelled, retried): it was spent. Not a state
+        // change, so it doesn't touch the reconciler's version.
+        // (A command spends nothing.)
+        const usage = addUsage(workflowRuns, result);
+        if (Object.keys(usage).length > 0) {
+          await db.update(workflowRuns).set(usage).where(eq(workflowRuns.id, workflowRunId));
         }
+
+        const finished = effectiveSuccess
+          ? await transitionWorkflowRunCas(
+              workflowRunId,
+              WorkflowRunState.RUNNING,
+              WorkflowRunState.COMPLETED,
+              { output: { summary: result.summary }, finishedAt: new Date() },
+              { startedAt: attemptStartedAt },
+            )
+          : await transitionWorkflowRunCas(
+              workflowRunId,
+              WorkflowRunState.RUNNING,
+              WorkflowRunState.FAILED,
+              {
+                errorMessage:
+                  effectiveError ?? (command ? "Command failed" : "Agent execution failed"),
+                finishedAt: new Date(),
+              },
+              { startedAt: attemptStartedAt },
+            );
+        // The reconciler's decideFailed handles the FAILED→QUEUED retry +
+        // exponential backoff; the transition wakes it.
+        if (!finished) log.info("Run moved on while the agent ran; its result is not recorded");
+        else if (effectiveSuccess) log.info("Workflow run completed");
+        else log.warn({ error: effectiveError }, "Workflow run failed");
       } catch (err) {
         log.error({ err }, "Workflow worker error");
         try {
@@ -614,18 +488,18 @@ export function startWorkflowWorker() {
                   { provisioningRetryCount: provisioningRetryCount + 1 },
                   "Provisioning error, re-queuing",
                 );
-                await transitionRun(
+                // Only while this attempt still owns the run: a cancel or the
+                // reconciler may have failed it meanwhile, and that stands.
+                const failed = await transitionWorkflowRunCas(
                   workflowRunId,
-                  currentRun.workflowId,
                   fromState,
                   WorkflowRunState.FAILED,
-                  {
-                    errorMessage: String(err),
-                  },
+                  { errorMessage: String(err) },
+                  { startedAt: attemptStartedAt },
                 );
-                await transitionRun(
+                if (!failed) throw err;
+                await transitionWorkflowRunCas(
                   workflowRunId,
-                  currentRun.workflowId,
                   WorkflowRunState.FAILED,
                   WorkflowRunState.QUEUED,
                 );
@@ -645,17 +519,14 @@ export function startWorkflowWorker() {
               }
             }
 
-            // Terminal failure
+            // Terminal failure (of this attempt, if it got as far as claiming one)
             if (canTransitionWorkflowRun(fromState, WorkflowRunState.FAILED)) {
-              await transitionRun(
+              await transitionWorkflowRunCas(
                 workflowRunId,
-                currentRun.workflowId,
                 fromState,
                 WorkflowRunState.FAILED,
-                {
-                  errorMessage: String(err),
-                  finishedAt: new Date(),
-                },
+                { errorMessage: String(err), finishedAt: new Date() },
+                { startedAt: attemptStartedAt },
               );
             }
           }
@@ -664,16 +535,8 @@ export function startWorkflowWorker() {
         }
         throw err;
       } finally {
-        // Release the pool slot so activeRunCount reflects only live runs.
-        // Clearing pod_id on the run keeps reconcileActiveRunCounts accurate
-        // if the worker later crashes; lastPodId is preserved for retry affinity.
         if (workflowPodId) {
-          await workflowPool.releaseRun(workflowPodId).catch(() => {});
-          await db
-            .update(workflowRuns)
-            .set({ podId: null, updatedAt: new Date() })
-            .where(eq(workflowRuns.id, workflowRunId))
-            .catch(() => {});
+          await workflowPool.releaseRun(workflowRunId, workflowPodId, attemptStartedAt);
         }
       }
     }),

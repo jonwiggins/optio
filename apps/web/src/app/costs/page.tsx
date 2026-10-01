@@ -364,7 +364,7 @@ export default function CostsPage() {
                 <div className="space-y-1">
                   {anomalies.slice(0, 5).map((a) => (
                     <div key={a.id} className="flex items-center gap-2 text-xs flex-wrap">
-                      <Link href={`/tasks/${a.id}`} className="text-text hover:text-primary">
+                      <Link href={a.href} className="text-text hover:text-primary">
                         {truncate(a.title, 40)}
                       </Link>
                       <span className="text-error font-medium tabular-nums">
@@ -583,7 +583,7 @@ export default function CostsPage() {
                 return (
                   <Link
                     key={task.id}
-                    href={`/tasks/${task.id}`}
+                    href={task.href}
                     className={cn(
                       "flex items-center gap-3 px-4 py-2.5 hover:bg-bg-hover/60 transition-colors min-w-0",
                       anomalous && "bg-error/5",

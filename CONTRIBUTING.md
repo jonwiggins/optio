@@ -60,9 +60,10 @@ pnpm lint             # Lint with ESLint
 ### Database Changes
 
 ```bash
-# Edit apps/api/src/db/schema.ts, then:
-cd apps/api && npx drizzle-kit generate  # Generate migration
-cd apps/api && npx drizzle-kit migrate   # Apply migration
+# Edit apps/api/src/db/schema.ts, then write the SQL in a new
+# apps/api/src/db/migrations/<unix-timestamp>_<name>.sql and add it to
+# migrations/meta/_journal.json (the drizzle-kit snapshots stopped at 0012).
+cd apps/api && pnpm db:migrate           # Apply migrations (the same migrator the API runs at boot)
 ```
 
 ### Adding a New API Route

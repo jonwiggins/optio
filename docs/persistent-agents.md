@@ -125,6 +125,25 @@ fresh agent invocation, with three sources of continuity:
 
 Native session resume (e.g. `claude --resume`) is a planned upgrade.
 
+### An agent with a repo
+
+An agent can work in one of its workspace's repos (`repo_id`, set from the
+New work form's Where). Each turn runs in one checkout of it at
+`/workspace/repo` (`CHECKOUT_REPO` in `apps/api/src/utils/pod-env.ts`): cloned
+on the first turn at the agent's branch, then only fetched, so what the agent
+left there — its own branches, uncommitted notes — stays between turns. Point
+the agent at another branch or repo and the next turn follows (a checkout, or
+a fresh clone). The turn signs in to git with a short-lived GitHub App
+installation token (or the workspace's tokens) — never Optio's credential
+secret, which could sign requests for other runs' tokens. A GitHub event
+trigger with no `repos` filter listens to the agent's own repo.
+
+### Environment
+
+Like every pod run, a turn gets the workspace's (and its repo's) MCP servers,
+connections, and skills, with the agent's own `settings` adding or removing
+them and its setup commands run first (`buildAgentEnvironment`).
+
 ## Failure handling
 
 - Turn errors increment `consecutive_failures`.
@@ -168,10 +187,12 @@ See migration `1777200001_persistent_agents.sql`. Tables:
 
 - `persistent_agents` — the agent itself
 - `persistent_agent_turns` — per-turn record
-- `persistent_agent_turn_logs` — log lines per turn
 - `persistent_agent_messages` — inbox (pending + processed)
-- `persistent_agent_pods` — per-agent pods, with `keep_warm_until` for
-  the cleanup worker
+
+A turn's log lines live in the one log table every run uses, `task_logs`,
+keyed by `persistent_agent_turn_id`; an agent's pod lives in the one pod
+table, `agent_pods` (`pool = 'persistent-agent'`, `pool_key` = the agent's
+id), with `keep_warm_until` for the cleanup worker (null = always-on).
 
 ## Open follow-ups
 
@@ -183,5 +204,5 @@ See migration `1777200001_persistent_agents.sql`. Tables:
   verbs, auto-injected into PA pods via `.mcp.json`.
 - Per-agent permission scoping for inter-agent messaging (currently
   workspace-wide).
-- Repo-mode PAs: long-lived worktrees + the existing Sessions UX as the
-  rendering layer for `repo_id`-bound agents.
+- The Sessions UX (terminal + chat) as a rendering layer for agents with a
+  repo.

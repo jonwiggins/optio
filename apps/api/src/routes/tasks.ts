@@ -2,18 +2,11 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import {
-  TaskState,
-  isTaskStalled,
-  getSilentDuration,
-  parseIntEnv,
-  toLocalAgentKind,
-} from "@optio/shared";
+import { TaskState, isTaskStalled, getSilentDuration, parseIntEnv } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
 import { planNewWork, workActor, workChangeError } from "../services/work-ownership.js";
 import * as taskPrService from "../services/task-pr-service.js";
 import { validateRunLocation } from "../services/local-run-service.js";
-import * as dependencyService from "../services/dependency-service.js";
 import * as unifiedTaskService from "../services/unified-task-service.js";
 import * as taskConfigService from "../services/task-config-service.js";
 import * as workflowService from "../services/workflow-service.js";
@@ -703,48 +696,53 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         ...taskInput
       } = input;
 
-      let resolvedAgentType: string = taskInput.agentType ?? "";
-      if (!resolvedAgentType) {
-        const repoConfig = await import("../services/repo-service.js").then((m) =>
-          m.getRepoByUrl(taskInput.repoUrl!, req.user?.workspaceId ?? null),
-        );
-        resolvedAgentType = repoConfig?.defaultAgentType ?? "claude-code";
-      }
-      if (location.runTarget === "local" && !toLocalAgentKind(resolvedAgentType)) {
-        return reply.status(400).send({
-          error: `${resolvedAgentType} can't run on your machine — pick Claude Code, Codex, Cursor, Gemini, or OpenCode`,
+      let task;
+      try {
+        const agentType = await taskService.resolveTaskAgent({
+          agentType: taskInput.agentType,
+          repoUrl: taskInput.repoUrl!,
+          workspaceId: req.user?.workspaceId ?? null,
+          runTarget: location.runTarget,
         });
+        // An ad-hoc task's agent options ride in its metadata (the form sends them there).
+        const adHocOptions =
+          (taskInput.metadata?.agentOptions as Record<string, unknown> | undefined) ??
+          input.agentOptions;
+        const plan = await planNewWork(input, workActor(req), {
+          agentType,
+          agentOptions: adHocOptions,
+          runsOn,
+        });
+        if (!plan.ok) return reply.status(400).send({ error: plan.error });
+        task = await taskService.submitTask(
+          {
+            ownerUserId: plan.ownerUserId,
+            podSecrets: plan.podSecrets ?? null,
+            title: taskInput.title!,
+            prompt: taskInput.prompt,
+            repoUrl: taskInput.repoUrl!,
+            repoBranch: taskInput.repoBranch,
+            agentType,
+            ticketSource: taskInput.ticketSource,
+            ticketExternalId: taskInput.ticketExternalId,
+            metadata: taskInput.metadata,
+            maxRetries: taskInput.maxRetries,
+            priority: taskInput.priority,
+            autoResume: taskInput.autoResume,
+            autoMerge: taskInput.autoMerge,
+            workspaceId: req.user?.workspaceId ?? null,
+            dependsOn,
+            ...location,
+          },
+          req.user?.id,
+        );
+      } catch (err) {
+        // The agent can't run there, or a dependency is invalid.
+        if (err instanceof taskService.TaskInputError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
       }
-
-      // An ad-hoc task's agent options ride in its metadata (the form sends them there).
-      const adHocOptions =
-        (taskInput.metadata?.agentOptions as Record<string, unknown> | undefined) ??
-        input.agentOptions;
-      const plan = await planNewWork(input, workActor(req), {
-        agentType: resolvedAgentType,
-        agentOptions: adHocOptions,
-        runsOn,
-      });
-      if (!plan.ok) return reply.status(400).send({ error: plan.error });
-      const task = await taskService.createTask({
-        ownerUserId: plan.ownerUserId,
-        podSecrets: plan.podSecrets ?? null,
-        title: taskInput.title!,
-        prompt: taskInput.prompt,
-        repoUrl: taskInput.repoUrl!,
-        repoBranch: taskInput.repoBranch,
-        agentType: resolvedAgentType,
-        ticketSource: taskInput.ticketSource,
-        ticketExternalId: taskInput.ticketExternalId,
-        metadata: taskInput.metadata,
-        maxRetries: taskInput.maxRetries,
-        priority: taskInput.priority,
-        autoResume: taskInput.autoResume,
-        autoMerge: taskInput.autoMerge,
-        createdBy: req.user?.id,
-        workspaceId: req.user?.workspaceId ?? null,
-        ...location,
-      });
       logAction({
         workspaceId: req.user?.workspaceId ?? null,
         userId: req.user?.id,
@@ -754,49 +752,9 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         success: true,
       }).catch(() => {});
 
-      const hasDeps = dependsOn && dependsOn.length > 0;
-      if (hasDeps) {
-        try {
-          await dependencyService.addDependencies(task.id, dependsOn);
-        } catch (err) {
-          reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
-          return;
-        }
-      }
-
-      // transitionTask returns the post-transition row — respond with that,
-      // not the stale `pending` row from createTask(), so clients never see a
+      // submitTask returns the post-transition row, so clients never see a
       // state the task has already left.
-      let transitioned: typeof task;
-      if (hasDeps) {
-        transitioned = await taskService.transitionTask(
-          task.id,
-          TaskState.WAITING_ON_DEPS,
-          "task_submitted_with_deps",
-          undefined,
-          req.user?.id,
-        );
-      } else {
-        transitioned = await taskService.transitionTask(
-          task.id,
-          TaskState.QUEUED,
-          "task_submitted",
-          undefined,
-          req.user?.id,
-        );
-        await taskQueue.add(
-          "process-task",
-          { taskId: task.id },
-          {
-            jobId: task.id,
-            priority: task.priority ?? 100,
-            attempts: task.maxRetries + 1,
-            backoff: { type: "exponential", delay: 5000 },
-          },
-        );
-      }
-
-      reply.status(201).send({ task: { type: "repo-task", ...(transitioned ?? task) } });
+      reply.status(201).send({ task: { type: "repo-task", ...task } });
     },
   );
 
@@ -1144,7 +1102,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Task not found" });
       }
 
-      const logs = await taskService.getAllTaskLogs(id, {
+      const logs = await taskService.getTaskLogs(id, {
         search: query.search || undefined,
         logType: query.logType || undefined,
       });

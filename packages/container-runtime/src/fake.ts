@@ -47,6 +47,8 @@ import type { ContainerSpec, ContainerHandle, ContainerStatus, ExecSession } fro
 import type { ContainerRuntime, ExecOptions, LogOptions } from "./types.js";
 
 const AGENT_EXEC_MARKER = "--output-format stream-json";
+/** A Job's shell command (apps/api/src/services/command-run.ts). */
+const COMMAND_RUN_MARKER = 'bash -lc "$OPTIO_COMMAND"';
 /** Markers of non-claude agent CLIs the fake cannot play — fail loudly. */
 const UNSUPPORTED_AGENT_MARKERS = [" codex ", " copilot ", " gemini ", " opencode ", " openclaw "];
 /**
@@ -63,11 +65,6 @@ function extractScriptExport(script: string, name: string): string | null {
   return m ? m[1].replaceAll("'\\''", "'") : null;
 }
 
-/** Pull the OPTIO_PROMPT value out of the exec script's single-quoted export. */
-function extractScriptPrompt(script: string): string {
-  const m = script.match(/export OPTIO_PROMPT='([^']*(?:'\\''[^']*)*)'/);
-  return m ? m[1].replaceAll("'\\''", "'") : "";
-}
 /**
  * How long exec waits for a prompt on stdin before failing the run — a
  * missing prompt means the worker's stdin delivery broke, which must surface
@@ -165,6 +162,7 @@ export class FakeContainerRuntime implements ContainerRuntime {
     _opts?: ExecOptions,
   ): Promise<ExecSession> {
     const script = command.join(" ");
+    if (script.includes(COMMAND_RUN_MARKER)) return this.commandSession(script);
     if (!script.includes(AGENT_EXEC_MARKER)) {
       if (UNSUPPORTED_AGENT_MARKERS.some((m) => script.includes(m))) {
         // A non-claude agent invocation would otherwise get an empty utility
@@ -193,6 +191,28 @@ export class FakeContainerRuntime implements ContainerRuntime {
 
   async ping(): Promise<boolean> {
     return true;
+  }
+
+  /**
+   * A Job that runs a shell command (no agent): its output, then the exit
+   * status line the real script prints. `[[mock:fail]]` in the command
+   * exits 1; `[[mock:silent]]` cuts the stream before any status.
+   */
+  private commandSession(script: string): ExecSession {
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stdin = new Writable({ write: (_c, _e, cb) => cb() });
+    // The command travels in the script itself (`export OPTIO_COMMAND='…'`).
+    setImmediate(() => {
+      if (!directive(script, "silent")) {
+        stdout.write("[optio] Running command...\n");
+        stdout.write("fake command output\n");
+        stdout.write(`[optio:exit] ${directive(script, "fail") ? 1 : 0}\n`);
+      }
+      stdout.end();
+      stderr.end();
+    });
+    return { stdin, stdout, stderr, resize: () => {}, close: () => stdout.end() };
   }
 
   /** Empty session for non-agent shell execs: ends immediately, exit-ok. */
@@ -406,7 +426,7 @@ export class FakeContainerRuntime implements ContainerRuntime {
     if (inlinePrompt) handlePrompt(inlinePrompt[1]);
     // Cursor delivers the prompt as a positional env-var reference, not stdin.
     if (script.includes(CURSOR_EXEC_MARKER)) {
-      handlePrompt(extractScriptPrompt(script) || (spec?.env?.OPTIO_PROMPT ?? ""));
+      handlePrompt(extractScriptExport(script, "OPTIO_PROMPT") || (spec?.env?.OPTIO_PROMPT ?? ""));
     }
 
     return {

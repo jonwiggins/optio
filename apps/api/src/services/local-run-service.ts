@@ -41,7 +41,7 @@ import {
   type RunTarget,
 } from "@optio/shared";
 import { db } from "../db/client.js";
-import { localTerminalTranscripts, tasks, workflowRuns, workflows } from "../db/schema.js";
+import { localTerminalTranscripts, tasks, workDefinitions, workflowRuns } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { canAccessHost, getHost, isDirAllowed, type LocalHostRow } from "./local-host-service.js";
 import {
@@ -53,10 +53,9 @@ import {
 } from "./local-terminal-service.js";
 import * as taskService from "./task-service.js";
 import { detectTaskPrs } from "./task-pr-service.js";
-import { transitionWorkflowRunCas } from "./workflow-service.js";
+import { isCommandJob, transitionWorkflowRunCas, type Workflow } from "./workflow-service.js";
 
 type TaskRow = typeof tasks.$inferSelect;
-type WorkflowRow = typeof workflows.$inferSelect;
 type WorkflowRunRow = typeof workflowRuns.$inferSelect;
 
 export const CLUSTER_LOCATION: RunLocation = Object.freeze({
@@ -175,21 +174,19 @@ export function localModelFor(
   return localAgentParams(agentType, agentOptions).model;
 }
 
-interface ResolvedLocalHost {
-  host: LocalHostRow;
-  agent: LocalAgentKind;
-  dir: string;
-}
-
-/** Re-check a persisted location at dispatch time: hosts get unpaired, dir lists change. */
+/**
+ * Re-check a persisted location at dispatch time: hosts get unpaired, dir
+ * lists change. `agentType` null is a shell command, which needs no agent on
+ * the machine (and resolves to `agent: null`).
+ */
 async function resolveLocalHost(input: {
-  agentType: string;
+  agentType: string | null;
   localHostId: string | null;
   localDir: string | null;
   noun: string;
-}): Promise<ResolvedLocalHost | { error: string }> {
-  const agent = toLocalAgentKind(input.agentType);
-  if (!agent) {
+}): Promise<{ host: LocalHostRow; agent: LocalAgentKind | null; dir: string } | { error: string }> {
+  const agent = input.agentType === null ? null : toLocalAgentKind(input.agentType);
+  if (input.agentType !== null && !agent) {
     return {
       error: `Agent "${input.agentType}" can't run on a local host (only Claude Code, Codex, Cursor, Gemini, or OpenCode can)`,
     };
@@ -245,15 +242,16 @@ async function claimedTerminal(id: string | null | undefined): Promise<LocalTerm
  */
 export async function dispatchLocalWorkflowRun(
   run: WorkflowRunRow,
-  workflow: WorkflowRow,
+  workflow: Workflow,
   renderedPrompt: string,
 ): Promise<LocalTerminalRow | null> {
   const log = logger.child({ workflowRunId: run.id, workflowId: workflow.id, local: true });
   const existing = await liveTerminal(run.localTerminalId);
   if (existing) return existing;
 
+  const command = isCommandJob(workflow);
   const resolved = await resolveLocalHost({
-    agentType: workflow.agentRuntime,
+    agentType: command ? null : workflow.agentRuntime,
     localHostId: workflow.localHostId,
     localDir: workflow.localDir,
     noun: "job",
@@ -290,16 +288,19 @@ export async function dispatchLocalWorkflowRun(
       userId: resolved.host.userId,
       workspaceId: workflow.workspaceId ?? resolved.host.workspaceId,
       dir: resolved.dir,
-      spec: {
-        kind: "agent",
-        agent: resolved.agent,
-        prompt: renderedPrompt.trim() || undefined,
-        mode: workflow.localSessionMode ?? "headless",
-        // The legacy single `model` column, then whatever the job's agent
-        // options set for a run on a machine (model, effort, permissions).
-        ...(workflow.model ? { model: workflow.model } : {}),
-        ...localAgentParams(workflow.agentRuntime, workflow.agentOptions),
-      },
+      // A command Job (no agent) runs its already shell-quoted command and exits.
+      spec: resolved.agent
+        ? {
+            kind: "agent",
+            agent: resolved.agent,
+            prompt: renderedPrompt.trim() || undefined,
+            mode: workflow.localSessionMode ?? "headless",
+            // The legacy single `model` column, then whatever the job's agent
+            // options set for a run on a machine (model, effort, permissions).
+            ...(workflow.model ? { model: workflow.model } : {}),
+            ...localAgentParams(workflow.agentRuntime, workflow.agentOptions),
+          }
+        : { kind: "command", command: renderedPrompt },
       title: run.title ?? `${workflow.name} · ${run.id.slice(0, 8)}`,
       spawnedBy: "job",
       modelProviderId: modelProviderIdFrom(workflow.agentOptions),
@@ -323,7 +324,7 @@ export async function dispatchLocalWorkflowRun(
  */
 async function failLocalWorkflowRun(
   run: WorkflowRunRow,
-  workflow: WorkflowRow,
+  workflow: Workflow,
   message: string,
 ): Promise<void> {
   const [fresh] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, run.id));
@@ -392,7 +393,8 @@ export async function dispatchLocalTask(
       : undefined;
   const spec: LocalTerminalSpec = {
     kind: "agent",
-    agent: resolved.agent,
+    // A task always has an agent type, so the host check found its agent.
+    agent: resolved.agent!,
     prompt: buildLocalTaskPrompt(task, opts.resumePrompt),
     mode: task.localSessionMode ?? "headless",
     ...(resumeSessionId ? { resumeSessionId } : {}),
@@ -511,9 +513,9 @@ function exitMessage(terminal: LocalTerminalRow): string {
 
 async function maxRetriesOf(workflowId: string): Promise<number> {
   const [wf] = await db
-    .select({ maxRetries: workflows.maxRetries })
-    .from(workflows)
-    .where(eq(workflows.id, workflowId));
+    .select({ maxRetries: workDefinitions.maxRetries })
+    .from(workDefinitions)
+    .where(eq(workDefinitions.id, workflowId));
   return wf?.maxRetries ?? 0;
 }
 

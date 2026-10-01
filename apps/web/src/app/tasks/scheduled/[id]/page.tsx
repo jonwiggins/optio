@@ -466,13 +466,8 @@ function RunsTab({ taskConfigId }: { taskConfigId: string }) {
 
   useEffect(() => {
     api
-      .searchTasks({ limit: 50 })
-      .then((res) => {
-        const matching = (res.tasks ?? []).filter(
-          (t: any) => (t.metadata as Record<string, unknown>)?.taskConfigId === taskConfigId,
-        );
-        setRuns(matching);
-      })
+      .listTaskRuns(taskConfigId)
+      .then((res) => setRuns(res.runs ?? []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [taskConfigId]);

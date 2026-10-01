@@ -11,6 +11,7 @@ vi.mock("../db/client.js", () => ({
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
+    groupBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
@@ -22,15 +23,25 @@ vi.mock("../db/client.js", () => ({
 }));
 
 vi.mock("../db/schema.js", () => ({
-  repoPods: {
+  agentPods: {
     id: "id",
-    repoUrl: "repoUrl",
-    state: "state",
-    activeTaskCount: "activeTaskCount",
-    updatedAt: "updatedAt",
+    pool: "pool",
+    poolKey: "poolKey",
+    instanceIndex: "instanceIndex",
+    workspaceId: "workspaceId",
+    repoBranch: "repoBranch",
     podName: "podName",
     podId: "podId",
-    instanceIndex: "instanceIndex",
+    state: "state",
+    activeCount: "activeCount",
+    lastUsedAt: "lastUsedAt",
+    errorMessage: "errorMessage",
+    managedBy: "managedBy",
+    statefulSetName: "statefulSetName",
+    cachePvcName: "cachePvcName",
+    cachePvcState: "cachePvcState",
+    createdAt: "createdAt",
+    updatedAt: "updatedAt",
   },
   tasks: {
     id: "id",
@@ -50,6 +61,31 @@ vi.mock("../db/schema.js", () => ({
     id: "id",
     allowDockerInDocker: "allowDockerInDocker",
   },
+}));
+
+// Picking a pod, the row's lifecycle, slots, and count repair are
+// agent-pod-pool's (exercised against a real database in
+// agent-pod-pool.int.test.ts). Here we check what the repo pool asks of it and
+// what it builds around it: the pod spec, admission checks, cleanup, exec.
+const podPool = vi.hoisted(() => ({
+  pickPod: vi.fn(),
+  insertPod: vi.fn(),
+  markPodReady: vi.fn(),
+  markPodError: vi.fn(),
+  getPod: vi.fn(),
+  listPods: vi.fn(),
+  deletePod: vi.fn(),
+  acquireSlot: vi.fn(),
+  releaseSlot: vi.fn(),
+  idlePods: vi.fn(),
+  reconcileActiveCounts: vi.fn(),
+}));
+vi.mock("./agent-pod-pool.js", () => podPool);
+
+// The repo has no shared cache directories configured.
+vi.mock("./shared-directory-service.js", () => ({
+  getSharedDirectoriesForRepo: vi.fn().mockResolvedValue([]),
+  ensureCachePvcForPod: vi.fn(),
 }));
 
 const mockRuntimeCreate = vi.fn();
@@ -94,6 +130,7 @@ vi.mock("./k8s-workload-service.js", () => ({
   getWorkloadManager: vi.fn(),
 }));
 
+import { sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   resolveImage,
@@ -106,7 +143,61 @@ import {
   killOrphanedAgentInPod,
   parseJsonEnv,
   execTaskInRepoPod,
+  type RepoPod,
 } from "./repo-pool-service.js";
+
+const REPO_URL = "https://github.com/org/repo";
+
+/** An `agent_pods` row in the repo pool. */
+function repoPod(overrides: Partial<RepoPod> = {}): RepoPod {
+  return {
+    id: "pod-1",
+    pool: "repo",
+    poolKey: REPO_URL,
+    instanceIndex: 0,
+    workspaceId: null,
+    repoBranch: "main",
+    podName: "optio-repo-org-repo-0",
+    podId: "k8s-pod-1",
+    state: "ready",
+    activeCount: 0,
+    lastUsedAt: null,
+    keepWarmUntil: null,
+    errorMessage: null,
+    managedBy: "bare-pod",
+    statefulSetName: null,
+    jobName: null,
+    cachePvcName: null,
+    cachePvcState: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
+/**
+ * pickPod finds nothing to share and scales up: it calls the repo pool's
+ * create callback for `instanceIndex`, whose row is recorded as "pod-1" and
+ * then marked ready. `workspaceLookup` answers the DinD admission query.
+ */
+function provisionNewPod(opts: { instanceIndex?: number; workspaceLookup?: unknown[] } = {}) {
+  podPool.pickPod.mockImplementation((_pool, _key, pickOpts) =>
+    pickOpts.create(opts.instanceIndex ?? 0),
+  );
+  podPool.insertPod.mockImplementation(async (values) =>
+    repoPod({ ...values, id: "pod-1", podName: null, podId: null, state: "provisioning" }),
+  );
+  podPool.markPodReady.mockImplementation(async (id, where) =>
+    repoPod({ ...where, id, state: "ready" }),
+  );
+  if (opts.workspaceLookup !== undefined) {
+    (db as any).where.mockResolvedValueOnce(opts.workspaceLookup);
+  }
+}
+
+beforeEach(() => {
+  for (const fn of Object.values(podPool)) fn.mockReset();
+});
 
 // ── resolveImage ────────────────────────────────────────────────────
 
@@ -264,59 +355,54 @@ describe("releaseRepoPodTask", () => {
     vi.clearAllMocks();
   });
 
-  it("decrements the active task count via DB update", async () => {
-    vi.mocked(db.update(undefined as any).set(undefined as any).where as any).mockResolvedValueOnce(
-      [],
-    );
+  it("decrements the active task count by releasing the pod's slot", async () => {
+    podPool.releaseSlot.mockResolvedValueOnce(repoPod({ activeCount: 0 }));
 
     await releaseRepoPodTask("pod-1");
 
-    expect(db.update).toHaveBeenCalled();
-    expect(db.update(undefined as any).set).toHaveBeenCalledWith(
-      expect.objectContaining({
-        updatedAt: expect.any(Date),
-      }),
-    );
+    expect(podPool.releaseSlot).toHaveBeenCalledTimes(1);
+    expect(podPool.releaseSlot).toHaveBeenCalledWith("pod-1");
   });
 });
 
 // ── cleanupIdleRepoPods ─────────────────────────────────────────────
 
 describe("cleanupIdleRepoPods", () => {
+  // The active-session check is select().from().where().limit(); where() has
+  // to hand back something .limit() can be called on.
+  const noActiveSession = () => ({
+    limit: vi.fn().mockResolvedValue([]),
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("returns 0 when no idle pods exist", async () => {
-    vi.mocked(db.select().from(undefined as any).where as any).mockResolvedValueOnce([]);
+    podPool.idlePods.mockResolvedValueOnce([]);
 
     const cleaned = await cleanupIdleRepoPods();
     expect(cleaned).toBe(0);
+    expect(podPool.idlePods).toHaveBeenCalledWith("repo", expect.any(Date));
+    expect(podPool.deletePod).not.toHaveBeenCalled();
   });
 
   it("destroys idle pods and removes their records", async () => {
-    const idlePod = {
+    const idlePod = repoPod({
       id: "pod-1",
-      repoUrl: "https://github.com/org/repo",
+      poolKey: REPO_URL,
       podName: "optio-repo-org-repo-abc1",
       podId: "k8s-pod-id-1",
       state: "ready",
-      activeTaskCount: 0,
+      activeCount: 0,
       instanceIndex: 0,
-    };
+    });
 
-    // where() is used as both a terminal (idle pods, delete) and chainable (.limit() for sessions).
-    // Return an object that supports .limit() and is also thenable.
-    const chainable = {
-      limit: vi.fn().mockResolvedValue([]),
-      then: (res: any, rej?: any) => Promise.resolve([]).then(res, rej),
-    };
-    vi.mocked(db.select().from(undefined as any).where as any)
-      .mockResolvedValueOnce([idlePod]) // idle pods query
-      .mockReturnValueOnce(chainable); // interactive sessions query (chainable to .limit())
-
+    podPool.idlePods.mockResolvedValueOnce([idlePod]);
+    vi.mocked(db.select().from(undefined as any).where as any).mockReturnValueOnce(
+      noActiveSession(),
+    );
     mockRuntimeDestroy.mockResolvedValueOnce(undefined);
-    vi.mocked(db.delete(undefined as any).where as any).mockResolvedValueOnce(undefined);
 
     const cleaned = await cleanupIdleRepoPods();
     expect(cleaned).toBe(1);
@@ -324,70 +410,65 @@ describe("cleanupIdleRepoPods", () => {
       id: idlePod.podId,
       name: idlePod.podName,
     });
+    expect(podPool.deletePod).toHaveBeenCalledWith("pod-1");
   });
 
   it("continues cleanup even if one pod fails to destroy", async () => {
     const pods = [
-      {
+      repoPod({
         id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
+        poolKey: REPO_URL,
         podName: "pod-a",
         podId: "id-a",
         state: "ready",
         instanceIndex: 0,
-      },
-      {
+      }),
+      repoPod({
         id: "pod-2",
-        repoUrl: "https://github.com/org/repo",
+        poolKey: REPO_URL,
         podName: "pod-b",
         podId: "id-b",
         state: "ready",
         instanceIndex: 1,
-      },
+      }),
     ];
 
-    const chainable = {
-      limit: vi.fn().mockResolvedValue([]),
-      then: (res: any, rej?: any) => Promise.resolve([]).then(res, rej),
-    };
+    podPool.idlePods.mockResolvedValueOnce(pods);
     vi.mocked(db.select().from(undefined as any).where as any)
-      .mockResolvedValueOnce(pods)
-      .mockReturnValueOnce(chainable) // session check for pod-2 (sorted desc by instanceIndex)
-      .mockReturnValueOnce(chainable); // session check for pod-1
+      .mockReturnValueOnce(noActiveSession()) // session check for pod-2 (sorted desc by instanceIndex)
+      .mockReturnValueOnce(noActiveSession()); // session check for pod-1
 
     mockRuntimeDestroy
       .mockRejectedValueOnce(new Error("Failed to destroy"))
       .mockResolvedValueOnce(undefined);
 
-    vi.mocked(db.delete(undefined as any).where as any).mockResolvedValue(undefined);
-
     const cleaned = await cleanupIdleRepoPods();
-    // First pod fails, second succeeds
+    // First pod (pod-2) fails, second (pod-1) succeeds
     expect(cleaned).toBe(1);
+    // The pod that couldn't be destroyed keeps its record
+    expect(podPool.deletePod).toHaveBeenCalledTimes(1);
+    expect(podPool.deletePod).toHaveBeenCalledWith("pod-1");
   });
 
   it("skips destroy if pod has no podName", async () => {
-    const pod = {
+    const pod = repoPod({
       id: "pod-1",
-      repoUrl: "https://github.com/org/repo",
+      poolKey: REPO_URL,
       podName: null,
       podId: null,
       state: "ready",
       instanceIndex: 0,
-    };
+    });
 
-    const chainable = {
-      limit: vi.fn().mockResolvedValue([]),
-      then: (res: any, rej?: any) => Promise.resolve([]).then(res, rej),
-    };
-    vi.mocked(db.select().from(undefined as any).where as any)
-      .mockResolvedValueOnce([pod])
-      .mockReturnValueOnce(chainable); // session check
-    vi.mocked(db.delete(undefined as any).where as any).mockResolvedValue(undefined);
+    podPool.idlePods.mockResolvedValueOnce([pod]);
+    vi.mocked(db.select().from(undefined as any).where as any).mockReturnValueOnce(
+      noActiveSession(),
+    );
 
     const cleaned = await cleanupIdleRepoPods();
     expect(cleaned).toBe(1);
     expect(mockRuntimeDestroy).not.toHaveBeenCalled();
+    expect(podPool.deletePod).toHaveBeenCalledWith("pod-1");
   });
 });
 
@@ -398,20 +479,26 @@ describe("listRepoPods", () => {
     vi.clearAllMocks();
   });
 
-  it("returns all pods from the database", async () => {
+  it("returns all pods in the repo pool", async () => {
     const mockPods = [
-      { id: "pod-1", repoUrl: "url1", podName: "p1", state: "ready" },
-      { id: "pod-2", repoUrl: "url2", podName: "p2", state: "provisioning" },
+      repoPod({ id: "pod-1", poolKey: "url1", podName: "p1", state: "ready" }),
+      repoPod({ id: "pod-2", poolKey: "url2", podName: "p2", state: "provisioning" }),
     ];
 
-    vi.mocked(db.select().from as any).mockResolvedValueOnce(mockPods);
+    podPool.listPods.mockResolvedValueOnce(mockPods);
 
     const result = await listRepoPods();
     expect(result).toEqual(mockPods);
+    expect(podPool.listPods).toHaveBeenCalledWith("repo");
   });
 });
 
 // ── reconcileActiveTaskCounts ───────────────────────────────────────
+//
+// The correction itself (set each pod's activeCount to its live count, zero
+// for pods no run names, leave matching pods alone) is agent-pod-pool's
+// reconcileActiveCounts. The repo pool's part is counting the live tasks on
+// each pod and handing that over for the repo pool.
 
 describe("reconcileActiveTaskCounts", () => {
   beforeEach(() => {
@@ -419,44 +506,50 @@ describe("reconcileActiveTaskCounts", () => {
   });
 
   it("returns 0 when no pods exist", async () => {
-    // First call: select pods
-    vi.mocked(db.select().from as any).mockResolvedValueOnce([]);
+    (db as any).groupBy.mockResolvedValueOnce([]);
+    podPool.reconcileActiveCounts.mockResolvedValueOnce(0);
 
     const result = await reconcileActiveTaskCounts();
     expect(result).toBe(0);
+    expect(podPool.reconcileActiveCounts).toHaveBeenCalledWith("repo", new Map());
   });
 
   it("corrects inflated activeTaskCount to match actual running tasks", async () => {
-    const pods = [
-      { id: "pod-1", activeTaskCount: 13 },
-      { id: "pod-2", activeTaskCount: 5 },
-    ];
-
-    // The mock chain uses mockReturnThis, so all methods return the same db mock.
-    // where() calls are interleaved: SELECT count, UPDATE, SELECT count, UPDATE
-    const dbMock = db as any;
-    dbMock.from.mockResolvedValueOnce(pods);
-    dbMock.where
-      .mockResolvedValueOnce([{ count: 1 }]) // SELECT: pod-1 has 1 running task
-      .mockResolvedValueOnce([]) // UPDATE: correct pod-1
-      .mockResolvedValueOnce([{ count: 0 }]) // SELECT: pod-2 has 0 running tasks
-      .mockResolvedValueOnce([]); // UPDATE: correct pod-2
+    // pod-1 holds 1 running task; pod-2 holds none, so it's absent from the
+    // grouped counts and the pool resets it to 0. Both were inflated (13, 5).
+    (db as any).groupBy.mockResolvedValueOnce([{ podId: "pod-1", n: 1 }]);
+    podPool.reconcileActiveCounts.mockResolvedValueOnce(2);
 
     const result = await reconcileActiveTaskCounts();
-    // Both pods should be corrected: pod-1 from 13→1, pod-2 from 5→0
     expect(result).toBe(2);
-    expect(db.update).toHaveBeenCalled();
+    expect(podPool.reconcileActiveCounts).toHaveBeenCalledTimes(1);
+    expect(podPool.reconcileActiveCounts).toHaveBeenCalledWith("repo", new Map([["pod-1", 1]]));
   });
 
-  it("does not update pods that already have the correct count", async () => {
-    const pods = [{ id: "pod-1", activeTaskCount: 0 }];
-
-    const dbMock = db as any;
-    dbMock.from.mockResolvedValueOnce(pods);
-    dbMock.where.mockResolvedValueOnce([{ count: 0 }]);
+  it("counts only running/provisioning tasks that record a pod, grouped by pod", async () => {
+    (db as any).groupBy.mockResolvedValueOnce([
+      { podId: "pod-1", n: 2 },
+      { podId: "pod-2", n: 1 },
+    ]);
+    podPool.reconcileActiveCounts.mockResolvedValueOnce(0);
 
     const result = await reconcileActiveTaskCounts();
     expect(result).toBe(0);
+
+    const filter = vi
+      .mocked(sql)
+      .mock.calls.find(([strings]) => strings.join("?").includes("IN ('running', 'provisioning')"));
+    expect(filter).toBeDefined();
+    expect(filter!.slice(1)).toEqual(["state", "lastPodId"]); // tasks.state, tasks.lastPodId
+    expect(filter![0].join("?")).toContain("IS NOT NULL");
+    expect((db as any).groupBy).toHaveBeenCalledWith("lastPodId");
+    expect(podPool.reconcileActiveCounts).toHaveBeenCalledWith(
+      "repo",
+      new Map([
+        ["pod-1", 2],
+        ["pod-2", 1],
+      ]),
+    );
   });
 });
 
@@ -505,55 +598,6 @@ describe("deleteNetworkPolicy", () => {
 // ── Docker-in-Docker admission check ──────────────────────────────
 
 describe("getOrCreateRepoPod — DinD admission check", () => {
-  /**
-   * Helper: set up the db mock chain for getOrCreateRepoPod.
-   * The function chains: select().from().where().orderBy() which needs special handling
-   * because mockResolvedValueOnce on where() consumes the chain before orderBy() is called.
-   */
-  function mockGetOrCreateFlow(opts: {
-    existingPods?: any[];
-    podCount?: number;
-    workspaceLookup?: any[];
-    insertedPod?: any;
-  }) {
-    const dbMock = db as any;
-
-    // The main challenge: select().from(repoPods).where().orderBy() must be awaitable
-    // after the full chain. We use a thenable + orderBy combo.
-    const orderByResult = opts.existingPods ?? [];
-    const chainableWithOrderBy = {
-      orderBy: vi.fn().mockResolvedValue(orderByResult),
-    };
-
-    // Track call count to know which where() call we're on:
-    // 1st where: existing pods (needs .orderBy)
-    // 2nd where: pod count (terminal, returns [{count}])
-    // 3rd where: workspace lookup (terminal, returns workspace row)
-    // 4th+ where: update calls (terminal)
-    let whereCallCount = 0;
-    dbMock.where.mockImplementation(() => {
-      whereCallCount++;
-      if (whereCallCount === 1) {
-        // existing pods query → needs .orderBy()
-        return chainableWithOrderBy;
-      }
-      if (whereCallCount === 2) {
-        // pod count query
-        return Promise.resolve([{ count: opts.podCount ?? 0 }]);
-      }
-      if (whereCallCount === 3 && opts.workspaceLookup !== undefined) {
-        // workspace lookup
-        return Promise.resolve(opts.workspaceLookup);
-      }
-      // Remaining calls: update queries (e.g. state transitions)
-      return Promise.resolve([]);
-    });
-
-    if (opts.insertedPod) {
-      dbMock.returning.mockResolvedValueOnce([opts.insertedPod]);
-    }
-  }
-
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset where to default behavior
@@ -561,86 +605,50 @@ describe("getOrCreateRepoPod — DinD admission check", () => {
   });
 
   it("rejects DinD when no workspaceId is provided", async () => {
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
+    provisionNewPod();
 
     await expect(
-      getOrCreateRepoPod("https://github.com/org/repo", "main", {}, undefined, {
+      getOrCreateRepoPod(REPO_URL, "main", {}, undefined, {
         dockerInDocker: true,
       }),
     ).rejects.toThrow("Docker-in-Docker requires a workspace with allowDockerInDocker enabled");
+    // Rejected before any pod row is recorded or pod created
+    expect(podPool.insertPod).not.toHaveBeenCalled();
+    expect(mockRuntimeCreate).not.toHaveBeenCalled();
   });
 
   it("rejects DinD when workspace has allowDockerInDocker=false", async () => {
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      workspaceLookup: [{ allowDockerInDocker: false }],
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
+    provisionNewPod({ workspaceLookup: [{ allowDockerInDocker: false }] });
 
     await expect(
-      getOrCreateRepoPod("https://github.com/org/repo", "main", {}, undefined, {
+      getOrCreateRepoPod(REPO_URL, "main", {}, undefined, {
         dockerInDocker: true,
         workspaceId: "ws-1",
       }),
     ).rejects.toThrow("Docker-in-Docker requires workspace admin opt-in");
+    expect(podPool.insertPod).not.toHaveBeenCalled();
+    expect(mockRuntimeCreate).not.toHaveBeenCalled();
   });
 
   it("rejects DinD when workspace is not found", async () => {
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      workspaceLookup: [],
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
+    provisionNewPod({ workspaceLookup: [] });
 
     await expect(
-      getOrCreateRepoPod("https://github.com/org/repo", "main", {}, undefined, {
+      getOrCreateRepoPod(REPO_URL, "main", {}, undefined, {
         dockerInDocker: true,
         workspaceId: "nonexistent-ws",
       }),
     ).rejects.toThrow("Docker-in-Docker requires workspace admin opt-in");
+    expect(podPool.insertPod).not.toHaveBeenCalled();
+    expect(mockRuntimeCreate).not.toHaveBeenCalled();
   });
 
   it("allows DinD when workspace has allowDockerInDocker=true", async () => {
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      workspaceLookup: [{ allowDockerInDocker: true }],
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
+    provisionNewPod({ workspaceLookup: [{ allowDockerInDocker: true }] });
 
     mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
 
-    const pod = await getOrCreateRepoPod("https://github.com/org/repo", "main", {}, undefined, {
+    const pod = await getOrCreateRepoPod(REPO_URL, "main", {}, undefined, {
       dockerInDocker: true,
       workspaceId: "ws-1",
     });
@@ -658,21 +666,11 @@ describe("getOrCreateRepoPod — DinD admission check", () => {
   });
 
   it("does not add DinD capabilities when dockerInDocker is false", async () => {
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
+    provisionNewPod();
 
     mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
 
-    const pod = await getOrCreateRepoPod("https://github.com/org/repo", "main", {}, undefined, {
+    const pod = await getOrCreateRepoPod(REPO_URL, "main", {}, undefined, {
       dockerInDocker: false,
     });
 
@@ -703,47 +701,47 @@ describe("killOrphanedAgentInPod", () => {
   });
 
   it("returns false when pod is not found", async () => {
-    const dbMock = db as any;
-    dbMock.where.mockResolvedValueOnce([]); // pod lookup returns nothing
+    podPool.getPod.mockResolvedValueOnce(null); // pod lookup returns nothing
 
     const result = await killOrphanedAgentInPod("nonexistent-pod", "task-1");
     expect(result).toBe(false);
+    expect(podPool.getPod).toHaveBeenCalledWith("nonexistent-pod");
+    expect(mockRuntimeExec).not.toHaveBeenCalled();
   });
 
   it("returns false when pod has no podName", async () => {
-    const dbMock = db as any;
-    dbMock.where.mockResolvedValueOnce([{ id: "pod-1", podName: null, state: "ready" }]);
+    podPool.getPod.mockResolvedValueOnce(repoPod({ id: "pod-1", podName: null, state: "ready" }));
 
     const result = await killOrphanedAgentInPod("pod-1", "task-1");
     expect(result).toBe(false);
+    expect(mockRuntimeExec).not.toHaveBeenCalled();
   });
 
   it("returns false when pod is not in ready state", async () => {
-    const dbMock = db as any;
-    dbMock.where.mockResolvedValueOnce([
-      { id: "pod-1", podName: "p1", podId: "pid1", state: "error" },
-    ]);
+    podPool.getPod.mockResolvedValueOnce(
+      repoPod({ id: "pod-1", podName: "p1", podId: "pid1", state: "error" }),
+    );
 
     const result = await killOrphanedAgentInPod("pod-1", "task-1");
     expect(result).toBe(false);
+    expect(mockRuntimeExec).not.toHaveBeenCalled();
   });
 
   it("returns false when pod is not reachable", async () => {
-    const dbMock = db as any;
-    dbMock.where.mockResolvedValueOnce([
-      { id: "pod-1", podName: "p1", podId: "pid1", state: "ready" },
-    ]);
+    podPool.getPod.mockResolvedValueOnce(
+      repoPod({ id: "pod-1", podName: "p1", podId: "pid1", state: "ready" }),
+    );
     mockRuntimeStatus.mockRejectedValueOnce(new Error("unreachable"));
 
     const result = await killOrphanedAgentInPod("pod-1", "task-1");
     expect(result).toBe(false);
+    expect(mockRuntimeExec).not.toHaveBeenCalled();
   });
 
   it("returns true when orphaned processes are found and killed", async () => {
-    const dbMock = db as any;
-    dbMock.where.mockResolvedValueOnce([
-      { id: "pod-1", podName: "p1", podId: "pid1", state: "ready" },
-    ]);
+    podPool.getPod.mockResolvedValueOnce(
+      repoPod({ id: "pod-1", podName: "p1", podId: "pid1", state: "ready" }),
+    );
     mockRuntimeStatus.mockResolvedValueOnce({ state: "running" });
 
     const killSession = makeExecSession("killed\n");
@@ -753,13 +751,13 @@ describe("killOrphanedAgentInPod", () => {
     const result = await killOrphanedAgentInPod("pod-1", "task-1");
     expect(result).toBe(true);
     expect(mockRuntimeExec).toHaveBeenCalledTimes(2); // kill + worktree cleanup
+    expect(mockRuntimeExec.mock.calls[0][0]).toEqual({ id: "pid1", name: "p1" });
   });
 
   it("returns false when no orphaned processes are found but still cleans worktree", async () => {
-    const dbMock = db as any;
-    dbMock.where.mockResolvedValueOnce([
-      { id: "pod-1", podName: "p1", podId: "pid1", state: "ready" },
-    ]);
+    podPool.getPod.mockResolvedValueOnce(
+      repoPod({ id: "pod-1", podName: "p1", podId: "pid1", state: "ready" }),
+    );
     mockRuntimeStatus.mockResolvedValueOnce({ state: "running" });
 
     const killSession = makeExecSession("none\n");
@@ -773,10 +771,9 @@ describe("killOrphanedAgentInPod", () => {
   });
 
   it("handles kill exec failure gracefully and still cleans worktree", async () => {
-    const dbMock = db as any;
-    dbMock.where.mockResolvedValueOnce([
-      { id: "pod-1", podName: "p1", podId: "pid1", state: "ready" },
-    ]);
+    podPool.getPod.mockResolvedValueOnce(
+      repoPod({ id: "pod-1", podName: "p1", podId: "pid1", state: "ready" }),
+    );
     mockRuntimeStatus.mockResolvedValueOnce({ state: "running" });
 
     // Kill exec throws, but cleanup should still run
@@ -829,31 +826,6 @@ describe("parseJsonEnv", () => {
 // ── nodeSelector / tolerations env var integration ────────────────────
 
 describe("getOrCreateRepoPod — nodeSelector and tolerations env vars", () => {
-  function mockGetOrCreateFlow(opts: {
-    existingPods?: any[];
-    podCount?: number;
-    insertedPod?: any;
-  }) {
-    const dbMock = db as any;
-
-    const orderByResult = opts.existingPods ?? [];
-    const chainableWithOrderBy = {
-      orderBy: vi.fn().mockResolvedValue(orderByResult),
-    };
-
-    let whereCallCount = 0;
-    dbMock.where.mockImplementation(() => {
-      whereCallCount++;
-      if (whereCallCount === 1) return chainableWithOrderBy;
-      if (whereCallCount === 2) return Promise.resolve([{ count: opts.podCount ?? 0 }]);
-      return Promise.resolve([]);
-    });
-
-    if (opts.insertedPod) {
-      dbMock.returning.mockResolvedValueOnce([opts.insertedPod]);
-    }
-  }
-
   const origNodeSelector = process.env.OPTIO_AGENT_NODE_SELECTOR;
   const origTolerations = process.env.OPTIO_AGENT_TOLERATIONS;
 
@@ -881,21 +853,10 @@ describe("getOrCreateRepoPod — nodeSelector and tolerations env vars", () => {
     process.env.OPTIO_AGENT_NODE_SELECTOR = '{"disktype":"ssd"}';
     delete process.env.OPTIO_AGENT_TOLERATIONS;
 
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
-
+    provisionNewPod();
     mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
 
-    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+    await getOrCreateRepoPod(REPO_URL, "main", {});
     const spec = mockRuntimeCreate.mock.calls[0][0];
     expect(spec.nodeSelector).toEqual({ disktype: "ssd" });
   });
@@ -905,21 +866,10 @@ describe("getOrCreateRepoPod — nodeSelector and tolerations env vars", () => {
     process.env.OPTIO_AGENT_TOLERATIONS =
       '[{"key":"gpu","operator":"Exists","effect":"NoSchedule"}]';
 
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
-
+    provisionNewPod();
     mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
 
-    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+    await getOrCreateRepoPod(REPO_URL, "main", {});
     const spec = mockRuntimeCreate.mock.calls[0][0];
     expect(spec.tolerations).toEqual([{ key: "gpu", operator: "Exists", effect: "NoSchedule" }]);
   });
@@ -928,193 +878,123 @@ describe("getOrCreateRepoPod — nodeSelector and tolerations env vars", () => {
     process.env.OPTIO_AGENT_NODE_SELECTOR = "{bad json}";
     delete process.env.OPTIO_AGENT_TOLERATIONS;
 
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
+    provisionNewPod();
 
-    await expect(getOrCreateRepoPod("https://github.com/org/repo", "main", {})).rejects.toThrow(
+    await expect(getOrCreateRepoPod(REPO_URL, "main", {})).rejects.toThrow(
       /Invalid JSON in OPTIO_AGENT_NODE_SELECTOR/,
     );
+    // The recorded row is marked errored rather than left provisioning
+    expect(podPool.markPodError).toHaveBeenCalledWith("pod-1", expect.any(Error));
   });
 
   it("throws a descriptive error when OPTIO_AGENT_TOLERATIONS contains malformed JSON", async () => {
     delete process.env.OPTIO_AGENT_NODE_SELECTOR;
     process.env.OPTIO_AGENT_TOLERATIONS = "not valid json";
 
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
+    provisionNewPod();
 
-    await expect(getOrCreateRepoPod("https://github.com/org/repo", "main", {})).rejects.toThrow(
+    await expect(getOrCreateRepoPod(REPO_URL, "main", {})).rejects.toThrow(
       /Invalid JSON in OPTIO_AGENT_TOLERATIONS/,
     );
+    expect(podPool.markPodError).toHaveBeenCalledWith("pod-1", expect.any(Error));
   });
 });
 
-describe("getOrCreateRepoPod — stale provisioning pod cleanup", () => {
-  function mockGetOrCreateFlow(opts: {
-    existingPods?: any[];
-    podCount?: number;
-    insertedPod?: any;
-  }) {
-    const dbMock = db as any;
+// ── Pod selection ─────────────────────────────────────────────────────
+//
+// Which pod a task lands on (retry affinity, least-loaded, removing gone /
+// errored / stale-provisioning rows, scaling out) is agent-pod-pool's
+// pickPod — see agent-pod-pool.int.test.ts. The repo pool hands it the repo's
+// pool and limits, and a create callback that provisions a repo pod.
 
-    // Build full chain for existing pods lookup: select().from().where().orderBy()
-    const orderByMock = vi.fn().mockResolvedValue(opts.existingPods ?? []);
-    const whereMockForList = vi.fn().mockReturnValue({
-      orderBy: orderByMock,
-    });
-    const fromMockForList = vi.fn().mockReturnValue({
-      where: whereMockForList,
-    });
-
-    // Build chain for count query: select().from().where()
-    const whereMockForCount = vi.fn().mockResolvedValue([{ count: opts.podCount ?? 0 }]);
-    const fromMockForCount = vi.fn().mockReturnValue({
-      where: whereMockForCount,
-    });
-
-    let selectCallCount = 0;
-    dbMock.select.mockImplementation(() => {
-      selectCallCount++;
-      if (selectCallCount === 1) {
-        // First call: existing pods query
-        return { from: fromMockForList };
-      } else {
-        // Second call: count query
-        return { from: fromMockForCount };
-      }
-    });
-
-    if (opts.insertedPod) {
-      dbMock.returning.mockResolvedValueOnce([opts.insertedPod]);
-    }
-  }
-
+describe("getOrCreateRepoPod — pod selection via agent-pod-pool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (db as any).where.mockReset().mockReturnThis();
-    (db as any).select.mockReset().mockReturnThis();
   });
 
-  it("deletes provisioning pods older than 10 minutes", async () => {
-    const elevenMinutesAgo = new Date(Date.now() - 11 * 60 * 1000);
-    const stalePod = {
-      id: "stale-pod",
-      repoUrl: "https://github.com/org/repo",
-      state: "provisioning",
-      createdAt: elevenMinutesAgo,
-      podName: "stale-pod-name",
-    };
+  it("returns the pod pickPod picks from the repo's pool without creating one", async () => {
+    const existing = repoPod({ id: "fresh-pod", podName: "fresh-pod-name", activeCount: 0 });
+    podPool.pickPod.mockResolvedValueOnce(existing);
 
-    mockGetOrCreateFlow({
-      existingPods: [stalePod],
-      podCount: 0,
-      insertedPod: {
-        id: "new-pod",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
+    const result = await getOrCreateRepoPod("git@github.com:Org/Repo.git", "main", {}, undefined, {
+      preferredPodId: "pod-prev",
+      maxAgentsPerPod: 3,
+      maxPodInstances: 4,
     });
 
-    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-new" });
-
-    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
-
-    // Verify the stale pod was deleted
-    expect((db as any).delete).toHaveBeenCalled();
+    expect(result).toBe(existing);
+    // Keyed by the normalized repo URL, so every spelling of a repo shares pods
+    expect(podPool.pickPod).toHaveBeenCalledWith("repo", REPO_URL, {
+      preferredPodId: "pod-prev",
+      maxAgentsPerPod: 3,
+      maxPodInstances: 4,
+      create: expect.any(Function),
+    });
+    expect(podPool.insertPod).not.toHaveBeenCalled();
+    expect(mockRuntimeCreate).not.toHaveBeenCalled();
   });
 
-  it("does not delete provisioning pods younger than 10 minutes", async () => {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const freshPod = {
-      id: "fresh-pod",
-      repoUrl: "https://github.com/org/repo",
-      state: "ready", // Mark as ready to avoid waitForPodReady loop
-      createdAt: fiveMinutesAgo,
-      podName: "fresh-pod-name",
-      activeTaskCount: 0,
-    };
+  it("defaults to 2 agents per pod and a single pod instance", async () => {
+    podPool.pickPod.mockResolvedValueOnce(repoPod());
 
-    mockGetOrCreateFlow({
-      existingPods: [freshPod],
-      podCount: 1,
+    await getOrCreateRepoPod(REPO_URL, "main", {});
+
+    expect(podPool.pickPod).toHaveBeenCalledWith(
+      "repo",
+      REPO_URL,
+      expect.objectContaining({
+        preferredPodId: undefined,
+        maxAgentsPerPod: 2,
+        maxPodInstances: 1,
+      }),
+    );
+  });
+
+  it("provisions the instance index pickPod asks for and marks it ready", async () => {
+    provisionNewPod({ instanceIndex: 2 });
+    mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
+
+    const pod = await getOrCreateRepoPod(REPO_URL, "develop", {});
+
+    expect(podPool.insertPod).toHaveBeenCalledWith({
+      pool: "repo",
+      poolKey: REPO_URL,
+      repoBranch: "develop",
+      instanceIndex: 2,
     });
+    const spec = mockRuntimeCreate.mock.calls[0][0];
+    expect(spec.labels["optio.instance-index"]).toBe("2");
+    expect(spec.env.OPTIO_REPO_URL).toBe(REPO_URL);
+    expect(spec.env.OPTIO_REPO_BRANCH).toBe("develop");
+    expect(podPool.markPodReady).toHaveBeenCalledWith("pod-1", {
+      podName: "optio-repo-abc",
+      podId: "k8s-id",
+    });
+    expect(pod).toMatchObject({ id: "pod-1", state: "ready", podName: "optio-repo-abc" });
+  });
 
-    mockRuntimeStatus.mockResolvedValueOnce({ state: "running" });
+  it("marks the row errored and removes the pod when provisioning fails", async () => {
+    provisionNewPod();
+    const failure = new Error("ErrImageNeverPull");
+    mockRuntimeCreate.mockRejectedValueOnce(failure);
+    mockRuntimeDestroy.mockResolvedValueOnce(undefined);
 
-    const result = await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+    await expect(getOrCreateRepoPod(REPO_URL, "main", {})).rejects.toThrow("ErrImageNeverPull");
 
-    // Verify we didn't delete the fresh pod
-    expect((db as any).delete).not.toHaveBeenCalled();
-    expect(result.id).toBe("fresh-pod");
+    expect(podPool.markPodError).toHaveBeenCalledWith("pod-1", failure);
+    expect(podPool.markPodReady).not.toHaveBeenCalled();
+    const podName = mockRuntimeCreate.mock.calls[0][0].name;
+    expect(mockRuntimeDestroy).toHaveBeenCalledWith({ id: podName, name: podName });
   });
 });
 
 describe("getOrCreateRepoPod — service account propagation", () => {
-  function mockGetOrCreateFlow(opts: {
-    existingPods?: any[];
-    podCount?: number;
-    insertedPod?: any;
-  }) {
-    const dbMock = db as any;
-
-    // Build full chain for existing pods lookup: select().from().where().orderBy()
-    const orderByMock = vi.fn().mockResolvedValue(opts.existingPods ?? []);
-    const whereMockForList = vi.fn().mockReturnValue({
-      orderBy: orderByMock,
-    });
-    const fromMockForList = vi.fn().mockReturnValue({
-      where: whereMockForList,
-    });
-
-    // Build chain for count query: select().from().where()
-    const whereMockForCount = vi.fn().mockResolvedValue([{ count: opts.podCount ?? 0 }]);
-    const fromMockForCount = vi.fn().mockReturnValue({
-      where: whereMockForCount,
-    });
-
-    let selectCallCount = 0;
-    dbMock.select.mockImplementation(() => {
-      selectCallCount++;
-      if (selectCallCount === 1) {
-        // First call: existing pods query
-        return { from: fromMockForList };
-      } else {
-        // Second call: count query
-        return { from: fromMockForCount };
-      }
-    });
-
-    if (opts.insertedPod) {
-      dbMock.returning.mockResolvedValueOnce([opts.insertedPod]);
-    }
-  }
-
   const origServiceAccountName = process.env.OPTIO_SERVICE_ACCOUNT_NAME;
 
   afterEach(() => {
     vi.clearAllMocks();
     (db as any).where.mockReset().mockReturnThis();
-    (db as any).select.mockReset().mockReturnThis();
     if (origServiceAccountName !== undefined) {
       process.env.OPTIO_SERVICE_ACCOUNT_NAME = origServiceAccountName;
     } else {
@@ -1125,27 +1005,15 @@ describe("getOrCreateRepoPod — service account propagation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (db as any).where.mockReset().mockReturnThis();
-    (db as any).select.mockReset().mockReturnThis();
   });
 
   it("passes service account name from env to container spec", async () => {
     process.env.OPTIO_SERVICE_ACCOUNT_NAME = "optio-workload-identity";
 
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
-
+    provisionNewPod();
     mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
 
-    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+    await getOrCreateRepoPod(REPO_URL, "main", {});
 
     const spec = mockRuntimeCreate.mock.calls[0][0];
     expect(spec.serviceAccountName).toBe("optio-workload-identity");
@@ -1154,21 +1022,10 @@ describe("getOrCreateRepoPod — service account propagation", () => {
   it("omits service account name when env var not set", async () => {
     delete process.env.OPTIO_SERVICE_ACCOUNT_NAME;
 
-    mockGetOrCreateFlow({
-      existingPods: [],
-      podCount: 0,
-      insertedPod: {
-        id: "pod-1",
-        repoUrl: "https://github.com/org/repo",
-        repoBranch: "main",
-        state: "provisioning",
-        instanceIndex: 0,
-      },
-    });
-
+    provisionNewPod();
     mockRuntimeCreate.mockResolvedValueOnce({ id: "k8s-id", name: "optio-repo-abc" });
 
-    await getOrCreateRepoPod("https://github.com/org/repo", "main", {});
+    await getOrCreateRepoPod(REPO_URL, "main", {});
 
     const spec = mockRuntimeCreate.mock.calls[0][0];
     expect(spec.serviceAccountName).toBeUndefined();
@@ -1200,20 +1057,24 @@ describe("execTaskInRepoPod", () => {
     ].join("\n");
 
     mockRuntimeExec.mockResolvedValueOnce({ stdin: { write: vi.fn() } });
-    const pod = {
+    const pod = repoPod({
       id: "pod-1",
-      repoUrl: "https://github.com/org/repo",
+      poolKey: "https://github.com/org/repo",
       podName: "optio-repo-org-repo-0",
       podId: "k8s-pod-1",
       state: "ready",
-    };
+    });
 
-    await execTaskInRepoPod(pod as any, "task-1", [`echo "[optio] agent"`], {
+    await execTaskInRepoPod(pod, "task-1", [`echo "[optio] agent"`], {
       OPTIO_PROMPT: hostilePrompt,
       OPTIO_REPO_BRANCH: "main",
     });
 
+    // The task takes a slot on the pod before it execs
+    expect(podPool.acquireSlot).toHaveBeenCalledWith("pod-1");
+
     const execCall = mockRuntimeExec.mock.calls[0];
+    expect(execCall[0]).toEqual({ id: "k8s-pod-1", name: "optio-repo-org-repo-0" });
     expect(execCall[1][0]).toBe("bash");
     expect(execCall[1][1]).toBe("-c");
     const script: string = execCall[1][2];

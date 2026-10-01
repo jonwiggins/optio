@@ -28,16 +28,13 @@ import {
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { db } from "../db/client.js";
-import { prReviews, prReviewRuns, taskLogs } from "../db/schema.js";
+import { prReviews, prReviewRuns } from "../db/schema.js";
+import { insertLog } from "../services/run-log-service.js";
+import { addUsage } from "../services/run-usage.js";
 import { getEventParser } from "../services/event-parsers.js";
 import * as repoPool from "../services/repo-pool-service.js";
-import {
-  resolveSecretsForTask,
-  resolveSecretsForSetup,
-  retrieveSecretWithFallback,
-} from "../services/secret-service.js";
+import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
 import { isGitHubAppConfigured } from "../services/github-app-service.js";
-import { getCredentialSecret } from "../services/credential-secret-service.js";
 import { publishEvent } from "../services/event-bus.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -46,11 +43,10 @@ import * as prReviewService from "../services/pr-review-service.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { resolveReviewConfig } from "../services/review-config.js";
 import * as optioSettingsService from "../services/optio-settings-service.js";
-import {
-  buildAgentCommand,
-  buildInitialClaudeStreamMessage,
-  inferExitCode,
-} from "./task-worker.js";
+import { buildAgentEnvironment } from "../services/agent-environment-service.js";
+import { applyGitAccess } from "../services/git-access-env.js";
+import { buildInitialClaudeStreamMessage } from "../services/pooled-agent-command.js";
+import { buildAgentCommand, inferExitCode } from "./task-worker.js";
 
 const connectionOpts = getBullMQConnectionOptions();
 
@@ -66,16 +62,7 @@ export async function appendRunLog(
   logType?: string,
   metadata?: Record<string, unknown>,
 ) {
-  const [row] = await db
-    .insert(taskLogs)
-    .values({
-      prReviewRunId: run.id,
-      content,
-      stream,
-      logType,
-      metadata,
-    })
-    .returning();
+  const row = await insertLog({ prReviewRunId: run.id }, { content, stream, logType, metadata });
   await publishEvent({
     type: "pr_review_run:log",
     prReviewId: run.prReviewId,
@@ -341,95 +328,23 @@ export function startPrReviewWorker() {
           googleCloudLocation,
         });
 
-        // ── MCP + connections + skills (shared with task-worker) ──
-        const { getMcpServersForTask, buildMcpJsonContent } =
-          await import("../services/mcp-server-service.js");
-        const { getSkillsForTask, buildSkillSetupFiles } =
-          await import("../services/skill-service.js");
-        const { getConnectionsForTask } = await import("../services/connection-service.js");
-
-        const mcpServers = await getMcpServersForTask(review.repoUrl, workspaceId);
-        if (mcpServers.length > 0) {
-          const mcpJsonContent = await buildMcpJsonContent(mcpServers, review.repoUrl);
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          agentConfig.setupFiles.push({ path: ".mcp.json", content: mcpJsonContent });
-          const installCommands = mcpServers
-            .filter((s) => s.installCommand)
-            .map((s) => s.installCommand!);
-          if (installCommands.length > 0) {
-            agentConfig.env.OPTIO_MCP_INSTALL_COMMANDS = installCommands.join(" && ");
-          }
-        }
-
-        const resolvedConnections = await getConnectionsForTask(
-          review.repoUrl,
-          agentType,
-          workspaceId,
+        // ── MCP + connections + skills (agent-environment-service) ──
+        Object.assign(
+          agentConfig.env,
+          await buildAgentEnvironment(
+            {
+              repoUrl: review.repoUrl,
+              agentType,
+              workspaceId,
+              ownerUserId: null,
+              // The pod reads the PR's diff — anyone's input — so its
+              // connections carry no credentials.
+              connectionSecrets: false,
+            },
+            log,
+            agentConfig.setupFiles,
+          ),
         );
-        if (resolvedConnections.length > 0) {
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          // For simplicity, push a separate .mcp.json block for connections if
-          // one doesn't already exist. The task-worker merges them; we do the
-          // same.
-          const connectionMcpEntries: Record<string, unknown> = {};
-          for (const conn of resolvedConnections) {
-            if (!conn.mcpConfig) continue;
-            connectionMcpEntries[conn.connectionName] = {
-              command: conn.mcpConfig.command,
-              args: conn.mcpConfig.args,
-            };
-          }
-          if (Object.keys(connectionMcpEntries).length > 0) {
-            const existingIdx = agentConfig.setupFiles.findIndex((f) => f.path === ".mcp.json");
-            if (existingIdx >= 0) {
-              const existing = JSON.parse(agentConfig.setupFiles[existingIdx].content);
-              existing.mcpServers = { ...existing.mcpServers, ...connectionMcpEntries };
-              agentConfig.setupFiles[existingIdx].content = JSON.stringify(existing, null, 2);
-            } else {
-              agentConfig.setupFiles.push({
-                path: ".mcp.json",
-                content: JSON.stringify({ mcpServers: connectionMcpEntries }, null, 2),
-              });
-            }
-          }
-        }
-
-        const skills = await getSkillsForTask(review.repoUrl, workspaceId, agentType);
-        if (skills.length > 0) {
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          agentConfig.setupFiles.push(...buildSkillSetupFiles(skills));
-        }
-
-        if (agentType === "claude-code") {
-          const { getInstalledSkillsForTask } =
-            await import("../services/installed-skill-service.js");
-          const { readInstalledSkillFiles } = await import("./skill-sync-worker.js");
-          const installed = await getInstalledSkillsForTask(review.repoUrl, workspaceId, agentType);
-          if (installed.length > 0) {
-            agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-            for (const skill of installed) {
-              try {
-                const files = await readInstalledSkillFiles(skill.resolvedSha!, skill.subpath);
-                for (const f of files) {
-                  agentConfig.setupFiles.push({
-                    path: `.claude/skills/${skill.name}/${f.relativePath}`,
-                    content: "",
-                    contentBase64: f.content.toString("base64"),
-                    executable: f.executable,
-                  });
-                }
-              } catch {
-                // best-effort — log via worker telemetry only
-              }
-            }
-          }
-        }
-
-        if (agentConfig.setupFiles && agentConfig.setupFiles.length > 0) {
-          agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(
-            JSON.stringify(agentConfig.setupFiles),
-          ).toString("base64");
-        }
 
         // ── Secrets ───────────────────────────────────────────────
         const secretNames = [
@@ -446,23 +361,7 @@ export function startPrReviewWorker() {
         );
         const allEnv: Record<string, string> = { ...agentConfig.env, ...resolvedSecrets };
 
-        for (const secretName of ["GITHUB_TOKEN", "GITLAB_TOKEN", "GITLAB_HOST"]) {
-          if (!allEnv[secretName]) {
-            const val = await retrieveSecretWithFallback(secretName, "global", workspaceId).catch(
-              () => null,
-            );
-            if (val) allEnv[secretName] = val as string;
-          }
-        }
-
-        const apiInternalUrl =
-          process.env.OPTIO_API_INTERNAL_URL ??
-          `http://localhost:${process.env.API_PORT ?? "4000"}`;
-        allEnv.OPTIO_GIT_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials`;
-        allEnv.OPTIO_GIT_TASK_CREDENTIAL_URL = `${apiInternalUrl}/api/internal/git-credentials?taskId=${run.id}`;
-        allEnv.OPTIO_CREDENTIAL_SECRET = getCredentialSecret();
-
-        if (isGitHubAppConfigured() && allEnv.GITHUB_TOKEN) delete allEnv.GITHUB_TOKEN;
+        await applyGitAccess(allEnv, { workspaceId, runId: run.id });
 
         if (repoConfig.extraPackages) allEnv.OPTIO_EXTRA_PACKAGES = repoConfig.extraPackages;
         if (repoConfig.setupCommands) allEnv.OPTIO_SETUP_COMMANDS = repoConfig.setupCommands;
@@ -484,27 +383,8 @@ export function startPrReviewWorker() {
         }
 
         // ── Pod provisioning ──────────────────────────────────────
-        const podEnv: Record<string, string> = {
-          OPTIO_GIT_CREDENTIAL_URL: allEnv.OPTIO_GIT_CREDENTIAL_URL,
-          OPTIO_CREDENTIAL_SECRET: allEnv.OPTIO_CREDENTIAL_SECRET,
-          ...(allEnv.GITHUB_TOKEN ? { GITHUB_TOKEN: allEnv.GITHUB_TOKEN } : {}),
-          ...(allEnv.GITLAB_TOKEN ? { GITLAB_TOKEN: allEnv.GITLAB_TOKEN } : {}),
-          ...(allEnv.GITLAB_HOST ? { GITLAB_HOST: allEnv.GITLAB_HOST } : {}),
-          ...(process.env.GITHUB_APP_BOT_NAME
-            ? { GITHUB_APP_BOT_NAME: process.env.GITHUB_APP_BOT_NAME }
-            : {}),
-          ...(process.env.GITHUB_APP_BOT_EMAIL
-            ? { GITHUB_APP_BOT_EMAIL: process.env.GITHUB_APP_BOT_EMAIL }
-            : {}),
-          ...(allEnv.OPTIO_EXTRA_PACKAGES
-            ? { OPTIO_EXTRA_PACKAGES: allEnv.OPTIO_EXTRA_PACKAGES }
-            : {}),
-          ...(allEnv.OPTIO_SETUP_COMMANDS
-            ? { OPTIO_SETUP_COMMANDS: allEnv.OPTIO_SETUP_COMMANDS }
-            : {}),
-        };
-        const setupSecrets = await resolveSecretsForSetup(review.repoUrl, workspaceId);
-        Object.assign(podEnv, setupSecrets);
+        // The pod's own env (repo-init.sh): no run's secrets — the pod is shared.
+        const podEnv = await repoPool.repoPodEnv(allEnv, review.repoUrl, workspaceId);
 
         const maxAgentsPerPod = repoConfig.maxAgentsPerPod ?? 2;
         const maxPodInstances = repoConfig.maxPodInstances ?? 1;
@@ -641,16 +521,14 @@ export function startPrReviewWorker() {
         const inferredExitCode = inferExitCode(agentType, allLogs);
         const result = adapter.parseResult(inferredExitCode, allLogs);
 
-        const costFields: Record<string, unknown> = {
-          resultSummary: result.summary,
-          errorMessage: result.error ?? null,
-        };
-        if (result.costUsd != null) costFields.costUsd = String(result.costUsd);
-        if (result.inputTokens != null) costFields.inputTokens = result.inputTokens;
-        if (result.outputTokens != null) costFields.outputTokens = result.outputTokens;
-        if (result.model) costFields.modelUsed = result.model;
-
-        await db.update(prReviewRuns).set(costFields).where(eq(prReviewRuns.id, run.id));
+        await db
+          .update(prReviewRuns)
+          .set({
+            resultSummary: result.summary,
+            errorMessage: result.error ?? null,
+            ...addUsage(prReviewRuns, result),
+          })
+          .where(eq(prReviewRuns.id, run.id));
 
         if (result.success) {
           await transitionRun(runId, PrReviewRunState.COMPLETED);

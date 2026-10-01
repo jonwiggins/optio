@@ -98,27 +98,6 @@ export interface WorkflowRun {
   updatedAt: Date;
 }
 
-export enum WorkflowPodState {
-  PROVISIONING = "provisioning",
-  READY = "ready",
-  ERROR = "error",
-  TERMINATING = "terminating",
-}
-
-export interface WorkflowPod {
-  id: string;
-  workflowRunId: string;
-  workspaceId?: string | null;
-  podName: string | null;
-  podId: string | null;
-  state: WorkflowPodState;
-  activeRunCount: number;
-  lastRunAt?: Date | null;
-  errorMessage?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 // ── Workflow run state machine ───────────────────────────────────────────────
 
 const VALID_WORKFLOW_RUN_TRANSITIONS: Record<WorkflowRunState, WorkflowRunState[]> = {
@@ -131,18 +110,4 @@ const VALID_WORKFLOW_RUN_TRANSITIONS: Record<WorkflowRunState, WorkflowRunState[
 
 export function canTransitionWorkflowRun(from: WorkflowRunState, to: WorkflowRunState): boolean {
   return VALID_WORKFLOW_RUN_TRANSITIONS[from]?.includes(to) ?? false;
-}
-
-export function transitionWorkflowRun(
-  from: WorkflowRunState,
-  to: WorkflowRunState,
-): WorkflowRunState {
-  if (!canTransitionWorkflowRun(from, to)) {
-    throw new Error(`Invalid workflow run transition: ${from} → ${to}`);
-  }
-  return to;
-}
-
-export function isTerminalWorkflowRunState(state: WorkflowRunState): boolean {
-  return VALID_WORKFLOW_RUN_TRANSITIONS[state]?.length === 0;
 }
