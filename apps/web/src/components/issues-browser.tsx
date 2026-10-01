@@ -12,11 +12,14 @@ import {
   Zap,
   GitBranch,
   CircleDot,
-  Check,
+  ArrowUpRight,
   Terminal,
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
+import { BRAND_LABEL, BrandIcon, IssueIcon, brandFor } from "@/components/brand-icon";
+import { EmptyState } from "@/components/empty-state";
+import { Chip, RepoFilter, RowSkeleton } from "@/components/pr-browser";
 
 /**
  * Browser of GitHub Issues across the workspace's connected repos.
@@ -191,22 +194,24 @@ export function IssuesBrowser() {
 
   return (
     <div>
-      {repos.length > 1 && (
-        <div className="mb-4">
-          <select
-            value={selectedRepo}
-            onChange={(e) => setSelectedRepo(e.target.value)}
-            className="px-3 py-1.5 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+        <RepoFilter repos={repos} value={selectedRepo} onChange={setSelectedRepo} />
+        {!loading && unassignedIssues.length > 0 && (
+          <button
+            onClick={handleAssignAll}
+            disabled={bulkAssigning}
+            title="Create a Repo Task for every unassigned issue in this list"
+            className="sm:ml-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
           >
-            <option value="">All repos</option>
-            {repos.map((r: any) => (
-              <option key={r.id} value={r.id}>
-                {r.fullName}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+            {bulkAssigning ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Zap className="w-3.5 h-3.5" />
+            )}
+            {bulkAssigning ? "Assigning..." : `Assign all to Optio (${unassignedIssues.length})`}
+          </button>
+        )}
+      </div>
 
       {!loading && (loadError || sourceErrors.length > 0) && (
         <div
@@ -265,116 +270,119 @@ export function IssuesBrowser() {
         </div>
       )}
 
-      {!loading && unassignedIssues.length > 0 && (
-        <div className="mb-4">
-          <button
-            onClick={handleAssignAll}
-            disabled={bulkAssigning}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
-          >
-            {bulkAssigning ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : (
-              <Zap className="w-3 h-3" />
-            )}
-            {bulkAssigning ? "Assigning..." : `Assign All (${unassignedIssues.length})`}
-          </button>
-        </div>
-      )}
-
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-text-muted">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" />
-          Loading issues...
-        </div>
+        <RowSkeleton />
       ) : issues.length === 0 ? (
-        <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
-          <CircleDot className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>
-            {loadError || sourceErrors.length > 0 ? "No issues to show" : "No open issues found"}
-          </p>
-          <p className="text-xs mt-1">
-            {loadError || sourceErrors.length > 0
+        <EmptyState
+          icon={CircleDot}
+          title={
+            loadError || sourceErrors.length > 0 ? "No issues to show" : "No open issues found"
+          }
+          description={
+            loadError || sourceErrors.length > 0
               ? "Fix the problem above and retry — there may be issues Optio can't see yet."
               : repos.length === 0
-                ? "Add a repo first in the Repos settings."
-                : "Issues will appear here from your configured repos."}
-          </p>
-        </div>
+                ? "Add a repo first — its open issues show up here."
+                : "Issues will appear here from your configured repos."
+          }
+          action={
+            repos.length === 0 && !loadError && sourceErrors.length === 0
+              ? { label: "Add a repo", href: "/repos" }
+              : undefined
+          }
+        />
       ) : (
-        <div className="space-y-2">
-          {issues.map((issue: any) => (
-            <div
-              key={issue.id ?? `${issue.repo?.fullName}-${issue.number}`}
-              className="card-hover p-3 rounded-lg border border-border bg-bg-card hover:border-primary/30"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+        <div className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60">
+          {issues.map((issue: any) => {
+            const localKey = issue.repo ? `${issue.repo.id}:${issue.number}` : null;
+            const busy = assigning === issue.number || workingLocally === localKey;
+            const localHost = !issue.optioTask && isAssignable(issue) ? findLocalHost(issue) : null;
+            const brand = brandFor(issue.source ?? "github");
+            return (
+              <div
+                key={issue.id ?? `${issue.repo?.fullName}-${issue.number}`}
+                className="group grid grid-cols-[auto_1fr_auto] items-center gap-x-4 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+              >
+                <IssueSourceIcon source={issue.source} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
                     <a
                       href={issue.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm font-medium hover:text-primary transition-colors truncate"
+                      className="text-sm font-medium text-text-heading hover:text-primary transition-colors truncate"
                     >
                       {issue.title}
                     </a>
-                    <span className="text-xs text-text-muted shrink-0">
+                    <span className="text-xs text-text-muted/70 shrink-0 tabular-nums">
                       {typeof issue.number === "number" ? `#${issue.number}` : issue.number}
                     </span>
-                    {issue.source && issue.source !== "github" && issue.source !== "gitlab" && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-primary/30 bg-primary/10 text-primary uppercase tracking-wide shrink-0">
-                        {issue.source}
-                      </span>
-                    )}
                   </div>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-text-muted">
-                    <span className="flex items-center gap-1">
-                      <GitBranch className="w-3 h-3" />
-                      {issue.repo?.fullName ?? issue.source}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-text-muted min-w-0">
+                    {issue.optioTask && <TaskStatus task={issue.optioTask} />}
+                    <span className="inline-flex items-center gap-1">
+                      {brand ? (
+                        <BrandIcon brand={brand} className="w-3 h-3" />
+                      ) : (
+                        <GitBranch className="w-3 h-3 text-text-muted/60" />
+                      )}
+                      <span className={cn(issue.repo?.fullName && "font-mono")}>
+                        {issue.repo?.fullName ?? (brand ? BRAND_LABEL[brand] : issue.source)}
+                      </span>
                     </span>
                     {issue.author && <span>@{issue.author}</span>}
-                    {issue.assignee && <span>assignee: @{issue.assignee}</span>}
-                    {issue.updatedAt && <span>{formatRelativeTime(issue.updatedAt)}</span>}
+                    {issue.assignee && <span>assignee @{issue.assignee}</span>}
+                    {issue.labels.map((label: string) => (
+                      <Chip
+                        key={label}
+                        className={
+                          label === "optio"
+                            ? "border-primary/30 bg-primary/10 text-primary"
+                            : undefined
+                        }
+                      >
+                        {label}
+                      </Chip>
+                    ))}
                   </div>
-                  {issue.labels.length > 0 && (
-                    <div className="flex items-center gap-1 mt-1.5">
-                      {issue.labels.map((label: string) => (
-                        <span
-                          key={label}
-                          className={cn(
-                            "text-[10px] px-1.5 py-0.5 rounded-full border",
-                            label === "optio"
-                              ? "border-primary/30 bg-primary/10 text-primary"
-                              : "border-border bg-bg text-text-muted",
-                          )}
-                        >
-                          {label}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
-                <div className="shrink-0 flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                   {issue.optioTask ? (
                     <Link
                       href={`/tasks/${issue.optioTask.taskId}`}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-success/10 text-success text-xs hover:bg-success/20"
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-bg-card text-xs text-text-muted hover:text-text hover:bg-bg-hover transition-colors sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
                     >
-                      <Check className="w-3 h-3" />
-                      {issue.optioTask.state === "completed"
-                        ? "Done"
-                        : issue.optioTask.state === "pr_opened"
-                          ? "PR"
-                          : "Running"}
+                      <ArrowUpRight className="w-3 h-3" />
+                      Open task
                     </Link>
                   ) : isAssignable(issue) ? (
-                    <>
+                    <div
+                      className={cn(
+                        "flex items-center gap-1.5 transition-opacity",
+                        !busy &&
+                          "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100",
+                      )}
+                    >
+                      {localHost && localKey && (
+                        <button
+                          onClick={() => handleWorkLocally(issue, localHost)}
+                          disabled={workingLocally === localKey}
+                          title={`Start an attended terminal in the matching checkout on ${localHost.name}`}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-bg-card text-xs text-text-muted hover:text-text hover:bg-bg-hover disabled:opacity-50 transition-colors"
+                        >
+                          {workingLocally === localKey ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Terminal className="w-3 h-3" />
+                          )}
+                          Work on locally
+                        </button>
+                      )}
                       <button
                         onClick={() => handleAssign(issue)}
                         disabled={assigning === issue.number}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
                       >
                         {assigning === issue.number ? (
                           <Loader2 className="w-3 h-3 animate-spin" />
@@ -383,41 +391,59 @@ export function IssuesBrowser() {
                         )}
                         Assign to Optio
                       </button>
-                      {(() => {
-                        const localHost = findLocalHost(issue);
-                        if (!localHost) return null;
-                        const key = `${issue.repo.id}:${issue.number}`;
-                        return (
-                          <button
-                            onClick={() => handleWorkLocally(issue, localHost)}
-                            disabled={workingLocally === key}
-                            title={`Start an attended terminal in the matching checkout on ${localHost.name}`}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-primary/40 bg-primary/10 text-primary text-xs hover:bg-primary/20 disabled:opacity-50 transition-colors"
-                          >
-                            {workingLocally === key ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <Terminal className="w-3 h-3" />
-                            )}
-                            Work on locally
-                          </button>
-                        );
-                      })()}
-                    </>
+                    </div>
                   ) : (
                     <span
-                      className="text-[10px] px-2 py-1 rounded-md border border-border bg-bg text-text-muted"
+                      className="inline-flex items-center gap-1 text-[11px] text-text-muted/70"
                       title="External tracker tickets are picked up automatically by the ticket-sync worker."
                     >
+                      <RefreshCw className="w-3 h-3" />
                       auto-sync
                     </span>
                   )}
+                  <span className="w-16 text-right text-[11px] text-text-muted/70 whitespace-nowrap">
+                    {issue.updatedAt ? formatRelativeTime(issue.updatedAt) : ""}
+                  </span>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
+}
+
+const TASK_STATUS: Record<string, { label: string; dot: string; text: string }> = {
+  completed: { label: "Done", dot: "bg-text-muted/40", text: "text-text-muted" },
+  pr_opened: { label: "PR open", dot: "bg-success", text: "text-success" },
+  failed: { label: "Failed", dot: "bg-error", text: "text-error" },
+  needs_attention: { label: "Needs you", dot: "bg-warning", text: "text-warning" },
+  queued: { label: "Queued", dot: "bg-warning/70", text: "text-warning" },
+};
+
+/** The Optio task working the issue, as the row's status line. */
+function TaskStatus({ task }: { task: { state?: string } }) {
+  const s = TASK_STATUS[task.state ?? ""] ?? {
+    label: "Running",
+    dot: "bg-primary animate-pulse",
+    text: "text-primary",
+  };
+  return (
+    <span className={cn("inline-flex items-center gap-1.5", s.text)}>
+      <span className={cn("w-1.5 h-1.5 rounded-full", s.dot)} />
+      Optio · {s.label}
+    </span>
+  );
+}
+
+/** GitHub / GitLab issues get GitHub's issue glyph; other trackers their own mark. */
+function IssueSourceIcon({ source }: { source?: string | null }) {
+  const brand = brandFor(source);
+  if (brand && brand !== "github" && brand !== "gitlab") {
+    return (
+      <BrandIcon brand={brand} className="w-4 h-4 text-text-muted" title={BRAND_LABEL[brand]} />
+    );
+  }
+  return <IssueIcon state="open" className="w-4 h-4" />;
 }

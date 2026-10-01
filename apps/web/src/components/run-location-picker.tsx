@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { GitBranch, Laptop, Loader2, MessageSquare, Server, Square } from "lucide-react";
 import { normalizeRepoUrl, toLocalAgentKind } from "@optio/shared";
 import { cn } from "@/lib/utils";
+import { Segmented } from "@/components/ui/segmented";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
 import { PairMachineGuide } from "@/components/local/pair-machine";
 import { AddDirForm, dirsLockedReason } from "@/components/local/host-dirs";
@@ -393,29 +394,22 @@ export function RunLocationPicker({
           {!hideSessionMode && (
             <div>
               <label className="block text-sm text-text-muted mb-1.5">Then</label>
-              <div className="flex gap-1.5 p-1 rounded-lg bg-bg border border-border w-fit">
-                {(
-                  [
-                    ["headless", Square, "Exit when done"],
-                    ["interactive", MessageSquare, "Keep the session open"],
-                  ] as Array<[LocalSessionMode, typeof Square, string]>
-                ).map(([mode, Icon, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => onChange({ ...value, localSessionMode: mode })}
-                    className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors",
-                      value.localSessionMode === mode
-                        ? "bg-primary text-white"
-                        : "text-text-muted hover:text-text",
-                    )}
-                  >
-                    <Icon className="w-3 h-3" />
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <Segmented<LocalSessionMode>
+                value={value.localSessionMode}
+                onChange={(mode) => onChange({ ...value, localSessionMode: mode })}
+                options={[
+                  {
+                    value: "headless",
+                    label: "Exit when done",
+                    icon: <Square className="w-3 h-3" />,
+                  },
+                  {
+                    value: "interactive",
+                    label: "Keep the session open",
+                    icon: <MessageSquare className="w-3 h-3" />,
+                  },
+                ]}
+              />
               <p className="text-[11px] text-text-muted/80 mt-1.5">
                 {value.localSessionMode === "headless"
                   ? "The agent runs one turn in print mode and the run finishes when it exits. You can still resume the session as a chat afterwards."

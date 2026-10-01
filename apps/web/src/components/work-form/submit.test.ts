@@ -17,11 +17,12 @@ const api = vi.hoisted(() => ({
   updateLocalBlueprintTrigger: vi.fn(),
   deleteLocalBlueprintTrigger: vi.fn(),
   createLocalTerminal: vi.fn(),
+  putWorkDefaults: vi.fn(),
 }));
 vi.mock("@/lib/api-client", () => ({ api }));
 vi.mock("@/lib/persistent-agent-defaults", () => ({ defaultAgentsMd: () => "" }));
 
-import { createWork, updateWork } from "./submit";
+import { createWork, rememberWorkDefaults, updateWork, workDefaultsFrom } from "./submit";
 import { EMPTY_DRAFT, normalize, type WorkDraft } from "./model";
 import type { EditTarget } from "./load";
 
@@ -212,6 +213,7 @@ describe("updateWork", () => {
     trigger,
     triggers: trigger ? [trigger] : [],
     draft: job,
+    foreignOwnerId: null,
   });
 
   it("patches the row and, for the same trigger type, the trigger in place", async () => {
@@ -304,5 +306,152 @@ describe("updateWork", () => {
     });
     expect(api.deleteLocalBlueprintTrigger).toHaveBeenCalledWith("b-1", "t1");
     expect(saved.href).toBe("/local/automations/b-1");
+  });
+});
+
+describe("owner and pod secrets on the wire", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.createTaskRun.mockResolvedValue({ runId: "run-1" });
+  });
+
+  it("a new pod Job sends its owner and an array of secrets, even empty", async () => {
+    api.createTaskUnified.mockResolvedValue({ task: { id: "w-1" } });
+    await createWork(normalize({ ...EMPTY_DRAFT, withRepo: false, prompt: "hi" }), {
+      repoUrl: "",
+      autoName: "Job 1",
+    });
+    expect(api.createTaskUnified).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "workspace", podSecrets: [] }),
+    );
+  });
+
+  it("a personal repo Task with secrets and a provider sends them all", async () => {
+    api.createTaskUnified.mockResolvedValue({ task: { id: "t-1" } });
+    await createWork(
+      normalize({
+        ...EMPTY_DRAFT,
+        prompt: "fix it",
+        owner: "me",
+        podSecrets: ["NPM_TOKEN"],
+        agentOptions: { modelProvider: "p-1", claudeModel: "us.anthropic.claude-opus-5-5" },
+      }),
+      { repoUrl: "https://github.com/acme/app", autoName: "Task 1" },
+    );
+    expect(api.createTaskUnified).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: "me",
+        podSecrets: ["NPM_TOKEN"],
+        metadata: {
+          agentOptions: { modelProvider: "p-1", claudeModel: "us.anthropic.claude-opus-5-5" },
+        },
+      }),
+    );
+  });
+
+  it("a Job on a machine is always mine and sends no pod secrets", async () => {
+    api.createTaskUnified.mockResolvedValue({ task: { id: "w-2" } });
+    await createWork(
+      normalize({
+        ...EMPTY_DRAFT,
+        withRepo: false,
+        prompt: "hi",
+        podSecrets: ["X"],
+        location: {
+          runTarget: "local",
+          localHostId: "h",
+          localDir: "/d",
+          localSessionMode: "headless",
+        },
+      }),
+      { repoUrl: "", autoName: "Job 2" },
+    );
+    const body = api.createTaskUnified.mock.calls[0][0];
+    expect(body.owner).toBe("me");
+    expect(body).not.toHaveProperty("podSecrets");
+  });
+
+  it("a persistent agent carries them; a local terminal carries only the provider", async () => {
+    const createPersistentAgent = vi.fn().mockResolvedValue({ agent: { id: "a-1" } });
+    (api as any).createPersistentAgent = createPersistentAgent;
+    await createWork(
+      normalize({
+        ...EMPTY_DRAFT,
+        withRepo: false,
+        prompt: "hi",
+        then: "waits-for-messages",
+        owner: "me",
+        podSecrets: ["A"],
+      }),
+      { repoUrl: "", autoName: "Agent 1" },
+    );
+    expect(createPersistentAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "me", podSecrets: ["A"] }),
+    );
+
+    api.createLocalTerminal.mockResolvedValue({ terminal: { id: "lt-1" } });
+    await createWork(
+      normalize({
+        ...EMPTY_DRAFT,
+        withRepo: false,
+        then: "waits-for-me",
+        agentOptions: { modelProvider: "p-1", claudeModel: "us.anthropic.claude-opus-5-5" },
+        location: {
+          runTarget: "local",
+          localHostId: "h",
+          localDir: "/d",
+          localSessionMode: "interactive",
+        },
+      }),
+      { repoUrl: "", autoName: "Terminal 1" },
+    );
+    const body = api.createLocalTerminal.mock.calls[0][0];
+    expect(body.agentOptions).toEqual({ modelProvider: "p-1" });
+    expect(body.spec.model).toBe("us.anthropic.claude-opus-5-5");
+    expect(body).not.toHaveProperty("owner");
+  });
+
+  it("an edit keeps a legacy null secret list and sends the owner", async () => {
+    const draft = normalize({ ...EMPTY_DRAFT, withRepo: false, prompt: "hi", podSecrets: null });
+    await updateWork(
+      {
+        id: "w-1",
+        kind: "standalone",
+        row: { id: "w-1", name: "Digest" },
+        trigger: null,
+        triggers: [],
+        draft,
+        foreignOwnerId: null,
+      },
+      draft,
+      { repoUrl: "" },
+    );
+    expect(api.updateWorkflow).toHaveBeenCalledWith(
+      "w-1",
+      expect.objectContaining({ owner: "workspace", podSecrets: null }),
+    );
+  });
+});
+
+describe("remembering the agent settings", () => {
+  it("saves the runtime and the options actually set, never for a terminal", () => {
+    const d = normalize({
+      ...EMPTY_DRAFT,
+      runtime: "codex",
+      agentOptions: { copilotModel: "gpt-5.5", copilotEffort: "" },
+    });
+    expect(workDefaultsFrom(d)).toEqual({
+      runtime: "codex",
+      agentOptions: { codex: { copilotModel: "gpt-5.5" } },
+    });
+    expect(workDefaultsFrom({ ...d, runtime: "" })).toBeNull();
+  });
+
+  it("is fire-and-forget: a failing PUT never throws", async () => {
+    api.putWorkDefaults.mockReset();
+    api.putWorkDefaults.mockRejectedValue(new Error("boom"));
+    expect(() => rememberWorkDefaults(normalize({ ...EMPTY_DRAFT }))).not.toThrow();
+    expect(api.putWorkDefaults).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
   });
 });

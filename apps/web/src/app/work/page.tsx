@@ -19,6 +19,7 @@ import { usePageTitle } from "@/hooks/use-page-title";
 import { useWorkFeed } from "@/hooks/use-work-feed";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
+import { Segmented } from "@/components/ui/segmented";
 import { WorkRowView } from "@/components/work-row";
 import { countWork, inView, sessionScreenTarget, type WorkView } from "@/lib/work-feed";
 
@@ -180,29 +181,14 @@ function WorkList() {
       />
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
-        <div className="flex gap-1 p-1 rounded-lg bg-bg-card border border-border w-fit">
-          {VIEWS.map((v) => (
-            <button
-              key={v.id}
-              type="button"
-              onClick={() => setView(v.id)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors",
-                view === v.id ? "bg-primary text-white" : "text-text-muted hover:text-text",
-              )}
-            >
-              {v.label}
-              <span
-                className={cn(
-                  "text-[10px] tabular-nums px-1 rounded",
-                  view === v.id ? "bg-white/20" : "bg-bg text-text-muted/70",
-                )}
-              >
-                {viewCount(v.id)}
-              </span>
-            </button>
-          ))}
-        </div>
+        <Segmented
+          size="md"
+          surface="card"
+          className="gap-1"
+          value={view}
+          onChange={setView}
+          options={VIEWS.map((v) => ({ value: v.id, label: v.label, count: viewCount(v.id) }))}
+        />
         <div className="relative sm:ml-auto sm:w-64">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
           <input

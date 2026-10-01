@@ -4,7 +4,17 @@
  * Bearer token to the real API — the session token never touches client-side JS.
  */
 
-import type { LocalTranscriptEntry, TriggerType } from "@optio/shared";
+import type {
+  CreateModelProviderInput,
+  LocalTranscriptEntry,
+  ModelProvider,
+  PickableSecret,
+  ResourceOwner,
+  TaskPr,
+  TriggerType,
+  UpdateModelProviderInput,
+  WorkFormDefaults,
+} from "@optio/shared";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
@@ -143,6 +153,15 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  attachTaskPr: (id: string, url: string) =>
+    request<{ pr: TaskPr }>(`/api/tasks/${id}/prs`, {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+
+  removeTaskPr: (id: string, prId: string) =>
+    request<{ primaryUrl: string | null }>(`/api/tasks/${id}/prs/${prId}`, { method: "DELETE" }),
+
   cancelTask: (id: string) => request<{ task: any }>(`/api/tasks/${id}/cancel`, { method: "POST" }),
 
   retryTask: (id: string) => request<{ task: any }>(`/api/tasks/${id}/retry`, { method: "POST" }),
@@ -239,6 +258,37 @@ export const api = {
         body: JSON.stringify(data),
       },
     ),
+
+  /** Secret names work can pick for its pod: the org's and the viewer's own (never values). */
+  listPickableSecrets: () => request<{ secrets: PickableSecret[] }>("/api/secrets/pickable"),
+
+  /** The New work form's remembered runtime + per-runtime agent options (`{}` when none). */
+  getWorkDefaults: () => request<{ defaults: WorkFormDefaults }>("/api/me/work-defaults"),
+
+  /** Merge into the remembered settings: `runtime` replaces; each runtime's options replace its own. */
+  putWorkDefaults: (data: WorkFormDefaults) =>
+    request<{ defaults: WorkFormDefaults }>("/api/me/work-defaults", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  // Model providers (Amazon Bedrock for Claude Code / Codex)
+  listModelProviders: () => request<{ providers: ModelProvider[] }>("/api/model-providers"),
+
+  createModelProvider: (data: CreateModelProviderInput) =>
+    request<{ provider: ModelProvider }>("/api/model-providers", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateModelProvider: (id: string, data: UpdateModelProviderInput) =>
+    request<{ provider: ModelProvider }>(`/api/model-providers/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteModelProvider: (id: string) =>
+    request<void>(`/api/model-providers/${id}`, { method: "DELETE" }),
 
   deleteSecret: (name: string, scope?: string) => {
     const qs = scope ? `?scope=${scope}` : "";
@@ -895,6 +945,11 @@ export const api = {
         name: string;
         slug: string;
         description: string | null;
+        /** Email domains whose people join on sign-in. */
+        autoJoinDomains?: string[];
+        autoJoinRole?: "member" | "viewer" | "admin";
+        /** Pods get only the secrets a piece of work picks. */
+        restrictPodSecrets?: boolean;
         createdAt: string;
         updatedAt: string;
       };
@@ -1577,6 +1632,10 @@ export const api = {
     localHostId?: string | null;
     localDir?: string | null;
     localSessionMode?: "headless" | "interactive" | null;
+    /** Who the work belongs to (default decided by the server). */
+    owner?: ResourceOwner;
+    /** Secret names the agent gets in its pod; null = legacy behavior. */
+    podSecrets?: string[] | null;
   }) =>
     request<{ task: any }>("/api/tasks", {
       method: "POST",
@@ -1687,6 +1746,8 @@ export const api = {
       localHostId: string | null;
       localDir: string | null;
       localSessionMode: "headless" | "interactive" | null;
+      owner: ResourceOwner;
+      podSecrets: string[] | null;
     }>,
   ) =>
     request<{ taskConfig: any }>(`/api/task-configs/${id}`, {
@@ -1835,6 +1896,8 @@ export const api = {
     maxTurns?: number;
     consecutiveFailureLimit?: number;
     enabled?: boolean;
+    owner?: ResourceOwner;
+    podSecrets?: string[] | null;
   }) =>
     request<{ agent: any }>(`/api/persistent-agents`, {
       method: "POST",
@@ -1990,6 +2053,8 @@ export const api = {
           permissionMode?: "auto" | "bypassPermissions" | "default";
           baseBranch?: string;
         };
+    /** Agent spawns: `{ modelProvider }` picks a model provider (Bedrock). */
+    agentOptions?: Record<string, string | boolean>;
     ticket?: {
       repoId: string;
       issueNumber: number;

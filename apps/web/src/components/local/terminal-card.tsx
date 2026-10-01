@@ -7,13 +7,11 @@ import { collectWorkLinks, WorkLinkBadges } from "./work-links";
 import { HoverCard } from "./hover-card";
 import { CONN_DOT, CONN_LABEL, type ConnState } from "./conn-state";
 import { SESSION_DOT, sessionTone } from "./attention";
+import { BRAND_LABEL, brandFor, triggerTypeIcon } from "@/components/brand-icon";
 import {
   Bot,
   Briefcase,
-  Clock,
   GitPullRequest,
-  Github,
-  Hash,
   Layers,
   Loader2,
   Play,
@@ -23,7 +21,6 @@ import {
   User,
   Webhook,
   XCircle,
-  Zap,
 } from "lucide-react";
 
 /** Last two path segments of an absolute dir — enough to recognize a checkout. */
@@ -197,23 +194,33 @@ const SPAWN_SOURCE: Record<string, { label: string; icon: any }> = {
 
 /** A trigger-started session names its source: GitHub, Slack, a schedule, … */
 const TRIGGER_SOURCE: Record<string, { label: string; icon: any }> = {
-  github: { label: "GitHub", icon: Github },
-  slack: { label: "Slack", icon: Hash },
-  linear: { label: "Linear", icon: Zap },
-  schedule: { label: "schedule", icon: Clock },
-  webhook: { label: "webhook", icon: Webhook },
-  ticket: { label: "ticket", icon: Ticket },
+  github: { label: "GitHub", icon: triggerTypeIcon("github") },
+  slack: { label: "Slack", icon: triggerTypeIcon("slack") },
+  linear: { label: "Linear", icon: triggerTypeIcon("linear") },
+  schedule: { label: "schedule", icon: triggerTypeIcon("schedule") },
+  webhook: { label: "webhook", icon: triggerTypeIcon("webhook") },
+  ticket: { label: "ticket", icon: triggerTypeIcon("ticket") },
 };
 
 export function SpawnSourceBadge({
   spawnedBy,
   triggerType,
+  ticketSource,
 }: {
   spawnedBy: string;
   triggerType?: string | null;
+  /** A ticket-started session shows its tracker's mark (GitHub, Linear, …). */
+  ticketSource?: string | null;
 }) {
+  const ticketBrand = spawnedBy === "ticket" ? brandFor(ticketSource) : null;
   const src =
     (spawnedBy === "trigger" && triggerType ? TRIGGER_SOURCE[triggerType] : undefined) ??
+    (ticketBrand
+      ? {
+          label: `${BRAND_LABEL[ticketBrand]} ticket`,
+          icon: triggerTypeIcon("ticket", ticketBrand),
+        }
+      : undefined) ??
     SPAWN_SOURCE[spawnedBy] ??
     SPAWN_SOURCE.manual;
   const Icon = src.icon;
@@ -332,7 +339,11 @@ export function TerminalCard({
       </div>
 
       <div className="flex items-center gap-1.5">
-        <SpawnSourceBadge spawnedBy={terminal.spawnedBy} triggerType={terminal.triggerType} />
+        <SpawnSourceBadge
+          spawnedBy={terminal.spawnedBy}
+          triggerType={terminal.triggerType}
+          ticketSource={terminal.ticketSource}
+        />
         {terminal.state === "exited" && terminal.exitCode != null && (
           <span
             className={cn(

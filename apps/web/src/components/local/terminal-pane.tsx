@@ -598,7 +598,11 @@ export function TerminalPane({
             className="hidden @lg:inline-flex"
           />
           <span className="hidden @4xl:inline-flex">
-            <SpawnSourceBadge spawnedBy={terminal.spawnedBy} triggerType={terminal.triggerType} />
+            <SpawnSourceBadge
+              spawnedBy={terminal.spawnedBy}
+              triggerType={terminal.triggerType}
+              ticketSource={terminal.ticketSource}
+            />
           </span>
           {viewToggle}
           {bellButton}

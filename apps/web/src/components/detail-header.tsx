@@ -22,8 +22,8 @@ export function DetailHeader({
   title: ReactNode;
   /** Optional subtitle line shown above the title (e.g. "owner/repo · #123"). */
   subtitle?: ReactNode;
-  /** Task or review state — rendered as a `<StateBadge>`. */
-  state: string;
+  /** Task or review state — rendered as a `<StateBadge>`. Omit for pages without one. */
+  state?: string;
   isStalled?: boolean;
   /** Small chips below the title (repo, agent, age, …). */
   metaItems?: ReactNode[];
@@ -44,7 +44,7 @@ export function DetailHeader({
             )}
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-lg font-bold tracking-tight">{title}</h1>
-              <StateBadge state={state} isStalled={isStalled} />
+              {state && <StateBadge state={state} isStalled={isStalled} />}
               {extraBadges}
             </div>
             {metaItems && metaItems.length > 0 && (

@@ -1,8 +1,22 @@
-import { getProviderCatalog, localAgentParams, providerForAgentType } from "@optio/shared";
+import {
+  getProviderCatalog,
+  localAgentParams,
+  providerForAgentType,
+  type WorkFormDefaults,
+} from "@optio/shared";
 import { api } from "@/lib/api-client";
 import { runLocationPayload } from "@/components/run-location-picker";
 import { defaultAgentsMd } from "@/lib/persistent-agent-defaults";
-import { deriveKind, isEventWhen, slugify, TERMINAL, type WorkDraft } from "./model";
+import {
+  deriveKind,
+  effectiveOwner,
+  isEventWhen,
+  isPodWork,
+  slugify,
+  takesOwner,
+  TERMINAL,
+  type WorkDraft,
+} from "./model";
 import { detailHref, type EditTarget } from "./load";
 
 /** Where the browser goes once the session exists. */
@@ -46,6 +60,43 @@ function setOptions(d: WorkDraft): Record<string, string | boolean> | null {
     out[k] = v;
   }
   return Object.keys(out).length ? out : null;
+}
+
+/**
+ * What a successful create remembers as your New work form settings: the
+ * runtime and the options actually submitted for it. Null for a terminal.
+ */
+export function workDefaultsFrom(d: WorkDraft): WorkFormDefaults | null {
+  if (d.runtime === TERMINAL) return null;
+  return { runtime: d.runtime, agentOptions: { [d.runtime]: setOptions(d) ?? {} } };
+}
+
+/** Fire-and-forget: never blocks or fails the submit. */
+export function rememberWorkDefaults(d: WorkDraft): void {
+  const body = workDefaultsFrom(d);
+  if (!body) return;
+  try {
+    void api.putWorkDefaults(body).catch(() => {});
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Who the row belongs to and what its pod may read: every Task, Job and
+ * agent carries an owner (a machine run is always "me"); pod work also
+ * carries the picked secrets (an array for new work, possibly empty; a
+ * legacy row that never picked keeps null).
+ */
+export function ownership(d: WorkDraft): {
+  owner?: "workspace" | "me";
+  podSecrets?: string[] | null;
+} {
+  if (!takesOwner(d)) return {};
+  return {
+    owner: effectiveOwner(d),
+    ...(isPodWork(d) ? { podSecrets: d.podSecrets } : {}),
+  };
 }
 
 /** The model the draft picked for its runtime, for rows that carry just a model. */
@@ -122,6 +173,7 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
   const location = runLocationPayload(d.location);
   const options = setOptions(d);
   const model = pickedModel(d);
+  const owned = ownership(d);
   const { repoUrl } = ctx;
 
   switch (kind) {
@@ -139,6 +191,7 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
         ...(options ? { metadata: { agentOptions: options } } : {}),
         ...(d.dependsOn.length ? { dependsOn: d.dependsOn } : {}),
         ...location,
+        ...owned,
       });
       return { kind, href: `/tasks/${task.id}`, toast: `${name} started — it will open a PR` };
     }
@@ -161,6 +214,7 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
               repoBranch: d.repoBranch,
               enabled: true,
               ...location,
+              ...owned,
             })
           ).task,
         (t) => (trigger ? api.createTaskTrigger(t.id, trigger) : Promise.resolve()),
@@ -186,6 +240,7 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
               maxRetries: d.maxRetries,
               enabled: true,
               ...location,
+              ...owned,
             })
           ).task,
         (t) => (trigger ? api.createTaskTrigger(t.id, trigger) : Promise.resolve()),
@@ -245,6 +300,10 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
                 // instructions off this base.
                 ...(d.withRepo ? { baseBranch: d.repoBranch || "main" } : {}),
               },
+        // The model provider (if any) rides in the agent options.
+        ...(d.runtime !== TERMINAL && options?.modelProvider
+          ? { agentOptions: { modelProvider: options.modelProvider } }
+          : {}),
       });
       return { kind, href: `/local/${terminal.id}`, toast: `${name} opened` };
     }
@@ -272,6 +331,7 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
               agentsMd: d.agent.agentsMd || defaultAgentsMd(),
               initialPrompt: prompt,
               podLifecycle: d.agent.podLifecycle,
+              ...owned,
             })
           ).agent,
         (a) => (trigger ? api.createPersistentAgentTrigger(a.id, trigger) : Promise.resolve()),
@@ -333,6 +393,7 @@ export async function updateWork(
   const location = runLocationPayload(d.location);
   const options = setOptions(d);
   const model = pickedModel(d);
+  const owned = ownership(d);
   const { repoUrl } = ctx;
   const wanted = trigger ? { type: trigger.type, config: trigger.config } : null;
   const href = detailHref(target);
@@ -351,6 +412,7 @@ export async function updateWork(
         repoUrl,
         repoBranch: d.repoBranch,
         ...location,
+        ...owned,
       });
       await syncTrigger(target, wanted, {
         create: (t) => api.createTaskTrigger(id, t as Parameters<typeof api.createTaskTrigger>[1]),
@@ -372,6 +434,7 @@ export async function updateWork(
         agentOptions: options,
         maxRetries: d.maxRetries,
         ...location,
+        ...owned,
       });
       await syncTrigger(target, wanted, {
         create: (t) => api.createTaskTrigger(id, t as Parameters<typeof api.createTaskTrigger>[1]),

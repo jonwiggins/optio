@@ -10,6 +10,7 @@
  * inheritance chain — there's nothing above it to inherit from.
  */
 
+import { AgentIcon } from "@/components/brand-icon";
 import {
   AGENT_TYPES,
   PROVIDER_CATALOGS,
@@ -81,7 +82,12 @@ export function ReviewAgentPicker({
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-xs text-text-muted mb-1">Review Agent</label>
+          <label className="flex items-center gap-1.5 text-xs text-text-muted mb-1">
+            {!inheriting && agentType && (
+              <AgentIcon runtime={agentType} colored className="w-3 h-3" />
+            )}
+            Review Agent
+          </label>
           <select
             value={inheriting ? "__inherit__" : (agentType ?? "")}
             onChange={(e) => handleAgentChange(e.target.value)}

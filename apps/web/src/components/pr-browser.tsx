@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -12,15 +12,18 @@ import {
   GitBranch,
   Eye,
   Check,
-  AlertTriangle,
-  Clock,
-  User,
+  Link2,
+  Search,
   ThumbsUp,
   ThumbsDown,
   MessageSquare,
   Zap,
   GitMerge,
+  X,
 } from "lucide-react";
+import { PrIcon } from "@/components/brand-icon";
+import { EmptyState } from "@/components/empty-state";
+import { Segmented } from "@/components/ui/segmented";
 
 export function PrBrowser() {
   const router = useRouter();
@@ -100,259 +103,385 @@ export function PrBrowser() {
     setSubmittingUrl(false);
   };
 
-  const draftStateBadge = (review: any) => {
-    if (!review) return null;
-    const styles: Record<string, string> = {
-      queued: "bg-warning/10 text-warning",
-      waiting_ci: "bg-bg text-text-muted border border-border",
-      reviewing: "bg-warning/10 text-warning",
-      ready: "bg-success/10 text-success",
-      stale: "bg-error/10 text-error",
-      submitted: "bg-info/10 text-info",
-      cancelled: "bg-bg text-text-muted",
-      failed: "bg-error/10 text-error",
-    };
-    const labels: Record<string, string> = {
-      queued: "Queued",
-      waiting_ci: "Waiting for CI",
-      reviewing: "Reviewing...",
-      ready: "Draft Ready",
-      stale: "Stale",
-      submitted: "Submitted",
-      cancelled: "Cancelled",
-      failed: "Failed",
-    };
-    return (
-      <span
-        className={cn(
-          "text-[10px] px-1.5 py-0.5 rounded-md font-medium",
-          styles[review.state] ?? "bg-bg text-text-muted",
-        )}
-      >
-        {labels[review.state] ?? review.state}
-      </span>
-    );
-  };
-
-  const verdictBadge = (review: any) => {
-    if (!review?.verdict) return null;
-    const config: Record<string, { icon: any; cls: string; label: string }> = {
-      approve: {
-        icon: ThumbsUp,
-        cls: "bg-success/10 text-success border-success/30",
-        label: "Approve",
-      },
-      request_changes: {
-        icon: ThumbsDown,
-        cls: "bg-error/10 text-error border-error/30",
-        label: "Request Changes",
-      },
-      comment: {
-        icon: MessageSquare,
-        cls: "bg-info/10 text-info border-info/30",
-        label: "Comment",
-      },
-    };
-    const c = config[review.verdict];
-    if (!c) return null;
-    const Icon = c.icon;
-    return (
-      <span
-        className={cn(
-          "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md font-medium border",
-          c.cls,
-        )}
-      >
-        <Icon className="w-3 h-3" />
-        {c.label}
-      </span>
-    );
-  };
-
   return (
     <div>
-      {/* URL input */}
-      <div className="mb-4 flex items-center gap-2">
-        <input
-          value={prUrl}
-          onChange={(e) => setPrUrl(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleUrlSubmit()}
-          placeholder="Paste a PR URL to review (e.g., https://github.com/owner/repo/pull/123)"
-          className="flex-1 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-primary focus:ring-1 focus:ring-primary/20 focus:outline-none"
-        />
-        <button
-          onClick={handleUrlSubmit}
-          disabled={submittingUrl || !prUrl.trim()}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
-        >
-          {submittingUrl ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Eye className="w-3.5 h-3.5" />
-          )}
-          Review
-        </button>
+      <div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-4">
+        <RepoFilter repos={repos} value={selectedRepo} onChange={setSelectedRepo} />
+        {/* Review any PR by URL */}
+        <div className="flex items-center gap-2 lg:ml-auto w-full lg:w-[30rem]">
+          <div className="relative flex-1 min-w-0">
+            <Link2 className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
+            <input
+              value={prUrl}
+              onChange={(e) => setPrUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleUrlSubmit()}
+              placeholder="Paste a PR URL to review…"
+              title="e.g. https://github.com/owner/repo/pull/123"
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+            />
+          </div>
+          <button
+            onClick={handleUrlSubmit}
+            disabled={submittingUrl || !prUrl.trim()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
+          >
+            {submittingUrl ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Eye className="w-3.5 h-3.5" />
+            )}
+            Review
+          </button>
+        </div>
       </div>
 
-      {/* Repo filter */}
-      {repos.length > 1 && (
-        <div className="mb-4">
-          <select
-            value={selectedRepo}
-            onChange={(e) => setSelectedRepo(e.target.value)}
-            className="px-3 py-1.5 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
-          >
-            <option value="">All repos</option>
-            {repos.map((r: any) => (
-              <option key={r.id} value={r.id}>
-                {r.fullName}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
       {loading ? (
-        <div className="flex items-center justify-center py-12 text-text-muted">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" />
-          Loading pull requests from GitHub...
-        </div>
+        <RowSkeleton />
       ) : prs.length === 0 ? (
-        <div className="text-center py-12 text-text-muted border border-dashed border-border rounded-lg">
-          <GitPullRequest className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>No open pull requests found</p>
-          <p className="text-xs mt-1">
-            {repos.length === 0
-              ? "Add a repo first in the Repos settings."
-              : "Pull requests will appear here from your configured repos."}
-          </p>
-        </div>
+        <EmptyState
+          icon={GitPullRequest}
+          title="No open pull requests found"
+          description={
+            repos.length === 0
+              ? "Add a repo first — its open pull requests show up here."
+              : "Pull requests will appear here from your configured repos. Paste a URL above to review any other PR."
+          }
+          action={repos.length === 0 ? { label: "Add a repo", href: "/repos" } : undefined}
+        />
       ) : (
-        <div className="space-y-2">
-          {prs.map((pr: any) => (
-            <div
-              key={`${pr.repo.fullName}-${pr.number}`}
-              className="p-3 rounded-lg border border-border bg-bg-card"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+        <div className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60">
+          {prs.map((pr: any) => {
+            const busy = reviewing === pr.number || merging === pr.number;
+            return (
+              <div
+                key={`${pr.repo.fullName}-${pr.number}`}
+                className="group grid grid-cols-[auto_1fr_auto] items-center gap-x-4 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+              >
+                <PrIcon state={pr.draft ? "draft" : "open"} className="w-4 h-4" />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
                     <a
                       href={pr.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm font-medium hover:text-primary transition-colors truncate"
+                      className="text-sm font-medium text-text-heading hover:text-primary transition-colors truncate"
                     >
                       {pr.title}
                     </a>
-                    <span className="text-xs text-text-muted shrink-0">#{pr.number}</span>
-                    {pr.draft && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-bg text-text-muted border border-border">
-                        Draft
-                      </span>
-                    )}
-                    {pr.review && draftStateBadge(pr.review)}
-                    {pr.review && verdictBadge(pr.review)}
+                    <span className="text-xs text-text-muted/70 shrink-0 tabular-nums">
+                      #{pr.number}
+                    </span>
+                    {pr.draft && <Chip>Draft</Chip>}
                     {pr.review?.origin === "auto" && (
-                      <span
-                        title="Automatically reviewed by Optio"
-                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary"
-                      >
-                        <Zap className="w-3 h-3" />
-                        Auto
-                      </span>
+                      <Chip className="border-primary/30 bg-primary/10 text-primary">
+                        <span
+                          title="Automatically reviewed by Optio"
+                          className="inline-flex items-center gap-0.5"
+                        >
+                          <Zap className="w-2.5 h-2.5" />
+                          Auto
+                        </span>
+                      </Chip>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-text-muted">
-                    <span className="flex items-center gap-1">
-                      <GitBranch className="w-3 h-3" />
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-text-muted min-w-0">
+                    {pr.review && <ReviewStatus review={pr.review} />}
+                    <span className="inline-flex items-center gap-1 font-mono">
+                      <GitBranch className="w-3 h-3 text-text-muted/60" />
                       {pr.repo.fullName}
                     </span>
-                    {pr.author && (
-                      <span className="flex items-center gap-1">
-                        <User className="w-3 h-3" />
-                        {pr.author}
-                      </span>
-                    )}
-                    <span>{formatRelativeTime(pr.updatedAt)}</span>
+                    {pr.author && <span>@{pr.author}</span>}
+                    {pr.labels?.map((label: string) => (
+                      <Chip key={label}>{label}</Chip>
+                    ))}
                   </div>
-                  {/* Labels */}
-                  {pr.labels && pr.labels.length > 0 && (
-                    <div className="flex items-center gap-1 mt-1.5">
-                      {pr.labels.map((label: string) => (
-                        <span
-                          key={label}
-                          className="text-[10px] px-1.5 py-0.5 rounded-full border border-border bg-bg text-text-muted"
-                        >
-                          {label}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
-                {/* Action buttons */}
-                <div className="shrink-0 flex items-center gap-2">
-                  {pr.review ? (
-                    <Link
-                      href={`/reviews/${pr.review.id}`}
-                      className={cn(
-                        "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs",
-                        pr.review.state === "stale"
-                          ? "bg-error/10 text-error hover:bg-error/20"
-                          : pr.review.state === "submitted"
-                            ? "bg-info/10 text-info hover:bg-info/20"
-                            : pr.review.state === "waiting_ci" ||
-                                pr.review.state === "reviewing" ||
-                                pr.review.state === "queued"
-                              ? "bg-bg text-text-muted border border-border hover:bg-bg-card"
-                              : "bg-success/10 text-success hover:bg-success/20",
-                      )}
-                    >
-                      {pr.review.state === "stale" ? (
-                        <AlertTriangle className="w-3 h-3" />
-                      ) : pr.review.state === "reviewing" ||
-                        pr.review.state === "waiting_ci" ||
-                        pr.review.state === "queued" ? (
-                        <Clock className="w-3 h-3" />
-                      ) : (
-                        <Check className="w-3 h-3" />
-                      )}
-                      View Review
-                    </Link>
-                  ) : (
+                <div className="flex items-center gap-2">
+                  <div
+                    className={cn(
+                      "flex items-center gap-1.5 transition-opacity",
+                      !busy &&
+                        "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100",
+                    )}
+                  >
+                    {pr.review ? (
+                      <Link
+                        href={`/reviews/${pr.review.id}`}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-bg-card text-xs text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
+                      >
+                        <Eye className="w-3 h-3" />
+                        View review
+                      </Link>
+                    ) : (
+                      <button
+                        onClick={() => handleReview(pr)}
+                        disabled={reviewing === pr.number}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
+                      >
+                        {reviewing === pr.number ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Eye className="w-3 h-3" />
+                        )}
+                        Review with Optio
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleReview(pr)}
-                      disabled={reviewing === pr.number}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
+                      onClick={() => handleApproveAndMerge(pr)}
+                      disabled={merging === pr.number}
+                      title="Approve and merge without using the agent"
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-success/30 bg-success/10 text-success text-xs hover:bg-success/20 disabled:opacity-50 transition-colors"
                     >
-                      {reviewing === pr.number ? (
+                      {merging === pr.number ? (
                         <Loader2 className="w-3 h-3 animate-spin" />
                       ) : (
-                        <Eye className="w-3 h-3" />
+                        <GitMerge className="w-3 h-3" />
                       )}
-                      Review with Optio
+                      Approve &amp; merge
                     </button>
-                  )}
-                  <button
-                    onClick={() => handleApproveAndMerge(pr)}
-                    disabled={merging === pr.number}
-                    title="Approve and merge without using the agent"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-success/10 text-success hover:bg-success/20 text-xs disabled:opacity-50"
-                  >
-                    {merging === pr.number ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <GitMerge className="w-3 h-3" />
-                    )}
-                    Approve & Merge
-                  </button>
+                  </div>
+                  <span className="w-16 text-right text-[11px] text-text-muted/70 whitespace-nowrap">
+                    {formatRelativeTime(pr.updatedAt)}
+                  </span>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
+  );
+}
+
+const REVIEW_STATE: Record<string, { label: string; dot: string; text: string }> = {
+  queued: { label: "Review queued", dot: "bg-warning/70", text: "text-warning" },
+  waiting_ci: { label: "Waiting for CI", dot: "bg-text-muted/60", text: "text-text-muted" },
+  reviewing: { label: "Reviewing…", dot: "bg-primary animate-pulse", text: "text-primary" },
+  ready: { label: "Draft ready", dot: "bg-success", text: "text-success" },
+  stale: { label: "Stale review", dot: "bg-error", text: "text-error" },
+  submitted: { label: "Submitted", dot: "bg-info", text: "text-info" },
+  cancelled: { label: "Cancelled", dot: "bg-text-muted/40", text: "text-text-muted" },
+  failed: { label: "Review failed", dot: "bg-error", text: "text-error" },
+};
+
+const VERDICT: Record<string, { icon: typeof ThumbsUp; text: string; label: string }> = {
+  approve: { icon: ThumbsUp, text: "text-success", label: "Approve" },
+  request_changes: { icon: ThumbsDown, text: "text-error", label: "Request changes" },
+  comment: { icon: MessageSquare, text: "text-info", label: "Comment" },
+};
+
+/** The Optio review's state and verdict, as the row's status line. */
+function ReviewStatus({ review }: { review: any }) {
+  const s = REVIEW_STATE[review.state] ?? {
+    label: review.state,
+    dot: "bg-text-muted/40",
+    text: "text-text-muted",
+  };
+  const v = review.verdict ? VERDICT[review.verdict] : null;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className={cn("inline-flex items-center gap-1.5", s.text)}>
+        <span className={cn("w-1.5 h-1.5 rounded-full", s.dot)} />
+        {s.label}
+      </span>
+      {v && (
+        <span className={cn("inline-flex items-center gap-1", v.text)}>
+          <v.icon className="w-3 h-3" />
+          {v.label}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** A tiny pill for labels and flags inside a row's title / meta line. */
+export function Chip({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center text-[10px] leading-4 px-1.5 rounded-full border border-border bg-bg text-text-muted shrink-0",
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** Loading placeholder shaped like the rows: glyph, title + meta, recency. */
+export function RowSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div
+      className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60"
+      aria-busy="true"
+      aria-label="Loading"
+    >
+      {[...Array(rows)].map((_, i) => (
+        <div
+          key={i}
+          className="grid grid-cols-[auto_1fr_auto] items-center gap-x-4 px-4 py-3 bg-bg-card/40"
+        >
+          <div className="w-4 h-4 rounded-full skeleton-shimmer" />
+          <div className="space-y-1.5">
+            <div className="h-3.5 skeleton-shimmer" style={{ width: `${60 - (i % 3) * 12}%` }} />
+            <div className="h-2.5 w-1/3 skeleton-shimmer" />
+          </div>
+          <div className="h-2.5 w-12 skeleton-shimmer" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type RepoOption = { id: string; fullName: string };
+
+/**
+ * Narrow a list to one repo. A few repos get pills; more get a search box
+ * that suggests matching repos (the same box as the Work list's search).
+ */
+export function RepoFilter({
+  repos,
+  value,
+  onChange,
+}: {
+  repos: RepoOption[];
+  value: string;
+  onChange: (repoId: string) => void;
+}) {
+  if (repos.length < 2) return null;
+  if (repos.length <= 4) {
+    return (
+      <Segmented
+        size="md"
+        surface="card"
+        wrap
+        className="gap-1"
+        aria-label="Repository"
+        value={value}
+        onChange={onChange}
+        options={[
+          { value: "", label: "All repos" },
+          ...repos.map((r) => ({ value: r.id, label: r.fullName })),
+        ]}
+      />
+    );
+  }
+  return <RepoSearch repos={repos} value={value} onChange={onChange} />;
+}
+
+function RepoSearch({
+  repos,
+  value,
+  onChange,
+}: {
+  repos: RepoOption[];
+  value: string;
+  onChange: (repoId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const selected = repos.find((r) => r.id === value);
+  const needle = q.trim().toLowerCase();
+  const matches = repos.filter((r) => r.fullName.toLowerCase().includes(needle));
+  const pick = (id: string) => {
+    onChange(id);
+    setQ("");
+    setOpen(false);
+  };
+  return (
+    <div
+      className="relative w-full sm:w-72"
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setOpen(false);
+          setQ("");
+        }
+      }}
+    >
+      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
+      <input
+        value={open ? q : (selected?.fullName ?? "")}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          setQ(e.target.value);
+          setOpen(true);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") (e.target as HTMLInputElement).blur();
+          if (e.key === "Enter" && needle && matches[0]) pick(matches[0].id);
+        }}
+        placeholder={selected ? selected.fullName : `All repos (${repos.length}) — search…`}
+        aria-label="Filter by repository"
+        role="combobox"
+        aria-expanded={open}
+        className={cn(
+          "w-full pl-8 py-1.5 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary",
+          selected ? "pr-8 font-mono text-[13px]" : "pr-3",
+        )}
+      />
+      {selected && !open && (
+        <button
+          type="button"
+          onClick={() => pick("")}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-text-muted hover:text-text hover:bg-bg-hover"
+          aria-label="Show all repos"
+          title="Show all repos"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {open && (
+        <div
+          role="listbox"
+          className="absolute z-20 mt-1 w-full max-h-72 overflow-auto rounded-lg border border-border bg-bg-card shadow-lg py-1"
+        >
+          {!needle && <RepoOptionRow label="All repos" active={!value} onPick={() => pick("")} />}
+          {matches.map((r) => (
+            <RepoOptionRow
+              key={r.id}
+              label={r.fullName}
+              mono
+              active={r.id === value}
+              onPick={() => pick(r.id)}
+            />
+          ))}
+          {matches.length === 0 && (
+            <div className="px-3 py-2 text-xs text-text-muted">No repo matches “{q}”</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RepoOptionRow({
+  label,
+  active,
+  mono,
+  onPick,
+}: {
+  label: string;
+  active: boolean;
+  mono?: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={active}
+      // Keep focus in the input so the list doesn't close before the click lands.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onPick}
+      className={cn(
+        "w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-bg-hover transition-colors",
+        active ? "text-primary" : "text-text",
+        mono && "font-mono text-[13px]",
+      )}
+    >
+      <span className="truncate flex-1">{label}</span>
+      {active && <Check className="w-3.5 h-3.5 shrink-0" />}
+    </button>
   );
 }

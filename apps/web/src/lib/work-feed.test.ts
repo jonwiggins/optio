@@ -1,10 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { collectWork, countWork, inView, sessionScreenTarget, type WorkRow } from "./work-feed";
+import {
+  collectWork,
+  countWork,
+  inView,
+  sessionScreenTarget,
+  sortWork,
+  type WorkRow,
+} from "./work-feed";
 
 const hosts = [{ id: "h1", name: "M1" }];
 
 describe("collectWork", () => {
-  it("projects every source onto the same row shape and ranks needs-you first", () => {
+  it("projects every source onto the same row shape and ranks live work first", () => {
     const rows = collectWork({
       unified: [
         {
@@ -64,7 +71,7 @@ describe("collectWork", () => {
 
     expect(rows.map((r) => r.key)).not.toContain("terminal-lt2");
     expect(rows.slice(0, 2).map((r) => r.status)).toEqual(["needs_you", "needs_you"]);
-    expect(rows[0].key).toBe("terminal-lt1"); // most recent needs-you first
+    expect(rows[0].key).toBe("terminal-lt1"); // most recent live row first
     expect(rows.find((r) => r.key === "task-t2")?.where).toEqual({
       target: "machine",
       detail: "M1 · ~/app",
@@ -138,5 +145,86 @@ describe("sessionScreenTarget", () => {
     expect(
       sessionScreenTarget([row("t", "needs_you", "2026-09-24T09:00:00Z", "repo-task")]),
     ).toBeNull();
+  });
+});
+
+describe("collectWork triggers", () => {
+  it("carries what starts a row: fetched definition triggers, a run's ticket or trigger", () => {
+    const rows = collectWork({
+      unified: [
+        { type: "repo-blueprint", id: "b1", name: "Nightly", enabled: true },
+        { type: "standalone", id: "j1", name: "Report", enabled: true },
+        {
+          type: "repo-task",
+          id: "t1",
+          title: "From an issue",
+          state: "running",
+          ticketSource: "linear",
+        },
+        {
+          type: "repo-task",
+          id: "t2",
+          title: "From a GitHub event",
+          state: "pr_opened",
+          prUrl: "https://github.com/a/b/pull/1",
+          prState: "open",
+          metadata: { taskConfigId: "b1", triggerId: "tr1" },
+        },
+      ],
+      localTerminals: [
+        {
+          id: "lt1",
+          title: "slack ask",
+          state: "running",
+          spawnedBy: "trigger",
+          triggerType: "slack",
+        },
+      ],
+      localBlueprints: [],
+      podSessions: [],
+      agents: [],
+      hosts: [],
+      triggers: {
+        b1: [
+          { id: "tr1", type: "github" },
+          { id: "tr2", type: "schedule" },
+          { id: "tr3", type: "ticket", config: { source: "linear" } },
+          { id: "tr4", type: "github" },
+        ],
+      },
+    });
+    const by = (k: string) => rows.find((r) => r.key === k)!;
+    expect(by("blueprint-b1").triggers).toEqual([
+      { type: "github" },
+      { type: "schedule" },
+      { type: "ticket", source: "linear" },
+    ]);
+    expect(by("job-j1").triggers).toBeUndefined(); // not fetched yet
+    expect(by("task-t1").triggers).toEqual([{ type: "ticket", source: "linear" }]);
+    expect(by("task-t2").triggers).toEqual([{ type: "github" }]);
+    expect(by("task-t2").prState).toBe("open");
+    expect(by("terminal-lt1").triggers).toEqual([{ type: "slack" }]);
+  });
+});
+
+describe("sortWork", () => {
+  const r = (key: string, status: WorkRow["status"], at: string, orderAt?: string) =>
+    ({ key, status, lastActivity: at, orderAt }) as WorkRow;
+
+  it("doesn't float needs-you above other live rows", () => {
+    const rows = sortWork([
+      r("waits", "needs_you", "2026-09-01T00:00:00Z"),
+      r("runs", "running", "2026-09-02T00:00:00Z"),
+      r("done", "done", "2026-09-03T00:00:00Z"),
+    ]);
+    expect(rows.map((x) => x.key)).toEqual(["runs", "waits", "done"]);
+  });
+
+  it("orders a session row by orderAt (last typed / created), not its activity", () => {
+    const rows = sortWork([
+      r("busy", "running", "2026-09-30T00:00:00Z", "2026-09-01T00:00:00Z"),
+      r("typed", "needs_you", "2026-09-02T00:00:00Z", "2026-09-10T00:00:00Z"),
+    ]);
+    expect(rows.map((x) => x.key)).toEqual(["typed", "busy"]);
   });
 });

@@ -15,7 +15,7 @@ import {
   Clock,
 } from "lucide-react";
 import { StateBadge } from "@/components/state-badge";
-import { EmptyState } from "./empty-state.js";
+import { EmptyState } from "@/components/empty-state";
 import { STATUS_COLORS } from "./types.js";
 
 function CapacityIndicator({ repoPod }: { repoPod: any }) {
@@ -64,6 +64,7 @@ export function PodsList({
       </div>
       {pods.length === 0 ? (
         <EmptyState
+          size="panel"
           icon={Container}
           title="No pods running"
           description="Pods are created automatically when tasks start. They stay warm for fast iteration."

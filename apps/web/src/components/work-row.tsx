@@ -12,11 +12,11 @@ import {
   Play,
   Server,
   Terminal,
-  Zap,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { runtimeLabel } from "@/components/work-form/model";
-import type { WorkRow, WorkStatus } from "@/lib/work-feed";
+import { PrIcon, TriggerIcon, agentRuntimeIcon, triggerLabel } from "@/components/brand-icon";
+import type { WorkRow, WorkStatus, WorkTrigger } from "@/lib/work-feed";
 
 /**
  * One piece of work as a row: status, name, its four attributes, recency. Shared
@@ -62,14 +62,18 @@ export function WorkRowView({ row }: { row: WorkRow }) {
         </div>
       </div>
       <div className="col-span-3 sm:col-span-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-muted min-w-0">
-        <Attr icon={WhenIcon} label={row.when} />
+        {row.triggers && row.triggers.length > 0 ? (
+          <WhenTriggers triggers={row.triggers} />
+        ) : (
+          <Attr icon={WhenIcon} label={row.when} />
+        )}
         <Attr
           icon={WhereIcon}
           label={row.where.detail ?? (row.where.target === "pod" ? "Optio pod" : "machine")}
           mono
         />
         <Attr
-          icon={row.who === "terminal" ? Terminal : Zap}
+          icon={agentRuntimeIcon(row.who, { colored: true })}
           label={row.who === "terminal" ? "terminal" : runtimeLabel(row.who)}
         />
         <Attr
@@ -90,8 +94,10 @@ export function WorkRowView({ row }: { row: WorkRow }) {
             target="_blank"
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className="text-primary hover:underline inline-flex items-center gap-0.5"
+            className="text-primary hover:underline inline-flex items-center gap-1"
+            title={`Pull request${row.prState ? ` (${row.prState})` : ""} · ${row.prUrl}`}
           >
+            <PrIcon state={row.prState} className="w-3 h-3" />
             PR <ExternalLink className="w-3 h-3" />
           </a>
         )}
@@ -131,6 +137,36 @@ function Attr({
     <span className="inline-flex items-center gap-1 min-w-0">
       <Icon className="w-3 h-3 shrink-0 text-text-muted/60" />
       <span className={cn("truncate", mono && "font-mono")}>{label}</span>
+    </span>
+  );
+}
+
+/**
+ * The When attribute for work whose triggers are known: each source's mark
+ * (GitHub, Slack, Linear, a ticket tracker, or the schedule / webhook icon)
+ * and their names, so a row reads "GitHub" rather than "on a trigger".
+ */
+function WhenTriggers({ triggers }: { triggers: WorkTrigger[] }) {
+  const labels = triggers.map((t) => triggerLabel(t.type, t.source));
+  const shown = triggers.slice(0, 3);
+  return (
+    <span
+      className="inline-flex items-center gap-1 min-w-0"
+      title={`Starts on: ${labels.join(", ")}`}
+    >
+      <span className="inline-flex items-center gap-0.5 shrink-0">
+        {shown.map((t) => (
+          <TriggerIcon
+            key={`${t.type}:${t.source ?? ""}`}
+            type={t.type}
+            source={t.source}
+            className="w-3 h-3 text-text-muted/80"
+          />
+        ))}
+      </span>
+      <span className="truncate">
+        {labels.length > 2 ? `${labels[0]} +${labels.length - 1}` : labels.join(" · ")}
+      </span>
     </span>
   );
 }

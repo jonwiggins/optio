@@ -33,10 +33,10 @@ import {
   ExternalLink,
   Clock,
   Zap,
-  GitPullRequest,
   XCircle,
   RotateCcw,
 } from "lucide-react";
+import { PrIcon } from "@/components/brand-icon";
 
 interface Review {
   id: string;
@@ -348,7 +348,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         title={`Review: PR #${review.prNumber}`}
         subtitle={
           <>
-            <GitPullRequest className="w-3.5 h-3.5" />
+            <PrIcon colored={false} className="w-3.5 h-3.5" />
             <span>
               {review.repoOwner}/{review.repoName} · #{review.prNumber}
             </span>

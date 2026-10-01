@@ -434,3 +434,63 @@ test.describe("Editing recurring work", () => {
     expect(triggers[0].config.channelId).toBe("C0999ZZZZ");
   });
 });
+
+test.describe("Remembered agent settings", () => {
+  // The e2e stack runs with auth disabled, where the API keeps no per-user
+  // settings, so the browser stands in for GET / PUT /api/me/work-defaults
+  // with the server's merge rule. What's under test is the form: it saves
+  // what was submitted and the next blank form opens with it.
+  test("a second New work form opens with the model and effort used last", async ({ page }) => {
+    let saved: { runtime?: string; agentOptions?: Record<string, Record<string, unknown>> } = {};
+    const puts: unknown[] = [];
+    await page.route("**/api/me/work-defaults", async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        puts.push(body);
+        saved = {
+          runtime: body.runtime ?? saved.runtime,
+          agentOptions: { ...saved.agentOptions, ...body.agentOptions },
+        };
+      }
+      await route.fulfill({ json: { defaults: saved } });
+    });
+
+    await open(page);
+    await preset(page, "Open a PR").click();
+    await who(page, "Claude Code").click();
+    const whoCard = page.locator("#session-who");
+    await whoCard.getByLabel("Model").selectOption("claude-sonnet-4-6");
+    await whoCard.getByLabel("Effort Level").selectOption("high");
+    await prompt(page).fill("Remember me [[mock:pr]]");
+    await nameInput(page).fill(named("remembered"));
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    await expect.poll(() => puts.length).toBe(1);
+    expect(puts[0]).toEqual({
+      runtime: "claude-code",
+      agentOptions: {
+        "claude-code": expect.objectContaining({
+          claudeModel: "claude-sonnet-4-6",
+          claudeEffort: "high",
+        }),
+      },
+    });
+
+    await open(page);
+    await expect(whoCard.getByLabel("Model")).toHaveValue("claude-sonnet-4-6");
+    await expect(whoCard.getByLabel("Effort Level")).toHaveValue("high");
+    await expect(page.getByTestId("work-last-settings")).toBeVisible();
+
+    // A stray click on an example chip that sets no options keeps them.
+    await preset(page, "Open a PR").click();
+    await expect(whoCard.getByLabel("Model")).toHaveValue("claude-sonnet-4-6");
+    await expect(whoCard.getByLabel("Effort Level")).toHaveValue("high");
+    await expect(page.getByTestId("work-last-settings")).toBeVisible();
+
+    // Reset goes back to the runtime's defaults for this form (here, the
+    // seeded repo's: Opus).
+    await page.getByTestId("work-last-settings").getByRole("button", { name: "Reset" }).click();
+    await expect(page.getByTestId("work-last-settings")).toHaveCount(0);
+    await expect(whoCard.getByLabel("Model")).not.toHaveValue("claude-sonnet-4-6");
+  });
+});

@@ -3,7 +3,27 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import { Loader2, Building2, Users, Trash2, UserPlus, Shield, Eye, Edit3 } from "lucide-react";
+import { Loader2, Building2, Users, Trash2, UserPlus, Shield, Eye, Edit3, X } from "lucide-react";
+import { addDomains } from "@/lib/auto-join-domains";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { SectionCard } from "@/components/ui/section-card";
+import { Segmented } from "@/components/ui/segmented";
+import {
+  BTN_PRIMARY,
+  BTN_ROW_DANGER,
+  BTN_SECONDARY,
+  CardFooter,
+  Field,
+  INPUT,
+  SkeletonCard,
+} from "@/components/settings/settings-ui";
+
+const ROLE_OPTIONS = [
+  { value: "admin", label: "Admin" },
+  { value: "member", label: "Member" },
+  { value: "viewer", label: "Viewer" },
+];
 
 interface WorkspaceDetail {
   id: string;
@@ -23,6 +43,199 @@ interface Member {
   displayName: string;
   avatarUrl: string | null;
   createdAt: string;
+}
+
+/**
+ * Sign-in auto-join (people whose verified email is on one of these domains
+ * join on sign-in, with this role) and the pod-secrets policy. Each change
+ * saves on its own.
+ */
+function AccessSettings() {
+  const [wsId, setWsId] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [domains, setDomains] = useState<string[]>([]);
+  const [joinRole, setJoinRole] = useState<"member" | "viewer">("member");
+  const [restrict, setRestrict] = useState(false);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const id = localStorage.getItem("optio_workspace_id");
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    setWsId(id);
+    api
+      .getWorkspace(id)
+      .then((res) => {
+        setRole(res.role);
+        setDomains(res.workspace.autoJoinDomains ?? []);
+        setJoinRole(res.workspace.autoJoinRole === "viewer" ? "viewer" : "member");
+        setRestrict(!!res.workspace.restrictPodSecrets);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const isAdmin = role === "admin";
+
+  const save = async (
+    patch: { autoJoinDomains?: string[]; autoJoinRole?: string; restrictPodSecrets?: boolean },
+    revert: () => void,
+  ) => {
+    if (!wsId) return;
+    setSaving(true);
+    try {
+      await api.updateWorkspace(wsId, patch);
+      toast.success("Saved");
+    } catch (err) {
+      revert();
+      toast.error("Couldn't save", {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setDomainList = (next: string[]) => {
+    const prev = domains;
+    setDomains(next);
+    save({ autoJoinDomains: next }, () => setDomains(prev));
+  };
+
+  const addFromInput = () => {
+    const { domains: next, invalid } = addDomains(domains, input);
+    if (invalid.length) toast.error(`Not a domain: ${invalid.join(", ")}`);
+    setInput(invalid.join(" "));
+    if (next.length !== domains.length) setDomainList(next);
+  };
+
+  const label = "Access";
+  const hint = "Who joins on sign-in, and which secrets pods get";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={2} />;
+  if (!wsId) return null;
+
+  return (
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={
+        domains.length
+          ? `${domains.length === 1 ? domains[0] : `${domains.length} domains`} → ${joinRole}`
+          : "invite only"
+      }
+      bodyClassName="p-4 space-y-4"
+    >
+      <div className="space-y-3">
+        <div>
+          <p className="text-sm font-medium">Sign-in</p>
+          <p className="text-xs text-text-muted mt-0.5">
+            People who sign in with a verified email on these domains join this workspace.
+          </p>
+        </div>
+        {(domains.length > 0 || !isAdmin) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {domains.map((d) => (
+              <span
+                key={d}
+                className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md bg-bg border border-border text-xs font-mono"
+              >
+                {d}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setDomainList(domains.filter((x) => x !== d))}
+                    disabled={saving}
+                    className="p-0.5 rounded text-text-muted hover:text-text"
+                    aria-label={`Remove ${d}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </span>
+            ))}
+            {domains.length === 0 && !isAdmin && (
+              <span className="text-xs text-text-muted">None — people join by invite only.</span>
+            )}
+          </div>
+        )}
+        {isAdmin && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addFromInput();
+                }
+              }}
+              placeholder="acme.com"
+              className={`${INPUT} flex-1 min-w-[12rem] w-auto font-mono`}
+            />
+            <button
+              type="button"
+              onClick={addFromInput}
+              disabled={saving || !input.trim()}
+              className={BTN_SECONDARY}
+            >
+              Add domain
+            </button>
+          </div>
+        )}
+        <div className="flex items-center gap-3 text-sm">
+          <span className="text-xs font-medium text-text-muted">They join as</span>
+          <Segmented
+            value={joinRole}
+            onChange={(next) => {
+              if (!isAdmin || saving || next === joinRole) return;
+              const prev = joinRole;
+              setJoinRole(next);
+              save({ autoJoinRole: next }, () => setJoinRole(prev));
+            }}
+            aria-label="Auto-join role"
+            options={[
+              {
+                value: "member",
+                label: "Member",
+                disabled: !isAdmin ? "Only admins can change this" : undefined,
+              },
+              {
+                value: "viewer",
+                label: "Viewer",
+                disabled: !isAdmin ? "Only admins can change this" : undefined,
+              },
+            ]}
+          />
+        </div>
+      </div>
+
+      <div className="pt-4 border-t border-border">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={restrict}
+            disabled={!isAdmin || saving}
+            onChange={(e) => {
+              const prev = restrict;
+              setRestrict(e.target.checked);
+              save({ restrictPodSecrets: e.target.checked }, () => setRestrict(prev));
+            }}
+            className="w-4 h-4 rounded mt-0.5"
+          />
+          <span>
+            <span className="block text-sm font-medium">Pods get only the secrets work picks</span>
+            <span className="block text-xs text-text-muted mt-0.5">
+              Off: work that picks no secrets still gets every organization secret in repo pods.
+            </span>
+          </span>
+        </label>
+      </div>
+    </SectionCard>
+  );
 }
 
 function WorkspaceInfo() {
@@ -73,79 +286,72 @@ function WorkspaceInfo() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "General";
+  const hint = "Name, slug, and description";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={3} />;
 
   if (!workspace) {
     return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        No workspace selected
-      </div>
+      <EmptyState
+        size="panel"
+        icon={Building2}
+        title="No workspace selected"
+        description="Pick a workspace from the sidebar to edit its settings."
+      />
     );
   }
 
   const isAdmin = role === "admin";
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
-      <div className="space-y-3">
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Name</label>
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={`${workspace.name} · ${workspace.slug}`}
+      bodyClassName="p-4 space-y-4"
+    >
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Name">
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={!isAdmin}
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary disabled:opacity-50"
+            className={INPUT}
           />
-        </div>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Slug</label>
+        </Field>
+        <Field
+          label="Slug"
+          help="URL-friendly identifier. Lowercase letters, numbers, and hyphens only."
+        >
           <input
             type="text"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             disabled={!isAdmin}
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary disabled:opacity-50"
+            className={`${INPUT} font-mono`}
             pattern="[a-z0-9-]+"
           />
-          <p className="text-[10px] text-text-muted mt-1">
-            URL-friendly identifier. Lowercase letters, numbers, and hyphens only.
-          </p>
-        </div>
-        <div>
-          <label className="block text-xs text-text-muted mb-1">Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={!isAdmin}
-            rows={2}
-            className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary disabled:opacity-50 resize-none"
-          />
-        </div>
+        </Field>
       </div>
-      {isAdmin && (
-        <div className="flex justify-end">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
-          >
+      <Field label="Description">
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          disabled={!isAdmin}
+          rows={2}
+          className={`${INPUT} resize-none`}
+        />
+      </Field>
+      <CardFooter note={isAdmin ? undefined : "Only workspace admins can edit workspace settings."}>
+        {isAdmin && (
+          <button onClick={handleSave} disabled={saving} className={BTN_PRIMARY}>
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             {saving ? "Saving..." : "Save"}
           </button>
-        </div>
-      )}
-      {!isAdmin && (
-        <p className="text-xs text-text-muted">
-          Only workspace admins can edit workspace settings.
-        </p>
-      )}
-    </div>
+        )}
+      </CardFooter>
+    </SectionCard>
   );
 }
 
@@ -227,13 +433,10 @@ function MemberManagement() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "Members";
+  const hint = "Who's in this workspace, and what they can do";
+  if (loading) return <SkeletonCard label={label} hint={hint} rows={3} />;
+  if (!wsId) return null;
 
   const roleIcon = (r: string) => {
     switch (r) {
@@ -248,98 +451,99 @@ function MemberManagement() {
     }
   };
 
+  const admins = members.filter((m) => m.role === "admin").length;
+
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
-      <div className="space-y-2">
-        {members.map((member) => (
-          <div
-            key={member.id}
-            className="flex items-center gap-3 p-3 rounded-lg border border-border"
-          >
-            {member.avatarUrl ? (
-              <img src={member.avatarUrl} alt="" className="w-8 h-8 rounded-full shrink-0" />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-                <Users className="w-4 h-4 text-primary" />
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{member.displayName}</p>
-              <p className="text-[10px] text-text-muted truncate">{member.email}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {roleIcon(member.role)}
-              {isAdmin ? (
-                <select
-                  value={member.role}
-                  onChange={(e) => handleRoleChange(member.userId, e.target.value)}
-                  className="text-xs px-2 py-1 rounded border border-border bg-bg focus:outline-none focus:border-primary"
-                >
-                  <option value="admin">Admin</option>
-                  <option value="member">Member</option>
-                  <option value="viewer">Viewer</option>
-                </select>
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={`${members.length} member${members.length === 1 ? "" : "s"} · ${admins} admin${admins === 1 ? "" : "s"}`}
+      summaryIcon={<Users className="w-3 h-3" />}
+      bodyClassName="p-4 space-y-4"
+    >
+      {members.length === 0 ? (
+        <EmptyState size="panel" icon={Users} title="No members" />
+      ) : (
+        <ul className="divide-y divide-border/60 rounded-lg border border-border bg-bg">
+          {members.map((member) => (
+            <li key={member.id} className="flex items-center gap-3 px-3 py-2.5">
+              {member.avatarUrl ? (
+                <img src={member.avatarUrl} alt="" className="w-8 h-8 rounded-full shrink-0" />
               ) : (
-                <span className="text-xs text-text-muted capitalize">{member.role}</span>
+                <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                  <Users className="w-4 h-4 text-primary" />
+                </div>
               )}
-              {isAdmin && members.length > 1 && (
-                <button
-                  onClick={() => handleRemove(member.userId, member.displayName)}
-                  className="p-1 rounded hover:bg-error/10 text-text-muted hover:text-error transition-colors"
-                  title="Remove member"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{member.displayName}</p>
+                <p className="text-[11px] text-text-muted truncate">{member.email}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {isAdmin ? (
+                  <Segmented
+                    value={member.role}
+                    onChange={(next) => {
+                      if (next !== member.role) handleRoleChange(member.userId, next);
+                    }}
+                    aria-label={`Role for ${member.displayName}`}
+                    options={ROLE_OPTIONS}
+                  />
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-text-muted capitalize">
+                    {roleIcon(member.role)}
+                    {member.role}
+                  </span>
+                )}
+                {isAdmin && members.length > 1 && (
+                  <button
+                    onClick={() => handleRemove(member.userId, member.displayName)}
+                    className={BTN_ROW_DANGER}
+                    title="Remove member"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
       {isAdmin && (
-        <div className="pt-4 border-t border-border/50">
-          <p className="text-xs font-medium text-text-muted mb-3 flex items-center gap-1.5">
+        <div className="pt-4 border-t border-border space-y-2">
+          <p className="text-xs font-medium text-text-muted flex items-center gap-1.5">
             <UserPlus className="w-3.5 h-3.5" /> Add New Member
           </p>
-          <form onSubmit={handleAddMember} className="flex flex-wrap gap-2">
-            <div className="flex-1 min-w-[200px]">
-              <input
-                type="email"
-                placeholder="user@example.com"
-                value={addingEmail}
-                onChange={(e) => setAddingEmail(e.target.value)}
-                required
-                className="w-full px-3 py-1.5 rounded-lg bg-bg border border-border text-xs focus:outline-none focus:border-primary"
-              />
-            </div>
-            <select
+          <form onSubmit={handleAddMember} className="flex flex-wrap items-center gap-2">
+            <input
+              type="email"
+              placeholder="user@example.com"
+              value={addingEmail}
+              onChange={(e) => setAddingEmail(e.target.value)}
+              required
+              className={`${INPUT} flex-1 min-w-[200px] w-auto`}
+            />
+            <Segmented
               value={addingRole}
-              onChange={(e) => setAddingRole(e.target.value)}
-              className="text-xs px-2 py-1.5 rounded border border-border bg-bg focus:outline-none focus:border-primary"
-            >
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
-              <option value="viewer">Viewer</option>
-            </select>
-            <button
-              type="submit"
-              disabled={isAdding || !addingEmail}
-              className="px-4 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 flex items-center gap-2"
-            >
+              onChange={setAddingRole}
+              aria-label="Role for the new member"
+              options={[ROLE_OPTIONS[1], ROLE_OPTIONS[0], ROLE_OPTIONS[2]]}
+            />
+            <button type="submit" disabled={isAdding || !addingEmail} className={BTN_PRIMARY}>
               {isAdding ? (
                 <>
-                  <Loader2 className="w-3 h-3 animate-spin" /> Adding...
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Adding...
                 </>
               ) : (
                 "Add Member"
               )}
             </button>
           </form>
-          <p className="text-[10px] text-text-muted mt-2">
+          <p className="text-[11px] text-text-muted/80">
             The user must have signed in to Optio at least once to be found.
           </p>
         </div>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -380,48 +584,47 @@ function DangerZone() {
   if (role !== "admin") return null;
 
   return (
-    <div className="p-5 rounded-xl border border-error/30 bg-error/5 space-y-3">
-      <div>
-        <p className="text-sm font-medium text-error">Delete workspace</p>
-        <p className="text-xs text-text-muted mt-1">
-          Permanently delete this workspace and all its data. This action cannot be undone.
-        </p>
+    <section className="rounded-xl border border-error/30 bg-error/5 overflow-hidden">
+      <header className="flex items-baseline gap-2 px-4 py-2.5 border-b border-error/20 bg-error/5">
+        <h2 className="text-sm font-semibold tracking-tight text-error">Danger zone</h2>
+        <span className="text-xs text-text-muted truncate">Can&apos;t be undone</span>
+      </header>
+      <div className="p-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Delete workspace</p>
+          <p className="text-xs text-text-muted mt-0.5">
+            Permanently delete this workspace and all its data. This action cannot be undone.
+          </p>
+        </div>
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-error text-white text-sm font-medium hover:bg-error/90 transition-colors disabled:opacity-50"
+        >
+          {deleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          {deleting ? "Deleting..." : "Delete workspace"}
+        </button>
       </div>
-      <button
-        onClick={handleDelete}
-        disabled={deleting}
-        className="px-4 py-1.5 rounded-md bg-error text-white text-xs hover:bg-error/90 disabled:opacity-50"
-      >
-        {deleting ? "Deleting..." : "Delete workspace"}
-      </button>
-    </div>
+    </section>
   );
 }
 
 export default function WorkspaceSettingsPage() {
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-8">
-      <div className="flex items-center gap-3">
-        <Building2 className="w-6 h-6 text-primary" />
-        <h1 className="text-2xl font-semibold tracking-tight">Workspace Settings</h1>
-      </div>
-
-      {/* Workspace Info */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3">General</h2>
+    <div className="p-6 max-w-3xl mx-auto">
+      <PageHeader
+        icon={Building2}
+        title="Workspace Settings"
+        description="This workspace's name, who can join it, and what each member can do."
+      />
+      <div className="space-y-4">
         <WorkspaceInfo />
-      </section>
-
-      {/* Members */}
-      <section>
-        <h2 className="text-sm font-medium text-text-muted mb-3">Members</h2>
+        <AccessSettings />
         <MemberManagement />
-      </section>
-
-      {/* Danger Zone */}
-      <section>
-        <DangerZone />
-      </section>
+        <div className="pt-4">
+          <DangerZone />
+        </div>
+      </div>
     </div>
   );
 }

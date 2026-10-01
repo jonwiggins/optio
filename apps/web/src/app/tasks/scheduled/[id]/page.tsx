@@ -14,13 +14,23 @@ import {
   Play,
   PlayCircle,
   Plus,
-  Ticket,
   Trash2,
-  Webhook,
   AlertCircle,
+  CircleDot,
+  FolderGit2,
+  GitBranch,
+  Laptop,
 } from "lucide-react";
 import { toast } from "sonner";
 import { TriggerSelector, type TriggerConfig, cronIsValid } from "@/components/trigger-selector";
+import { RunsAsBadge } from "@/components/runs-as-badge";
+import { AgentIcon, TriggerIcon } from "@/components/brand-icon";
+import { DetailHeader } from "@/components/detail-header";
+import { StateBadge } from "@/components/state-badge";
+import { EmptyState } from "@/components/empty-state";
+import { Panel, PanelEmpty } from "@/components/ui/panel";
+import { Segmented } from "@/components/ui/segmented";
+import { cn } from "@/lib/utils";
 
 /**
  * A scheduled Task's runs and actions. Its five answers (when / where / who /
@@ -31,6 +41,8 @@ import { TriggerSelector, type TriggerConfig, cronIsValid } from "@/components/t
 type Tab = "runs" | "triggers";
 
 interface TaskConfig {
+  /** Personal work: who it runs as (null = the organization's). */
+  ownerUserId?: string | null;
   id: string;
   name: string;
   description: string | null;
@@ -229,193 +241,222 @@ function ScheduledTaskDetailInner({ id }: { id: string }) {
     );
   }
 
+  const repoName = config.repoUrl.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "");
+
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <Link
-        href="/work?view=recurring"
-        className="text-sm text-text-muted hover:text-text flex items-center gap-1 mb-4"
-      >
-        <ArrowLeft className="w-3.5 h-3.5" /> Back to Work
-      </Link>
-
-      <div className="flex items-start justify-between mb-2 gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span
-              className={`inline-block w-2 h-2 rounded-full ${config.enabled ? "bg-primary" : "bg-text-muted/40"}`}
-            />
-            <h1 className="text-2xl font-semibold tracking-tight">{config.name}</h1>
-          </div>
-          {config.description && <p className="text-sm text-text-muted">{config.description}</p>}
-          <p className="text-xs text-text-muted/80 mt-1">
-            {config.agentType ?? "claude-code"} ·{" "}
-            {config.runTarget === "local"
-              ? `on your machine · ${config.localDir ?? ""}`
-              : config.repoUrl.replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/, "")}{" "}
-            · {config.repoBranch} · opens a PR each run
-          </p>
-        </div>
-        <div className="flex gap-2 shrink-0">
+    <>
+      <DetailHeader
+        title={config.name}
+        subtitle={
           <Link
-            href={`/work/${id}/edit`}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover"
+            href="/work?view=recurring"
+            className="inline-flex items-center gap-1 hover:text-primary"
           >
-            <Pencil className="w-4 h-4" /> Edit
+            <ArrowLeft className="w-3 h-3" />
+            Work
           </Link>
-          <button
-            onClick={runNow}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-card border border-border text-sm text-text hover:bg-bg-hover"
-          >
-            <PlayCircle className="w-4 h-4" /> Run now
-          </button>
-          <button
-            onClick={toggleEnabled}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-card border border-border text-sm text-text hover:bg-bg-hover"
-          >
-            {config.enabled ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            {config.enabled ? "Pause" : "Resume"}
-          </button>
-          <button
-            onClick={deleteConfig}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-card border border-border text-sm text-danger hover:bg-danger/5"
-          >
-            <Trash2 className="w-4 h-4" /> Delete
-          </button>
-        </div>
-      </div>
-
-      {scheduleTrigger && scheduleTrigger.enabled && config.enabled && (
-        <div className="mb-6 p-3 rounded-lg bg-primary/5 border border-primary/20 flex items-center gap-3">
-          <Clock className="w-4 h-4 text-primary" />
-          <div className="flex-1 text-sm">
-            Next run {formatRelative(scheduleTrigger.nextFireAt)} —{" "}
-            <span className="text-text-muted">{formatAbsolute(scheduleTrigger.nextFireAt)}</span>
-          </div>
-        </div>
-      )}
-
-      {!config.enabled && (
-        <div className="mb-6 p-3 rounded-lg bg-bg-card border border-border flex items-center gap-3">
-          <AlertCircle className="w-4 h-4 text-text-muted" />
-          <div className="flex-1 text-sm text-text-muted">
-            Paused — triggers will not fire while disabled.
-          </div>
-        </div>
-      )}
-
-      <div className="flex gap-1 border-b border-border mb-6">
-        {(["runs", "triggers"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors capitalize ${
-              tab === t
-                ? "border-primary text-text"
-                : "border-transparent text-text-muted hover:text-text"
-            }`}
-          >
-            {t}
-            {t === "triggers" && ` (${triggers.length})`}
-          </button>
-        ))}
-      </div>
-
-      {tab === "triggers" && (
-        <div className="space-y-3">
-          {triggers.length === 0 && (
-            <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-text-muted">
-              No triggers yet. Add one to make this run automatically.
-            </div>
-          )}
-          {triggers.map((t) => (
-            <div key={t.id} className="rounded-lg border border-border bg-bg-card p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    {t.type === "schedule" && <Clock className="w-4 h-4 text-text-muted" />}
-                    {t.type === "webhook" && <Webhook className="w-4 h-4 text-text-muted" />}
-                    {t.type === "ticket" && <Ticket className="w-4 h-4 text-text-muted" />}
-                    <span className="font-medium capitalize">{t.type}</span>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded ${t.enabled ? "bg-primary/10 text-primary" : "bg-bg text-text-muted"}`}
-                    >
-                      {t.enabled ? "enabled" : "paused"}
-                    </span>
-                  </div>
-                  {t.type === "schedule" && (
-                    <>
-                      <code className="text-xs font-mono bg-bg px-2 py-1 rounded">
-                        {t.config?.cronExpression}
-                      </code>
-                      <div className="mt-2 text-xs text-text-muted">
-                        Next {formatRelative(t.nextFireAt)} · Last {formatRelative(t.lastFiredAt)}
-                      </div>
-                    </>
-                  )}
-                  {t.type === "webhook" && (
-                    <code className="text-xs font-mono bg-bg px-2 py-1 rounded">
-                      POST /api/hooks/{t.config?.path}
-                    </code>
-                  )}
-                  {t.type === "ticket" && (
-                    <code className="text-xs font-mono bg-bg px-2 py-1 rounded">
-                      source={String(t.config?.source)}
-                      {Array.isArray(t.config?.labels) &&
-                        ` labels=${(t.config!.labels as string[]).join(",")}`}
-                    </code>
-                  )}
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => toggleTrigger(t)}
-                    className="p-2 rounded hover:bg-bg-hover text-text-muted hover:text-text"
-                    title={t.enabled ? "Pause" : "Resume"}
-                  >
-                    {t.enabled ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                  </button>
-                  <button
-                    onClick={() => deleteTrigger(t)}
-                    className="p-2 rounded hover:bg-bg-hover text-text-muted hover:text-danger"
-                    title="Delete"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-
-          {!addingTrigger ? (
-            <button
-              onClick={() => setAddingTrigger(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-card border border-border text-sm text-text-muted hover:text-text"
-            >
-              <Plus className="w-4 h-4" /> Add trigger
-            </button>
+        }
+        state={config.enabled ? "enabled" : "disabled"}
+        extraBadges={<RunsAsBadge ownerUserId={config.ownerUserId} />}
+        metaItems={[
+          <>
+            <AgentIcon runtime={config.agentType ?? "claude-code"} className="w-3 h-3" />
+            {config.agentType ?? "claude-code"}
+          </>,
+          config.runTarget === "local" ? (
+            <span className="inline-flex items-center gap-1 font-mono">
+              <Laptop className="w-3 h-3" />
+              on your machine · {config.localDir ?? ""}
+            </span>
           ) : (
-            <div className="rounded-lg border border-border bg-bg-card p-4 space-y-3">
-              <TriggerSelector value={newTrigger} onChange={setNewTrigger} hideManual />
-              <div className="flex gap-2">
-                <button
-                  onClick={addTrigger}
-                  className="px-3 py-1.5 rounded-md bg-primary text-white text-sm hover:bg-primary-hover"
-                >
-                  Add
-                </button>
-                <button
-                  onClick={() => setAddingTrigger(false)}
-                  className="px-3 py-1.5 rounded-md border border-border text-sm text-text-muted hover:text-text"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+            <span className="inline-flex items-center gap-1 font-mono">
+              <FolderGit2 className="w-3 h-3" />
+              {repoName}
+            </span>
+          ),
+          <>
+            <GitBranch className="w-3 h-3" />
+            {config.repoBranch} · opens a PR each run
+          </>,
+          ...(config.description
+            ? [
+                <span key="desc" className="text-text-muted">
+                  {config.description}
+                </span>,
+              ]
+            : []),
+        ]}
+        actions={
+          <>
+            <button
+              onClick={runNow}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover transition-colors"
+            >
+              <PlayCircle className="w-3 h-3" /> Run now
+            </button>
+            <Link
+              href={`/work/${id}/edit`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg text-text-muted text-xs hover:bg-bg-hover hover:text-text transition-colors"
+            >
+              <Pencil className="w-3 h-3" /> Edit
+            </Link>
+            <button
+              onClick={toggleEnabled}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors",
+                config.enabled
+                  ? "bg-warning/10 text-warning hover:bg-warning/20"
+                  : "bg-success/10 text-success hover:bg-success/20",
+              )}
+            >
+              {config.enabled ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+              {config.enabled ? "Pause" : "Resume"}
+            </button>
+            <button
+              onClick={deleteConfig}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-error/10 text-error text-xs hover:bg-error/20 transition-colors"
+            >
+              <Trash2 className="w-3 h-3" /> Delete
+            </button>
+          </>
+        }
+      />
 
-      {tab === "runs" && <RunsTab taskConfigId={id} />}
-    </div>
+      <div className="p-6 max-w-5xl mx-auto">
+        {scheduleTrigger && scheduleTrigger.enabled && config.enabled && (
+          <div className="mb-6 p-3 rounded-lg bg-primary/5 border border-primary/20 flex items-center gap-3">
+            <Clock className="w-4 h-4 text-primary" />
+            <div className="flex-1 text-sm">
+              Next run {formatRelative(scheduleTrigger.nextFireAt)} —{" "}
+              <span className="text-text-muted">{formatAbsolute(scheduleTrigger.nextFireAt)}</span>
+            </div>
+          </div>
+        )}
+
+        {!config.enabled && (
+          <div className="mb-6 p-3 rounded-lg bg-bg-card border border-border flex items-center gap-3">
+            <AlertCircle className="w-4 h-4 text-text-muted" />
+            <div className="flex-1 text-sm text-text-muted">
+              Paused — triggers will not fire while disabled.
+            </div>
+          </div>
+        )}
+
+        <Segmented
+          className="mb-4"
+          size="md"
+          surface="card"
+          aria-label="Scheduled task view"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: "runs", label: "Runs" },
+            { value: "triggers", label: "Triggers", count: triggers.length },
+          ]}
+        />
+
+        {tab === "triggers" && (
+          <div className="space-y-3">
+            <Panel title="Triggers">
+              {triggers.length === 0 && (
+                <PanelEmpty>No triggers yet. Add one to make this run automatically.</PanelEmpty>
+              )}
+              <div className="divide-y divide-border/60">
+                {triggers.map((t) => (
+                  <div key={t.id} className="px-4 py-3 bg-bg-card/40">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <TriggerIcon
+                            type={t.type}
+                            source={t.config?.source as string | undefined}
+                            className="w-4 h-4 text-text-muted"
+                          />
+                          <span className="font-medium capitalize">{t.type}</span>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded ${t.enabled ? "bg-primary/10 text-primary" : "bg-bg text-text-muted"}`}
+                          >
+                            {t.enabled ? "enabled" : "paused"}
+                          </span>
+                        </div>
+                        {t.type === "schedule" && (
+                          <>
+                            <code className="text-xs font-mono bg-bg px-2 py-1 rounded">
+                              {t.config?.cronExpression}
+                            </code>
+                            <div className="mt-2 text-xs text-text-muted">
+                              Next {formatRelative(t.nextFireAt)} · Last{" "}
+                              {formatRelative(t.lastFiredAt)}
+                            </div>
+                          </>
+                        )}
+                        {t.type === "webhook" && (
+                          <code className="text-xs font-mono bg-bg px-2 py-1 rounded">
+                            POST /api/hooks/{t.config?.path}
+                          </code>
+                        )}
+                        {t.type === "ticket" && (
+                          <code className="text-xs font-mono bg-bg px-2 py-1 rounded">
+                            source={String(t.config?.source)}
+                            {Array.isArray(t.config?.labels) &&
+                              ` labels=${(t.config!.labels as string[]).join(",")}`}
+                          </code>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => toggleTrigger(t)}
+                          className="p-2 rounded hover:bg-bg-hover text-text-muted hover:text-text"
+                          title={t.enabled ? "Pause" : "Resume"}
+                        >
+                          {t.enabled ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => deleteTrigger(t)}
+                          className="p-2 rounded hover:bg-bg-hover text-text-muted hover:text-error"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+
+            {!addingTrigger ? (
+              <button
+                onClick={() => setAddingTrigger(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-card border border-border text-sm text-text-muted hover:text-text"
+              >
+                <Plus className="w-4 h-4" /> Add trigger
+              </button>
+            ) : (
+              <div className="rounded-lg border border-border bg-bg-card p-4 space-y-3">
+                <TriggerSelector value={newTrigger} onChange={setNewTrigger} hideManual />
+                <div className="flex gap-2">
+                  <button
+                    onClick={addTrigger}
+                    className="px-3 py-1.5 rounded-md bg-primary text-white text-sm hover:bg-primary-hover"
+                  >
+                    Add
+                  </button>
+                  <button
+                    onClick={() => setAddingTrigger(false)}
+                    className="px-3 py-1.5 rounded-md border border-border text-sm text-text-muted hover:text-text"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "runs" && <RunsTab taskConfigId={id} />}
+      </div>
+    </>
   );
 }
 
@@ -439,38 +480,33 @@ function RunsTab({ taskConfigId }: { taskConfigId: string }) {
   if (loading) return <div className="text-sm text-text-muted">Loading runs...</div>;
   if (runs.length === 0)
     return (
-      <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-text-muted">
-        No runs yet.
-      </div>
+      <EmptyState
+        icon={CircleDot}
+        title="No runs yet"
+        description="Each run opens a Task; they show up here."
+      />
     );
 
   return (
-    <div className="space-y-2">
-      {runs.map((r) => (
-        <Link
-          key={r.id}
-          href={`/tasks/${r.id}`}
-          className="block rounded-lg border border-border bg-bg-card p-3 hover:border-primary/60 transition-colors"
-        >
-          <div className="flex items-center justify-between gap-3">
+    <Panel
+      title="Runs"
+      actions={<span className="text-text-muted tabular-nums">{runs.length}</span>}
+    >
+      <div className="divide-y divide-border/60">
+        {runs.map((r) => (
+          <Link
+            key={r.id}
+            href={`/tasks/${r.id}`}
+            className="flex items-center gap-4 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+          >
             <div className="flex-1 min-w-0">
-              <div className="text-sm truncate">{r.title}</div>
-              <div className="text-xs text-text-muted">{formatRelative(r.createdAt)}</div>
+              <div className="text-sm font-medium text-text-heading truncate">{r.title}</div>
+              <div className="text-[11px] text-text-muted">{formatRelative(r.createdAt)}</div>
             </div>
-            <span
-              className={`text-xs px-2 py-0.5 rounded ${
-                r.state === "completed"
-                  ? "bg-green-500/10 text-green-500"
-                  : r.state === "failed"
-                    ? "bg-red-500/10 text-red-500"
-                    : "bg-bg text-text-muted"
-              }`}
-            >
-              {r.state}
-            </span>
-          </div>
-        </Link>
-      ))}
-    </div>
+            <StateBadge state={r.state} />
+          </Link>
+        ))}
+      </div>
+    </Panel>
   );
 }

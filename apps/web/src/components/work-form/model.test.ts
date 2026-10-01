@@ -279,3 +279,273 @@ suite("optionsFromRepo", () => {
     expect(optionsFromRepo("codex", repo)).toEqual({});
   });
 });
+
+// ── Owner, pod secrets, model providers ─────────────────────────────────────
+
+import type { ModelProvider, PickableSecret } from "@optio/shared";
+import {
+  addableSecrets,
+  effectiveOwner,
+  isPersonalOnlySecret,
+  isPodWork,
+  pickedProvider,
+  providerDisabled,
+  providerModelsFor,
+  usableProviders,
+  withOwner,
+  withProvider,
+  withSecret,
+  withoutSecret,
+} from "./model";
+
+const provider = (over: Partial<ModelProvider> = {}): ModelProvider => ({
+  id: "p-org",
+  workspaceId: "ws",
+  ownerUserId: null,
+  ownerName: null,
+  kind: "bedrock",
+  name: "Bedrock",
+  agents: ["claude-code", "codex"],
+  region: "us-west-2",
+  models: {
+    "claude-code": [{ id: "us.anthropic.claude-opus-5-5", label: "Opus 5.5" }],
+    codex: [{ id: "openai.gpt-5.5" }],
+  },
+  localAwsProfile: null,
+  podCredential: "access-key",
+  hasPodCredentials: true,
+  mine: false,
+  canEdit: true,
+  createdAt: "",
+  updatedAt: "",
+  ...over,
+});
+const orgP = provider();
+const myP = provider({ id: "p-me", name: "My Bedrock", ownerUserId: "u-me", mine: true });
+const theirP = provider({ id: "p-them", ownerUserId: "u-them", canEdit: false });
+
+suite("model providers in the draft", () => {
+  const job = normalize({ ...EMPTY_DRAFT, withRepo: false, prompt: "hi" });
+
+  it("offers org providers and mine for the runtime, never someone else's", () => {
+    expect(usableProviders(job, [orgP, myP, theirP]).map((p) => p.id)).toEqual(["p-org", "p-me"]);
+    expect(usableProviders({ ...job, runtime: "gemini" }, [orgP])).toEqual([]);
+    expect(usableProviders(job, [provider({ agents: ["codex"] })]).map((p) => p.id)).toEqual([]);
+  });
+
+  it("picking a provider sets the option and its first model; Default removes both", () => {
+    const picked = withProvider(job, orgP);
+    expect(picked.agentOptions).toEqual({
+      modelProvider: "p-org",
+      claudeModel: "us.anthropic.claude-opus-5-5",
+    });
+    expect(pickedProvider(picked, [orgP])?.id).toBe("p-org");
+    expect(providerModelsFor(picked, orgP)?.[0].id).toBe("us.anthropic.claude-opus-5-5");
+    expect(picked.owner).toBe("workspace");
+    const back = withProvider(
+      { ...picked, agentOptions: { ...picked.agentOptions, effort: "high" } },
+      null,
+    );
+    expect(back.agentOptions).toEqual({ effort: "high" });
+    // Default with no provider picked leaves a chosen model alone.
+    expect(
+      withProvider({ ...job, agentOptions: { claudeModel: "opus" } }, null).agentOptions,
+    ).toEqual({
+      claudeModel: "opus",
+    });
+  });
+
+  it("Codex's model goes in copilotModel", () => {
+    const codex = normalize({ ...job, runtime: "codex" });
+    expect(withProvider(codex, orgP).agentOptions.copilotModel).toBe("openai.gpt-5.5");
+  });
+
+  it("a personal provider makes the work mine; making it the org's drops it", () => {
+    const mine = withProvider(job, myP);
+    expect(mine.owner).toBe("me");
+    const org = withOwner(mine, "workspace", [orgP, myP], []);
+    expect(org.owner).toBe("workspace");
+    expect(org.agentOptions.modelProvider).toBeUndefined();
+    // An org provider survives the switch.
+    expect(
+      withOwner(withProvider(job, orgP), "workspace", [orgP], []).agentOptions.modelProvider,
+    ).toBe("p-org");
+  });
+
+  it("disables a provider with the reason", () => {
+    expect(providerDisabled(job, provider({ podCredential: "none" }), undefined)).toBe(
+      "Machines only",
+    );
+    const onMachine = normalize({
+      ...job,
+      location: { ...job.location, runTarget: "local", localHostId: "h", localDir: "/x" },
+    });
+    expect(providerDisabled(onMachine, orgP, { name: "mac", modelProviders: false })).toBe(
+      "Update Optio Local on mac to use model providers",
+    );
+    expect(
+      providerDisabled(onMachine, provider({ localAwsProfile: "work" }), {
+        name: "mac",
+        modelProviders: true,
+        awsProfiles: ["default"],
+      }),
+    ).toBe("AWS profile work isn't on mac");
+    expect(
+      providerDisabled(onMachine, provider({ podCredential: "none" }), {
+        name: "mac",
+        modelProviders: true,
+        awsProfiles: [],
+      }),
+    ).toBeUndefined();
+  });
+});
+
+suite("owner and pod secrets", () => {
+  const job = normalize({ ...EMPTY_DRAFT, withRepo: false, prompt: "hi" });
+  const pickable: PickableSecret[] = [
+    { name: "SHARED", owner: "workspace" },
+    { name: "SHARED", owner: "me" },
+    { name: "MINE", owner: "me" },
+    { name: "ORG", owner: "workspace" },
+  ];
+
+  it("pod work takes secrets; a machine run is always mine and takes none", () => {
+    expect(isPodWork(job)).toBe(true);
+    expect(isPodWork({ ...job, runtime: "" })).toBe(false);
+    const local = normalize({ ...job, location: { ...job.location, runTarget: "local" } });
+    expect(isPodWork(local)).toBe(false);
+    expect(effectiveOwner(local)).toBe("me");
+    expect(effectiveOwner(job)).toBe("workspace");
+  });
+
+  it("knows which names only I have", () => {
+    expect(isPersonalOnlySecret("MINE", pickable)).toBe(true);
+    expect(isPersonalOnlySecret("SHARED", pickable)).toBe(false);
+    expect(isPersonalOnlySecret("ORG", pickable)).toBe(false);
+  });
+
+  it("adds, removes, and hides picked names from the add list", () => {
+    const one = withSecret(job, { name: "ORG", owner: "workspace" });
+    expect(one.podSecrets).toEqual(["ORG"]);
+    expect(one.owner).toBe("workspace");
+    expect(addableSecrets(one, pickable).map((s) => s.name)).toEqual(["SHARED", "SHARED", "MINE"]);
+    const two = withSecret(one, { name: "MINE", owner: "me" });
+    expect(two.owner).toBe("me");
+    expect(withoutSecret(two, "ORG").podSecrets).toEqual(["MINE"]);
+    // Back to the org: my-only secrets go, the rest stay.
+    expect(withOwner(two, "workspace", [], pickable).podSecrets).toEqual(["ORG"]);
+  });
+
+  it("a legacy null list becomes an array on the first pick", () => {
+    expect(
+      withSecret({ ...job, podSecrets: null }, { name: "ORG", owner: "workspace" }).podSecrets,
+    ).toEqual(["ORG"]);
+  });
+});
+
+// ── Remembered agent settings ───────────────────────────────────────────────
+
+import { applyWorkDefaults, sameOptions, savedOptionsFor } from "./model";
+
+suite("remembered agent settings", () => {
+  const blank = normalize(PRESETS[0].apply(EMPTY_DRAFT));
+  const defaults = {
+    runtime: "codex",
+    agentOptions: {
+      codex: { copilotModel: "gpt-5.5", copilotEffort: "high" },
+      "claude-code": { claudeModel: "opus", claudeEffort: "max" },
+    },
+  };
+
+  it("applies the saved runtime and its options to a blank form", () => {
+    const d = applyWorkDefaults(blank, defaults, []);
+    expect(d.runtime).toBe("codex");
+    expect(d.agentOptions).toEqual({ copilotModel: "gpt-5.5", copilotEffort: "high" });
+  });
+
+  it("keeps the form's runtime when the saved one can't run here", () => {
+    const onMachine = normalize(PRESETS[1].apply(EMPTY_DRAFT));
+    const d = applyWorkDefaults(onMachine, { ...defaults, runtime: "no-such-agent" }, []);
+    expect(d.runtime).toBe(onMachine.runtime);
+    expect(d.agentOptions).toEqual({ claudeModel: "opus", claudeEffort: "max" });
+  });
+
+  it("never applies to a terminal and is a no-op without defaults", () => {
+    const term = normalize(PRESETS[2].apply(EMPTY_DRAFT));
+    expect(applyWorkDefaults(term, defaults, [])).toBe(term);
+    expect(applyWorkDefaults(blank, null, [])).toBe(blank);
+    expect(applyWorkDefaults(blank, {}, [])).toEqual(blank);
+  });
+
+  it("drops a provider that's gone, someone else's, or doesn't serve the runtime — with its model", () => {
+    const withP = (id: string) => ({
+      agentOptions: {
+        "claude-code": { modelProvider: id, claudeModel: "us.anthropic.x", claudeEffort: "high" },
+      },
+    });
+    for (const id of ["p-gone", theirP.id]) {
+      expect(savedOptionsFor(withP(id), "claude-code", [orgP, theirP])).toEqual({
+        claudeEffort: "high",
+      });
+    }
+    const codexOnly = provider({ id: "p-codex", agents: ["codex"] });
+    expect(savedOptionsFor(withP("p-codex"), "claude-code", [codexOnly])).toEqual({
+      claudeEffort: "high",
+    });
+    expect(savedOptionsFor(withP(orgP.id), "claude-code", [orgP])).toEqual({
+      modelProvider: orgP.id,
+      claudeModel: "us.anthropic.x",
+      claudeEffort: "high",
+    });
+  });
+
+  it("makes the work yours when the saved provider is personal", () => {
+    const d = applyWorkDefaults(
+      blank,
+      { runtime: "claude-code", agentOptions: { "claude-code": { modelProvider: myP.id } } },
+      [myP],
+    );
+    expect(d.agentOptions).toEqual({ modelProvider: myP.id });
+    expect(d.owner).toBe("me");
+  });
+
+  it("keeps free-text models and compares options ignoring blanks", () => {
+    expect(
+      savedOptionsFor({ agentOptions: { codex: { copilotModel: "my-model" } } }, "codex", []),
+    ).toEqual({ copilotModel: "my-model" });
+    expect(sameOptions({ a: "1", b: "" }, { a: "1" })).toBe(true);
+    expect(sameOptions({ a: "1" }, { a: "2" })).toBe(false);
+  });
+});
+
+import { applyPreset } from "./model";
+
+suite("example chips keep remembered settings", () => {
+  const defaults = {
+    runtime: "claude-code",
+    agentOptions: { "claude-code": { claudeModel: "claude-sonnet-4-6", claudeEffort: "high" } },
+  };
+  const start = normalize(PRESETS[0].apply(EMPTY_DRAFT));
+  const chip = (id: string) => PRESETS.find((p) => p.id === id)!;
+
+  it("a chip that leaves options blank starts from the saved ones", () => {
+    const d = applyPreset(start, chip("pr"), defaults, []);
+    expect(d.agentOptions).toEqual({ claudeModel: "claude-sonnet-4-6", claudeEffort: "high" });
+    expect(applyPreset(start, chip("chat"), defaults, []).agentOptions).toEqual(
+      defaults.agentOptions["claude-code"],
+    );
+  });
+
+  it("keeps a chip's own options, skips a terminal, and respects touched runtimes", () => {
+    const own = {
+      ...chip("pr"),
+      apply: (x: WorkDraft) => ({ ...x, agentOptions: { claudeEffort: "low" } }),
+    };
+    expect(applyPreset(start, own, defaults, []).agentOptions).toEqual({ claudeEffort: "low" });
+    expect(applyPreset(start, chip("terminal"), defaults, []).agentOptions).toEqual({});
+    expect(
+      applyPreset(start, chip("pr"), defaults, [], new Set(["claude-code"])).agentOptions,
+    ).toEqual({});
+    expect(applyPreset(start, chip("pr"), null, []).agentOptions).toEqual({});
+  });
+});
