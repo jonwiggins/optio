@@ -298,7 +298,7 @@ class WorkFormModelTest {
     @Test
     fun presetsLandOnPromisedKinds() {
         val by = PRESETS.associate { it.id to normalize(it.apply(empty)) }
-        assertEquals(listOf("pr", "chat", "terminal", "schedule", "agent"), PRESETS.map { it.id })
+        assertEquals(listOf("pr", "assign", "chat", "terminal", "schedule", "agent"), PRESETS.map { it.id })
         assertEquals(WorkKind.REPO_TASK, deriveKind(by.getValue("pr")))
         assertEquals(WorkKind.LOCAL_TERMINAL, deriveKind(local(by.getValue("chat"))))
         assertEquals(WorkKind.LOCAL_TERMINAL, deriveKind(local(by.getValue("terminal"))))
@@ -450,6 +450,116 @@ class WorkFormModelTest {
         assertEquals("~/repos/app", shortDir("/Users/dev/repos/app"))
         assertEquals("~/x", shortDir("/home/dev/x"))
         assertEquals("/srv/app", shortDir("/srv/app"))
+    }
+
+    // endregion
+
+    // region Work until merged — PR follow-through (model.test.ts)
+
+    private val repoBase = empty.copy(prompt = "p", repoUrl = "https://github.com/a/b")
+
+    @Test
+    fun untilMergedNeedsAnAgentWithARepo() {
+        assertTrue(Then.UNTIL_MERGED in enabled(thenOptions(repoBase)))
+        assertTrue(Then.UNTIL_MERGED in enabled(thenOptions(local(repoBase))))
+        assertFalse(Then.UNTIL_MERGED in enabled(thenOptions(repoBase.copy(withRepo = false))))
+        assertFalse(Then.UNTIL_MERGED in enabled(thenOptions(local(repoBase.copy(withRepo = false)))))
+        assertFalse(Then.UNTIL_MERGED in enabled(thenOptions(repoBase.copy(runtime = TERMINAL))))
+        assertTrue(thenOptions(local(repoBase.copy(withRepo = false))).first { it.value == Then.UNTIL_MERGED }.disabled!!.contains("On a new branch"))
+    }
+
+    @Test
+    fun untilMergedIsStillATaskHeadless() {
+        val d = normalize(repoBase.copy(then = Then.UNTIL_MERGED))
+        assertEquals(Then.UNTIL_MERGED, d.then)
+        assertEquals(WorkKind.REPO_TASK, deriveKind(d))
+        assertEquals(WorkKind.REPO_BLUEPRINT, deriveKind(d.copy(whenType = WhenType.TICKET, trigger = TriggerConfig(TriggerType.TICKET))))
+        assertEquals(LocalSessionMode.HEADLESS, normalize(local(d)).location.localSessionMode)
+    }
+
+    @Test
+    fun untilMergedSnapsBackToExitsWithoutARepo() {
+        assertEquals(Then.EXITS, normalize(repoBase.copy(then = Then.UNTIL_MERGED, withRepo = false)).then)
+    }
+
+    @Test
+    fun untilMergedReadsAsASentence() {
+        assertEquals(
+            "Started now, a Claude Code run in an Optio pod with https://github.com/a/b that opens a PR and keeps working on it until it merges.",
+            text(repoBase.copy(then = Then.UNTIL_MERGED)),
+        )
+        assertTrue(text(repoBase.copy(then = Then.UNTIL_MERGED, mergeWhenReady = false)).endsWith("keeps it green until you merge it."))
+        assertEquals("Start work (until merged)", submitLabel(repoBase.copy(then = Then.UNTIL_MERGED)))
+    }
+
+    @Test
+    fun assignToOptioPresetIsATicketLabeledScheduledTaskWorkedUntilMerged() {
+        val d = normalize(preset("assign")!!.apply(empty))
+        assertEquals(WhenType.TICKET, d.whenType)
+        assertEquals(listOf("optio"), d.trigger.ticketLabels)
+        assertEquals(TicketSource.GITHUB, d.trigger.ticketSource)
+        assertEquals(Then.UNTIL_MERGED, d.then)
+        assertTrue(d.mergeWhenReady)
+        assertEquals(WorkKind.REPO_BLUEPRINT, deriveKind(d))
+    }
+
+    private fun on(plan: FollowThrough?): List<String> = plan!!.steps.filter { it.on }.map { it.key }
+
+    @Test
+    fun exitWhenDoneShowsTheReposSettings() {
+        val plan = followThrough(repoBase, RepoPrSettings(autoResume = false, autoMerge = false))
+        assertTrue(plan!!.fromRepo)
+        assertEquals(listOf("pr", "done"), on(plan))
+        assertEquals(
+            listOf("pr", "review", "ci", "changes", "merge", "done"),
+            on(followThrough(repoBase, RepoPrSettings(autoResume = true, autoMerge = true, reviewEnabled = true, reviewTrigger = "on_ci_pass"))),
+        )
+    }
+
+    @Test
+    fun untilMergedResumesAndMergesWhateverTheRepoSays() {
+        val d = repoBase.copy(then = Then.UNTIL_MERGED)
+        val plan = followThrough(d, RepoPrSettings(autoResume = false, autoMerge = false, maxAutoResumes = 4))
+        assertFalse(plan!!.fromRepo)
+        assertEquals(listOf("pr", "ci", "changes", "merge", "done"), on(plan))
+        assertTrue(plan.steps.first { it.key == "ci" }.detail!!.contains("up to 4 times"))
+        assertEquals(listOf("pr", "ci", "changes", "done"), on(followThrough(d.copy(mergeWhenReady = false), null)))
+        assertTrue(followThrough(d, null)!!.steps.first { it.key == "ci" }.detail!!.contains("up to $DEFAULT_MAX_AUTO_RESUMES times"))
+    }
+
+    @Test
+    fun cautiousModeHoldsTheMergeBack() {
+        val plan = followThrough(repoBase.copy(then = Then.UNTIL_MERGED), RepoPrSettings(cautiousMode = true))!!
+        val merge = plan.steps.first { it.key == "merge" }
+        assertFalse(merge.on)
+        assertTrue(merge.detail!!.contains("cautious mode"))
+        assertEquals("Opens a draft PR", plan.steps[0].label)
+    }
+
+    @Test
+    fun onlyWorkThatOpensAPrHasAPlan() {
+        assertNull(followThrough(repoBase.copy(withRepo = false), null))
+        assertNull(followThrough(repoBase.copy(then = Then.WAITS_FOR_ME), null))
+        assertNull(followThrough(repoBase.copy(runtime = TERMINAL), null))
+    }
+
+    @Test
+    fun repoPrSettingsReadTheRawRepoRow() {
+        val row = JsonObject(
+            mapOf(
+                "autoResume" to JsonPrimitive(true),
+                "autoMerge" to JsonNull,
+                "cautiousMode" to JsonPrimitive(false),
+                "reviewEnabled" to JsonPrimitive(true),
+                "reviewTrigger" to JsonPrimitive("on_pr"),
+                "maxAutoResumes" to JsonPrimitive(3),
+            ),
+        )
+        assertEquals(
+            RepoPrSettings(autoResume = true, autoMerge = null, cautiousMode = false, reviewEnabled = true, reviewTrigger = "on_pr", maxAutoResumes = 3),
+            RepoPrSettings.from(row),
+        )
+        assertNull(RepoPrSettings.from(null))
     }
 
     // endregion

@@ -313,4 +313,32 @@ class WorkFeedTest {
         // Waiting counts the PR task but not the idle agent; agents count everything not done.
         assertEquals(WorkCounts(needsYou = 0, running = 2, waiting = 1, recurring = 1, agents = 2), WorkFeed.count(rows))
     }
+
+    @Test
+    fun tasksWithTheirOwnFollowThroughWorkUntilMerged() {
+        val rows = WorkFeed.collect(
+            Sources(
+                unified = listOf(
+                    UnifiedRow(type = "repo-task", id = "t1", title = "Fix", state = "pr_opened", repoUrl = "x", autoResume = true),
+                    UnifiedRow(type = "repo-task", id = "t2", title = "Plain", state = "running", repoUrl = "x", autoResume = null),
+                    UnifiedRow(type = "repo-blueprint", id = "b1", name = "Assign", enabled = true, repoUrl = "x", autoResume = true),
+                    UnifiedRow(type = "repo-blueprint", id = "b2", name = "Nightly", enabled = true, repoUrl = "x"),
+                ),
+            ),
+        ).associateBy { it.key }
+        assertEquals(WorkThen.UNTIL_MERGED, rows.getValue("task-t1").then)
+        assertEquals(WorkThen.EXITS, rows.getValue("task-t2").then)
+        assertEquals(WorkThen.UNTIL_MERGED, rows.getValue("blueprint-b1").then)
+        assertEquals("works each PR until it merges", rows.getValue("blueprint-b1").note)
+        assertEquals(WorkThen.EXITS, rows.getValue("blueprint-b2").then)
+        assertEquals("opens a PR each run", rows.getValue("blueprint-b2").note)
+        assertEquals("until merged", WorkThen.UNTIL_MERGED.label)
+    }
+
+    @Test
+    fun decodesAutoResumeOffTheUnifiedRow() {
+        val row = OptioJson.decodeFromString(UnifiedRow.serializer(), """{"type":"repo-task","id":"t","autoResume":true,"autoMerge":false}""")
+        assertEquals(true, row.autoResume)
+        assertNull(OptioJson.decodeFromString(UnifiedRow.serializer(), """{"type":"repo-task","autoResume":null}""").autoResume)
+    }
 }

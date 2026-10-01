@@ -53,7 +53,7 @@ private fun missing(s: String, field: SentenceField): SentencePart = SentencePar
 private fun whenPhrase(d: WorkDraft): List<SentencePart> = when (d.whenType) {
     WhenType.MANUAL -> when (d.then) {
         Then.WAITS_FOR_MESSAGES -> listOf(text("Woken by messages,"))
-        Then.EXITS -> listOf(text("Started now,"))
+        Then.EXITS, Then.UNTIL_MERGED -> listOf(text("Started now,"))
         Then.WAITS_FOR_ME -> listOf(text("Opened now,"))
     }
     WhenType.SCHEDULE -> {
@@ -104,7 +104,7 @@ fun describe(d: WorkDraft, ctx: SentenceContext = SentenceContext()): List<Sente
     val noun = when (d.then) {
         Then.WAITS_FOR_MESSAGES -> "agent"
         Then.WAITS_FOR_ME -> "session"
-        Then.EXITS -> "run"
+        Then.EXITS, Then.UNTIL_MERGED -> "run"
     }
     parts += text(if (d.runtime == TERMINAL) who else "$who $noun")
 
@@ -133,6 +133,13 @@ fun describe(d: WorkDraft, ctx: SentenceContext = SentenceContext()): List<Sente
 
     parts += when (d.then) {
         Then.EXITS -> text(if (d.withRepo) "that opens a PR and exits when done." else "that exits when done.")
+        Then.UNTIL_MERGED -> text(
+            if (d.mergeWhenReady) {
+                "that opens a PR and keeps working on it until it merges."
+            } else {
+                "that opens a PR and keeps it green until you merge it."
+            },
+        )
         Then.WAITS_FOR_ME -> text("that waits for you between turns.")
         Then.WAITS_FOR_MESSAGES -> text("that keeps its memory between turns.")
     }
@@ -170,6 +177,7 @@ fun submitLabel(d: WorkDraft, editing: Boolean = false): String = when {
     editing -> "Save changes"
     deriveKind(d) == WorkKind.PERSISTENT_AGENT -> "Create agent"
     d.whenType != WhenType.MANUAL -> "Save"
+    d.then == Then.UNTIL_MERGED -> "Start work (until merged)"
     d.then == Then.EXITS -> if (d.withRepo) "Start work (opens a PR)" else "Start work"
     else -> "Open session"
 }
