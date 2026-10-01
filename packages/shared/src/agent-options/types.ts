@@ -88,6 +88,12 @@ export interface OptionField {
   /** Supplementary help text shown beneath the control. */
   helpText?: string;
   /**
+   * Hide (and don't send) this field while another field has this value —
+   * e.g. Claude's effort while thinking is off (Claude Code rejects an
+   * effort with thinking disabled).
+   */
+  hiddenWhen?: { key: string; equals: string | boolean };
+  /**
    * Where the field applies: `pod` (a run in an Optio pod) and/or `local`
    * (a run on the user's machine, where the Optio Local daemon passes it to
    * the agent CLI). Default `["pod"]` — most fields only reach pod runs.

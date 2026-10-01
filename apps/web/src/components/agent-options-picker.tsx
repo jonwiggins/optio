@@ -309,6 +309,9 @@ export function AgentOptionsPicker({
         {fields
           .filter((f) => f.kind === "select")
           .map((field) => {
+            if (field.hiddenWhen && values[field.hiddenWhen.key] === field.hiddenWhen.equals) {
+              return null;
+            }
             const choices = optionChoicesFor(field, selectedModel);
             // A model without that setting (Claude Haiku 4.5 takes no effort): no field.
             if (field.modelEfforts && choices.length === 0) return null;

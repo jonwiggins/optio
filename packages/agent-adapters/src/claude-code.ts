@@ -96,8 +96,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     if (input.claudeThinking !== undefined) {
       claudeSettings.alwaysThinkingEnabled = input.claudeThinking;
     }
-    if (input.claudeEffort) {
-      claudeSettings.effortLevel = input.claudeEffort;
+    // Thinking off rejects any effort (effort_requires_thinking). The settings
+    // key only persists up to xhigh; CLAUDE_CODE_EFFORT_LEVEL takes every
+    // level, max included, for the session (older releases ignore it).
+    if (input.claudeEffort && input.claudeThinking !== false) {
+      if (input.claudeEffort !== "max") claudeSettings.effortLevel = input.claudeEffort;
+      env.CLAUDE_CODE_EFFORT_LEVEL = input.claudeEffort;
     }
     setupFiles.push({
       path: "/home/agent/.claude/settings.json",

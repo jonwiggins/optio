@@ -8,13 +8,14 @@ describe("agentOptionsEnv", () => {
       claudeModel: "claude-opus-4-8",
       claudeContextWindow: "1m",
       claudeEffort: "medium",
-      claudeThinking: false,
+      claudeThinking: true,
     });
     expect(env.OPTIO_CLAUDE_MODEL).toBe("claude-opus-4-8");
     expect(env.OPTIO_CLAUDE_CONTEXT_WINDOW).toBe("1m");
+    expect(env.CLAUDE_CODE_EFFORT_LEVEL).toBe("medium");
     expect(JSON.parse(env.OPTIO_CLAUDE_SETTINGS_JSON)).toEqual({
       effortLevel: "medium",
-      alwaysThinkingEnabled: false,
+      alwaysThinkingEnabled: true,
     });
   });
 
@@ -140,5 +141,16 @@ describe("codexModelFlags with a model provider", () => {
       }),
     ).toBe(` -c 'model_provider="amazon-bedrock"' -m 'openai.gpt-5.4'`);
     expect(codexModelFlags({ OPTIO_CODEX_PROVIDER_CONFIG: "not json" })).toBe("");
+  });
+});
+
+describe("agentOptionsEnv — Claude effort and thinking", () => {
+  it("sends max through CLAUDE_CODE_EFFORT_LEVEL and nothing while thinking is off", () => {
+    const max = agentOptionsEnv("claude-code", { claudeEffort: "max" });
+    expect(max.CLAUDE_CODE_EFFORT_LEVEL).toBe("max");
+    expect(max.OPTIO_CLAUDE_SETTINGS_JSON).toBeUndefined();
+    const off = agentOptionsEnv("claude-code", { claudeEffort: "high", claudeThinking: false });
+    expect(off.CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();
+    expect(JSON.parse(off.OPTIO_CLAUDE_SETTINGS_JSON)).toEqual({ alwaysThinkingEnabled: false });
   });
 });

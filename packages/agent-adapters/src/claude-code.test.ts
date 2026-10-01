@@ -499,3 +499,30 @@ describe("ClaudeCodeAdapter", () => {
     });
   });
 });
+
+describe("ClaudeCodeAdapter effort and thinking", () => {
+  const adapter = new ClaudeCodeAdapter();
+  const base = { taskId: "t", prompt: "p", repoUrl: "https://github.com/o/r", repoBranch: "main" };
+  const settingsOf = (c: ReturnType<ClaudeCodeAdapter["buildContainerConfig"]>) =>
+    JSON.parse(c.setupFiles!.find((f) => f.path.endsWith("settings.json"))!.content);
+
+  it("passes every effort level through the env; the settings file only up to xhigh", () => {
+    const max = adapter.buildContainerConfig({ ...base, claudeEffort: "max" });
+    expect(max.env.CLAUDE_CODE_EFFORT_LEVEL).toBe("max");
+    expect(settingsOf(max).effortLevel).toBeUndefined();
+    const xhigh = adapter.buildContainerConfig({ ...base, claudeEffort: "xhigh" });
+    expect(xhigh.env.CLAUDE_CODE_EFFORT_LEVEL).toBe("xhigh");
+    expect(settingsOf(xhigh).effortLevel).toBe("xhigh");
+  });
+
+  it("sends no effort while thinking is off (Claude Code would reject it)", () => {
+    const off = adapter.buildContainerConfig({
+      ...base,
+      claudeEffort: "high",
+      claudeThinking: false,
+    });
+    expect(off.env.CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();
+    expect(settingsOf(off)).toMatchObject({ alwaysThinkingEnabled: false });
+    expect(settingsOf(off).effortLevel).toBeUndefined();
+  });
+});
