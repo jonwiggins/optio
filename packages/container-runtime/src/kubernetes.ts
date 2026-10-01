@@ -257,6 +257,10 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     if (spec.tolerations && spec.tolerations.length > 0) {
       podSpec.tolerations = spec.tolerations as V1PodSpec["tolerations"];
     }
+    // Workload identity (GKE / EKS IRSA). The token itself is never mounted.
+    if (spec.serviceAccountName) {
+      podSpec.serviceAccountName = spec.serviceAccountName;
+    }
 
     const metadata = new V1ObjectMeta();
     metadata.name = podName;
