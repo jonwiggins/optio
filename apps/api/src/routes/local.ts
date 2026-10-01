@@ -3,6 +3,7 @@
  * All resources are user-scoped: hosts are personal machines, and every
  * ownership miss is a 404. See docs/optio-local.md.
  */
+import { LimitsRefreshError, refreshHostLimits } from "../services/local-limits-service.js";
 import { providerSelectionError } from "../services/model-provider-service.js";
 import { modelProviderIdFrom } from "@optio/shared";
 import type { FastifyInstance } from "fastify";
@@ -193,6 +194,7 @@ function withLiveCapabilities<T extends { id: string }>(host: T) {
     claudeCredentials: relay.hostHasClaudeCredentials(host.id),
     manageDirs: relay.hostCanManageDirs(host.id),
     modelProviders: relay.hostCanUseModelProviders(host.id),
+    refreshLimits: relay.hostCanRefreshLimits(host.id),
   };
 }
 
@@ -329,6 +331,43 @@ export async function localRoutes(rawApp: FastifyInstance) {
       .string()
       .describe("The directory as the machine resolved it (~ expanded, symlinks followed)"),
   });
+
+  app.post(
+    "/api/local/hosts/:id/limits/refresh",
+    {
+      ...member,
+      schema: {
+        operationId: "refreshLocalHostLimits",
+        summary: "Refresh a machine's agent usage limits",
+        description:
+          "Asks the machine's daemon for its agents' current usage limits now (Codex's, from " +
+          "its app server) instead of waiting for the next Codex turn. 409 while the machine " +
+          "is offline or its daemon is too old; 502 with Codex's reason (e.g. not signed in).",
+        tags: ["Local"],
+        params: z.object({ id: z.string().uuid() }),
+        response: {
+          200: z.object({ limits: z.unknown() }),
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+          502: ErrorResponseSchema,
+          504: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const host = await hostService.getHost(req.params.id);
+      if (!host || !hostService.canAccessHost(host, req.user?.id)) {
+        return reply.status(404).send({ error: "Host not found" });
+      }
+      try {
+        reply.send({ limits: await refreshHostLimits(host) });
+      } catch (err) {
+        if (err instanceof LimitsRefreshError)
+          return reply.status(err.status).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
 
   app.post(
     "/api/local/hosts/:id/dirs",

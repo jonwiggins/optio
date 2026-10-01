@@ -1997,6 +1997,9 @@ export const api = {
    * daemon does what `optio local add` would there. `path` in the answer is
    * the directory as the machine resolved it.
    */
+  refreshLocalHostLimits: (hostId: string) =>
+    request<{ limits: any }>(`/api/local/hosts/${hostId}/limits/refresh`, { method: "POST" }),
+
   addLocalHostDir: (hostId: string, path: string) =>
     request<{ host: any; path: string }>(`/api/local/hosts/${hostId}/dirs`, {
       method: "POST",

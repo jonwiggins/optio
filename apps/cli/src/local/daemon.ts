@@ -36,7 +36,7 @@ import { TranscriptTracker } from "./transcript-tracker.js";
 import { CodexSessionFinder } from "./codex-sessions.js";
 import { codexThreadIdFromPath } from "./codex-transcript.js";
 import { readSessionTranscript } from "./transcript-backfill.js";
-import { readAgentLimits } from "./codex-limits.js";
+import { fetchCodexLimitsLive, readAgentLimits } from "./codex-limits.js";
 import { probeClaudeCli, probeCodexModels, type ClaudeCliCaps } from "./cli-probes.js";
 import { hasClaudeCredentials, readClaudeCredentials } from "./claude-credentials.js";
 import { TerminalManager, ensureSpawnHelperExecutable } from "./terminal-manager.js";
@@ -333,8 +333,32 @@ export async function runDaemon(opts: {
       case "dirs":
         void answerDirsRequest(msg);
         return;
+      case "limits-refresh":
+        void answerLimitsRefresh(msg.requestId);
+        return;
       case "pong":
         return;
+    }
+  }
+
+  /**
+   * Optio asked for this machine's agent limits now (the refresh button on
+   * Codex's usage pill): ask Codex directly, report them like the periodic
+   * read does, and answer with them — or with why Codex couldn't say.
+   */
+  async function answerLimitsRefresh(requestId: string): Promise<void> {
+    try {
+      const codex = await fetchCodexLimitsLive();
+      const limits: LocalHostAgentLimits = codex ? { codex } : readAgentLimits();
+      lastLimitsKey = JSON.stringify(limits);
+      send({ type: "agent-limits", limits });
+      send({ type: "limits-refresh-result", requestId, limits });
+    } catch (err) {
+      send({
+        type: "limits-refresh-result",
+        requestId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -499,6 +523,7 @@ export async function runDaemon(opts: {
           transcriptBackfill: true,
           manageDirs: remoteDirs,
           modelProviders: true,
+          refreshLimits: true,
           awsProfiles: listAwsProfiles(),
         };
         socket.send(JSON.stringify(hello));

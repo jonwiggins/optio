@@ -1,7 +1,9 @@
+import { spawn } from "node:child_process";
 import { readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { AgentLimitWindow, LocalHostAgentLimits } from "@optio/shared";
+import { scrubSpawnEnv } from "./terminal-manager.js";
 
 /**
  * Codex CLI writes a `rate_limits` block into every `token_count` event of
@@ -134,4 +136,108 @@ export function readAgentLimits(): LocalHostAgentLimits {
   const codex = readCodexLimits();
   if (codex) limits.codex = codex;
   return limits;
+}
+
+/** A window as Codex's app server reports it (`account/rateLimits/read`). */
+function liveWindow(raw: unknown): AgentLimitWindow | null {
+  const w = raw as { usedPercent?: unknown; windowDurationMins?: unknown; resetsAt?: unknown };
+  if (!w || typeof w !== "object" || typeof w.usedPercent !== "number") return null;
+  return {
+    usedPercent: Math.max(0, Math.min(100, w.usedPercent)),
+    windowMinutes: typeof w.windowDurationMins === "number" ? w.windowDurationMins : null,
+    resetsAt: typeof w.resetsAt === "number" ? new Date(w.resetsAt * 1000).toISOString() : null,
+  };
+}
+
+/** Codex's `GetAccountRateLimitsResponse` as the limits Optio shows; null when it has none. */
+export function parseLiveCodexLimits(
+  result: unknown,
+  now = new Date(),
+): LocalHostAgentLimits["codex"] | null {
+  const r =
+    (result as { rateLimits?: unknown; rateLimitsByLimitId?: Record<string, unknown> })
+      ?.rateLimitsByLimitId?.codex ?? (result as { rateLimits?: unknown })?.rateLimits;
+  const snap = r as { primary?: unknown; secondary?: unknown; planType?: unknown } | undefined;
+  if (!snap || typeof snap !== "object") return null;
+  const primary = liveWindow(snap.primary);
+  const secondary = liveWindow(snap.secondary);
+  if (!primary && !secondary) return null;
+  return {
+    primary,
+    secondary,
+    planType: typeof snap.planType === "string" ? snap.planType : null,
+    observedAt: now.toISOString(),
+  };
+}
+
+/**
+ * Ask the machine's Codex for its current limits: a short-lived `codex
+ * app-server` (stdio JSON-RPC) answering `account/rateLimits/read`. Unlike
+ * the session log, this is current even when Codex hasn't run lately.
+ * Rejects with Codex's own message (e.g. it isn't signed in).
+ */
+export function fetchCodexLimitsLive(
+  timeoutMs = 20_000,
+): Promise<LocalHostAgentLimits["codex"] | null> {
+  return new Promise((resolve, reject) => {
+    const shell = process.env.SHELL || "/bin/bash";
+    const child = spawn(shell, ["-l", "-c", "exec codex app-server"], {
+      cwd: homedir(),
+      env: scrubSpawnEnv(process.env),
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    let buf = "";
+    let settled = false;
+    const done = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      fn();
+    };
+    const timer = setTimeout(
+      () => done(() => reject(new Error("Codex didn't answer in time"))),
+      timeoutMs,
+    );
+    const send = (msg: object) => child.stdin.write(JSON.stringify(msg) + "\n");
+    child.on("error", (err) => done(() => reject(err)));
+    child.on("exit", () =>
+      done(() => reject(new Error("Codex isn't installed here, or its app server exited"))),
+    );
+    child.stdout.on("data", (chunk: Buffer) => {
+      buf += chunk.toString("utf-8");
+      let i: number;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        let m: { id?: number; result?: unknown; error?: { message?: string } };
+        try {
+          m = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (m.id === 1) {
+          if (m.error)
+            return done(() => reject(new Error(m.error?.message ?? "initialize failed")));
+          send({ method: "initialized" });
+          send({ id: 2, method: "account/rateLimits/read" });
+        } else if (m.id === 2) {
+          if (m.error) {
+            const msg = m.error.message ?? "Codex couldn't read its limits";
+            return done(() =>
+              reject(
+                new Error(
+                  /401|unauthori[sz]ed|sign(ing)? in/i.test(msg)
+                    ? "Codex isn't signed in on this machine — run `codex login` there"
+                    : msg.slice(0, 300),
+                ),
+              ),
+            );
+          }
+          return done(() => resolve(parseLiveCodexLimits(m.result)));
+        }
+      }
+    });
+    send({ id: 1, method: "initialize", params: { clientInfo: { name: "optio", version: "0" } } });
+  });
 }

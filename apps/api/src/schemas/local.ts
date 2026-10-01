@@ -55,6 +55,10 @@ export const LocalHostSchema = z
       .describe(
         "The connected daemon runs agents through a model provider such as Amazon Bedrock (false while offline)",
       ),
+    refreshLimits: z
+      .boolean()
+      .optional()
+      .describe("The connected daemon refreshes agent limits on request (false while offline)"),
     awsProfiles: z
       .array(z.string())
       .nullable()

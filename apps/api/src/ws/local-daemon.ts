@@ -4,6 +4,7 @@
  * Sec-WebSocket-Protocol). The first frame must be a `hello` naming a host
  * that belongs to the authenticated user. See docs/optio-local.md.
  */
+import { deliverLimitsResult } from "../services/local-limits-service.js";
 import type { FastifyInstance } from "fastify";
 import type { LocalDaemonMessage } from "@optio/shared";
 import { logger } from "../logger.js";
@@ -95,6 +96,7 @@ export async function localDaemonWs(app: FastifyInstance) {
           transcriptBackfill: msg.transcriptBackfill === true,
           manageDirs: msg.manageDirs === true,
           modelProviders: msg.modelProviders === true,
+          refreshLimits: msg.refreshLimits === true,
         });
         await markHostOnline(host.id, {
           dirs: msg.dirs,
@@ -197,6 +199,9 @@ export async function localDaemonWs(app: FastifyInstance) {
           return;
         case "dirs-result":
           deliverDirsResult(hostId, msg);
+          return;
+        case "limits-refresh-result":
+          deliverLimitsResult(hostId, msg);
           return;
         case "preview":
           await terminalService.handlePreview(
