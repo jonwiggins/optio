@@ -328,4 +328,78 @@ class WorkFormStateTest {
             assertEquals(WorkKind.STANDALONE, state.kind)
         }
     }
+
+    // region Your last settings
+
+    private val savedDefaults =
+        """{"defaults":{"runtime":"codex","agentOptions":{"codex":{"copilotModel":"gpt-5.5-saved"},"claude-code":{"claudeModel":"sonnet","claudeEffort":"low"}}}}"""
+
+    @Test
+    fun aBlankFormStartsFromYourLastSettings() {
+        server.json("/api/me/work-defaults", savedDefaults)
+        val state = loaded()
+        awaitUntil("last settings") { state.draft.runtime == "codex" && state.usingRemembered }
+        on {
+            assertEquals(OptionValue.Str("gpt-5.5-saved"), state.draft.agentOptions["copilotModel"])
+            assertTrue(state.showsRememberedHint)
+
+            // An untouched runtime starts from its saved options, over the repo's.
+            state.setRuntime("claude-code")
+            assertEquals(OptionValue.Str("sonnet"), state.draft.agentOptions["claudeModel"])
+            assertEquals(OptionValue.Str("low"), state.draft.agentOptions["claudeEffort"])
+            assertTrue(state.usingRemembered)
+
+            // Touch it: the hint goes, and switching away and back keeps the form's own seed.
+            state.setOption("claudeEffort", OptionValue.Str("max"))
+            assertFalse(state.showsRememberedHint)
+            state.setRuntime("gemini")
+            assertFalse(state.usingRemembered, "nothing saved for gemini")
+            state.setRuntime("claude-code")
+            assertEquals(OptionValue.Str("opus"), state.draft.agentOptions["claudeModel"], "the repo's, not the saved one")
+        }
+    }
+
+    @Test
+    fun resetGoesBackToTheRepoDefaults() {
+        server.json("/api/me/work-defaults", """{"defaults":{"runtime":"claude-code","agentOptions":{"claude-code":{"claudeModel":"sonnet"}}}}""")
+        val state = loaded()
+        awaitUntil("last settings") { state.usingRemembered }
+        on {
+            assertEquals(OptionValue.Str("sonnet"), state.draft.agentOptions["claudeModel"])
+            state.resetRemembered()
+            assertFalse(state.showsRememberedHint)
+            assertEquals(OptionValue.Str("opus"), state.draft.agentOptions["claudeModel"])
+        }
+    }
+
+    @Test
+    fun aPresetOrAnEditNeverFetchesThem() {
+        server.json("/api/me/work-defaults", savedDefaults)
+        val state = loaded("schedule")
+        on {
+            assertEquals("claude-code", state.draft.runtime)
+            assertFalse(state.usingRemembered)
+        }
+        assertEquals(0, server.count("GET", "/api/me/work-defaults"))
+    }
+
+    @Test
+    fun aCreateRemembersWhatItSubmitted() {
+        server.post("/api/tasks") { FakeResponse.fixture("workform-create-job.json", 201) }
+        server.post("/api/tasks/:id/runs") { FakeResponse.fixture("workform-create-run.json", 202) }
+        server.put("/api/me/work-defaults") { FakeResponse.json("""{"defaults":{}}""") }
+        val state = loaded()
+        val created = runBlocking(dispatcher) {
+            state.setWithRepo(false)
+            state.setOption("claudeModel", OptionValue.Str("sonnet"))
+            state.setPrompt("Say hi")
+            state.submit()
+        }
+        assertNotNull(created)
+        val body = server.awaitRequest("PUT", "/api/me/work-defaults").json.jsonObject
+        assertEquals(JsonPrimitive("claude-code"), body["runtime"])
+        assertEquals(JsonPrimitive("sonnet"), body["agentOptions"]!!.jsonObject["claude-code"]!!.jsonObject["claudeModel"])
+    }
+
+    // endregion
 }

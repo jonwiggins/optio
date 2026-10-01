@@ -3,6 +3,7 @@ package dev.optio.feature.workform
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,8 +22,6 @@ import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ConfirmationNumber
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Forum
@@ -31,7 +30,6 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.automirrored.outlined.MergeType
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Webhook
 import androidx.compose.material3.Checkbox
@@ -54,6 +52,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -61,11 +60,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import dev.optio.core.ui.components.Brand
+import dev.optio.core.ui.components.BrandIcons
 import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.KeyValueRow
 import dev.optio.core.ui.components.OptioIcons
 import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.SectionHeader
+import dev.optio.core.ui.components.agentIcon
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
@@ -83,10 +85,18 @@ internal val WhenType.icon: ImageVector
         WhenType.SCHEDULE -> Icons.Outlined.Schedule
         WhenType.WEBHOOK -> Icons.Outlined.Webhook
         WhenType.TICKET -> Icons.Outlined.ConfirmationNumber
-        WhenType.GITHUB -> Icons.Outlined.Code
-        WhenType.SLACK -> Icons.Outlined.Tag
-        WhenType.LINEAR -> Icons.Outlined.Bolt
+        WhenType.GITHUB -> BrandIcons.GitHub
+        WhenType.SLACK -> BrandIcons.SlackColor
+        WhenType.LINEAR -> BrandIcons.Linear
     }
+
+/** The mark shown beside the Starts value: the trigger's brand, a ticket source's logo, else its icon. */
+internal fun whenGlyph(d: WorkDraft): ImageVector =
+    if (d.whenType == WhenType.TICKET) (d.trigger.ticketSource ?: TicketSource.GITHUB).icon else d.whenType.icon
+
+/** A ticket source's logo. */
+internal val TicketSource.icon: ImageVector
+    get() = Brand.fromProvider(raw)?.icon ?: Icons.Outlined.ConfirmationNumber
 
 internal fun presetIcon(id: String): ImageVector = when (id) {
     "pr" -> Icons.AutoMirrored.Outlined.MergeType
@@ -132,7 +142,7 @@ internal fun PresetsSection(state: WorkFormState, modifier: Modifier = Modifier)
 internal fun WhenSection(state: WorkFormState, modifier: Modifier = Modifier) {
     val d = state.draft
     FormSectionCard(title = "When", question = "What starts it?", footer = whenFooter(d), modifier = modifier.testTag("work-form-when")) {
-        MenuRow(label = "Starts", value = d.whenType.menuLabel, modifier = Modifier.testTag("work-form-starts")) {
+        MenuRow(label = "Starts", value = d.whenType.menuLabel, leadingIcon = whenGlyph(d), modifier = Modifier.testTag("work-form-starts")) {
             WhenType.entries.forEach { w ->
                 val reason = state.whenDisabled(w)?.takeIf { w != d.whenType }
                 MenuChoice(
@@ -207,8 +217,8 @@ private fun TicketRows(state: WorkFormState) {
         input = ""
     }
     RowDivider()
-    MenuRow(label = "Source", value = source.label) {
-        TicketSource.entries.forEach { s -> MenuChoice(s.label, selected = s == source, onClick = { state.setTicketSource(s) }) }
+    MenuRow(label = "Source", value = source.label, leadingIcon = source.icon) {
+        TicketSource.entries.forEach { s -> MenuChoice(s.label, selected = s == source, icon = s.icon, onClick = { state.setTicketSource(s) }) }
     }
     RowDivider()
     Row(
@@ -522,12 +532,17 @@ internal fun WhoSection(state: WorkFormState, modifier: Modifier = Modifier) {
     val d = state.draft
     val runtimes = state.runtimeChoices
     FormSectionCard(title = "Who", question = "A terminal, or an agent?", footer = whoFooter(state, runtimes), modifier = modifier.testTag("work-form-who")) {
-        MenuRow(label = "Runtime", value = runtimeName(d.runtime), modifier = Modifier.testTag("work-form-runtime")) {
+        MenuRow(
+            label = "Runtime",
+            value = runtimeName(d.runtime),
+            leadingIcon = agentIcon(d.runtime),
+            modifier = Modifier.testTag("work-form-runtime"),
+        ) {
             runtimes.forEach { r ->
                 MenuChoice(
                     runtimeName(r.value),
                     selected = r.value == d.runtime,
-                    icon = if (r.value == TERMINAL) Icons.Outlined.Terminal else OptioIcons.Bot,
+                    icon = agentIcon(r.value),
                     enabled = r.isEnabled,
                     subtitle = r.disabled,
                     onClick = { state.setRuntime(r.value) },
@@ -536,14 +551,40 @@ internal fun WhoSection(state: WorkFormState, modifier: Modifier = Modifier) {
         }
         if (!state.isTerminal && state.kind != WorkKind.POD_SESSION) {
             RowDivider()
+            ProviderRows(state)
             AgentOptionsPicker(
                 provider = state.provider,
                 state = state.catalogState,
                 values = d.agentOptions,
                 local = !state.fullOptionsApply,
                 onChange = state::setOption,
+                providerModels = state.providerModels,
             )
+            if (state.showsRememberedHint) RememberedHint(onReset = state::resetRemembered)
         }
+        OwnerRows(state)
+        PodSecretsRows(state)
+        state.readOnlyReason?.let {
+            RowDivider()
+            CardNote(it)
+        }
+    }
+}
+
+/** "Your last settings · Reset": the parameters came from the last work you created. */
+@Composable
+private fun RememberedHint(onReset: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.m).testTag("work-form-remembered"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Your last settings · ", style = OptioTheme.type.footnote, color = OptioTheme.colors.secondaryLabel)
+        Text(
+            "Reset",
+            style = OptioTheme.type.footnote,
+            color = OptioTheme.colors.accent,
+            modifier = Modifier.clickable(role = Role.Button, onClick = onReset).testTag("work-form-remembered-reset"),
+        )
     }
 }
 

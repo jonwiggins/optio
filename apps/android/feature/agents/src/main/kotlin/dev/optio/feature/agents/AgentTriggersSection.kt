@@ -12,12 +12,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ConfirmationNumber
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.Webhook
 import androidx.compose.material3.Icon
@@ -34,6 +31,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.optio.core.model.stringValue
 import dev.optio.core.network.LocalApiClient
+import dev.optio.core.ui.components.BrandIcons
 import dev.optio.core.ui.auth.Roles
 import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.InsetDivider
@@ -188,8 +186,8 @@ internal val AgentTriggerType?.icon: ImageVector
             AgentTriggerType.SCHEDULE -> Icons.Outlined.Schedule
             AgentTriggerType.WEBHOOK -> Icons.Outlined.Webhook
             AgentTriggerType.TICKET -> Icons.Outlined.ConfirmationNumber
-            AgentTriggerType.GITHUB -> Icons.Outlined.Code
-            AgentTriggerType.SLACK -> Icons.Outlined.Tag
-            AgentTriggerType.LINEAR -> Icons.Outlined.Bolt
+            AgentTriggerType.GITHUB -> BrandIcons.GitHub
+            AgentTriggerType.SLACK -> BrandIcons.Slack
+            AgentTriggerType.LINEAR -> BrandIcons.Linear
             AgentTriggerType.MANUAL, null -> Icons.Outlined.TouchApp
         }

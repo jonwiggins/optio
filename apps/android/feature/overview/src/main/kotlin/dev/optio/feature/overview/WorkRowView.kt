@@ -11,11 +11,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material.icons.outlined.Memory
-import androidx.compose.material.icons.outlined.Merge
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Terminal
@@ -34,7 +32,12 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import dev.optio.core.ui.components.AgentMark
+import dev.optio.core.ui.components.Brand
+import dev.optio.core.ui.components.BrandMark
 import dev.optio.core.ui.components.OptioRow
+import dev.optio.core.ui.components.PrGlyph
+import dev.optio.core.ui.components.PrGlyphState
 import dev.optio.core.ui.components.StateDot
 import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.format.rememberNow
@@ -101,7 +104,7 @@ internal fun WorkRowView(
                             modifier = Modifier.padding(top = 3.dp),
                         )
                     }
-                    row.prUrl?.let { PrChip { onOpenPr(it) } }
+                    row.prUrl?.let { PrChip(PrGlyphState.from(row.prState)) { onOpenPr(it) } }
                 }
             },
             contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.m),
@@ -123,9 +126,9 @@ private fun statusLine(row: WorkRow): AnnotatedString {
     }
 }
 
-/** The "PR" link capsule (iOS: `arrow.triangle.pull` + PR on a tertiary fill, accent). */
+/** The "PR" link capsule: GitHub's pull-request glyph in its state's colour + "PR" on a tertiary fill. */
 @Composable
-private fun PrChip(onClick: () -> Unit) {
+private fun PrChip(state: PrGlyphState, onClick: () -> Unit) {
     Row(
         Modifier
             .clip(Radius.smallShape)
@@ -136,8 +139,8 @@ private fun PrChip(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Icon(Icons.Outlined.Merge, contentDescription = null, tint = OptioTheme.colors.accent, modifier = Modifier.size(12.dp))
-        Text("PR", style = OptioTheme.type.caption2.medium(), color = OptioTheme.colors.accent, maxLines = 1)
+        PrGlyph(state, size = 12.dp)
+        Text("PR", style = OptioTheme.type.caption2.medium(), color = OptioTheme.colors.secondaryLabel, maxLines = 1)
     }
 }
 
@@ -149,11 +152,22 @@ private fun AttributeGrid(
 ) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-            Attribute(row.whenKind.icon, row.whenLabel, Modifier.weight(1f))
+            val origin = Brand.fromProvider(row.origin)
+            if (origin != null) {
+                Attribute(row.whenLabel, Modifier.weight(1f)) {
+                    // Brand marks read at secondary weight; quaternary washes them out.
+                    BrandMark(origin, size = 12.dp, contentDescription = "from ${origin.label}", tint = OptioTheme.colors.secondaryLabel)
+                }
+            } else {
+                Attribute(row.whenKind.icon, row.whenLabel, Modifier.weight(1f))
+            }
             Attribute(row.where.icon, row.where.label, Modifier.weight(1f), mono = true)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-            Attribute(if (row.isTerminal) Icons.Outlined.Terminal else Icons.Outlined.Bolt, row.whoLabel, Modifier.weight(1f))
+            Attribute(row.whoLabel, Modifier.weight(1f)) {
+                // The runtime's logo (a terminal glyph for a plain shell), at secondary weight like the brand marks.
+                AgentMark(if (row.isTerminal) "terminal" else row.who, size = 12.dp, contentDescription = null, tint = OptioTheme.colors.secondaryLabel)
+            }
             Attribute(row.then.icon, row.then.label, Modifier.weight(1f))
         }
     }
@@ -166,8 +180,20 @@ private fun Attribute(
     modifier: Modifier = Modifier,
     mono: Boolean = false,
 ) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+    Attribute(label, modifier, mono) {
         Icon(icon, contentDescription = null, tint = OptioTheme.colors.quaternaryLabel, modifier = Modifier.size(12.dp))
+    }
+}
+
+@Composable
+private fun Attribute(
+    label: String,
+    modifier: Modifier = Modifier,
+    mono: Boolean = false,
+    icon: @Composable () -> Unit,
+) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        icon()
         Text(
             label,
             style = if (mono) OptioTheme.type.monoCaption else OptioTheme.type.caption,

@@ -263,6 +263,13 @@ data class WorkDraft(
     val priority: Int = 100,
     val maxRetries: Int = 3,
     val dependsOn: List<String> = emptyList(),
+    /** Pod work: who it runs as (Organization / Just me). Work on a machine is always the owner's. */
+    val owner: WorkOwner = WorkOwner.WORKSPACE,
+    /**
+     * Pod work: the secrets (by name) the agent gets in its pod. Null = a saved row's legacy
+     * behavior (left as is on save); new work always sends a list, possibly empty.
+     */
+    val podSecrets: List<String>? = emptyList(),
 ) {
     companion object {
         val EMPTY = WorkDraft()

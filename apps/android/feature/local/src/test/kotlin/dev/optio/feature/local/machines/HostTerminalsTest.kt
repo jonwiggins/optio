@@ -5,28 +5,66 @@ import dev.optio.core.model.LocalHostState
 import dev.optio.core.model.LocalTerminalState
 import dev.optio.core.testing.Samples
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import org.junit.Test
 
 class HostTerminalsTest {
     @Test
-    fun groupsInTheOrderYoudActOnThem() {
-        val waitingLong = Samples.localTerminal(id = "a", attentionState = LocalAttentionState.NEEDS_YOU, lastActivityAt = Samples.agoIso(30))
-        val waitingShort = Samples.localTerminal(id = "b", attentionState = LocalAttentionState.NEEDS_YOU, lastActivityAt = Samples.agoIso(2))
-        val working = Samples.localTerminal(id = "c", attentionState = LocalAttentionState.WORKING, lastActivityAt = Samples.agoIso(1))
-        val held = Samples.localTerminal(id = "d", state = LocalTerminalState.PENDING, attentionState = LocalAttentionState.IDLE)
-        val oldDone = Samples.localTerminal(id = "e", state = LocalTerminalState.EXITED, attentionState = LocalAttentionState.IDLE, exitCode = 0, lastActivityAt = Samples.agoIso(90))
-        val newDone = Samples.localTerminal(id = "f", state = LocalTerminalState.EXITED, attentionState = LocalAttentionState.NEEDS_YOU, exitCode = 0, lastActivityAt = Samples.agoIso(10))
+    fun ordersByLastInteractionThenCreationIgnoringAttention() {
+        // Typed into 1 min ago, created long ago: first, whatever its attention state.
+        val typed = Samples.localTerminal(id = "a", attentionState = LocalAttentionState.WORKING, createdAt = Samples.agoIso(120)).copy(lastInteractedAt = Samples.agoIso(1))
+        // Never typed into: falls back to createdAt.
+        val newest = Samples.localTerminal(id = "b", attentionState = LocalAttentionState.NEEDS_YOU, createdAt = Samples.agoIso(5))
+        val older = Samples.localTerminal(id = "c", attentionState = LocalAttentionState.NEEDS_YOU, createdAt = Samples.agoIso(60))
+        val held = Samples.localTerminal(id = "d", state = LocalTerminalState.PENDING, attentionState = LocalAttentionState.IDLE, createdAt = Samples.agoIso(30))
+        val oldDone = Samples.localTerminal(id = "e", state = LocalTerminalState.EXITED, attentionState = LocalAttentionState.IDLE, exitCode = 0, createdAt = Samples.agoIso(90))
+        val newDone = Samples.localTerminal(id = "f", state = LocalTerminalState.EXITED, attentionState = LocalAttentionState.NEEDS_YOU, exitCode = 0, createdAt = Samples.agoIso(10))
 
-        val grouped = HostTerminals.grouped(listOf(oldDone, working, waitingShort, held, newDone, waitingLong))
+        val grouped = HostTerminals.grouped(listOf(oldDone, older, newest, held, newDone, typed))
         assertEquals(
             listOf(
-                HostTerminals.Group.NEEDS_YOU to listOf("a", "b"), // oldest wait first
-                HostTerminals.Group.RUNNING to listOf("c"),
-                HostTerminals.Group.PENDING to listOf("d"),
-                HostTerminals.Group.FINISHED to listOf("f", "e"), // newest first; a finished run is never "waiting"
+                HostTerminals.Group.LIVE to listOf("a", "b", "d", "c"),
+                HostTerminals.Group.FINISHED to listOf("f", "e"),
             ),
             grouped.map { (g, ts) -> g to ts.map { it.id } },
         )
+    }
+
+    @Test
+    fun attentionChangesDoNotMoveRows() {
+        val list =
+            listOf(
+                Samples.localTerminal(id = "x", attentionState = LocalAttentionState.WORKING, createdAt = Samples.agoIso(3)),
+                Samples.localTerminal(id = "y", attentionState = LocalAttentionState.NEEDS_YOU, createdAt = Samples.agoIso(4)),
+            )
+        val flipped = list.map { it.copy(attentionState = if (it.attentionState == LocalAttentionState.WORKING) LocalAttentionState.NEEDS_YOU else LocalAttentionState.WORKING) }
+        assertEquals(HostTerminals.ordered(list).map { it.id }, HostTerminals.ordered(flipped).map { it.id })
+    }
+
+    @Test
+    fun tiesBreakOnCreationThenId() {
+        val at = Samples.agoIso(5)
+        val b = Samples.localTerminal(id = "b", createdAt = at)
+        val a = Samples.localTerminal(id = "a", createdAt = at)
+        val typedSame = Samples.localTerminal(id = "c", createdAt = Samples.agoIso(50)).copy(lastInteractedAt = at)
+        assertEquals(listOf("a", "b", "c"), HostTerminals.ordered(listOf(typedSame, b, a)).map { it.id })
+    }
+
+    @Test
+    fun nextNeedsYouCyclesInVisualOrder() {
+        val list =
+            listOf(
+                Samples.localTerminal(id = "w", attentionState = LocalAttentionState.WORKING, createdAt = Samples.agoIso(1)),
+                Samples.localTerminal(id = "n1", attentionState = LocalAttentionState.NEEDS_YOU, createdAt = Samples.agoIso(2)),
+                Samples.localTerminal(id = "n2", attentionState = LocalAttentionState.NEEDS_YOU, createdAt = Samples.agoIso(3)),
+                Samples.localTerminal(id = "done", state = LocalTerminalState.EXITED, attentionState = LocalAttentionState.NEEDS_YOU, exitCode = 0, createdAt = Samples.agoIso(0)),
+            )
+        assertEquals(2, HostTerminals.needsYouCount(list))
+        assertEquals("n1", HostTerminals.nextNeedsYou(list, null)?.id)
+        assertEquals("n2", HostTerminals.nextNeedsYou(list, "n1")?.id)
+        assertEquals("n1", HostTerminals.nextNeedsYou(list, "n2")?.id)
+        assertEquals("n1", HostTerminals.nextNeedsYou(list, "gone")?.id)
+        assertNull(HostTerminals.nextNeedsYou(list.filter { it.id == "w" }, null))
     }
 
     @Test

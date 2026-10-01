@@ -2,6 +2,7 @@ package dev.optio.feature.workform
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import dev.optio.core.model.ModelProviderModel
 
 /**
  * Port of `agent-options-picker.tsx` as card rows (iOS `AgentOptionsPickerView`): the model (a
@@ -19,13 +20,35 @@ internal fun AgentOptionsPicker(
     values: Map<String, OptionValue>,
     local: Boolean,
     onChange: (String, OptionValue) -> Unit,
+    providerModels: List<ModelProviderModel>? = null,
 ) {
     val catalog = state.catalog
     val modelField = catalog?.modelField ?: modelFieldForProvider(provider)
     // A stored alias ("opus") shows as the model it resolves to, so the menu matches an option.
     val modelValue = resolveModel(values[modelField]?.stringValue.orEmpty(), catalog?.aliases)
 
-    if (catalog != null && catalog.modelIsFreeText != true) {
+    if (providerModels != null) {
+        // A model provider is picked: its own model ids (the first is its default); free text
+        // when it lists none.
+        val raw = values[modelField]?.stringValue.orEmpty()
+        if (providerModels.isEmpty()) {
+            ValueField(
+                label = "Model",
+                value = raw,
+                onValueChange = { onChange(modelField, OptionValue.Str(it)) },
+                placeholder = "Provider model id",
+                capitalization = KeyboardCapitalization.None,
+                fieldTag = "option-$modelField",
+            )
+        } else {
+            MenuRow(label = "Model", value = providerModels.firstOrNull { it.id == raw }?.let { it.label ?: it.id } ?: raw.ifEmpty { "Pick a model…" }) {
+                if (raw.isNotEmpty() && providerModels.none { it.id == raw }) MenuChoice(raw, selected = true, onClick = {})
+                providerModels.forEach { m ->
+                    MenuChoice(m.label ?: m.id, selected = m.id == raw, subtitle = m.id.takeIf { m.label != null }, mono = false, onClick = { onChange(modelField, OptionValue.Str(m.id)) })
+                }
+            }
+        }
+    } else if (catalog != null && catalog.modelIsFreeText != true) {
         MenuRow(label = "Model", value = modelLabel(catalog, modelValue)) {
             MenuChoice("Default", selected = modelValue.isEmpty(), onClick = { onChange(modelField, OptionValue.Str("")) })
             if (modelValue.isNotEmpty() && catalog.models.none { it.id == modelValue }) {

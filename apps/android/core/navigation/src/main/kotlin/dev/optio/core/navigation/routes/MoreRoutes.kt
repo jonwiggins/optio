@@ -27,6 +27,10 @@ data object AppIconRoute : NavKey
 @Serializable
 data object SecretsRoute : NavKey
 
+/** Settings › Model providers (Amazon Bedrock for Claude Code / Codex). */
+@Serializable
+data object ModelProvidersRoute : NavKey
+
 @Serializable
 data object WebhooksRoute : NavKey
 

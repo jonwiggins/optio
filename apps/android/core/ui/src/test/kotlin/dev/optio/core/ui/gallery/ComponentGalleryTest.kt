@@ -325,6 +325,30 @@ class ComponentGalleryTest : ScreenshotTest() {
     }
 
     @Test
+    fun brands() = captureScreens("Gallery_9_Brands") {
+        Page {
+            Caption("BrandMark (tinted; Slack in colour, then mono)")
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.l), verticalAlignment = Alignment.CenterVertically) {
+                dev.optio.core.ui.components.Brand.entries.forEach { dev.optio.core.ui.components.BrandMark(it, size = 24.dp, tint = OptioTheme.colors.label) }
+                dev.optio.core.ui.components.BrandMark(dev.optio.core.ui.components.Brand.Slack, size = 24.dp, mono = true, tint = OptioTheme.colors.label)
+            }
+            Caption("PrGlyph / IssueGlyph")
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.l), verticalAlignment = Alignment.CenterVertically) {
+                dev.optio.core.ui.components.PrGlyphState.entries.forEach { dev.optio.core.ui.components.PrGlyph(it, size = 24.dp) }
+                dev.optio.core.ui.components.IssueGlyph(open = true, size = 24.dp)
+                dev.optio.core.ui.components.IssueGlyph(open = false, size = 24.dp)
+            }
+            Caption("TriggerIcon")
+            listOf("manual", "schedule", "webhook", "ticket", "github", "slack", "linear").forEach { type ->
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalAlignment = Alignment.CenterVertically) {
+                    dev.optio.core.ui.components.TriggerIcon(type, size = 18.dp, tint = OptioTheme.colors.secondaryLabel)
+                    Text(type, style = OptioTheme.type.body, color = OptioTheme.colors.label)
+                }
+            }
+        }
+    }
+
+    @Test
     fun detail() = captureScreens("Gallery_5_Detail") {
         CompositionLocalProvider(LocalUsageStore provides UsageSamples.store()) {
             Column(Modifier.fillMaxSize()) {

@@ -1,5 +1,13 @@
 package dev.optio.feature.local.machines
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import dev.optio.core.ui.components.SectionHeader
+import dev.optio.core.ui.format.isoInstant
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -112,28 +120,48 @@ data class HostPage(
 )
 
 /**
- * The terminals on one machine, in the order you'd act on them: waiting on you (oldest wait
- * first), then running (newest activity first), pending, and finished (newest first). The web's
- * session rail groups the same way.
+ * The terminals on one machine, in a stable order: the session you last typed into first, else the
+ * newest (`lastInteractedAt ?? createdAt` descending, then `createdAt`, then id). Attention state
+ * never reorders rows — sessions flip between working and needs-you all the time, and a list that
+ * reshuffles under your thumb can't be tapped. Waiting sessions show by their dot and label, and
+ * the header's "N need you" jumps between them. The only move is live → Finished, which happens once.
+ * The web's session rail orders the same way.
  */
 object HostTerminals {
-    enum class Group(val title: String) { NEEDS_YOU("Needs you"), RUNNING("Running"), PENDING("Pending"), FINISHED("Finished") }
+    enum class Group(val title: String) { LIVE("Sessions"), FINISHED("Finished") }
 
-    fun group(t: LocalTerminal): Group =
-        when {
-            LocalPresentation.waitsOnYou(t) -> Group.NEEDS_YOU
-            t.state == LocalTerminalState.RUNNING || t.state == LocalTerminalState.LAUNCHING -> Group.RUNNING
-            t.state == LocalTerminalState.PENDING -> Group.PENDING
-            else -> Group.FINISHED
+    fun group(t: LocalTerminal): Group = if (LocalPresentation.isDead(t)) Group.FINISHED else Group.LIVE
+
+    private fun instant(iso: String?): Instant = iso?.isoInstant() ?: Instant.EPOCH
+
+    /** The navigation order (see the object doc). */
+    val order: Comparator<LocalTerminal> =
+        compareByDescending<LocalTerminal> { instant(it.lastInteractedAt ?: it.createdAt) }
+            .thenByDescending { instant(it.createdAt) }
+            .thenBy { it.id }
+
+    fun grouped(terminals: List<LocalTerminal>): List<Pair<Group, List<LocalTerminal>>> =
+        Group.entries.mapNotNull { g ->
+            val members = terminals.filter { group(it) == g }.sortedWith(order)
+            if (members.isEmpty()) null else g to members
         }
 
-    fun grouped(terminals: List<LocalTerminal>): List<Pair<Group, List<LocalTerminal>>> {
-        val at = { t: LocalTerminal -> LocalPresentation.activityAt(t) ?: Instant.EPOCH }
-        return Group.entries.mapNotNull { g ->
-            val members = terminals.filter { group(it) == g }
-            if (members.isEmpty()) return@mapNotNull null
-            g to if (g == Group.NEEDS_YOU) members.sortedBy(at) else members.sortedByDescending(at)
-        }
+    /** The rows top to bottom, as [grouped] lays them out. */
+    fun ordered(terminals: List<LocalTerminal>): List<LocalTerminal> = grouped(terminals).flatMap { it.second }
+
+    fun needsYouCount(terminals: List<LocalTerminal>): Int = terminals.count(LocalPresentation::waitsOnYou)
+
+    /**
+     * The waiting session after [afterId] in visual order, wrapping round; the first waiting one
+     * when [afterId] is null or no longer listed. Null when nothing waits.
+     */
+    fun nextNeedsYou(
+        terminals: List<LocalTerminal>,
+        afterId: String?,
+    ): LocalTerminal? {
+        val rows = ordered(terminals)
+        val start = rows.indexOfFirst { it.id == afterId }
+        return (1..rows.size).asSequence().map { rows[(start + it).mod(rows.size)] }.firstOrNull(LocalPresentation::waitsOnYou)
     }
 }
 
@@ -410,13 +438,62 @@ private fun LazyListScope.terminalsSection(
         }
         return
     }
+    val needsYou = HostTerminals.needsYouCount(terminals)
     HostTerminals.grouped(terminals).forEach { (group, members) ->
         item(key = "group-${group.name}") {
-            GroupedSection(header = "${group.title} · ${members.size}") {
-                members.forEachIndexed { i, t ->
-                    TerminalRow(t, onClick = { navigator.push(LocalTerminalRoute(t.id)) })
-                    if (i < members.lastIndex) InsetDivider()
+            Column {
+                if (group == HostTerminals.Group.LIVE) {
+                    LiveHeader(count = members.size, needsYou = needsYou, terminals = terminals, navigator = navigator)
                 }
+                GroupedSection(header = if (group == HostTerminals.Group.LIVE) null else "${group.title} · ${members.size}") {
+                    members.forEachIndexed { i, t ->
+                        TerminalRow(t, onClick = { navigator.push(LocalTerminalRoute(t.id)) })
+                        if (i < members.lastIndex) InsetDivider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * "Sessions · N" and, while any wait on you, a tappable "N need you" that opens the next waiting
+ * session in list order (cycling on each tap), so the rows themselves never have to move.
+ */
+@Composable
+private fun LiveHeader(
+    count: Int,
+    needsYou: Int,
+    terminals: List<LocalTerminal>,
+    navigator: Navigator,
+) {
+    var lastJumped by rememberSaveable { mutableStateOf<String?>(null) }
+    Row(
+        Modifier.fillMaxWidth().padding(start = Spacing.l * 2, end = Spacing.l, top = Spacing.l + Spacing.xs, bottom = Spacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SectionHeader(
+            "${HostTerminals.Group.LIVE.title} · $count",
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(0.dp),
+        )
+        if (needsYou > 0) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(role = Role.Button) {
+                        HostTerminals.nextNeedsYou(terminals, lastJumped)?.let {
+                            lastJumped = it.id
+                            navigator.push(LocalTerminalRoute(it.id))
+                        }
+                    }
+                    .padding(horizontal = Spacing.s, vertical = Spacing.xs)
+                    .testTag("next-needs-you"),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StateDot(Tone.ACCENT, size = 6.dp, pulse = false)
+                Text("$needsYou need${if (needsYou == 1) "s" else ""} you", style = OptioTheme.type.footnote.semibold(), color = Tone.ACCENT.textColor)
             }
         }
     }

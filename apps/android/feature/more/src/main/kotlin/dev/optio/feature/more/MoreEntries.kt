@@ -8,6 +8,7 @@ import dev.optio.core.navigation.routes.NewWebhookRoute
 import dev.optio.core.navigation.routes.NotificationDevicesRoute
 import dev.optio.core.navigation.routes.NotificationPrefsRoute
 import dev.optio.core.navigation.routes.OptioAgentSettingsRoute
+import dev.optio.core.navigation.routes.ModelProvidersRoute
 import dev.optio.core.navigation.routes.SecretsRoute
 import dev.optio.core.navigation.routes.ServerEditRoute
 import dev.optio.core.navigation.routes.ServersRoute
@@ -15,6 +16,7 @@ import dev.optio.core.navigation.routes.SettingsRoute
 import dev.optio.core.navigation.routes.WebhookDetailRoute
 import dev.optio.core.navigation.routes.WebhooksRoute
 import dev.optio.core.navigation.routes.WorkspaceSettingsRoute
+import dev.optio.feature.more.providers.ModelProvidersScreen
 import dev.optio.feature.more.secrets.SecretsScreen
 import dev.optio.feature.more.servers.ServerEditScreen
 import dev.optio.feature.more.servers.ServersScreen
@@ -38,6 +40,7 @@ fun EntryProviderScope<NavKey>.moreEntries() {
     entry<OptioAgentSettingsRoute> { OptioAgentSettingsScreen() }
     entry<AppIconRoute> { AppIconScreen() }
     entry<SecretsRoute> { SecretsScreen() }
+    entry<ModelProvidersRoute> { ModelProvidersScreen() }
     entry<WebhooksRoute> { WebhooksScreen() }
     entry<WebhookDetailRoute> { key -> WebhookDetailScreen(webhookId = key.id) }
     entry<NewWebhookRoute> { NewWebhookScreen() }

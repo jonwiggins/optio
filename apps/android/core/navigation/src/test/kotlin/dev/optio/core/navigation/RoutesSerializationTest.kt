@@ -26,6 +26,7 @@ import dev.optio.core.navigation.routes.RepoDetailRoute
 import dev.optio.core.navigation.routes.RepoSettingsRoute
 import dev.optio.core.navigation.routes.ReviewDetailRoute
 import dev.optio.core.navigation.routes.ScheduledDetailRoute
+import dev.optio.core.navigation.routes.ModelProvidersRoute
 import dev.optio.core.navigation.routes.SecretsRoute
 import dev.optio.core.navigation.routes.ServersRoute
 import dev.optio.core.navigation.routes.SessionDetailRoute
@@ -77,6 +78,7 @@ class RoutesSerializationTest {
                 OptioAgentSettingsRoute,
                 AppIconRoute,
                 SecretsRoute,
+                ModelProvidersRoute,
                 WebhooksRoute,
                 WebhookDetailRoute("wh1"),
                 WorkspaceSettingsRoute,

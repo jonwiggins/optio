@@ -10,6 +10,19 @@ import dev.optio.core.model.LocalHostDir
 import dev.optio.core.model.LocalHostState
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.CurrentUser
+import dev.optio.core.network.MODEL_PROVIDER_OPTION_KEY
+import dev.optio.core.network.createPickableSecret
+import dev.optio.core.network.listModelProviders
+import dev.optio.core.network.getWorkDefaults
+import dev.optio.core.network.isOrganization
+import dev.optio.core.network.putWorkDefaults
+import dev.optio.core.model.WorkFormDefaults
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import dev.optio.core.network.listPickableSecrets
+import dev.optio.core.model.ModelProvider
+import dev.optio.core.model.PickableSecret
 import dev.optio.core.ui.state.ErrorText
 import java.time.Clock
 import java.time.ZoneOffset
@@ -37,7 +50,27 @@ class WorkFormState(
     val edit: EditTarget? = null,
     private val clock: Clock = Clock.systemUTC(),
     private val loadCatalog: suspend (ApiClient, String) -> CatalogState = AgentCatalogCache::load,
+    /** Where "remember these settings" runs after a create: outlives the screen, which closes on success. */
+    private val rememberScope: CoroutineScope = RememberScope,
 ) {
+    /** A blank New work form (not an edit, not an example preset): it starts from your last settings. */
+    private val blank: Boolean = edit == null && preset(presetId) == null
+
+    /** Your last settings (`GET /api/me/work-defaults`), once fetched for a blank form. */
+    private var remembered: WorkFormDefaults? = null
+
+    /** The runtime was picked by hand: late-arriving last settings leave it alone. */
+    private var runtimePicked = false
+
+    /** Runtimes whose options the user changed (or reset): last settings never overwrite them. */
+    private val touchedRuntimes = mutableSetOf<String>()
+
+    /** The owner became Just me because the last settings picked a personal provider. */
+    private var ownerFromRemembered = false
+
+    /** The parameters came from your last settings (the "Your last settings · Reset" hint). */
+    var usingRemembered: Boolean by mutableStateOf(false)
+        private set
     /** The answers so far. Change them with the setters (never assign directly). */
     var draft: WorkDraft by mutableStateOf(initialDraft(presetId, edit))
         private set
@@ -81,6 +114,22 @@ class WorkFormState(
 
     /** Where the form should scroll next (gaps, the dev script); the screen consumes it. */
     var scrollRequest: FormSection? by mutableStateOf(null)
+
+    /** Model providers the viewer can see (`GET /api/model-providers`). */
+    var providers: List<ModelProvider> by mutableStateOf(emptyList())
+        private set
+
+    /** Secret names pod work can pick (`GET /api/secrets/pickable`). */
+    var pickableSecrets: List<PickableSecret> by mutableStateOf(emptyList())
+        private set
+
+    /** A one-line note after the form changed the owner on its own ("Runs as Just me now"). */
+    var ownerNote: String? by mutableStateOf(null)
+        private set
+
+    /** An inline secret is being created. */
+    var creatingSecret: Boolean by mutableStateOf(false)
+        private set
 
     /** Per-provider catalogs (`GET /api/agents/:provider/options`). */
     val catalogs = mutableStateMapOf<String, CatalogState>()
@@ -142,14 +191,21 @@ class WorkFormState(
                 agentOptions = emptyMap(),
             )
         }
+        applyRememberedOptions()
     }
 
     /** The picker starts from the repo's defaults only while there is a repo; switching starts over. */
-    fun setWithRepo(withRepo: Boolean) = update { it.copy(withRepo = withRepo, agentOptions = emptyMap()) }
+    fun setWithRepo(withRepo: Boolean) {
+        update { it.copy(withRepo = withRepo, agentOptions = emptyMap()) }
+        applyRememberedOptions()
+    }
 
+    /** A runtime whose options you haven't touched starts from your last settings for it. */
     fun setRuntime(runtime: String) {
+        runtimePicked = true
         update { it.copy(runtime = runtime, agentOptions = emptyMap()) }
         loadCatalog()
+        applyRememberedOptions()
     }
 
     fun setThen(then: Then) = update { it.copy(then = then) }
@@ -161,9 +217,17 @@ class WorkFormState(
                 repoId = repo.id,
                 repoUrl = repo.repoUrl,
                 repoBranch = repo.defaultBranch,
-                agentOptions = optionsFromRepo(d.runtime, repo.raw, optionKeys(d.runtime)),
+                agentOptions = keepProvider(d, optionsFromRepo(d.runtime, repo.raw, optionKeys(d.runtime))),
             )
         }
+        applyRememberedOptions()
+    }
+
+    /** A picked provider (and its model) survives a repo change. */
+    private fun keepProvider(d: WorkDraft, seeded: Map<String, OptionValue>): Map<String, OptionValue> {
+        val id = d.agentOptions[MODEL_PROVIDER_OPTION_KEY] ?: return seeded
+        val field = catalog?.modelField ?: modelFieldForRuntime(d.runtime)
+        return seeded + (MODEL_PROVIDER_OPTION_KEY to id) + listOfNotNull(d.agentOptions[field]?.let { field to it })
     }
 
     fun setBranch(branch: String) = update { it.copy(repoBranch = branch) }
@@ -172,7 +236,69 @@ class WorkFormState(
 
     fun setDir(path: String) = update { it.copy(location = it.location.copy(localDir = path)) }
 
-    fun setOption(key: String, value: OptionValue) = update { it.copy(agentOptions = it.agentOptions + (key to value)) }
+    fun setOption(key: String, value: OptionValue) {
+        touchOptions()
+        update { it.copy(agentOptions = it.agentOptions + (key to value)) }
+    }
+
+    private fun touchOptions() {
+        touchedRuntimes += draft.runtime
+        usingRemembered = false
+    }
+
+    /** Picks a model provider (null = Default); a personal one on pod work switches the owner to Just me. */
+    fun setProvider(p: ModelProvider?) {
+        touchOptions()
+        val before = draft.owner
+        update { withProvider(it, p, catalog?.modelField) }
+        ownerNote = if (before != draft.owner && draft.owner == WorkOwner.ME) "Runs as Just me now — ${p?.name} is your own provider." else null
+    }
+
+    fun setOwner(owner: WorkOwner) {
+        ownerNote = null
+        ownerFromRemembered = false
+        update { it.copy(owner = owner) }
+    }
+
+    fun addPodSecret(name: String) {
+        val n = name.trim()
+        if (n.isEmpty()) return
+        update { d -> d.copy(podSecrets = (d.podSecrets.orEmpty() - n) + n) }
+    }
+
+    /** [createSecret] on the form's scope; [done] gets whether it worked. */
+    fun createSecretAsync(name: String, value: String, personal: Boolean, done: (Boolean) -> Unit) {
+        scope.launch { done(createSecret(name, value, personal)) }
+    }
+
+    fun removePodSecret(name: String) = update { d -> d.copy(podSecrets = d.podSecrets.orEmpty() - name) }
+
+    /**
+     * "New secret…": creates it (`POST /api/secrets`, personal or org), reloads the pickable list
+     * and picks it. A personal one makes the work Just me. Returns false (with [error]) on failure.
+     */
+    suspend fun createSecret(name: String, value: String, personal: Boolean): Boolean {
+        val n = name.trim()
+        if (n.isEmpty() || value.isEmpty() || creatingSecret) return false
+        creatingSecret = true
+        return try {
+            api.createPickableSecret(n, value, personal)
+            pickableSecrets = attempt { api.listPickableSecrets() } ?: (pickableSecrets + PickableSecret(n, if (personal) PickableSecret.Owner.ME else PickableSecret.Owner.WORKSPACE))
+            if (personal && draft.owner != WorkOwner.ME) {
+                update { it.copy(owner = WorkOwner.ME) }
+                ownerNote = "Runs as Just me now — $n is your own secret."
+            }
+            addPodSecret(n)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = "Couldn't create the secret: ${ErrorText.humanize(e)}"
+            false
+        } finally {
+            creatingSecret = false
+        }
+    }
 
     fun setCron(expr: String) = update { it.copy(trigger = it.trigger.copy(cronExpression = expr)) }
 
@@ -240,6 +366,13 @@ class WorkFormState(
         scope.launch { existingTasks = attempt { api.listDependencyTasks() }.orEmpty() }
         scope.launch { workCount = attempt { api.workCount() } }
         scope.launch { loadMe() }
+        scope.launch {
+            // Last settings wait for the providers: a saved provider is kept only while usable.
+            val defaults = if (blank) async { attempt { api.getWorkDefaults() } } else null
+            providers = attempt { api.listModelProviders() }.orEmpty()
+            defaults?.await()?.let(::applyRemembered)
+        }
+        scope.launch { pickableSecrets = attempt { api.listPickableSecrets() }.orEmpty() }
         loadCatalog()
     }
 
@@ -262,7 +395,11 @@ class WorkFormState(
         workCount: Int? = null,
         catalogs: Map<String, CatalogState> = emptyMap(),
         me: CurrentUser? = null,
+        providers: List<ModelProvider> = emptyList(),
+        pickableSecrets: List<PickableSecret> = emptyList(),
     ) {
+        this.providers = providers
+        this.pickableSecrets = pickableSecrets
         this.catalogs.putAll(catalogs)
         this.templates = templates
         this.existingTasks = existingTasks
@@ -288,7 +425,12 @@ class WorkFormState(
                 repoId = first.id,
                 repoUrl = first.repoUrl,
                 repoBranch = if (edit != null) d.repoBranch else first.defaultBranch,
-                agentOptions = if (seed) optionsFromRepo(d.runtime, first.raw, optionKeys(d.runtime)) else d.agentOptions,
+                // Your last settings, if they arrived first, stay on top of the repo's.
+                agentOptions = if (seed) {
+                    optionsFromRepo(d.runtime, first.raw, optionKeys(d.runtime)) + (if (usingRemembered) d.agentOptions else emptyMap())
+                } else {
+                    d.agentOptions
+                },
             )
         }
         seedOptionsIfNeeded()
@@ -401,7 +543,39 @@ class WorkFormState(
         get() = gaps.isEmpty() && (!wantsRepoUrl || effectiveRepoUrl.isNotEmpty())
 
     val canSubmit: Boolean
-        get() = !submitting && ready
+        get() = !submitting && ready && readOnlyReason == null
+
+    /** Editing someone else's personal work: the form is read-only, and this says why. */
+    val readOnlyReason: String?
+        get() = edit?.let { foreignOwnerReason(it.ownerUserId, me?.id, null) }
+
+    /** The Provider control's providers for this runtime (empty = the control is hidden). */
+    val usableProviders: List<ModelProvider>
+        get() = usableProviders(draft, providers)
+
+    val pickedProvider: ModelProvider?
+        get() = pickedProvider(draft, providers)
+
+    /** Why [p] is greyed out here, if it is. */
+    fun providerDisabled(p: ModelProvider): String? = providerDisabled(p, draft, host)
+
+    /** The picked provider's models (null = no provider: the catalog's list). */
+    val providerModels: List<dev.optio.core.model.ModelProviderModel>?
+        get() = providerModels(draft, providers)
+
+    val showsOwner: Boolean
+        get() = showsOwner(draft)
+
+    val showsPodSecrets: Boolean
+        get() = showsPodSecrets(draft)
+
+    val organizationDisabled: String?
+        get() = organizationDisabled(draft, providers, pickableSecrets)
+
+    val addableSecrets: List<PickableSecret>
+        get() = addableSecrets(draft, pickableSecrets)
+
+    fun secretOwnerTag(name: String): String = secretOwnerTag(name, draft, pickableSecrets)
 
     /** Where a tap on the not-ready button goes: the first gap, or the missing repo. */
     val firstGap: SentenceField?
@@ -446,7 +620,9 @@ class WorkFormState(
         get() {
             if (isTerminal) return ""
             val field = catalog?.modelField ?: modelFieldForRuntime(draft.runtime)
-            val id = resolveModel(draft.agentOptions[field]?.stringValue.orEmpty(), catalog?.aliases)
+            val raw = draft.agentOptions[field]?.stringValue.orEmpty()
+            providerModels?.let { models -> return models.firstOrNull { it.id == raw }?.let { it.label ?: it.id } ?: raw }
+            val id = resolveModel(raw, catalog?.aliases)
             if (id.isEmpty()) return ""
             return catalog?.models?.firstOrNull { it.id == id }?.label ?: id
         }
@@ -466,7 +642,8 @@ class WorkFormState(
         get() = if (isTerminal) {
             "Terminal"
         } else {
-            runtimeLabel(draft.runtime) + modelLabel.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
+            runtimeLabel(draft.runtime) + modelLabel.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty() +
+                (if (pickedProviderId(draft) != null) " · Bedrock" else "")
         }
 
     val summaryThen: String
@@ -511,6 +688,71 @@ class WorkFormState(
             }
 
     fun withRepoDisabled(withRepo: Boolean): String? = lock { it.copy(withRepo = withRepo, agentOptions = emptyMap()) }
+
+    // endregion
+
+    // region Your last settings
+
+    /**
+     * Starts the form from [defaults]: their runtime (when it can run here and you haven't picked
+     * one), then their options for the runtime in use.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun applyRemembered(defaults: WorkFormDefaults) {
+        remembered = defaults
+        if (!runtimePicked) {
+            val runtime = rememberedRuntime(defaults, draft)
+            if (runtime != null && runtime != draft.runtime) {
+                draft = normalize(draft.copy(runtime = runtime, agentOptions = emptyMap()))
+                adoptHostIfNeeded()
+                seedOptionsIfNeeded()
+                loadCatalog()
+            }
+        }
+        applyRememberedOptions()
+    }
+
+    /**
+     * Lays the saved options for the current runtime over what the form seeded (the repo's
+     * parameters), unless you've already changed this runtime's options.
+     */
+    private fun applyRememberedOptions() {
+        val saved = remembered ?: return
+        val d = draft
+        if (d.runtime == TERMINAL || d.runtime in touchedRuntimes) {
+            usingRemembered = false
+            return
+        }
+        val options = rememberedOptions(saved, d.runtime, d, providers, catalog?.modelField)
+        if (options.isEmpty()) {
+            usingRemembered = false
+            return
+        }
+        var next = d.copy(agentOptions = d.agentOptions + options)
+        val p = pickedProvider(next, providers)
+        if (p != null && !p.isOrganization && !isLocal(next) && next.owner != WorkOwner.ME) {
+            next = next.copy(owner = WorkOwner.ME)
+            ownerFromRemembered = true
+            ownerNote = "Runs as Just me — your last settings use ${p.name}, your own provider."
+        }
+        draft = normalize(next)
+        usingRemembered = true
+    }
+
+    /** "Reset": back to this runtime's defaults for the form (the repo's parameters, else blank). */
+    fun resetRemembered() {
+        touchOptions()
+        if (ownerFromRemembered) {
+            ownerFromRemembered = false
+            ownerNote = null
+            draft = draft.copy(owner = WorkOwner.WORKSPACE)
+        }
+        update { it.copy(agentOptions = emptyMap()) }
+    }
+
+    /** The hint under the parameters: shown while they are your last settings, unchanged. */
+    val showsRememberedHint: Boolean
+        get() = usingRemembered && edit == null && !isTerminal && kind != WorkKind.POD_SESSION
 
     // endregion
 
@@ -563,7 +805,12 @@ class WorkFormState(
         return try {
             val submitter = WorkFormSubmitter(api)
             val target = edit
-            if (target != null) submitter.update(target, draft, effectiveRepoUrl) else submitter.create(draft, effectiveRepoUrl, autoName, catalog)
+            if (target != null) {
+                submitter.update(target, draft, effectiveRepoUrl)
+            } else {
+                val submitted = draft
+                submitter.create(submitted, effectiveRepoUrl, autoName, catalog).also { remember(submitted) }
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -572,6 +819,12 @@ class WorkFormState(
         } finally {
             submitting = false
         }
+    }
+
+    /** Saves what a create used as your last settings: fire-and-forget, never fails the submit. */
+    private fun remember(submitted: WorkDraft) {
+        val body = rememberedAfterCreate(submitted) ?: return
+        rememberScope.launch { attempt { api.putWorkDefaults(body) } }
     }
 
     // endregion
@@ -616,6 +869,9 @@ class WorkFormState(
             edit?.draft ?: normalize((preset(presetId) ?: PRESETS[0]).apply(WorkDraft.EMPTY))
     }
 }
+
+/** Outlives the form's own scope, so "remember these settings" finishes after the screen closes. */
+private val RememberScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 /** The Then card titles (also the Then summary). */
 fun thenTitle(then: Then): String = when (then) {

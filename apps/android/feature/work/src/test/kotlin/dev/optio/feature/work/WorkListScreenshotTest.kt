@@ -38,6 +38,10 @@ class WorkListScreenshotTest : ScreenshotTest() {
     @Test
     fun active() = shot("WorkList_active", WorkView.ACTIVE, ScreenSize.TALL)
 
+    /** The seed with ticket sources and PR states filled in: the When chip's brand logos and PR glyph colours. */
+    @Test
+    fun brands() = shot("WorkList_brands", WorkView.ACTIVE, ScreenSize.TALL, load = { WorkSeed.branded })
+
     @Test
     fun recurring() = shot("WorkList_recurring", WorkView.RECURRING)
 

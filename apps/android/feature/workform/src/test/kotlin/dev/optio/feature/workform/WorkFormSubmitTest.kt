@@ -85,7 +85,7 @@ class WorkFormSubmitTest {
                 """{"type":"repo-task","title":"Task 14","prompt":"Fix the thing [[mock:pr]]","description":"Why","agentType":"codex",
                 "maxRetries":3,"priority":100,"repoUrl":"https://github.com/e2e-org/e2e-repo","repoBranch":"main",
                 "metadata":{"agentOptions":{"copilotModel":"gpt-5"}},"dependsOn":["dep-1"],
-                "runTarget":"cluster","localHostId":null,"localDir":null,"localSessionMode":null}""",
+                "runTarget":"cluster","localHostId":null,"localDir":null,"localSessionMode":null,"owner":"workspace","podSecrets":[]}""",
             ),
             body("POST", "/api/tasks"),
         )
@@ -121,7 +121,7 @@ class WorkFormSubmitTest {
             obj(
                 """{"type":"repo-blueprint","title":"Sweep","name":"Sweep","prompt":"Nightly sweep","agentType":"claude-code",
                 "agentOptions":null,"maxRetries":3,"priority":7,"repoUrl":"https://github.com/e2e-org/e2e-repo","repoBranch":"develop",
-                "enabled":true,"runTarget":"cluster","localHostId":null,"localDir":null,"localSessionMode":null}""",
+                "enabled":true,"runTarget":"cluster","localHostId":null,"localDir":null,"localSessionMode":null,"owner":"workspace","podSecrets":[]}""",
             ),
             body("POST", "/api/tasks"),
         )
@@ -147,7 +147,7 @@ class WorkFormSubmitTest {
             obj(
                 """{"type":"standalone","title":"Hello","name":"Hello","prompt":"Say hello","agentType":"claude-code","model":"opus",
                 "agentOptions":{"claudeModel":"opus","claudeThinking":true},"maxRetries":3,"enabled":true,
-                "runTarget":"cluster","localHostId":null,"localDir":null,"localSessionMode":null}""",
+                "runTarget":"cluster","localHostId":null,"localDir":null,"localSessionMode":null,"owner":"workspace","podSecrets":[]}""",
             ),
             body("POST", "/api/tasks"),
         )
@@ -354,7 +354,7 @@ class WorkFormSubmitTest {
         assertEquals(Created(WorkKind.PERSISTENT_AGENT, AgentDetailRoute("a-1"), "Release Captain 2 created"), created)
         val expected = obj(
             """{"slug":"release-captain-2","name":"Release Captain 2","agentRuntime":"claude-code","model":null,"agentOptions":null,
-            "systemPrompt":null,"agentsMd":"","initialPrompt":"You are the e2e agent.","podLifecycle":"on-demand"}""",
+            "systemPrompt":null,"agentsMd":"","initialPrompt":"You are the e2e agent.","podLifecycle":"on-demand","owner":"workspace","podSecrets":[]}""",
         )
         val b = body("POST", "/api/persistent-agents")
         assertEquals(JsonObject(expected.filterKeys { it != "agentsMd" }), JsonObject(b.filterKeys { it != "agentsMd" }))
@@ -530,7 +530,7 @@ class WorkFormSubmitTest {
         assertEquals(
             obj(
                 """{"name":"Digest","runTitle":null,"promptTemplate":"Summarize","description":"","agentRuntime":"claude-code",
-                "model":null,"agentOptions":null,"maxRetries":3,"runTarget":"cluster","localHostId":null,"localDir":null,"localSessionMode":null}""",
+                "model":null,"agentOptions":null,"maxRetries":3,"runTarget":"cluster","localHostId":null,"localDir":null,"localSessionMode":null,"owner":"workspace","podSecrets":[]}""",
             ),
             body("PATCH", "/api/jobs/w-1"),
         )
