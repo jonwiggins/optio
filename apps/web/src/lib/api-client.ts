@@ -1442,8 +1442,6 @@ export const api = {
       body: JSON.stringify({ params: params ?? null }),
     }),
 
-  getWorkflowRuns: (workflowId: string) => request<{ runs: any[] }>(`/api/jobs/${workflowId}/runs`),
-
   listWorkflowRuns: (workflowId: string, limit?: number) => {
     const qs = limit ? `?limit=${limit}` : "";
     return request<{ runs: any[] }>(`/api/jobs/${workflowId}/runs${qs}`);
@@ -1452,9 +1450,6 @@ export const api = {
   getWorkflowRun: (id: string) => request<{ run: any }>(`/api/workflow-runs/${id}`),
 
   // Workflow Triggers
-  getWorkflowTriggers: (workflowId: string) =>
-    request<{ triggers: any[] }>(`/api/jobs/${workflowId}/triggers`),
-
   listWorkflowTriggers: (workflowId: string) =>
     request<{ triggers: any[] }>(`/api/jobs/${workflowId}/triggers`),
 
@@ -1672,134 +1667,12 @@ export const api = {
     );
   },
 
-  /**
-   * Create a Task, polymorphic. `type` defaults to "repo-task" (existing
-   * ad-hoc Repo Task behavior). Use "repo-blueprint" for a scheduled Repo
-   * Task config, "standalone" for a Standalone Task.
-   */
-  createTaskUnified: (data: {
-    type?: "repo-task" | "repo-blueprint" | "standalone";
-    title?: string;
-    name?: string;
-    /** Standalone: `{{param}}` template each run is named from (repo-blueprint: `title`). */
-    runTitle?: string | null;
-    prompt: string;
-    description?: string;
-    agentType?: string;
-    /** Standalone: model override for the agent CLI (legacy single field). */
-    model?: string;
-    /** Repo blueprints + standalone: per-run agent parameters (model, effort, …). */
-    agentOptions?: Record<string, string | boolean> | null;
-    maxRetries?: number;
-    repoUrl?: string;
-    repoBranch?: string;
-    priority?: number;
-    ticketSource?: string;
-    ticketExternalId?: string;
-    metadata?: Record<string, unknown>;
-    dependsOn?: string[];
-    enabled?: boolean;
-    /** Repo kinds: PR follow-through over the repo's settings (null = the repo's). */
-    autoResume?: boolean | null;
-    autoMerge?: boolean | null;
-    // Run location: an Optio pod (default) or the caller's own machine.
-    runTarget?: "cluster" | "local";
-    localHostId?: string | null;
-    localDir?: string | null;
-    localSessionMode?: "headless" | "interactive" | null;
-    /** Who the work belongs to (default decided by the server). */
-    owner?: ResourceOwner;
-    /** Secret names the agent gets in its pod; null = legacy behavior. */
-    podSecrets?: string[] | null;
-  }) =>
-    request<{ task: any }>("/api/tasks", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  /**
-   * Get a Task by id. The returned task has a `type` discriminator so
-   * callers can branch per shape.
-   */
-  getTaskUnified: (id: string) =>
-    request<{
-      task: any;
-      pendingReason?: string | null;
-      pipelineProgress?: any | null;
-      stallInfo?: any | null;
-    }>(`/api/tasks/${id}`),
-
   /** List runs under a Task (blueprint/standalone only). */
   listTaskRuns: (id: string) => request<{ runs: any[] }>(`/api/tasks/${id}/runs`),
 
-  /** Kick off a run on a Task (blueprint/standalone only). */
-  createTaskRun: (id: string, params?: Record<string, unknown>) =>
-    request<{ runId: string; type: string }>(`/api/tasks/${id}/runs`, {
-      method: "POST",
-      body: JSON.stringify({ params: params ?? {} }),
-    }),
-
-  /** Get a single run under a Task. */
-  getTaskRun: (id: string, runId: string) =>
-    request<{ run: any }>(`/api/tasks/${id}/runs/${runId}`),
-
-  /** List triggers on a Task (blueprint/standalone only). */
-  listTaskTriggers: (id: string) => request<{ triggers: any[] }>(`/api/tasks/${id}/triggers`),
-
-  createTaskTrigger: (
-    id: string,
-    data: {
-      type: TriggerType;
-      config?: Record<string, unknown>;
-      paramMapping?: Record<string, unknown>;
-      enabled?: boolean;
-    },
-  ) =>
-    request<{ trigger: any }>(`/api/tasks/${id}/triggers`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  updateTaskTrigger: (
-    id: string,
-    triggerId: string,
-    data: Partial<{
-      config: Record<string, unknown>;
-      paramMapping: Record<string, unknown>;
-      enabled: boolean;
-    }>,
-  ) =>
-    request<{ trigger: any }>(`/api/tasks/${id}/triggers/${triggerId}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    }),
-
-  deleteTaskTrigger: (id: string, triggerId: string) =>
-    request<null>(`/api/tasks/${id}/triggers/${triggerId}`, { method: "DELETE" }),
-
   // ── Task Configs (legacy — prefer unified /api/tasks endpoints above) ─────
 
-  listTaskConfigs: () => request<{ taskConfigs: any[] }>("/api/task-configs"),
-
   getTaskConfig: (id: string) => request<{ taskConfig: any }>(`/api/task-configs/${id}`),
-
-  createTaskConfig: (data: {
-    name: string;
-    description?: string;
-    title: string;
-    prompt: string;
-    promptTemplateId?: string;
-    repoUrl: string;
-    repoBranch?: string;
-    agentType?: string;
-    maxRetries?: number;
-    priority?: number;
-    enabled?: boolean;
-  }) =>
-    request<{ taskConfig: any }>("/api/task-configs", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
 
   updateTaskConfig: (
     id: string,
@@ -1956,50 +1829,6 @@ export const api = {
     request<{ agent: any; inbox: { pending: number; oldest: string | null } }>(
       `/api/persistent-agents/${id}`,
     ),
-
-  createPersistentAgent: (data: {
-    slug: string;
-    name: string;
-    description?: string;
-    agentRuntime?: string;
-    model?: string | null;
-    /** Per-turn agent parameters keyed like the provider catalog; null = defaults. */
-    agentOptions?: Record<string, string | boolean> | null;
-    systemPrompt?: string | null;
-    agentsMd?: string | null;
-    initialPrompt: string;
-    podLifecycle?: "always-on" | "sticky" | "on-demand";
-    idlePodTimeoutMs?: number;
-    maxTurnDurationMs?: number;
-    maxTurns?: number;
-    consecutiveFailureLimit?: number;
-    enabled?: boolean;
-    owner?: ResourceOwner;
-    podSecrets?: string[] | null;
-  }) =>
-    request<{ agent: any }>(`/api/persistent-agents`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  createPersistentAgentTrigger: (
-    id: string,
-    data: {
-      type: TriggerType;
-      config?: Record<string, unknown>;
-      enabled?: boolean;
-    },
-  ) =>
-    request<{ trigger: any }>(`/api/persistent-agents/${id}/triggers`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  updatePersistentAgent: (id: string, data: Record<string, unknown>) =>
-    request<{ agent: any }>(`/api/persistent-agents/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    }),
 
   deletePersistentAgent: (id: string) =>
     request<undefined>(`/api/persistent-agents/${id}`, { method: "DELETE" }),
