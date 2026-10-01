@@ -15,7 +15,8 @@ import Foundation
 //          (in the directory as it is, or on a new branch that becomes a PR)
 //   WHO    a terminal with no agent, or an agent runtime and its parameters
 //   WHAT   the prompt (agents only), with the trigger's params available
-//   THEN   what happens when a turn ends: exits / waits for me / persistent agent
+//   THEN   what happens when a turn ends: exits / works until the PR merges /
+//          waits for me / persistent agent
 //   NAME   yours, or "Job N" / "Terminal N" for its kind
 
 enum WorkForm {
@@ -23,8 +24,13 @@ enum WorkForm {
 
     enum Then: String, CaseIterable, Hashable, Sendable {
         case exits
+        /// Opens a PR, then comes back for failing CI, conflicts and review feedback until it merges.
+        case untilMerged = "until-merged"
         case waitsForMe = "waits-for-me"
         case waitsForMessages = "waits-for-messages"
+
+        /// One headless run (or one per firing), not a session (web `isOneShot`).
+        var isOneShot: Bool { self == .exits || self == .untilMerged }
     }
 
     enum TriggerType: String, CaseIterable, Hashable, Sendable {
@@ -186,6 +192,9 @@ enum WorkForm {
         var agentOptions: AgentOptions = [:]
         var prompt = ""
         var then: Then = .exits
+        /// `.untilMerged` only: merge the PR once it's green and approved (vs. keep
+        /// it green and leave the merge to you).
+        var mergeWhenReady = true
         var agent = AgentExtras()
         /// Blank = "<Kind> N" (see `kindWord`).
         var name = ""
@@ -278,6 +287,18 @@ enum WorkForm {
             if d.runtime.isEmpty { d.runtime = "claude-code" }
             d.agentOptions = [:]
             d.then = .exits
+            return d
+        },
+        Preset(id: "assign", label: "Assign to Optio", hint: "Issues labeled optio become PRs an agent works on until they merge.", systemImage: "arrow.triangle.merge") { d in
+            var d = d
+            d.when = .ticket
+            d.trigger = TriggerConfig(type: .ticket, ticketSource: .github, ticketLabels: ["optio"])
+            d.location.runTarget = .cluster
+            d.withRepo = true
+            if d.runtime.isEmpty { d.runtime = "claude-code" }
+            d.agentOptions = [:]
+            d.then = .untilMerged
+            d.mergeWhenReady = true
             return d
         },
         Preset(id: "chat", label: "Interactive chat", hint: "An agent session on your machine you can type into.", systemImage: "bubble.left.and.text.bubble.right") { d in
@@ -422,8 +443,13 @@ enum WorkForm {
             : isTerminal ? "A persistent agent needs an agent runtime."
             : d.withRepo ? "Persistent agents don't attach to a repo — pick No repo above."
             : nil
+        let untilMerged: String? =
+            isTerminal ? "Following a PR through needs an agent to fix what CI and reviewers find."
+            : !d.withRepo ? (local ? "It works on the PR it opens — pick “On a new branch” above." : "It works on the PR it opens — pick a repository above.")
+            : nil
         return [
             Choice(value: .exits, disabled: isTerminal ? "A terminal with no agent waits for you." : nil),
+            Choice(value: .untilMerged, disabled: untilMerged),
             Choice(value: .waitsForMe, disabled: waitsForMe),
             Choice(value: .waitsForMessages, disabled: messages),
         ]
@@ -518,6 +544,92 @@ enum WorkForm {
         (repoUrlFromRemote(repoUrl) ?? repoUrl).replacing(/^https:\/\//, with: "")
     }
 
+    // MARK: - PR follow-through
+
+    /// The repo settings that decide what happens to a PR after it opens (web `RepoPrSettings`).
+    struct RepoPrSettings: Hashable, Sendable {
+        var autoResume: Bool? = nil
+        var autoMerge: Bool? = nil
+        var cautiousMode: Bool? = nil
+        var reviewEnabled: Bool? = nil
+        var reviewTrigger: String? = nil
+        var maxAutoResumes: Int? = nil
+
+        init(autoResume: Bool? = nil, autoMerge: Bool? = nil, cautiousMode: Bool? = nil,
+             reviewEnabled: Bool? = nil, reviewTrigger: String? = nil, maxAutoResumes: Int? = nil) {
+            self.autoResume = autoResume
+            self.autoMerge = autoMerge
+            self.cautiousMode = cautiousMode
+            self.reviewEnabled = reviewEnabled
+            self.reviewTrigger = reviewTrigger
+            self.maxAutoResumes = maxAutoResumes
+        }
+
+        /// Reads the columns off a raw `/api/repos` row.
+        init(row: [String: AnyCodable]) {
+            self.init(
+                autoResume: row["autoResume"]?.boolValue,
+                autoMerge: row["autoMerge"]?.boolValue,
+                cautiousMode: row["cautiousMode"]?.boolValue,
+                reviewEnabled: row["reviewEnabled"]?.boolValue,
+                reviewTrigger: row["reviewTrigger"]?.stringValue,
+                maxAutoResumes: row["maxAutoResumes"]?.intValue
+            )
+        }
+    }
+
+    /// The server's cap when a repo sets none (`OPTIO_MAX_AUTO_RESUMES`' default).
+    static let defaultMaxAutoResumes = 10
+
+    /// One line of "What happens to the PR".
+    struct FollowThroughStep: Hashable, Sendable, Identifiable {
+        enum Key: String, Hashable, Sendable { case pr, review, ci, changes, merge, done }
+        let key: Key
+        let label: String
+        let on: Bool
+        var detail: String? = nil
+        var id: Key { key }
+    }
+
+    /// The checklist, and whether it comes from the repo's settings (vs. this work's own).
+    struct FollowThrough: Hashable, Sendable {
+        let fromRepo: Bool
+        let steps: [FollowThroughStep]
+    }
+
+    /// What happens to the PR once the agent opens it, step by step — the same
+    /// rules the reconciler applies: a task's own follow-through (`.untilMerged`)
+    /// wins over the repo's settings, review is always the repo's, and cautious
+    /// mode (draft PRs) never merges. Nil when the work doesn't open a PR.
+    static func followThrough(_ d: Draft, repo: RepoPrSettings?) -> FollowThrough? {
+        guard d.withRepo, d.runtime != terminal, d.then.isOneShot else { return nil }
+        let own = d.then == .untilMerged
+        let resume = own ? true : repo?.autoResume == true
+        let merge = own ? d.mergeWhenReady : repo?.autoMerge == true
+        let cautious = repo?.cautiousMode == true
+        let cap = repo?.maxAutoResumes ?? defaultMaxAutoResumes
+        // The reconciler launches a review only on these two triggers.
+        let reviewOn = repo?.reviewEnabled == true && (repo?.reviewTrigger == "on_pr" || repo?.reviewTrigger == "on_ci_pass")
+        let resumes = "the agent picks it back up (up to \(cap) times)"
+        let reviewDetail = !reviewOn ? "Off for this repo — turn it on in the repo's settings."
+            : repo?.reviewTrigger == "on_pr" ? "As soon as the PR opens."
+            : "Once CI passes."
+        let mergeDetail = merge && cautious ? "Held back: this repo opens draft PRs (cautious mode), so a person merges."
+            : merge ? "Squash-merges once checks pass and any blocking review is done."
+            : "You merge it."
+        return FollowThrough(fromRepo: !own, steps: [
+            FollowThroughStep(key: .pr, label: cautious ? "Opens a draft PR" : "Opens a PR", on: true,
+                              detail: "The agent's turn ends here; Optio watches CI and reviews from then on."),
+            FollowThroughStep(key: .review, label: "A review agent reviews it", on: reviewOn, detail: reviewDetail),
+            FollowThroughStep(key: .ci, label: "Fixes failing CI and merge conflicts", on: resume,
+                              detail: resume ? "When checks fail or it conflicts, \(resumes)." : "It waits for you."),
+            FollowThroughStep(key: .changes, label: "Addresses requested changes", on: resume,
+                              detail: resume ? "When a reviewer requests changes, \(resumes)." : "It waits for you to resume it."),
+            FollowThroughStep(key: .merge, label: "Merges when it's ready", on: merge && !cautious, detail: mergeDetail),
+            FollowThroughStep(key: .done, label: "Completes on merge, fails if the PR is closed", on: true),
+        ])
+    }
+
     // MARK: - Kind: the storage row a draft becomes
 
     enum Kind: String, Hashable, Sendable {
@@ -582,7 +694,7 @@ enum WorkForm {
         switch d.when {
         case .manual:
             if d.then == .waitsForMessages { return [.text("Woken by messages,")] }
-            return [.text(d.then == .exits ? "Started now," : "Opened now,")]
+            return [.text(d.then.isOneShot ? "Started now," : "Opened now,")]
         case .schedule:
             let cron = d.trigger.cronExpression?.trimmingCharacters(in: .whitespaces) ?? ""
             if !cronIsValid(cron) {
@@ -635,6 +747,10 @@ enum WorkForm {
 
         switch d.then {
         case .exits: parts.append(.text(d.withRepo ? "that opens a PR and exits when done." : "that exits when done."))
+        case .untilMerged:
+            parts.append(.text(d.mergeWhenReady
+                ? "that opens a PR and keeps working on it until it merges."
+                : "that opens a PR and keeps it green until you merge it."))
         case .waitsForMe: parts.append(.text("that waits for you between turns."))
         case .waitsForMessages: parts.append(.text("that keeps its memory between turns."))
         }
@@ -675,6 +791,7 @@ enum WorkForm {
         if d.when != .manual { return "Save" }
         switch d.then {
         case .exits: return d.withRepo ? "Start work (opens a PR)" : "Start work"
+        case .untilMerged: return "Start work (until merged)"
         case .waitsForMe, .waitsForMessages: return "Open session"
         }
     }

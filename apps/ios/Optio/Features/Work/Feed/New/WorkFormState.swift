@@ -143,6 +143,9 @@ final class WorkFormState {
 
     func setThen(_ then: F.Then) { edit { $0.then = then } }
 
+    /// "Work until merged": merge the PR once it's ready (vs. you merge it).
+    func setMergeWhenReady(_ merge: Bool) { edit { $0.mergeWhenReady = merge } }
+
     func setRepo(_ repoId: String) {
         guard let repo = repos.first(where: { $0.id == repoId }) else { return }
         edit { d in
@@ -225,6 +228,15 @@ final class WorkFormState {
     var sentence: [F.SentencePart] { F.describe(draft, sentenceContext) }
     var gaps: [F.SentenceField] { F.missingFields(draft, sentenceContext) }
     var wantsRepoUrl: Bool { draft.withRepo && draft.then != .waitsForMessages }
+    /// The repo whose settings decide what happens to the PR: the picked repo on a
+    /// pod, or on a machine the registered repo the checkout belongs to, if any.
+    var policyRepo: SessionFormRepo? {
+        if !isLocal { return repoRow }
+        guard !effectiveRepoUrl.isEmpty else { return nil }
+        return repos.first { F.repoUrlFromRemote($0.repoUrl) == effectiveRepoUrl }
+    }
+    /// "What happens to the PR", or nil when the work doesn't open one.
+    var prPlan: F.FollowThrough? { F.followThrough(draft, repo: policyRepo.map { F.RepoPrSettings(row: $0.raw) }) }
     var canSubmit: Bool { !submitting && gaps.isEmpty && (!wantsRepoUrl || !effectiveRepoUrl.isEmpty) }
     var autoName: String { "\(F.kindWord(kind)) \((sessionCount ?? 0) + 1)" }
     var params: [String] { F.triggerParams(draft.when) }
@@ -256,6 +268,7 @@ final class WorkFormState {
     var summaryThen: String {
         switch draft.then {
         case .exits: return "Exit when done"
+        case .untilMerged: return "Work until merged"
         case .waitsForMe: return "Wait for me"
         case .waitsForMessages: return "Persistent agent"
         }

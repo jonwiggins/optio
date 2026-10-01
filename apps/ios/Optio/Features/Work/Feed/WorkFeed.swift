@@ -75,6 +75,8 @@ enum WorkView: String, Hashable, Sendable, CaseIterable, Identifiable {
 /// Exit conditions (`Then` in `components/session-form/model.ts`).
 enum SessionThen: String, Hashable, Sendable {
     case exits
+    /// A Task (or scheduled Task) with its own PR follow-through: works the PR until it merges.
+    case untilMerged = "until-merged"
     case waitsForMe = "waits-for-me"
     case waitsForMessages = "waits-for-messages"
 
@@ -82,6 +84,7 @@ enum SessionThen: String, Hashable, Sendable {
     var label: String {
         switch self {
         case .exits: return "exits"
+        case .untilMerged: return "until merged"
         case .waitsForMe: return "waits for me"
         case .waitsForMessages: return "persistent"
         }
@@ -90,6 +93,7 @@ enum SessionThen: String, Hashable, Sendable {
     var systemImage: String {
         switch self {
         case .exits: return "rectangle.portrait.and.arrow.right"
+        case .untilMerged: return "arrow.triangle.merge"
         case .waitsForMe: return "terminal"
         case .waitsForMessages: return "cpu"
         }
@@ -198,6 +202,8 @@ enum WorkFeed {
         var agentType: String?
         var agentRuntime: String?
         var prUrl: String?
+        /// PR follow-through over the repo's settings ("Works until merged"); nil = the repo's.
+        var autoResume: Bool?
         var runTarget: String?
         var localHostId: String?
         var localDir: String?
@@ -424,7 +430,7 @@ enum WorkFeed {
                     when: spawned ? "on a trigger" : "now",
                     where: local ? machine(t.localHostId, t.localDir) : SessionWhere(target: .pod, detail: shortRepo(t.repoUrl)),
                     who: t.agentType ?? "claude-code",
-                    then: .exits,
+                    then: t.autoResume == true ? .untilMerged : .exits,
                     status: status, statusLabel: statusLabel,
                     note: t.prUrl.flatMap { $0.split(separator: "/").last }.map { "PR \($0)" },
                     prUrl: t.prUrl,
@@ -439,9 +445,9 @@ enum WorkFeed {
                     when: "on a trigger",
                     where: local ? machine(t.localHostId, t.localDir) : SessionWhere(target: .pod, detail: shortRepo(t.repoUrl)),
                     who: t.agentType ?? "claude-code",
-                    then: .exits,
+                    then: t.autoResume == true ? .untilMerged : .exits,
                     status: paused ? .paused : .scheduled, statusLabel: paused ? "paused" : "armed",
-                    note: "opens a PR each run",
+                    note: t.autoResume == true ? "works each PR until it merges" : "opens a PR each run",
                     prUrl: nil,
                     lastActivity: last,
                     recurring: true, spawned: false
