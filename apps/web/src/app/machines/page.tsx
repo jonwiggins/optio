@@ -1,27 +1,52 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ExternalLink, FolderPlus, Laptop, Merge, Plus, RefreshCw, X } from "lucide-react";
+import {
+  Bot,
+  Briefcase,
+  ChevronDown,
+  ChevronRight,
+  FolderGit2,
+  FolderOpen,
+  FolderPlus,
+  Laptop,
+  Merge,
+  Plus,
+  RefreshCw,
+  Server,
+  X,
+} from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { shortDir, type WorkRow } from "@/lib/work-feed";
+import {
+  groupWorkByPlace,
+  nowSummary,
+  placeSize,
+  type PlaceWork,
+  type PodGroup,
+} from "@/lib/work-places";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
+import { useWorkFeed } from "@/hooks/use-work-feed";
 import { PageHeader } from "@/components/page-header";
+import { WorkRowView } from "@/components/work-row";
 import { AutomationsSection } from "@/components/local/automations-section";
 import { likelySameComputer, mergeTargets } from "@/components/local/host-merge";
 import { PairMachineGuide } from "@/components/local/pair-machine";
 import { AddDirForm, HostDirList, dirsLockedReason } from "@/components/local/host-dirs";
 
 /**
- * Your paired machines (Optio Local hosts) and the directories each one
- * offers as a place to run work. Pairing is setup, not daily work, so
- * this lives in the Library next to Repos. "Add machine" walks through
- * pairing another computer; each machine's directories are added and
- * removed here, through its daemon. Local Automations (agent / terminal
- * specs that fire on events in one of these directories) are edited here
- * too — they're per-machine configuration, not live work.
+ * Where work runs. Each paired machine (Optio Local host) with the work on
+ * it — what's live there now, and what's set up to run there (automations,
+ * Jobs and scheduled Tasks pointed at it) — and, as that machine's setup,
+ * the directories it offers. Then the Optio pods: the cluster as the other
+ * place work runs, grouped by repo, Jobs and persistent agents. Rows come
+ * from the Work feed (`GET /api/work`), grouped by `where.hostId` in
+ * `lib/work-places.ts`. "Add machine" walks through pairing another
+ * computer; Local Automations are created from the section at the bottom.
  */
 export default function MachinesPage() {
   usePageTitle("Machines");
@@ -31,6 +56,7 @@ export default function MachinesPage() {
   const { hosts, loading, refetch, replaceHost } = useLocalHosts({
     pollMs: fastPoll ? 3000 : undefined,
   });
+  const work = useWorkFeed();
   const noHosts = !loading && hosts.length === 0;
   const showGuide = pairing || noHosts;
   useEffect(() => setFastPoll(showGuide), [showGuide]);
@@ -40,12 +66,35 @@ export default function MachinesPage() {
     if (new URLSearchParams(window.location.search).get("pair") === "1") setPairing(true);
   }, []);
 
+  // Online machines first, then by name.
+  const sortedHosts = useMemo(
+    () =>
+      [...hosts].sort(
+        (a: any, b: any) =>
+          Number(b.state === "online") - Number(a.state === "online") ||
+          String(a.name).localeCompare(String(b.name)),
+      ),
+    [hosts],
+  );
+  const places = useMemo(
+    () =>
+      groupWorkByPlace(
+        work.rows,
+        hosts.map((h: any) => h.id),
+      ),
+    [work.rows, hosts],
+  );
+  const refresh = () => {
+    refetch();
+    work.refetch();
+  };
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <PageHeader
         icon={Laptop}
         title="Machines"
-        description="Computers paired with Optio Local. A session that runs “on my machine” runs in one of these directories, with that machine's own agent CLI and login."
+        description="Where your work runs: each computer paired with Optio Local and what runs on it — with that machine's own agent CLI and login — then the Optio pods in the cluster."
         actions={
           <div className="flex items-center gap-1">
             {!showGuide && (
@@ -58,11 +107,11 @@ export default function MachinesPage() {
               </button>
             )}
             <button
-              onClick={refetch}
+              onClick={refresh}
               className="p-2 rounded-lg hover:bg-bg-hover text-text-muted transition-all btn-press hover:text-text"
               title="Refresh"
             >
-              <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+              <RefreshCw className={cn("w-4 h-4", (loading || work.loading) && "animate-spin")} />
             </button>
           </div>
         }
@@ -92,47 +141,289 @@ export default function MachinesPage() {
       {loading && hosts.length === 0 ? (
         <div className="h-32 skeleton-shimmer rounded-lg" />
       ) : hosts.length === 0 ? null : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {hosts.map((h: any) => (
-            <div key={h.id} className="rounded-xl border border-border/70 bg-bg-card/40 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "w-2 h-2 rounded-full shrink-0",
-                        h.state === "online" ? "bg-success" : "bg-text-muted/40",
-                      )}
-                    />
-                    <h2 className="text-sm font-medium text-text-heading truncate">{h.name}</h2>
-                  </div>
-                  <p className="text-[11px] text-text-muted mt-0.5">
-                    {h.platform}
-                    {h.arch ? ` · ${h.arch}` : ""}
-                    {h.daemonVersion ? ` · daemon ${h.daemonVersion}` : ""}
-                    {h.lastSeenAt ? ` · seen ${formatRelativeTime(h.lastSeenAt)}` : ""}
-                  </p>
-                </div>
-                <Link
-                  href="/work"
-                  className="text-[11px] text-primary hover:underline inline-flex items-center gap-1 shrink-0"
-                >
-                  Work <ExternalLink className="w-3 h-3" />
-                </Link>
-              </div>
-              <div className="mt-3">
-                <HostDirList host={h} onChanged={replaceHost} />
-                <HostDirAdder host={h} onAdded={replaceHost} />
-              </div>
-              {h.state !== "online" && likelySameComputer(h, hosts) && (
-                <MergeInto source={h} hosts={hosts} onMerged={refetch} />
-              )}
-            </div>
+        <div className="space-y-4">
+          <PlaceHeading icon={Laptop} title="Your machines" />
+          {sortedHosts.map((h: any) => (
+            <MachineSection
+              key={h.id}
+              host={h}
+              hosts={hosts}
+              work={places.machines[h.id] ?? { now: [], setUp: [] }}
+              loadingWork={work.loading}
+              onHostChanged={replaceHost}
+              onMerged={refetch}
+            />
           ))}
+          {placeSize(places.otherMachines) > 0 && (
+            <section
+              aria-label="Other machines"
+              className="rounded-xl border border-border/70 overflow-hidden"
+            >
+              <header className="px-4 py-3 bg-bg-card/40">
+                <h3 className="text-sm font-medium text-text-heading">Other machines</h3>
+                <p className="text-[11px] text-text-muted mt-0.5">
+                  Work set to run on a machine that isn&apos;t one of yours — a teammate&apos;s, or
+                  one that was removed.
+                </p>
+              </header>
+              <PlaceRows work={places.otherMachines} />
+            </section>
+          )}
         </div>
       )}
 
-      {hosts.length > 0 && <AutomationsSection hosts={hosts} defaultOpen />}
+      <PodsSection groups={places.pods} loading={work.loading && work.rows.length === 0} />
+
+      {hosts.length > 0 && <AutomationsSection hosts={hosts} />}
+    </div>
+  );
+}
+
+/** A heading over one kind of place ("Your machines", "Optio pods"). */
+function PlaceHeading({
+  icon: Icon,
+  title,
+  hint,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  hint?: string;
+}) {
+  return (
+    <div className="flex items-baseline gap-2 pt-2">
+      <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-text-muted">
+        <Icon className="w-3.5 h-3.5" />
+        {title}
+      </h2>
+      {hint && <span className="text-xs text-text-muted/70 truncate">{hint}</span>}
+    </div>
+  );
+}
+
+/** How many rows of each half a place shows before "N more in Work". */
+const ROWS_SHOWN = 6;
+
+/**
+ * A place's work: "Now" (live, needs-you first), then "Set up to run here"
+ * (recurring definitions and standing agents), each a flush list of Work rows.
+ */
+function PlaceRows({
+  work,
+  whereLabel,
+  empty = "Nothing running here, and nothing set up to run here.",
+  setUpTitle = "Set up to run here",
+}: {
+  work: PlaceWork;
+  whereLabel?: (row: WorkRow) => string | undefined;
+  empty?: string;
+  setUpTitle?: string;
+}) {
+  if (placeSize(work) === 0) {
+    return <p className="px-4 py-3 text-xs text-text-muted border-t border-border/60">{empty}</p>;
+  }
+  return (
+    <>
+      <RowList title="Now" rows={work.now} more="/work?view=active" whereLabel={whereLabel} />
+      <RowList
+        title={setUpTitle}
+        rows={work.setUp}
+        more="/work?view=recurring"
+        whereLabel={whereLabel}
+      />
+    </>
+  );
+}
+
+function RowList({
+  title,
+  rows,
+  more,
+  whereLabel,
+}: {
+  title: string;
+  rows: WorkRow[];
+  more: string;
+  whereLabel?: (row: WorkRow) => string | undefined;
+}) {
+  if (rows.length === 0) return null;
+  const hidden = rows.length - ROWS_SHOWN;
+  return (
+    <div className="border-t border-border/60">
+      <div className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted/80">
+        {title}
+      </div>
+      <div className="divide-y divide-border/60">
+        {rows.slice(0, ROWS_SHOWN).map((r) => (
+          <WorkRowView key={r.key} row={r} whereLabel={whereLabel?.(r)} />
+        ))}
+      </div>
+      {hidden > 0 && (
+        <Link
+          href={more}
+          className="block px-4 py-2 text-[11px] text-text-muted hover:text-primary border-t border-border/60"
+        >
+          {hidden} more in Work →
+        </Link>
+      )}
+    </div>
+  );
+}
+
+/** On a machine the row already sits under its name: its chip names only the directory. */
+const machineWhere = (row: WorkRow) => shortDir(row.where.dir) ?? undefined;
+
+/**
+ * One paired machine: who it is and whether it's connected, the work on it,
+ * and its setup — the directories it offers (collapsed unless it has none)
+ * and, for a stale duplicate, a merge offer.
+ */
+function MachineSection({
+  host,
+  hosts,
+  work,
+  loadingWork,
+  onHostChanged,
+  onMerged,
+}: {
+  host: any;
+  hosts: any[];
+  work: PlaceWork;
+  loadingWork: boolean;
+  onHostChanged: (host: any) => void;
+  onMerged: () => void;
+}) {
+  const online = host.state === "online";
+  const dirs: any[] = host.dirs ?? [];
+  const [dirsOpen, setDirsOpen] = useState(dirs.length === 0);
+  const summary = nowSummary(work);
+  return (
+    <section aria-label={host.name} className="rounded-xl border border-border/70 overflow-hidden">
+      <header className="flex items-start justify-between gap-3 px-4 py-3 bg-bg-card/40">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "w-2 h-2 rounded-full shrink-0",
+                online ? "bg-success" : "bg-text-muted/40",
+              )}
+              aria-label={online ? "online" : "offline"}
+            />
+            <h3 className="text-sm font-medium text-text-heading truncate">{host.name}</h3>
+            <span className={cn("text-[11px]", online ? "text-success" : "text-text-muted")}>
+              {online ? "online" : "offline"}
+            </span>
+          </div>
+          <p className="text-[11px] text-text-muted mt-0.5">
+            {host.platform}
+            {host.arch ? ` · ${host.arch}` : ""}
+            {host.daemonVersion ? ` · daemon ${host.daemonVersion}` : ""}
+            {host.lastSeenAt ? ` · seen ${formatRelativeTime(host.lastSeenAt)}` : ""}
+          </p>
+        </div>
+        {summary && (
+          <span className="text-[11px] text-text-muted whitespace-nowrap pt-0.5">{summary}</span>
+        )}
+      </header>
+
+      {loadingWork && placeSize(work) === 0 ? (
+        <div className="h-12 skeleton-shimmer border-t border-border/60" />
+      ) : (
+        <PlaceRows work={work} whereLabel={machineWhere} />
+      )}
+
+      <div className="px-4 py-2.5 border-t border-border/60 bg-bg-card/20">
+        <button
+          type="button"
+          onClick={() => setDirsOpen(!dirsOpen)}
+          aria-expanded={dirsOpen}
+          className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text transition-colors"
+        >
+          {dirsOpen ? (
+            <ChevronDown className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5" />
+          )}
+          <FolderOpen className="w-3.5 h-3.5" />
+          Directories
+          <span className="text-text-muted/60">({dirs.length})</span>
+        </button>
+        {dirsOpen && (
+          <div className="mt-2">
+            <HostDirList host={host} onChanged={onHostChanged} />
+            <HostDirAdder host={host} onAdded={onHostChanged} />
+          </div>
+        )}
+        {!online && likelySameComputer(host, hosts) && (
+          <MergeInto source={host} hosts={hosts} onMerged={onMerged} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+const GROUP_ICON: Record<PodGroup["kind"], React.ComponentType<{ className?: string }>> = {
+  repo: FolderGit2,
+  jobs: Briefcase,
+  agents: Bot,
+  other: Server,
+};
+
+/**
+ * The cluster as the other place work runs: Repo Tasks, pod sessions and
+ * scheduled Tasks by repo (one pod set per repo), Jobs and their runs
+ * (pooled pods per Job), and persistent agents (a pod each).
+ */
+function PodsSection({ groups, loading }: { groups: PodGroup[]; loading: boolean }) {
+  return (
+    <div className="space-y-4 mt-8">
+      <PlaceHeading
+        icon={Server}
+        title="Optio pods"
+        hint="Work that runs in the cluster, with the workspace's secrets and connections"
+      />
+      {loading ? (
+        <div className="h-24 skeleton-shimmer rounded-lg" />
+      ) : groups.length === 0 ? (
+        <p className="rounded-xl border border-border/70 px-4 py-3 text-xs text-text-muted">
+          Nothing running in Optio pods, and nothing set up to.{" "}
+          <Link href="/work/new" className="text-primary hover:underline">
+            New work
+          </Link>
+        </p>
+      ) : (
+        groups.map((g) => {
+          const Icon = GROUP_ICON[g.kind];
+          const summary = nowSummary(g.work);
+          return (
+            <section
+              key={g.key}
+              aria-label={g.label}
+              className="rounded-xl border border-border/70 overflow-hidden"
+            >
+              <header className="flex items-center justify-between gap-3 px-4 py-2.5 bg-bg-card/40">
+                <h3
+                  className={cn(
+                    "flex items-center gap-2 text-sm font-medium text-text-heading min-w-0",
+                    g.kind === "repo" && "font-mono text-[13px]",
+                  )}
+                >
+                  <Icon className="w-4 h-4 shrink-0 text-text-muted" />
+                  <span className="truncate">{g.label}</span>
+                </h3>
+                {summary && (
+                  <span className="text-[11px] text-text-muted whitespace-nowrap">{summary}</span>
+                )}
+              </header>
+              <PlaceRows
+                work={g.work}
+                setUpTitle={g.kind === "agents" ? "Standing by" : "Set up to run"}
+                // Under a repo's heading its rows needn't repeat it.
+                whereLabel={g.kind === "repo" ? () => "Optio pod" : undefined}
+              />
+            </section>
+          );
+        })
+      )}
     </div>
   );
 }

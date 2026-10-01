@@ -42,7 +42,12 @@ const THEN_ICON = {
   "waits-for-messages": Bot,
 } as const;
 
-export function WorkRowView({ row }: { row: WorkRow }) {
+/**
+ * `whereLabel` replaces the Where chip's text where the place is already
+ * said around the row (the Machines page lists a machine's work under it,
+ * so its rows name only the directory).
+ */
+export function WorkRowView({ row, whereLabel }: { row: WorkRow; whereLabel?: string }) {
   const router = useRouter();
   const ThenIcon = THEN_ICON[row.then];
   const WhenIcon = row.when === "now" ? Play : row.when === "messages" ? Bot : Clock;
@@ -71,7 +76,9 @@ export function WorkRowView({ row }: { row: WorkRow }) {
         )}
         <Attr
           icon={WhereIcon}
-          label={row.where.detail ?? (row.where.target === "pod" ? "Optio pod" : "machine")}
+          label={
+            whereLabel ?? row.where.detail ?? (row.where.target === "pod" ? "Optio pod" : "machine")
+          }
           mono
         />
         <Attr

@@ -84,7 +84,7 @@ Sidebar (v0.6): **Overview** · **Work** · **Reviews** · **Inbox** · **Librar
 - **`/work`**, **`/work/new`** — the unified feed and the one creation form. `/tasks/new`, `/jobs/new`, `/agents/new`, and the v0.5 `/sessions/new` redirect here.
 - **`/reviews`**, **`/reviews/:id`** — code-review subtasks plus external PR reviews, with CI / review / merge tracking.
 - **`/issues`** (Inbox) — GitHub / GitLab Issues across connected repos. "Assign to Optio" creates a `repo-task`.
-- **`/machines`** — paired Optio Local hosts and their directory allowlists.
+- **`/machines`** — where work runs: each paired Optio Local host with the work on it (live now, and set up to run there — grouped by the feed's `where.hostId`, `lib/work-places.ts`) and its directory allowlist, then the Optio pods' work grouped by repo, Jobs, and persistent agents.
 - Detail pages per kind still exist and link back to `/work`: `/tasks/:id`, `/tasks/scheduled/:id`, `/jobs/:id`, `/jobs/:id/runs/:runId`, `/agents/:id`, `/local/:id`, `/sessions/:id` (pod sessions — the one place the word keeps its narrow meaning).
 - The per-kind list pages are retired: `/tasks`, `/jobs`, `/tasks/scheduled`, `/agents`, `/local`, and the v0.5 `/sessions` redirect to the matching `/work?view=…`. Recurring work (scheduled Tasks, Jobs, Local Automations) each have a page about them (`/tasks/scheduled/:id`, `/jobs/:id`, `/local/automations/:id`: stats, triggers, prior runs) and are edited at `/work/:id/edit` — the New work form reopened on the saved row, with the kind locked.
 - Legacy `/tasks?tab=standalone|issues|prs` URLs redirect to `/work?view=recurring`, `/issues`, `/reviews`.

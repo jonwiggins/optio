@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// Paired Optio Local hosts (`GET /api/local/hosts`): name, online state,
-/// platform / arch / daemon version, last seen, and the directory allowlist
-/// with detected checkouts marked. Sessions that run on a machine are in the
-/// Sessions list; this is the machine itself — plus the Local Automations that
-/// fire on one of its directories (per-machine configuration, like the web's
-/// `/machines#automations`).
+/// Where work runs (the web's `/machines`). Each paired Optio Local host —
+/// online first — with the work on it: what's live there now and what's set up
+/// to run there (automations, Jobs and scheduled Tasks pointed at it), then, as
+/// the machine's setup, its directory allowlist. Then the Optio pods: the
+/// cluster as the other place work runs, grouped by repo, Jobs and persistent
+/// agents. Rows come from the Work feed (`WorkFeedModel`), grouped by
+/// `where.hostId` in `WorkPlaces`; tapping one opens the same detail screen as
+/// on the Work tab. Local Automations are still created from the link below.
 struct MachinesView: View {
     @Environment(APIClient.self) private var api
     @State private var hosts: [LocalHost] = []
@@ -13,6 +15,7 @@ struct MachinesView: View {
     @State private var error: Error?
     @State private var actionError: String?
     @State private var pendingForget: LocalHost?
+    @State private var feed: WorkFeedModel?
 
     private var sorted: [LocalHost] {
         hosts.sorted { a, b in
@@ -21,7 +24,14 @@ struct MachinesView: View {
         }
     }
 
+    private var places: WorkPlaces {
+        WorkPlaces(rows: feed?.rows ?? [], hostIds: hosts.map(\.id))
+    }
+
+    private var feedLoading: Bool { feed?.loading ?? true }
+
     var body: some View {
+        let places = places
         List {
             if let error {
                 ErrorRow(error: error, what: "machines") { Task { await refresh() } }
@@ -36,15 +46,31 @@ struct MachinesView: View {
             } else {
                 ForEach(sorted, id: \.id) { host in
                     Section {
-                        MachineCard(host: host)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .contextMenu {
-                                Button(role: .destructive) { pendingForget = host } label: { Label("Forget machine", systemImage: "trash") }
-                            }
+                        placeRows(places.machines[host.id] ?? PlaceWork(),
+                                  whereLabel: { WorkFeed.shortDir($0.where.dir) },
+                                  empty: "Nothing running here, and nothing set up to run here.")
+                        MachineDirectories(host: host)
+                    } header: {
+                        MachineHeader(host: host, summary: places.machines[host.id]?.nowSummary) {
+                            pendingForget = host
+                        }
+                        .textCase(nil)
                     }
                 }
+                if !places.otherMachines.isEmpty {
+                    Section {
+                        placeRows(places.otherMachines, empty: "")
+                    } header: {
+                        SectionHeader(title: "Other machines", detail: "a teammate's, or removed").textCase(nil)
+                    }
+                }
+            }
+
+            if loaded {
+                podSections(places.pods)
+            }
+
+            if loaded, !hosts.isEmpty {
                 Section {
                     NavigationLink(value: MachinesRoute.automations) {
                         Label("Automations", systemImage: "square.stack.3d.up")
@@ -55,6 +81,7 @@ struct MachinesView: View {
             }
         }
         .listStyle(.plain)
+        .workDestinations()
         .navigationDestination(for: MachinesRoute.self) { route in
             switch route {
             case .automations: LocalBlueprintsView(hosts: hosts)
@@ -67,13 +94,20 @@ struct MachinesView: View {
             }
         }
         .task {
+            if feed == nil { feed = WorkFeedModel(api: api) }
+            feed?.start()
             await refresh()
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
                 await refresh()
             }
         }
-        .refreshable { await refresh() }
+        .onDisappear { feed?.stop() }
+        .refreshable {
+            async let machines: Void = refresh()
+            async let work: Void? = feed?.refresh()
+            _ = await (machines, work)
+        }
         .confirmationDialog("Forget “\(pendingForget?.name ?? "")”?", isPresented: Binding(get: { pendingForget != nil }, set: { if !$0 { pendingForget = nil } }), titleVisibility: .visible) {
             Button("Forget", role: .destructive) {
                 if let h = pendingForget { Task { await forget(h) } }
@@ -83,6 +117,72 @@ struct MachinesView: View {
             Text("Removes the pairing. Run `optio local up` on the machine to pair it again.")
         }
         .errorToast($actionError)
+    }
+
+    /// The cluster: one section per repo / Jobs / agents, after a heading row.
+    @ViewBuilder
+    private func podSections(_ groups: [PodGroup]) -> some View {
+        Section {
+            if groups.isEmpty {
+                Text(feedLoading ? "Loading…" : "Nothing running in Optio pods, and nothing set up to.")
+                    .font(.footnote).foregroundStyle(.tertiary)
+            }
+        } header: {
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Optio pods", systemImage: "server.rack").font(.headline).foregroundStyle(.primary)
+                Text("Work that runs in the cluster, with the workspace's secrets and connections.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            .textCase(nil)
+            .padding(.top, Spacing.m)
+        }
+        ForEach(groups) { group in
+            Section {
+                placeRows(group.work,
+                          whereLabel: group.kind == .repo ? { _ in "Optio pod" } : nil,
+                          setUpTitle: group.kind == .agents ? "Standing by" : "Set up to run",
+                          empty: "")
+            } header: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: group.systemImage).font(.caption).foregroundStyle(.secondary)
+                    Text(group.label)
+                        .font(group.kind == .repo ? .footnote.monospaced().weight(.semibold) : .footnote.weight(.semibold))
+                        .foregroundStyle(Color(.secondaryLabel))
+                        .lineLimit(1).truncationMode(.head)
+                    Spacer(minLength: Spacing.s)
+                    if let summary = group.work.nowSummary {
+                        Text(summary).font(.footnote).foregroundStyle(Color(.tertiaryLabel))
+                    }
+                }
+                .textCase(nil)
+            }
+        }
+    }
+
+    /// A place's rows: "Now", then what is set up to run there; a quiet line when empty.
+    @ViewBuilder
+    private func placeRows(_ work: PlaceWork,
+                           whereLabel: ((WorkRow) -> String?)? = nil,
+                           setUpTitle: String = "Set up to run here",
+                           empty: String) -> some View {
+        if work.isEmpty {
+            if !empty.isEmpty {
+                Text(feedLoading ? "Loading…" : empty).font(.footnote).foregroundStyle(.tertiary)
+            }
+        } else {
+            if !work.now.isEmpty {
+                SubHeading(title: "Now")
+                ForEach(work.now) { row in
+                    NavigationLink(value: row.destination) { WorkRowView(row: row, whereLabel: whereLabel?(row)) }
+                }
+            }
+            if !work.setUp.isEmpty {
+                SubHeading(title: setUpTitle)
+                ForEach(work.setUp) { row in
+                    NavigationLink(value: row.destination) { WorkRowView(row: row, whereLabel: whereLabel?(row)) }
+                }
+            }
+        }
     }
 
     private func refresh() async {
@@ -110,9 +210,25 @@ enum MachinesRoute: Hashable {
     case automations
 }
 
-/// One machine: identity line, facts, then its directories.
-private struct MachineCard: View {
+/// "Now" / "Set up to run here" inside a place's section.
+private struct SubHeading: View {
+    let title: String
+
+    var body: some View {
+        Text(title.uppercased())
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .listRowSeparator(.hidden)
+            .padding(.top, Spacing.xs)
+    }
+}
+
+/// A machine's section header: who it is, whether it's connected, its facts,
+/// what's live on it, and a menu to forget it.
+private struct MachineHeader: View {
     let host: LocalHost
+    let summary: String?
+    let onForget: () -> Void
 
     private var online: Bool { host.state == .online }
 
@@ -123,56 +239,75 @@ private struct MachineCard: View {
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    private var seen: String? {
+    private var seen: String {
         if online { return "online" }
         if let seen = host.lastSeenAt { return "seen \(seen.relativeDescription)" }
         return "offline"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
-                StateDot(tone: online ? .success : .idle).padding(.top, 2)
-                Text(host.name).font(.body.weight(.semibold)).lineLimit(1)
+                StateDot(tone: online ? .success : .idle)
+                Text(host.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
+                Text(seen)
+                    .font(.footnote)
+                    .foregroundStyle(online ? Tone.success.textStyle : AnyShapeStyle(Color(.tertiaryLabel)))
+                    .lineLimit(1)
                 Spacer(minLength: Spacing.s)
-                if let seen {
-                    Text(seen)
-                        .font(.footnote)
-                        .foregroundStyle(online ? Tone.success.textStyle : AnyShapeStyle(.tertiary))
-                        .lineLimit(1)
+                Menu {
+                    Button(role: .destructive, action: onForget) { Label("Forget machine", systemImage: "trash") }
+                } label: {
+                    Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("\(host.name) options")
+            }
+            HStack(spacing: Spacing.s) {
+                Text(facts).lineLimit(1).truncationMode(.middle)
+                if let summary {
+                    Spacer(minLength: Spacing.s)
+                    Text(summary).foregroundStyle(Color(.secondaryLabel)).lineLimit(1)
                 }
             }
-            Text(facts).font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            .font(.footnote)
+            .foregroundStyle(Color(.tertiaryLabel))
+        }
+        .padding(.top, Spacing.m)
+    }
+}
 
+/// The machine's setup: its directory allowlist, folded away.
+private struct MachineDirectories: View {
+    let host: LocalHost
+    @State private var open = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $open) {
             if host.dirs.isEmpty {
                 Text("No directories exposed — `optio local add <dir>` on the machine.")
                     .font(.footnote).foregroundStyle(.tertiary)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(host.dirs, id: \.path) { dir in
-                        HStack(spacing: 6) {
-                            Image(systemName: dir.repoUrl == nil ? "folder" : "arrow.triangle.branch")
-                                .font(.caption)
-                                .foregroundStyle(dir.repoUrl == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(AppTheme.accent))
-                                .frame(width: 14)
-                            Text(WorkFeed.shortDir(dir.path) ?? dir.path)
-                                .font(.caption.monospaced())
-                                .lineLimit(1)
-                                .truncationMode(.head)
-                            if let repo = WorkFeed.shortRepo(dir.repoUrl) {
-                                Spacer(minLength: Spacing.s)
-                                Text(repo).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
-                            }
+                ForEach(host.dirs, id: \.path) { dir in
+                    HStack(spacing: 6) {
+                        Image(systemName: dir.repoUrl == nil ? "folder" : "arrow.triangle.branch")
+                            .font(.caption)
+                            .foregroundStyle(dir.repoUrl == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(AppTheme.accent))
+                            .frame(width: 14)
+                        Text(WorkFeed.shortDir(dir.path) ?? dir.path)
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                        if let repo = WorkFeed.shortRepo(dir.repoUrl) {
+                            Spacer(minLength: Spacing.s)
+                            Text(repo).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                         }
                     }
                 }
-                .padding(.top, 2)
             }
+        } label: {
+            Label("Directories (\(host.dirs.count))", systemImage: "folder")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
-        .padding(Spacing.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Surface.card, in: Radius.cardShape)
-        .padding(.horizontal, Spacing.l)
-        .padding(.vertical, Spacing.xs)
     }
 }
