@@ -186,3 +186,37 @@ body::after {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Platform article: the composer's answers slide in, the diagram's lines flow. */
+@keyframes composer-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.composer-chip {
+  animation: composer-in 0.45s ease both;
+}
+.composer-sentence {
+  animation: composer-in 0.5s ease 0.35s both;
+}
+@keyframes flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+.flow {
+  stroke-dasharray: 4 6;
+  animation: flow 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-chip,
+  .composer-sentence,
+  .flow {
+    animation: none;
+  }
+}
