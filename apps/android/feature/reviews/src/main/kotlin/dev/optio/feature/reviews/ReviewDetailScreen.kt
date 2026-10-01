@@ -83,6 +83,8 @@ import dev.optio.core.model.AgentLogEntry
 import dev.optio.core.navigation.LocalNavigator
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
+import dev.optio.core.ui.components.Brand
+import dev.optio.core.ui.components.BrandMark
 import dev.optio.core.ui.components.ChatComposer
 import dev.optio.core.ui.components.ConfirmDialog
 import dev.optio.core.ui.components.DetailHeader
@@ -307,7 +309,10 @@ private fun ReviewMenu(
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
                 text = { Text("View on ${review.platformName}") },
-                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null) },
+                leadingIcon = {
+                    val brand = Brand.fromUrl(review.prUrl)
+                    if (brand != null) BrandMark(brand, size = 20.dp, contentDescription = null) else Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
+                },
                 onClick = {
                     open = false
                     actions.onOpenPr()

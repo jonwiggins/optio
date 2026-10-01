@@ -21,26 +21,27 @@
  * Every step is idempotent and CAS-guarded: daemon frames, the reconciler's
  * resync, retries, and user actions all race with each other.
  */
+import { modelProviderIdFrom } from "@optio/shared";
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import {
   TASK_BRANCH_PREFIX,
   TaskState,
   WorkflowRunState,
   localAgentParams,
   normalizeRepoUrl,
-  parsePrUrl,
   parseRepoUrl,
+  prsFromTranscript,
   toLocalAgentKind,
   type LocalAgentKind,
   type LocalAgentSessionMode,
   type LocalTerminalSpec,
+  type PrToolCallMatch,
   type RunLocation,
   type RunTarget,
-  type WorkLink,
 } from "@optio/shared";
 import { db } from "../db/client.js";
-import { tasks, workDefinitions, workflowRuns } from "../db/schema.js";
+import { localTerminalTranscripts, tasks, workDefinitions, workflowRuns } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { canAccessHost, getHost, isDirAllowed, type LocalHostRow } from "./local-host-service.js";
 import {
@@ -51,6 +52,7 @@ import {
   type LocalTerminalRow,
 } from "./local-terminal-service.js";
 import * as taskService from "./task-service.js";
+import { detectTaskPrs } from "./task-pr-service.js";
 import { transitionWorkflowRunCas, type Workflow } from "./workflow-service.js";
 
 type TaskRow = typeof tasks.$inferSelect;
@@ -299,6 +301,7 @@ export async function dispatchLocalWorkflowRun(
       },
       title: run.title ?? `${workflow.name} · ${run.id.slice(0, 8)}`,
       spawnedBy: "job",
+      modelProviderId: modelProviderIdFrom(workflow.agentOptions),
       workflowRunId: run.id,
       triggerId: run.triggerId ?? undefined,
     });
@@ -407,6 +410,7 @@ export async function dispatchLocalTask(
       title: task.title,
       spawnedBy: "task",
       taskId: task.id,
+      modelProviderId: modelProviderIdFrom((task.metadata as any)?.agentOptions),
       ticket:
         task.ticketSource && task.ticketExternalId
           ? {
@@ -457,6 +461,7 @@ export function buildLocalTaskPrompt(
     "---",
     `This is Optio task ${task.id} ("${task.title}") for ${repoName}, running in a local checkout of the repository.`,
     `Work on a branch, never directly on \`${base}\`: create \`${branch}\` from an up-to-date \`${base}\`, commit your changes there, push it, and open a ${noun} against \`${base}\` (for example with ${cmd}) with a clear title and description.`,
+    `If the work needs more than one ${noun}, name each extra branch \`${branch}-<short-slug>\` so Optio tracks every one.`,
     `Print the ${noun} URL when you are done.`,
   ].join("\n");
 }
@@ -612,26 +617,93 @@ async function syncWorkflowRun(terminal: LocalTerminalRow): Promise<void> {
   }
 }
 
-/** The first PR link in the output that belongs to the task's repo. */
-export function prLinkForTask(
-  task: Pick<TaskRow, "repoUrl">,
-  links: WorkLink[] | null | undefined,
-): WorkLink | null {
-  if (!links?.length) return null;
-  const repo = parseRepoUrl(task.repoUrl);
-  for (const link of links) {
-    if (link.kind !== "pr") continue;
-    const pr = parsePrUrl(link.url);
-    if (!pr) continue;
-    if (
-      !repo ||
-      (pr.owner.toLowerCase() === repo.owner.toLowerCase() &&
-        pr.repo.toLowerCase() === repo.repo.toLowerCase())
-    ) {
-      return link;
-    }
+/**
+ * The PRs a local Repo Task's agent created, from the terminal's transcript:
+ * PR-creating tool calls (`gh pr create`, MCP `create_pull_request`, …)
+ * paired with their own results. Links the agent merely printed are not
+ * evidence (they still show as the terminal's links).
+ */
+export async function localTaskPrMatches(
+  terminalId: string,
+  toolUseIds?: string[],
+): Promise<PrToolCallMatch[]> {
+  const kinds = inArray(localTerminalTranscripts.kind, ["tool_use", "tool_result"]);
+  const rows = await db
+    .select({
+      kind: localTerminalTranscripts.kind,
+      text: localTerminalTranscripts.text,
+      detail: localTerminalTranscripts.detail,
+      toolName: localTerminalTranscripts.toolName,
+      toolUseId: localTerminalTranscripts.toolUseId,
+      isError: localTerminalTranscripts.isError,
+    })
+    .from(localTerminalTranscripts)
+    .where(
+      and(
+        eq(localTerminalTranscripts.terminalId, terminalId),
+        kinds,
+        toolUseIds
+          ? inArray(localTerminalTranscripts.toolUseId, toolUseIds)
+          : isNotNull(localTerminalTranscripts.toolUseId),
+      ),
+    )
+    .orderBy(asc(localTerminalTranscripts.seq));
+  return prsFromTranscript(rows);
+}
+
+/**
+ * Find and adopt a local task's PRs: its transcript's PR-creating calls
+ * (confirmed on the git platform) and open PRs on branches under the task's
+ * branch. Returns the task's primary PR URL afterwards.
+ */
+async function detectLocalTaskPrs(
+  task: Pick<TaskRow, "id" | "repoUrl">,
+  terminal: LocalTerminalRow,
+  toolUseIds?: string[],
+): Promise<string | null> {
+  try {
+    const matches = await localTaskPrMatches(terminal.id, toolUseIds);
+    // Mid-run (a transcript batch) only the calls matter; at exit also ask
+    // the platform for PRs on the task's branches.
+    if (toolUseIds && matches.length === 0) return null;
+    const { primaryUrl } = await detectTaskPrs(
+      { id: task.id, repoUrl: task.repoUrl },
+      { matches, runStartedAt: terminal.startedAt ?? terminal.createdAt ?? null },
+    );
+    return primaryUrl;
+  } catch (err) {
+    logger.warn({ err, taskId: task.id, terminalId: terminal.id }, "local: PR detection failed");
+    return null;
   }
-  return null;
+}
+
+/**
+ * New transcript entries for a terminal running a Repo Task: when they hold
+ * the result of a PR-creating call, adopt the PR and move a running task to
+ * pr_opened. Called by local-terminal-service after it stores a batch.
+ */
+export async function onTaskTranscript(
+  terminal: LocalTerminalRow,
+  entries: { kind: string; toolUseId: string | null }[],
+): Promise<void> {
+  if (!terminal.taskId) return;
+  const ids = [
+    ...new Set(
+      entries.filter((e) => e.kind === "tool_result" && e.toolUseId).map((e) => e.toolUseId!),
+    ),
+  ];
+  if (ids.length === 0) return;
+  const task = await taskService.getTask(terminal.taskId);
+  if (!task || task.prUrl) return;
+  if (task.localTerminalId && task.localTerminalId !== terminal.id) return;
+  const prUrl = await detectLocalTaskPrs(task, terminal, ids);
+  if (!prUrl || task.state !== TaskState.RUNNING) return;
+  await taskService.tryTransitionTask(
+    task.id,
+    TaskState.PR_OPENED,
+    "pr_detected",
+    `PR opened in the local session: ${prUrl}`,
+  );
 }
 
 async function syncTask(terminal: LocalTerminalRow): Promise<void> {
@@ -670,15 +742,11 @@ async function syncTask(terminal: LocalTerminalRow): Promise<void> {
       if (state === TaskState.QUEUED) await step(TaskState.PROVISIONING, "local_spawn");
       return;
     case "running": {
-      const running =
-        state === TaskState.RUNNING ||
-        ((state === TaskState.QUEUED || state === TaskState.PROVISIONING) &&
-          (await climbToRunning(state)));
-      if (!running || task.prUrl) return;
-      const pr = prLinkForTask(task, terminal.links);
-      if (!pr) return;
-      await taskService.updateTaskPr(task.id, pr.url);
-      await step(TaskState.PR_OPENED, "pr_detected", `PR detected in the local session: ${pr.url}`);
+      if (state === TaskState.QUEUED || state === TaskState.PROVISIONING) {
+        await climbToRunning(state);
+      }
+      // PRs are adopted from the transcript as the agent creates them
+      // (onTaskTranscript), which moves a running task to pr_opened.
       return;
     }
     case "exited":
@@ -690,7 +758,7 @@ async function syncTask(terminal: LocalTerminalRow): Promise<void> {
       ) {
         return; // pr_opened / cancelled / already terminal: the exit changes nothing
       }
-      const prUrl = task.prUrl ?? prLinkForTask(task, terminal.links)?.url ?? null;
+      const prUrl = task.prUrl ?? (await detectLocalTaskPrs(task, terminal));
       const killed = killedOutcome(terminal);
       const ok = terminal.state === "exited" && terminal.exitCode === 0;
       if (prUrl) {

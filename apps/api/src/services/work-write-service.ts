@@ -203,8 +203,13 @@ async function definitionColumns(
       };
     case "local-blueprint": {
       const problem = await blueprintService.checkBlueprint(
-        { commandTemplate: common.prompt, hostId: spec.where.localHostId },
-        actor.userId,
+        {
+          commandTemplate: common.prompt,
+          hostId: spec.where.localHostId,
+          agent: spec.who.runtime,
+          agentOptions: spec.who.agentOptions,
+        },
+        actor,
       );
       if (problem) throw new WorkError(400, problem);
       return {
@@ -293,7 +298,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
               prompt: columns.prompt!,
               workspaceId: actor.workspaceId,
               ...(kind === "local-blueprint"
-                ? { userId: actor.userId }
+                ? { ownerUserId: actor.userId }
                 : { createdBy: actor.userId }),
             },
             tx,
@@ -422,7 +427,9 @@ export async function getOwnDefinition(id: string, actor: Actor): Promise<WorkDe
   const definition = await definitions.getDefinition(id);
   if (!definition) return null;
   if (definition.kind === "local-blueprint") {
-    return blueprintService.canAccessBlueprint(definition, actor.userId) ? definition : null;
+    return blueprintService.canAccessBlueprint({ userId: definition.ownerUserId }, actor.userId)
+      ? definition
+      : null;
   }
   const ws = definition.workspaceId;
   return !actor.workspaceId || !ws || ws === actor.workspaceId ? definition : null;

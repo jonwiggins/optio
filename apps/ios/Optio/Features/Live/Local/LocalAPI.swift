@@ -35,15 +35,6 @@ struct LocalTrigger: Decodable, Hashable, Identifiable {
             return ""
         }
     }
-
-    var systemImage: String {
-        switch type {
-        case "schedule": return "clock"
-        case "webhook": return "antenna.radiowaves.left.and.right"
-        case "ticket": return "ticket"
-        default: return "play"
-        }
-    }
 }
 
 // MARK: - Request bodies
@@ -308,7 +299,7 @@ enum LocalPresentation {
     static func workLinks(_ t: LocalTerminal) -> [WorkLink] {
         let scanned = t.links
         guard let ticketUrl = t.ticketUrl, !scanned.contains(where: { $0.url == ticketUrl }) else { return scanned }
-        let provider: WorkLinkProvider = t.ticketSource == "gitlab" ? .gitlab : .github
+        let provider = WorkLinkProvider(rawValue: t.ticketSource ?? "github") ?? .unknown
         let label = t.ticketExternalId.map { "#\($0)" } ?? "ticket"
         return [WorkLink(url: ticketUrl, kind: .issue, provider: provider, label: label)] + scanned
     }
@@ -366,26 +357,26 @@ struct WorkLinkBadges: View {
         }
     }
 
+    /// GitHub PRs / issues get Octicons; GitLab, Linear and Jira links their brand.
+    static func glyph(_ link: WorkLink) -> Glyph {
+        switch (link.kind, link.provider) {
+        case (.pr, .github): return .pr(.open)
+        case (.issue, .github): return .issue(open: true)
+        case (_, .gitlab): return .brand(.gitlab)
+        case (_, .linear): return .brand(.linear)
+        case (_, .jira): return .brand(.jira)
+        case (.pr, _): return .symbol("arrow.triangle.pull")
+        case (.ref, _): return .symbol("number")
+        default: return .symbol("circle.circle")
+        }
+    }
+
     var body: some View {
         if !links.isEmpty {
             HStack(spacing: 4) {
                 ForEach(links.prefix(max), id: \.url) { link in
                     if let url = URL(string: link.url) {
-                        Link(destination: url) {
-                            // Explicit HStack: `Label` collapses to icon-only inside a List row's Link.
-                            HStack(spacing: 3) {
-                                Image(systemName: link.kind == .pr ? "arrow.triangle.pull" : link.kind == .ref ? "number" : "circle.circle")
-                                Text(Self.shortLabel(link))
-                            }
-                                .font(.caption2.monospaced())
-                                .lineLimit(1)
-                                .fixedSize()
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.fill.tertiary, in: Radius.smallShape)
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
+                        LinkChip(url: url, glyph: Self.glyph(link), text: Self.shortLabel(link))
                     }
                 }
                 if links.count > max {

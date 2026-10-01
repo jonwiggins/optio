@@ -11,6 +11,7 @@
  * substituted value is shell-single-quoted first — write templates without
  * extra quotes around params (`claude {{prompt}}`, not `claude "{{prompt}}"`).
  */
+import { modelProviderIdFrom } from "@optio/shared";
 import { eq, isNull } from "drizzle-orm";
 import {
   localAgentParams,
@@ -39,12 +40,13 @@ import {
   type LocalHostRow,
 } from "./local-host-service.js";
 import { createTerminal, type LocalTerminalRow } from "./local-terminal-service.js";
+import { providerSelectionError } from "./model-provider-service.js";
 
 /** A Local automation as /api/local/blueprints has always returned it. */
 export function toLocalBlueprint(d: WorkDefinition) {
   return {
     id: d.id,
-    userId: d.userId,
+    userId: d.ownerUserId,
     workspaceId: d.workspaceId,
     name: d.name,
     description: d.description,
@@ -69,7 +71,7 @@ export type LocalBlueprintRow = ReturnType<typeof toLocalBlueprint>;
 
 /** The automations a person owns (none: the unowned rows of auth-disabled dev). */
 export function ownedBy(userId: string | null | undefined) {
-  return userId ? eq(workDefinitions.userId, userId) : isNull(workDefinitions.userId);
+  return userId ? eq(workDefinitions.ownerUserId, userId) : isNull(workDefinitions.ownerUserId);
 }
 
 export function canAccessBlueprint(
@@ -108,15 +110,18 @@ export interface CreateBlueprintInput {
 
 /**
  * What a create / update must carry: a prompt (or a saved prompt that
- * exists), and a host the person owns. Returns the problem, or null.
+ * exists), a host the person owns, and — for an agent — a model provider
+ * the person may use on their machine. Returns the problem, or null.
  */
 export async function checkBlueprint(
   body: {
     commandTemplate?: string;
     promptTemplateId?: string | null;
     hostId?: string | null;
+    agent?: string | null;
+    agentOptions?: Record<string, unknown> | null;
   },
-  userId: string | null | undefined,
+  owner: { userId: string | null | undefined; workspaceId: string | null },
 ): Promise<string | null> {
   if (!body.commandTemplate?.trim() && !body.promptTemplateId) {
     return "Give the automation a prompt / command, or pick a saved prompt";
@@ -127,7 +132,16 @@ export async function checkBlueprint(
   }
   if (body.hostId) {
     const host = await getHost(body.hostId);
-    if (!host || !canAccessHost(host, userId)) return "Host not found";
+    if (!host || !canAccessHost(host, owner.userId)) return "Host not found";
+  }
+  if (body.agent) {
+    return providerSelectionError({
+      agentType: body.agent,
+      agentOptions: body.agentOptions,
+      workspaceId: owner.workspaceId,
+      ownerUserId: owner.userId ?? null,
+      runsOn: "local",
+    });
   }
   return null;
 }
@@ -144,7 +158,7 @@ export async function createBlueprint(
   const row = await definitions.createDefinition(
     "local-blueprint",
     {
-      userId: input.userId,
+      ownerUserId: input.userId,
       workspaceId: input.workspaceId,
       name: input.name,
       description: input.description,
@@ -393,5 +407,6 @@ export async function spawnFromBlueprint(
     triggerId: opts.triggerId,
     ticket: opts.ticket,
     hold: blueprint.spawnMode === "hold",
+    ...(blueprint.agent ? { modelProviderId: modelProviderIdFrom(blueprint.agentOptions) } : {}),
   });
 }

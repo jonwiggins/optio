@@ -29,7 +29,17 @@ export const WorkRowSchema = z
     statusLabel: z.string(),
     note: z.string().nullable(),
     prUrl: z.string().nullable(),
+    prState: z.string().nullable().optional().describe("open | merged | closed, when known"),
+    triggers: z
+      .array(z.object({ type: z.string(), source: z.string().nullable().optional() }))
+      .optional()
+      .describe("What starts it (a definition) or started it (a run), one per type"),
     lastActivity: z.string().nullable().describe("ISO-8601"),
+    orderAt: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("What the list orders the row by when it isn't lastActivity (ISO-8601)"),
     recurring: z.boolean().describe("A definition that spawns runs"),
     editHref: z.string().nullable(),
     spawned: z.boolean().describe("A run spawned from a definition"),

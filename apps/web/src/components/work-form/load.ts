@@ -30,6 +30,30 @@ export interface EditTarget {
   /** Every trigger on the row, so a save can retire the ones it replaces. */
   triggers: any[];
   draft: WorkDraft;
+  /**
+   * The row is someone else's personal work: only they can change it (it
+   * runs with their credentials), so the form opens read-only.
+   */
+  foreignOwnerId: string | null;
+}
+
+/**
+ * A row's owner as the form's answer: null → the organization; you → "me";
+ * someone else → "me" from their side, flagged so the form goes read-only.
+ */
+export function ownerFromRow(
+  row: { ownerUserId?: string | null } | null | undefined,
+  meId: string | null | undefined,
+): { owner: WorkDraft["owner"]; foreignOwnerId: string | null } {
+  const ownerId = row?.ownerUserId ?? null;
+  if (!ownerId) return { owner: "workspace", foreignOwnerId: null };
+  // Unknown viewer: leave it editable; the server refuses a non-owner save.
+  return { owner: "me", foreignOwnerId: !meId || ownerId === meId ? null : ownerId };
+}
+
+/** The row's picked pod secrets; null when it predates picking. */
+function podSecretsFromRow(row: any): string[] | null {
+  return Array.isArray(row?.podSecrets) ? row.podSecrets.map(String) : null;
 }
 
 export const isEditableKind = (k: string): k is EditableKind =>
@@ -105,11 +129,18 @@ function optionsFromRow(runtime: string, row: any): WorkDraft["agentOptions"] {
  * branch for its kind. `normalize` then confirms the draft sits inside the
  * space, which it does for anything the form itself saved.
  */
-export function draftFromRow(kind: EditableKind, row: any, trigger: any | null): WorkDraft {
+export function draftFromRow(
+  kind: EditableKind,
+  row: any,
+  trigger: any | null,
+  meId?: string | null,
+): WorkDraft {
   const when = whenFromTrigger(trigger);
   const common = {
     ...EMPTY_DRAFT,
     ...when,
+    owner: ownerFromRow(row, meId).owner,
+    podSecrets: podSecretsFromRow(row),
     name: String(row.name ?? row.title ?? ""),
     description: String(row.description ?? ""),
   };
@@ -181,6 +212,10 @@ export function pickTrigger(triggers: any[]): any | null {
  * definition and has no edit form.
  */
 export async function loadEditTarget(id: string): Promise<EditTarget> {
+  const meId = await Promise.resolve()
+    .then(() => api.getCurrentUser())
+    .then((r) => r.user.id)
+    .catch(() => null);
   const unified = await api.getTaskUnified(id).catch((err: { status?: number }) => {
     if (err?.status === 404) return null;
     throw err;
@@ -198,7 +233,8 @@ export async function loadEditTarget(id: string): Promise<EditTarget> {
       row: unified.task,
       trigger,
       triggers,
-      draft: draftFromRow(kind, unified.task, trigger),
+      draft: draftFromRow(kind, unified.task, trigger, meId),
+      foreignOwnerId: ownerFromRow(unified.task, meId).foreignOwnerId,
     };
   }
   const [{ blueprint }, { triggers }] = await Promise.all([
@@ -212,6 +248,8 @@ export async function loadEditTarget(id: string): Promise<EditTarget> {
     row: blueprint,
     trigger,
     triggers,
-    draft: draftFromRow("local-blueprint", blueprint, trigger),
+    draft: draftFromRow("local-blueprint", blueprint, trigger, meId),
+    // Automations live on your own machine; they are always yours.
+    foreignOwnerId: null,
   };
 }

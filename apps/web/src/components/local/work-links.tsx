@@ -1,7 +1,8 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { GitPullRequest, CircleDot, ExternalLink, Hash } from "lucide-react";
+import { ExternalLink, Hash } from "lucide-react";
+import { BrandIcon, BRAND_LABEL, IssueIcon, PrIcon, brandFor } from "@/components/brand-icon";
 import { dedupeWorkLinks, type WorkLink } from "@optio/shared";
 
 /**
@@ -39,26 +40,36 @@ export function workLinksSearchText(links: WorkLink[]): string {
 }
 
 /**
- * Quiet chips: neutral surface, the kind carried by the icon's color (PR
- * green, ticket blue, plain ref grey — the colors those things have on
- * GitHub), so a row of badges reads as a list, not a row of buttons.
+ * Quiet chips: neutral surface, the kind carried by the icon (GitHub's PR
+ * and issue glyphs in their colors, a Linear / Jira ticket by its brand
+ * mark, a plain ref grey), so a row of badges reads as a list, not a row
+ * of buttons.
  */
-const KIND: Record<WorkLink["kind"], { icon: typeof GitPullRequest; tint: string; title: string }> =
-  {
-    pr: { icon: GitPullRequest, tint: "text-success", title: "Pull request" },
-    issue: { icon: CircleDot, tint: "text-info", title: "Ticket" },
-    ref: { icon: Hash, tint: "text-text-muted", title: "Reference" },
-  };
+function linkTitle(link: WorkLink): string {
+  if (link.kind === "pr") return link.provider === "gitlab" ? "Merge request" : "Pull request";
+  if (link.kind === "ref") return "Reference";
+  const brand = brandFor(link.provider);
+  return brand && link.provider !== "github" ? `${BRAND_LABEL[brand]} ticket` : "Issue";
+}
+
+export function WorkLinkIcon({ link, className }: { link: WorkLink; className?: string }) {
+  if (link.kind === "pr") return <PrIcon state="open" className={className} />;
+  if (link.kind === "issue") {
+    if (link.provider === "linear" || link.provider === "jira") {
+      return <BrandIcon brand={link.provider} className={cn("text-text", className)} />;
+    }
+    return <IssueIcon state="open" className={className} />;
+  }
+  return <Hash className={cn("shrink-0 text-text-muted", className)} aria-hidden />;
+}
 
 export function WorkLinkBadge({ link, size = "sm" }: { link: WorkLink; size?: "xs" | "sm" }) {
-  const kind = KIND[link.kind] ?? KIND.ref;
-  const Icon = kind.icon;
   return (
     <a
       href={link.url}
       target="_blank"
       rel="noopener noreferrer"
-      title={`${kind.title} · ${link.url}`}
+      title={`${linkTitle(link)} · ${link.url}`}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       className={cn(
@@ -67,7 +78,7 @@ export function WorkLinkBadge({ link, size = "sm" }: { link: WorkLink; size?: "x
         size === "xs" ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-1 text-xs",
       )}
     >
-      <Icon className={cn("shrink-0", kind.tint, size === "xs" ? "w-3 h-3" : "w-3.5 h-3.5")} />
+      <WorkLinkIcon link={link} className={size === "xs" ? "w-3 h-3" : "w-3.5 h-3.5"} />
       <span className="truncate">{link.label}</span>
       {size === "sm" && <ExternalLink className="w-3 h-3 opacity-40 shrink-0" />}
     </a>

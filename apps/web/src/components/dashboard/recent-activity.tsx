@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { EmptyState } from "./empty-state.js";
+import { EmptyState } from "@/components/empty-state";
 
 type ActivityItem = {
   id: string;
@@ -129,6 +129,7 @@ export function RecentActivity() {
       </div>
       {items.length === 0 ? (
         <EmptyState
+          size="panel"
           icon={Activity}
           title="No recent activity"
           description="Actions and events will appear here as you use Optio."

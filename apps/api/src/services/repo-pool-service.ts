@@ -1329,6 +1329,44 @@ export async function killOrphanedAgentInPod(podId: string, taskId: string): Pro
 }
 
 /**
+ * The task's pushed branches in a repo pod: remote-tracking refs and local
+ * branches with an upstream under `optio/task-<id>` (its own branch and any
+ * extra `optio/task-<id>-<slug>` / `optio/task-<id>/<slug>` ones). Used after
+ * a run to find PRs the agent opened from branches other than its own.
+ * Best-effort: [] when the pod can't be reached.
+ */
+export async function listTaskBranchesInPod(podId: string, taskId: string): Promise<string[]> {
+  if (!/^[A-Za-z0-9-]+$/.test(taskId)) return [];
+  const pod = await podPool.getPod(podId);
+  if (!pod || !pod.podName) return [];
+  const rt = getRuntime();
+  const handle = podPool.podHandle(pod);
+  const prefix = `optio/task-${taskId}`;
+  const script = [
+    `cd /workspace/repo 2>/dev/null || exit 0`,
+    `git for-each-ref --format='%(refname:lstrip=3)' 'refs/remotes/origin/${prefix}*' 2>/dev/null`,
+    `git for-each-ref --format='%(refname:lstrip=2) %(upstream)' 'refs/heads/${prefix}*' 2>/dev/null | awk '$2 != "" { print $1 }'`,
+  ].join("\n");
+  try {
+    const session = await rt.exec(handle, ["bash", "-c", script], { tty: false });
+    let output = "";
+    for await (const chunk of session.stdout as AsyncIterable<Buffer>) {
+      output += chunk.toString();
+      if (output.length > 64 * 1024) break;
+    }
+    session.close();
+    const branches = output
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((b) => b === prefix || b.startsWith(`${prefix}-`) || b.startsWith(`${prefix}/`));
+    return [...new Set(branches)].slice(0, 20);
+  } catch (err) {
+    logger.debug({ err, podId, taskId }, "Failed to list task branches in pod");
+    return [];
+  }
+}
+
+/**
  * Reconcile activeTaskCount on all repo pods to match actual running/provisioning tasks.
  *
  * The stored counter can drift if the worker process is killed before the finally

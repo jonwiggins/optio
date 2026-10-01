@@ -173,7 +173,7 @@ const MIGRATED_ROUTES: MigratedRoute[] = [
   { method: "post", path: "/api/work/{id}/triggers" },
   { method: "patch", path: "/api/work/{id}/triggers/{triggerId}" },
   { method: "delete", path: "/api/work/{id}/triggers/{triggerId}" },
-  // Phase 1 — tasks.ts (14 routes)
+  // Phase 1 — tasks.ts (16 routes)
   { method: "get", path: "/api/tasks" },
   { method: "get", path: "/api/tasks/stats" },
   { method: "get", path: "/api/tasks/search" },
@@ -190,6 +190,8 @@ const MIGRATED_ROUTES: MigratedRoute[] = [
   { method: "post", path: "/api/tasks/{id}/review" },
   { method: "post", path: "/api/tasks/{id}/run-now" },
   { method: "post", path: "/api/tasks/reorder" },
+  { method: "post", path: "/api/tasks/{id}/prs" },
+  { method: "delete", path: "/api/tasks/{id}/prs/{prId}" },
 
   // Phase 2 — task ecosystem (19 routes)
   // subtasks.ts (3)
@@ -352,6 +354,15 @@ const MIGRATED_ROUTES: MigratedRoute[] = [
   { method: "get", path: "/api/secrets" },
   { method: "post", path: "/api/secrets" },
   { method: "delete", path: "/api/secrets/{name}" },
+  { method: "get", path: "/api/secrets/pickable" },
+  // work-defaults.ts (2)
+  { method: "get", path: "/api/me/work-defaults" },
+  { method: "put", path: "/api/me/work-defaults" },
+  // model-providers.ts (4)
+  { method: "get", path: "/api/model-providers" },
+  { method: "post", path: "/api/model-providers" },
+  { method: "patch", path: "/api/model-providers/{id}" },
+  { method: "delete", path: "/api/model-providers/{id}" },
   // optio.ts (3)
   { method: "get", path: "/api/optio/status" },
   { method: "get", path: "/api/optio/system-status" },
@@ -431,8 +442,11 @@ describe("OpenAPI spec — migrated routes are fully documented", () => {
     // Removed 14 routes (8 schedule + 6 task-template) that were redundant
     // with agent workflows. 183 - 14 = 169. Then added 2 CodeCommit setup
     // routes (validate/aws-credentials and repos/codecommit) → 171. Then the
-    // Work resource (list, create, get, save, delete, runs, triggers ×4) → 181.
-    expect(MIGRATED_ROUTES).toHaveLength(181);
+    // pickable-secrets route, 4 model-provider routes and 2 work-defaults
+    // routes → 178. Then the two task PR routes (attach / stop tracking) → 180.
+    // Then the Work resource (list, create, get, save, delete, runs,
+    // triggers ×4) → 190.
+    expect(MIGRATED_ROUTES).toHaveLength(190);
   });
 
   it("components.schemas contains the Task domain types", () => {

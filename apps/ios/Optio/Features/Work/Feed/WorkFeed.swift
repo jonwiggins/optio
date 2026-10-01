@@ -148,6 +148,15 @@ struct WorkRow: Identifiable, Hashable, Sendable {
     let recurring: Bool
     /// Runs spawned from a definition / task config.
     let spawned: Bool
+    /// The brand the work came from (its ticket's source, the event that
+    /// started it), shown on the When chip.
+    var origin: Brand? = nil
+    /// `open` / `merged` / `closed` for the PR chip's glyph colour.
+    var prState: String? = nil
+    /// What the list orders the row by, when it differs from `lastActivity`: a
+    /// session on your machine sorts by when you last typed into it (else when
+    /// it was made), so it doesn't jump as its attention state flips.
+    var orderAt: String? = nil
 
     var id: String { key }
 
@@ -167,13 +176,18 @@ struct WorkRow: Identifiable, Hashable, Sendable {
         switch when {
         case "now": return "play"
         case "messages": return "cpu"
+        case "ticket": return "ticket"
         default: return "clock"
         }
     }
 
+    /// The When chip's mark: the origin's brand when known, else the symbol.
+    var whenGlyph: Glyph { origin.map(Glyph.brand) ?? .symbol(whenSystemImage) }
+
     /// Chip copy for Who (`runtimeLabel`).
     var whoLabel: String { who == "terminal" ? "terminal" : WorkFeed.runtimeLabel(who) }
-    var whoSystemImage: String { who == "terminal" ? "terminal" : "bolt" }
+    /// The runtime's logo (a terminal symbol, or a bolt for a runtime without a mark).
+    var whoGlyph: Glyph { .agent(who) }
 }
 
 struct WorkCounts: Hashable, Sendable {
@@ -202,6 +216,8 @@ enum WorkFeed {
         var agentType: String?
         var agentRuntime: String?
         var prUrl: String?
+        var prState: String?
+        var ticketSource: String?
         /// PR follow-through over the repo's settings ("Works until merged"); nil = the repo's.
         var autoResume: Bool?
         var runTarget: String?
@@ -231,7 +247,11 @@ enum WorkFeed {
         var blueprintId: String?
         var workflowRunId: String?
         var taskId: String?
+        var ticketSource: String?
         var lastActivityAt: String?
+        /// Stamped when a person types into it (throttled); opening it doesn't.
+        var lastInteractedAt: String?
+        var createdAt: String?
         var updatedAt: String?
 
         struct Spec: Decodable, Hashable, Sendable {
@@ -304,12 +324,41 @@ enum WorkFeed {
         }
     }
 
-    /// needs-you first, then live, then everything by recency.
+    /// Live work first (needs you / running / queued / waiting share one rank,
+    /// so a row doesn't jump when an agent flips between working and needs-you —
+    /// that shows on the row and in the "N need you" count), then armed, paused,
+    /// failed, done; within a rank by `orderAt ?? lastActivity`, newest first.
+    static func rank(_ status: WorkStatus) -> Int {
+        switch status {
+        case .needsYou, .running, .queued, .waiting: return 0
+        case .scheduled: return 1
+        case .paused: return 2
+        case .failed: return 3
+        case .done: return 4
+        }
+    }
+
     static func sort(_ rows: [WorkRow]) -> [WorkRow] {
         rows.sorted { a, b in
-            if a.status != b.status { return a.status < b.status }
-            return (a.lastActivity ?? "") > (b.lastActivity ?? "")
+            let ra = rank(a.status), rb = rank(b.status)
+            if ra != rb { return ra < rb }
+            let ta = a.orderAt ?? a.lastActivity ?? "", tb = b.orderAt ?? b.lastActivity ?? ""
+            if ta != tb { return ta > tb }
+            return a.key < b.key
         }
+    }
+
+    /// The next needs-you row after `current` in visual order (wrapping), or the
+    /// first one when nothing is current. Nil when nothing waits, or the only
+    /// waiting row is the current one. Tapping "N need you" walks these.
+    static func nextNeedsYou(_ ordered: [WorkRow], after current: String?) -> WorkRow? {
+        guard ordered.contains(where: { $0.status == .needsYou }) else { return nil }
+        let idx = current.flatMap { c in ordered.firstIndex { $0.key == c } } ?? -1
+        for i in 1...ordered.count {
+            let r = ordered[(idx + i + ordered.count) % ordered.count]
+            if r.status == .needsYou { return r.key == current ? nil : r }
+        }
+        return nil
     }
 
     /// Free-text search over name, place, agent, status and note (`sessions/page.tsx`).
@@ -427,7 +476,7 @@ enum WorkFeed {
                 rows.append(WorkRow(
                     key: "task-\(id)", source: .repoTask, sourceId: id, href: "/tasks/\(id)",
                     name: t.title ?? "",
-                    when: spawned ? "on a trigger" : "now",
+                    when: spawned ? "on a trigger" : (t.ticketSource ?? "").isEmpty ? "now" : "from a ticket",
                     where: local ? machine(t.localHostId, t.localDir) : SessionWhere(target: .pod, detail: shortRepo(t.repoUrl)),
                     who: t.agentType ?? "claude-code",
                     then: t.autoResume == true ? .untilMerged : .exits,
@@ -435,7 +484,9 @@ enum WorkFeed {
                     note: t.prUrl.flatMap { $0.split(separator: "/").last }.map { "PR \($0)" },
                     prUrl: t.prUrl,
                     lastActivity: last,
-                    recurring: false, spawned: spawned
+                    recurring: false, spawned: spawned,
+                    origin: Brand(provider: t.ticketSource),
+                    prState: t.prState
                 ))
             case "repo-blueprint":
                 let paused = t.enabled == false
@@ -494,7 +545,9 @@ enum WorkFeed {
                 prUrl: nil,
                 lastActivity: t.lastActivityAt ?? t.updatedAt,
                 recurring: false,
-                spawned: !(t.blueprintId ?? "").isEmpty || !(t.workflowRunId ?? "").isEmpty
+                spawned: !(t.blueprintId ?? "").isEmpty || !(t.workflowRunId ?? "").isEmpty,
+                origin: Brand(provider: t.ticketSource),
+                orderAt: t.lastInteractedAt ?? t.createdAt
             ))
         }
 

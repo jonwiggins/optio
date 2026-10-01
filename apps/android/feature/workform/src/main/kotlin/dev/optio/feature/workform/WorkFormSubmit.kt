@@ -132,6 +132,16 @@ fun locationPayload(d: WorkDraft): JsonObject = if (d.location.runTarget != Wher
 
 private fun JsonObjectBuilder.putAll(obj: JsonObject) = obj.forEach { (k, v) -> put(k, v) }
 
+/**
+ * Who the work runs as, and (pod work) the secrets its pod gets: `owner` always ("me" on a
+ * machine), `podSecrets` for pod work unless a saved row's legacy null is kept.
+ */
+fun ownerPayload(d: WorkDraft): JsonObject = buildJsonObject {
+    put("owner", effectiveOwner(d).raw)
+    val secrets = d.podSecrets
+    if (!isLocal(d) && secrets != null) put("podSecrets", JsonArray(secrets.map(::JsonPrimitive)))
+}
+
 private fun JsonObjectBuilder.putOrNull(key: String, value: String?) = put(key, value?.let(::JsonPrimitive) ?: JsonNull)
 
 private fun JsonObjectBuilder.putOrNull(key: String, value: JsonObject?) = put(key, value ?: JsonNull)
@@ -279,6 +289,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                     options?.let { put("metadata", jsonObjectOf("agentOptions" to it)) }
                     if (d.dependsOn.isNotEmpty()) put("dependsOn", JsonArray(d.dependsOn.map(::JsonPrimitive)))
                     putAll(location)
+                    putAll(ownerPayload(d))
                 }
                 val id = api.createTaskUnified(body)
                 val toast = if (d.then == Then.UNTIL_MERGED) "$name started — it will work the PR until it merges" else "$name started — it will open a PR"
@@ -305,6 +316,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                                 if (d.then == Then.UNTIL_MERGED) putAll(followThroughFor(d))
                                 put("enabled", true)
                                 putAll(location)
+                                putAll(ownerPayload(d))
                             },
                         )
                     },
@@ -332,6 +344,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                                 put("maxRetries", d.maxRetries)
                                 put("enabled", true)
                                 putAll(location)
+                                putAll(ownerPayload(d))
                             },
                         )
                     },
@@ -402,6 +415,11 @@ class WorkFormSubmitter(private val api: ApiClient) {
                         put("dir", d.location.localDir)
                         put("title", name)
                         put("spec", spec)
+                        // A model provider (Bedrock) picked for the agent: the server turns it
+                        // into the spawn's provider launch.
+                        pickedProviderId(d)?.takeIf { d.runtime != TERMINAL }?.let {
+                            put("agentOptions", jsonObjectOf(dev.optio.core.network.MODEL_PROVIDER_OPTION_KEY to JsonPrimitive(it)))
+                        }
                     },
                 )
                 Created(kind, LocalTerminalRoute(id), "$name opened")
@@ -436,6 +454,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                                 put("agentsMd", d.agent.agentsMd.ifEmpty { DEFAULT_AGENTS_MD })
                                 put("initialPrompt", prompt)
                                 put("podLifecycle", d.agent.podLifecycle.raw)
+                                putAll(ownerPayload(d))
                             },
                         )
                     },
@@ -484,6 +503,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                         // the repo's settings.
                         putAll(followThroughFor(d))
                         putAll(location)
+                        putAll(ownerPayload(d))
                     },
                 )
                 syncTrigger(target, trigger, taskTriggerOps(id))
@@ -503,6 +523,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                         putOrNull("agentOptions", options)
                         put("maxRetries", d.maxRetries)
                         putAll(location)
+                        putAll(ownerPayload(d))
                     },
                 )
                 syncTrigger(target, trigger, taskTriggerOps(id))

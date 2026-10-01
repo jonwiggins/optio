@@ -16,6 +16,7 @@ export {
   type WorkRow,
   type WorkSource,
   type WorkStatus,
+  type WorkTrigger,
   type WorkView,
 } from "@optio/shared";
 

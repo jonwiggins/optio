@@ -119,7 +119,7 @@ struct AgentDetailView: View {
             tone: agent.state == .paused ? .working : nil,
             line: Text.meta([
                 Text.mono("@\(agent.slug)"),
-                Text(agent.agentRuntime),
+                Text.agent(agent.agentRuntime, agent.agentRuntime),
                 Text(agent.podLifecycle.rawValue),
                 agent.lastTurnAt.map { Text("last turn \($0.relativeDescription)") },
                 Cost.formatIfNonZero(agent.totalCostUsd).map { Text($0) },
@@ -319,7 +319,7 @@ struct AgentTriggersSection: View {
             ForEach(model.triggers) { t in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Label(t.type.capitalized, systemImage: icon(for: t.type)).font(.subheadline.weight(.semibold))
+                        Label { Text(TriggerIcon.label(t.type)) } icon: { TriggerIcon(type: t.type, source: t.config?["source"]?.stringValue, size: 15) }.font(.subheadline.weight(.semibold))
                         Spacer()
                         if t.enabled == false { StatusBadge(text: "disabled", tone: .idle) }
                     }
@@ -338,15 +338,6 @@ struct AgentTriggersSection: View {
         }
         .listStyle(.plain)
         .refreshable { await model.refreshTriggers() }
-    }
-
-    private func icon(for type: String) -> String {
-        switch type {
-        case "schedule": return "calendar.badge.clock"
-        case "webhook": return "link"
-        case "ticket": return "ticket"
-        default: return "hand.tap"
-        }
     }
 }
 

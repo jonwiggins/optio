@@ -45,6 +45,33 @@ describe("GitHubPlatform", () => {
     expect(platform.type).toBe("github");
   });
 
+  describe("findPullRequestsByHeadPrefix", () => {
+    it("lists open PRs and keeps those whose head branch has the prefix", async () => {
+      mockJsonResponse([
+        {
+          number: 1,
+          head: { ref: "optio/task-abc", repo: { full_name: "acme/widgets" } },
+          html_url: "u1",
+        },
+        {
+          number: 2,
+          head: { ref: "optio/task-abc-docs", repo: { full_name: "fork/widgets" } },
+          html_url: "u2",
+        },
+        { number: 3, head: { ref: "feature/x" }, html_url: "u3" },
+      ]);
+      const prs = await platform.findPullRequestsByHeadPrefix(ri, "optio/task-abc");
+      expect(prs.map((p) => [p.number, p.headBranch, p.headRepo])).toEqual([
+        [1, "optio/task-abc", "acme/widgets"],
+        [2, "optio/task-abc-docs", "fork/widgets"],
+      ]);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch.mock.calls[0][0]).toContain(
+        "/repos/acme/widgets/pulls?state=open&per_page=100",
+      );
+    });
+  });
+
   describe("getPullRequest", () => {
     it("fetches PR and maps response", async () => {
       mockJsonResponse({

@@ -49,6 +49,17 @@ export const LocalHostSchema = z
       .describe(
         "The connected daemon adds / removes allowlisted directories when asked from Optio (false while offline)",
       ),
+    modelProviders: z
+      .boolean()
+      .optional()
+      .describe(
+        "The connected daemon runs agents through a model provider such as Amazon Bedrock (false while offline)",
+      ),
+    awsProfiles: z
+      .array(z.string())
+      .nullable()
+      .optional()
+      .describe("AWS profile names on the machine, as its daemon last reported them"),
     state: z.enum(["online", "offline"]),
     lastSeenAt: z.date().nullable(),
     createdAt: z.date(),
@@ -99,6 +110,18 @@ export const LocalTerminalSpecSchema = z
         .optional()
         .describe(
           "Work on a new branch off this base and open a PR: the prompt is wrapped with the instructions",
+        ),
+      provider: z
+        .object({
+          kind: z.literal("bedrock"),
+          providerId: z.string().uuid(),
+          name: z.string().max(100),
+          region: z.string().max(40),
+          awsProfile: z.string().max(64).optional(),
+        })
+        .optional()
+        .describe(
+          "Reach the models through this model provider (Amazon Bedrock) with the machine's own AWS credentials. On create only `providerId` counts: the rest is filled in from the provider",
         ),
     }),
   ])
@@ -196,6 +219,11 @@ export const LocalTerminalSchema = z
       .describe("Token / cost totals summed from the agent's transcript (agent spawns only)"),
     costUsd: z.string().nullable(),
     lastActivityAt: z.date().nullable(),
+    lastInteractedAt: z
+      .date()
+      .nullable()
+      .optional()
+      .describe("When a person last typed into it (throttled); null = never"),
     snoozedUntil: z
       .date()
       .nullable()

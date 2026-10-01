@@ -6,7 +6,9 @@
 --   standalone       each firing starts a Job run            (was workflows)
 --   local-blueprint  each firing opens a terminal on a machine (was local_blueprints)
 -- Ids are kept, so triggers (workflow_triggers.target_id), Job runs, spawned
--- tasks, and spawned terminals still point at their definition.
+-- tasks, and spawned terminals still point at their definition. Every kind
+-- has one owner column: null = the organization's, set = one person's (a
+-- Local automation's user_id).
 --
 -- Columns are the five attributes of work under one name each: the prompt
 -- (task_configs.prompt / workflows.prompt_template / local_blueprints.command_template),
@@ -20,8 +22,9 @@ CREATE TABLE "work_definitions" (
   "name" text NOT NULL,
   "description" text,
   "workspace_id" uuid,
-  "user_id" uuid REFERENCES "users"("id") ON DELETE CASCADE,
+  "owner_user_id" uuid REFERENCES "users"("id") ON DELETE SET NULL,
   "created_by" uuid REFERENCES "users"("id"),
+  "pod_secrets" jsonb,
   "enabled" boolean DEFAULT true NOT NULL,
   "prompt" text NOT NULL,
   "prompt_template_id" uuid REFERENCES "prompt_templates"("id") ON DELETE SET NULL,
@@ -57,27 +60,29 @@ CREATE TABLE "work_definitions" (
 );
 --> statement-breakpoint
 INSERT INTO "work_definitions" (
-  "id", "kind", "name", "description", "workspace_id", "created_by", "enabled",
-  "prompt", "prompt_template_id", "run_title", "agent_type", "agent_options",
+  "id", "kind", "name", "description", "workspace_id", "owner_user_id", "created_by", "pod_secrets",
+  "enabled", "prompt", "prompt_template_id", "run_title", "agent_type", "agent_options",
   "repo_url", "repo_branch", "run_target", "local_host_id", "local_dir", "local_session_mode",
   "max_retries", "priority", "auto_resume", "auto_merge", "created_at", "updated_at"
 )
 SELECT
-  "id", 'repo-blueprint', "name", "description", "workspace_id", "created_by", "enabled",
+  "id", 'repo-blueprint', "name", "description", "workspace_id", "owner_user_id", "created_by",
+  "pod_secrets", "enabled",
   "prompt", "prompt_template_id", "title", "agent_type", "agent_options",
   "repo_url", "repo_branch", "run_target", "local_host_id", "local_dir", "local_session_mode",
   "max_retries", "priority", "auto_resume", "auto_merge", "created_at", "updated_at"
 FROM "task_configs";
 --> statement-breakpoint
 INSERT INTO "work_definitions" (
-  "id", "kind", "name", "description", "workspace_id", "created_by", "enabled",
-  "prompt", "run_title", "params_schema", "agent_type", "model", "agent_options",
+  "id", "kind", "name", "description", "workspace_id", "owner_user_id", "created_by", "pod_secrets",
+  "enabled", "prompt", "run_title", "params_schema", "agent_type", "model", "agent_options",
   "run_target", "local_host_id", "local_dir", "local_session_mode", "environment_spec",
   "max_retries", "max_turns", "budget_usd", "max_concurrent", "warm_pool_size",
   "max_pod_instances", "max_agents_per_pod", "created_at", "updated_at"
 )
 SELECT
-  "id", 'standalone', "name", "description", "workspace_id", "created_by", "enabled",
+  "id", 'standalone', "name", "description", "workspace_id", "owner_user_id", "created_by",
+  "pod_secrets", "enabled",
   "prompt_template", "run_title", "params_schema", "agent_runtime", "model", "agent_options",
   "run_target", "local_host_id", "local_dir", "local_session_mode", "environment_spec",
   "max_retries", "max_turns", "budget_usd", "max_concurrent", "warm_pool_size",
@@ -85,7 +90,7 @@ SELECT
 FROM "workflows";
 --> statement-breakpoint
 INSERT INTO "work_definitions" (
-  "id", "kind", "name", "description", "workspace_id", "user_id", "enabled",
+  "id", "kind", "name", "description", "workspace_id", "owner_user_id", "enabled",
   "prompt", "prompt_template_id", "run_title", "agent_type", "agent_options",
   "repo_url", "repo_branch", "run_target", "local_host_id", "local_dir", "local_session_mode",
   "spawn_mode", "created_at", "updated_at"
@@ -103,9 +108,12 @@ CREATE UNIQUE INDEX "work_definitions_workspace_name_key"
   ON "work_definitions" ("kind", "workspace_id", "name") WHERE "kind" <> 'local-blueprint';
 --> statement-breakpoint
 CREATE UNIQUE INDEX "work_definitions_user_name_key"
-  ON "work_definitions" ("user_id", "name") WHERE "kind" = 'local-blueprint';
+  ON "work_definitions" ("owner_user_id", "name") WHERE "kind" = 'local-blueprint';
 --> statement-breakpoint
 CREATE INDEX "work_definitions_workspace_id_idx" ON "work_definitions" ("workspace_id");
+--> statement-breakpoint
+CREATE INDEX "work_definitions_owner_user_id_idx" ON "work_definitions" ("owner_user_id")
+  WHERE "owner_user_id" IS NOT NULL;
 --> statement-breakpoint
 -- A Job's runs and its triggers' legacy workflow_id go with the Job, as before.
 ALTER TABLE "workflow_runs" DROP CONSTRAINT IF EXISTS "workflow_runs_workflow_id_fkey";

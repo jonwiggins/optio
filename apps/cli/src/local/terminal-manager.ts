@@ -153,6 +153,7 @@ export class TerminalManager {
               effort: msg.spec.effort,
               permissionMode: msg.spec.permissionMode,
               claudeCaps: this.opts.getClaudeCaps?.(),
+              provider: msg.spec.provider ?? null,
             }),
           ];
           break;

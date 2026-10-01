@@ -22,6 +22,7 @@ import { requireWsRole } from "./ws-authz.js";
 import { acceptWs } from "./ws-connection.js";
 import { isMessageWithinSizeLimit, WS_CLOSE_MESSAGE_TOO_LARGE } from "./ws-limits.js";
 import * as relay from "../services/local-relay.js";
+import { noteInteraction } from "../services/local-terminal-service.js";
 import {
   canAccessTerminal,
   getTerminal,
@@ -95,6 +96,7 @@ export async function localTerminalStreamWs(app: FastifyInstance) {
       }
       if (msg.type === "input" && typeof msg.data === "string") {
         relay.viewerInput(terminal.id, socket);
+        void noteInteraction(terminal.id);
         relay.sendToHost(terminal.hostId, {
           type: "input",
           terminalId: terminal.id,

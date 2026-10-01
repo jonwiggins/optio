@@ -18,13 +18,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ConfirmationNumber
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.LinearScale
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.Webhook
 import androidx.compose.material3.AssistChip
@@ -51,6 +48,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.optio.core.ui.components.BrandIcons
 import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.MonoText
 import dev.optio.core.ui.components.Truncation
@@ -81,9 +79,9 @@ val TriggerKind.icon: ImageVector
         TriggerKind.SCHEDULE -> Icons.Outlined.Schedule
         TriggerKind.WEBHOOK -> Icons.Outlined.Webhook
         TriggerKind.TICKET -> Icons.Outlined.ConfirmationNumber
-        TriggerKind.GITHUB -> Icons.Outlined.Code
-        TriggerKind.SLACK -> Icons.Outlined.Tag
-        TriggerKind.LINEAR -> Icons.Outlined.LinearScale
+        TriggerKind.GITHUB -> BrandIcons.GitHub
+        TriggerKind.SLACK -> BrandIcons.Slack
+        TriggerKind.LINEAR -> BrandIcons.Linear
         TriggerKind.UNKNOWN -> Icons.Outlined.Bolt
     }
 

@@ -370,7 +370,10 @@ export async function countSessionTiles(userId: string): Promise<WatchTileCounts
                     inArray(workDefinitions.kind, ["repo-blueprint", "standalone"]),
                     inArray(workDefinitions.workspaceId, ws),
                   ),
-              and(eq(workDefinitions.kind, "local-blueprint"), eq(workDefinitions.userId, userId)),
+              and(
+                eq(workDefinitions.kind, "local-blueprint"),
+                eq(workDefinitions.ownerUserId, userId),
+              ),
             ),
           ),
         ),

@@ -38,6 +38,8 @@ import dev.optio.core.navigation.routes.ReviewDetailRoute
 import dev.optio.core.network.ApiClient
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
+import dev.optio.core.ui.components.Brand
+import dev.optio.core.ui.components.BrandMark
 import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.GroupedSection
 import dev.optio.core.ui.components.InsetDivider
@@ -168,7 +170,12 @@ internal fun PullRequestContent(
                         value = null,
                         onClick = onOpenExternal,
                         modifier = Modifier.testTag("open-external"), trailing = {
-                        Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, tint = OptioTheme.colors.accent, modifier = Modifier.size(18.dp))
+                        val brand = Brand.fromUrl(route.url)
+                        if (brand != null) {
+                            BrandMark(brand, size = 18.dp, contentDescription = null)
+                        } else {
+                            Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, tint = OptioTheme.colors.accent, modifier = Modifier.size(18.dp))
+                        }
                     })
                 }
             }

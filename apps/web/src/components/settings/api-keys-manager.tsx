@@ -4,6 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Check, Copy, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { api, type ApiKeyCreated, type ApiKeySummary } from "@/lib/api-client";
+import { SectionCard } from "@/components/ui/section-card";
+import { EmptyState } from "@/components/empty-state";
+import { BTN_PRIMARY, INPUT, SkeletonCard } from "./settings-ui";
 
 const EXPIRY_OPTIONS = [
   { label: "No expiry", days: 0 },
@@ -96,16 +99,23 @@ export function ApiKeysManager() {
     }
   }
 
-  if (keys === null) {
-    return (
-      <div className="p-5 rounded-xl border border-border/50 bg-bg-card text-center text-text-muted text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> Loading...
-      </div>
-    );
-  }
+  const label = "API keys";
+  const hint = "Personal access tokens for the CLI, the apps, and scripts";
+  if (keys === null) return <SkeletonCard label={label} hint={hint} rows={1} />;
 
   return (
-    <div className="p-5 rounded-xl border border-border/50 bg-bg-card space-y-4">
+    <SectionCard
+      label={label}
+      hint={hint}
+      summary={
+        unavailable
+          ? "needs sign-in"
+          : keys.length
+            ? `${keys.length} token${keys.length === 1 ? "" : "s"}`
+            : undefined
+      }
+      bodyClassName="p-4 space-y-4"
+    >
       <p className="text-xs text-text-muted">
         Personal access tokens authenticate the CLI (
         <code className="px-1 rounded bg-bg">optio login</code>
@@ -115,7 +125,7 @@ export function ApiKeysManager() {
       </p>
 
       {unavailable && (
-        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">
+        <div className="p-3 rounded-lg bg-warning/10 border border-warning/20 text-warning text-xs">
           Tokens need a signed-in user. With authentication disabled, any bearer value is accepted,
           so clients can use a placeholder such as <code className="px-1 rounded bg-bg">dev</code>.
         </div>
@@ -136,7 +146,7 @@ export function ApiKeysManager() {
             <button
               type="button"
               onClick={copy}
-              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs bg-primary text-white hover:bg-primary/90"
+              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs bg-primary text-white hover:bg-primary-hover"
             >
               {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
               {copied ? "Copied" : "Copy"}
@@ -165,12 +175,12 @@ export function ApiKeysManager() {
             onChange={(e) => setName(e.target.value)}
             placeholder="Token name (e.g. iPhone)"
             maxLength={80}
-            className="flex-1 min-w-[10rem] px-3 py-1.5 rounded-lg border border-border bg-bg text-sm"
+            className={`${INPUT} flex-1 min-w-[10rem] w-auto`}
           />
           <select
             value={expiryDays}
             onChange={(e) => setExpiryDays(Number(e.target.value))}
-            className="px-2 py-1.5 rounded-lg border border-border bg-bg text-sm"
+            className="px-2 py-2 rounded-lg border border-border bg-bg text-sm focus:outline-none focus:border-primary"
             aria-label="Expiry"
           >
             {EXPIRY_OPTIONS.map((o) => (
@@ -179,12 +189,12 @@ export function ApiKeysManager() {
               </option>
             ))}
           </select>
-          <button
-            type="submit"
-            disabled={creating}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-primary text-white hover:bg-primary/90 disabled:opacity-50"
-          >
-            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+          <button type="submit" disabled={creating} className={BTN_PRIMARY}>
+            {creating ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Plus className="w-3.5 h-3.5" />
+            )}
             Create token
           </button>
         </form>
@@ -192,16 +202,19 @@ export function ApiKeysManager() {
 
       {keys.length === 0 ? (
         !unavailable && (
-          <p className="text-xs text-text-muted flex items-center gap-2">
-            <KeyRound className="w-3.5 h-3.5" /> No tokens yet.
-          </p>
+          <EmptyState
+            size="panel"
+            icon={KeyRound}
+            title="No tokens yet"
+            description="Create one above, then run optio login with it."
+          />
         )
       ) : (
-        <ul className="divide-y divide-border/60 rounded-lg border border-border">
+        <ul className="divide-y divide-border/60 rounded-lg border border-border bg-bg">
           {keys.map((k) => {
             const expired = !!k.expiresAt && new Date(k.expiresAt).getTime() < Date.now();
             return (
-              <li key={k.id} className="flex items-center justify-between gap-3 px-3 py-2">
+              <li key={k.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
                 <div className="min-w-0">
                   <p className="text-sm font-medium truncate">{k.name}</p>
                   <p className="text-[11px] text-text-muted font-mono truncate">
@@ -220,7 +233,7 @@ export function ApiKeysManager() {
                   type="button"
                   onClick={() => revoke(k)}
                   disabled={revoking === k.id}
-                  className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-error hover:bg-error/10 disabled:opacity-50"
+                  className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-text-muted hover:text-error hover:bg-error/10 disabled:opacity-50"
                   aria-label={`Revoke ${k.name}`}
                 >
                   {revoking === k.id ? (
@@ -235,6 +248,6 @@ export function ApiKeysManager() {
           })}
         </ul>
       )}
-    </div>
+    </SectionCard>
   );
 }

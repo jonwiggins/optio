@@ -133,7 +133,8 @@ struct SessionDetailView: View {
                         tone: Tone.forState(pr.prState ?? "open") == .working ? nil : Tone.forState(pr.prState ?? "open"),
                         meta: Text.meta([pr.prState, pr.prChecksStatus.map { "CI \($0)" }, pr.prReviewStatus.map { "review \($0)" }]),
                         trailing: "Open ↗",
-                        titleLineLimit: 1
+                        titleLineLimit: 1,
+                        glyph: Brand(url: pr.prUrl) == .gitlab ? .brand(.gitlab) : .pr(PRGlyphState(pr.prState))
                     )
                 }
             }

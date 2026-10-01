@@ -100,6 +100,29 @@ describe("ClaudeCodeAdapter", () => {
       expect(config.env.OPTIO_API_URL).toBe("http://optio-api:4000");
     });
 
+    describe("bedrock mode (a model provider)", () => {
+      it("needs no Anthropic key and passes the provider env through", () => {
+        const config = adapter.buildContainerConfig({
+          ...baseInput,
+          claudeAuthMode: "bedrock",
+          claudeModel: "us.anthropic.claude-sonnet-5",
+          modelProviderEnv: {
+            CLAUDE_CODE_USE_BEDROCK: "1",
+            AWS_REGION: "us-west-2",
+            AWS_BEARER_TOKEN_BEDROCK: "k",
+          },
+        });
+        expect(config.requiredSecrets).toEqual([]);
+        expect(config.env).toMatchObject({
+          OPTIO_AUTH_MODE: "bedrock",
+          CLAUDE_CODE_USE_BEDROCK: "1",
+          AWS_REGION: "us-west-2",
+          AWS_BEARER_TOKEN_BEDROCK: "k",
+          OPTIO_CLAUDE_MODEL: "us.anthropic.claude-sonnet-5",
+        });
+      });
+    });
+
     describe("vertex-ai mode", () => {
       it("does not require ANTHROPIC_API_KEY", () => {
         const config = adapter.buildContainerConfig({

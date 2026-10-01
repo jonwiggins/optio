@@ -8,6 +8,7 @@ import {
   optionChoicesFor,
   optionRunsOn,
   type AgentProviderId,
+  type ModelProviderModel,
   type ProviderCatalog,
 } from "@optio/shared";
 import { api } from "@/lib/api-client";
@@ -45,6 +46,11 @@ interface Props {
    * stored alias as the alias, instead of showing the model it names today.
    */
   latestAliases?: boolean;
+  /**
+   * A model provider (Bedrock) is picked: its models replace the model
+   * dropdown's choices (free text when it lists none). Everything else stays.
+   */
+  providerModels?: ModelProviderModel[];
 }
 
 const DEFAULT_INPUT_CLASS =
@@ -90,6 +96,7 @@ export function AgentOptionsPicker({
   latestAliases = false,
   runsOn = "pod",
   hostId,
+  providerModels,
 }: Props) {
   const baseline = getProviderCatalog(provider);
   const idBase = useId();
@@ -150,7 +157,7 @@ export function AgentOptionsPicker({
   const rawModel = String(values[catalog.modelField] ?? "");
   const isAlias = Object.hasOwn(catalog.aliases, rawModel);
   const modelValue = isAlias && !latestAliases ? catalog.aliases[rawModel] : rawModel;
-  const canRefresh = catalog.liveRefreshSupported && !hideRefresh;
+  const canRefresh = catalog.liveRefreshSupported && !hideRefresh && !providerModels;
   const labelOf = (id: string) => catalog.models.find((m) => m.id === id)?.label ?? id;
   // A saved model the list doesn't offer (the live list is down, or it was
   // retired) still shows as itself rather than as whichever option is first.
@@ -207,7 +214,31 @@ export function AgentOptionsPicker({
               </button>
             )}
           </div>
-          {catalog.modelIsFreeText ? (
+          {providerModels && providerModels.length > 0 ? (
+            <select
+              id={controlId("model")}
+              value={rawModel}
+              onChange={(e) => setField(catalog.modelField, e.target.value)}
+              className={inputClass}
+            >
+              {!providerModels.some((m) => m.id === rawModel) && (
+                <option value={rawModel}>{rawModel || "Pick a model"}</option>
+              )}
+              {providerModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label ?? m.id}
+                </option>
+              ))}
+            </select>
+          ) : providerModels ? (
+            <input
+              id={controlId("model")}
+              value={rawModel}
+              onChange={(e) => setField(catalog.modelField, e.target.value)}
+              placeholder="The provider's model id"
+              className={inputClass}
+            />
+          ) : catalog.modelIsFreeText ? (
             <>
               <input
                 id={controlId("model")}
@@ -261,13 +292,13 @@ export function AgentOptionsPicker({
                   ))}
             </select>
           )}
-          {latestAliases && !catalog.modelIsFreeText && (
+          {latestAliases && !catalog.modelIsFreeText && !providerModels && (
             <p className="text-[11px] text-text-muted mt-1">
               &ldquo;Always the latest&rdquo; moves to each new release on its own; a specific
               version stays put.
             </p>
           )}
-          {live?.liveFrom && (
+          {live?.liveFrom && !providerModels && (
             <p className="text-[11px] text-text-muted mt-1">
               Models from {live.liveFrom}
               {live.refreshedAt ? ` · ${formatRefreshed(live.refreshedAt)}` : ""}

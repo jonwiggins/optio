@@ -146,6 +146,7 @@ export class GenericOIDCProvider implements OAuthProvider {
       displayName: data.name ?? data.preferred_username ?? "",
       username: data.preferred_username ?? undefined,
       avatarUrl: data.picture,
+      emailVerified: data.email_verified === true || data.email_verified === "true",
     };
   }
 }

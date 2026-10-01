@@ -5,6 +5,9 @@ import { api } from "@/lib/api-client";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { FileText, Loader2, Plus, Trash2, Eye, X, Save, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { Segmented } from "@/components/ui/segmented";
 
 type TemplateKind = "prompt" | "review" | "job" | "task";
 
@@ -37,7 +40,7 @@ const KIND_FILTERS: Array<{ value: TemplateKind | "all"; label: string }> = [
 ];
 
 export default function TemplatesPage() {
-  usePageTitle("Templates");
+  usePageTitle("Prompts");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [filter, setFilter] = useState<TemplateKind | "all">("all");
   const [loading, setLoading] = useState(true);
@@ -49,7 +52,7 @@ export default function TemplatesPage() {
       const res = await api.listTemplates();
       setTemplates(res.templates as Template[]);
     } catch (err) {
-      toast.error("Failed to load templates", {
+      toast.error("Failed to load prompts", {
         description: err instanceof Error ? err.message : "Unknown error",
       });
     } finally {
@@ -62,9 +65,11 @@ export default function TemplatesPage() {
   }, []);
 
   const visible = templates.filter((t) => filter === "all" || t.kind === filter);
+  const countOf = (k: TemplateKind | "all") =>
+    k === "all" ? templates.length : templates.filter((t) => t.kind === k).length;
 
   const remove = async (t: Template) => {
-    if (!confirm(`Delete template "${t.name}"?`)) return;
+    if (!confirm(`Delete prompt "${t.name}"?`)) return;
     try {
       await api.deleteNamedTemplate(t.id);
       await load();
@@ -75,88 +80,107 @@ export default function TemplatesPage() {
     }
   };
 
+  const newButton = (
+    <button
+      onClick={() => setEditing("new")}
+      className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
+    >
+      <Plus className="w-4 h-4" />
+      New prompt
+    </button>
+  );
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Templates</h1>
-          <p className="text-sm text-text-muted mt-1">
-            Reusable prompt templates. Repo Tasks and Standalone Tasks can reference a template and
-            fill in parameters at runtime.
-          </p>
-        </div>
-        <button
-          onClick={() => setEditing("new")}
-          className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          New Template
-        </button>
-      </div>
+      <PageHeader
+        icon={FileText}
+        title="Prompts"
+        description="Reusable prompts. Work can start from one and fill in its {{params}} when it runs."
+        meta={
+          templates.length > 0 ? (
+            <span>
+              {templates.length} prompt{templates.length === 1 ? "" : "s"}
+            </span>
+          ) : null
+        }
+        actions={newButton}
+      />
 
-      <div className="flex gap-1 mb-6 border-b border-border">
-        {KIND_FILTERS.map((f) => (
-          <button
-            key={f.value}
-            onClick={() => setFilter(f.value)}
-            className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors ${
-              filter === f.value
-                ? "border-primary text-text"
-                : "border-transparent text-text-muted hover:text-text"
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        size="md"
+        surface="card"
+        className="gap-1 mb-4"
+        aria-label="Filter by kind"
+        value={filter}
+        onChange={setFilter}
+        options={KIND_FILTERS.map((f) => ({
+          value: f.value,
+          label: f.label,
+          count: countOf(f.value),
+        }))}
+      />
 
       {loading ? (
-        <div className="flex items-center gap-2 text-text-muted py-8">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading...
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-16 skeleton-shimmer rounded-lg" />
+          ))}
         </div>
       ) : visible.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border p-10 text-center">
-          <FileText className="w-8 h-8 text-text-muted mx-auto mb-3" />
-          <p className="text-sm text-text-muted">
-            No templates {filter !== "all" && `in "${filter}"`} yet.
-          </p>
-        </div>
+        <EmptyState
+          icon={FileText}
+          title={filter === "all" ? "No prompts yet" : "No prompts of this kind"}
+          description="Save a prompt once and start work from it, with {{params}} filled in at run time."
+          action={newButton}
+        />
       ) : (
-        <div className="space-y-3">
+        <div className="rounded-xl border border-border/70 overflow-hidden divide-y divide-border/60">
           {visible.map((t) => (
-            <div key={t.id} className="rounded-lg border border-border bg-bg-card p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h2 className="text-base font-medium truncate">{t.name}</h2>
-                    <span className="px-2 py-0.5 text-xs rounded bg-bg border border-border text-text-muted">
-                      {KIND_LABELS[t.kind] ?? t.kind}
+            <div
+              key={t.id}
+              className="group flex items-start gap-3 px-4 py-3 bg-bg-card/40 hover:bg-bg-hover/60 transition-colors"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <h2 className="text-sm font-medium text-text-heading truncate">
+                    <button
+                      onClick={() => setEditing(t)}
+                      className="hover:underline underline-offset-2 text-left"
+                    >
+                      {t.name}
+                    </button>
+                  </h2>
+                  <span className="shrink-0 px-1.5 py-0.5 text-[10px] rounded bg-bg-hover text-text-muted">
+                    {KIND_LABELS[t.kind] ?? t.kind}
+                  </span>
+                  {t.defaultAgentType && (
+                    <span className="shrink-0 text-[11px] text-text-muted">
+                      {t.defaultAgentType}
                     </span>
-                    {t.defaultAgentType && (
-                      <span className="text-xs text-text-muted">{t.defaultAgentType}</span>
-                    )}
-                  </div>
-                  {t.description && <p className="text-xs text-text-muted mb-2">{t.description}</p>}
-                  <pre className="text-xs font-mono text-text-muted bg-bg rounded px-2 py-1.5 line-clamp-3 whitespace-pre-wrap">
-                    {t.template}
-                  </pre>
+                  )}
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    onClick={() => setEditing(t)}
-                    title="Edit"
-                    className="p-2 rounded hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => remove(t)}
-                    title="Delete"
-                    className="p-2 rounded hover:bg-bg-hover text-text-muted hover:text-danger transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                {t.description && (
+                  <p className="text-[11px] text-text-muted truncate mt-0.5">{t.description}</p>
+                )}
+                <p className="text-[11px] font-mono text-text-muted/80 truncate mt-1">
+                  {t.template}
+                </p>
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                <button
+                  onClick={() => setEditing(t)}
+                  title="Edit"
+                  className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted hover:text-text transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => remove(t)}
+                  title="Delete"
+                  className="p-1.5 rounded-md hover:bg-error/10 text-text-muted hover:text-error transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           ))}
@@ -212,7 +236,7 @@ function TemplateEditor({
       } else {
         await api.createNamedTemplate(payload);
       }
-      toast.success(template ? "Template updated" : "Template created");
+      toast.success(template ? "Prompt updated" : "Prompt created");
       onSaved();
     } catch (err) {
       toast.error("Save failed", {
@@ -225,7 +249,7 @@ function TemplateEditor({
 
   const handlePreview = async () => {
     if (!template) {
-      toast.info("Save the template first to preview.");
+      toast.info("Save the prompt first to preview.");
       return;
     }
     try {
@@ -241,9 +265,11 @@ function TemplateEditor({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-bg border border-border rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-bg flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-lg font-semibold">{template ? "Edit Template" : "New Template"}</h2>
+      <div className="bg-bg border border-border rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-bg-subtle flex items-center justify-between px-4 py-3 border-b border-border">
+          <h2 className="text-sm font-semibold tracking-tight text-text-heading">
+            {template ? "Edit prompt" : "New prompt"}
+          </h2>
           <button
             onClick={onClose}
             className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text"
@@ -253,29 +279,27 @@ function TemplateEditor({
         </div>
 
         <div className="p-4 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-text-muted mb-1.5">Name</label>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-text-muted mb-1.5">Kind</label>
-              <select
-                value={form.kind}
-                onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as TemplateKind }))}
-                className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
-              >
-                <option value="prompt">Coding prompt</option>
-                <option value="review">Code review</option>
-                <option value="job">Standalone task prompt</option>
-                <option value="task">Repo task blueprint</option>
-              </select>
-            </div>
+          <div>
+            <label className="block text-sm text-text-muted mb-1.5">Name</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
+            />
+          </div>
+          <div>
+            <span className="block text-sm text-text-muted mb-1.5">Kind</span>
+            <Segmented
+              wrap
+              aria-label="Kind"
+              value={form.kind}
+              onChange={(kind) => setForm((f) => ({ ...f, kind }))}
+              options={(Object.keys(KIND_LABELS) as TemplateKind[]).map((k) => ({
+                value: k,
+                label: KIND_LABELS[k],
+              }))}
+            />
           </div>
 
           <div>
@@ -284,7 +308,7 @@ function TemplateEditor({
               type="text"
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              placeholder="What is this template for?"
+              placeholder="What is this prompt for?"
               className="w-full px-3 py-2 rounded-lg bg-bg-card border border-border text-sm"
             />
           </div>
@@ -301,7 +325,7 @@ function TemplateEditor({
           </div>
 
           <div>
-            <label className="block text-sm text-text-muted mb-1.5">Template body</label>
+            <label className="block text-sm text-text-muted mb-1.5">Prompt</label>
             <textarea
               rows={10}
               value={form.template}

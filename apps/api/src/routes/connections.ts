@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { workActor } from "../services/work-ownership.js";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import * as connectionService from "../services/connection-service.js";
@@ -49,6 +50,12 @@ const createConnectionSchema = z
     scope: z.string().optional().describe("'global' or repo URL"),
     repoUrl: z.string().optional().describe("Repo URL (sets scope automatically)"),
     enabled: z.boolean().optional(),
+    owner: z
+      .enum(["workspace", "me"])
+      .optional()
+      .describe(
+        "`workspace` (default, admins only) or `me`: a personal connection reaches only work you own",
+      ),
     assignments: z
       .array(
         z.object({
@@ -207,7 +214,11 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
-      const conns = await connectionService.listConnections(workspaceId);
+      const actor = workActor(req);
+      // Personal connections: their owner's (and, by name, admins').
+      const conns = (await connectionService.listConnections(workspaceId)).filter(
+        (c) => !c.ownerUserId || c.ownerUserId === actor.userId || actor.isAdmin,
+      );
       reply.send({ connections: conns });
     },
   );
@@ -215,19 +226,28 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.post(
     "/api/connections",
     {
-      preHandler: [requireRole("admin")],
+      // Members add their own (`owner: me`); the organization's need an admin.
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "createConnection",
         summary: "Create a connection",
         description: "Create a new connection instance. Optionally provide inline assignments.",
         tags: ["Repos & Integrations"],
         body: createConnectionSchema,
-        response: { 201: ConnectionResponse },
+        response: { 201: ConnectionResponse, 403: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
       const workspaceId = req.user?.workspaceId ?? null;
-      const conn = await connectionService.createConnection(req.body, workspaceId);
+      const actor = workActor(req);
+      const { owner, ...input } = req.body;
+      const ownerUserId = owner === "me" && actor.userId ? actor.userId : null;
+      if (!ownerUserId && !actor.isAdmin) {
+        return reply
+          .status(403)
+          .send({ error: "Only admins can add a connection for the organization" });
+      }
+      const conn = await connectionService.createConnection({ ...input, ownerUserId }, workspaceId);
       logAction({
         userId: req.user?.id,
         action: "connection.create",
@@ -258,6 +278,10 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       if (wsId && conn.workspaceId && conn.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Connection not found" });
       }
+      const actor = workActor(req);
+      if (conn.ownerUserId && conn.ownerUserId !== actor.userId && !actor.isAdmin) {
+        return reply.status(404).send({ error: "Connection not found" });
+      }
       reply.send({ connection: conn });
     },
   );
@@ -265,7 +289,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.patch(
     "/api/connections/:id",
     {
-      preHandler: [requireRole("admin")],
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "updateConnection",
         summary: "Update a connection",
@@ -273,7 +297,7 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
         body: updateConnectionSchema,
-        response: { 200: ConnectionResponse, 404: ErrorResponseSchema },
+        response: { 403: ErrorResponseSchema, 200: ConnectionResponse, 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
@@ -282,6 +306,20 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Connection not found" });
+      }
+      {
+        // The organization's: admins. A personal one: its owner (admins may delete it).
+        const actor = workActor(req);
+        const allowed = existing.ownerUserId
+          ? existing.ownerUserId === actor.userId
+          : actor.isAdmin;
+        if (!allowed) {
+          return reply.status(403).send({
+            error: existing.ownerUserId
+              ? "Only its owner can change a personal connection"
+              : "Forbidden: requires admin role",
+          });
+        }
       }
       const conn = await connectionService.updateConnection(req.params.id, req.body);
       logAction({
@@ -298,14 +336,14 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
   app.delete(
     "/api/connections/:id",
     {
-      preHandler: [requireRole("admin")],
+      preHandler: [requireRole("member")],
       schema: {
         operationId: "deleteConnection",
         summary: "Delete a connection",
         description: "Delete a connection and all its assignments. Returns 204 on success.",
         tags: ["Repos & Integrations"],
         params: IdParamsSchema,
-        response: { 204: z.null(), 404: ErrorResponseSchema },
+        response: { 403: ErrorResponseSchema, 204: z.null(), 404: ErrorResponseSchema },
       },
     },
     async (req, reply) => {
@@ -314,6 +352,20 @@ export async function connectionRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Connection not found" });
+      }
+      {
+        // The organization's: admins. A personal one: its owner (admins may delete it).
+        const actor = workActor(req);
+        const allowed = existing.ownerUserId
+          ? existing.ownerUserId === actor.userId || actor.isAdmin
+          : actor.isAdmin;
+        if (!allowed) {
+          return reply.status(403).send({
+            error: existing.ownerUserId
+              ? "Only its owner can change a personal connection"
+              : "Forbidden: requires admin role",
+          });
+        }
       }
       await connectionService.deleteConnection(req.params.id);
       logAction({

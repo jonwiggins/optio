@@ -80,7 +80,7 @@ export function UpdateBanner() {
     return null;
   }
 
-  const rollbackCommand = `kubectl rollout undo deployment/optio-api deployment/optio-web -n optio`;
+  const rollbackCommand = `kubectl rollout undo deployment/optio-api -n optio`;
 
   return (
     <>

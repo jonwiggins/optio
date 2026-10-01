@@ -1,4 +1,5 @@
 import { eq, desc, and, or, ilike, gte, lte, sql } from "drizzle-orm";
+import { ensurePrimaryPrRow, prNumberFromUrl } from "./task-pr-service.js";
 import { db } from "../db/client.js";
 import { tasks, taskEvents, taskLogs, users, repos } from "../db/schema.js";
 import * as runLogService from "./run-log-service.js";
@@ -41,6 +42,10 @@ export async function createTask(
     workspaceId?: string | null;
     /** The work definition (scheduled Task) spawning it. */
     workId?: string | null;
+    /** Null = the organization's; see services/work-ownership.ts. */
+    ownerUserId?: string | null;
+    /** Secrets (by name) the agent gets in its pod; null = the workspace's default. */
+    podSecrets?: string[] | null;
   },
 ) {
   const [task] = await db
@@ -63,6 +68,8 @@ export async function createTask(
       localHostId: input.runTarget === "local" ? (input.localHostId ?? null) : null,
       localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
+      ownerUserId: input.ownerUserId ?? null,
+      podSecrets: input.podSecrets ?? null,
       autoResume: input.autoResume ?? null,
       autoMerge: input.autoMerge ?? null,
       workId: input.workId ?? null,
@@ -83,21 +90,15 @@ export async function createTask(
 export class TaskInputError extends Error {}
 
 /**
- * Create a one-off repo task and put it in line: queued (and handed to the
- * task worker), or waiting on the tasks it depends on. The agent defaults to
- * the repo's. Returns the task in the state it moved to. Throws
- * `TaskInputError` before creating anything when the agent can't run where
- * asked, and after when a dependency can't be added (the task stays
- * pending, as the HTTP route always left it).
+ * The agent a new task runs: the one asked for, else the repo's default.
+ * Throws `TaskInputError` when it can't run on a machine and the task would.
  */
-export async function submitTask(
-  input: Omit<CreateTaskInput, "agentType" | "dependsOn"> & {
-    agentType?: string | null;
-    workspaceId?: string | null;
-    dependsOn?: string[];
-  },
-  userId?: string,
-) {
+export async function resolveTaskAgent(input: {
+  agentType?: string | null;
+  repoUrl: string;
+  workspaceId?: string | null;
+  runTarget?: string;
+}): Promise<string> {
   let agentType = input.agentType ?? "";
   if (!agentType) {
     const { getRepoByUrl } = await import("./repo-service.js");
@@ -109,7 +110,28 @@ export async function submitTask(
       `${agentType} can't run on your machine — pick Claude Code, Codex, Cursor, Gemini, or OpenCode`,
     );
   }
+  return agentType;
+}
 
+/**
+ * Create a one-off repo task and put it in line: queued (and handed to the
+ * task worker), or waiting on the tasks it depends on. The agent defaults to
+ * the repo's. Returns the task in the state it moved to. Throws
+ * `TaskInputError` before creating anything when the agent can't run where
+ * asked, and after when a dependency can't be added (the task stays
+ * pending, as the HTTP route always left it).
+ */
+export async function submitTask(
+  input: Omit<CreateTaskInput, "agentType" | "dependsOn"> & {
+    agentType?: string | null;
+    workspaceId?: string | null;
+    ownerUserId?: string | null;
+    podSecrets?: string[] | null;
+    dependsOn?: string[];
+  },
+  userId?: string,
+) {
+  const agentType = await resolveTaskAgent(input);
   const { dependsOn, ...rest } = input;
   const task = await createTask({ ...rest, agentType, createdBy: userId ?? input.createdBy });
   if (dependsOn && dependsOn.length > 0) {
@@ -568,7 +590,11 @@ export async function updateTaskContainer(id: string, containerId: string) {
   await db.update(tasks).set({ containerId, updatedAt: new Date() }).where(eq(tasks.id, id));
 }
 
-export async function updateTaskPr(id: string, prUrl: string) {
+export async function updateTaskPr(
+  id: string,
+  prUrl: string,
+  source: "tool_call" | "branch" | "attached" = "branch",
+) {
   // A cancelled task must never adopt a PR. The agent can still emit a PR
   // URL after the user cancels (late exec output before the kill lands, or
   // an API-fallback detection); dropping the write keeps cancelled tasks
@@ -578,12 +604,13 @@ export async function updateTaskPr(id: string, prUrl: string) {
     logger.info({ taskId: id, prUrl }, "Ignoring PR URL for cancelled task");
     return;
   }
-  const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
-  const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : undefined;
+  const prNumber = prNumberFromUrl(prUrl) ?? undefined;
   await db
     .update(tasks)
     .set({ prUrl, ...(prNumber != null && { prNumber }), updatedAt: new Date() })
     .where(eq(tasks.id, id));
+  // Every PR of a task has a task_prs row, the primary included.
+  if (current) await ensurePrimaryPrRow(id, current.repoUrl, prUrl, source);
 }
 
 /**

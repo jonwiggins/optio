@@ -63,7 +63,7 @@ struct ScheduledDetailView: View {
                         line: Text.meta([
                             Text(RunFormatting.repoShortName(config.repoUrl)),
                             Text.mono(config.repoBranch ?? "main"),
-                            Text(RunFormatting.agentLabel(config.agentType)),
+                            Text.agent(config.agentType, RunFormatting.agentLabel(config.agentType)),
                             Text(model.triggers.isEmpty ? "manual only" : "\(model.triggers.count) trigger\(model.triggers.count == 1 ? "" : "s")"),
                         ]),
                         secondary: model.triggers.first.map { Text(ScheduleFormat.humanize($0)) }
@@ -147,7 +147,7 @@ struct ScheduledDetailView: View {
             ForEach(model.triggers) { t in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Label(t.type.capitalized, systemImage: triggerIcon(t.type)).font(.body.weight(.medium))
+                        Label { Text(TriggerIcon.label(t.type)) } icon: { TriggerIcon(type: t.type, source: t.ticketSource ?? "github", size: 17) }.font(.body.weight(.medium))
                         Spacer()
                         Toggle("", isOn: Binding(get: { t.enabled }, set: { on in
                             Task { await model.run(api: api) { try await api.setTaskConfigTriggerEnabled(configId, triggerId: t.id, on); return nil } }
@@ -330,7 +330,7 @@ struct TriggerFormSheet: View {
                 Picker("Type", selection: $type) {
                     Label("Schedule", systemImage: "clock").tag("schedule")
                     Label("Webhook", systemImage: "link").tag("webhook")
-                    Label("Ticket", systemImage: "ticket").tag("ticket")
+                    Label { Text("Ticket") } icon: { Glyph.trigger("ticket", source: ticketSource).image() }.tag("ticket")
                     Label("Manual", systemImage: "hand.tap").tag("manual")
                 }
                 .pickerStyle(.inline)

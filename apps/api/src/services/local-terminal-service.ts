@@ -7,6 +7,8 @@
  * for the DB row and publishes content-free nudges + browser status frames on
  * every transition.
  */
+import { MODEL_PROVIDER_OPTION_KEY } from "@optio/shared";
+import { providerLaunch, resolveProviderForWork } from "./model-provider-service.js";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
   LOCAL_DEFAULT_COLS,
@@ -85,6 +87,7 @@ export function withBranchInstructions(
   const lines = [
     `You are working in the local checkout at ${opts.dir}.`,
     `Work on a branch, never directly on \`${base}\`: create \`${opts.branch}\` from an up-to-date \`${base}\`, commit your changes there, push it, and open a pull request against \`${base}\` (for example with \`gh pr create\`) with a clear title and description.`,
+    `If the work needs more than one pull request, name each extra branch \`${opts.branch}-<short-slug>\`.`,
     "Print the pull request URL when you are done.",
   ];
   const body = prompt.trim();
@@ -231,6 +234,13 @@ export interface CreateTerminalInput {
   workflowRunId?: string;
   /** Repo Task this terminal executes (spawnedBy = "task"). */
   taskId?: string;
+  /**
+   * Run the agent through this model provider (Bedrock), from the work's
+   * agent options. Checked here against the terminal's owner; the spec then
+   * carries the provider's launch (region, the machine's AWS profile — never
+   * a credential). A `spec.provider` from a client counts only by its id.
+   */
+  modelProviderId?: string;
 }
 
 /**
@@ -245,6 +255,22 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
   let spec = input.spec;
   if (spec.kind === "agent" && !AGENT_BINS[spec.agent]) {
     throw new Error(`Unknown agent kind: ${spec.agent}`);
+  }
+  if (spec.kind === "agent") {
+    const providerId = input.modelProviderId ?? spec.provider?.providerId;
+    const { provider: _clientProvider, ...rest } = spec;
+    spec = rest;
+    if (providerId) {
+      // Throws a ModelProviderError saying why it can't be used here.
+      const row = await resolveProviderForWork({
+        agentType: spec.agent,
+        agentOptions: { [MODEL_PROVIDER_OPTION_KEY]: providerId },
+        workspaceId: input.workspaceId,
+        ownerUserId: input.userId,
+        runsOn: "local",
+      });
+      if (row) spec = { ...spec, provider: providerLaunch(row) };
+    }
   }
   // "New branch that becomes a PR": the id is fixed up front so the branch
   // name in the instructions matches the row.
@@ -311,6 +337,20 @@ export async function createTerminal(input: CreateTerminalInput): Promise<LocalT
 async function trySpawn(row: LocalTerminalRow): Promise<LocalTerminalRow | null> {
   if (!relay.isHostOnline(row.hostId)) {
     return updateTerminal(row.id, { state: "pending", pendingReason: "host_offline" });
+  }
+  const spawnSpec = row.spec as unknown as LocalTerminalSpec;
+  if (
+    spawnSpec.kind === "agent" &&
+    spawnSpec.provider &&
+    !relay.hostCanUseModelProviders(row.hostId)
+  ) {
+    // A daemon from before model providers would ignore the provider and run
+    // the agent on its own sign-in instead: refuse rather than surprise.
+    return transitionTerminal(row.id, ["pending"], {
+      state: "error",
+      errorMessage: `Optio Local on this machine can't use model providers yet — update it and restart \`optio local up\` to run through ${spawnSpec.provider.name}`,
+      endedAt: new Date(),
+    });
   }
   const claimed = await transitionTerminal(row.id, ["pending"], {
     state: "launching",
@@ -667,6 +707,8 @@ export async function resumeTerminal(
       ...(spec.effort ? { effort: spec.effort } : {}),
       ...(spec.permissionMode ? { permissionMode: spec.permissionMode } : {}),
     },
+    // ...and through the same model provider, checked again.
+    ...(spec.provider ? { modelProviderId: spec.provider.providerId } : {}),
     title: row.title.startsWith("↺ ") ? row.title : `↺ ${row.title}`,
     spawnedBy: "resume",
     blueprintId: row.blueprintId ?? undefined,
@@ -864,7 +906,15 @@ export async function handleTranscript(
   const row = await getTerminal(terminalId);
   if (!row || row.hostId !== hostId) return 0;
   if (row.state !== "running" && row.state !== "launching") return 0;
-  return insertTranscriptEntries(terminalId, clean);
+  const inserted = await insertTranscriptEntries(terminalId, clean);
+  // A Repo Task adopts the PRs its agent's PR-creating calls report.
+  // Dynamic import: local-run-service imports this module.
+  if (row.taskId && inserted > 0) {
+    await import("./local-run-service.js")
+      .then(({ onTaskTranscript }) => onTaskTranscript(row, clean))
+      .catch((err) => logger.warn({ err, terminalId }, "local: task PR detection failed"));
+  }
+  return inserted;
 }
 
 async function insertTranscriptEntries(
@@ -1276,4 +1326,38 @@ export async function sweepStuckLaunching(): Promise<void> {
 function lastPathSegment(p: string): string {
   const parts = p.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? p;
+}
+
+/** Last time each terminal's interaction was written, to write at most once a minute. */
+const interactionWrittenAt = new Map<string, number>();
+const INTERACTION_WRITE_INTERVAL_MS = 60_000;
+
+/**
+ * A person typed into the terminal: stamp `last_interacted_at`, which lists
+ * order by (then creation), so a session doesn't move around just because
+ * its agent flips between working and needing you. Opening a session doesn't
+ * count — the row would jump under the click. Throttled to one write a minute.
+ */
+export async function noteInteraction(terminalId: string): Promise<void> {
+  const now = Date.now();
+  const last = interactionWrittenAt.get(terminalId);
+  if (last !== undefined && now - last < INTERACTION_WRITE_INTERVAL_MS) return;
+  interactionWrittenAt.set(terminalId, now);
+  if (interactionWrittenAt.size > 5000) {
+    for (const [id, at] of interactionWrittenAt) {
+      if (now - at > INTERACTION_WRITE_INTERVAL_MS) interactionWrittenAt.delete(id);
+    }
+  }
+  try {
+    const [row] = await db
+      .update(localTerminals)
+      .set({ lastInteractedAt: new Date(now) })
+      .where(eq(localTerminals.id, terminalId))
+      .returning();
+    if (row) {
+      await publishLocalChanged({ terminalId: row.id, hostId: row.hostId, userId: row.userId });
+    }
+  } catch (err) {
+    logger.warn({ err, terminalId }, "local: failed to record interaction");
+  }
 }

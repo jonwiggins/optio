@@ -8,9 +8,9 @@ import { describe, expect, it } from "vitest";
 import { stageDatabase } from "../test-utils/integration/staged-migration.js";
 
 /** The last migration before the unification. */
-const BEFORE = "1791600000_task_pr_follow_through";
+const BEFORE = "1791800000_task_prs";
 
-describe("1791612000_unified_run_logs", () => {
+describe("1791900000_unified_run_logs", () => {
   it("moves persistent-agent turn logs into task_logs, keyed by turn, cascading from the agent", async () => {
     const db = await stageDatabase(BEFORE);
     try {
@@ -67,7 +67,7 @@ describe("1791612000_unified_run_logs", () => {
   });
 });
 
-describe("1791613000_agent_pods", () => {
+describe("1791910000_agent_pods", () => {
   it("moves every pod into agent_pods, keeping ids, keys, counts, and per-pool fields", async () => {
     const db = await stageDatabase(BEFORE);
     try {
@@ -161,9 +161,9 @@ describe("1791613000_agent_pods", () => {
   });
 });
 
-describe("1791614000_work_definitions", () => {
+describe("1791920000_work_definitions", () => {
   it("moves scheduled Tasks, Jobs, and Local automations into work_definitions with their ids and links", async () => {
-    const db = await stageDatabase("1791613000_agent_pods");
+    const db = await stageDatabase("1791910000_agent_pods");
     try {
       const { sql } = db;
       const [user] = await sql`
@@ -180,19 +180,20 @@ describe("1791614000_work_definitions", () => {
       const [config] = await sql`
         INSERT INTO task_configs (name, description, workspace_id, title, prompt, prompt_template_id,
           repo_url, repo_branch, agent_type, max_retries, priority, enabled, created_by,
-          run_target, local_host_id, local_dir, local_session_mode, agent_options, auto_resume, auto_merge)
+          run_target, local_host_id, local_dir, local_session_mode, agent_options, auto_resume, auto_merge,
+          owner_user_id, pod_secrets)
         VALUES ('Nightly', 'every night', ${ws.id}, 'Nightly {{date}}', 'fix things', ${template.id},
           'https://github.com/acme/app', 'dev', 'codex', 4, 7, false, ${user.id},
           'local', ${host.id}, '/src/app', 'interactive', ${JSON.stringify({ effort: "high" })}::jsonb,
-          true, false)
+          true, false, ${user.id}, ${JSON.stringify(["NPM_TOKEN"])}::jsonb)
         RETURNING id`;
       const [job] = await sql`
         INSERT INTO workflows (name, workspace_id, environment_spec, prompt_template, params_schema,
           run_title, agent_runtime, model, max_turns, budget_usd, max_concurrent, max_retries,
-          warm_pool_size, max_pod_instances, max_agents_per_pod, created_by)
+          warm_pool_size, max_pod_instances, max_agents_per_pod, created_by, pod_secrets)
         VALUES ('Report', ${ws.id}, ${JSON.stringify({ env: 1 })}::jsonb, 'report on {{x}}',
           ${JSON.stringify({ type: "object" })}::jsonb, 'Report {{x}}', 'gemini', 'pro', 12, '2.5',
-          3, 2, 1, 4, 5, ${user.id})
+          3, 2, 1, 4, 5, ${user.id}, ${JSON.stringify([])}::jsonb)
         RETURNING id`;
       const [automation] = await sql`
         INSERT INTO local_blueprints (user_id, workspace_id, name, host_id, dir, repo_url, base_branch,
@@ -234,7 +235,8 @@ describe("1791614000_work_definitions", () => {
         name: "Nightly",
         description: "every night",
         workspace_id: ws.id,
-        user_id: null,
+        owner_user_id: user.id,
+        pod_secrets: ["NPM_TOKEN"],
         created_by: user.id,
         enabled: false,
         prompt: "fix things",
@@ -257,6 +259,8 @@ describe("1791614000_work_definitions", () => {
         id: job.id,
         name: "Report",
         workspace_id: ws.id,
+        owner_user_id: null,
+        pod_secrets: [],
         created_by: user.id,
         prompt: "report on {{x}}",
         run_title: "Report {{x}}",
@@ -278,7 +282,8 @@ describe("1791614000_work_definitions", () => {
       expect(byKind["local-blueprint"]).toMatchObject({
         id: automation.id,
         name: "Review PRs",
-        user_id: user.id,
+        // A Local automation's person is its owner, like any personal work.
+        owner_user_id: user.id,
         workspace_id: ws.id,
         run_target: "local",
         local_host_id: host.id,
@@ -308,7 +313,7 @@ describe("1791614000_work_definitions", () => {
       await sql`INSERT INTO work_definitions (kind, name, workspace_id, prompt, repo_url)
                 VALUES ('repo-blueprint', 'Report', ${ws.id}, 'x', 'https://github.com/acme/app')`;
       await expect(
-        sql`INSERT INTO work_definitions (kind, name, user_id, prompt)
+        sql`INSERT INTO work_definitions (kind, name, owner_user_id, prompt)
             VALUES ('local-blueprint', 'Review PRs', ${user.id}, 'x')`,
       ).rejects.toThrow(/work_definitions_user_name_key/);
       // A scheduled Task needs a repo.
@@ -329,11 +334,11 @@ describe("1791614000_work_definitions", () => {
       const [kept] = await sql`SELECT work_id FROM tasks WHERE id = ${fromConfig}`;
       expect(kept.work_id).toBeNull();
 
-      // A Local automation belongs to its person.
+      // A person's work outlives them as the organization's (owner cleared).
       await sql`DELETE FROM users WHERE id = ${user.id}`;
-      const [{ automations }] = await sql`
-        SELECT count(*)::int AS automations FROM work_definitions WHERE kind = 'local-blueprint'`;
-      expect(automations).toBe(0);
+      const [automationRow] = await sql`
+        SELECT owner_user_id FROM work_definitions WHERE id = ${automation.id}`;
+      expect(automationRow.owner_user_id).toBeNull();
     } finally {
       await db.drop();
     }

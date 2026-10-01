@@ -46,6 +46,12 @@ export interface WorkWhere {
   detail: string | null;
 }
 
+/** A trigger that starts (or started) a piece of work: its type, and a ticket trigger's source. */
+export interface WorkTrigger {
+  type: string;
+  source?: string | null;
+}
+
 export interface WorkRow {
   /** Unique across kinds: `task-<id>`, `terminal-<id>`, … */
   key: string;
@@ -66,8 +72,21 @@ export interface WorkRow {
   /** Extra one-liner: PR link, attention reason, next fire… */
   note: string | null;
   prUrl: string | null;
+  /** The PR's state when known ("open" | "merged" | "closed"). */
+  prState?: string | null;
+  /**
+   * What starts it, when known: a recurring definition's triggers, or the
+   * trigger / ticket a run was started by. Drives the brand marks on the row.
+   */
+  triggers?: WorkTrigger[];
   /** ISO-8601; rows sort on it lexically. */
   lastActivity: string | null;
+  /**
+   * What the list orders the row by, when it differs from `lastActivity`:
+   * a session on your machine sorts by when you last typed into it (else
+   * when it was made), so it doesn't jump as its attention state flips.
+   */
+  orderAt?: string | null;
   /**
    * Definitions that spawn runs (blueprints, Jobs, automations). Their `href`
    * is the page about the definition (stats, triggers, prior runs);
@@ -109,23 +128,29 @@ export function inView(row: WorkRow, view: WorkView): boolean {
   }
 }
 
-/** needs-you first, then live, then everything by recency. */
+/**
+ * Live work first (needs you / running / queued / waiting share one rank, so
+ * a row doesn't jump when an agent flips between working and needs-you —
+ * that shows on the row and in the Needs-you count), then armed, paused,
+ * failed, done; within a rank by `orderAt ?? lastActivity`, newest first.
+ */
 const STATUS_RANK: Record<WorkStatus, number> = {
   needs_you: 0,
-  running: 1,
-  queued: 2,
-  waiting: 3,
-  scheduled: 4,
-  paused: 5,
-  failed: 6,
-  done: 7,
+  running: 0,
+  queued: 0,
+  waiting: 0,
+  scheduled: 1,
+  paused: 2,
+  failed: 3,
+  done: 4,
 };
 
 export function sortWork(rows: WorkRow[]): WorkRow[] {
+  const at = (r: WorkRow) => r.orderAt ?? r.lastActivity ?? "";
   return [...rows].sort((a, b) => {
     const r = STATUS_RANK[a.status] - STATUS_RANK[b.status];
     if (r !== 0) return r;
-    return (b.lastActivity ?? "").localeCompare(a.lastActivity ?? "");
+    return at(b).localeCompare(at(a)) || a.key.localeCompare(b.key);
   });
 }
 

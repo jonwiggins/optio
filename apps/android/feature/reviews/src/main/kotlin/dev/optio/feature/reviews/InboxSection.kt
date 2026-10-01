@@ -35,11 +35,14 @@ import dev.optio.core.navigation.Section
 import dev.optio.core.navigation.routes.IssueDetailRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.ui.auth.Roles
+import dev.optio.core.ui.components.Brand
+import dev.optio.core.ui.components.BrandMark
 import dev.optio.core.ui.components.ChipPicker
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.InsetDivider
+import dev.optio.core.ui.components.IssueGlyph
 import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.PullRefresh
 import dev.optio.core.ui.components.SkeletonRows
@@ -52,6 +55,7 @@ import dev.optio.core.ui.format.rememberNow
 import dev.optio.core.ui.format.relativeDescription
 import dev.optio.core.ui.hub.HubActions
 import dev.optio.core.ui.state.LoadState
+import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Tone
 import dev.optio.core.ui.toast.LocalToaster
 import java.time.Instant
@@ -195,6 +199,20 @@ internal fun InboxContent(
     }
 }
 
+/** The tracker an issue lives in: its `source`, else its URL's host. */
+internal fun issueBrand(issue: IssueRow): Brand? = Brand.fromProvider(issue.source) ?: Brand.fromUrl(issue.url)
+
+/** GitHub's issue glyph (green open, purple closed) for a GitHub issue, else the tracker's logo. */
+@Composable
+internal fun IssueRowGlyph(issue: IssueRow) {
+    val brand = issueBrand(issue)
+    if (brand == null || brand == Brand.GitHub) {
+        IssueGlyph(open = issue.state?.lowercase() != "closed", size = 13.dp)
+    } else {
+        BrandMark(brand, size = 13.dp, tint = OptioTheme.colors.secondaryLabel)
+    }
+}
+
 /** `dot · title` / `#12 · owner/repo · @author · 2h`, trailing the Optio task's state (iOS `IssueRowView`). */
 @Composable
 internal fun IssueRowView(
@@ -223,6 +241,7 @@ internal fun IssueRowView(
             trailing = trailing?.first,
             trailingTone = trailing?.second,
             footer = issue.labels?.takeIf { it.isNotEmpty() }?.let { metaText(it) },
+            metaGlyph = { IssueRowGlyph(issue) },
             onClick = onOpen,
             onLongClick = if (canAssign || onOpenExternal != null) ({ menu = true }) else null,
             onClickLabel = "Open issue",
@@ -249,7 +268,10 @@ internal fun IssueRowView(
             if (onOpenExternal != null) {
                 DropdownMenuItem(
                     text = { Text(hostLabel) },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null) },
+                    leadingIcon = {
+                        val brand = issueBrand(issue)
+                        if (brand != null) BrandMark(brand, size = 20.dp, contentDescription = null) else Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
+                    },
                     onClick = {
                         menu = false
                         onOpenExternal()

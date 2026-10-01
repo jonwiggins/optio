@@ -313,9 +313,9 @@ describe("terminal snooze → Watch queue", () => {
     await insertTaskConfig({ workspaceId: ws.id, enabled: false }); // paused: not recurring
     await insertTaskConfig({ workspaceId: foreign.id }); // not my workspace
     await insertWorkflow({ workspaceId: ws.id });
-    await insertLocalBlueprint({ userId: u.id, name: "nightly" });
-    await insertLocalBlueprint({ userId: u.id, name: "off", enabled: false });
-    await insertLocalBlueprint({ userId: other.id, name: "theirs" });
+    await insertLocalBlueprint({ ownerUserId: u.id, name: "nightly" });
+    await insertLocalBlueprint({ ownerUserId: u.id, name: "off", enabled: false });
+    await insertLocalBlueprint({ ownerUserId: other.id, name: "theirs" });
     await db.insert(persistentAgents).values([
       { workspaceId: ws.id, slug: "vesper", name: "Vesper", initialPrompt: "hi" },
       { workspaceId: ws.id, slug: "old", name: "Old", initialPrompt: "hi", state: "archived" },

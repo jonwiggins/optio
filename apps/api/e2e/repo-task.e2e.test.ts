@@ -186,6 +186,32 @@ describe("repo-task e2e", () => {
     expect(logsBody.logs.some((l) => l.logType === "system")).toBe(true);
   });
 
+  it("adopts only the PR the agent's create call returned, not one it mentioned", async () => {
+    const taskId = await createTask("Open a PR [[mock:pr-mention]] [[mock:pr]]");
+
+    const task = await waitForTaskState(taskId, [
+      "pr_opened",
+      "completed",
+      "failed",
+      "needs_attention",
+    ]);
+    expect(task.state).toBe("pr_opened");
+    expect(task.prUrl).toMatch(/^https:\/\/github\.com\/e2e-org\/e2e-repo\/pull\/\d+$/);
+    expect(task.prUrl).not.toContain("/pull/9999");
+
+    // The detail carries every tracked PR: just the created one.
+    const { body } = await api<{
+      task: { prs: { url: string; source: string; primary: boolean }[] };
+    }>(`/api/tasks/${taskId}`);
+    expect(body.task.prs).toEqual([
+      expect.objectContaining({ url: task.prUrl, source: "tool_call", primary: true }),
+    ]);
+
+    // The mention is still in the logs — just never adopted.
+    const { body: logsBody } = await api<{ logs: LogRow[] }>(`/api/tasks/${taskId}/logs`);
+    expect(logsBody.logs.map((l) => l.content).join("\n")).toContain("/pull/9999");
+  });
+
   it("escalates a successful run with no PR to needs_attention (completed_without_pr)", async () => {
     const taskId = await createTask("Complete without opening a PR");
 

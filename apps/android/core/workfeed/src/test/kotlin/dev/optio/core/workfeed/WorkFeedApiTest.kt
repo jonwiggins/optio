@@ -51,7 +51,7 @@ class WorkFeedApiTest {
         server.error("GET", WorkFeedEndpoints.POD_SESSIONS, 500, "boom")
         server.json(WorkFeedEndpoints.AGENTS, """{"unexpected":true}""") // undecodable: counts as failed
         val rows = WorkFeed.collect(server.client().workFeedSources())
-        assertEquals(listOf("terminal-lt1", "task-t1", "automation-a1"), rows.map { it.key })
+        assertEquals(listOf("task-t1", "terminal-lt1", "automation-a1"), rows.map { it.key })
     }
 
     @Test

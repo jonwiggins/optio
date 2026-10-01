@@ -44,3 +44,5 @@ export * from "./types/push.js";
 export * from "./agent-options/index.js";
 export * from "./work/feed.js";
 export * from "./work/spec.js";
+export * from "./types/model-provider.js";
+export * from "./utils/pr-tool-calls.js";

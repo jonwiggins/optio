@@ -4,6 +4,8 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { TaskState, isTaskStalled, getSilentDuration, parseIntEnv } from "@optio/shared";
 import * as taskService from "../services/task-service.js";
+import { planNewWork, workActor, workChangeError } from "../services/work-ownership.js";
+import * as taskPrService from "../services/task-pr-service.js";
 import { validateRunLocation } from "../services/local-run-service.js";
 import * as unifiedTaskService from "../services/unified-task-service.js";
 import * as taskConfigService from "../services/task-config-service.js";
@@ -183,6 +185,18 @@ const createTaskSchema = z
       .describe(
         "Local runs: `headless` (default) exits when the agent's turn is done; `interactive` keeps the session open for chat",
       ),
+    owner: z
+      .enum(["workspace", "me"])
+      .optional()
+      .describe(
+        "Who the work belongs to: `workspace` (the organization) or `me` (runs with your own secrets / model providers; only you can change it). Default: `me` when it runs on your machine or picks something personal, else `workspace`.",
+      ),
+    podSecrets: z
+      .array(z.string().min(1).max(128))
+      .max(100)
+      .nullable()
+      .optional()
+      .describe("Secrets (by name) the agent gets in its pod; null = the workspace's default"),
   })
   .describe("Body for creating a task (polymorphic via `type`)");
 
@@ -223,6 +237,37 @@ const TaskStatsResponseSchema = z
     stats: TaskStatsSchema,
   })
   .describe("Aggregated pipeline counts");
+
+const TaskPrSchema = z
+  .object({
+    id: z.string(),
+    taskId: z.string(),
+    repoUrl: z.string(),
+    number: z.number().int(),
+    url: z.string(),
+    headBranch: z.string().nullable(),
+    headRepo: z.string().nullable(),
+    baseBranch: z.string().nullable(),
+    source: z.enum(["tool_call", "branch", "attached"]),
+    state: z.string(),
+    primary: z.boolean(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .describe("A pull / merge request a task opened or tracks");
+
+const TaskPrResponseSchema = z.object({ pr: TaskPrSchema }).describe("The tracked PR");
+
+const AttachTaskPrBodySchema = z
+  .object({ url: z.string().min(1).max(2000).describe("PR / MR URL in the task's repository") })
+  .describe("PR to track");
+
+const TaskPrParamsSchema = z
+  .object({
+    id: z.string().describe("Task UUID"),
+    prId: z.string().uuid().describe("task_prs row id"),
+  })
+  .describe("Task + tracked PR ids");
 
 const TaskDetailResponseSchema = z
   .object({
@@ -432,6 +477,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
           return reply.status(404).send({ error: "Task not found" });
         }
         const [task] = await taskService.hydratePrReviewPrUrls([rawTask]);
+        const prs = await taskPrService.listTaskPrs(rawTask);
 
         let pendingReason: string | null = null;
         if (["pending", "waiting_on_deps", "queued"].includes(task.state)) {
@@ -454,7 +500,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         }
 
         return reply.send({
-          task: { type: "repo-task", ...task },
+          task: { type: "repo-task", ...task, prs },
           pendingReason,
           pipelineProgress,
           stallInfo,
@@ -519,6 +565,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       );
       if (!locationCheck.ok) return reply.status(400).send({ error: locationCheck.error });
       const location = locationCheck.location;
+      const runsOn = location.runTarget === "local" ? ("local" as const) : ("pod" as const);
 
       // ── Standalone: create a workflow row ─────────────────────────────
       if (type === "standalone") {
@@ -526,9 +573,17 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         if (!name) {
           return reply.status(400).send({ error: "Standalone tasks require `name` or `title`" });
         }
+        const plan = await planNewWork(input, workActor(req), {
+          agentType: input.agentType ?? "claude-code",
+          agentOptions: input.agentOptions,
+          runsOn,
+        });
+        if (!plan.ok) return reply.status(400).send({ error: plan.error });
         try {
           const workflow = await workflowService.createWorkflow({
             name,
+            ownerUserId: plan.ownerUserId,
+            podSecrets: plan.podSecrets ?? null,
             description: input.description,
             promptTemplate: input.prompt,
             runTitle: input.runTitle,
@@ -569,9 +624,17 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         if (!name) {
           return reply.status(400).send({ error: "repo-blueprint requires `name` or `title`" });
         }
+        const plan = await planNewWork(input, workActor(req), {
+          agentType: input.agentType ?? "claude-code",
+          agentOptions: input.agentOptions,
+          runsOn,
+        });
+        if (!plan.ok) return reply.status(400).send({ error: plan.error });
         try {
           const row = await taskConfigService.createTaskConfig({
             name,
+            ownerUserId: plan.ownerUserId,
+            podSecrets: plan.podSecrets ?? null,
             description: input.description ?? null,
             title: input.title ?? name,
             prompt: input.prompt,
@@ -628,18 +691,38 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         localHostId: _lh,
         localDir: _ld,
         localSessionMode: _lm,
+        owner: _owner,
+        podSecrets: _podSecrets,
         ...taskInput
       } = input;
 
       let task;
       try {
+        const agentType = await taskService.resolveTaskAgent({
+          agentType: taskInput.agentType,
+          repoUrl: taskInput.repoUrl!,
+          workspaceId: req.user?.workspaceId ?? null,
+          runTarget: location.runTarget,
+        });
+        // An ad-hoc task's agent options ride in its metadata (the form sends them there).
+        const adHocOptions =
+          (taskInput.metadata?.agentOptions as Record<string, unknown> | undefined) ??
+          input.agentOptions;
+        const plan = await planNewWork(input, workActor(req), {
+          agentType,
+          agentOptions: adHocOptions,
+          runsOn,
+        });
+        if (!plan.ok) return reply.status(400).send({ error: plan.error });
         task = await taskService.submitTask(
           {
+            ownerUserId: plan.ownerUserId,
+            podSecrets: plan.podSecrets ?? null,
             title: taskInput.title!,
             prompt: taskInput.prompt,
             repoUrl: taskInput.repoUrl!,
             repoBranch: taskInput.repoBranch,
-            agentType: taskInput.agentType,
+            agentType,
             ticketSource: taskInput.ticketSource,
             ticketExternalId: taskInput.ticketExternalId,
             metadata: taskInput.metadata,
@@ -672,6 +755,113 @@ export async function taskRoutes(rawApp: FastifyInstance) {
       // submitTask returns the post-transition row, so clients never see a
       // state the task has already left.
       reply.status(201).send({ task: { type: "repo-task", ...task } });
+    },
+  );
+
+  // Attach a PR to a task by hand
+  app.post(
+    "/api/tasks/:id/prs",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "attachTaskPr",
+        summary: "Track a PR on a task",
+        description:
+          "Attach a pull / merge request in the task's repository to the task. " +
+          "It becomes the primary PR (`prUrl`) when the task has none. Requires `member` role; " +
+          "personal work only by its owner.",
+        tags: ["Tasks"],
+        params: IdParamsSchema,
+        body: AttachTaskPrBodySchema,
+        response: {
+          201: TaskPrResponseSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params;
+      const task = await taskService.getTask(id);
+      const wsId = req.user?.workspaceId;
+      if (!task || (wsId && task.workspaceId !== wsId)) {
+        return reply.status(404).send({ error: "Task not found" });
+      }
+      const changeErr = await workChangeError(task.ownerUserId, workActor(req), "edit");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
+      try {
+        const pr = await taskPrService.attachTaskPr(task, req.body.url);
+        logAction({
+          workspaceId: wsId ?? null,
+          userId: req.user?.id,
+          action: "task.pr.attach",
+          params: { taskId: id, url: req.body.url },
+          result: { id: pr.id },
+          success: true,
+        }).catch(() => {});
+        return reply.status(201).send({ pr });
+      } catch (err) {
+        if (err instanceof taskPrService.TaskPrError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // Stop tracking a PR
+  app.delete(
+    "/api/tasks/:id/prs/:prId",
+    {
+      preHandler: [requireRole("member")],
+      schema: {
+        operationId: "removeTaskPr",
+        summary: "Stop tracking a PR on a task",
+        description:
+          "Remove a PR from the task's list. The primary PR can only be removed while " +
+          "another PR can take its place (the oldest remaining one becomes primary). " +
+          "Requires `member` role; personal work only by its owner.",
+        tags: ["Tasks"],
+        params: TaskPrParamsSchema,
+        response: {
+          200: z
+            .object({ primaryUrl: z.string().nullable() })
+            .describe("The task's primary PR now"),
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id, prId } = req.params;
+      const task = await taskService.getTask(id);
+      const wsId = req.user?.workspaceId;
+      if (!task || (wsId && task.workspaceId !== wsId)) {
+        return reply.status(404).send({ error: "Task not found" });
+      }
+      const changeErr = await workChangeError(task.ownerUserId, workActor(req), "edit");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
+      try {
+        const result = await taskPrService.removeTaskPr(task, prId);
+        logAction({
+          workspaceId: wsId ?? null,
+          userId: req.user?.id,
+          action: "task.pr.remove",
+          params: { taskId: id, prId },
+          result,
+          success: true,
+        }).catch(() => {});
+        return reply.send(result);
+      } catch (err) {
+        if (err instanceof taskPrService.TaskPrError) {
+          return reply.status(err.status).send({ error: err.message });
+        }
+        throw err;
+      }
     },
   );
 

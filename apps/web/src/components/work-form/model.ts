@@ -1,7 +1,15 @@
 import {
   getProviderCatalog,
+  isModelProviderAgent,
+  MODEL_PROVIDER_OPTION_KEY,
+  modelProviderIdFrom,
   providerForAgentType,
   toLocalAgentKind,
+  type LocalHost,
+  type ModelProvider,
+  type PickableSecret,
+  type ResourceOwner,
+  type WorkFormDefaults,
   type WorkThen,
 } from "@optio/shared";
 import type { TriggerConfig } from "@/components/trigger-selector";
@@ -118,6 +126,17 @@ export interface WorkDraft {
   priority: number;
   maxRetries: number;
   dependsOn: string[];
+  /**
+   * Pod work: who it belongs to — the organization, or you (it then runs
+   * with your own secrets, providers, and connections). Work on a machine is
+   * always yours (`effectiveOwner`).
+   */
+  owner: ResourceOwner;
+  /**
+   * Pod work: the secrets (by name) the agent gets in its pod. Null = the
+   * row predates picking (legacy behavior) and nothing was picked since.
+   */
+  podSecrets: string[] | null;
 }
 
 export const RUNTIMES: Array<{ value: string; label: string }> = [
@@ -158,6 +177,8 @@ export const EMPTY_DRAFT: WorkDraft = {
   priority: 100,
   maxRetries: 3,
   dependsOn: [],
+  owner: "workspace",
+  podSecrets: [],
 };
 
 // ── Presets ──────────────────────────────────────────────────────────────────
@@ -783,4 +804,263 @@ export function kindLock(
   const next = deriveKind(normalize({ ...d, ...patch }));
   if (next === locked || next === deriveKind(d)) return undefined;
   return `This is saved as ${KIND_NOUN[locked]} — start new work to make it something else.`;
+}
+
+// ── Owner, pod secrets, model providers ─────────────────────────────────────
+
+/** Work that runs in an Optio pod with an agent: the kinds that take an owner and pod secrets. */
+export function isPodWork(d: WorkDraft): boolean {
+  if (isLocal(d) || d.runtime === TERMINAL) return false;
+  const kind = deriveKind(d);
+  return (
+    kind === "repo-task" ||
+    kind === "repo-blueprint" ||
+    kind === "standalone" ||
+    kind === "persistent-agent"
+  );
+}
+
+/** The kinds whose rows carry an owner (a pod or a machine run of a Task / Job / agent). */
+export function takesOwner(d: WorkDraft): boolean {
+  const kind = deriveKind(d);
+  return (
+    kind === "repo-task" ||
+    kind === "repo-blueprint" ||
+    kind === "standalone" ||
+    kind === "persistent-agent"
+  );
+}
+
+/** Who the saved row belongs to: work on a machine is always its owner's. */
+export function effectiveOwner(d: WorkDraft): ResourceOwner {
+  return isLocal(d) ? "me" : d.owner;
+}
+
+/** The provider the draft picked, if it is in the list. */
+export function pickedProvider(
+  d: WorkDraft,
+  providers: ModelProvider[],
+): ModelProvider | undefined {
+  const id = modelProviderIdFrom(d.agentOptions);
+  return id ? providers.find((p) => p.id === id) : undefined;
+}
+
+/**
+ * The providers the Provider control offers for the draft's runtime: the
+ * organization's, plus your own (picking one makes the work yours). Someone
+ * else's personal provider (admins see them by name) is never offered.
+ */
+export function usableProviders(d: WorkDraft, providers: ModelProvider[]): ModelProvider[] {
+  if (d.runtime === TERMINAL || !isModelProviderAgent(d.runtime)) return [];
+  const runtime = d.runtime;
+  return providers.filter((p) => p.agents.includes(runtime) && (p.ownerUserId === null || p.mine));
+}
+
+/** Why a provider can't be picked here, if it can't. */
+export function providerDisabled(
+  d: WorkDraft,
+  p: ModelProvider,
+  host: Pick<LocalHost, "name" | "modelProviders" | "awsProfiles"> | undefined,
+): string | undefined {
+  if (!isLocal(d)) {
+    return p.podCredential === "none" ? "Machines only" : undefined;
+  }
+  if (!host) return undefined;
+  if (!host.modelProviders) return `Update Optio Local on ${host.name} to use model providers`;
+  if (p.localAwsProfile && !(host.awsProfiles ?? []).includes(p.localAwsProfile)) {
+    return `AWS profile ${p.localAwsProfile} isn't on ${host.name}`;
+  }
+  return undefined;
+}
+
+/** The runtime's model field (`claudeModel`, `copilotModel`), if it has one. */
+function modelFieldFor(runtime: string): string | undefined {
+  if (runtime === TERMINAL) return undefined;
+  return getProviderCatalog(providerForAgentType(runtime))?.modelField;
+}
+
+/**
+ * Pick a provider (or `null` for Default). A provider swaps the model to its
+ * first model; Default removes the key and the provider's model. A personal
+ * provider makes the work yours.
+ */
+export function withProvider(d: WorkDraft, p: ModelProvider | null): WorkDraft {
+  const field = modelFieldFor(d.runtime);
+  const options = { ...d.agentOptions };
+  const wasProvider = !!modelProviderIdFrom(options);
+  if (!p) {
+    delete options[MODEL_PROVIDER_OPTION_KEY];
+    // The provider's model id means nothing to the default sign-in.
+    if (field && wasProvider) delete options[field];
+    return { ...d, agentOptions: options };
+  }
+  options[MODEL_PROVIDER_OPTION_KEY] = p.id;
+  if (field) {
+    const first = isModelProviderAgent(d.runtime) ? p.models[d.runtime]?.[0]?.id : undefined;
+    if (first) options[field] = first;
+    else delete options[field];
+  }
+  return { ...d, agentOptions: options, owner: p.ownerUserId !== null ? "me" : d.owner };
+}
+
+/** A picked secret name only you have (no organization secret of that name). */
+export function isPersonalOnlySecret(name: string, pickable: PickableSecret[]): boolean {
+  const matches = pickable.filter((s) => s.name === name);
+  return matches.length > 0 && matches.every((s) => s.owner === "me");
+}
+
+/** The secrets "+ Add secret" offers: org ones always, yours unless the work is the org's. */
+export function addableSecrets(d: WorkDraft, pickable: PickableSecret[]): PickableSecret[] {
+  const picked = new Set(d.podSecrets ?? []);
+  const seen = new Set<string>();
+  return pickable.filter((s) => {
+    if (picked.has(s.name) || seen.has(`${s.owner}:${s.name}`)) return false;
+    seen.add(`${s.owner}:${s.name}`);
+    return true;
+  });
+}
+
+/** Add a secret by name; one only you have makes the work yours. */
+export function withSecret(d: WorkDraft, s: PickableSecret): WorkDraft {
+  const current = d.podSecrets ?? [];
+  const podSecrets = current.includes(s.name) ? current : [...current, s.name];
+  return { ...d, podSecrets, owner: s.owner === "me" && !isLocal(d) ? "me" : d.owner };
+}
+
+export function withoutSecret(d: WorkDraft, name: string): WorkDraft {
+  return { ...d, podSecrets: (d.podSecrets ?? []).filter((n) => n !== name) };
+}
+
+/**
+ * Switch the owner. Organization work can only use organization providers
+ * and secrets, so making it the org's drops a personal provider (back to
+ * Default) and any secret only you have.
+ */
+export function withOwner(
+  d: WorkDraft,
+  owner: ResourceOwner,
+  providers: ModelProvider[],
+  pickable: PickableSecret[],
+): WorkDraft {
+  let next: WorkDraft = { ...d, owner };
+  if (owner === "workspace") {
+    const p = pickedProvider(next, providers);
+    if (p && p.ownerUserId !== null) next = withProvider(next, null);
+    if (next.podSecrets) {
+      next = {
+        ...next,
+        podSecrets: next.podSecrets.filter((n) => !isPersonalOnlySecret(n, pickable)),
+      };
+    }
+  }
+  return next;
+}
+
+/** The provider models the picker offers instead of the catalog's, when one is picked. */
+export function providerModelsFor(d: WorkDraft, p: ModelProvider | undefined) {
+  if (!p || !isModelProviderAgent(d.runtime)) return undefined;
+  return p.models[d.runtime] ?? [];
+}
+
+/**
+ * The agent options you last used for `runtime` (from `GET
+ * /api/me/work-defaults`), minus what no longer applies: a model provider
+ * that's gone, someone else's, or doesn't serve the runtime is dropped along
+ * with its model (a provider's model id means nothing without it). Any other
+ * model is kept — free-text models exist. Null when nothing is saved.
+ */
+export function savedOptionsFor(
+  defaults: WorkFormDefaults | null | undefined,
+  runtime: string,
+  providers: ModelProvider[],
+): AgentOptionsValues | null {
+  if (runtime === TERMINAL) return null;
+  const saved = defaults?.agentOptions?.[runtime];
+  if (!saved || typeof saved !== "object") return null;
+  // Only string / boolean values are options (the API stores nothing else).
+  const out: AgentOptionsValues = {};
+  for (const [k, v] of Object.entries(saved)) {
+    if (typeof v === "string" || typeof v === "boolean") out[k] = v;
+  }
+  const providerId = modelProviderIdFrom(out);
+  if (providerId) {
+    const p = providers.find((x) => x.id === providerId);
+    const usable =
+      !!p &&
+      isModelProviderAgent(runtime) &&
+      p.agents.includes(runtime) &&
+      (p.ownerUserId === null || !!p.mine);
+    if (!usable) {
+      delete out[MODEL_PROVIDER_OPTION_KEY];
+      const field = modelFieldFor(runtime);
+      if (field) delete out[field];
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** Options for a runtime as the form starts it: saved ones, with a personal provider making the work yours. */
+export function withSavedOptions(
+  d: WorkDraft,
+  options: AgentOptionsValues,
+  providers: ModelProvider[],
+): WorkDraft {
+  const p = pickedProvider({ ...d, agentOptions: options }, providers);
+  return {
+    ...d,
+    agentOptions: options,
+    owner: p && p.ownerUserId !== null && !isLocal(d) ? "me" : d.owner,
+  };
+}
+
+/**
+ * A blank New work form with your last settings applied: the remembered
+ * runtime when it can run here (never a bare terminal — the runtime key is
+ * always an agent), and that runtime's saved options. Without saved options
+ * for the runtime it lands on, the draft's own options stay.
+ */
+export function applyWorkDefaults(
+  d: WorkDraft,
+  defaults: WorkFormDefaults | null | undefined,
+  providers: ModelProvider[],
+): WorkDraft {
+  if (!defaults || d.runtime === TERMINAL) return d;
+  const wanted = defaults.runtime;
+  const runtime =
+    wanted &&
+    wanted !== TERMINAL &&
+    runtimeOptions(d).some((r) => r.value === wanted && !r.disabled)
+      ? wanted
+      : d.runtime;
+  const next: WorkDraft = runtime === d.runtime ? d : { ...d, runtime, agentOptions: {} };
+  const saved = savedOptionsFor(defaults, runtime, providers);
+  return normalize(saved ? withSavedOptions(next, saved, providers) : next);
+}
+
+/** Same values, ignoring blank entries (a blank select means "default"). */
+export function sameOptions(a: AgentOptionsValues, b: AgentOptionsValues): boolean {
+  const clean = (o: AgentOptionsValues) =>
+    Object.entries(o)
+      .filter(([, v]) => v !== "" && v !== undefined)
+      .sort(([x], [y]) => x.localeCompare(y));
+  return JSON.stringify(clean(a)) === JSON.stringify(clean(b));
+}
+
+/**
+ * Apply an example chip. A chip that doesn't set agent options itself (it
+ * leaves them blank) starts its runtime from your saved settings, so a stray
+ * click doesn't lose the remembered model — unless you've already changed
+ * that runtime's options on this form (`touched`).
+ */
+export function applyPreset(
+  d: WorkDraft,
+  preset: Preset,
+  defaults: WorkFormDefaults | null | undefined,
+  providers: ModelProvider[],
+  touched: ReadonlySet<string> = new Set(),
+): WorkDraft {
+  const next = normalize(preset.apply(d));
+  if (Object.keys(next.agentOptions).length > 0 || touched.has(next.runtime)) return next;
+  const saved = savedOptionsFor(defaults, next.runtime, providers);
+  return saved ? normalize(withSavedOptions(next, saved, providers)) : next;
 }

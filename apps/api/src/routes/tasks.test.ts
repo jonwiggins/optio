@@ -22,6 +22,8 @@ vi.mock("../services/task-service.js", () => ({
   getTask: (...args: unknown[]) => mockGetTask(...args),
   createTask: (...args: unknown[]) => mockCreateTask(...args),
   submitTask: (...args: unknown[]) => mockSubmitTask(...args),
+  resolveTaskAgent: async (input: { agentType?: string | null }) =>
+    input.agentType || "claude-code",
   TaskInputError: class TaskInputError extends Error {},
   transitionTask: (...args: unknown[]) => mockTransitionTask(...args),
   forceRedoTask: (...args: unknown[]) => mockForceRedoTask(...args),
@@ -33,6 +35,23 @@ vi.mock("../services/task-service.js", () => ({
 }));
 
 const mockAddDependencies = vi.fn();
+const mockListTaskPrs = vi.fn();
+const mockAttachTaskPr = vi.fn();
+const mockRemoveTaskPr = vi.fn();
+vi.mock("../services/task-pr-service.js", () => ({
+  listTaskPrs: (...args: unknown[]) => mockListTaskPrs(...args),
+  attachTaskPr: (...args: unknown[]) => mockAttachTaskPr(...args),
+  removeTaskPr: (...args: unknown[]) => mockRemoveTaskPr(...args),
+  TaskPrError: class TaskPrError extends Error {
+    constructor(
+      message: string,
+      readonly status = 400,
+    ) {
+      super(message);
+    }
+  },
+}));
+
 vi.mock("../services/dependency-service.js", () => ({
   addDependencies: (...args: unknown[]) => mockAddDependencies(...args),
   computePendingReason: vi.fn().mockResolvedValue(null),
@@ -792,5 +811,90 @@ describe("GET /api/tasks/stats", () => {
 
     expect(res.statusCode).toBe(200);
     expect(mockGetTaskStats).toHaveBeenCalledWith("ws-1");
+  });
+});
+
+describe("task PR routes", () => {
+  let app: FastifyInstance;
+  const pr = {
+    id: "11111111-2222-4333-8444-555555555555",
+    taskId: "task-1",
+    repoUrl: "https://github.com/org/repo",
+    number: 7,
+    url: "https://github.com/org/repo/pull/7",
+    headBranch: "optio/task-task-1-docs",
+    headRepo: "org/repo",
+    baseBranch: "main",
+    source: "attached",
+    state: "open",
+    primary: false,
+    createdAt: "2026-09-30T10:00:00.000Z",
+    updatedAt: "2026-09-30T10:00:00.000Z",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockListTaskPrs.mockResolvedValue([]);
+    app = await buildTestApp();
+  });
+
+  it("GET /api/tasks/:id includes the task's PRs", async () => {
+    mockGetTask.mockResolvedValue(mockTaskData);
+    mockListTaskPrs.mockResolvedValue([pr]);
+    const res = await app.inject({ method: "GET", url: "/api/tasks/task-1" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().task.prs).toEqual([pr]);
+  });
+
+  it("POST /api/tasks/:id/prs attaches a PR", async () => {
+    mockGetTask.mockResolvedValue(mockTaskData);
+    mockAttachTaskPr.mockResolvedValue(pr);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks/task-1/prs",
+      payload: { url: pr.url },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().pr.url).toBe(pr.url);
+    expect(mockAttachTaskPr).toHaveBeenCalledWith(mockTaskData, pr.url);
+  });
+
+  it("POST /api/tasks/:id/prs maps a rejected PR to its status", async () => {
+    const { TaskPrError } = await import("../services/task-pr-service.js");
+    mockGetTask.mockResolvedValue(mockTaskData);
+    mockAttachTaskPr.mockRejectedValue(new TaskPrError("not in this repo", 400));
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks/task-1/prs",
+      payload: { url: "https://github.com/other/repo/pull/1" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("not in this repo");
+  });
+
+  it("POST /api/tasks/:id/prs 404s for an unknown task", async () => {
+    mockGetTask.mockResolvedValue(null);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks/nope/prs",
+      payload: { url: pr.url },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("DELETE /api/tasks/:id/prs/:prId stops tracking", async () => {
+    mockGetTask.mockResolvedValue(mockTaskData);
+    mockRemoveTaskPr.mockResolvedValue({ primaryUrl: null });
+    const res = await app.inject({ method: "DELETE", url: `/api/tasks/task-1/prs/${pr.id}` });
+    expect(res.statusCode).toBe(200);
+    expect(mockRemoveTaskPr).toHaveBeenCalledWith(mockTaskData, pr.id);
+  });
+
+  it("DELETE refuses to drop the only primary PR", async () => {
+    const { TaskPrError } = await import("../services/task-pr-service.js");
+    mockGetTask.mockResolvedValue(mockTaskData);
+    mockRemoveTaskPr.mockRejectedValue(new TaskPrError("only PR", 409));
+    const res = await app.inject({ method: "DELETE", url: `/api/tasks/task-1/prs/${pr.id}` });
+    expect(res.statusCode).toBe(409);
   });
 });

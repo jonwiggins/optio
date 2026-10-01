@@ -37,6 +37,11 @@ export const users = pgTable("users", {
   username: text("username"),
   avatarUrl: text("avatar_url"),
   defaultWorkspaceId: uuid("default_workspace_id"), // last-used workspace
+  // The New work form's last-used agent settings (runtime + per-runtime options).
+  workDefaults: jsonb("work_defaults").$type<{
+    runtime?: string;
+    agentOptions?: Record<string, Record<string, string | boolean>>;
+  }>(),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -51,6 +56,11 @@ export const workspaces = pgTable("workspaces", {
   description: text("description"),
   createdBy: uuid("created_by"),
   allowDockerInDocker: boolean("allow_docker_in_docker").notNull().default(false),
+  // Verified email domains whose people join this workspace when they sign in.
+  autoJoinDomains: jsonb("auto_join_domains").$type<string[]>().notNull().default([]),
+  autoJoinRole: workspaceRoleEnum("auto_join_role").notNull().default("member"),
+  // Pods get only the secrets a piece of work picks (off: legacy "every org secret").
+  restrictPodSecrets: boolean("restrict_pod_secrets").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -150,6 +160,10 @@ export const tasks = pgTable(
     localDir: text("local_dir"),
     localSessionMode: text("local_session_mode").$type<"interactive" | "headless">(),
     localTerminalId: uuid("local_terminal_id"),
+    // Who the work belongs to (null = the organization) and the secrets its
+    // pod gets by name (null = the workspace's legacy behavior).
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    podSecrets: jsonb("pod_secrets").$type<string[]>(),
     createdBy: uuid("created_by"), // nullable FK to users (null when auth is disabled)
     ignoreOffPeak: boolean("ignore_off_peak").notNull().default(false),
     // PR follow-through for this task, over the repo's settings: null = the
@@ -200,6 +214,31 @@ export const taskEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("task_events_task_id_idx").on(table.taskId)],
+);
+
+/**
+ * Every PR a Repo Task opened or tracks. `tasks.pr_url` stays the primary
+ * one (what the PR lifecycle follows); extra PRs live only here.
+ */
+export const taskPrs = pgTable(
+  "task_prs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    repoUrl: text("repo_url").notNull(),
+    number: integer("number").notNull(),
+    url: text("url").notNull(),
+    headBranch: text("head_branch"),
+    headRepo: text("head_repo"),
+    baseBranch: text("base_branch"),
+    source: text("source").notNull(), // tool_call | branch | attached
+    state: text("state").notNull().default("open"), // open | merged | closed
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("task_prs_task_url_idx").on(table.taskId, table.url)],
 );
 
 // The one log table for every agent run (services/run-log-service.ts): a row
@@ -650,12 +689,15 @@ export const workDefinitions = pgTable(
     kind: text("kind").$type<WorkDefinitionKind>().notNull(),
     name: text("name").notNull(),
     description: text("description"),
-    // Scheduled Tasks and Jobs belong to a workspace (deleting it deletes
-    // them: workspace-service). Local automations belong to a person.
+    // Scheduled Tasks and Jobs live in a workspace (deleting it deletes
+    // them: workspace-service); Local automations are their owner's.
     workspaceId: uuid("workspace_id"),
-    // Nullable: auth-disabled dev/e2e has no user rows (mirrors interactive_sessions).
-    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    // Who the work belongs to: null = the organization's, set = one person's
+    // own (it runs with their credentials; a Local automation always is).
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id),
+    // The secrets its pod gets, by name (null = the workspace's legacy behavior).
+    podSecrets: jsonb("pod_secrets").$type<string[]>(),
     enabled: boolean("enabled").notNull().default(true),
 
     // What. The prompt (a Local automation's command when it runs no agent)
@@ -717,9 +759,12 @@ export const workDefinitions = pgTable(
       .on(table.kind, table.workspaceId, table.name)
       .where(sql`${table.kind} <> 'local-blueprint'`),
     uniqueIndex("work_definitions_user_name_key")
-      .on(table.userId, table.name)
+      .on(table.ownerUserId, table.name)
       .where(sql`${table.kind} = 'local-blueprint'`),
     index("work_definitions_workspace_id_idx").on(table.workspaceId),
+    index("work_definitions_owner_user_id_idx")
+      .on(table.ownerUserId)
+      .where(sql`${table.ownerUserId} IS NOT NULL`),
     check(
       "work_definitions_kind_check",
       sql`${table.kind} IN ('repo-blueprint', 'standalone', 'local-blueprint')`,
@@ -884,6 +929,8 @@ export const connections = pgTable(
     scope: text("scope").notNull().default("global"), // "global" or repo URL
     repoUrl: text("repo_url"), // null = global
     workspaceId: uuid("workspace_id"),
+    // Null = the organization's; set = one person's own (only their work gets it).
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
     enabled: boolean("enabled").notNull().default(true),
     status: connectionStatusEnum("status").notNull().default("unknown"),
     statusMessage: text("status_message"),
@@ -895,6 +942,42 @@ export const connections = pgTable(
     index("connections_provider_id_idx").on(table.providerId),
     index("connections_workspace_id_idx").on(table.workspaceId),
     index("connections_scope_idx").on(table.scope),
+  ],
+);
+
+// ── Model providers (Bedrock for Claude Code / Codex) ──────────────────────
+
+export const modelProviders = pgTable(
+  "model_providers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id"),
+    // Null = the organization's; set = one person's own.
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    kind: text("kind").$type<"bedrock">().notNull().default("bedrock"),
+    name: text("name").notNull(),
+    agents: jsonb("agents").$type<string[]>().notNull().default([]),
+    region: text("region").notNull(),
+    models: jsonb("models")
+      .$type<Record<string, Array<{ id: string; label?: string }>>>()
+      .notNull()
+      .default({}),
+    localAwsProfile: text("local_aws_profile"),
+    podCredential: text("pod_credential")
+      .$type<"access-key" | "bearer-token" | "ambient" | "none">()
+      .notNull()
+      .default("none"),
+    // AES-256-GCM JSON of the pod credentials; never returned by the API.
+    encryptedCredentials: bytea("encrypted_credentials"),
+    credentialsIv: bytea("credentials_iv"),
+    credentialsAuthTag: bytea("credentials_auth_tag"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("model_providers_workspace_id_idx").on(table.workspaceId),
+    index("model_providers_owner_user_id_idx").on(table.ownerUserId),
   ],
 );
 
@@ -1495,6 +1578,10 @@ export const persistentAgents = pgTable(
     controlIntent: text("control_intent"), // "pause" | "resume" | "archive" | "restart" | null
     reconcileBackoffUntil: timestamp("reconcile_backoff_until", { withTimezone: true }),
     reconcileAttempts: integer("reconcile_attempts").notNull().default(0),
+    // Who the work belongs to (null = the organization) and the secrets its
+    // pod gets by name (null = the workspace's legacy behavior).
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    podSecrets: jsonb("pod_secrets").$type<string[]>(),
     createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1620,6 +1707,9 @@ export const localHosts = pgTable(
         observedAt: string;
       };
     } | null>(),
+    // AWS profile names on the machine (for model providers), as its daemon
+    // last reported them. Null until a daemon that reports them connects.
+    awsProfiles: jsonb("aws_profiles").$type<string[]>(),
     // The models the machine's agent CLIs offer (Codex's own catalog), read by
     // the daemon; merged into the model and effort pickers.
     agentModels: jsonb("agent_models").$type<{
@@ -1724,6 +1814,8 @@ export const localTerminals = pgTable(
     } | null>(),
     costUsd: text("cost_usd"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+    // When a person last typed into it (throttled): the rail's order.
+    lastInteractedAt: timestamp("last_interacted_at", { withTimezone: true }),
     // "Later": while in the future the terminal is out of the needs-you queue.
     snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

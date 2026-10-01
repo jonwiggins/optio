@@ -106,6 +106,18 @@ data class WorkRow(
     val recurring: Boolean,
     /** Runs spawned from a definition / task config. */
     val spawned: Boolean,
+    /**
+     * Where the work came from, as a provider string (`github`, `linear`, `jira`, `slack`, …): its
+     * ticket's source or the event that spawned it. The When chip draws that brand's logo.
+     */
+    val origin: String? = null,
+    /** `open` / `merged` / `closed` for the PR chip's glyph colour. */
+    val prState: String? = null,
+    /**
+     * What orders the row within its rank when set (ISO-8601): a terminal's last interaction, else
+     * its creation, so it doesn't move as its agent works. Null = [lastActivity].
+     */
+    val orderAt: String? = null,
 ) {
     /** The detail screen this row opens (the web's `href`). */
     val destination: WorkDestination
@@ -166,6 +178,8 @@ object WorkFeed {
         val agentType: String? = null,
         val agentRuntime: String? = null,
         val prUrl: String? = null,
+        val prState: String? = null,
+        val ticketSource: String? = null,
         /** PR follow-through over the repo's settings ("Works until merged"); null = the repo's. */
         val autoResume: Boolean? = null,
         val runTarget: String? = null,
@@ -193,11 +207,15 @@ object WorkFeed {
         val dir: String? = null,
         val spec: JsonElement? = null,
         val spawnedBy: String? = null,
+        val ticketSource: String? = null,
         val blueprintId: String? = null,
         val workflowRunId: String? = null,
         val taskId: String? = null,
         val lastActivityAt: String? = null,
         val updatedAt: String? = null,
+        val createdAt: String? = null,
+        /** When a person last typed into it (any viewer); null if never. */
+        val lastInteractedAt: String? = null,
     ) {
         /** `spec.kind`: `shell`, `command` or `agent`. */
         val specKind: String?
@@ -285,9 +303,27 @@ object WorkFeed {
         WorkView.ALL -> true
     }
 
-    /** Needs-you first, then live, then everything by recency (stable, like the web's sort). */
+    /**
+     * The web's `sortWork`: live work first (needs you / running / queued / waiting share one rank,
+     * so a row doesn't jump when an agent flips between working and needs-you — that shows on the
+     * row and in the Needs-you count), then scheduled, paused, failed, done; within a rank by
+     * `orderAt ?: lastActivity` (newest first), then key.
+     */
     fun sort(rows: List<WorkRow>): List<WorkRow> =
-        rows.sortedWith(compareBy<WorkRow> { it.status.ordinal }.thenByDescending { it.lastActivity.orEmpty() })
+        rows.sortedWith(
+            compareBy<WorkRow> { rank(it.status) }
+                .thenByDescending { it.orderAt ?: it.lastActivity.orEmpty() }
+                .thenBy { it.key },
+        )
+
+    /** `STATUS_RANK` in the web's work-feed.ts. */
+    fun rank(status: WorkStatus): Int = when (status) {
+        WorkStatus.NEEDS_YOU, WorkStatus.RUNNING, WorkStatus.QUEUED, WorkStatus.WAITING -> 0
+        WorkStatus.SCHEDULED -> 1
+        WorkStatus.PAUSED -> 2
+        WorkStatus.FAILED -> 3
+        WorkStatus.DONE -> 4
+    }
 
     /** Free-text search over name, place, agent, status and note (the web's Work page). */
     fun matches(
@@ -320,6 +356,9 @@ object WorkFeed {
     // endregion
 
     // region Labels
+
+    /** Terminal `spawnedBy` values that name the service whose event started it. */
+    private val EVENT_SOURCES = setOf("github", "slack", "linear")
 
     private val REPO_HOST = Regex("^https?://[^/]+/")
     private val HOME_DIR = Regex("^/Users/[^/]+|^/home/[^/]+")
@@ -438,7 +477,7 @@ object WorkFeed {
                         sourceId = id,
                         href = "/tasks/$id",
                         name = t.title.orEmpty(),
-                        whenLabel = if (spawned) "on a trigger" else "now",
+                        whenLabel = if (spawned) "on a trigger" else if (t.ticketSource.isNullOrEmpty()) "now" else "from a ticket",
                         where = if (local) machine(t.localHostId, t.localDir) else pod(shortRepo(t.repoUrl)),
                         who = t.agentType ?: "claude-code",
                         then = if (t.autoResume == true) WorkThen.UNTIL_MERGED else WorkThen.EXITS,
@@ -449,6 +488,8 @@ object WorkFeed {
                         lastActivity = last,
                         recurring = false,
                         spawned = spawned,
+                        origin = t.ticketSource?.takeIf { it.isNotEmpty() },
+                        prState = t.prState,
                     )
                 }
                 "repo-blueprint" -> {
@@ -521,8 +562,10 @@ object WorkFeed {
                 note = if (t.attentionState == "needs_you") t.attentionReason?.takeIf { it.isNotEmpty() } else null,
                 prUrl = null,
                 lastActivity = t.lastActivityAt ?: t.updatedAt,
+                orderAt = t.lastInteractedAt ?: t.createdAt,
                 recurring = false,
                 spawned = !t.blueprintId.isNullOrEmpty() || !t.workflowRunId.isNullOrEmpty(),
+                origin = t.ticketSource?.takeIf { it.isNotEmpty() } ?: spawnedBy.takeIf { it in EVENT_SOURCES },
             )
         }
 

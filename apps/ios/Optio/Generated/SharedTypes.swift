@@ -187,10 +187,11 @@ public enum ClaudeAuthMode: String, Codable, Hashable, Sendable, CaseIterable {
     case apiKey = "api-key"
     case maxSubscription = "max-subscription"
     case vertexAi = "vertex-ai"
+    case bedrock = "bedrock"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [ClaudeAuthMode] = [.apiKey, .maxSubscription, .vertexAi]
+    public static let allCases: [ClaudeAuthMode] = [.apiKey, .maxSubscription, .vertexAi, .bedrock]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -201,10 +202,11 @@ public enum ClaudeAuthMode: String, Codable, Hashable, Sendable, CaseIterable {
 public enum CodexAuthMode: String, Codable, Hashable, Sendable, CaseIterable {
     case apiKey = "api-key"
     case appServer = "app-server"
+    case bedrock = "bedrock"
     /// Fallback for raw values this client does not know about yet.
     case unknown = "__unknown__"
 
-    public static let allCases: [CodexAuthMode] = [.apiKey, .appServer]
+    public static let allCases: [CodexAuthMode] = [.apiKey, .appServer, .bedrock]
 
     public init(from decoder: any Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -306,6 +308,11 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
     public let googleCloudProject: String?
     public let googleCloudLocation: String?
     public let claudeVertexServiceAccountKey: String?
+    /// Env that points the agent at a model provider (Bedrock), from
+    /// `bedrockRuntime`; set with `claudeAuthMode` / `codexAuthMode` = "bedrock".
+    public let modelProviderEnv: [String: String]?
+    /// Codex `-c` overrides for the model provider (`model_provider="amazon-bedrock"`).
+    public let codexProviderConfig: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case taskId = "taskId"
@@ -341,6 +348,8 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         case googleCloudProject = "googleCloudProject"
         case googleCloudLocation = "googleCloudLocation"
         case claudeVertexServiceAccountKey = "claudeVertexServiceAccountKey"
+        case modelProviderEnv = "modelProviderEnv"
+        case codexProviderConfig = "codexProviderConfig"
     }
 
     public init(
@@ -376,7 +385,9 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         maxTurnsReview: Double? = nil,
         googleCloudProject: String? = nil,
         googleCloudLocation: String? = nil,
-        claudeVertexServiceAccountKey: String? = nil
+        claudeVertexServiceAccountKey: String? = nil,
+        modelProviderEnv: [String: String]? = nil,
+        codexProviderConfig: [String]? = nil
     ) {
         self.taskId = taskId
         self.prompt = prompt
@@ -411,6 +422,8 @@ public struct AgentTaskInput: Codable, Hashable, Sendable {
         self.googleCloudProject = googleCloudProject
         self.googleCloudLocation = googleCloudLocation
         self.claudeVertexServiceAccountKey = claudeVertexServiceAccountKey
+        self.modelProviderEnv = modelProviderEnv
+        self.codexProviderConfig = codexProviderConfig
     }
 }
 
@@ -744,6 +757,9 @@ public struct Connection: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// Null = the organization's; set = one person's own: only injected into
+    /// work that person owns, and only visible to them (and admins, by name).
+    public let ownerUserId: String?
     public let enabled: Bool
     public let status: ConnectionStatus
     public let statusMessage: String?
@@ -761,6 +777,7 @@ public struct Connection: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case ownerUserId = "ownerUserId"
         case enabled = "enabled"
         case status = "status"
         case statusMessage = "statusMessage"
@@ -779,6 +796,7 @@ public struct Connection: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        ownerUserId: String? = nil,
         enabled: Bool,
         status: ConnectionStatus,
         statusMessage: String? = nil,
@@ -795,6 +813,7 @@ public struct Connection: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.ownerUserId = ownerUserId
         self.enabled = enabled
         self.status = status
         self.statusMessage = statusMessage
@@ -807,6 +826,20 @@ public struct Connection: Codable, Hashable, Sendable {
 }
 
 public struct CreateConnectionInput: Codable, Hashable, Sendable {
+    public enum Owner: String, Codable, Hashable, Sendable, CaseIterable {
+        case workspace = "workspace"
+        case me = "me"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Owner] = [.workspace, .me]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Owner(rawValue: raw) ?? .unknown
+        }
+    }
+
     public struct Assignment: Codable, Hashable, Sendable {
         public let repoId: String?
         public let agentTypes: [String]?
@@ -833,6 +866,8 @@ public struct CreateConnectionInput: Codable, Hashable, Sendable {
     public let scope: String?
     public let repoUrl: String?
     public let enabled: Bool?
+    /// Default `workspace`; `workspace` needs an admin.
+    public let owner: Owner?
     public let assignments: [Assignment]?
 
     private enum CodingKeys: String, CodingKey {
@@ -843,6 +878,7 @@ public struct CreateConnectionInput: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case enabled = "enabled"
+        case owner = "owner"
         case assignments = "assignments"
     }
 
@@ -854,6 +890,7 @@ public struct CreateConnectionInput: Codable, Hashable, Sendable {
         scope: String? = nil,
         repoUrl: String? = nil,
         enabled: Bool? = nil,
+        owner: Owner? = nil,
         assignments: [Assignment]? = nil
     ) {
         self.name = name
@@ -863,6 +900,7 @@ public struct CreateConnectionInput: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.enabled = enabled
+        self.owner = owner
         self.assignments = assignments
     }
 }
@@ -974,6 +1012,9 @@ public struct RepoConnection: Codable, Hashable, Sendable {
     public let scope: String
     public let repoUrl: String?
     public let workspaceId: String?
+    /// Null = the organization's; set = one person's own: only injected into
+    /// work that person owns, and only visible to them (and admins, by name).
+    public let ownerUserId: String?
     public let enabled: Bool
     public let status: ConnectionStatus
     public let statusMessage: String?
@@ -994,6 +1035,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         case scope = "scope"
         case repoUrl = "repoUrl"
         case workspaceId = "workspaceId"
+        case ownerUserId = "ownerUserId"
         case enabled = "enabled"
         case status = "status"
         case statusMessage = "statusMessage"
@@ -1013,6 +1055,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         scope: String,
         repoUrl: String? = nil,
         workspaceId: String? = nil,
+        ownerUserId: String? = nil,
         enabled: Bool,
         status: ConnectionStatus,
         statusMessage: String? = nil,
@@ -1030,6 +1073,7 @@ public struct RepoConnection: Codable, Hashable, Sendable {
         self.scope = scope
         self.repoUrl = repoUrl
         self.workspaceId = workspaceId
+        self.ownerUserId = ownerUserId
         self.enabled = enabled
         self.status = status
         self.statusMessage = statusMessage
@@ -2635,6 +2679,10 @@ public struct PullRequest: Codable, Hashable, Sendable {
     public let draft: Bool
     public let headSha: String
     public let baseBranch: String
+    /// The PR's head / source branch, when the platform reports it.
+    public let headBranch: String?
+    /// `owner/repo` the head branch lives in (differs from the base repo for a fork), when known.
+    public let headRepo: String?
     public let url: String
     public let author: String
     public let assignees: [String]
@@ -2652,6 +2700,8 @@ public struct PullRequest: Codable, Hashable, Sendable {
         case draft = "draft"
         case headSha = "headSha"
         case baseBranch = "baseBranch"
+        case headBranch = "headBranch"
+        case headRepo = "headRepo"
         case url = "url"
         case author = "author"
         case assignees = "assignees"
@@ -2670,6 +2720,8 @@ public struct PullRequest: Codable, Hashable, Sendable {
         draft: Bool,
         headSha: String,
         baseBranch: String,
+        headBranch: String? = nil,
+        headRepo: String? = nil,
         url: String,
         author: String,
         assignees: [String],
@@ -2686,6 +2738,8 @@ public struct PullRequest: Codable, Hashable, Sendable {
         self.draft = draft
         self.headSha = headSha
         self.baseBranch = baseBranch
+        self.headBranch = headBranch
+        self.headRepo = headRepo
         self.url = url
         self.author = author
         self.assignees = assignees
@@ -3189,6 +3243,11 @@ public struct LocalHost: Codable, Hashable, Sendable {
     /// as `optio local add|remove` on the machine. Live (from the daemon's
     /// hello), so false whenever the host is offline.
     public let manageDirs: Bool?
+    /// Whether the connected daemon can run agents through a model provider
+    /// (Bedrock). Live, so false whenever the host is offline.
+    public let modelProviders: Bool?
+    /// AWS profiles on the machine, as its daemon last reported them (names only).
+    public let awsProfiles: [String]?
     public let state: LocalHostState
     public let lastSeenAt: String?
     public let createdAt: String
@@ -3207,6 +3266,8 @@ public struct LocalHost: Codable, Hashable, Sendable {
         case agentLimits = "agentLimits"
         case claudeCredentials = "claudeCredentials"
         case manageDirs = "manageDirs"
+        case modelProviders = "modelProviders"
+        case awsProfiles = "awsProfiles"
         case state = "state"
         case lastSeenAt = "lastSeenAt"
         case createdAt = "createdAt"
@@ -3226,6 +3287,8 @@ public struct LocalHost: Codable, Hashable, Sendable {
         agentLimits: LocalHostAgentLimits? = nil,
         claudeCredentials: Bool? = nil,
         manageDirs: Bool? = nil,
+        modelProviders: Bool? = nil,
+        awsProfiles: [String]? = nil,
         state: LocalHostState,
         lastSeenAt: String? = nil,
         createdAt: String,
@@ -3243,6 +3306,8 @@ public struct LocalHost: Codable, Hashable, Sendable {
         self.agentLimits = agentLimits
         self.claudeCredentials = claudeCredentials
         self.manageDirs = manageDirs
+        self.modelProviders = modelProviders
+        self.awsProfiles = awsProfiles
         self.state = state
         self.lastSeenAt = lastSeenAt
         self.createdAt = createdAt
@@ -3382,6 +3447,10 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
         /// "Work on a new branch that becomes a PR": the server wraps the prompt
         /// with branch-and-PR instructions off this base before the spawn.
         public let baseBranch: String?
+        /// Reach the models through this provider (Amazon Bedrock) instead of
+        /// the CLI's own sign-in, with the machine's own AWS credentials. Only
+        /// sent to daemons whose hello set `modelProviders`.
+        public let provider: ModelProviderLaunch?
 
         private enum CodingKeys: String, CodingKey {
             case agent = "agent"
@@ -3392,6 +3461,7 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
             case effort = "effort"
             case permissionMode = "permissionMode"
             case baseBranch = "baseBranch"
+            case provider = "provider"
         }
 
         public init(
@@ -3402,7 +3472,8 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
             model: String? = nil,
             effort: String? = nil,
             permissionMode: LocalAgentPermissionMode? = nil,
-            baseBranch: String? = nil
+            baseBranch: String? = nil,
+            provider: ModelProviderLaunch? = nil
         ) {
             self.agent = agent
             self.prompt = prompt
@@ -3412,6 +3483,7 @@ public enum LocalTerminalSpec: Codable, Hashable, Sendable {
             self.effort = effort
             self.permissionMode = permissionMode
             self.baseBranch = baseBranch
+            self.provider = provider
         }
     }
 
@@ -3686,6 +3758,8 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
     public let usage: AnyCodable?
     public let costUsd: String?
     public let lastActivityAt: String?
+    /// When a person last typed into it (throttled to a minute); null = never. Lists order by it, then creation.
+    public let lastInteractedAt: String?
     /// "Later": while set and in the future the terminal is not in the needs-you
     /// queue (Watch, widgets, push). Cleared by DELETE /snooze or by expiry.
     public let snoozedUntil: String?
@@ -3724,6 +3798,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         case usage = "usage"
         case costUsd = "costUsd"
         case lastActivityAt = "lastActivityAt"
+        case lastInteractedAt = "lastInteractedAt"
         case snoozedUntil = "snoozedUntil"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
@@ -3761,6 +3836,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         usage: AnyCodable? = nil,
         costUsd: String? = nil,
         lastActivityAt: String? = nil,
+        lastInteractedAt: String? = nil,
         snoozedUntil: String? = nil,
         createdAt: String,
         updatedAt: String,
@@ -3796,6 +3872,7 @@ public struct LocalTerminal: Codable, Hashable, Sendable {
         self.usage = usage
         self.costUsd = costUsd
         self.lastActivityAt = lastActivityAt
+        self.lastInteractedAt = lastInteractedAt
         self.snoozedUntil = snoozedUntil
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -3961,6 +4038,10 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
         public let transcriptBackfill: Bool?
         /// The daemon answers `dirs` (adds / removes an allowlisted directory when asked from Optio).
         public let manageDirs: Bool?
+        /// The daemon runs agents through a model provider (`spec.provider`).
+        public let modelProviders: Bool?
+        /// AWS profile names in the machine's ~/.aws/config and credentials (names only).
+        public let awsProfiles: [String]?
 
         private enum CodingKeys: String, CodingKey {
             case hostId = "hostId"
@@ -3970,6 +4051,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             case claudeCredentials = "claudeCredentials"
             case transcriptBackfill = "transcriptBackfill"
             case manageDirs = "manageDirs"
+            case modelProviders = "modelProviders"
+            case awsProfiles = "awsProfiles"
         }
 
         public init(
@@ -3979,7 +4062,9 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             terminals: [LocalDaemonTerminalSync],
             claudeCredentials: Bool? = nil,
             transcriptBackfill: Bool? = nil,
-            manageDirs: Bool? = nil
+            manageDirs: Bool? = nil,
+            modelProviders: Bool? = nil,
+            awsProfiles: [String]? = nil
         ) {
             self.hostId = hostId
             self.daemonVersion = daemonVersion
@@ -3988,6 +4073,8 @@ public enum LocalDaemonMessage: Codable, Hashable, Sendable {
             self.claudeCredentials = claudeCredentials
             self.transcriptBackfill = transcriptBackfill
             self.manageDirs = manageDirs
+            self.modelProviders = modelProviders
+            self.awsProfiles = awsProfiles
         }
     }
 
@@ -5496,6 +5583,378 @@ public struct UpdateInstalledSkillInput: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - model-provider.ts
+
+public enum ModelProviderKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case bedrock = "bedrock"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderKind] = [.bedrock]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelProviderKind(rawValue: raw) ?? .unknown
+    }
+}
+
+public enum ModelProviderAgent: String, Codable, Hashable, Sendable, CaseIterable {
+    case claudeCode = "claude-code"
+    case codex = "codex"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderAgent] = [.claudeCode, .codex]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelProviderAgent(rawValue: raw) ?? .unknown
+    }
+}
+
+/// How a pod signs in to the provider:
+/// - `access-key`: stored AWS access key id + secret (+ optional session token)
+/// - `bearer-token`: a stored Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`)
+/// - `ambient`: the pod's own AWS identity (IRSA / instance profile on EKS)
+/// - `none`: machines only — work in a pod can't use it
+public enum ModelProviderPodCredential: String, Codable, Hashable, Sendable, CaseIterable {
+    case accessKey = "access-key"
+    case bearerToken = "bearer-token"
+    case ambient = "ambient"
+    case none = "none"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ModelProviderPodCredential] = [.accessKey, .bearerToken, .ambient, .none]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ModelProviderPodCredential(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct ModelProviderModel: Codable, Hashable, Sendable {
+    /// The provider's model id, passed to the CLI as-is.
+    public let id: String
+    /// Shown in pickers; the id when absent.
+    public let label: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case label = "label"
+    }
+
+    public init(id: String, label: String? = nil) {
+        self.id = id
+        self.label = label
+    }
+}
+
+/// The models a provider offers each agent, in picker order; the first is the default.
+public struct ModelProviderModels: Codable, Hashable, Sendable {
+    public let claudeCode: [ModelProviderModel]?
+    public let codex: [ModelProviderModel]?
+
+    private enum CodingKeys: String, CodingKey {
+        case claudeCode = "claude-code"
+        case codex = "codex"
+    }
+
+    public init(claudeCode: [ModelProviderModel]? = nil, codex: [ModelProviderModel]? = nil) {
+        self.claudeCode = claudeCode
+        self.codex = codex
+    }
+}
+
+/// Who a model provider, secret, connection or piece of work belongs to.
+public enum ResourceOwner: String, Codable, Hashable, Sendable, CaseIterable {
+    case workspace = "workspace"
+    case me = "me"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [ResourceOwner] = [.workspace, .me]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ResourceOwner(rawValue: raw) ?? .unknown
+    }
+}
+
+public struct ModelProvider: Codable, Hashable, Sendable {
+    public let id: String
+    public let workspaceId: String?
+    /// Null = the organization's (every member can pick it). Set = one person's own.
+    public let ownerUserId: String?
+    /// Display name of `ownerUserId`, for personal providers.
+    public let ownerName: String?
+    public let kind: ModelProviderKind
+    public let name: String
+    public let agents: [ModelProviderAgent]
+    /// AWS region the runtime calls (`us-west-2`).
+    public let region: String
+    /// The models offered for each agent, in picker order; the first is the default.
+    public let models: ModelProviderModels
+    /// AWS profile to use on a machine; null = the machine's default AWS credentials.
+    public let localAwsProfile: String?
+    public let podCredential: ModelProviderPodCredential
+    /// Whether stored pod credentials exist (the values are never returned).
+    public let hasPodCredentials: Bool
+    /// The viewer's own (personal) provider.
+    public let mine: Bool
+    /// Whether the viewer may change or delete it.
+    public let canEdit: Bool
+    public let createdAt: String
+    public let updatedAt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case workspaceId = "workspaceId"
+        case ownerUserId = "ownerUserId"
+        case ownerName = "ownerName"
+        case kind = "kind"
+        case name = "name"
+        case agents = "agents"
+        case region = "region"
+        case models = "models"
+        case localAwsProfile = "localAwsProfile"
+        case podCredential = "podCredential"
+        case hasPodCredentials = "hasPodCredentials"
+        case mine = "mine"
+        case canEdit = "canEdit"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+    }
+
+    public init(
+        id: String,
+        workspaceId: String? = nil,
+        ownerUserId: String? = nil,
+        ownerName: String? = nil,
+        kind: ModelProviderKind,
+        name: String,
+        agents: [ModelProviderAgent],
+        region: String,
+        models: ModelProviderModels,
+        localAwsProfile: String? = nil,
+        podCredential: ModelProviderPodCredential,
+        hasPodCredentials: Bool,
+        mine: Bool,
+        canEdit: Bool,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id = id
+        self.workspaceId = workspaceId
+        self.ownerUserId = ownerUserId
+        self.ownerName = ownerName
+        self.kind = kind
+        self.name = name
+        self.agents = agents
+        self.region = region
+        self.models = models
+        self.localAwsProfile = localAwsProfile
+        self.podCredential = podCredential
+        self.hasPodCredentials = hasPodCredentials
+        self.mine = mine
+        self.canEdit = canEdit
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+public enum ModelProviderCredentials: Codable, Hashable, Sendable {
+    case accessKey(AccessKeyPayload)
+    case bearerToken(BearerTokenPayload)
+    /// Fallback for discriminator values this client does not know about yet.
+    case unknown(AnyCodable)
+
+    public struct AccessKeyPayload: Codable, Hashable, Sendable {
+        public let accessKeyId: String
+        public let secretAccessKey: String
+        public let sessionToken: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case accessKeyId = "accessKeyId"
+            case secretAccessKey = "secretAccessKey"
+            case sessionToken = "sessionToken"
+        }
+
+        public init(accessKeyId: String, secretAccessKey: String, sessionToken: String? = nil) {
+            self.accessKeyId = accessKeyId
+            self.secretAccessKey = secretAccessKey
+            self.sessionToken = sessionToken
+        }
+    }
+
+    public struct BearerTokenPayload: Codable, Hashable, Sendable {
+        public let bearerToken: String
+
+        private enum CodingKeys: String, CodingKey {
+            case bearerToken = "bearerToken"
+        }
+
+        public init(bearerToken: String) {
+            self.bearerToken = bearerToken
+        }
+    }
+
+    private enum DiscriminatorKey: String, CodingKey {
+        case type
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: DiscriminatorKey.self)
+        let discriminator = try container.decodeIfPresent(String.self, forKey: .type) ?? ""
+        switch discriminator {
+        case "access-key": self = .accessKey(try AccessKeyPayload(from: decoder))
+        case "bearer-token": self = .bearerToken(try BearerTokenPayload(from: decoder))
+        default: self = .unknown(try AnyCodable(from: decoder))
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        switch self {
+        case .accessKey(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("access-key", forKey: .type)
+            try payload.encode(to: encoder)
+        case .bearerToken(let payload):
+            var container = encoder.container(keyedBy: DiscriminatorKey.self)
+            try container.encode("bearer-token", forKey: .type)
+            try payload.encode(to: encoder)
+        case .unknown(let value):
+            try value.encode(to: encoder)
+        }
+    }
+}
+
+public struct CreateModelProviderInput: Codable, Hashable, Sendable {
+    public let name: String
+    /// `workspace` needs an admin.
+    public let owner: ResourceOwner
+    public let kind: ModelProviderKind
+    public let agents: [ModelProviderAgent]
+    public let region: String
+    public let models: ModelProviderModels?
+    public let localAwsProfile: String?
+    public let podCredential: ModelProviderPodCredential?
+    /// Replaces the stored pod credentials; null clears them; absent keeps them.
+    public let credentials: ModelProviderCredentials?
+
+    private enum CodingKeys: String, CodingKey {
+        case name = "name"
+        case owner = "owner"
+        case kind = "kind"
+        case agents = "agents"
+        case region = "region"
+        case models = "models"
+        case localAwsProfile = "localAwsProfile"
+        case podCredential = "podCredential"
+        case credentials = "credentials"
+    }
+
+    public init(
+        name: String,
+        owner: ResourceOwner,
+        kind: ModelProviderKind,
+        agents: [ModelProviderAgent],
+        region: String,
+        models: ModelProviderModels? = nil,
+        localAwsProfile: String? = nil,
+        podCredential: ModelProviderPodCredential? = nil,
+        credentials: ModelProviderCredentials? = nil
+    ) {
+        self.name = name
+        self.owner = owner
+        self.kind = kind
+        self.agents = agents
+        self.region = region
+        self.models = models
+        self.localAwsProfile = localAwsProfile
+        self.podCredential = podCredential
+        self.credentials = credentials
+    }
+}
+
+/// A change to a model provider: absent fields are kept.
+public struct UpdateModelProviderInput: Codable, Hashable, Sendable {
+    public let name: String?
+    /// Moving it to the organization needs an admin.
+    public let owner: ResourceOwner?
+    public let agents: [ModelProviderAgent]?
+    public let region: String?
+    public let models: ModelProviderModels?
+    public let localAwsProfile: String?
+    public let podCredential: ModelProviderPodCredential?
+    /// Replaces the stored pod credentials; null clears them; absent keeps them.
+    public let credentials: ModelProviderCredentials?
+
+    private enum CodingKeys: String, CodingKey {
+        case name = "name"
+        case owner = "owner"
+        case agents = "agents"
+        case region = "region"
+        case models = "models"
+        case localAwsProfile = "localAwsProfile"
+        case podCredential = "podCredential"
+        case credentials = "credentials"
+    }
+
+    public init(
+        name: String? = nil,
+        owner: ResourceOwner? = nil,
+        agents: [ModelProviderAgent]? = nil,
+        region: String? = nil,
+        models: ModelProviderModels? = nil,
+        localAwsProfile: String? = nil,
+        podCredential: ModelProviderPodCredential? = nil,
+        credentials: ModelProviderCredentials? = nil
+    ) {
+        self.name = name
+        self.owner = owner
+        self.agents = agents
+        self.region = region
+        self.models = models
+        self.localAwsProfile = localAwsProfile
+        self.podCredential = podCredential
+        self.credentials = credentials
+    }
+}
+
+/// What a spawn on a machine carries to use a provider: never a credential,
+/// only where to call and which of the machine's AWS profiles to use.
+public struct ModelProviderLaunch: Codable, Hashable, Sendable {
+    public let kind: ModelProviderKind
+    public let providerId: String
+    public let name: String
+    public let region: String
+    /// An AWS profile on the machine; absent = its default credentials.
+    public let awsProfile: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case providerId = "providerId"
+        case name = "name"
+        case region = "region"
+        case awsProfile = "awsProfile"
+    }
+
+    public init(
+        kind: ModelProviderKind,
+        providerId: String,
+        name: String,
+        region: String,
+        awsProfile: String? = nil
+    ) {
+        self.kind = kind
+        self.providerId = providerId
+        self.name = name
+        self.region = region
+        self.awsProfile = awsProfile
+    }
+}
+
 // MARK: - optio-action.ts
 
 /// Audit trail entry for an Optio agent write action.
@@ -5840,6 +6299,13 @@ public struct PersistentAgent: Codable, Hashable, Sendable {
     public let reconcileBackoffUntil: Date?
     public let reconcileAttempts: Double
     public let createdBy: String?
+    /// Who the work belongs to: null = the organization; set = one person's own.
+    /// Personal work runs with that person's secrets, model providers and
+    /// connections, and only they can change it.
+    public let ownerUserId: String?
+    /// The secrets (by name) the agent gets in its pod. Null = the workspace's
+    /// legacy behavior (see `Workspace.restrictPodSecrets`).
+    public let podSecrets: [String]?
     public let createdAt: Date
     public let updatedAt: Date
 
@@ -5876,6 +6342,8 @@ public struct PersistentAgent: Codable, Hashable, Sendable {
         case reconcileBackoffUntil = "reconcileBackoffUntil"
         case reconcileAttempts = "reconcileAttempts"
         case createdBy = "createdBy"
+        case ownerUserId = "ownerUserId"
+        case podSecrets = "podSecrets"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
     }
@@ -5913,6 +6381,8 @@ public struct PersistentAgent: Codable, Hashable, Sendable {
         reconcileBackoffUntil: Date? = nil,
         reconcileAttempts: Double,
         createdBy: String? = nil,
+        ownerUserId: String? = nil,
+        podSecrets: [String]? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -5948,6 +6418,8 @@ public struct PersistentAgent: Codable, Hashable, Sendable {
         self.reconcileBackoffUntil = reconcileBackoffUntil
         self.reconcileAttempts = reconcileAttempts
         self.createdBy = createdBy
+        self.ownerUserId = ownerUserId
+        self.podSecrets = podSecrets
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -6781,6 +7253,36 @@ public struct CreateSecretInput: Codable, Hashable, Sendable {
     }
 }
 
+/// A secret a piece of work can pick for its pod: the org's and the viewer's own.
+public struct PickableSecret: Codable, Hashable, Sendable {
+    public enum Owner: String, Codable, Hashable, Sendable, CaseIterable {
+        case workspace = "workspace"
+        case me = "me"
+        /// Fallback for raw values this client does not know about yet.
+        case unknown = "__unknown__"
+
+        public static let allCases: [Owner] = [.workspace, .me]
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Owner(rawValue: raw) ?? .unknown
+        }
+    }
+
+    public let name: String
+    public let owner: Owner
+
+    private enum CodingKeys: String, CodingKey {
+        case name = "name"
+        case owner = "owner"
+    }
+
+    public init(name: String, owner: Owner) {
+        self.name = name
+        self.owner = owner
+    }
+}
+
 // MARK: - session.ts
 
 public enum InteractiveSessionState: String, Codable, Hashable, Sendable, CaseIterable {
@@ -7240,6 +7742,16 @@ public struct OptioTask: Codable, Hashable, Sendable {
     public let localSessionMode: LocalAgentSessionMode?
     /// Local runs: the `local_terminals` row executing this task.
     public let localTerminalId: String?
+    /// Who the work belongs to: null = the organization; set = one person's own.
+    /// Personal work runs with that person's secrets, model providers and
+    /// connections, and only they can change it.
+    public let ownerUserId: String?
+    /// The secrets (by name) the agent gets in its pod. Null = the workspace's
+    /// legacy behavior (see `Workspace.restrictPodSecrets`).
+    public let podSecrets: [String]?
+    /// Every PR the task opened or tracks (GET /api/tasks/:id only). `prUrl`
+    /// stays the primary one, which the PR lifecycle follows.
+    public let prs: [TaskPr]?
     /// PR follow-through over the repo's settings ("Works until merged"): resume
     /// the agent on failing CI, conflicts, and requested changes / merge once
     /// it's green. Null or absent = the repo's `autoResume` / `autoMerge`.
@@ -7274,6 +7786,9 @@ public struct OptioTask: Codable, Hashable, Sendable {
         case localDir = "localDir"
         case localSessionMode = "localSessionMode"
         case localTerminalId = "localTerminalId"
+        case ownerUserId = "ownerUserId"
+        case podSecrets = "podSecrets"
+        case prs = "prs"
         case autoResume = "autoResume"
         case autoMerge = "autoMerge"
         case createdAt = "createdAt"
@@ -7306,6 +7821,9 @@ public struct OptioTask: Codable, Hashable, Sendable {
         localDir: String? = nil,
         localSessionMode: LocalAgentSessionMode? = nil,
         localTerminalId: String? = nil,
+        ownerUserId: String? = nil,
+        podSecrets: [String]? = nil,
+        prs: [TaskPr]? = nil,
         autoResume: Bool? = nil,
         autoMerge: Bool? = nil,
         createdAt: Date,
@@ -7336,12 +7854,99 @@ public struct OptioTask: Codable, Hashable, Sendable {
         self.localDir = localDir
         self.localSessionMode = localSessionMode
         self.localTerminalId = localTerminalId
+        self.ownerUserId = ownerUserId
+        self.podSecrets = podSecrets
+        self.prs = prs
         self.autoResume = autoResume
         self.autoMerge = autoMerge
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.startedAt = startedAt
         self.completedAt = completedAt
+    }
+}
+
+/// How Optio learned a PR belongs to a task: the agent's own PR-creating tool
+/// call (`tool_call`), a PR whose head branch is under the task's branch
+/// (`branch`), or a person attached it (`attached`).
+public enum TaskPrSource: String, Codable, Hashable, Sendable, CaseIterable {
+    case toolCall = "tool_call"
+    case branch = "branch"
+    case attached = "attached"
+    /// Fallback for raw values this client does not know about yet.
+    case unknown = "__unknown__"
+
+    public static let allCases: [TaskPrSource] = [.toolCall, .branch, .attached]
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TaskPrSource(rawValue: raw) ?? .unknown
+    }
+}
+
+/// A pull / merge request a task opened or tracks.
+public struct TaskPr: Codable, Hashable, Sendable {
+    public let id: String
+    public let taskId: String
+    public let repoUrl: String
+    public let number: Double
+    public let url: String
+    public let headBranch: String?
+    /// `owner/repo` of the head branch (a fork's differs from the task's repo).
+    public let headRepo: String?
+    public let baseBranch: String?
+    public let source: TaskPrSource
+    /// `open` / `merged` / `closed` when last seen.
+    public let state: String
+    /// True for the task's primary PR (`tasks.pr_url`).
+    public let primary: Bool
+    public let createdAt: String
+    public let updatedAt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case taskId = "taskId"
+        case repoUrl = "repoUrl"
+        case number = "number"
+        case url = "url"
+        case headBranch = "headBranch"
+        case headRepo = "headRepo"
+        case baseBranch = "baseBranch"
+        case source = "source"
+        case state = "state"
+        case primary = "primary"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+    }
+
+    public init(
+        id: String,
+        taskId: String,
+        repoUrl: String,
+        number: Double,
+        url: String,
+        headBranch: String? = nil,
+        headRepo: String? = nil,
+        baseBranch: String? = nil,
+        source: TaskPrSource,
+        state: String,
+        primary: Bool,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id = id
+        self.taskId = taskId
+        self.repoUrl = repoUrl
+        self.number = number
+        self.url = url
+        self.headBranch = headBranch
+        self.headRepo = headRepo
+        self.baseBranch = baseBranch
+        self.source = source
+        self.state = state
+        self.primary = primary
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -8395,6 +9000,13 @@ public struct Workflow: Codable, Hashable, Sendable {
     public let localSessionMode: LocalAgentSessionMode?
     public let enabled: Bool
     public let createdBy: String?
+    /// Who the work belongs to: null = the organization; set = one person's own.
+    /// Personal work runs with that person's secrets, model providers and
+    /// connections, and only they can change it.
+    public let ownerUserId: String?
+    /// The secrets (by name) the agent gets in its pod. Null = the workspace's
+    /// legacy behavior (see `Workspace.restrictPodSecrets`).
+    public let podSecrets: [String]?
     public let createdAt: Date
     public let updatedAt: Date
 
@@ -8420,6 +9032,8 @@ public struct Workflow: Codable, Hashable, Sendable {
         case localSessionMode = "localSessionMode"
         case enabled = "enabled"
         case createdBy = "createdBy"
+        case ownerUserId = "ownerUserId"
+        case podSecrets = "podSecrets"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
     }
@@ -8446,6 +9060,8 @@ public struct Workflow: Codable, Hashable, Sendable {
         localSessionMode: LocalAgentSessionMode? = nil,
         enabled: Bool,
         createdBy: String? = nil,
+        ownerUserId: String? = nil,
+        podSecrets: [String]? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -8470,6 +9086,8 @@ public struct Workflow: Codable, Hashable, Sendable {
         self.localSessionMode = localSessionMode
         self.enabled = enabled
         self.createdBy = createdBy
+        self.ownerUserId = ownerUserId
+        self.podSecrets = podSecrets
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -8711,6 +9329,14 @@ public struct Workspace: Codable, Hashable, Sendable {
     public let description: String?
     public let createdBy: String?
     public let allowDockerInDocker: Bool
+    /// Email domains whose people join this workspace when they sign in
+    /// (verified email only), e.g. `["acme.com"]`.
+    public let autoJoinDomains: [String]?
+    /// The role people joining by domain get.
+    public let autoJoinRole: WorkspaceRole?
+    /// Pods get only the secrets a piece of work picks. Off keeps the legacy
+    /// behavior for work that picks none: every org secret goes to repo pods.
+    public let restrictPodSecrets: Bool?
     public let createdAt: Date
     public let updatedAt: Date
 
@@ -8721,6 +9347,9 @@ public struct Workspace: Codable, Hashable, Sendable {
         case description = "description"
         case createdBy = "createdBy"
         case allowDockerInDocker = "allowDockerInDocker"
+        case autoJoinDomains = "autoJoinDomains"
+        case autoJoinRole = "autoJoinRole"
+        case restrictPodSecrets = "restrictPodSecrets"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
     }
@@ -8732,6 +9361,9 @@ public struct Workspace: Codable, Hashable, Sendable {
         description: String? = nil,
         createdBy: String? = nil,
         allowDockerInDocker: Bool,
+        autoJoinDomains: [String]? = nil,
+        autoJoinRole: WorkspaceRole? = nil,
+        restrictPodSecrets: Bool? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -8741,6 +9373,9 @@ public struct Workspace: Codable, Hashable, Sendable {
         self.description = description
         self.createdBy = createdBy
         self.allowDockerInDocker = allowDockerInDocker
+        self.autoJoinDomains = autoJoinDomains
+        self.autoJoinRole = autoJoinRole
+        self.restrictPodSecrets = restrictPodSecrets
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -8854,5 +9489,24 @@ public struct WorkspaceSummary: Codable, Hashable, Sendable {
         self.name = name
         self.slug = slug
         self.role = role
+    }
+}
+
+/// The agent settings a person last used in the New work form, offered again
+/// next time: the runtime, and for each runtime its agent options (model,
+/// effort, model provider, …).
+public struct WorkFormDefaults: Codable, Hashable, Sendable {
+    public let runtime: String?
+    /// Per runtime: option key → value (a string or a boolean, like work's `agentOptions`).
+    public let agentOptions: [String: [String: AnyCodable]]?
+
+    private enum CodingKeys: String, CodingKey {
+        case runtime = "runtime"
+        case agentOptions = "agentOptions"
+    }
+
+    public init(runtime: String? = nil, agentOptions: [String: [String: AnyCodable]]? = nil) {
+        self.runtime = runtime
+        self.agentOptions = agentOptions
     }
 }

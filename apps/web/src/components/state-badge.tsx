@@ -109,6 +109,39 @@ const STATE_CONFIG: Record<
     dotColor: "bg-success",
     glowClass: "badge-glow-success",
   },
+  // Persistent agent states (queued / provisioning / running / failed shared above)
+  idle: {
+    label: "Idle",
+    color: "text-text-muted",
+    dotColor: "bg-text-muted/50",
+    glowClass: "badge-glow-muted",
+  },
+  paused: {
+    label: "Paused",
+    color: "text-text-muted",
+    dotColor: "bg-text-muted/30",
+    glowClass: "badge-glow-muted",
+  },
+  archived: {
+    label: "Archived",
+    color: "text-text-muted",
+    dotColor: "bg-text-muted/20",
+    glowClass: "badge-glow-muted",
+  },
+  // Interactive pod session states
+  active: {
+    label: "Active",
+    color: "text-primary",
+    dotColor: "bg-primary",
+    glowClass: "badge-glow-primary",
+    pulse: true,
+  },
+  ended: {
+    label: "Ended",
+    color: "text-text-muted",
+    dotColor: "bg-text-muted",
+    glowClass: "badge-glow-muted",
+  },
   // Workflow blueprint enablement states
   enabled: {
     label: "Enabled",

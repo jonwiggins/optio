@@ -1,21 +1,63 @@
-import type { ComponentType, ReactNode } from "react";
+import Link from "next/link";
+import { isValidElement, type ComponentType, type ReactNode } from "react";
+import { Plus } from "lucide-react";
+
+/** A primary "create" CTA: `{ label, href }` renders the standard + button. */
+export type EmptyStateAction = { label: string; href: string };
 
 /**
- * The one true empty-state for list pages. Same icon framing, same vertical
- * rhythm, same dashed border across Tasks / Jobs / Reviews / Issues / Agents
- * / Work. Pass `action` to render a primary CTA below the description.
+ * The one true empty-state. Same icon framing, same vertical rhythm, same
+ * dashed border across Tasks / Jobs / Reviews / Issues / Agents / Work.
+ *
+ * - `size="page"` (default): list pages — round icon chip, text-base title.
+ * - `size="panel"`: inside an Overview / dashboard panel — softer square
+ *   icon tile, text-sm title, xs description.
+ *
+ * `action` is either a ready-made node (any button/link) or
+ * `{ label, href }`, which renders the standard primary "+ label" link.
  */
 export function EmptyState({
   icon: Icon,
   title,
   description,
   action,
+  size = "page",
 }: {
   icon: ComponentType<{ className?: string }>;
   title: ReactNode;
   description?: ReactNode;
-  action?: ReactNode;
+  action?: ReactNode | EmptyStateAction;
+  size?: "page" | "panel";
 }) {
+  const cta = isActionLink(action) ? (
+    <Link
+      href={action.href}
+      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-all btn-press shadow-sm shadow-primary/20 hover:shadow-md hover:shadow-primary/25"
+    >
+      <Plus className="w-3.5 h-3.5" />
+      {action.label}
+    </Link>
+  ) : (
+    (action as ReactNode)
+  );
+
+  if (size === "panel") {
+    return (
+      <div className="flex flex-col items-center justify-center py-14 px-6 rounded-xl border border-dashed border-border bg-bg-card/50">
+        <div className="p-3.5 rounded-2xl bg-bg-hover/70 mb-4">
+          <Icon className="w-7 h-7 text-text-muted/60" />
+        </div>
+        <span className="text-sm font-medium text-text-heading">{title}</span>
+        {description ? (
+          <p className="text-xs text-text-muted mt-1.5 text-center max-w-xs leading-relaxed">
+            {description}
+          </p>
+        ) : null}
+        {cta ? <div className="mt-5 inline-flex">{cta}</div> : null}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-dashed border-border/80 bg-bg-card/30 px-8 py-14 text-center">
       <span
@@ -28,7 +70,17 @@ export function EmptyState({
       {description ? (
         <p className="text-sm text-text-muted mt-1 max-w-md mx-auto">{description}</p>
       ) : null}
-      {action ? <div className="mt-5 inline-flex">{action}</div> : null}
+      {cta ? <div className="mt-5 inline-flex">{cta}</div> : null}
     </div>
+  );
+}
+
+function isActionLink(a: unknown): a is EmptyStateAction {
+  return (
+    !!a &&
+    typeof a === "object" &&
+    !isValidElement(a) &&
+    typeof (a as EmptyStateAction).href === "string" &&
+    typeof (a as EmptyStateAction).label === "string"
   );
 }

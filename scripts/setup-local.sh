@@ -50,8 +50,6 @@ echo "   Building optio-go..."
 docker build -t optio-go:latest -f images/go.Dockerfile . -q &
 echo "   Building optio-rust..."
 docker build -t optio-rust:latest -f images/rust.Dockerfile . -q &
-echo "   Building optio-optio (operations assistant)..."
-docker build -t optio-optio:latest -f Dockerfile.optio . -q &
 wait
 echo "   Building optio-full..."
 docker build -t optio-full:latest -f images/full.Dockerfile . -q
@@ -104,8 +102,6 @@ echo "   Helm deployment complete."
 
 echo "[6/6] Verifying deployment..."
 kubectl wait --namespace optio --for=condition=available deployment/optio-api --timeout=60s 2>/dev/null || true
-kubectl wait --namespace optio --for=condition=available deployment/optio-web --timeout=60s 2>/dev/null || true
-kubectl wait --namespace optio --for=condition=available deployment/optio-optio --timeout=60s 2>/dev/null || true
 
 echo ""
 echo "=== Setup Complete ==="
@@ -127,7 +123,7 @@ echo ""
 echo "  2. After rebuilding images, redeploy with:"
 echo "     docker build -t optio-api:latest -f Dockerfile.api ."
 echo "     docker build -t optio-web:latest -f Dockerfile.web ."
-echo "     kubectl rollout restart deployment/optio-api deployment/optio-web -n optio"
+echo "     kubectl rollout restart deployment/optio-api -n optio   # API + web share this pod"
 echo ""
 echo "To tear down:"
 echo "  helm uninstall optio -n optio"

@@ -1,96 +1,5 @@
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ .Release.Name }}-web
-  namespace: {{ .Values.namespace }}
-  labels:
-    app: optio-web
-    {{- include "optio.labels" . | nindent 4 }}
-spec:
-  replicas: {{ .Values.web.replicas }}
-  selector:
-    matchLabels:
-      app: optio-web
-  template:
-    metadata:
-      labels:
-        app: optio-web
-    spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- if eq .Values.web.antiAffinity "hard" }}
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  app: optio-web
-              topologyKey: kubernetes.io/hostname
-      {{- else if eq .Values.web.antiAffinity "soft" }}
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app: optio-web
-                topologyKey: kubernetes.io/hostname
-      {{- end }}
-      {{- with .Values.web.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
-        fsGroup: 1000
-      containers:
-        - name: web
-          image: "{{ .Values.web.image.repository }}:{{ .Values.web.image.tag }}"
-          imagePullPolicy: {{ .Values.web.image.pullPolicy }}
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop:
-                - ALL
-            seccompProfile:
-              type: RuntimeDefault
-          ports:
-            - containerPort: {{ .Values.web.port }}
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-            - name: next-cache
-              mountPath: /app/.next/cache
-          env:
-            - name: INTERNAL_API_URL
-              value: "http://{{ .Release.Name }}-api:{{ .Values.api.port }}"
-            - name: OPTIO_AUTH_DISABLED
-              value: {{ .Values.auth.disabled | quote }}
-            {{- if .Values.publicUrl }}
-            - name: PUBLIC_URL
-              value: {{ .Values.publicUrl | quote }}
-            {{- end }}
-            {{- if .Values.web.publicApiUrl }}
-            - name: PUBLIC_API_URL
-              value: {{ .Values.web.publicApiUrl | quote }}
-            {{- else if and (eq .Values.api.service.type "NodePort") .Values.api.service.nodePort }}
-            - name: PUBLIC_API_URL
-              value: "http://localhost:{{ .Values.api.service.nodePort }}"
-            {{- end }}
-          resources:
-            {{- toYaml .Values.web.resources | nindent 12 }}
-      volumes:
-        - name: tmp
-          emptyDir: {}
-        - name: next-cache
-          emptyDir: {}
----
+# The web UI runs as a second container in the API pod (api-deployment.yaml);
+# this Service exposes its port.
 apiVersion: v1
 kind: Service
 metadata:
@@ -102,7 +11,7 @@ metadata:
 spec:
   type: {{ .Values.web.service.type }}
   selector:
-    app: optio-web
+    app: optio-api
   ports:
     - port: {{ .Values.web.port }}
       targetPort: {{ .Values.web.port }}

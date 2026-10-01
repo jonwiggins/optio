@@ -4,6 +4,7 @@
 import type { WorkLink } from "../utils/extract-work-links.js";
 import type { LocalTerminalUsage } from "../utils/agent-usage.js";
 import type { TriggerType } from "./triggers.js";
+import type { ModelProviderLaunch } from "./model-provider.js";
 
 export type LocalHostState = "online" | "offline";
 
@@ -106,6 +107,13 @@ export interface LocalHost {
    * hello), so false whenever the host is offline.
    */
   manageDirs?: boolean;
+  /**
+   * Whether the connected daemon can run agents through a model provider
+   * (Bedrock). Live, so false whenever the host is offline.
+   */
+  modelProviders?: boolean;
+  /** AWS profiles on the machine, as its daemon last reported them (names only). */
+  awsProfiles?: string[] | null;
   state: LocalHostState;
   lastSeenAt: string | null;
   createdAt: string;
@@ -179,6 +187,12 @@ export type LocalTerminalSpec =
        * with branch-and-PR instructions off this base before the spawn.
        */
       baseBranch?: string;
+      /**
+       * Reach the models through this provider (Amazon Bedrock) instead of
+       * the CLI's own sign-in, with the machine's own AWS credentials. Only
+       * sent to daemons whose hello set `modelProviders`.
+       */
+      provider?: ModelProviderLaunch;
     };
 
 /** Agent CLIs the daemon knows how to launch (and, for claude-code, hook). */
@@ -350,6 +364,8 @@ export interface LocalTerminal {
   usage: LocalTerminalUsage | null;
   costUsd: string | null;
   lastActivityAt: string | null;
+  /** When a person last typed into it (throttled to a minute); null = never. Lists order by it, then creation. */
+  lastInteractedAt?: string | null;
   /**
    * "Later": while set and in the future the terminal is not in the needs-you
    * queue (Watch, widgets, push). Cleared by DELETE /snooze or by expiry.
@@ -426,6 +442,10 @@ export type LocalDaemonMessage =
       transcriptBackfill?: boolean;
       /** The daemon answers `dirs` (adds / removes an allowlisted directory when asked from Optio). */
       manageDirs?: boolean;
+      /** The daemon runs agents through a model provider (`spec.provider`). */
+      modelProviders?: boolean;
+      /** AWS profile names in the machine's ~/.aws/config and credentials (names only). */
+      awsProfiles?: string[];
     }
   /**
    * Answer to `dirs`: the allowlist after the change (the host's `dirs` from

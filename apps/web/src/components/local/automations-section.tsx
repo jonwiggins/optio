@@ -21,20 +21,15 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
-  Clock,
-  Github,
-  Hash,
   Loader2,
   MessageSquare,
   Pencil,
   Play,
   Plus,
   Sparkles,
-  Ticket,
   Trash2,
-  Webhook,
-  Zap,
 } from "lucide-react";
+import { triggerTypeIcon } from "@/components/brand-icon";
 
 type TriggerType = "schedule" | "webhook" | "ticket" | "github" | "slack" | "linear";
 type Agent = "claude-code" | "codex" | "cursor" | "gemini" | "opencode";
@@ -64,12 +59,12 @@ export const LINEAR_KINDS: Array<{ value: string; label: string; personal: boole
 ];
 
 const TRIGGER_META: Record<TriggerType, { label: string; icon: any }> = {
-  schedule: { label: "Schedule", icon: Clock },
-  webhook: { label: "Webhook", icon: Webhook },
-  ticket: { label: "Ticket sync", icon: Ticket },
-  github: { label: "GitHub", icon: Github },
-  slack: { label: "Slack", icon: Hash },
-  linear: { label: "Linear", icon: Zap },
+  schedule: { label: "Schedule", icon: triggerTypeIcon("schedule") },
+  webhook: { label: "Webhook", icon: triggerTypeIcon("webhook") },
+  ticket: { label: "Ticket sync", icon: triggerTypeIcon("ticket") },
+  github: { label: "GitHub", icon: triggerTypeIcon("github") },
+  slack: { label: "Slack", icon: triggerTypeIcon("slack") },
+  linear: { label: "Linear", icon: triggerTypeIcon("linear") },
 };
 
 /** Prompt params each trigger source provides, for the hint strip. */
@@ -163,7 +158,7 @@ const PRESETS: Preset[] = [
     id: "pr-review",
     title: "Review PRs I'm tagged on",
     blurb: "GitHub asks for my review → an agent reviews the PR in my checkout and reports back.",
-    icon: Github,
+    icon: triggerTypeIcon("github"),
     form: {
       name: "PR review requested",
       agent: "claude-code",
@@ -182,7 +177,7 @@ const PRESETS: Preset[] = [
     id: "slack-channel",
     title: "Act on a Slack channel",
     blurb: "A message lands in a channel → an agent picks it up with the message as its prompt.",
-    icon: Hash,
+    icon: triggerTypeIcon("slack"),
     form: {
       name: "Slack channel request",
       agent: "claude-code",
@@ -199,7 +194,7 @@ const PRESETS: Preset[] = [
     id: "linear-triage",
     title: "Triage Linear tickets assigned to me",
     blurb: "A Linear issue is assigned to me → an agent triages it and opens a draft PR.",
-    icon: Zap,
+    icon: triggerTypeIcon("linear"),
     form: {
       name: "Linear ticket triage",
       agent: "claude-code",
@@ -583,7 +578,7 @@ function AutomationRow({
             <div className="flex flex-wrap gap-1 mt-1.5">
               {triggers.map((t) => {
                 const meta = TRIGGER_META[t.type as TriggerType];
-                const Icon = meta?.icon ?? Play;
+                const Icon = meta ? triggerTypeIcon(t.type, t.config?.source) : Play;
                 return (
                   <span
                     key={t.id}
@@ -691,7 +686,7 @@ function TriggerList({
       ) : (
         triggers.map((t) => {
           const meta = TRIGGER_META[t.type as TriggerType];
-          const Icon = meta?.icon ?? Play;
+          const Icon = meta ? triggerTypeIcon(t.type, t.config?.source) : Play;
           return (
             <div key={t.id} className="flex items-center gap-2 text-xs">
               <Icon className="w-3.5 h-3.5 text-text-muted shrink-0" />
@@ -1526,7 +1521,7 @@ function AutomationEditor({
           {trigger && !editingTrigger ? (
             <div className="flex items-center gap-2 text-xs">
               {(() => {
-                const Icon = TRIGGER_META[trigger.type].icon;
+                const Icon = triggerTypeIcon(trigger.type, trigger.config?.source as string);
                 return <Icon className="w-3.5 h-3.5 text-text-muted" />;
               })()}
               <span className="font-mono text-text-muted truncate flex-1">

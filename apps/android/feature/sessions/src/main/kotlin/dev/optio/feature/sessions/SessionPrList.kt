@@ -8,9 +8,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 import dev.optio.core.model.SessionPr
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.OptioRow
+import dev.optio.core.ui.components.PrGlyph
+import dev.optio.core.ui.components.PrGlyphState
 import dev.optio.core.ui.components.PullRefresh
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.theme.OptioTheme
@@ -64,6 +67,7 @@ internal fun SessionPrRow(
             ),
         trailing = "Open ↗",
         titleMaxLines = 1,
+        metaGlyph = { PrGlyph(PrGlyphState.from(pr.prState), size = 13.dp) },
         onClick = onOpen,
         onClickLabel = "Open pull request",
         modifier = modifier.testTag("pr-${pr.prNumber.toInt()}"),

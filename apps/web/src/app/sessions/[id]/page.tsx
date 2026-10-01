@@ -11,7 +11,6 @@ import {
   Loader2,
   FolderGit2,
   StopCircle,
-  GitPullRequest,
   ExternalLink,
   CheckCircle2,
   XCircle,
@@ -21,6 +20,8 @@ import {
   ChevronDown,
   Bot,
 } from "lucide-react";
+import { PrIcon } from "@/components/brand-icon";
+import { DetailHeader } from "@/components/detail-header";
 import dynamic from "next/dynamic";
 
 const SessionTerminal = dynamic(
@@ -138,48 +139,34 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="shrink-0 px-6 py-4 border-b border-border bg-bg">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/sessions" className="text-text-muted hover:text-text transition-colors">
-              <ArrowLeft className="w-4 h-4" />
-            </Link>
-            <div className="flex items-center gap-2">
-              <Terminal className="w-5 h-5 text-primary" />
-              <div>
-                <h1 className="text-lg font-semibold tracking-tight">
-                  {session.title || session.branch || `Session ${session.id.slice(0, 8)}`}
-                </h1>
-                <div className="flex items-center gap-3 text-xs text-text-muted">
-                  <span className="flex items-center gap-1">
-                    <FolderGit2 className="w-3 h-3" />
-                    {repoName}
-                  </span>
-                  <span
-                    className={cn(
-                      "flex items-center gap-1",
-                      isActive ? "text-primary" : "text-text-muted",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "w-1.5 h-1.5 rounded-full",
-                        isActive ? "bg-primary animate-pulse" : "bg-text-muted",
-                      )}
-                    />
-                    {session.state}
-                  </span>
-                  <span>Started {formatRelativeTime(session.createdAt)}</span>
-                  {isActive && (
-                    <span className="text-primary">{formatDuration(session.createdAt)}</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
+      <DetailHeader
+        title={session.title || session.branch || `Session ${session.id.slice(0, 8)}`}
+        subtitle={
+          <Link href="/work" className="inline-flex items-center gap-1 hover:text-primary">
+            <ArrowLeft className="w-3 h-3" />
+            Work
+          </Link>
+        }
+        state={session.state}
+        metaItems={[
+          <>
+            <Terminal className="w-3 h-3" />
+            Pod session
+          </>,
+          <span key="repo" className="inline-flex items-center gap-1 font-mono">
+            <FolderGit2 className="w-3 h-3" />
+            {repoName}
+          </span>,
+          <>
+            <Clock className="w-3 h-3" />
+            Started {formatRelativeTime(session.createdAt)}
+            {isActive && (
+              <span className="text-primary"> · {formatDuration(session.createdAt)}</span>
+            )}
+          </>,
+        ]}
+        rightSlot={
+          <>
             {/* Live cost counter */}
             {displayCost > 0 && (
               <span className="flex items-center gap-1 text-xs text-text-muted px-2 py-1 bg-bg-card rounded-md border border-border">
@@ -230,7 +217,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             {/* PR indicator in header */}
             {prs.length > 0 && (
               <span className="flex items-center gap-1 text-xs text-text-muted px-2 py-1 bg-bg-card rounded-md border border-border">
-                <GitPullRequest className="w-3 h-3" />
+                <PrIcon colored={false} className="w-3 h-3" />
                 {prs.length} PR{prs.length > 1 ? "s" : ""}
               </span>
             )}
@@ -244,9 +231,9 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                 End Session
               </button>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* End session warning dialog */}
       {showEndWarning && (
@@ -357,7 +344,7 @@ function PrBadge({ pr }: { pr: any }) {
       rel="noopener noreferrer"
       className="shrink-0 flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-border bg-bg-card text-xs hover:border-primary/30 transition-colors"
     >
-      <GitPullRequest className="w-3 h-3 text-text-muted" />
+      <PrIcon state={pr.prState} className="w-3 h-3" />
       <span className="font-medium">#{pr.prNumber}</span>
       <span
         className={cn(

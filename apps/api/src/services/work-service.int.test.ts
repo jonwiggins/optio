@@ -63,7 +63,7 @@ async function seedPerson(workspaceId: string, label: string) {
     })
     .returning();
   const blueprint = await insertLocalBlueprint({
-    userId: user.id,
+    ownerUserId: user.id,
     workspaceId,
     name: `${label} automation`,
     hostId: host.id,
@@ -112,9 +112,11 @@ describe("listWork", () => {
     expect(keys).not.toContain(`session-${teammate.session.id}`);
     expect(keys).not.toContain(`task-${elsewhere.id}`);
 
-    // Needs-you first, and the caller's own machine is named.
-    expect(rows[0]).toMatchObject({
-      key: `terminal-${me.terminal.id}`,
+    // Live work leads the list, and the caller's own machine is named.
+    const live = rows.findIndex((r) => r.status === "scheduled");
+    const terminal = rows.findIndex((r) => r.key === `terminal-${me.terminal.id}`);
+    expect(terminal).toBeLessThan(live);
+    expect(rows[terminal]).toMatchObject({
       status: "needs_you",
       where: { target: "machine", detail: "me-mac · ~/app" },
     });

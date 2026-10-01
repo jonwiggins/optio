@@ -4,7 +4,7 @@
  * on that release has it — so a test can seed rows in the old shape with raw
  * SQL, call `migrateRest()`, and assert where every row landed.
  *
- *     const db = await stageDatabase("1791600000_task_pr_follow_through");
+ *     const db = await stageDatabase("1791800000_task_prs");
  *     await db.sql`INSERT INTO tasks ...`;
  *     await db.migrateRest();
  *     expect(await db.sql`SELECT work_id FROM tasks`).toEqual(...);

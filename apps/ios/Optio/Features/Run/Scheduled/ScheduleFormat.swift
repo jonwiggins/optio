@@ -28,12 +28,3 @@ enum ScheduleFormat {
         return expr
     }
 }
-
-func triggerIcon(_ type: String) -> String {
-    switch type {
-    case "schedule": return "clock"
-    case "webhook": return "link"
-    case "ticket": return "ticket"
-    default: return "hand.tap"
-    }
-}

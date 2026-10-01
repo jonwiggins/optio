@@ -22,6 +22,7 @@ function sources(over: Partial<WorkSources> = {}): WorkSources {
     podSessions: [],
     agents: [],
     hosts: [],
+    triggers: [],
     ...over,
   };
 }

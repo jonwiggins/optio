@@ -131,7 +131,13 @@ describe("boot from an empty database", () => {
 
     // Key tables from across the schema's lifetime now exist.
     const tables = await listPublicTables();
-    for (const expected of ["tasks", "workflows", "persistent_agents", "connection_providers"]) {
+    for (const expected of [
+      "tasks",
+      "work_definitions",
+      "agent_pods",
+      "persistent_agents",
+      "connection_providers",
+    ]) {
       expect(tables).toContain(expected);
     }
 

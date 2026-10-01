@@ -8,7 +8,7 @@
  *
  * See docs/tasks.md ("The Work feed") and docs/plans/work-unification.md.
  */
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray, or } from "drizzle-orm";
 import {
   sortWork,
   shortDir,
@@ -16,6 +16,7 @@ import {
   type WorkRow,
   type WorkSource,
   type WorkStatus,
+  type WorkTrigger,
   type WorkWhere,
 } from "@optio/shared";
 import { db } from "../db/client.js";
@@ -24,6 +25,7 @@ import {
   tasks,
   workDefinitions,
   workflowRuns,
+  workflowTriggers,
   type interactiveSessions,
   type localHosts,
   type persistentAgents,
@@ -60,6 +62,8 @@ export interface WorkSources {
   agents: PersistentAgentRow[];
   /** The caller's machines — names for rows that run on them. */
   hosts: Pick<LocalHostRow, "id" | "name">[];
+  /** The definitions' triggers, and those that started a task or terminal. */
+  triggers: TriggerRow[];
 }
 
 /** How many rows of each high-volume kind the list carries (the web's old fan-out limits). */
@@ -85,13 +89,18 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
       paService.listPersistentAgents(scope.workspaceId),
       hostService.listHosts(scope.userId),
     ]);
+  const defs = [...configs.slice(0, TASK_LIMIT), ...jobs.slice(0, TASK_LIMIT), ...automations];
+  const runs = { tasks: taskRows, localTerminals: terminals };
   return projectWork({
-    tasks: taskRows,
-    definitions: [...configs.slice(0, TASK_LIMIT), ...jobs.slice(0, TASK_LIMIT), ...automations],
-    localTerminals: terminals,
+    ...runs,
+    definitions: defs,
     podSessions,
     agents,
     hosts,
+    triggers: await loadTriggers(
+      defs.map((d) => d.id),
+      triggerIdsOf(runs),
+    ),
   });
 }
 
@@ -161,33 +170,94 @@ function definitionStatus(enabled: boolean): Pick<WorkRow, "status" | "statusLab
     : { status: "paused", statusLabel: "paused" };
 }
 
-/** Where a row runs, named the way the list shows it. */
-interface Places {
+/** What the projectors look up across rows: machine names and triggers. */
+interface Context {
+  /** Where a row runs on a machine, named the way the list shows it. */
   machine(hostId: string | null, dir: string | null): WorkWhere;
+  /** A definition's triggers, one per type (a ticket trigger per source). */
+  triggersOf(definitionId: string): WorkTrigger[];
+  /** What started a run: its ticket, else the trigger that fired it (when known). */
+  startedBy(ticketSource: string | null | undefined, triggerId: unknown): WorkTrigger[] | undefined;
 }
 
-function places(hosts: WorkSources["hosts"]): Places {
+type TriggerRow = Pick<typeof workflowTriggers.$inferSelect, "id" | "type" | "targetId" | "config">;
+
+/** One entry per distinct trigger type (a ticket trigger per source). */
+function distinctTriggers(list: TriggerRow[]): WorkTrigger[] {
+  const seen = new Set<string>();
+  const out: WorkTrigger[] = [];
+  for (const t of list) {
+    const source = t.type === "ticket" ? ((t.config?.source as string | undefined) ?? null) : null;
+    const key = `${t.type}:${source ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(source ? { type: t.type, source } : { type: t.type });
+  }
+  return out;
+}
+
+function context(hosts: WorkSources["hosts"], triggers: TriggerRow[]): Context {
   const hostName = new Map(hosts.map((h) => [h.id, h.name]));
+  const byTarget = new Map<string, TriggerRow[]>();
+  const byId = new Map<string, TriggerRow>();
+  for (const t of triggers) {
+    byTarget.set(t.targetId, [...(byTarget.get(t.targetId) ?? []), t]);
+    byId.set(t.id, t);
+  }
   return {
     machine: (hostId, dir) => ({
       target: "machine",
       detail:
         [hostName.get(hostId ?? "") ?? null, shortDir(dir)].filter(Boolean).join(" · ") || null,
     }),
+    triggersOf: (id) => distinctTriggers(byTarget.get(id) ?? []),
+    startedBy: (ticketSource, triggerId) => {
+      if (ticketSource) return [{ type: "ticket", source: ticketSource }];
+      const trigger = typeof triggerId === "string" ? byId.get(triggerId) : undefined;
+      return trigger ? distinctTriggers([trigger]) : undefined;
+    },
   };
+}
+
+/** The triggers rows refer to: every definition's, and those that started a run. */
+async function loadTriggers(definitionIds: string[], triggerIds: string[]): Promise<TriggerRow[]> {
+  if (definitionIds.length === 0 && triggerIds.length === 0) return [];
+  return db
+    .select({
+      id: workflowTriggers.id,
+      type: workflowTriggers.type,
+      targetId: workflowTriggers.targetId,
+      config: workflowTriggers.config,
+    })
+    .from(workflowTriggers)
+    .where(
+      or(
+        definitionIds.length ? inArray(workflowTriggers.targetId, definitionIds) : undefined,
+        triggerIds.length ? inArray(workflowTriggers.id, triggerIds) : undefined,
+      ),
+    );
+}
+
+/** The trigger ids a task or terminal says started it. */
+function triggerIdsOf(src: Pick<WorkSources, "tasks" | "localTerminals">): string[] {
+  const ids = [
+    ...src.tasks.map((t) => (t.metadata as { triggerId?: unknown } | null)?.triggerId),
+    ...src.localTerminals.map((t) => t.triggerId),
+  ];
+  return [...new Set(ids.filter((id): id is string => typeof id === "string"))];
 }
 
 function repoWhere(
   row: { runTarget: "cluster" | "local"; localHostId: string | null; localDir: string | null },
   repoUrl: string | null,
-  at: Places,
+  at: Context,
 ): WorkWhere {
   return row.runTarget === "local"
     ? at.machine(row.localHostId, row.localDir)
     : { target: "pod", detail: shortRepo(repoUrl) };
 }
 
-function taskRow(t: TaskRow, at: Places): WorkRow {
+function taskRow(t: TaskRow, at: Context): WorkRow {
   const [status, statusLabel] = taskStatus(t.state);
   const configId = (t.metadata as { taskConfigId?: string } | null)?.taskConfigId;
   return {
@@ -204,6 +274,11 @@ function taskRow(t: TaskRow, at: Places): WorkRow {
     statusLabel,
     note: t.prUrl ? `PR ${t.prUrl.split("/").pop()}` : null,
     prUrl: t.prUrl ?? null,
+    prState: t.prState ?? null,
+    triggers: at.startedBy(
+      t.ticketSource,
+      (t.metadata as { triggerId?: unknown } | null)?.triggerId,
+    ),
     lastActivity: iso(t.updatedAt ?? t.createdAt),
     recurring: false,
     editHref: null,
@@ -211,12 +286,13 @@ function taskRow(t: TaskRow, at: Places): WorkRow {
   };
 }
 
-function definitionRow(d: WorkDefinition, at: Places): WorkRow {
+function definitionRow(d: WorkDefinition, at: Context): WorkRow {
   const common = {
     id: d.id,
     name: d.name,
     ...definitionStatus(d.enabled),
     prUrl: null,
+    triggers: at.triggersOf(d.id),
     lastActivity: iso(d.updatedAt ?? d.createdAt),
     recurring: true,
     editHref: `/work/${d.id}/edit`,
@@ -265,7 +341,7 @@ function definitionRow(d: WorkDefinition, at: Places): WorkRow {
   }
 }
 
-function terminalRow(t: LocalTerminalRow, at: Places): WorkRow {
+function terminalRow(t: LocalTerminalRow, at: Context): WorkRow {
   const [status, statusLabel] = terminalStatus(t);
   const spec = t.spec as { kind?: string; agent?: string; mode?: string };
   const interactive = spec.kind !== "agent" || spec.mode !== "headless";
@@ -283,7 +359,16 @@ function terminalRow(t: LocalTerminalRow, at: Places): WorkRow {
     statusLabel,
     note: t.attentionState === "needs_you" && t.attentionReason ? t.attentionReason : null,
     prUrl: null,
+    triggers:
+      t.spawnedBy === "ticket"
+        ? [{ type: "ticket", source: t.ticketSource ?? null }]
+        : t.spawnedBy === "trigger"
+          ? at.startedBy(null, t.triggerId)
+          : undefined,
     lastActivity: iso(t.lastActivityAt ?? t.updatedAt),
+    // Ordered by when you last typed into it (else when it was made), so it
+    // doesn't jump as its attention state flips.
+    orderAt: iso(t.lastInteractedAt ?? t.createdAt),
     recurring: false,
     editHref: null,
     spawned: !!t.blueprintId || !!t.workflowRunId,
@@ -350,7 +435,7 @@ function jobRunStatus(state: string): [WorkStatus, string] {
 }
 
 /** One run of a Job, as a row of its own. */
-function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Places): WorkRow {
+function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Context): WorkRow {
   const [status, statusLabel] = jobRunStatus(r.state);
   return {
     key: `job-run-${r.id}`,
@@ -369,6 +454,7 @@ function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Places): WorkRow {
     statusLabel,
     note: r.errorMessage ?? null,
     prUrl: null,
+    triggers: at.startedBy(null, r.triggerId),
     lastActivity: iso(r.updatedAt ?? r.createdAt),
     recurring: false,
     editHref: null,
@@ -378,7 +464,7 @@ function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Places): WorkRow {
 
 /** Projects each source row onto a `WorkRow`. Pure; `listWork` feeds it. */
 export function projectWork(src: WorkSources): WorkRow[] {
-  const at = places(src.hosts);
+  const at = context(src.hosts, src.triggers);
   return sortWork([
     ...src.tasks.map((t) => taskRow(t, at)),
     ...src.definitions.map((d) => definitionRow(d, at)),
@@ -407,7 +493,12 @@ export async function resolveWork(id: string, scope: WorkScope): Promise<Resolve
   if (!UUID.test(id)) return null;
   const inWorkspace = (row: { workspaceId: string | null }) =>
     !scope.workspaceId || !row.workspaceId || row.workspaceId === scope.workspaceId;
-  const at = async () => places(await hostService.listHosts(scope.userId));
+  /** The row's context: the caller's machines, and the triggers it names. */
+  const at = async (definitionIds: string[], triggerIds: string[]) =>
+    context(
+      await hostService.listHosts(scope.userId),
+      await loadTriggers(definitionIds, triggerIds),
+    );
   const found = (source: WorkSource, data: object, row: WorkRow): ResolvedWork => ({
     source,
     data: data as Record<string, unknown>,
@@ -416,17 +507,22 @@ export async function resolveWork(id: string, scope: WorkScope): Promise<Resolve
 
   const task = await taskService.getTask(id);
   if (task) {
-    return inWorkspace(task) ? found("repo-task", task, taskRow(task, await at())) : null;
+    if (!inWorkspace(task)) return null;
+    return found(
+      "repo-task",
+      task,
+      taskRow(task, await at([], triggerIdsOf({ tasks: [task], localTerminals: [] }))),
+    );
   }
 
   const definition = await definitions.getDefinition(id);
   if (definition) {
     const visible =
       definition.kind === "local-blueprint"
-        ? canAccessBlueprint(definition, scope.userId)
+        ? canAccessBlueprint({ userId: definition.ownerUserId }, scope.userId)
         : inWorkspace(definition);
     return visible
-      ? found(definition.kind, definition, definitionRow(definition, await at()))
+      ? found(definition.kind, definition, definitionRow(definition, await at([definition.id], [])))
       : null;
   }
 
@@ -434,7 +530,8 @@ export async function resolveWork(id: string, scope: WorkScope): Promise<Resolve
   if (terminal) {
     // A terminal that executes a task is that task's run, not work of its own.
     if (terminal.taskId || !terminalService.canAccessTerminal(terminal, scope.userId)) return null;
-    return found("local-terminal", terminal, terminalRow(terminal, await at()));
+    const ctx = await at([], triggerIdsOf({ tasks: [], localTerminals: [terminal] }));
+    return found("local-terminal", terminal, terminalRow(terminal, ctx));
   }
 
   const session = await sessionService.getSession(id);
@@ -457,7 +554,11 @@ const RUN_LIMIT = 50;
  * scheduled Task's tasks, a Job's runs, a Local automation's terminals.
  */
 export async function listRuns(definition: WorkDefinition, scope: WorkScope): Promise<WorkRow[]> {
-  const at = places(await hostService.listHosts(scope.userId));
+  // Runs say which of the definition's triggers started them.
+  const at = context(
+    await hostService.listHosts(scope.userId),
+    await loadTriggers([definition.id], []),
+  );
   switch (definition.kind) {
     case "repo-blueprint": {
       const rows = await db

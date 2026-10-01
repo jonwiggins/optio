@@ -63,6 +63,7 @@ export class GitLabOAuthProvider implements OAuthProvider {
       displayName: data.name ?? data.username ?? "",
       username: data.username ?? undefined,
       avatarUrl: data.avatar_url,
+      emailVerified: !!data.email && !!data.confirmed_at,
     };
   }
 }

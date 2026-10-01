@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Bot, GitPullRequest, ListTodo, Plus, Terminal } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { EmptyState } from "./empty-state.js";
+import { EmptyState } from "@/components/empty-state";
 
 export interface RecentRun {
   id: string;
@@ -70,6 +70,7 @@ export function RecentRuns({ runs }: { runs: RecentRun[] }) {
       </div>
       {runs.length === 0 ? (
         <EmptyState
+          size="panel"
           icon={ListTodo}
           title="Nothing has run yet"
           description="Tasks, job runs, and agent turns will show up here as they happen."

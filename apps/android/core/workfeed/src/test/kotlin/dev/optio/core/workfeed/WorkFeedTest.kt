@@ -105,12 +105,33 @@ class WorkFeedTest {
     @Test
     fun theWholeOrderIsStatusRankThenRecency() {
         val rows = WorkFeed.collect(sources())
-        // needs you (newest first) → waiting (agent, session: no timestamps, input order) →
-        // scheduled (blueprint, automation) → paused (job) → done (task).
+        // live (needs you and waiting share a rank; newest first, then key for rows without a
+        // timestamp) → scheduled (by key) → paused (job) → done (task).
         assertEquals(
-            listOf("terminal-lt1", "task-t2", "session-s1", "agent-pa1", "blueprint-b1", "automation-a1", "job-j1", "task-t1"),
+            listOf("terminal-lt1", "task-t2", "agent-pa1", "session-s1", "automation-a1", "blueprint-b1", "job-j1", "task-t1"),
             rows.map { it.key },
         )
+    }
+
+    @Test
+    fun liveRowsDoNotJumpWhenAnAgentChangesState() {
+        fun terminal(id: String, attention: String, created: String, interacted: String? = null, activity: String = "2026-09-30T12:00:00Z") =
+            TerminalRow(
+                id = id, title = id, state = "running", attentionState = attention, spec = spec("agent", agent = "claude-code"),
+                createdAt = created, lastInteractedAt = interacted, lastActivityAt = activity,
+            )
+        val before = listOf(
+            terminal("a", "working", created = "2026-09-30T10:00:00Z", interacted = "2026-09-30T11:30:00Z"),
+            terminal("b", "needs_you", created = "2026-09-30T11:00:00Z"),
+            terminal("c", "working", created = "2026-09-30T09:00:00Z", activity = "2026-09-30T12:59:00Z"),
+        )
+        val order = { ts: List<TerminalRow> -> WorkFeed.collect(Sources(localTerminals = ts)).map { it.key } }
+        // Last interaction, else creation — never the agent's own activity or its attention state.
+        assertEquals(listOf("terminal-a", "terminal-b", "terminal-c"), order(before))
+        val flipped = before.map { it.copy(attentionState = if (it.attentionState == "working") "needs_you" else "working") }
+        assertEquals(order(before), order(flipped))
+        // Finishing still moves a row below the live ones.
+        assertEquals(listOf("terminal-b", "terminal-c", "terminal-a"), order(before.map { if (it.id == "a") it.copy(state = "exited") else it }))
     }
 
     @Test
@@ -189,7 +210,7 @@ class WorkFeedTest {
         assertEquals(listOf("job-j1"), rows.filter { WorkFeed.matches(it, "GEMINI") }.map { it.key })
         assertEquals(listOf("task-t1"), rows.filter { WorkFeed.matches(it, "PR 7") }.map { it.key })
         assertEquals(rows.size, rows.count { WorkFeed.matches(it, "  ") })
-        assertEquals(listOf("blueprint-b1", "automation-a1"), rows.filter { WorkFeed.matches(it, "armed") }.map { it.key })
+        assertEquals(listOf("automation-a1", "blueprint-b1"), rows.filter { WorkFeed.matches(it, "armed") }.map { it.key })
     }
 
     @Test

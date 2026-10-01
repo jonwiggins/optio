@@ -28,17 +28,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Build
-import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Cloud
-import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Power
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
@@ -84,6 +79,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.optio.core.navigation.LocalNavigator
+import dev.optio.core.ui.components.BrandIcons
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.OptioRowDefaults
 import dev.optio.core.ui.components.SectionHeader
@@ -692,12 +688,12 @@ internal fun SwipeToDelete(
 
 /** Material glyph for a connection provider's `icon` (iOS `ConnectionIcons.symbol`). */
 internal fun providerIcon(icon: String?): ImageVector = when (icon) {
-    "notion" -> Icons.Outlined.Description
-    "github" -> Icons.Outlined.Code
-    "slack" -> Icons.Outlined.Forum
-    "linear" -> Icons.Outlined.BarChart
+    "notion" -> BrandIcons.Notion
+    "github" -> BrandIcons.GitHub
+    "slack" -> BrandIcons.Slack
+    "linear" -> BrandIcons.Linear
     "database" -> Icons.Outlined.Storage
-    "sentry" -> Icons.Outlined.BugReport
+    "sentry" -> BrandIcons.Sentry
     "folder" -> Icons.Outlined.Folder
     "terminal" -> Icons.Outlined.Terminal
     "globe" -> Icons.Outlined.Public

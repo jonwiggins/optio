@@ -21,10 +21,10 @@ import dev.optio.core.model.LocalTerminalSpec
 import dev.optio.core.model.LocalTerminalState
 import dev.optio.core.model.WorkLink
 import dev.optio.core.model.WorkLinkKind
-import dev.optio.core.model.WorkLinkProvider
 import dev.optio.core.ui.components.OptioRow
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.mono
+import dev.optio.core.ui.components.workLinkProvider
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.Tone
@@ -98,7 +98,7 @@ internal object LocalPresentation {
     fun workLinks(t: LocalTerminal): List<WorkLink> {
         val ticketUrl = t.ticketUrl ?: return t.links
         if (t.links.any { it.url == ticketUrl }) return t.links
-        val provider = if (t.ticketSource == "gitlab") WorkLinkProvider.GITLAB else WorkLinkProvider.GITHUB
+        val provider = workLinkProvider(t.ticketSource)
         val label = t.ticketExternalId?.let { "#$it" } ?: "ticket"
         return listOf(WorkLink(url = ticketUrl, kind = WorkLinkKind.ISSUE, provider = provider, label = label)) + t.links
     }

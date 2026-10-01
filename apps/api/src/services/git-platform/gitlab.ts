@@ -67,6 +67,29 @@ export class GitLabPlatform implements GitPlatform {
     return data.map((d: any) => mapMr(d, ri));
   }
 
+  async findPullRequestsByHeadPrefix(ri: RepoIdentifier, prefix: string): Promise<PullRequest[]> {
+    const out: PullRequest[] = [];
+    for (let page = 1; page <= 3; page++) {
+      const params = new URLSearchParams({
+        state: "opened",
+        per_page: "100",
+        page: String(page),
+        order_by: "created_at",
+        sort: "desc",
+      });
+      const data = await this.fetchJson<any[]>(this.url(ri, `/merge_requests?${params}`), {
+        headers: this.headers(),
+      });
+      for (const d of data) {
+        if (typeof d?.source_branch === "string" && d.source_branch.startsWith(prefix)) {
+          out.push(mapMr(d, ri));
+        }
+      }
+      if (data.length < 100) break;
+    }
+    return out;
+  }
+
   async getCIChecks(ri: RepoIdentifier, commitSha: string): Promise<CICheck[]> {
     // Get pipelines for the commit
     const pipelines = await this.fetchJson<any[]>(
@@ -397,6 +420,7 @@ function mapMr(data: any, ri: RepoIdentifier): PullRequest {
     draft: data.draft ?? data.work_in_progress ?? false,
     headSha: data.sha ?? data.diff_refs?.head_sha ?? "",
     baseBranch: data.target_branch ?? "",
+    headBranch: data.source_branch ?? undefined,
     url: data.web_url ?? `https://${ri.host}/${ri.owner}/${ri.repo}/-/merge_requests/${data.iid}`,
     author: data.author?.username ?? "",
     assignees: (data.assignees ?? []).map((a: any) => a.username ?? ""),

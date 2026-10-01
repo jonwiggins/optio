@@ -75,6 +75,8 @@ import dev.optio.core.navigation.routes.TaskDetailRoute
 import dev.optio.core.network.LocalApiClient
 import dev.optio.core.network.LocalCurrentUser
 import dev.optio.core.ui.auth.Roles
+import dev.optio.core.ui.components.Brand
+import dev.optio.core.ui.components.BrandMark
 import dev.optio.core.ui.components.ChatComposer
 import dev.optio.core.ui.components.ConfirmHost
 import dev.optio.core.ui.components.DetailHeader
@@ -83,6 +85,8 @@ import dev.optio.core.ui.components.ErrorRow
 import dev.optio.core.ui.components.GroupedSection
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.NoticeBanner
+import dev.optio.core.ui.components.PrGlyph
+import dev.optio.core.ui.components.PrGlyphState
 import dev.optio.core.ui.components.SkeletonRows
 import dev.optio.core.ui.components.metaText
 import dev.optio.core.ui.components.mono
@@ -428,7 +432,11 @@ private fun TaskHeader(detail: TaskDetail, onOpenPr: (String) -> Unit) {
     ) {
         task.prUrl?.let { url ->
             IconButton(onClick = { onOpenPr(url) }, modifier = Modifier.size(32.dp).testTag("open-pr")) {
-                Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = "Open pull request", modifier = Modifier.size(18.dp))
+                if (Brand.fromUrl(url) == Brand.GitLab) {
+                    BrandMark(Brand.GitLab, size = 18.dp, contentDescription = "Open merge request")
+                } else {
+                    PrGlyph(PrGlyphState.from(task.prState), size = 18.dp, contentDescription = "Open pull request")
+                }
             }
         }
     }

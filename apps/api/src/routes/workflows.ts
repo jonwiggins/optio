@@ -6,6 +6,12 @@ import { validateRunLocation } from "../services/local-run-service.js";
 import { workflowRunQueue } from "../workers/workflow-worker.js";
 import { requireRole } from "../plugins/auth.js";
 import { logAction } from "../services/optio-action-service.js";
+import {
+  planNewWork,
+  planWorkUpdate,
+  workActor,
+  workChangeError,
+} from "../services/work-ownership.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
   WorkflowSchema,
@@ -98,6 +104,18 @@ const createWorkflowSchema = z
       .nullable()
       .optional()
       .describe("Local runs: `headless` (default) exits when done; `interactive` stays open"),
+    owner: z
+      .enum(["workspace", "me"])
+      .optional()
+      .describe(
+        "Who the work belongs to: `workspace` (the organization) or `me` (runs with your own secrets / model providers; only you can change it). Default: `me` when it runs on your machine or picks something personal, else `workspace`.",
+      ),
+    podSecrets: z
+      .array(z.string().min(1).max(128))
+      .max(100)
+      .nullable()
+      .optional()
+      .describe("Secrets (by name) the agent gets in its pod; null = the workspace's default"),
   })
   .describe("Body for creating a new workflow template");
 
@@ -127,6 +145,18 @@ const updateWorkflowSchema = z
     localHostId: z.string().uuid().nullable().optional(),
     localDir: z.string().min(1).max(1000).nullable().optional(),
     localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
+    owner: z
+      .enum(["workspace", "me"])
+      .optional()
+      .describe(
+        "Who the work belongs to: `workspace` (the organization) or `me` (runs with your own secrets / model providers; only you can change it). Default: `me` when it runs on your machine or picks something personal, else `workspace`.",
+      ),
+    podSecrets: z
+      .array(z.string().min(1).max(128))
+      .max(100)
+      .nullable()
+      .optional()
+      .describe("Secrets (by name) the agent gets in its pod; null = the workspace's default"),
   })
   .describe("Partial update to a workflow template");
 
@@ -285,6 +315,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         tags: ["Workflows"],
         body: createWorkflowSchema,
         response: {
+          403: ErrorResponseSchema,
           201: WorkflowResponseSchema,
           400: ErrorResponseSchema,
         },
@@ -303,10 +334,19 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         req.user?.id,
       );
       if (!location.ok) return reply.status(400).send({ error: location.error });
+      const { owner, podSecrets: _podSecrets, ...fields } = input;
+      const plan = await planNewWork(input, workActor(req), {
+        agentType: input.agentRuntime ?? "claude-code",
+        agentOptions: input.agentOptions,
+        runsOn: location.location.runTarget === "local" ? "local" : "pod",
+      });
+      if (!plan.ok) return reply.status(plan.status).send({ error: plan.error });
       try {
         const workflow = await workflowService.createWorkflow({
-          ...input,
+          ...fields,
           ...location.location,
+          ownerUserId: plan.ownerUserId,
+          ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
           workspaceId: req.user?.workspaceId ?? undefined,
           createdBy: req.user?.id,
         });
@@ -363,6 +403,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         params: IdParamsSchema,
         body: updateWorkflowSchema,
         response: {
+          403: ErrorResponseSchema,
           200: WorkflowResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -374,6 +415,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const input = req.body;
       const existing = await requireWorkflowInWorkspace(req, id);
       if (!existing) return reply.status(404).send({ error: "Workflow not found" });
+      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
 
       // Re-validate the run location whenever anything that feeds it changes,
       // merging the patch over the stored row (a partial PATCH may only move
@@ -402,8 +445,20 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         if (!location.ok) return reply.status(400).send({ error: location.error });
         patch = { ...input, ...location.location };
       }
+      const { owner: _owner, podSecrets: _podSecrets, ...patchFields } = patch as typeof input;
+      const plan = await planWorkUpdate(existing, input, workActor(req), {
+        agentType: patchFields.agentRuntime ?? existing.agentRuntime,
+        runsOn: (patchFields.runTarget ?? existing.runTarget) === "local" ? "local" : "pod",
+        touchesRuntime: touchesLocation,
+      });
+      if (!plan.ok) return reply.status(plan.status).send({ error: plan.error });
+      const { ownerUserId, podSecrets } = plan;
       try {
-        const workflow = await workflowService.updateWorkflow(id, patch);
+        const workflow = await workflowService.updateWorkflow(id, {
+          ...patchFields,
+          ...(ownerUserId !== existing.ownerUserId ? { ownerUserId } : {}),
+          ...(podSecrets !== undefined ? { podSecrets } : {}),
+        });
         if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
         logAction({
           userId: req.user?.id,
@@ -476,6 +531,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         tags: ["Workflows"],
         params: IdParamsSchema,
         response: {
+          403: ErrorResponseSchema,
           204: z.null().describe("Workflow deleted"),
           404: ErrorResponseSchema,
         },
@@ -485,6 +541,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const existing = await requireWorkflowInWorkspace(req, id);
       if (!existing) return reply.status(404).send({ error: "Workflow not found" });
+      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "delete");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
       const deleted = await workflowService.deleteWorkflow(id);
       if (!deleted) return reply.status(404).send({ error: "Workflow not found" });
       logAction({
@@ -516,6 +574,7 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
         params: IdParamsSchema,
         body: runWorkflowBodySchema,
         response: {
+          403: ErrorResponseSchema,
           201: WorkflowRunResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -526,6 +585,8 @@ export async function workflowRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const workflow = await requireWorkflowInWorkspace(req, id);
       if (!workflow) return reply.status(404).send({ error: "Workflow not found" });
+      const changeErr = await workChangeError(workflow.ownerUserId, workActor(req), "run");
+      if (changeErr) return reply.status(403).send({ error: changeErr });
       try {
         // createWorkflowRun enqueues on workflowRunQueue internally
         const run = await workflowService.createWorkflowRun(id, req.body);

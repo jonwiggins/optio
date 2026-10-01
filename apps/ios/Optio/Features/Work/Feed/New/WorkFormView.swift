@@ -74,6 +74,7 @@ private struct FormBody: View {
                 WhenSection(state: state)
                 WhereSection(state: state)
                 WhoSection(state: state)
+                if state.takesPodAccess { AccessSection(state: state) }
                 if !state.isTerminal { WhatSection(state: state, editor: editor) }
                 ThenSection(state: state)
                 NameSection(state: state)
