@@ -7,16 +7,56 @@ import SwiftUI
 struct AgentLogView: View {
     let entries: [AgentLogEntry]
     var autoScroll = true
+    /// Fold each turn's in-between work (tool calls, thinking, running
+    /// commentary) into one row, leaving what was said and the last reply —
+    /// `AgentLogFold`.
+    var foldSteps = false
+    /// The log ends before the first entry: offer to load earlier ones.
+    var onLoadEarlier: (() async -> Void)?
+    var loadingEarlier = false
+    /// The last steps row is the agent at work: it shows the step it's on.
+    var working = false
     /// The reader is at the end: new entries scroll into view. Once they scroll
     /// up to read back, a live log stops pulling them down.
     @State private var atBottom = true
+    @State private var blocks: [AgentLogBlock] = []
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(entries.enumerated()), id: \.offset) { idx, entry in
-                        AgentLogRow(entry: entry).id(idx)
+                    if let onLoadEarlier {
+                        Button {
+                            Task { await onLoadEarlier() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if loadingEarlier { ProgressView().controlSize(.mini) }
+                                Text("Load earlier messages")
+                            }
+                            .font(.caption.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(loadingEarlier)
+                    }
+                    if foldSteps {
+                        ForEach(blocks, id: \.id) { block in
+                            switch block {
+                            case .entry(let i):
+                                AgentLogRow(entry: entries[i]).id(block.id)
+                            case .steps(let range):
+                                AgentLogStepsRow(
+                                    entries: entries[range],
+                                    working: working && block == blocks.last
+                                )
+                                .id(block.id)
+                            }
+                        }
+                    } else {
+                        ForEach(Array(entries.enumerated()), id: \.offset) { idx, entry in
+                            AgentLogRow(entry: entry).id(idx)
+                        }
                     }
                     // iOS 17 has no scroll geometry: the end coming into view stands in.
                     Color.clear.frame(height: 1)
@@ -26,13 +66,154 @@ struct AgentLogView: View {
                 .padding()
             }
             .modifier(TracksBottom(atBottom: $atBottom))
-            .onChange(of: entries.count) { old, count in
+            .onChange(of: entries.count, initial: true) { old, count in
+                if foldSteps { blocks = AgentLogFold.blocks(entries) }
                 // Land at the end when the log first loads; after that, follow
                 // only a reader who is already there.
                 guard autoScroll, count > 0, old == 0 || atBottom else { return }
-                withAnimation { proxy.scrollTo(count - 1, anchor: .bottom) }
+                let last = foldSteps ? blocks.last?.id : count - 1
+                guard let last else { return }
+                if old == count {
+                    proxy.scrollTo(last, anchor: .bottom)
+                } else {
+                    withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                }
             }
         }
+    }
+}
+
+/// One row of a folded log: an entry, or a run of steps (indices into the entries).
+enum AgentLogBlock: Hashable {
+    case entry(Int)
+    case steps(Range<Int>)
+
+    /// The first entry's index: stays put as a turn grows.
+    var id: Int {
+        switch self {
+        case .entry(let i): return i
+        case .steps(let r): return r.lowerBound
+        }
+    }
+}
+
+/// Port of `foldTranscript()` in the web's `transcript-view.tsx`. What reads as
+/// the conversation: what you (or a background task, another agent, a
+/// compaction) put in, and the agent's last reply to it. Everything between —
+/// tool calls, thinking, the agent's running commentary — folds into one
+/// steps row, so a turn with a hundred tool calls reads as your message, one
+/// folded line, and the answer.
+enum AgentLogFold {
+    static func blocks(_ entries: [AgentLogEntry]) -> [AgentLogBlock] {
+        var out: [AgentLogBlock] = []
+        func pushSteps(_ r: Range<Int>) {
+            if r.count == 1 { out.append(.entry(r.lowerBound)) } else if r.count > 1 { out.append(.steps(r)) }
+        }
+        // Per turn (what follows each opener): the steps before its last reply,
+        // the reply, then the steps after it — a turn still at work has those.
+        func flush(_ turn: Range<Int>) {
+            guard let reply = turn.last(where: { isReply(entries[$0]) }) else {
+                pushSteps(turn)
+                return
+            }
+            pushSteps(turn.lowerBound..<reply)
+            out.append(.entry(reply))
+            pushSteps((reply + 1)..<turn.upperBound)
+        }
+        var start = 0
+        for (i, e) in entries.enumerated() where opensTurn(e) {
+            flush(start..<i)
+            out.append(.entry(i))
+            start = i + 1
+        }
+        flush(start..<entries.count)
+        return out
+    }
+
+    static func opensTurn(_ e: AgentLogEntry) -> Bool {
+        switch e.type {
+        case .text: return e.metadata?["role"]?.stringValue != nil
+        case .system: return e.metadata?["source"]?.stringValue != nil
+        default: return false
+        }
+    }
+
+    static func isReply(_ e: AgentLogEntry) -> Bool {
+        e.type == .text && e.metadata?["role"]?.stringValue == nil
+    }
+
+    /// "12 tool calls · 3 messages · thinking".
+    static func summary(_ entries: ArraySlice<AgentLogEntry>) -> String {
+        var tools = 0, messages = 0, thinking = 0
+        for e in entries {
+            switch e.type {
+            case .toolUse, .toolResult: tools += 1
+            case .thinking: thinking += 1
+            default: messages += 1
+            }
+        }
+        func plural(_ n: Int, _ noun: String) -> String { "\(n) \(noun)\(n == 1 ? "" : "s")" }
+        return [
+            tools > 0 ? plural(tools, "tool call") : nil,
+            messages > 0 ? plural(messages, "message") : nil,
+            thinking > 0 ? "thinking" : nil,
+        ].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    static func failures(_ entries: ArraySlice<AgentLogEntry>) -> Int {
+        entries.filter { $0.metadata?["resultIsError"]?.boolValue == true || $0.type == .error }.count
+    }
+}
+
+/// A turn's in-between work folded to one line — what it holds, and while the
+/// agent is at it the step it's on. Open, every step reads as its own row.
+struct AgentLogStepsRow: View {
+    let entries: ArraySlice<AgentLogEntry>
+    var working = false
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.snappy) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption2)
+                    Image(systemName: "wrench.and.screwdriver").font(.caption2)
+                    Text(AgentLogFold.summary(entries)).font(.caption)
+                    let failed = AgentLogFold.failures(entries)
+                    if failed > 0 {
+                        Text("· \(failed) failed").font(.caption).foregroundStyle(Tone.danger.textStyle)
+                    }
+                    if working, !expanded, let current {
+                        Text("· \(current)")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(AgentLogFold.summary(entries)), \(expanded ? "expanded" : "collapsed")")
+            if expanded {
+                ForEach(entries.indices, id: \.self) { i in
+                    AgentLogRow(entry: entries[i])
+                }
+                .padding(.leading, 10)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The last step, while working: "Shell · npm test".
+    private var current: String? {
+        guard let last = entries.last, last.type == .toolUse else { return nil }
+        let name = last.metadata?["toolName"]?.stringValue ?? "tool"
+        let summary = (last.metadata?["summary"]?.stringValue ?? "").replacingOccurrences(of: "\n", with: " ")
+        return summary.isEmpty ? name : "\(name) · \(summary.prefix(60))"
     }
 }
 

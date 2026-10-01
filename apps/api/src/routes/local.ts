@@ -589,16 +589,21 @@ export async function localRoutes(rawApp: FastifyInstance) {
         operationId: "getLocalTerminalTranscript",
         summary: "The conversation of an agent session (prompts, replies, tool calls)",
         description:
-          "Distilled by the daemon from the agent CLI's own transcript, so it covers the whole session — not just the last screen — and reads on any device. Grows while the session runs; `after` fetches only entries past a seq.",
+          "Distilled by the daemon from the agent CLI's own transcript, so it covers the whole session — not just the last screen — and reads on any device. Grows while the session runs; `after` fetches only entries past a seq. `before` instead returns the last `limit` entries before a seq (pass one past the highest seq for the latest page), with `hasEarlier` saying whether more precede them — how a phone opens a long session without downloading every tool output.",
         tags: ["Local"],
         params: z.object({ id: z.string().uuid() }),
         querystring: z.object({
           after: z.coerce.number().int().min(0).default(0),
+          before: z.coerce.number().int().min(1).optional(),
           limit: z.coerce.number().int().min(1).max(5000).default(2000),
         }),
         response: {
           200: z.object({
             entries: z.array(LocalTranscriptEntrySchema),
+            hasEarlier: z
+              .boolean()
+              .optional()
+              .describe("With `before`: entries precede the first one returned"),
             /** True when fewer than `limit` entries came back, i.e. the caller has everything stored. */
             complete: z.boolean(),
             backfilling: z
@@ -616,18 +621,27 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!terminal || !terminalService.canAccessTerminal(terminal, req.user?.id)) {
         return reply.status(404).send({ error: "Terminal not found" });
       }
-      const entries = await terminalService.getTranscript(
-        terminal.id,
-        req.query.after,
-        req.query.limit,
-      );
+      const { after, before, limit } = req.query;
+      const page =
+        before !== undefined
+          ? await terminalService.getTranscriptBefore(terminal.id, before, limit)
+          : {
+              entries: await terminalService.getTranscript(terminal.id, after, limit),
+              hasEarlier: undefined,
+            };
+      const { entries } = page;
       // Nothing stored at all: a finished session's machine can still read
       // it off disk.
       const backfilling =
-        req.query.after === 0 &&
+        (before !== undefined ? !page.hasEarlier : after === 0) &&
         entries.length === 0 &&
         terminalService.requestTranscriptBackfill(terminal);
-      reply.send({ entries, complete: entries.length < req.query.limit, backfilling });
+      reply.send({
+        entries,
+        complete: entries.length < limit,
+        backfilling,
+        ...(page.hasEarlier !== undefined && { hasEarlier: page.hasEarlier }),
+      });
     },
   );
 

@@ -14,6 +14,7 @@ import {
   deleteTerminal,
   getTerminal,
   getTranscript,
+  getTranscriptBefore,
   handleExit,
   handleSession,
   handleStarted,
@@ -154,6 +155,21 @@ describe("handleTranscript / getTranscript", () => {
     expect(await getTranscript(terminal.id, 2)).toHaveLength(2);
     expect(await getTranscript(terminal.id, 0, 1)).toHaveLength(1);
     expect(await countTranscript(terminal.id)).toBe(4);
+  });
+
+  it("pages backwards from the latest entry", async () => {
+    const { host, terminal } = await runningAgentTerminal();
+    await handleTranscript(
+      host.id,
+      terminal.id,
+      [1, 2, 3, 4, 5].map((n) => entry(n)),
+    );
+    const latest = await getTranscriptBefore(terminal.id, 20_001, 2);
+    expect(latest.entries.map((e) => e.seq)).toEqual([4, 5]);
+    expect(latest.hasEarlier).toBe(true);
+    const earlier = await getTranscriptBefore(terminal.id, 4, 3);
+    expect(earlier.entries.map((e) => e.seq)).toEqual([1, 2, 3]);
+    expect(earlier.hasEarlier).toBe(false);
   });
 
   it("refuses writes from another host and after the terminal exited", async () => {

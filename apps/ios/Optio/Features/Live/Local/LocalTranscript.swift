@@ -1,11 +1,13 @@
 import Foundation
 import Observation
 
-/// A terminal's stored conversation: everything at start (paged), then — while
-/// `live` — only the entries past the last seq every few seconds. Port of the
-/// web's `use-transcript.ts`. `loaded` flips once the first fetch settles, so
-/// the screen can decide its default face (transcript vs. screen) without a
-/// flash of the wrong one.
+/// A terminal's stored conversation: the latest page at start, earlier pages
+/// on request (`loadEarlier`), then — while `live` — only the entries past
+/// the last seq every few seconds. A long Codex or Claude session can hold
+/// thousands of tool outputs; fetching them all before showing anything
+/// timed out on a phone. `loaded` flips once the first fetch settles, so the
+/// screen can decide its default face (transcript vs. screen) without a flash
+/// of the wrong one.
 ///
 /// A finished session whose conversation was never streamed is read off its
 /// machine on that first fetch (the server answers `backfilling`): the model
@@ -17,11 +19,21 @@ final class LocalTranscriptModel {
     private(set) var entries: [LocalTranscriptEntry] = []
     private(set) var loaded = false
     private(set) var backfilling = false
+    /// Entries precede the first one held (`loadEarlier` fetches them).
+    private(set) var hasEarlier = false
+    private(set) var loadingEarlier = false
+    /// Why the conversation couldn't be fetched, while nothing is showing.
+    private(set) var loadError: String?
 
     private static let livePoll: Duration = .seconds(4)
     private static let backfillPoll: Duration = .seconds(1)
     private static let backfillPolls = 12
-    private static let page = 2000
+    /// The first page: enough for the last few exchanges, small enough for a phone.
+    private static let latestPage = 300
+    private static let earlierPage = 300
+    private static let livePage = 500
+    /// Past any seq the server stores, for the latest page.
+    private static let pastEnd = Int(Int32.max)
 
     private let api: APIClient
     private let terminalId: String
@@ -41,32 +53,41 @@ final class LocalTranscriptModel {
     /// The machine is still reading the conversation and nothing has landed yet.
     var readingConversation: Bool { backfilling && entries.isEmpty }
 
-    /// Fetch everything stored, then keep polling while `live`.
+    /// Fetch the latest page, then keep polling while `live`.
     func start(live: Bool) {
         self.live = live
         loadTask?.cancel()
         loadTask = Task { [weak self] in
             guard let self else { return }
-            var all: [LocalTranscriptEntry] = []
-            var backfill = false
             do {
-                var after = 0
-                while !Task.isCancelled {
-                    let page = try await api.getLocalTerminalTranscript(terminalId, after: after, limit: Self.page)
-                    all.append(contentsOf: page.entries)
-                    backfill = page.backfilling ?? false
-                    if page.complete || page.entries.isEmpty { break }
-                    after = Int(page.entries[page.entries.count - 1].seq)
-                }
+                let page = try await api.getLocalTerminalTranscript(terminalId, before: Self.pastEnd, limit: Self.latestPage)
+                if Task.isCancelled { return }
+                entries = page.entries
+                hasEarlier = page.hasEarlier ?? false
+                backfilling = (page.backfilling ?? false) && page.entries.isEmpty
+                lastSeq = page.entries.last.map { Int($0.seq) } ?? 0
+                loadError = nil
             } catch {
-                // No transcript (older row, non-agent session) — the screen view stands in.
+                if Task.isCancelled { return }
+                // Not a dead end: the poll below keeps trying, and the face says why it's empty.
+                loadError = error.localizedDescription
             }
-            if Task.isCancelled { return }
-            lastSeq = all.last.map { Int($0.seq) } ?? 0
-            entries = all
-            backfilling = backfill && all.isEmpty
             loaded = true
             restartPolling()
+        }
+    }
+
+    /// Fetch the page before the first entry held.
+    func loadEarlier() async {
+        guard hasEarlier, !loadingEarlier, let first = entries.first else { return }
+        loadingEarlier = true
+        defer { loadingEarlier = false }
+        do {
+            let page = try await api.getLocalTerminalTranscript(terminalId, before: Int(first.seq), limit: Self.earlierPage)
+            entries.insert(contentsOf: page.entries, at: 0)
+            hasEarlier = page.hasEarlier ?? false
+        } catch {
+            // The button stays; tapping again retries.
         }
     }
 
@@ -77,6 +98,12 @@ final class LocalTranscriptModel {
         guard self.live != live else { return }
         self.live = live
         if loaded { restartPolling() }
+    }
+
+    /// Try the first fetch again (after `loadError`).
+    func retry() {
+        loadError = nil
+        start(live: live)
     }
 
     func stop() {
@@ -101,10 +128,11 @@ final class LocalTranscriptModel {
             }
             return
         }
-        if !live {
+        if !live && loadError == nil {
             pollTask = Task { [weak self] in await self?.fetchMore() }
             return
         }
+        // Live, or the first fetch failed: keep asking.
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.livePoll)
@@ -114,25 +142,36 @@ final class LocalTranscriptModel {
         }
     }
 
-    /// Entries past the last seq.
+    /// Entries past the last seq — or, while nothing is held yet (the first
+    /// fetch failed, or a backfill is landing), the latest page.
     private func fetchMore() async {
         guard !inflight else { return }
         inflight = true
         defer { inflight = false }
         do {
-            let page = try await api.getLocalTerminalTranscript(terminalId, after: lastSeq, limit: Self.page)
+            let fromLatest = entries.isEmpty
+            let page = fromLatest
+                ? try await api.getLocalTerminalTranscript(terminalId, before: Self.pastEnd, limit: Self.latestPage)
+                : try await api.getLocalTerminalTranscript(terminalId, after: lastSeq, limit: Self.livePage)
+            let recovered = loadError != nil
+            loadError = nil
             guard !page.entries.isEmpty else {
                 // Nothing new and nothing more being read: a backfill is over.
                 if backfilling && !(page.backfilling ?? false) {
                     backfilling = false
                     restartPolling()
+                } else if recovered {
+                    restartPolling()
                 }
                 return
             }
+            if fromLatest { hasEarlier = page.hasEarlier ?? false }
             lastSeq = Int(page.entries[page.entries.count - 1].seq)
             entries.append(contentsOf: page.entries)
+            if recovered { restartPolling() }
         } catch {
-            // transient — the next tick retries
+            // Transient once something is showing — the next tick retries.
+            if entries.isEmpty { loadError = error.localizedDescription }
         }
     }
 }

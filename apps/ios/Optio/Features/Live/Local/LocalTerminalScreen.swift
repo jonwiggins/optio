@@ -171,6 +171,7 @@ struct LocalTerminalScreen: View {
                 LocalTranscriptFace(
                     terminalId: terminalId,
                     entries: transcript?.entries ?? [],
+                    transcript: transcript,
                     live: !LocalPresentation.isDead(terminal),
                     canSend: terminal.state == .running,
                     working: terminal.attentionState == .working,
@@ -363,6 +364,8 @@ struct SessionViewToggle: View {
 struct LocalTranscriptFace: View {
     let terminalId: String
     let entries: [LocalTranscriptEntry]
+    /// Paging and load errors (nil in previews: `entries` is everything).
+    var transcript: LocalTranscriptModel?
     let live: Bool
     let canSend: Bool
     let working: Bool
@@ -373,7 +376,16 @@ struct LocalTranscriptFace: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if entries.isEmpty {
+            if entries.isEmpty, let error = transcript?.loadError {
+                ContentUnavailableView {
+                    Label("Couldn't load the conversation", systemImage: "exclamationmark.bubble")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Try again") { transcript?.retry() }
+                }
+                .frame(maxHeight: .infinity)
+            } else if entries.isEmpty {
                 ContentUnavailableView {
                     Label(live ? "Nothing yet" : "No conversation recorded", systemImage: "text.bubble")
                 } description: {
@@ -381,8 +393,14 @@ struct LocalTranscriptFace: View {
                 }
                 .frame(maxHeight: .infinity)
             } else {
-                AgentLogView(entries: log)
-                    .frame(maxHeight: .infinity)
+                AgentLogView(
+                    entries: log,
+                    foldSteps: true,
+                    onLoadEarlier: transcript?.hasEarlier == true ? { await transcript?.loadEarlier() } : nil,
+                    loadingEarlier: transcript?.loadingEarlier ?? false,
+                    working: live && working
+                )
+                .frame(maxHeight: .infinity)
             }
             if live, !entries.isEmpty {
                 HStack(spacing: 6) {
@@ -395,7 +413,7 @@ struct LocalTranscriptFace: View {
             }
             if canSend {
                 if working {
-                    Text("Claude is working — sending will queue your message")
+                    Text("The agent is working — sending will queue your message")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
