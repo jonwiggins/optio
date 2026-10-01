@@ -1,5 +1,8 @@
 package dev.optio.feature.workform
 
+import dev.optio.core.model.boolValue
+import dev.optio.core.model.intValue
+import dev.optio.core.model.stringValue
 import kotlin.random.Random
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -23,7 +26,8 @@ import kotlinx.serialization.json.booleanOrNull
 //          as it is, or on a new branch that becomes a PR)
 //   WHO    a terminal with no agent, or an agent runtime and its parameters
 //   WHAT   the prompt (agents only), with the trigger's params available
-//   THEN   what happens when a turn ends: exits / waits for me / persistent agent
+//   THEN   what happens when a turn ends: exits / works until the PR merges / waits for me /
+//          persistent agent
 //   NAME   yours, or "Job N" / "Terminal N" for its kind
 //
 // `normalize` keeps a draft inside the space: an upstream change (say, a trigger) moves the
@@ -34,9 +38,16 @@ import kotlinx.serialization.json.booleanOrNull
 /** What happens when a turn ends. */
 enum class Then(val raw: String) {
     EXITS("exits"),
+
+    /** Opens a PR, then comes back for failing CI, conflicts and review feedback until it merges. */
+    UNTIL_MERGED("until-merged"),
     WAITS_FOR_ME("waits-for-me"),
     WAITS_FOR_MESSAGES("waits-for-messages"),
     ;
+
+    /** One headless run (or one per firing), not a session (web `isOneShot`). */
+    val isOneShot: Boolean
+        get() = this == EXITS || this == UNTIL_MERGED
 
     companion object {
         fun fromRaw(raw: String?): Then? = entries.firstOrNull { it.raw == raw }
@@ -254,6 +265,11 @@ data class WorkDraft(
     val agentOptions: Map<String, OptionValue> = emptyMap(),
     val prompt: String = "",
     val then: Then = Then.EXITS,
+    /**
+     * [Then.UNTIL_MERGED] only: merge the PR once it's green and approved (vs. keep it green and
+     * leave the merge to you).
+     */
+    val mergeWhenReady: Boolean = true,
     val agent: AgentExtras = AgentExtras(),
     /** Blank = "<Kind> N" (see [WorkKind.word]). */
     val name: String = "",
@@ -350,6 +366,18 @@ val PRESETS: List<Preset> = listOf(
             runtime = d.runtime.ifEmpty { "claude-code" },
             agentOptions = emptyMap(),
             then = Then.EXITS,
+        )
+    },
+    Preset("assign", "Assign to Optio", "Issues labeled optio become PRs an agent works on until they merge.") { d ->
+        d.copy(
+            whenType = WhenType.TICKET,
+            trigger = TriggerConfig(type = TriggerType.TICKET, ticketSource = TicketSource.GITHUB, ticketLabels = listOf("optio")),
+            location = d.location.copy(runTarget = Where.CLUSTER),
+            withRepo = true,
+            runtime = d.runtime.ifEmpty { "claude-code" },
+            agentOptions = emptyMap(),
+            then = Then.UNTIL_MERGED,
+            mergeWhenReady = true,
         )
     },
     Preset("chat", "Interactive chat", "An agent session on your machine you can type into.") { d ->
@@ -569,6 +597,15 @@ fun thenOptions(d: WorkDraft): List<Choice<Then>> {
     return listOf(
         Choice(Then.EXITS, if (terminal) "A terminal with no agent waits for you." else null),
         Choice(
+            Then.UNTIL_MERGED,
+            when {
+                terminal -> "Following a PR through needs an agent to fix what CI and reviewers find."
+                !d.withRepo ->
+                    if (local) "It works on the PR it opens — pick “On a new branch” above." else "It works on the PR it opens — pick a repository above."
+                else -> null
+            },
+        ),
+        Choice(
             Then.WAITS_FOR_ME,
             when {
                 !local && !d.withRepo -> "A pod terminal is attached to a repo — pick a repository above."
@@ -675,6 +712,106 @@ private val HOME_PREFIX = Regex("^/Users/[^/]+|^/home/[^/]+")
 
 /** `/Users/jon/repos/app` → `~/repos/app`. */
 fun shortDir(dir: String): String = dir.replaceFirst(HOME_PREFIX, "~")
+
+// endregion
+
+// region PR follow-through
+
+/** The repo settings that decide what happens to a PR after it opens (web `RepoPrSettings`). */
+data class RepoPrSettings(
+    val autoResume: Boolean? = null,
+    val autoMerge: Boolean? = null,
+    val cautiousMode: Boolean? = null,
+    val reviewEnabled: Boolean? = null,
+    val reviewTrigger: String? = null,
+    val maxAutoResumes: Int? = null,
+) {
+    companion object {
+        /** Reads the columns off a raw `/api/repos` row. */
+        fun from(row: JsonObject?): RepoPrSettings? {
+            row ?: return null
+            return RepoPrSettings(
+                autoResume = row["autoResume"]?.boolValue,
+                autoMerge = row["autoMerge"]?.boolValue,
+                cautiousMode = row["cautiousMode"]?.boolValue,
+                reviewEnabled = row["reviewEnabled"]?.boolValue,
+                reviewTrigger = row["reviewTrigger"]?.stringValue,
+                maxAutoResumes = row["maxAutoResumes"]?.intValue,
+            )
+        }
+    }
+}
+
+/** The server's cap when a repo sets none (`OPTIO_MAX_AUTO_RESUMES`' default). */
+const val DEFAULT_MAX_AUTO_RESUMES = 10
+
+/** One line of "What happens to the PR". */
+data class FollowThroughStep(val key: String, val label: String, val on: Boolean, val detail: String? = null)
+
+/** The checklist, and whether it comes from the repo's settings (vs. this work's own). */
+data class FollowThrough(val fromRepo: Boolean, val steps: List<FollowThroughStep>)
+
+/**
+ * What happens to the PR once the agent opens it, step by step — the same rules the reconciler
+ * applies: a task's own follow-through ([Then.UNTIL_MERGED]) wins over the repo's settings, review
+ * is always the repo's, and cautious mode (draft PRs) never merges. Null when the work doesn't open
+ * a PR.
+ */
+fun followThrough(d: WorkDraft, repo: RepoPrSettings?): FollowThrough? {
+    if (!d.withRepo || d.runtime == TERMINAL || !d.then.isOneShot) return null
+    val own = d.then == Then.UNTIL_MERGED
+    val resume = if (own) true else repo?.autoResume == true
+    val merge = if (own) d.mergeWhenReady else repo?.autoMerge == true
+    val cautious = repo?.cautiousMode == true
+    val cap = repo?.maxAutoResumes ?: DEFAULT_MAX_AUTO_RESUMES
+    // The reconciler launches a review only on these two triggers.
+    val reviewOn = repo?.reviewEnabled == true && (repo.reviewTrigger == "on_pr" || repo.reviewTrigger == "on_ci_pass")
+    val resumes = "the agent picks it back up (up to $cap times)"
+    return FollowThrough(
+        fromRepo = !own,
+        steps = listOf(
+            FollowThroughStep(
+                "pr",
+                if (cautious) "Opens a draft PR" else "Opens a PR",
+                on = true,
+                detail = "The agent's turn ends here; Optio watches CI and reviews from then on.",
+            ),
+            FollowThroughStep(
+                "review",
+                "A review agent reviews it",
+                on = reviewOn,
+                detail = when {
+                    !reviewOn -> "Off for this repo — turn it on in the repo's settings."
+                    repo?.reviewTrigger == "on_pr" -> "As soon as the PR opens."
+                    else -> "Once CI passes."
+                },
+            ),
+            FollowThroughStep(
+                "ci",
+                "Fixes failing CI and merge conflicts",
+                on = resume,
+                detail = if (resume) "When checks fail or it conflicts, $resumes." else "It waits for you.",
+            ),
+            FollowThroughStep(
+                "changes",
+                "Addresses requested changes",
+                on = resume,
+                detail = if (resume) "When a reviewer requests changes, $resumes." else "It waits for you to resume it.",
+            ),
+            FollowThroughStep(
+                "merge",
+                "Merges when it's ready",
+                on = merge && !cautious,
+                detail = when {
+                    merge && cautious -> "Held back: this repo opens draft PRs (cautious mode), so a person merges."
+                    merge -> "Squash-merges once checks pass and any blocking review is done."
+                    else -> "You merge it."
+                },
+            ),
+            FollowThroughStep("done", "Completes on merge, fails if the PR is closed", on = true),
+        ),
+    )
+}
 
 // endregion
 

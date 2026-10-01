@@ -264,4 +264,32 @@ class WorkFormLoadTest {
     }
 
     // endregion
+
+    // region A scheduled Task's follow-through (load.test.ts)
+
+    private val assignRow = """"name":"Assign","title":"Assign","prompt":"fix {{ticketTitle}}","repoUrl":"https://github.com/a/b",
+        "repoBranch":"main","agentType":"claude-code""""
+
+    @Test
+    fun aRowWithItsOwnFollowThroughOpensAsWorkUntilMerged() {
+        val d = draftFromRow(EditableKind.REPO_BLUEPRINT, obj("""{$assignRow,"autoResume":true,"autoMerge":false}"""), null)
+        assertEquals(Then.UNTIL_MERGED, d.then)
+        assertEquals(false, d.mergeWhenReady)
+        assertEquals(WorkKind.REPO_BLUEPRINT, deriveKind(d.copy(whenType = WhenType.TICKET)))
+        assertEquals(true, draftFromRow(EditableKind.REPO_BLUEPRINT, obj("""{$assignRow,"autoResume":true}"""), null).mergeWhenReady)
+    }
+
+    @Test
+    fun aRowWithoutOneOpensAsExitWhenDone() {
+        assertEquals(Then.EXITS, draftFromRow(EditableKind.REPO_BLUEPRINT, obj("""{$assignRow}"""), null).then)
+        assertEquals(Then.EXITS, draftFromRow(EditableKind.REPO_BLUEPRINT, obj("""{$assignRow,"autoResume":null}"""), null).then)
+    }
+
+    @Test
+    fun untilMergedStaysInsideTheScheduledTaskLock() {
+        val d = draftFromRow(EditableKind.REPO_BLUEPRINT, obj("""{$assignRow}"""), obj("""{"type":"ticket","config":{"source":"github","labels":["optio"]}}"""))
+        assertNull(kindLock(d, WorkKind.REPO_BLUEPRINT) { it.copy(then = Then.UNTIL_MERGED) })
+    }
+
+    // endregion
 }

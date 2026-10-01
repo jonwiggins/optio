@@ -191,6 +191,7 @@ private val WorkWhere.icon: ImageVector
 private val WorkThen.icon: ImageVector
     get() = when (this) {
         WorkThen.EXITS -> Icons.AutoMirrored.Outlined.Logout
+        WorkThen.UNTIL_MERGED -> Icons.Outlined.Merge
         WorkThen.WAITS_FOR_ME -> Icons.Outlined.Terminal
         WorkThen.WAITS_FOR_MESSAGES -> Icons.Outlined.Memory
     }

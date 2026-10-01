@@ -22,14 +22,17 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ConfirmationNumber
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Merge
 import androidx.compose.material.icons.automirrored.outlined.MergeType
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Terminal
@@ -90,6 +93,7 @@ internal val WhenType.icon: ImageVector
 
 internal fun presetIcon(id: String): ImageVector = when (id) {
     "pr" -> Icons.AutoMirrored.Outlined.MergeType
+    "assign" -> Icons.Outlined.Merge
     "chat" -> Icons.Outlined.Forum
     "terminal" -> Icons.Outlined.Terminal
     "schedule" -> Icons.Outlined.Schedule
@@ -98,6 +102,7 @@ internal fun presetIcon(id: String): ImageVector = when (id) {
 
 internal fun thenIcon(then: Then): ImageVector = when (then) {
     Then.EXITS -> Icons.AutoMirrored.Outlined.Logout
+    Then.UNTIL_MERGED -> Icons.Outlined.Merge
     Then.WAITS_FOR_ME -> Icons.Outlined.Terminal
     Then.WAITS_FOR_MESSAGES -> OptioIcons.Bot
 }
@@ -670,7 +675,7 @@ internal fun ThenSection(state: WorkFormState, modifier: Modifier = Modifier) {
         Then.WAITS_FOR_MESSAGES ->
             "${d.agent.podLifecycle.hint} The system prompt and manual are optional — a blank manual means Optio's standard one (messaging other agents, reading the inbox, finishing a turn)."
         Then.WAITS_FOR_ME -> "Interactive sessions land in your “needs you” queue whenever they stop."
-        Then.EXITS -> null
+        Then.EXITS, Then.UNTIL_MERGED -> state.prPlan?.let { followThroughFooter(it, state.policyRepo) }
     }
     FormSectionCard(title = "Then", question = "When a turn ends", footer = footer, modifier = modifier.testTag("work-form-then")) {
         state.thenChoices.forEachIndexed { i, c ->
@@ -684,6 +689,20 @@ internal fun ThenSection(state: WorkFormState, modifier: Modifier = Modifier) {
                 onClick = { state.setThen(c.value) },
                 modifier = Modifier.testTag("work-form-then-${c.value.raw}"),
             )
+        }
+        state.prPlan?.let { plan ->
+            if (d.then == Then.UNTIL_MERGED) {
+                RowDivider()
+                SwitchRow(
+                    title = "Merge it for me when it's ready",
+                    subtitle = "Off: the agent keeps the PR green and addresses feedback, and you merge it.",
+                    checked = d.mergeWhenReady,
+                    onCheckedChange = state::setMergeWhenReady,
+                    modifier = Modifier.testTag("work-form-merge-when-ready"),
+                )
+            }
+            RowDivider()
+            FollowThroughList(plan)
         }
         if (d.then == Then.WAITS_FOR_MESSAGES) {
             RowDivider()
@@ -713,8 +732,52 @@ internal fun ThenSection(state: WorkFormState, modifier: Modifier = Modifier) {
     }
 }
 
+/** "What happens to the PR": one line per step, checked when it happens. */
+@Composable
+private fun FollowThroughList(plan: FollowThrough) {
+    val colors = OptioTheme.colors
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.l, vertical = Spacing.m)
+            .testTag("work-form-pr-plan"),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        Text("What happens to the PR", style = OptioTheme.type.footnote.semibold(), color = colors.secondaryLabel)
+        plan.steps.forEach { step ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "${step.label}, ${if (step.on) "on" else "off"}" + step.detail?.let { ". $it" }.orEmpty()
+                    },
+                horizontalArrangement = Arrangement.spacedBy(Spacing.m),
+            ) {
+                Icon(
+                    if (step.on) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = if (step.on) colors.accent else colors.quaternaryLabel,
+                    modifier = Modifier.size(18.dp),
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(step.label, style = OptioTheme.type.body, color = if (step.on) colors.label else colors.tertiaryLabel)
+                    step.detail?.let { Text(it, style = OptioTheme.type.footnote, color = colors.secondaryLabel) }
+                }
+            }
+        }
+    }
+}
+
+/** Whose settings the checklist follows. */
+private fun followThroughFooter(plan: FollowThrough, repo: FormRepo?): String = if (plan.fromRepo) {
+    "Following ${repo?.fullName ?: "the repo"}'s settings (change them in the repo's settings). Pick Work until merged to follow this PR through whatever they say."
+} else {
+    "This work's own setting, over the repo's. Review and cautious mode still come from the repo."
+}
+
 private fun thenSubtitle(then: Then, withRepo: Boolean): String = when (then) {
     Then.EXITS -> if (withRepo) "One turn of work; opens the PR, then finishes" else "One turn of work, then the run finishes"
+    Then.UNTIL_MERGED -> "Opens a PR, then fixes failing CI, conflicts and review feedback until it merges"
     Then.WAITS_FOR_ME -> "Stops at its prompt after each turn until you type"
     Then.WAITS_FOR_MESSAGES -> "Named, keeps its memory, wakes when messaged"
 }
@@ -832,7 +895,7 @@ private fun RunNameRows(state: WorkFormState) {
 @Composable
 internal fun MoreOptionsSection(state: WorkFormState, modifier: Modifier = Modifier) {
     val d = state.draft
-    val footer = if (state.more && d.then == Then.EXITS) {
+    val footer = if (state.more && d.then.isOneShot) {
         if (d.withRepo) "Lower priority runs sooner; 100 is the default." else "Failed runs retry with backoff, up to the limit."
     } else {
         null
@@ -861,7 +924,7 @@ internal fun MoreOptionsSection(state: WorkFormState, modifier: Modifier = Modif
                 maxLines = 4,
                 fieldTag = "work-form-description",
             )
-            if (d.then == Then.EXITS) {
+            if (d.then.isOneShot) {
                 if (d.withRepo) {
                     RowDivider()
                     StepperRow("Priority", d.priority, 1..1000, state::setPriority, step = 10)
