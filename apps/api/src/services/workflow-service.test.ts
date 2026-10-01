@@ -205,7 +205,6 @@ describe("workflow-service", () => {
       expect(definitions.createDefinition).toHaveBeenCalledWith(
         "standalone",
         expect.objectContaining({ name: "Pipeline", prompt: "Do it" }),
-        undefined,
       );
       expect(result).toMatchObject({ id: "w-1", name: "Pipeline", promptTemplate: "Do it" });
     });

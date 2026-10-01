@@ -224,7 +224,10 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       if (parent.type === "repo-task") {
         return reply.status(405).send({ error: "Ad-hoc Repo Tasks do not have triggers" });
       }
-      const triggers = await unifiedTaskService.listTriggersForParent(parent);
+      const triggers = await triggerService.listTriggers(
+        unifiedTaskService.targetTypeFor(parent),
+        parent.data.id as string,
+      );
       reply.send({ triggers });
     },
   );
@@ -324,7 +327,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         return reply.status(405).send({ error: "Ad-hoc Repo Tasks do not have triggers" });
       }
 
-      const existing = await unifiedTaskService.getTriggerForParent(parent, triggerId);
+      const existing = await triggerService.getTriggerFor(
+        unifiedTaskService.targetTypeFor(parent),
+        parent.data.id as string,
+        triggerId,
+      );
       if (!existing) return reply.status(404).send({ error: "Trigger not found" });
 
       if (req.body.config) {
@@ -377,7 +384,11 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         return reply.status(405).send({ error: "Ad-hoc Repo Tasks do not have triggers" });
       }
 
-      const existing = await unifiedTaskService.getTriggerForParent(parent, triggerId);
+      const existing = await triggerService.getTriggerFor(
+        unifiedTaskService.targetTypeFor(parent),
+        parent.data.id as string,
+        triggerId,
+      );
       if (!existing) return reply.status(404).send({ error: "Trigger not found" });
 
       await triggerService.deleteTrigger(triggerId);

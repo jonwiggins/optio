@@ -217,7 +217,8 @@ export function taskToWatchItem(task: {
   runTarget?: string | null;
   localDir?: string | null;
   updatedAt: Date;
-  metadata?: { taskConfigId?: string | null } | null;
+  /** The scheduled Task that spawned it, if any. */
+  workId?: string | null;
 }): WatchItem {
   const local = task.runTarget === "local";
   const reason =
@@ -239,7 +240,7 @@ export function taskToWatchItem(task: {
     link: `optio://tasks/${task.id}`,
     prUrl: task.prUrl ?? null,
     source: "repo-task",
-    when: task.metadata?.taskConfigId ? "on a trigger" : "now",
+    when: task.workId ? "on a trigger" : "now",
     where: local
       ? { target: "machine", detail: shortDir(task.localDir) }
       : { target: "pod", detail: shortRepo(task.repoUrl) },

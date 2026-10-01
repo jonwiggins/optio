@@ -20,11 +20,10 @@ import {
 import { db } from "../db/client.js";
 import { workflowTriggers } from "../db/schema.js";
 import { computeNextFire } from "../utils/cron.js";
+// The pool, or a transaction — so a trigger can be written with the row it starts.
+import type { Db } from "./work-definition-service.js";
 
 export type TriggerRow = typeof workflowTriggers.$inferSelect;
-
-/** The pool, or a transaction — so a trigger can be written with the row it starts. */
-type Db = Pick<typeof db, "select" | "insert" | "update" | "delete">;
 
 /** Slack channel ids look like C0123ABCD. */
 const SLACK_CHANNEL_ID = /^[A-Z][A-Z0-9]{5,}$/;

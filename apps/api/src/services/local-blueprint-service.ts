@@ -151,32 +151,25 @@ export async function checkBlueprint(
  * trigger (GitHub / Linear) can carry the repo, and as a last resort the
  * host's first allowlisted dir is used — see resolveBlueprintDir.
  */
-export async function createBlueprint(
-  input: CreateBlueprintInput,
-  tx?: definitions.Db,
-): Promise<LocalBlueprintRow> {
-  const row = await definitions.createDefinition(
-    "local-blueprint",
-    {
-      ownerUserId: input.userId,
-      workspaceId: input.workspaceId,
-      name: input.name,
-      description: input.description,
-      runTarget: "local",
-      localHostId: input.hostId,
-      localDir: input.dir,
-      repoUrl: input.repoUrl,
-      repoBranch: input.baseBranch ?? null,
-      prompt: input.commandTemplate,
-      runTitle: input.runTitle?.trim() || null,
-      promptTemplateId: input.promptTemplateId ?? null,
-      agentType: input.agent ?? null,
-      spawnMode: input.spawnMode ?? "auto",
-      localSessionMode: input.sessionMode ?? "interactive",
-      agentOptions: cleanAgentOptions(input.agentOptions),
-    },
-    tx,
-  );
+export async function createBlueprint(input: CreateBlueprintInput): Promise<LocalBlueprintRow> {
+  const row = await definitions.createDefinition("local-blueprint", {
+    ownerUserId: input.userId,
+    workspaceId: input.workspaceId,
+    name: input.name,
+    description: input.description,
+    runTarget: "local",
+    localHostId: input.hostId,
+    localDir: input.dir,
+    repoUrl: input.repoUrl,
+    repoBranch: input.baseBranch ?? null,
+    prompt: input.commandTemplate,
+    runTitle: input.runTitle?.trim() || null,
+    promptTemplateId: input.promptTemplateId ?? null,
+    agentType: input.agent ?? null,
+    spawnMode: input.spawnMode ?? "auto",
+    localSessionMode: input.sessionMode ?? "interactive",
+    agentOptions: cleanAgentOptions(input.agentOptions),
+  });
   return toLocalBlueprint(row);
 }
 

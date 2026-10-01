@@ -108,8 +108,9 @@ export function startReconcileWorker() {
 export const resyncQueue = new Queue("reconcile-resync", { connection: connectionOpts });
 
 /**
- * Periodic resync: every N minutes, walk all non-terminal runs in both tables
- * and enqueue a reconcile key for each. Catches drift from lost events.
+ * Periodic resync: every N minutes, walk every non-terminal run (repo tasks
+ * and Job runs, one table), PR review, and persistent agent, and enqueue a
+ * reconcile key for each. Catches drift from lost events.
  */
 export function startReconcileResyncWorker() {
   const intervalMs = parseIntEnv("OPTIO_RECONCILE_RESYNC_INTERVAL", 5 * 60 * 1000);
@@ -126,19 +127,14 @@ export function startReconcileResyncWorker() {
     "reconcile-resync",
     instrumentWorkerProcessor("reconcile-resync", async () => {
       const { db } = await import("../db/client.js");
-      const { tasks, workflowRuns, prReviews, persistentAgents } = await import("../db/schema.js");
-      const { TaskState, WorkflowRunState, PrReviewState } = await import("@optio/shared");
+      const { workRuns, prReviews, persistentAgents } = await import("../db/schema.js");
       const { sql } = await import("drizzle-orm");
 
-      const nonTerminalTasks = await db
-        .select({ id: tasks.id })
-        .from(tasks)
-        .where(sql`${tasks.state} NOT IN ('completed')`);
-
+      // Repo tasks and Job runs: `kind` is the run's RunKind.
       const nonTerminalRuns = await db
-        .select({ id: workflowRuns.id })
-        .from(workflowRuns)
-        .where(sql`${workflowRuns.state} NOT IN ('completed')`);
+        .select({ id: workRuns.id, kind: workRuns.kind })
+        .from(workRuns)
+        .where(sql`${workRuns.state} NOT IN ('completed')`);
 
       const nonTerminalReviews = await db
         .select({ id: prReviews.id })
@@ -150,25 +146,18 @@ export function startReconcileResyncWorker() {
         .from(persistentAgents)
         .where(sql`${persistentAgents.state} NOT IN ('archived')`);
 
-      void TaskState;
-      void WorkflowRunState;
-      void PrReviewState;
-
       logger.info(
         {
-          tasks: nonTerminalTasks.length,
-          runs: nonTerminalRuns.length,
+          tasks: nonTerminalRuns.filter((r) => r.kind === "repo").length,
+          runs: nonTerminalRuns.filter((r) => r.kind === "standalone").length,
           reviews: nonTerminalReviews.length,
           persistentAgents: livePersistentAgents.length,
         },
         "reconcile.resync.sweep",
       );
 
-      for (const r of nonTerminalTasks) {
-        await enqueueReconcile({ kind: "repo", id: r.id }, { reason: "resync" });
-      }
       for (const r of nonTerminalRuns) {
-        await enqueueReconcile({ kind: "standalone", id: r.id }, { reason: "resync" });
+        await enqueueReconcile({ kind: r.kind, id: r.id }, { reason: "resync" });
       }
       for (const r of nonTerminalReviews) {
         await enqueueReconcile({ kind: "pr-review", id: r.id }, { reason: "resync" });

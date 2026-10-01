@@ -13,7 +13,6 @@ import type { TriggerTargetType, WorkDefinitionKind } from "@optio/shared";
 import { db } from "../db/client.js";
 import { workDefinitions, workflowTriggers, workRuns } from "../db/schema.js";
 
-export type { WorkDefinitionKind };
 export type WorkDefinition = typeof workDefinitions.$inferSelect;
 export type WorkDefinitionValues = Omit<
   typeof workDefinitions.$inferInsert,

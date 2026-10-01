@@ -3,6 +3,7 @@ import { countWork, inView } from "@optio/shared";
 
 // projectWork is pure; keep the services it gathers from (DB, queues) out of the test.
 vi.mock("./task-service.js", () => ({}));
+vi.mock("./workflow-service.js", () => ({}));
 vi.mock("./work-definition-service.js", () => ({}));
 vi.mock("./local-terminal-service.js", () => ({}));
 vi.mock("./local-blueprint-service.js", () => ({}));
@@ -58,7 +59,8 @@ describe("projectWork", () => {
             runTarget: "local",
             localHostId: "h1",
             localDir: "/Users/dev/app",
-            metadata: { taskConfigId: "b1" },
+            metadata: null,
+            workId: "b1",
             autoResume: true,
             createdAt: at("2026-07-01T00:00:00Z"),
             updatedAt: at("2026-08-01T00:00:00Z"),

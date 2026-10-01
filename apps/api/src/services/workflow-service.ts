@@ -5,7 +5,7 @@
  */
 import { eq, desc, sql, and, inArray } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
-import type { LocalAgentSessionMode, RunTarget } from "@optio/shared";
+import { parseIntEnv, type LocalAgentSessionMode, type RunTarget } from "@optio/shared";
 import { db } from "../db/client.js";
 import { workDefinitions, workflowRuns, workflowTriggers } from "../db/schema.js";
 import * as runLogs from "./run-log-service.js";
@@ -103,39 +103,35 @@ export interface CreateWorkflowInput {
   localSessionMode?: LocalAgentSessionMode | null;
 }
 
-export async function createWorkflow(input: CreateWorkflowInput, tx?: definitions.Db) {
+export async function createWorkflow(input: CreateWorkflowInput) {
   const local = input.runTarget === "local";
-  const row = await definitions.createDefinition(
-    "standalone",
-    {
-      name: input.name,
-      description: input.description,
-      prompt: input.promptTemplate,
-      runTitle: input.runTitle?.trim() || null,
-      agentType: input.agentRuntime ?? "claude-code",
-      model: input.model,
-      agentOptions: input.agentOptions ?? null,
-      maxTurns: input.maxTurns,
-      budgetUsd: input.budgetUsd,
-      maxConcurrent: input.maxConcurrent ?? 2,
-      maxRetries: input.maxRetries ?? 1,
-      warmPoolSize: input.warmPoolSize ?? 0,
-      maxPodInstances: input.maxPodInstances ?? 1,
-      maxAgentsPerPod: input.maxAgentsPerPod ?? 2,
-      runTarget: input.runTarget ?? "cluster",
-      localHostId: local ? (input.localHostId ?? null) : null,
-      localDir: local ? (input.localDir ?? null) : null,
-      localSessionMode: input.localSessionMode ?? "headless",
-      enabled: input.enabled ?? true,
-      environmentSpec: input.environmentSpec,
-      paramsSchema: input.paramsSchema,
-      workspaceId: input.workspaceId,
-      createdBy: input.createdBy,
-      ownerUserId: input.ownerUserId ?? null,
-      podSecrets: input.podSecrets ?? null,
-    },
-    tx,
-  );
+  const row = await definitions.createDefinition("standalone", {
+    name: input.name,
+    description: input.description,
+    prompt: input.promptTemplate,
+    runTitle: input.runTitle?.trim() || null,
+    agentType: input.agentRuntime ?? "claude-code",
+    model: input.model,
+    agentOptions: input.agentOptions ?? null,
+    maxTurns: input.maxTurns,
+    budgetUsd: input.budgetUsd,
+    maxConcurrent: input.maxConcurrent ?? 2,
+    maxRetries: input.maxRetries ?? 1,
+    warmPoolSize: input.warmPoolSize ?? 0,
+    maxPodInstances: input.maxPodInstances ?? 1,
+    maxAgentsPerPod: input.maxAgentsPerPod ?? 2,
+    runTarget: input.runTarget ?? "cluster",
+    localHostId: local ? (input.localHostId ?? null) : null,
+    localDir: local ? (input.localDir ?? null) : null,
+    localSessionMode: input.localSessionMode ?? "headless",
+    enabled: input.enabled ?? true,
+    environmentSpec: input.environmentSpec,
+    paramsSchema: input.paramsSchema,
+    workspaceId: input.workspaceId,
+    createdBy: input.createdBy,
+    ownerUserId: input.ownerUserId ?? null,
+    podSecrets: input.podSecrets ?? null,
+  });
   return toWorkflow(row);
 }
 
@@ -387,6 +383,30 @@ export async function listWorkflowRuns(workflowId: string, limit = 50) {
 export async function getWorkflowRun(id: string) {
   const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, id));
   return run ?? null;
+}
+
+/**
+ * The Job concurrency rule's two limits and how full each is: running Job
+ * runs across every Job (cluster runs only — a local run holds no pod) under
+ * OPTIO_MAX_WORKFLOW_CONCURRENT, and this Job's running runs under its
+ * `maxConcurrent`. A run starts only while both are below their max.
+ */
+export async function jobRunCapacity(workflowId: string, maxConcurrent: number) {
+  const [row] = await db
+    .select({
+      global: sql<number>`count(*) FILTER (WHERE ${workDefinitions.runTarget} <> 'local')::int`,
+      job: sql<number>`count(*) FILTER (WHERE ${workflowRuns.workflowId} = ${workflowId})::int`,
+    })
+    .from(workflowRuns)
+    .innerJoin(workDefinitions, eq(workDefinitions.id, workflowRuns.workflowId))
+    .where(eq(workflowRuns.state, WorkflowRunState.RUNNING));
+  return {
+    global: {
+      running: Number(row?.global ?? 0),
+      max: parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5),
+    },
+    job: { running: Number(row?.job ?? 0), max: maxConcurrent },
+  };
 }
 
 export async function createWorkflowRun(

@@ -8,12 +8,13 @@ import {
 import { getAdapter } from "@optio/agent-adapters";
 import { getEventParser } from "../services/event-parsers.js";
 import { db } from "../db/client.js";
-import { workDefinitions, workflowRuns } from "../db/schema.js";
+import { workflowRuns } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import * as workflowService from "../services/workflow-service.js";
 import { transitionWorkflowRunCas } from "../services/workflow-service.js";
 import * as workflowPool from "../services/workflow-pool-service.js";
 import { addUsage } from "../services/run-usage.js";
+import { activityFlusher } from "../services/activity-flush.js";
 import {
   resolvePodSecrets,
   resolveSecretsForTask,
@@ -31,8 +32,6 @@ import { getBullMQConnectionOptions } from "../services/redis-config.js";
 
 const connectionOpts = getBullMQConnectionOptions();
 
-/** Agent events that count as signs of life for stall detection (as for repo tasks). */
-const ACTIVITY_EVENTS = new Set(["text", "tool_use", "tool_result", "thinking", "system"]);
 /** How often a run's last-activity time is written while its agent works. */
 const ACTIVITY_FLUSH_MS = 10_000;
 
@@ -157,28 +156,22 @@ export function startWorkflowWorker() {
 
         // ── Concurrency check ─────────────────────────────────────────
         const claimed = await withClaimLock(async () => {
-          // Global workflow concurrency — cluster runs only; local runs
-          // don't occupy pods.
-          const globalMax = parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5);
-          const runningRows = await db
-            .select({ workflowId: workflowRuns.workflowId, runTarget: workDefinitions.runTarget })
-            .from(workflowRuns)
-            .innerJoin(workDefinitions, eq(workDefinitions.id, workflowRuns.workflowId))
-            .where(eq(workflowRuns.state, WorkflowRunState.RUNNING));
-          const allRuns = runningRows.filter((r) => r.runTarget !== "local");
-          if (allRuns.length >= globalMax) {
+          // Global workflow concurrency (cluster runs only; local runs don't
+          // occupy pods), then this workflow's own.
+          const capacity = await workflowService.jobRunCapacity(
+            workflow.id,
+            workflow.maxConcurrent,
+          );
+          if (capacity.global.running >= capacity.global.max) {
             log.info(
-              { activeCount: allRuns.length, globalMax },
+              { activeCount: capacity.global.running, globalMax: capacity.global.max },
               "Global workflow concurrency saturated",
             );
             return false;
           }
-
-          // Per-workflow concurrency
-          const workflowActiveRuns = allRuns.filter((r) => r.workflowId === workflow.id);
-          if (workflowActiveRuns.length >= workflow.maxConcurrent) {
+          if (capacity.job.running >= capacity.job.max) {
             log.info(
-              { activeCount: workflowActiveRuns.length, max: workflow.maxConcurrent },
+              { activeCount: capacity.job.running, max: capacity.job.max },
               "Per-workflow concurrency saturated",
             );
             return false;
@@ -410,17 +403,14 @@ export function startWorkflowWorker() {
         })().catch(() => {});
 
         // Signs of life, written at most every ACTIVITY_FLUSH_MS.
-        let pendingActivityAt: Date | null = null;
-        let activityFlushedAt = 0;
-        const flushActivity = async () => {
-          if (!pendingActivityAt) return;
-          await db
-            .update(workflowRuns)
-            .set({ lastActivityAt: pendingActivityAt })
-            .where(eq(workflowRuns.id, workflowRunId));
-          pendingActivityAt = null;
-          activityFlushedAt = Date.now();
-        };
+        const activity = activityFlusher(
+          (at) =>
+            db
+              .update(workflowRuns)
+              .set({ lastActivityAt: at })
+              .where(eq(workflowRuns.id, workflowRunId)),
+          ACTIVITY_FLUSH_MS,
+        );
 
         for await (const chunk of execSession.stdout as AsyncIterable<Buffer>) {
           const text = chunk.toString();
@@ -454,7 +444,7 @@ export function startWorkflowWorker() {
             // Persist + publish log entries (historical DB + live WS)
             for (const entry of parsed.entries) {
               // Stall detection: meaningful agent events are signs of life.
-              if (ACTIVITY_EVENTS.has(entry.type)) pendingActivityAt = new Date();
+              activity.mark(entry.type);
               await workflowService.appendWorkflowRunLog({
                 workflowRunId,
                 stream: "stdout",
@@ -464,9 +454,9 @@ export function startWorkflowWorker() {
               });
             }
           }
-          if (Date.now() - activityFlushedAt > ACTIVITY_FLUSH_MS) await flushActivity();
+          await activity.maybeFlush();
         }
-        await flushActivity();
+        await activity.flush();
 
         // Flush remaining buffer
         if (lineBuf.trim()) {

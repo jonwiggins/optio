@@ -1102,7 +1102,7 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         return reply.status(404).send({ error: "Task not found" });
       }
 
-      const logs = await taskService.getAllTaskLogs(id, {
+      const logs = await taskService.getTaskLogs(id, {
         search: query.search || undefined,
         logType: query.logType || undefined,
       });

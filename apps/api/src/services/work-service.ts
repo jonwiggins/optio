@@ -31,6 +31,7 @@ import {
   type persistentAgents,
 } from "../db/schema.js";
 import * as taskService from "./task-service.js";
+import * as workflowService from "./workflow-service.js";
 import * as definitions from "./work-definition-service.js";
 import * as terminalService from "./local-terminal-service.js";
 import * as hostService from "./local-host-service.js";
@@ -102,7 +103,6 @@ export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
   const runs = { tasks: taskRows, localTerminals: terminals, jobRuns };
   return projectWork({
     ...runs,
-    jobRuns,
     definitions: defs,
     podSessions,
     agents,
@@ -260,7 +260,8 @@ function triggerIdsOf(
   return [...new Set(ids.filter((id): id is string => typeof id === "string"))];
 }
 
-function repoWhere(
+/** On the owner's machine, or in a pod (named by its repo, when it has one). */
+function whereOf(
   row: { runTarget: "cluster" | "local"; localHostId: string | null; localDir: string | null },
   repoUrl: string | null,
   at: Context,
@@ -272,15 +273,14 @@ function repoWhere(
 
 function taskRow(t: TaskRow, at: Context): WorkRow {
   const [status, statusLabel] = taskStatus(t.state);
-  const configId = (t.metadata as { taskConfigId?: string } | null)?.taskConfigId;
   return {
     key: `task-${t.id}`,
     source: "repo-task",
     id: t.id,
     href: `/tasks/${t.id}`,
     name: t.title,
-    when: configId ? "on a trigger" : "now",
-    where: repoWhere(t, t.repoUrl, at),
+    when: t.workId ? "on a trigger" : "now",
+    where: whereOf(t, t.repoUrl, at),
     who: t.agentType ?? "claude-code",
     then: t.autoResume ? "until-merged" : "exits",
     status,
@@ -295,7 +295,7 @@ function taskRow(t: TaskRow, at: Context): WorkRow {
     lastActivity: iso(t.updatedAt ?? t.createdAt),
     recurring: false,
     editHref: null,
-    spawned: !!configId,
+    spawned: !!t.workId,
   };
 }
 
@@ -319,7 +319,7 @@ function definitionRow(d: WorkDefinition, at: Context): WorkRow {
         source: "repo-blueprint",
         href: `/tasks/scheduled/${d.id}`,
         when: "on a trigger",
-        where: repoWhere(d, d.repoUrl, at),
+        where: whereOf(d, d.repoUrl, at),
         who: d.agentType ?? "claude-code",
         then: d.autoResume ? "until-merged" : "exits",
         note: d.autoResume ? "works each PR until it merges" : "opens a PR each run",
@@ -331,10 +331,7 @@ function definitionRow(d: WorkDefinition, at: Context): WorkRow {
         source: "standalone",
         href: `/jobs/${d.id}`,
         when: "on a trigger",
-        where:
-          d.runTarget === "local"
-            ? at.machine(d.localHostId, d.localDir)
-            : { target: "pod", detail: null },
+        where: whereOf(d, null, at),
         who: d.agentType ?? "claude-code",
         then: "exits",
         note: null,
@@ -434,22 +431,9 @@ function agentRow(a: PersistentAgentRow): WorkRow {
   };
 }
 
-function jobRunStatus(state: string): [WorkStatus, string] {
-  switch (state) {
-    case "queued":
-      return ["queued", "queued"];
-    case "running":
-      return ["running", "running"];
-    case "failed":
-      return ["failed", "failed"];
-    default:
-      return ["done", state];
-  }
-}
-
 /** One run of a Job, as a row of its own. */
 function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Context): WorkRow {
-  const [status, statusLabel] = jobRunStatus(r.state);
+  const [status, statusLabel] = taskStatus(r.state);
   return {
     key: `job-run-${r.id}`,
     source: "standalone",
@@ -457,10 +441,7 @@ function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Context): WorkRow {
     href: `/jobs/${job.id}/runs/${r.id}`,
     name: r.title ?? job.name,
     when: r.triggerId ? "on a trigger" : "now",
-    where:
-      job.runTarget === "local"
-        ? at.machine(job.localHostId, job.localDir)
-        : { target: "pod", detail: null },
+    where: whereOf(job, null, at),
     who: job.agentType ?? "claude-code",
     then: "exits",
     status,
@@ -575,21 +556,11 @@ export async function listRuns(definition: WorkDefinition, scope: WorkScope): Pr
   );
   switch (definition.kind) {
     case "repo-blueprint": {
-      const rows = await db
-        .select()
-        .from(tasks)
-        .where(eq(tasks.workId, definition.id))
-        .orderBy(desc(tasks.createdAt))
-        .limit(RUN_LIMIT);
+      const rows = await taskService.listTasks({ workId: definition.id, limit: RUN_LIMIT });
       return rows.map((t) => taskRow(t, at));
     }
     case "standalone": {
-      const rows = await db
-        .select()
-        .from(workflowRuns)
-        .where(eq(workflowRuns.workflowId, definition.id))
-        .orderBy(desc(workflowRuns.createdAt))
-        .limit(RUN_LIMIT);
+      const rows = await workflowService.listWorkflowRuns(definition.id, RUN_LIMIT);
       return rows.map((r) => jobRunRow(r, definition, at));
     }
     case "local-blueprint": {

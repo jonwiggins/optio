@@ -111,36 +111,32 @@ function columns(input: UpdateTaskConfigInput): Partial<WorkDefinitionValues> {
   return { ...rest, ...(title !== undefined ? { runTitle: title } : {}) };
 }
 
-export async function createTaskConfig(input: CreateTaskConfigInput, tx?: definitions.Db) {
+export async function createTaskConfig(input: CreateTaskConfigInput) {
   const local = input.runTarget === "local";
-  const row = await definitions.createDefinition(
-    "repo-blueprint",
-    {
-      name: input.name,
-      description: input.description ?? null,
-      runTitle: input.title,
-      prompt: input.prompt,
-      promptTemplateId: input.promptTemplateId ?? null,
-      repoUrl: input.repoUrl,
-      repoBranch: input.repoBranch ?? "main",
-      agentType: input.agentType ?? null,
-      maxRetries: input.maxRetries ?? 3,
-      priority: input.priority ?? 100,
-      agentOptions: input.agentOptions ?? null,
-      runTarget: input.runTarget ?? "cluster",
-      localHostId: local ? (input.localHostId ?? null) : null,
-      localDir: local ? (input.localDir ?? null) : null,
-      localSessionMode: local ? (input.localSessionMode ?? "headless") : null,
-      autoResume: input.autoResume ?? null,
-      autoMerge: input.autoMerge ?? null,
-      enabled: input.enabled ?? true,
-      workspaceId: input.workspaceId ?? null,
-      createdBy: input.createdBy ?? null,
-      ownerUserId: input.ownerUserId ?? null,
-      podSecrets: input.podSecrets ?? null,
-    },
-    tx,
-  );
+  const row = await definitions.createDefinition("repo-blueprint", {
+    name: input.name,
+    description: input.description ?? null,
+    runTitle: input.title,
+    prompt: input.prompt,
+    promptTemplateId: input.promptTemplateId ?? null,
+    repoUrl: input.repoUrl,
+    repoBranch: input.repoBranch ?? "main",
+    agentType: input.agentType ?? null,
+    maxRetries: input.maxRetries ?? 3,
+    priority: input.priority ?? 100,
+    agentOptions: input.agentOptions ?? null,
+    runTarget: input.runTarget ?? "cluster",
+    localHostId: local ? (input.localHostId ?? null) : null,
+    localDir: local ? (input.localDir ?? null) : null,
+    localSessionMode: local ? (input.localSessionMode ?? "headless") : null,
+    autoResume: input.autoResume ?? null,
+    autoMerge: input.autoMerge ?? null,
+    enabled: input.enabled ?? true,
+    workspaceId: input.workspaceId ?? null,
+    createdBy: input.createdBy ?? null,
+    ownerUserId: input.ownerUserId ?? null,
+    podSecrets: input.podSecrets ?? null,
+  });
   return toTaskConfig(row);
 }
 
@@ -195,8 +191,8 @@ export async function deleteTaskConfig(id: string): Promise<boolean> {
 }
 
 /**
- * Create a concrete task from a task_config blueprint, transition it into
- * the queue, and enqueue the BullMQ job. Mirrors the flow used by the
+ * Create a concrete task from a scheduled Task (a repo-blueprint), transition
+ * it into the queue, and enqueue the BullMQ job. Mirrors the flow used by the
  * ticket-sync worker and the POST /api/tasks route.
  */
 export async function instantiateTask(

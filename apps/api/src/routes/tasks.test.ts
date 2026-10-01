@@ -12,7 +12,6 @@ const mockSubmitTask = vi.fn();
 const mockTransitionTask = vi.fn();
 const mockForceRedoTask = vi.fn();
 const mockGetTaskLogs = vi.fn();
-const mockGetAllTaskLogs = vi.fn();
 const mockGetTaskEvents = vi.fn();
 const mockGetTaskStats = vi.fn();
 
@@ -28,7 +27,6 @@ vi.mock("../services/task-service.js", () => ({
   transitionTask: (...args: unknown[]) => mockTransitionTask(...args),
   forceRedoTask: (...args: unknown[]) => mockForceRedoTask(...args),
   getTaskLogs: (...args: unknown[]) => mockGetTaskLogs(...args),
-  getAllTaskLogs: (...args: unknown[]) => mockGetAllTaskLogs(...args),
   getTaskEvents: (...args: unknown[]) => mockGetTaskEvents(...args),
   getTaskStats: (...args: unknown[]) => mockGetTaskStats(...args),
   hydratePrReviewPrUrls: async (rows: unknown[]) => rows,
@@ -100,8 +98,6 @@ vi.mock("../services/unified-task-service.js", () => ({
   listUnifiedTasks: vi.fn().mockResolvedValue([]),
   listUnifiedRuns: vi.fn().mockResolvedValue([]),
   getUnifiedRun: vi.fn().mockResolvedValue(null),
-  listTriggersForParent: vi.fn().mockResolvedValue([]),
-  getTriggerForParent: vi.fn().mockResolvedValue(null),
 }));
 
 // POST /api/tasks now dispatches to workflow-service and task-config-service
@@ -657,7 +653,7 @@ describe("GET /api/tasks/:id/logs/export", () => {
 
   it("exports logs as JSON by default", async () => {
     mockGetTask.mockResolvedValue(mockTaskData);
-    mockGetAllTaskLogs.mockResolvedValue([]);
+    mockGetTaskLogs.mockResolvedValue([]);
 
     const res = await app.inject({ method: "GET", url: "/api/tasks/task-1/logs/export" });
 
@@ -667,7 +663,7 @@ describe("GET /api/tasks/:id/logs/export", () => {
 
   it("exports logs as plaintext", async () => {
     mockGetTask.mockResolvedValue(mockTaskData);
-    mockGetAllTaskLogs.mockResolvedValue([
+    mockGetTaskLogs.mockResolvedValue([
       { timestamp: "2026-03-27T10:00:00Z", logType: "text", content: "hello" },
     ]);
 
@@ -683,7 +679,7 @@ describe("GET /api/tasks/:id/logs/export", () => {
 
   it("exports logs as markdown", async () => {
     mockGetTask.mockResolvedValue(mockTaskData);
-    mockGetAllTaskLogs.mockResolvedValue([
+    mockGetTaskLogs.mockResolvedValue([
       { timestamp: "2026-03-27T10:00:00Z", logType: "text", content: "hello" },
     ]);
 

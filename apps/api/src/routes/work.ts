@@ -38,7 +38,6 @@ import {
 } from "../schemas/work.js";
 
 const TriggerParamsSchema = z.object({ id: z.string(), triggerId: z.string() });
-const WorkErrorSchema = ErrorResponseSchema;
 
 export async function workRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -61,7 +60,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const rows = await workService.listWork(scopeOf(req));
+      const rows = await workService.listWork(workActor(req));
       const view = req.query.view ?? "all";
       reply.send({ rows: rows.filter((r) => inView(r, view)) });
     },
@@ -85,15 +84,15 @@ export async function workRoutes(rawApp: FastifyInstance) {
         body: WorkSpecSchema,
         response: {
           201: WorkCreatedSchema,
-          400: WorkErrorSchema,
-          403: WorkErrorSchema,
-          409: WorkErrorSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          409: ErrorResponseSchema,
         },
       },
     },
     async (req, reply) => {
       const created = await withWorkErrors(reply, () =>
-        workWrite.createWork(req.body, actorOf(req)),
+        workWrite.createWork(req.body, workActor(req)),
       );
       if (!created) return;
       logAction({
@@ -153,7 +152,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const resolved = await workService.resolveWork(req.params.id, scopeOf(req));
+      const resolved = await workService.resolveWork(req.params.id, workActor(req));
       if (!resolved) return reply.status(404).send({ error: "Work not found" });
       reply.send({ source: resolved.source, row: resolved.row, work: resolved.data });
     },
@@ -177,16 +176,16 @@ export async function workRoutes(rawApp: FastifyInstance) {
         body: WorkSpecSchema,
         response: {
           200: WorkCreatedSchema,
-          400: WorkErrorSchema,
-          403: WorkErrorSchema,
-          404: WorkErrorSchema,
-          409: WorkErrorSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
         },
       },
     },
     async (req, reply) => {
       const saved = await withWorkErrors(reply, () =>
-        workWrite.updateWork(req.params.id, req.body, actorOf(req)),
+        workWrite.updateWork(req.params.id, req.body, workActor(req)),
       );
       if (saved) reply.send(saved);
     },
@@ -209,7 +208,7 @@ export async function workRoutes(rawApp: FastifyInstance) {
     },
     async (req, reply) => {
       const deleted = await withWorkErrors(reply, () =>
-        workWrite.deleteWork(req.params.id, actorOf(req)),
+        workWrite.deleteWork(req.params.id, workActor(req)),
       );
       if (deleted === null) return;
       if (!deleted) return reply.status(404).send({ error: "Work not found" });
@@ -232,9 +231,10 @@ export async function workRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const definition = await workWrite.getOwnDefinition(req.params.id, actorOf(req));
+      const actor = workActor(req);
+      const definition = await workWrite.getOwnDefinition(req.params.id, actor);
       if (!definition) return reply.status(404).send({ error: "Work not found" });
-      reply.send({ runs: await workService.listRuns(definition, scopeOf(req)) });
+      reply.send({ runs: await workService.listRuns(definition, actor) });
     },
   );
 
@@ -260,12 +260,9 @@ export async function workRoutes(rawApp: FastifyInstance) {
       return {
         targetType: TRIGGER_TARGET[definition.kind],
         targetId: id,
-        changeError: () =>
-          workWrite.assertMayChange(definition, actor, "edit").then(
-            () => null,
-            (err: unknown) =>
-              err instanceof workWrite.WorkError ? err.message : Promise.reject(err),
-          ),
+        // A Local automation the caller can see is theirs, so this only
+        // ever stops someone else's personal scheduled Task or Job.
+        changeError: () => workChangeError(definition.ownerUserId, actor, "edit"),
       };
     }
     const agent = await getPersistentAgentScoped(id, req.user?.workspaceId ?? null);
@@ -422,9 +419,3 @@ async function withWorkErrors<T>(reply: FastifyReply, write: () => Promise<T>): 
     return null;
   }
 }
-
-function scopeOf(req: { user?: { id: string; workspaceId?: string | null } }) {
-  return { workspaceId: req.user?.workspaceId ?? null, userId: req.user?.id ?? null };
-}
-
-const actorOf = workActor;

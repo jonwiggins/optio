@@ -25,14 +25,17 @@ const mockCreateWork = vi.fn();
 const mockUpdateWork = vi.fn();
 const mockDeleteWork = vi.fn();
 const mockGetOwnDefinition = vi.fn();
-const mockAssertMayChange = vi.fn();
 vi.mock("../services/work-write-service.js", () => ({
   WorkError,
   createWork: (...args: unknown[]) => mockCreateWork(...args),
   updateWork: (...args: unknown[]) => mockUpdateWork(...args),
   deleteWork: (...args: unknown[]) => mockDeleteWork(...args),
   getOwnDefinition: (...args: unknown[]) => mockGetOwnDefinition(...args),
-  assertMayChange: (...args: unknown[]) => mockAssertMayChange(...args),
+}));
+const mockWorkChangeError = vi.fn();
+vi.mock("../services/work-ownership.js", async (importActual) => ({
+  ...(await importActual<typeof import("../services/work-ownership.js")>()),
+  workChangeError: (...args: unknown[]) => mockWorkChangeError(...args),
 }));
 const mockCreateTrigger = vi.fn();
 vi.mock("../services/trigger-service.js", async (importActual) => ({
@@ -88,7 +91,9 @@ describe("GET /api/work", () => {
     const res = await app.inject({ method: "GET", url: "/api/work" });
     expect(res.statusCode).toBe(200);
     expect(res.json().rows).toEqual([row({})]);
-    expect(mockListWork).toHaveBeenCalledWith({ workspaceId: "ws-1", userId: "user-1" });
+    expect(mockListWork).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "ws-1", userId: "user-1" }),
+    );
   });
 
   it("filters to one view", async () => {
@@ -127,7 +132,10 @@ describe("GET /api/work/:id", () => {
       work: { id: "t1" },
       row: { key: "task-t1" },
     });
-    expect(mockResolveWork).toHaveBeenCalledWith("t1", { workspaceId: "ws-1", userId: "user-1" });
+    expect(mockResolveWork).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({ workspaceId: "ws-1", userId: "user-1" }),
+    );
   });
 
   it("404s when nothing in scope has the id", async () => {
@@ -190,7 +198,7 @@ describe("writing work", () => {
 
   it("only lets the owner of personal work change its triggers", async () => {
     mockGetOwnDefinition.mockResolvedValue({ id: "j1", kind: "standalone", ownerUserId: "u2" });
-    mockAssertMayChange.mockRejectedValue(new WorkError(403, "Only Bo can change this"));
+    mockWorkChangeError.mockResolvedValue("Only Bo can change this");
     const res = await app.inject({
       method: "POST",
       url: "/api/work/j1/triggers",
@@ -198,6 +206,11 @@ describe("writing work", () => {
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe("Only Bo can change this");
+    expect(mockWorkChangeError).toHaveBeenCalledWith(
+      "u2",
+      expect.objectContaining({ userId: "user-1" }),
+      "edit",
+    );
     expect(mockCreateTrigger).not.toHaveBeenCalled();
   });
 });

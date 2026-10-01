@@ -216,6 +216,8 @@ export async function listTasks(opts?: {
   limit?: number;
   offset?: number;
   workspaceId?: string | null;
+  /** Only the tasks this definition (a scheduled Task) spawned. */
+  workId?: string;
 }) {
   const conditions = [];
   if (opts?.state) {
@@ -223,6 +225,9 @@ export async function listTasks(opts?: {
   }
   if (opts?.workspaceId) {
     conditions.push(eq(tasks.workspaceId, opts.workspaceId));
+  }
+  if (opts?.workId) {
+    conditions.push(eq(tasks.workId, opts.workId));
   }
 
   let query = db.select().from(tasks).orderBy(desc(tasks.createdAt));
@@ -669,10 +674,6 @@ export async function getTaskLogs(
   taskId: string,
   opts?: { limit?: number; offset?: number; search?: string; logType?: string },
 ) {
-  return runLogService.listLogs({ taskId }, opts);
-}
-
-export async function getAllTaskLogs(taskId: string, opts?: { search?: string; logType?: string }) {
   return runLogService.listLogs({ taskId }, opts);
 }
 

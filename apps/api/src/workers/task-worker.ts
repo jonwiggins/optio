@@ -55,6 +55,7 @@ import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { codexModelFlags } from "../services/pooled-agent-command.js";
 import { addUsage } from "../services/run-usage.js";
 import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
+import { activityFlusher } from "../services/activity-flush.js";
 
 const connectionOpts = getBullMQConnectionOptions();
 
@@ -745,9 +746,7 @@ export function startTaskWorker() {
         let lastHeartbeat = Date.now();
         const HEARTBEAT_INTERVAL_MS = 60_000;
         // Stall detection: debounced activity timestamp flush
-        let pendingActivityAt: Date | null = null;
-        let lastActivityFlushAt = 0;
-        const ACTIVITY_FLUSH_INTERVAL_MS = 5_000;
+        const activity = activityFlusher((at) => taskService.updateTaskActivity(taskId, at), 5_000);
         // Buffer for partial NDJSON lines split across chunks
         let lineBuf = "";
 
@@ -849,25 +848,16 @@ export function startTaskWorker() {
               );
 
               // Stall detection: mark activity on meaningful parsed events
-              if (["text", "tool_use", "tool_result", "thinking", "system"].includes(entry.type)) {
-                pendingActivityAt = new Date();
-              }
+              activity.mark(entry.type);
             }
           }
 
           // Debounced flush of lastActivityAt to avoid per-event DB writes
-          if (pendingActivityAt && Date.now() - lastActivityFlushAt > ACTIVITY_FLUSH_INTERVAL_MS) {
-            await taskService.updateTaskActivity(taskId, pendingActivityAt);
-            lastActivityFlushAt = Date.now();
-            pendingActivityAt = null;
-          }
+          await activity.maybeFlush();
         }
 
         // Final flush of pending activity timestamp
-        if (pendingActivityAt) {
-          await taskService.updateTaskActivity(taskId, pendingActivityAt);
-          pendingActivityAt = null;
-        }
+        await activity.flush();
 
         // Flush any remaining partial line in the buffer
         if (lineBuf.trim()) {
@@ -1472,7 +1462,7 @@ export async function reconcileOrphanedTasks() {
     logger.info({ count: enqueued }, "Reconciled orphaned tasks after startup");
   }
 
-  // Reset activeTaskCount on all repo pods to match actual running tasks.
+  // Reset each repo pod's active count to match actual running tasks.
   // The counter can drift if the server crashes before the finally block
   // in the task worker decrements it.
   const corrected = await repoPool.reconcileActiveTaskCounts();

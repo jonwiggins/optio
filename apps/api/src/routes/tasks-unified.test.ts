@@ -6,16 +6,12 @@ import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 const mockResolveAnyTaskById = vi.fn();
 const mockListUnifiedRuns = vi.fn();
 const mockGetUnifiedRun = vi.fn();
-const mockListTriggersForParent = vi.fn();
-const mockGetTriggerForParent = vi.fn();
 
 vi.mock("../services/unified-task-service.js", () => ({
   resolveAnyTaskById: (...args: unknown[]) => mockResolveAnyTaskById(...args),
   listUnifiedTasks: vi.fn().mockResolvedValue([]),
   listUnifiedRuns: (...args: unknown[]) => mockListUnifiedRuns(...args),
   getUnifiedRun: (...args: unknown[]) => mockGetUnifiedRun(...args),
-  listTriggersForParent: (...args: unknown[]) => mockListTriggersForParent(...args),
-  getTriggerForParent: (...args: unknown[]) => mockGetTriggerForParent(...args),
   targetTypeFor: (parent: { type: string }) =>
     parent.type === "standalone"
       ? "job"
@@ -35,6 +31,7 @@ vi.mock("../services/task-config-service.js", () => ({
 }));
 
 // One trigger service for every parent kind; the route only picks the target type.
+const mockListTriggers = vi.fn();
 const mockCreateTrigger = vi.fn();
 const mockUpdateTrigger = vi.fn();
 const mockDeleteTrigger = vi.fn();
@@ -44,6 +41,7 @@ vi.mock("../services/trigger-service.js", async () => {
   );
   return {
     validateTriggerConfig: actual.validateTriggerConfig,
+    listTriggers: (...args: unknown[]) => mockListTriggers(...args),
     createTrigger: (...args: unknown[]) => mockCreateTrigger(...args),
     updateTrigger: (...args: unknown[]) => mockUpdateTrigger(...args),
     deleteTrigger: (...args: unknown[]) => mockDeleteTrigger(...args),
@@ -314,7 +312,7 @@ describe("GET /api/tasks/:id/triggers", () => {
       type: "standalone",
       data: { id: "wf-1" },
     });
-    mockListTriggersForParent.mockResolvedValue([
+    mockListTriggers.mockResolvedValue([
       {
         id: "t-1",
         targetType: "job",
@@ -331,6 +329,7 @@ describe("GET /api/tasks/:id/triggers", () => {
     const res = await app.inject({ method: "GET", url: "/api/tasks/wf-1/triggers" });
     expect(res.statusCode).toBe(200);
     expect(res.json().triggers).toHaveLength(1);
+    expect(mockListTriggers).toHaveBeenCalledWith("job", "wf-1");
   });
 
   it("returns 405 for ad-hoc repo-task parents", async () => {

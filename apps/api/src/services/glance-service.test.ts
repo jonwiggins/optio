@@ -268,7 +268,7 @@ describe("terminalToWatchItem / computeWatchState", () => {
       prNumber: 7,
       agentType: "codex",
       updatedAt: NOW,
-      metadata: { taskConfigId: "cfg" },
+      workId: "cfg",
     });
     expect(task).toMatchObject({
       kind: "task",

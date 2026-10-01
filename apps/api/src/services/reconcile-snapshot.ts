@@ -49,6 +49,8 @@ import type {
 import { getGitPlatformForRepo } from "./git-token-service.js";
 import { determineCheckStatus, determineReviewStatus } from "../workers/pr-watcher-worker.js";
 import { checkBlockingSubtasks } from "./subtask-service.js";
+import { getPod } from "./agent-pod-pool.js";
+import { jobRunCapacity } from "./workflow-service.js";
 import { logger } from "../logger.js";
 
 /**
@@ -349,22 +351,10 @@ async function loadPrStatus(run: Run, userId: string | null): Promise<PrStatus |
   };
 }
 
-async function loadPodStatusForWorkflowRun(runId: string): Promise<PodStatus | null> {
-  // Runs share pods across a workflow; the assigned pod is the run's
-  // `pod_id`. Null when the run has been released (terminal) or hasn't been
-  // scheduled onto a pod yet.
-  const [runRow] = await db
-    .select({ podId: workflowRuns.podId })
-    .from(workflowRuns)
-    .where(eq(workflowRuns.id, runId))
-    .limit(1);
-  return loadPodStatus(runRow?.podId ?? null);
-}
-
 /** A pod's observed status, from its `agent_pods` row. */
 async function loadPodStatus(podId: string | null): Promise<PodStatus | null> {
   if (!podId) return null;
-  const [pod] = await db.select().from(agentPods).where(eq(agentPods.id, podId)).limit(1);
+  const pod = await getPod(podId);
   if (!pod) return null;
   return {
     podName: pod.podName ?? pod.id,
@@ -429,16 +419,16 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
 
   const run = loadStandaloneRun(row, workflowRow, ref);
 
-  const [globalCap, workflowCap, podResult] = await Promise.all([
-    loadGlobalWorkflowCapacity().catch((err) => {
+  const [capacity, podResult] = await Promise.all([
+    // Cluster runs only — local runs don't occupy job pods.
+    jobRunCapacity(row.workflowId, workflowRow.maxConcurrent).catch((err) => {
       readErrors.push({ source: "capacity", message: String(err) });
       return null;
     }),
-    loadPerWorkflowCapacity(row.workflowId, workflowRow.maxConcurrent).catch((err) => {
-      readErrors.push({ source: "capacity", message: String(err) });
-      return null;
-    }),
-    loadPodStatusForWorkflowRun(ref.id).catch((err) => {
+    // Runs share pods across a workflow; the assigned pod is the run's
+    // `pod_id`. Null when the run has been released (terminal) or hasn't
+    // been scheduled onto a pod yet.
+    loadPodStatus(row.podId ?? null).catch((err) => {
       readErrors.push({ source: "pod", message: String(err) });
       return null;
     }),
@@ -448,12 +438,9 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
   // The worker writes the attempt's last agent event (else the claim stands
   // in for it). Local runs are exempt: the daemon owns liveness and
   // interactive sessions idle by design.
-  if (run.kind !== "standalone") {
-    throw new Error("expected standalone run for standalone snapshot");
-  }
   const heartbeat = computeHeartbeat(
-    row.lastActivityAt ?? run.status.startedAt,
-    run.status.state === WorkflowRunState.RUNNING && workflowRow.runTarget !== "local",
+    row.lastActivityAt ?? row.startedAt ?? null,
+    row.state === WorkflowRunState.RUNNING && workflowRow.runTarget !== "local",
     stallThresholdMs,
     now,
   );
@@ -466,11 +453,11 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
     dependencies: [],
     blockingSubtasks: [],
     capacity: {
-      global: globalCap ?? {
+      global: capacity?.global ?? {
         running: 0,
         max: parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5),
       },
-      repo: workflowCap ?? undefined,
+      repo: capacity?.job,
     },
     heartbeat,
     settings: {
@@ -529,29 +516,6 @@ function loadStandaloneRun(
     updatedAt: row.updatedAt,
   };
   return { kind: "standalone", ref, spec, status };
-}
-
-async function loadGlobalWorkflowCapacity() {
-  const max = parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5);
-  // Cluster runs only — local runs don't occupy job pods.
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(workflowRuns)
-    .innerJoin(workDefinitions, eq(workDefinitions.id, workflowRuns.workflowId))
-    .where(
-      sql`${workflowRuns.state} = ${WorkflowRunState.RUNNING} AND ${workDefinitions.runTarget} <> 'local'`,
-    );
-  return { running: Number(count), max };
-}
-
-async function loadPerWorkflowCapacity(workflowId: string, max: number) {
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(workflowRuns)
-    .where(
-      sql`${workflowRuns.state} = ${WorkflowRunState.RUNNING} AND ${workflowRuns.workflowId} = ${workflowId}`,
-    );
-  return { running: Number(count), max };
 }
 
 // ── Heartbeat helper ────────────────────────────────────────────────────────
