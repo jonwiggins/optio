@@ -604,8 +604,7 @@ test.describe("Where → Environment", () => {
       .locator("#session-where")
       .getByRole("button", { name: /^Environment/ })
       .click();
-    await page.getByRole("button", { name: "Review", exact: true }).click();
-    await page.getByRole("button", { name: "When the PR opens", exact: true }).click();
+    await page.getByRole("button", { name: "Review when the PR opens", exact: true }).click();
     // The plan under Then follows the work's own setting.
     await expect(page.getByText("As soon as the PR opens.")).toBeVisible();
     await submit(page).click();
