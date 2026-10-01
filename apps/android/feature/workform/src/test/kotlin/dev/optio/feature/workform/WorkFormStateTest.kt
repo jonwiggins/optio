@@ -402,4 +402,30 @@ class WorkFormStateTest {
     }
 
     // endregion
+
+    @Test
+    fun workUntilMergedFollowsThePrOverTheReposSettings() {
+        val state = newState(preset = "assign")
+        on { state.load() }
+        awaitUntil("repos") { !state.reposLoading }
+        on {
+            assertEquals(Then.UNTIL_MERGED, state.draft.then)
+            assertEquals(WorkKind.REPO_BLUEPRINT, state.kind)
+            assertEquals("e2e-org/e2e-repo", state.policyRepo?.fullName)
+            val plan = state.prPlan!!
+            assertFalse(plan.fromRepo)
+            assertEquals(listOf("pr", "ci", "changes", "merge", "done"), plan.steps.filter { it.on }.map { it.key })
+            state.setMergeWhenReady(false)
+            assertFalse(state.prPlan!!.steps.first { it.key == "merge" }.on)
+            assertTrue(state.sentence.let(::sentenceText).endsWith("keeps it green until you merge it."))
+            // Exit when done: the fixture repo resumes nothing and merges nothing.
+            state.setThen(Then.EXITS)
+            assertTrue(state.prPlan!!.fromRepo)
+            assertEquals(listOf("pr", "done"), state.prPlan!!.steps.filter { it.on }.map { it.key })
+            // No repo, no PR, no plan; Work until merged is off the table.
+            state.setWithRepo(false)
+            assertNull(state.prPlan)
+            assertNotNull(state.thenChoices.first { it.value == Then.UNTIL_MERGED }.disabled)
+        }
+    }
 }

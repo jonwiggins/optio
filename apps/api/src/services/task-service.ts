@@ -66,6 +66,8 @@ export async function createTask(
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
       ownerUserId: input.ownerUserId ?? null,
       podSecrets: input.podSecrets ?? null,
+      autoResume: input.autoResume ?? null,
+      autoMerge: input.autoMerge ?? null,
     })
     .returning();
 
@@ -81,6 +83,21 @@ export async function createTask(
 
 export async function getTask(id: string) {
   const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
+  return task ?? null;
+}
+
+/**
+ * The most recent task whose PR is `prUrl`, across all workspaces (the
+ * GitHub merge webhook is not workspace-scoped). Null when none matches.
+ */
+export async function getTaskByPrUrl(prUrl: string) {
+  if (!prUrl) return null;
+  const [task] = await db
+    .select()
+    .from(tasks)
+    .where(eq(tasks.prUrl, prUrl))
+    .orderBy(desc(tasks.createdAt))
+    .limit(1);
   return task ?? null;
 }
 

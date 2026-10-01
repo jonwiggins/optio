@@ -161,6 +161,11 @@ export const tasks = pgTable(
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
     createdBy: uuid("created_by"), // nullable FK to users (null when auth is disabled)
     ignoreOffPeak: boolean("ignore_off_peak").notNull().default(false),
+    // PR follow-through for this task, over the repo's settings: null = the
+    // repo's auto_resume / auto_merge apply. "Works until merged" sets
+    // auto_resume (and auto_merge unless the person merges themselves).
+    autoResume: boolean("auto_resume"),
+    autoMerge: boolean("auto_merge"),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }), // stall detection: last parsed agent event
     activitySubstate: taskActivitySubstateEnum("activity_substate").notNull().default("active"),
     workspaceId: uuid("workspace_id"), // nullable for backward compat; new tasks should always set this
@@ -656,6 +661,9 @@ export const taskConfigs = pgTable(
     localHostId: uuid("local_host_id").references(() => localHosts.id, { onDelete: "set null" }),
     localDir: text("local_dir"),
     localSessionMode: text("local_session_mode").$type<"interactive" | "headless">(),
+    // PR follow-through copied onto every spawned task (see tasks.auto_resume).
+    autoResume: boolean("auto_resume"),
+    autoMerge: boolean("auto_merge"),
     enabled: boolean("enabled").notNull().default(true),
     // Who the work belongs to (null = the organization) and the secrets its
     // pod gets by name (null = the workspace's legacy behavior).

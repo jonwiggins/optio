@@ -35,12 +35,7 @@ import {
 } from "../services/secret-service.js";
 import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
-import { parseClaudeEvent } from "../services/agent-event-parser.js";
-import { parseCodexEvent } from "../services/codex-event-parser.js";
-import { parseCopilotEvent } from "../services/copilot-event-parser.js";
-import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
-import { parseGeminiEvent } from "../services/gemini-event-parser.js";
-import { parseCursorEvent } from "../services/cursor-event-parser.js";
+import { getEventParser } from "../services/event-parsers.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { agentOptionsEnv } from "../services/agent-options-env.js";
 import { buildPooledAgentCommand } from "../services/pooled-agent-command.js";
@@ -130,23 +125,6 @@ function buildInitialStreamMessage(prompt: string): string {
       message: { role: "user", content: [{ type: "text", text: prompt }] },
     }) + "\n"
   );
-}
-
-function pickEventParser(agentRuntime: string) {
-  switch (agentRuntime) {
-    case "codex":
-      return parseCodexEvent;
-    case "copilot":
-      return parseCopilotEvent;
-    case "opencode":
-      return parseOpenCodeEvent;
-    case "gemini":
-      return parseGeminiEvent;
-    case "cursor":
-      return parseCursorEvent;
-    default:
-      return parseClaudeEvent;
-  }
 }
 
 // ── Worker ─────────────────────────────────────────────────────────────────
@@ -348,7 +326,7 @@ export function startPersistentAgentWorker() {
         }
 
         // Stream output.
-        const parseEvent = pickEventParser(claimedAgent.agentRuntime);
+        const parseEvent = getEventParser(claimedAgent.agentRuntime);
         let allLogs = "";
         let lineBuf = "";
         let stderrData = "";

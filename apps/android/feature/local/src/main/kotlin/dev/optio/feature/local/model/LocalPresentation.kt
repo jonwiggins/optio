@@ -157,7 +157,7 @@ object LocalPresentation {
         now: Instant,
     ): Instant? = t.snoozedUntil?.isoInstant()?.takeIf { it.isAfter(now) }
 
-    /** An agent CLI terminal (the Screen face then takes prose: autocorrect on). */
+    /** An agent CLI terminal (the Terminal face then takes prose: autocorrect on). */
     fun isAgent(t: LocalTerminal): Boolean = t.spec is LocalTerminalSpec.Agent
 
     /** What runs in the terminal, for a meta line: the command, else the spec in words. */

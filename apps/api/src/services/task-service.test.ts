@@ -27,6 +27,7 @@ vi.mock("../db/schema.js", () => ({
     taskId: "taskId",
     activitySubstate: "activitySubstate",
     repoUrl: "repoUrl",
+    prUrl: "prUrl",
   },
   taskEvents: { taskId: "taskId", createdAt: "createdAt", userId: "userId" },
   taskLogs: { taskId: "taskId", timestamp: "timestamp", logType: "logType", content: "content" },
@@ -65,6 +66,7 @@ import {
   searchTasks,
   updateTaskActivity,
   getStallThresholdForRepo,
+  getTaskByPrUrl,
 } from "./task-service.js";
 
 describe("StateRaceError", () => {
@@ -411,5 +413,30 @@ describe("updateTaskActivity", () => {
     );
     // Restore original where mock
     mockDb.where = origWhere;
+  });
+});
+
+describe("getTaskByPrUrl", () => {
+  // The mocked client is a flat chain; reach its builder methods directly.
+  const mockDb = db as unknown as Record<"where" | "limit", ReturnType<typeof vi.fn>>;
+  beforeEach(() => vi.clearAllMocks());
+
+  it("queries by PR URL directly instead of scanning a capped list", async () => {
+    const row = { id: "t-merged", prUrl: "https://github.com/o/r/pull/9" };
+    vi.mocked(mockDb.limit).mockResolvedValueOnce([row] as any);
+    const result = await getTaskByPrUrl("https://github.com/o/r/pull/9");
+    expect(result).toEqual(row);
+    expect(mockDb.where).toHaveBeenCalledTimes(1);
+    expect(mockDb.limit).toHaveBeenCalledWith(1);
+  });
+
+  it("returns null when nothing matches", async () => {
+    vi.mocked(mockDb.limit).mockResolvedValueOnce([] as any);
+    expect(await getTaskByPrUrl("https://github.com/o/r/pull/404")).toBeNull();
+  });
+
+  it("returns null for an empty URL without querying", async () => {
+    expect(await getTaskByPrUrl("")).toBeNull();
+    expect(db.select).not.toHaveBeenCalled();
   });
 });

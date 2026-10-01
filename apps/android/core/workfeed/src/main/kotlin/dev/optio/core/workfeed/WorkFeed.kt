@@ -57,6 +57,9 @@ enum class WorkStatus(val id: String) {
 /** Exit conditions (`Then` in the web's `components/work-form/model.ts`); [raw] is the wire id. */
 enum class WorkThen(val raw: String, val label: String) {
     EXITS("exits", "exits"),
+
+    /** A Task (or scheduled Task) with its own PR follow-through: works the PR until it merges. */
+    UNTIL_MERGED("until-merged", "until merged"),
     WAITS_FOR_ME("waits-for-me", "waits for me"),
     WAITS_FOR_MESSAGES("waits-for-messages", "persistent"),
 }
@@ -177,6 +180,8 @@ object WorkFeed {
         val prUrl: String? = null,
         val prState: String? = null,
         val ticketSource: String? = null,
+        /** PR follow-through over the repo's settings ("Works until merged"); null = the repo's. */
+        val autoResume: Boolean? = null,
         val runTarget: String? = null,
         val localHostId: String? = null,
         val localDir: String? = null,
@@ -475,7 +480,7 @@ object WorkFeed {
                         whenLabel = if (spawned) "on a trigger" else if (t.ticketSource.isNullOrEmpty()) "now" else "from a ticket",
                         where = if (local) machine(t.localHostId, t.localDir) else pod(shortRepo(t.repoUrl)),
                         who = t.agentType ?: "claude-code",
-                        then = WorkThen.EXITS,
+                        then = if (t.autoResume == true) WorkThen.UNTIL_MERGED else WorkThen.EXITS,
                         status = status,
                         statusLabel = statusLabel,
                         note = prNumber?.let { "PR $it" },
@@ -498,10 +503,10 @@ object WorkFeed {
                         whenLabel = "on a trigger",
                         where = if (local) machine(t.localHostId, t.localDir) else pod(shortRepo(t.repoUrl)),
                         who = t.agentType ?: "claude-code",
-                        then = WorkThen.EXITS,
+                        then = if (t.autoResume == true) WorkThen.UNTIL_MERGED else WorkThen.EXITS,
                         status = if (paused) WorkStatus.PAUSED else WorkStatus.SCHEDULED,
                         statusLabel = if (paused) "paused" else "armed",
-                        note = "opens a PR each run",
+                        note = if (t.autoResume == true) "works each PR until it merges" else "opens a PR each run",
                         prUrl = null,
                         lastActivity = last,
                         recurring = true,

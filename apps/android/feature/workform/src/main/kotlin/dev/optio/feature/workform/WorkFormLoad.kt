@@ -158,7 +158,9 @@ fun draftFromRow(kind: EditableKind, row: JsonObject, trigger: JsonObject?): Wor
                     runtime = runtime,
                     agentOptions = optionsFromRow(runtime, row),
                     prompt = row.text("prompt"),
-                    then = Then.EXITS,
+                    // A row saved with its own follow-through is "Work until merged".
+                    then = if (row["autoResume"]?.boolValue == true) Then.UNTIL_MERGED else Then.EXITS,
+                    mergeWhenReady = row["autoMerge"]?.boolValue != false,
                     priority = row["priority"]?.intValue ?: WorkDraft.EMPTY.priority,
                     maxRetries = row["maxRetries"]?.intValue ?: WorkDraft.EMPTY.maxRetries,
                 ),

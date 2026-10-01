@@ -143,6 +143,18 @@ export const TaskSchema = z
       .describe("Local runs: the local terminal executing this task"),
     createdBy: z.string().nullable().describe("User ID of the creator (null if auth disabled)"),
     ignoreOffPeak: z.boolean().describe("If true, the task runs immediately even off-peak"),
+    autoResume: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe(
+        "Resume the agent on failing CI, conflicts, or requested changes (null = the repo's setting)",
+      ),
+    autoMerge: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe("Merge the PR once checks pass (null = the repo's setting)"),
     lastActivityAt: z
       .date()
       .nullable()

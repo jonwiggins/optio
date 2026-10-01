@@ -34,6 +34,9 @@ export interface CreateTaskConfigInput {
   localHostId?: string | null;
   localDir?: string | null;
   localSessionMode?: LocalAgentSessionMode | null;
+  /** PR follow-through copied to every spawned task (null = the repo's setting). */
+  autoResume?: boolean | null;
+  autoMerge?: boolean | null;
 }
 
 export interface UpdateTaskConfigInput {
@@ -55,6 +58,9 @@ export interface UpdateTaskConfigInput {
   localSessionMode?: LocalAgentSessionMode | null;
   ownerUserId?: string | null;
   podSecrets?: string[] | null;
+  /** PR follow-through copied to every spawned task (null = the repo's setting). */
+  autoResume?: boolean | null;
+  autoMerge?: boolean | null;
 }
 
 export async function createTaskConfig(input: CreateTaskConfigInput) {
@@ -76,6 +82,8 @@ export async function createTaskConfig(input: CreateTaskConfigInput) {
       localHostId: input.runTarget === "local" ? (input.localHostId ?? null) : null,
       localDir: input.runTarget === "local" ? (input.localDir ?? null) : null,
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
+      autoResume: input.autoResume ?? null,
+      autoMerge: input.autoMerge ?? null,
       enabled: input.enabled ?? true,
       workspaceId: input.workspaceId ?? null,
       createdBy: input.createdBy ?? null,
@@ -145,6 +153,8 @@ export async function updateTaskConfig(id: string, input: UpdateTaskConfigInput)
   if (input.localSessionMode !== undefined) updates.localSessionMode = input.localSessionMode;
   if (input.ownerUserId !== undefined) updates.ownerUserId = input.ownerUserId;
   if (input.podSecrets !== undefined) updates.podSecrets = input.podSecrets;
+  if (input.autoResume !== undefined) updates.autoResume = input.autoResume;
+  if (input.autoMerge !== undefined) updates.autoMerge = input.autoMerge;
 
   const [row] = await db.update(taskConfigs).set(updates).where(eq(taskConfigs.id, id)).returning();
   return row ?? null;
@@ -227,6 +237,8 @@ export async function instantiateTask(
     localHostId: config.localHostId,
     localDir: config.localDir,
     localSessionMode: config.localSessionMode,
+    autoResume: config.autoResume,
+    autoMerge: config.autoMerge,
     ...(opts?.ticket
       ? { ticketSource: opts.ticket.source, ticketExternalId: opts.ticket.externalId }
       : {}),

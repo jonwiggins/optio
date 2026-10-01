@@ -232,6 +232,15 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     podSpec.restartPolicy = "Never";
     podSpec.volumes = volumes.length > 0 ? volumes : undefined;
 
+    // Never mount a Kubernetes API token into an agent pod. Agent pods may
+    // run under the API's own ServiceAccount (OPTIO_SERVICE_ACCOUNT_NAME),
+    // whose Role can read Secrets and exec into pods; an auto-mounted token
+    // would hand that to untrusted agent code. serviceAccountName is kept so
+    // cloud workload identity still works: GKE serves credentials from the
+    // metadata server and EKS IRSA injects its own projected web-identity
+    // token, neither of which depends on this automount.
+    podSpec.automountServiceAccountToken = false;
+
     if (spec.terminationGracePeriodSeconds !== undefined) {
       podSpec.terminationGracePeriodSeconds = spec.terminationGracePeriodSeconds;
     }
@@ -247,6 +256,10 @@ export class KubernetesContainerRuntime implements ContainerRuntime {
     }
     if (spec.tolerations && spec.tolerations.length > 0) {
       podSpec.tolerations = spec.tolerations as V1PodSpec["tolerations"];
+    }
+    // Workload identity (GKE / EKS IRSA). The token itself is never mounted.
+    if (spec.serviceAccountName) {
+      podSpec.serviceAccountName = spec.serviceAccountName;
     }
 
     const metadata = new V1ObjectMeta();

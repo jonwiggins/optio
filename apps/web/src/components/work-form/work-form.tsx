@@ -13,9 +13,12 @@ import {
 } from "@optio/shared";
 import {
   Bot,
+  CheckCircle2,
+  Circle,
   Clock,
   FolderOpen,
   GitBranch as GitBranchIcon,
+  GitMerge,
   GitPullRequest,
   History,
   Link2,
@@ -54,10 +57,12 @@ import {
   WHEN_TYPES,
   describe,
   deriveKind,
+  followThrough,
   fullOptionsApply,
   isEventWhen,
   isTriggered,
   isLocal,
+  isOneShot,
   kindLock,
   missingFields,
   normalize,
@@ -155,6 +160,13 @@ const THEN_CARDS: Record<
     subtitle: "A one-shot run",
     description:
       "The agent does one turn of work and the run finishes. On a branch, it opens the PR first.",
+  },
+  "until-merged": {
+    icon: <GitMerge className="w-5 h-5" />,
+    title: "Work until merged",
+    subtitle: "Follows the PR through",
+    description:
+      "Opens a PR, then comes back to fix failing CI, conflicts, and review feedback until it merges.",
   },
   "waits-for-me": {
     icon: <Terminal className="w-5 h-5" />,
@@ -372,6 +384,11 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
   const sentence = useMemo(() => describe(draft, sentenceCtx), [draft, repoRow, machine]);
   const gaps = missingFields(draft, sentenceCtx);
   const wantsRepoUrl = draft.withRepo && draft.then !== "waits-for-messages";
+  // The repo whose settings decide what happens to the PR (on a machine, the
+  // registered repo the checkout belongs to, if any).
+  const policyRepo =
+    repoRow ?? (effectiveRepoUrl ? repos.find((r: any) => r.repoUrl === effectiveRepoUrl) : null);
+  const prPlan = followThrough(draft, policyRepo);
   const canSubmit =
     !readOnly && !submitting && gaps.length === 0 && (!wantsRepoUrl || !!effectiveRepoUrl);
   // Named for what it is ("Job 12", "Terminal 12"), numbered after everything
@@ -502,11 +519,13 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
     : kind === "persistent-agent"
       ? "Create agent"
       : draft.when === "manual"
-        ? draft.then === "exits"
-          ? draft.withRepo
-            ? "Start work (opens a PR)"
-            : "Start work"
-          : "Open session"
+        ? draft.then === "until-merged"
+          ? "Start work (until merged)"
+          : draft.then === "exits"
+            ? draft.withRepo
+              ? "Start work (opens a PR)"
+              : "Start work"
+            : "Open session"
         : "Save";
 
   // The kind's own rules first, then (editing) the lock on the saved kind.
@@ -1137,7 +1156,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
             hint="What happens when a turn ends?"
             summary={summaries.then}
           >
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {thens.map((c) => (
                 <ModeCard
                   key={c.value}
@@ -1152,6 +1171,75 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                 />
               ))}
             </div>
+
+            {prPlan && (
+              <div className="mt-3 pt-3 border-t border-border space-y-3">
+                {draft.then === "until-merged" && (
+                  <label className="flex items-start gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={draft.mergeWhenReady}
+                      onChange={(e) => setDraft({ mergeWhenReady: e.target.checked })}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      Merge it for me when it&apos;s ready
+                      <span className="block text-xs text-text-muted">
+                        Off: the agent keeps the PR green and addresses feedback, and you merge it.
+                      </span>
+                    </span>
+                  </label>
+                )}
+                <div>
+                  <div className="text-sm text-text-muted mb-1.5">What happens to the PR</div>
+                  <ol className="space-y-1.5">
+                    {prPlan.steps.map((step) => (
+                      <li key={step.key} className="flex items-start gap-2 text-sm">
+                        {step.on ? (
+                          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-success" />
+                        ) : (
+                          <Circle className="w-4 h-4 mt-0.5 shrink-0 text-text-muted/50" />
+                        )}
+                        <span className={cn(!step.on && "text-text-muted")}>
+                          {step.label}
+                          {step.detail && (
+                            <span className="block text-xs text-text-muted">{step.detail}</span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="text-[11px] text-text-muted/80 mt-2">
+                    {prPlan.fromRepo ? (
+                      <>
+                        Following {policyRepo ? (policyRepo.fullName ?? "the repo") : "the repo"}
+                        &apos;s settings
+                        {policyRepo?.id && (
+                          <>
+                            {" "}
+                            (
+                            <Link
+                              href={`/repos/${policyRepo.id}`}
+                              className="text-primary hover:underline"
+                            >
+                              change them
+                            </Link>
+                            )
+                          </>
+                        )}
+                        . Pick <span className="font-medium">Work until merged</span> to follow this
+                        PR through whatever they say.
+                      </>
+                    ) : (
+                      <>
+                        This work&apos;s own setting, over the repo&apos;s. Review and cautious mode
+                        still come from the repo.
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {draft.then === "waits-for-messages" && (
               <div className="mt-3 pt-3 border-t border-border space-y-3">
@@ -1322,7 +1410,7 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                       className={INPUT}
                     />
                   </div>
-                  {draft.then === "exits" && (
+                  {isOneShot(draft.then) && (
                     <div className="flex flex-wrap gap-6">
                       {draft.withRepo && (
                         <div>
@@ -1437,6 +1525,8 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   <Bot className="w-4 h-4" />
                 ) : draft.then === "waits-for-me" ? (
                   <Terminal className="w-4 h-4" />
+                ) : draft.then === "until-merged" ? (
+                  <GitMerge className="w-4 h-4" />
                 ) : draft.withRepo ? (
                   <GitPullRequest className="w-4 h-4" />
                 ) : (

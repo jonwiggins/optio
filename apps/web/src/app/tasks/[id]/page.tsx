@@ -38,6 +38,7 @@ import {
   Plus,
   X,
   CheckCircle,
+  GitMerge,
   Laptop,
 } from "lucide-react";
 import { BRAND_LABEL, PrIcon, TriggerIcon, brandFor } from "@/components/brand-icon";
@@ -322,6 +323,21 @@ export default function TaskDetailPage({ params }: { params: Promise<{ id: strin
                     {task.localDir?.split("/").filter(Boolean).slice(-2).join("/") ??
                       "your machine"}
                   </span>
+                </span>,
+              ]
+            : []),
+          ...(task.autoResume
+            ? [
+                <span
+                  className="flex items-center gap-1"
+                  title={
+                    task.autoMerge === false
+                      ? "Comes back to fix failing CI, conflicts, and review feedback; you merge it"
+                      : "Comes back to fix failing CI, conflicts, and review feedback, then merges"
+                  }
+                >
+                  <GitMerge className="w-3 h-3" />
+                  {task.autoMerge === false ? "Works until ready to merge" : "Works until merged"}
                 </span>,
               ]
             : []),

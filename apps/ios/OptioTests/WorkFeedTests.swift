@@ -197,4 +197,21 @@ final class WorkFeedTests: XCTestCase {
         XCTAssertTrue(router.handle(url: URL(string: "optio://needs-you")!))
         XCTAssertEqual(router.pendingWorkView, .active)
     }
+
+    func testTasksWithTheirOwnFollowThroughWorkUntilMerged() {
+        let rows = F.collect(F.Sources(unified: [
+            F.UnifiedRow(type: "repo-task", id: "t1", title: "Fix", state: "pr_opened", repoUrl: "x", autoResume: true),
+            F.UnifiedRow(type: "repo-task", id: "t2", title: "Plain", state: "running", repoUrl: "x", autoResume: nil),
+            F.UnifiedRow(type: "repo-blueprint", id: "b1", name: "Assign", enabled: true, repoUrl: "x", autoResume: true),
+            F.UnifiedRow(type: "repo-blueprint", id: "b2", name: "Nightly", enabled: true, repoUrl: "x"),
+        ]))
+        let byKey = Dictionary(uniqueKeysWithValues: rows.map { ($0.key, $0) })
+        XCTAssertEqual(byKey["task-t1"]?.then, .untilMerged)
+        XCTAssertEqual(byKey["task-t2"]?.then, .exits)
+        XCTAssertEqual(byKey["blueprint-b1"]?.then, .untilMerged)
+        XCTAssertEqual(byKey["blueprint-b1"]?.note, "works each PR until it merges")
+        XCTAssertEqual(byKey["blueprint-b2"]?.then, .exits)
+        XCTAssertEqual(byKey["blueprint-b2"]?.note, "opens a PR each run")
+        XCTAssertEqual(SessionThen.untilMerged.label, "until merged")
+    }
 }

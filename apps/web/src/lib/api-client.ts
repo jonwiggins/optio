@@ -344,6 +344,31 @@ export const api = {
 
   getRepo: (id: string) => request<{ repo: any }>(`/api/repos/${id}`),
 
+  /** GitHub repos the server's stored credentials can reach (the Add repository picker). */
+  browseGitHubRepos: (params: { q?: string; page?: number; perPage?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.q) qs.set("q", params.q);
+    if (params.page) qs.set("page", String(params.page));
+    if (params.perPage) qs.set("perPage", String(params.perPage));
+    const query = qs.toString();
+    return request<{
+      repos: Array<{
+        fullName: string;
+        cloneUrl: string;
+        htmlUrl: string;
+        defaultBranch: string;
+        isPrivate: boolean;
+        description: string | null;
+        pushedAt: string | null;
+      }>;
+      page: number;
+      perPage: number;
+      hasMore: boolean;
+      truncated?: boolean;
+      error?: string;
+    }>(`/api/repos/github/accessible${query ? `?${query}` : ""}`);
+  },
+
   createRepoConfig: (data: {
     repoUrl: string;
     fullName: string;
@@ -1627,6 +1652,9 @@ export const api = {
     metadata?: Record<string, unknown>;
     dependsOn?: string[];
     enabled?: boolean;
+    /** Repo kinds: PR follow-through over the repo's settings (null = the repo's). */
+    autoResume?: boolean | null;
+    autoMerge?: boolean | null;
     // Run location: an Optio pod (default) or the caller's own machine.
     runTarget?: "cluster" | "local";
     localHostId?: string | null;
@@ -1748,6 +1776,9 @@ export const api = {
       localSessionMode: "headless" | "interactive" | null;
       owner: ResourceOwner;
       podSecrets: string[] | null;
+      /** PR follow-through for spawned tasks; null = the repo's settings. */
+      autoResume: boolean | null;
+      autoMerge: boolean | null;
     }>,
   ) =>
     request<{ taskConfig: any }>(`/api/task-configs/${id}`, {
@@ -2079,6 +2110,13 @@ export const api = {
 
   deleteLocalTerminal: (id: string) =>
     request<{}>(`/api/local/terminals/${id}`, { method: "DELETE" }),
+
+  /** Write to a running terminal's stdin (REST; 409 unless it's running). */
+  sendLocalTerminalInput: (id: string, data: string) =>
+    request<{}>(`/api/local/terminals/${id}/input`, {
+      method: "POST",
+      body: JSON.stringify({ data }),
+    }),
 
   /** Open an exited agent session again as a fresh interactive terminal. */
   /** `reused`: a resume of this session that hasn't ended, returned instead of a second one. */

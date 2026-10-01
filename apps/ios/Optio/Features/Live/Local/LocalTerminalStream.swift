@@ -15,8 +15,8 @@ final class TerminalBridge {
     private var pending = Data()
     /// The host has laid out for the first time: its natural grid is known.
     var onSettled: (() -> Void)?
-    /// A new SwiftTerm view took the place of an earlier one (the Screen face
-    /// came back after the Transcript): it starts blank, with none of the
+    /// A new SwiftTerm view took the place of an earlier one (the Terminal face
+    /// came back after Chat): it starts blank, with none of the
     /// program's modes, so the stream attaches again for a fresh snapshot.
     var onReplaced: (() -> Void)?
     private var everAttached = false
@@ -56,7 +56,7 @@ final class TerminalBridge {
             defer { replaying = false }
             host.terminal.feed(byteArray: ArraySlice([UInt8](data)))
         } else if host == nil, everAttached {
-            // The Screen face is away; when it comes back it attaches again
+            // The Terminal face is away; when it comes back it attaches again
             // (onReplaced) and gets the whole screen, so don't pile this up.
         } else {
             pending.append(data)
@@ -103,8 +103,8 @@ final class TerminalBridge {
 ///
 /// One PTY, one grid, and the server gives it to the screen in use
 /// (apps/api/src/services/local-grid.ts). This phone reports the grid that fits
-/// it, whether the Screen face is on screen with the app in front, and how long
-/// since it was used (`view`). The Screen face coming on screen asks for the grid
+/// it, whether the Terminal face is on screen with the app in front, and how long
+/// since it was used (`view`). The Terminal face coming on screen asks for the grid
 /// (`open`) — granted unless another screen showing the session was used in the
 /// last minute, so glancing at a laptop session you're working at never forces
 /// the laptop's TUI down to phone width. Focusing the terminal, typing, or "Use
@@ -164,9 +164,9 @@ final class LocalTerminalStream {
     private var arbitrated = false
     /// Whether the last announced grid was ours; nil when the server didn't say.
     private var announcedYours: Bool?
-    /// The Screen face is on screen with the app in front (`setShowing`).
+    /// The Terminal face is on screen with the app in front (`setShowing`).
     private var showing = false
-    /// When this screen was last used; the Screen face coming on screen counts.
+    /// When this screen was last used; the Terminal face coming on screen counts.
     private var lastUsed = Date()
     /// The grid in the last `view` sent on this connection.
     private var lastViewGrid: TerminalGrid?
@@ -185,7 +185,7 @@ final class LocalTerminalStream {
     init(api: APIClient, terminalId: String) {
         self.api = api
         self.terminalId = terminalId
-        // A grid announced while the Screen face was hidden was judged without
+        // A grid announced while the Terminal face was hidden was judged without
         // knowing our natural fit; judge it again once the host has laid out, and
         // send the `view` that was waiting on that fit.
         bridge.onSettled = { [weak self] in
@@ -408,7 +408,7 @@ final class LocalTerminalStream {
         }
     }
 
-    /// The Screen face came on screen with the app in front, or left it. Coming on
+    /// The Terminal face came on screen with the app in front, or left it. Coming on
     /// screen is arriving: it asks for the grid unless another screen is in use.
     func setShowing(_ on: Bool) {
         guard on != showing else { return }
@@ -441,7 +441,7 @@ final class LocalTerminalStream {
     private func sendView(open: Bool) {
         guard connState == .connected, let ws, !terminalDead, !disposed else { return }
         // Asking for the grid needs our real fit; a state report can reuse the last
-        // one (the Screen face may already be gone).
+        // one (the Terminal face may already be gone).
         let measured = bridge.host?.settled == true ? bridge.naturalGrid : nil
         guard let grid = measured ?? (open ? nil : lastViewGrid) else {
             heldOpen = (heldOpen ?? false) || open

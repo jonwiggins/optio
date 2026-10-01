@@ -74,6 +74,16 @@ fun setOptions(d: WorkDraft): JsonObject? {
     return if (out.isEmpty()) null else JsonObject(out)
 }
 
+/**
+ * A repo row's PR follow-through (web `followThroughFor`): "Work until merged" resumes (and merges,
+ * unless you'd rather) whatever the repo says; "Exit when done" leaves both to the repo (null).
+ */
+fun followThroughFor(d: WorkDraft): JsonObject = if (d.then == Then.UNTIL_MERGED) {
+    jsonObjectOf("autoResume" to JsonPrimitive(true), "autoMerge" to JsonPrimitive(d.mergeWhenReady))
+} else {
+    jsonObjectOf("autoResume" to JsonNull, "autoMerge" to JsonNull)
+}
+
 /** The model the draft picked for its runtime, for rows that carry just a model. */
 fun pickedModel(d: WorkDraft): String? {
     if (d.runtime == TERMINAL) return null
@@ -275,13 +285,15 @@ class WorkFormSubmitter(private val api: ApiClient) {
                     put("priority", d.priority)
                     put("repoUrl", repoUrl)
                     put("repoBranch", d.repoBranch)
+                    if (d.then == Then.UNTIL_MERGED) putAll(followThroughFor(d))
                     options?.let { put("metadata", jsonObjectOf("agentOptions" to it)) }
                     if (d.dependsOn.isNotEmpty()) put("dependsOn", JsonArray(d.dependsOn.map(::JsonPrimitive)))
                     putAll(location)
                     putAll(ownerPayload(d))
                 }
                 val id = api.createTaskUnified(body)
-                Created(kind, TaskDetailRoute(id), "$name started — it will open a PR")
+                val toast = if (d.then == Then.UNTIL_MERGED) "$name started — it will work the PR until it merges" else "$name started — it will open a PR"
+                Created(kind, TaskDetailRoute(id), toast)
             }
 
             WorkKind.REPO_BLUEPRINT -> {
@@ -301,6 +313,7 @@ class WorkFormSubmitter(private val api: ApiClient) {
                                 put("priority", d.priority)
                                 put("repoUrl", repoUrl)
                                 put("repoBranch", d.repoBranch)
+                                if (d.then == Then.UNTIL_MERGED) putAll(followThroughFor(d))
                                 put("enabled", true)
                                 putAll(location)
                                 putAll(ownerPayload(d))
@@ -486,6 +499,9 @@ class WorkFormSubmitter(private val api: ApiClient) {
                         put("priority", d.priority)
                         put("repoUrl", repoUrl)
                         put("repoBranch", d.repoBranch)
+                        // Always sent, so switching back to "Exit when done" hands the PR back to
+                        // the repo's settings.
+                        putAll(followThroughFor(d))
                         putAll(location)
                         putAll(ownerPayload(d))
                     },

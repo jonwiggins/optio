@@ -12,6 +12,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { logger } from "../logger.js";
+import { getRedisClient } from "../services/event-bus.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
 import {
   fireEventTriggers,
@@ -47,6 +48,50 @@ export function rememberDelivery(provider: "slack" | "linear" | "github", id: st
     if (first) recentDeliveryIds.delete(first);
   }
   return true;
+}
+
+/** How long a claimed delivery id stays claimed in Redis. */
+const DELIVERY_DEDUPE_TTL_SECS = 24 * 60 * 60;
+/** Don't hold a webhook ack hostage to a slow / unreachable Redis. */
+const DELIVERY_DEDUPE_REDIS_TIMEOUT_MS = 1000;
+
+/**
+ * Durable variant of {@link rememberDelivery}: also claims the id in Redis
+ * (SET NX, 24 h TTL) so a replay is dropped across API restarts and replicas.
+ * Returns true when this caller is the first to see the delivery. Fails open
+ * (true) when Redis errors or is slow — the signature check still gates it.
+ */
+export async function claimDelivery(
+  provider: "slack" | "linear" | "github",
+  id: string,
+): Promise<boolean> {
+  if (!rememberDelivery(provider, id)) return false;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const result = await Promise.race([
+      getRedisClient().set(
+        `optio:webhook-delivery:${provider}:${id}`,
+        "1",
+        "EX",
+        DELIVERY_DEDUPE_TTL_SECS,
+        "NX",
+      ),
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), DELIVERY_DEDUPE_REDIS_TIMEOUT_MS);
+        timer.unref?.();
+      }),
+    ]);
+    if (result === "timeout") {
+      logger.warn({ provider }, "Webhook delivery dedupe timed out in Redis; accepting");
+      return true;
+    }
+    return result === "OK";
+  } catch (err) {
+    logger.warn({ err, provider }, "Webhook delivery dedupe failed in Redis; accepting");
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Exported for tests. */

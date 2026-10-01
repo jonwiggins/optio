@@ -61,9 +61,9 @@ import kotlinx.coroutines.launch
 /**
  * The focus view of one Local terminal (iOS `LocalTerminalScreen`'s state): the terminal row (REST,
  * polled every 10 s and nudged by `local:changed`), its transcript ([LocalTranscriptModel]) and the
- * stream ([LocalTerminalStream]) feeding [screen], the emulator the Screen face renders.
+ * stream ([LocalTerminalStream]) feeding [screen], the emulator the Terminal face renders.
  *
- * [screen] lives here, not in the composable, so switching Transcript ⇄ Screen and rotating keep the
+ * [screen] lives here, not in the composable, so switching Chat ⇄ Terminal and rotating keep the
  * screen. The stream is connected only while the screen is on display ([attach] / [detach]): its
  * `status` / `exit` frames drive the header on both faces, and a screen that comes back replays.
  */
@@ -105,7 +105,7 @@ class LocalTerminalViewModel(
 
     private val _viewChoice = MutableStateFlow<LocalSessionView?>(null)
 
-    /** An explicit Transcript ⇄ Screen choice; remembered while this screen is on the stack. */
+    /** An explicit Chat ⇄ Terminal choice; remembered while this screen is on the stack. */
     val viewChoice: StateFlow<LocalSessionView?> = _viewChoice.asStateFlow()
 
     private val _focusComposer = MutableStateFlow(compose)
@@ -116,7 +116,7 @@ class LocalTerminalViewModel(
     private val eventChannel = Channel<Event>(Channel.BUFFERED)
     val events: Flow<Event> = eventChannel.receiveAsFlow()
 
-    /** The emulator of the Screen face; fed by the stream on both faces. */
+    /** The emulator of the Terminal face; fed by the stream on both faces. */
     val screen: TerminalState = terminalFactory()
     private val sink: TerminalSink = sinkFactory(screen)
 
@@ -159,7 +159,7 @@ class LocalTerminalViewModel(
         }
         screen.onGridSizeChanged = { grid -> _stream.value?.onGridSizeChanged(grid) }
         screen.onNaturalGridChanged = { _stream.value?.onNaturalGridChanged() }
-        // The grid goes to the screen in use: this phone, while the Screen face shows.
+        // The grid goes to the screen in use: this phone, while the Terminal face shows.
         viewModelScope.launch {
             sessionView.collect { view -> _stream.value?.setShowing(view == LocalSessionView.SCREEN) }
         }
@@ -437,7 +437,7 @@ class LocalTerminalViewModel(
 
     /**
      * The Transcript composer: the message plus Enter, over the stream when it's connected, else the
-     * REST fallback. Never claims the grid (the Screen face isn't in use).
+     * REST fallback. Never claims the grid (the Terminal face isn't in use).
      */
     suspend fun sendToAgent(text: String) {
         val payload = text + "\r"

@@ -18,13 +18,7 @@ import {
 } from "@optio/shared";
 import { getAdapter } from "@optio/agent-adapters";
 import { shellSingleQuote } from "../utils/pod-env.js";
-import { parseClaudeEvent } from "../services/agent-event-parser.js";
-import { parseCodexEvent } from "../services/codex-event-parser.js";
-import { parseCopilotEvent } from "../services/copilot-event-parser.js";
-import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
-import { parseGeminiEvent } from "../services/gemini-event-parser.js";
-import { parseOpenClawEvent } from "../services/openclaw-event-parser.js";
-import { parseCursorEvent } from "../services/cursor-event-parser.js";
+import { getEventParser } from "../services/event-parsers.js";
 import { checkExistingPr, type ExistingPr } from "../services/pr-detection-service.js";
 import { detectTaskPrs } from "../services/task-pr-service.js";
 import { db } from "../db/client.js";
@@ -370,7 +364,11 @@ export function startTaskWorker() {
           TASK_ID: task.id,
           TASK_TITLE: task.title,
           REPO_NAME: repoName,
-          AUTO_MERGE: String(promptConfig.autoMerge),
+          // The task's own follow-through wins over the repo's; cautious mode
+          // (draft PRs) never merges.
+          AUTO_MERGE: String(
+            promptConfig.cautiousMode ? false : (task.autoMerge ?? promptConfig.autoMerge),
+          ),
           DRAFT_PR: String(promptConfig.cautiousMode),
           ISSUE_NUMBER: task.ticketExternalId ?? "",
           GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
@@ -1033,20 +1031,7 @@ export function startTaskWorker() {
             ingestPrToolCalls(line);
 
             // Parse as structured agent event (format depends on agent type)
-            const parsed =
-              task.agentType === "codex"
-                ? parseCodexEvent(line, taskId)
-                : task.agentType === "copilot"
-                  ? parseCopilotEvent(line, taskId)
-                  : task.agentType === "opencode"
-                    ? parseOpenCodeEvent(line, taskId)
-                    : task.agentType === "gemini"
-                      ? parseGeminiEvent(line, taskId)
-                      : task.agentType === "openclaw"
-                        ? parseOpenClawEvent(line, taskId)
-                        : task.agentType === "cursor"
-                          ? parseCursorEvent(line, taskId)
-                          : parseClaudeEvent(line, taskId);
+            const parsed = getEventParser(task.agentType)(line, taskId);
             if (parsed.sessionId && !sessionId) {
               sessionId = parsed.sessionId;
               await taskService.updateTaskSession(taskId, sessionId);
@@ -1097,20 +1082,7 @@ export function startTaskWorker() {
         // Flush any remaining partial line in the buffer
         if (lineBuf.trim()) {
           ingestPrToolCalls(lineBuf);
-          const parsed =
-            task.agentType === "codex"
-              ? parseCodexEvent(lineBuf, taskId)
-              : task.agentType === "copilot"
-                ? parseCopilotEvent(lineBuf, taskId)
-                : task.agentType === "opencode"
-                  ? parseOpenCodeEvent(lineBuf, taskId)
-                  : task.agentType === "gemini"
-                    ? parseGeminiEvent(lineBuf, taskId)
-                    : task.agentType === "openclaw"
-                      ? parseOpenClawEvent(lineBuf, taskId)
-                      : task.agentType === "cursor"
-                        ? parseCursorEvent(lineBuf, taskId)
-                        : parseClaudeEvent(lineBuf, taskId);
+          const parsed = getEventParser(task.agentType)(lineBuf, taskId);
           for (const entry of parsed.entries) {
             await taskService.appendTaskLog(
               taskId,

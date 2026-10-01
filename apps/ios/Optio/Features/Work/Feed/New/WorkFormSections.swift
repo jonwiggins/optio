@@ -625,6 +625,8 @@ struct ThenSection: View {
         case .exits:
             return ("rectangle.portrait.and.arrow.right", "Exit when done",
                     state.draft.withRepo ? "One turn of work; opens the PR, then finishes" : "One turn of work, then the run finishes")
+        case .untilMerged:
+            return ("arrow.triangle.merge", "Work until merged", "Opens a PR, then fixes failing CI, conflicts and review feedback until it merges")
         case .waitsForMe:
             return ("terminal", "Wait for me", "Stops at its prompt after each turn until you type")
         case .waitsForMessages:
@@ -639,6 +641,18 @@ struct ThenSection: View {
                 ChoiceRow(systemImage: m.icon, title: m.title, subtitle: m.subtitle, selected: state.draft.then == c.value, disabled: c.disabled) {
                     withAnimation(.snappy) { state.setThen(c.value) }
                 }
+            }
+            if let plan = state.prPlan {
+                if state.draft.then == .untilMerged {
+                    Toggle(isOn: Binding(get: { state.draft.mergeWhenReady }, set: { v in state.setMergeWhenReady(v) })) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Merge it for me when it's ready")
+                            Text("Off: the agent keeps the PR green and addresses feedback, and you merge it.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                FollowThroughList(plan: plan)
             }
             if state.draft.then == .waitsForMessages {
                 MenuRow(label: "Pod lifecycle", value: state.draft.agent.podLifecycle.label) {
@@ -662,8 +676,42 @@ struct ThenSection: View {
                 Text("\(state.draft.agent.podLifecycle.hint) The system prompt and manual are optional — a blank manual means Optio's standard one (messaging other agents, reading the inbox, finishing a turn).")
             } else if state.draft.then == .waitsForMe {
                 Text("Interactive sessions land in your “needs you” queue whenever they stop.")
+            } else if let plan = state.prPlan {
+                Text(plan.fromRepo
+                     ? "Following \(state.policyRepo?.fullName ?? "the repo")'s settings (change them in the repo's settings). Pick Work until merged to follow this PR through whatever they say."
+                     : "This work's own setting, over the repo's. Review and cautious mode still come from the repo.")
             }
         }
+    }
+}
+
+/// "What happens to the PR": one line per step, checked when it happens.
+private struct FollowThroughList: View {
+    let plan: WorkForm.FollowThrough
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("What happens to the PR")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ForEach(plan.steps) { step in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: step.on ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(step.on ? Color.accentColor : Color.secondary.opacity(0.5))
+                        .imageScale(.small)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(step.label)
+                            .foregroundStyle(step.on ? .primary : .secondary)
+                        if let detail = step.detail {
+                            Text(detail).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityValue(step.on ? "On" : "Off")
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -696,7 +744,7 @@ struct NameSection: View {
                 TextField("Description", text: Binding(get: { state.draft.description }, set: { v in state.edit { $0.description = v } }), axis: .vertical)
                     .lineLimit(1...4)
                     .textInputAutocapitalization(.sentences)
-                if state.draft.then == .exits {
+                if state.draft.then.isOneShot {
                     if state.draft.withRepo {
                         Stepper(value: Binding(get: { state.draft.priority }, set: { v in state.edit { $0.priority = v } }), in: 1...1000, step: 10) {
                             LabeledContent("Priority", value: "\(state.draft.priority)")
@@ -717,7 +765,7 @@ struct NameSection: View {
                 Text("More options")
             }
         } footer: {
-            if state.more, state.draft.then == .exits {
+            if state.more, state.draft.then.isOneShot {
                 Text(state.draft.withRepo ? "Lower priority runs sooner; 100 is the default." : "Failed runs retry with backoff, up to the limit.")
             }
         }

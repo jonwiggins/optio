@@ -240,11 +240,11 @@ class LocalTerminalStreamTest {
     @Test
     fun aPassiveViewerRejudgesWhenItsFitBecomesKnown() =
         runTest {
-            // The Transcript face was showing: no view has laid out, so the grid can't be ours yet.
+            // The Chat face was showing: no view has laid out, so the grid can't be ours yet.
             val h = Harness(this, natural = null)
             h.attachLive(this, TerminalGrid(50, 20))
             assertEquals(TerminalSizing.Mode.Passive(TerminalGrid(50, 20)), h.state.mode)
-            // The Screen face lays out at exactly that grid: nothing to scale.
+            // The Terminal face lays out at exactly that grid: nothing to scale.
             h.sink.natural = TerminalGrid(50, 20)
             h.stream.onNaturalGridChanged()
             runCurrent()
@@ -596,7 +596,7 @@ class LocalTerminalStreamTest {
             assertNull(h.state.errorMessage, "nothing is being retried any more")
             assertFalse(h.state.retrying)
             assertTrue(h.state.settled)
-            assertFalse(h.state.outputSeen, "the Screen face falls back to the text preview")
+            assertFalse(h.state.outputSeen, "the Terminal face falls back to the text preview")
         }
 
     @Test
@@ -704,7 +704,7 @@ class LocalTerminalStreamTest {
     fun aScreenThatIsntShowingReportsWithoutAsking() =
         runTest {
             val h = Harness(this)
-            h.stream.connect() // the Transcript face is up
+            h.stream.connect() // the Chat face is up
             h.socket.opened()
             runCurrent()
             assertEquals(listOf(FakeStreamSocket.View(TerminalGrid(50, 20), visible = false, idleMs = 0, open = null)), h.socket.views())

@@ -630,4 +630,60 @@ class WorkFormSubmitTest {
     }
 
     // endregion
+
+    // region Work until merged (submit.test.ts)
+
+    private val untilMerged = normalize(
+        WorkDraft.EMPTY.copy(prompt = "fix it", repoUrl = "https://github.com/a/b", then = Then.UNTIL_MERGED),
+    )
+
+    @Test
+    fun aTaskCarriesItsOwnFollowThrough() = runTest {
+        val created = submitter.create(untilMerged, "https://github.com/a/b", autoName = "Task 1")
+        assertEquals("Task 1 started — it will work the PR until it merges", created.toast)
+        val b = body("POST", "/api/tasks")
+        assertEquals("repo-task", b.text("type"))
+        assertEquals("true", b.text("autoResume"))
+        assertEquals("true", b.text("autoMerge"))
+    }
+
+    @Test
+    fun youMergeItKeepsResumingButDoesNotMerge() = runTest {
+        submitter.create(untilMerged.copy(mergeWhenReady = false), "https://github.com/a/b", autoName = "Task 1")
+        val b = body("POST", "/api/tasks")
+        assertEquals("true", b.text("autoResume"))
+        assertEquals("false", b.text("autoMerge"))
+    }
+
+    @Test
+    fun exitWhenDoneLeavesThePrToTheReposSettings() = runTest {
+        submitter.create(untilMerged.copy(then = Then.EXITS), "https://github.com/a/b", autoName = "Task 1")
+        val b = body("POST", "/api/tasks")
+        assertEquals(false, "autoResume" in b)
+        assertEquals(false, "autoMerge" in b)
+    }
+
+    @Test
+    fun aScheduledTaskSavesItAndSwitchingBackToExitClearsIt() = runTest {
+        val ticket = untilMerged.copy(whenType = WhenType.TICKET, trigger = TriggerConfig(TriggerType.TICKET, ticketSource = TicketSource.GITHUB))
+        submitter.create(ticket, "https://github.com/a/b", autoName = "Task 1")
+        val created = body("POST", "/api/tasks")
+        assertEquals("repo-blueprint", created.text("type"))
+        assertEquals("true", created.text("autoResume"))
+        assertEquals("true", created.text("autoMerge"))
+
+        editRoutes()
+        val t = EditTarget("c-1", EditableKind.REPO_BLUEPRINT, obj("""{"id":"c-1","name":"Task 1"}"""), null, emptyList(), ticket)
+        submitter.update(t, ticket.copy(then = Then.EXITS), repoUrl = "https://github.com/a/b")
+        val patched = body("PATCH", "/api/task-configs/c-1")
+        assertEquals(kotlinx.serialization.json.JsonNull, patched["autoResume"])
+        assertEquals(kotlinx.serialization.json.JsonNull, patched["autoMerge"])
+
+        submitter.update(t, ticket.copy(mergeWhenReady = false), repoUrl = "https://github.com/a/b")
+        val kept = body("PATCH", "/api/task-configs/c-1")
+        assertEquals("true", kept.text("autoResume"))
+        assertEquals("false", kept.text("autoMerge"))
+    }
+
+    // endregion
 }

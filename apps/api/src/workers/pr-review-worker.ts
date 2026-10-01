@@ -29,13 +29,7 @@ import {
 import { getAdapter } from "@optio/agent-adapters";
 import { db } from "../db/client.js";
 import { prReviews, prReviewRuns, taskLogs } from "../db/schema.js";
-import { parseClaudeEvent } from "../services/agent-event-parser.js";
-import { parseCodexEvent } from "../services/codex-event-parser.js";
-import { parseCopilotEvent } from "../services/copilot-event-parser.js";
-import { parseOpenCodeEvent } from "../services/opencode-event-parser.js";
-import { parseGeminiEvent } from "../services/gemini-event-parser.js";
-import { parseCursorEvent } from "../services/cursor-event-parser.js";
-import { parseOpenClawEvent } from "../services/openclaw-event-parser.js";
+import { getEventParser } from "../services/event-parsers.js";
 import * as repoPool from "../services/repo-pool-service.js";
 import {
   resolveSecretsForTask,
@@ -593,20 +587,7 @@ export function startPrReviewWorker() {
 
           for (const line of parts) {
             if (!line.trim()) continue;
-            const parsed =
-              agentType === "codex"
-                ? parseCodexEvent(line, run.id)
-                : agentType === "copilot"
-                  ? parseCopilotEvent(line, run.id)
-                  : agentType === "opencode"
-                    ? parseOpenCodeEvent(line, run.id)
-                    : agentType === "gemini"
-                      ? parseGeminiEvent(line, run.id)
-                      : agentType === "openclaw"
-                        ? parseOpenClawEvent(line, run.id)
-                        : agentType === "cursor"
-                          ? parseCursorEvent(line, run.id)
-                          : parseClaudeEvent(line, run.id);
+            const parsed = getEventParser(agentType)(line, run.id);
 
             if (parsed.sessionId && !sessionId) {
               sessionId = parsed.sessionId;
@@ -647,20 +628,7 @@ export function startPrReviewWorker() {
 
         // Flush any remaining partial line.
         if (lineBuf.trim()) {
-          const parsed =
-            agentType === "codex"
-              ? parseCodexEvent(lineBuf, run.id)
-              : agentType === "copilot"
-                ? parseCopilotEvent(lineBuf, run.id)
-                : agentType === "opencode"
-                  ? parseOpenCodeEvent(lineBuf, run.id)
-                  : agentType === "gemini"
-                    ? parseGeminiEvent(lineBuf, run.id)
-                    : agentType === "openclaw"
-                      ? parseOpenClawEvent(lineBuf, run.id)
-                      : agentType === "cursor"
-                        ? parseCursorEvent(lineBuf, run.id)
-                        : parseClaudeEvent(lineBuf, run.id);
+          const parsed = getEventParser(agentType)(lineBuf, run.id);
           for (const entry of parsed.entries) {
             await appendRunLog(run, entry.content, "stdout", entry.type, entry.metadata);
           }

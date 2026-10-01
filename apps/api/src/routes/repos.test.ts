@@ -28,6 +28,16 @@ vi.mock("../services/repo-detect-service.js", () => ({
   detectRepoConfig: vi.fn().mockResolvedValue({ imagePreset: "node", testCommand: "npm test" }),
 }));
 
+const mockGetGitHubToken = vi.fn();
+vi.mock("../services/github-token-service.js", () => ({
+  getGitHubToken: (...args: unknown[]) => mockGetGitHubToken(...args),
+}));
+
+const mockBrowse = vi.fn();
+vi.mock("../services/github-repo-browse-service.js", () => ({
+  browseGitHubRepos: (...args: unknown[]) => mockBrowse(...args),
+}));
+
 import { repoRoutes } from "./repos.js";
 
 // ─── Helpers ───
@@ -432,5 +442,56 @@ describe("DELETE /api/repos/:id", () => {
     const res = await app.inject({ method: "DELETE", url: "/api/repos/nonexistent" });
 
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("GET /api/repos/github/accessible (#623)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const repo = {
+    fullName: "acme/api",
+    cloneUrl: "https://github.com/acme/api.git",
+    htmlUrl: "https://github.com/acme/api",
+    defaultBranch: "main",
+    isPrivate: true,
+    description: null,
+    pushedAt: null,
+  };
+
+  it("lists repos with the server's workspace token, passing search + paging", async () => {
+    mockGetGitHubToken.mockResolvedValue("ghs_install");
+    mockBrowse.mockResolvedValue({ repos: [repo], hasMore: true });
+    const app = await buildRouteTestApp(repoRoutes, {
+      user: { id: "u1", workspaceId: "ws-1", workspaceRole: "member" },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/repos/github/accessible?q=api&page=2&perPage=10",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ repos: [repo], hasMore: true, page: 2, perPage: 10 });
+    expect(mockGetGitHubToken).toHaveBeenCalledWith({ server: true, workspaceId: "ws-1" });
+    expect(mockBrowse).toHaveBeenCalledWith("ghs_install", { q: "api", page: 2, perPage: 10 });
+  });
+
+  it("says so when no GitHub credentials are configured", async () => {
+    mockGetGitHubToken.mockRejectedValue(new Error("No GitHub token available"));
+    const app = await buildTestApp();
+    const res = await app.inject({ method: "GET", url: "/api/repos/github/accessible" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().repos).toEqual([]);
+    expect(res.json().error).toMatch(/No GitHub credentials/);
+    expect(mockBrowse).not.toHaveBeenCalled();
+  });
+
+  it("is closed to viewers", async () => {
+    const app = await buildRouteTestApp(repoRoutes, {
+      user: { id: "u2", workspaceId: "ws-1", workspaceRole: "viewer" },
+    });
+    const res = await app.inject({ method: "GET", url: "/api/repos/github/accessible" });
+    expect(res.statusCode).toBe(403);
+    expect(mockGetGitHubToken).not.toHaveBeenCalled();
   });
 });

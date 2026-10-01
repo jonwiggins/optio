@@ -3640,6 +3640,13 @@ data class OptioTask(
      * stays the primary one, which the PR lifecycle follows.
      */
     val prs: List<TaskPr>? = null,
+    /**
+     * PR follow-through over the repo's settings ("Works until merged"): resume
+     * the agent on failing CI, conflicts, and requested changes / merge once
+     * it's green. Null or absent = the repo's `autoResume` / `autoMerge`.
+     */
+    val autoResume: Boolean? = null,
+    val autoMerge: Boolean? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
     val startedAt: Instant? = null,
@@ -3772,6 +3779,9 @@ data class CreateTaskInput(
     val localHostId: String? = null,
     val localDir: String? = null,
     val localSessionMode: LocalAgentSessionMode? = null,
+    /** PR follow-through over the repo's settings; see `Task.autoResume`. */
+    val autoResume: Boolean? = null,
+    val autoMerge: Boolean? = null,
 )
 
 @Serializable

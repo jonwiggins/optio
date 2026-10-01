@@ -3,12 +3,12 @@ import SwiftUI
 import SwiftTerm
 
 /// Focus view for one local terminal (`/local/:id`): header with state and
-/// attention, then one of two faces — the **Transcript** (the agent's
-/// conversation, reflowed for the phone, with a composer) or the **Screen**
-/// (the SwiftTerm viewer fed by the stream WS, with an extra-keys bar).
+/// attention, then one of two faces — **Chat** (the agent's conversation,
+/// reflowed for the phone, with a composer) or the **Terminal** (the SwiftTerm
+/// viewer fed by the stream WS, with an extra-keys bar).
 ///
 /// The stream WS stays connected on both faces: its status / exit / attention
-/// frames drive the header either way. Only the Screen face mounts SwiftTerm,
+/// frames drive the header either way. Only the Terminal face mounts SwiftTerm,
 /// and even then the PTY is never resized until this phone claims the grid.
 struct LocalTerminalScreen: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -30,7 +30,7 @@ struct LocalTerminalScreen: View {
     @State private var pollTask: Task<Void, Never>?
     @State private var stream: LocalTerminalStream?
     @State private var transcript: LocalTranscriptModel?
-    /// An explicit Transcript ⇄ Screen choice; remembered for this screen's lifetime.
+    /// An explicit Chat ⇄ Terminal choice; remembered for this screen's lifetime.
     @State private var viewChoice: LocalSessionView?
 
     var body: some View {
@@ -225,7 +225,7 @@ struct LocalTerminalScreen: View {
             if LocalPresentation.isDead(t), let msg = t.errorMessage, !msg.isEmpty { return Text(msg) }
             return Text.mono(t.dir)
         }()
-        let showToggle = hasTranscript && view != nil
+        let showToggle = LocalSessionViewRule.canShowChat(t, hasTranscript: hasTranscript) && view != nil
         return DetailHeader(
             state: LocalPresentation.stateLabel(t),
             tone: LocalPresentation.stateTone(t) == .accent ? .working : LocalPresentation.stateTone(t),
@@ -306,7 +306,7 @@ struct LocalTerminalScreen: View {
         do { try await api.sendLocalTerminalInput(terminalId, data: text) } catch { actionError = error.localizedDescription }
     }
 
-    /// Transcript composer: the text plus Enter, over the stream when it's
+    /// Chat composer: the text plus Enter, over the stream when it's
     /// connected, else the REST fallback (`POST /input`).
     private func sendToAgent(_ text: String) async {
         let payload = text + "\r"
@@ -335,7 +335,7 @@ extension LocalTerminal {
     }
 }
 
-// MARK: - Transcript ⇄ Screen toggle (session-view-toggle.tsx)
+// MARK: - Chat ⇄ Terminal toggle (session-view-toggle.tsx)
 
 struct SessionViewToggle: View {
     let view: LocalSessionView
@@ -344,10 +344,12 @@ struct SessionViewToggle: View {
     var body: some View {
         Picker("Session view", selection: Binding(get: { view }, set: onChange)) {
             Image(systemName: "text.bubble")
-                .accessibilityLabel("Transcript")
+                .accessibilityLabel("Chat")
+                .accessibilityHint("The conversation — read it and reply")
                 .tag(LocalSessionView.transcript)
             Image(systemName: "terminal")
-                .accessibilityLabel("Screen")
+                .accessibilityLabel("Terminal")
+                .accessibilityHint("The terminal, as it runs")
                 .tag(LocalSessionView.screen)
         }
         .pickerStyle(.segmented)
@@ -356,7 +358,7 @@ struct SessionViewToggle: View {
     }
 }
 
-// MARK: - Transcript face (transcript-view.tsx + a composer)
+// MARK: - Chat face (transcript-view.tsx + a composer)
 
 struct LocalTranscriptFace: View {
     let terminalId: String
@@ -375,7 +377,7 @@ struct LocalTranscriptFace: View {
                 ContentUnavailableView {
                     Label(live ? "Nothing yet" : "No conversation recorded", systemImage: "text.bubble")
                 } description: {
-                    Text(live ? "The conversation shows up here as the agent works." : "Switch to Screen to see the terminal as it ran.")
+                    Text(live ? "The conversation shows up here as the agent works." : "Switch to Terminal to see the terminal as it ran.")
                 }
                 .frame(maxHeight: .infinity)
             } else {
@@ -409,7 +411,7 @@ struct LocalTranscriptFace: View {
     }
 }
 
-// MARK: - Screen face (status strip + grid strip + SwiftTerm + extra keys)
+// MARK: - Terminal face (status strip + grid strip + SwiftTerm + extra keys)
 
 struct LocalTerminalStreamView: View {
     @Environment(\.colorScheme) private var colorScheme

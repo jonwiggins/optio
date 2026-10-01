@@ -149,6 +149,20 @@ const createTaskSchema = z
       .nullable()
       .optional()
       .describe("Blueprints: per-run agent parameters copied to each spawned task"),
+    // PR follow-through (repo kinds): "Works until merged" over the repo's
+    // settings. Null / absent = the repo's auto_resume / auto_merge.
+    autoResume: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe(
+        "Repo kinds: resume the agent on failing CI, conflicts, or requested changes (null = the repo's setting)",
+      ),
+    autoMerge: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe("Repo kinds: merge the PR once checks pass (null = the repo's setting)"),
     // Run location (all kinds): an Optio pod (`cluster`, default) or the
     // caller's own machine (`local`) in an allowlisted directory, via the
     // Optio Local daemon.
@@ -637,6 +651,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
             maxRetries: input.maxRetries ?? 3,
             priority: input.priority ?? 100,
             agentOptions: input.agentOptions ?? null,
+            autoResume: input.autoResume ?? null,
+            autoMerge: input.autoMerge ?? null,
             enabled: input.enabled ?? true,
             workspaceId: req.user?.workspaceId ?? null,
             createdBy: req.user?.id ?? null,
@@ -723,6 +739,8 @@ export async function taskRoutes(rawApp: FastifyInstance) {
         metadata: taskInput.metadata,
         maxRetries: taskInput.maxRetries,
         priority: taskInput.priority,
+        autoResume: taskInput.autoResume,
+        autoMerge: taskInput.autoMerge,
         createdBy: req.user?.id,
         workspaceId: req.user?.workspaceId ?? null,
         ...location,

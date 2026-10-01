@@ -210,6 +210,9 @@ class WorkFormState(
 
     fun setThen(then: Then) = update { it.copy(then = then) }
 
+    /** "Work until merged": merge the PR once it's ready (vs. you merge it). */
+    fun setMergeWhenReady(merge: Boolean) = update { it.copy(mergeWhenReady = merge) }
+
     fun setRepo(repoId: String) {
         val repo = repos.firstOrNull { it.id == repoId } ?: return
         update { d ->
@@ -537,6 +540,18 @@ class WorkFormState(
 
     val wantsRepoUrl: Boolean
         get() = draft.withRepo && draft.then != Then.WAITS_FOR_MESSAGES
+
+    /**
+     * The repo whose settings decide what happens to the PR: the picked repo on a pod, or on a
+     * machine the registered repo the checkout belongs to, if any.
+     */
+    val policyRepo: FormRepo?
+        get() = repoRow.takeUnless { isLocal }
+            ?: effectiveRepoUrl.takeIf { it.isNotEmpty() }?.let { url -> repos.firstOrNull { repoUrlFromRemote(it.repoUrl) == url } }
+
+    /** "What happens to the PR", or null when the work doesn't open one. */
+    val prPlan: FollowThrough?
+        get() = followThrough(draft, RepoPrSettings.from(policyRepo?.raw))
 
     /** Nothing is missing: the button makes the work. */
     val ready: Boolean
@@ -876,6 +891,7 @@ private val RememberScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 /** The Then card titles (also the Then summary). */
 fun thenTitle(then: Then): String = when (then) {
     Then.EXITS -> "Exit when done"
+    Then.UNTIL_MERGED -> "Work until merged"
     Then.WAITS_FOR_ME -> "Wait for me"
     Then.WAITS_FOR_MESSAGES -> "Persistent agent"
 }

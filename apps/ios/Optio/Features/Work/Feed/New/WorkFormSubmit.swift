@@ -39,6 +39,15 @@ extension WorkForm {
         return out.isEmpty ? nil : out
     }
 
+    /// A repo row's PR follow-through (web `followThroughFor`): "Work until merged"
+    /// resumes (and merges, unless you'd rather) whatever the repo says; "Exit when
+    /// done" leaves both to the repo (null).
+    static func followThroughFor(_ d: Draft) -> [String: AnyCodable] {
+        d.then == .untilMerged
+            ? ["autoResume": .bool(true), "autoMerge": .bool(d.mergeWhenReady)]
+            : ["autoResume": .null, "autoMerge": .null]
+    }
+
     /// The model the draft picked for its runtime, for rows that carry just a model.
     static func pickedModel(_ d: Draft) -> String? {
         guard d.runtime != terminal else { return nil }
@@ -121,10 +130,12 @@ struct WorkFormSubmitter {
             if let description { body["description"] = description }
             if let options { body["metadata"] = .object(["agentOptions": .object(options)]) }
             if !d.dependsOn.isEmpty { body["dependsOn"] = .array(d.dependsOn.map { .string($0) }) }
+            if d.then == .untilMerged { body.merge(F.followThroughFor(d)) { _, new in new } }
             body.merge(F.locationPayload(d)) { _, new in new }
             body.merge(access) { _, new in new }
             let id = try await api.post("/api/tasks", body: body, as: IdEnvelope.self).task.id
-            return .init(kind: kind, destination: .task(id), toast: "\(name) started — it will open a PR")
+            let toast = d.then == .untilMerged ? "\(name) started — it will work the PR until it merges" : "\(name) started — it will open a PR"
+            return .init(kind: kind, destination: .task(id), toast: toast)
 
         case .repoBlueprint:
             var body: [String: AnyCodable] = [
@@ -141,6 +152,7 @@ struct WorkFormSubmitter {
             ]
             if let description { body["description"] = description }
             body["agentOptions"] = options.map { .object($0) } ?? .null
+            if d.then == .untilMerged { body.merge(F.followThroughFor(d)) { _, new in new } }
             body.merge(F.locationPayload(d)) { _, new in new }
             body.merge(access) { _, new in new }
             let id = try await api.post("/api/tasks", body: body, as: IdEnvelope.self).task.id

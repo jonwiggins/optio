@@ -47,7 +47,7 @@ class WebSocketStreamSocket(private val client: WebSocketClient) : StreamSocket 
 
 /**
  * Where the stream's terminal bytes go, and what it needs to know about the screen showing them.
- * The app's sink is [TerminalStateSink] (the Screen face's emulator); tests record into a fake.
+ * The app's sink is [TerminalStateSink] (the Terminal face's emulator); tests record into a fake.
  * Every call happens on the main thread.
  */
 interface TerminalSink {

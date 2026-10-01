@@ -7752,6 +7752,11 @@ public struct OptioTask: Codable, Hashable, Sendable {
     /// Every PR the task opened or tracks (GET /api/tasks/:id only). `prUrl`
     /// stays the primary one, which the PR lifecycle follows.
     public let prs: [TaskPr]?
+    /// PR follow-through over the repo's settings ("Works until merged"): resume
+    /// the agent on failing CI, conflicts, and requested changes / merge once
+    /// it's green. Null or absent = the repo's `autoResume` / `autoMerge`.
+    public let autoResume: Bool?
+    public let autoMerge: Bool?
     public let createdAt: Date
     public let updatedAt: Date
     public let startedAt: Date?
@@ -7784,6 +7789,8 @@ public struct OptioTask: Codable, Hashable, Sendable {
         case ownerUserId = "ownerUserId"
         case podSecrets = "podSecrets"
         case prs = "prs"
+        case autoResume = "autoResume"
+        case autoMerge = "autoMerge"
         case createdAt = "createdAt"
         case updatedAt = "updatedAt"
         case startedAt = "startedAt"
@@ -7817,6 +7824,8 @@ public struct OptioTask: Codable, Hashable, Sendable {
         ownerUserId: String? = nil,
         podSecrets: [String]? = nil,
         prs: [TaskPr]? = nil,
+        autoResume: Bool? = nil,
+        autoMerge: Bool? = nil,
         createdAt: Date,
         updatedAt: Date,
         startedAt: Date? = nil,
@@ -7848,6 +7857,8 @@ public struct OptioTask: Codable, Hashable, Sendable {
         self.ownerUserId = ownerUserId
         self.podSecrets = podSecrets
         self.prs = prs
+        self.autoResume = autoResume
+        self.autoMerge = autoMerge
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.startedAt = startedAt
@@ -8167,6 +8178,9 @@ public struct CreateTaskInput: Codable, Hashable, Sendable {
     public let localHostId: String?
     public let localDir: String?
     public let localSessionMode: LocalAgentSessionMode?
+    /// PR follow-through over the repo's settings; see `Task.autoResume`.
+    public let autoResume: Bool?
+    public let autoMerge: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case title = "title"
@@ -8185,6 +8199,8 @@ public struct CreateTaskInput: Codable, Hashable, Sendable {
         case localHostId = "localHostId"
         case localDir = "localDir"
         case localSessionMode = "localSessionMode"
+        case autoResume = "autoResume"
+        case autoMerge = "autoMerge"
     }
 
     public init(
@@ -8203,7 +8219,9 @@ public struct CreateTaskInput: Codable, Hashable, Sendable {
         runTarget: RunTarget? = nil,
         localHostId: String? = nil,
         localDir: String? = nil,
-        localSessionMode: LocalAgentSessionMode? = nil
+        localSessionMode: LocalAgentSessionMode? = nil,
+        autoResume: Bool? = nil,
+        autoMerge: Bool? = nil
     ) {
         self.title = title
         self.prompt = prompt
@@ -8221,6 +8239,8 @@ public struct CreateTaskInput: Codable, Hashable, Sendable {
         self.localHostId = localHostId
         self.localDir = localDir
         self.localSessionMode = localSessionMode
+        self.autoResume = autoResume
+        self.autoMerge = autoMerge
     }
 }
 
