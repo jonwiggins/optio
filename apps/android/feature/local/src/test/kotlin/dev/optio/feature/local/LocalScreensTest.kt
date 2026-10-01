@@ -142,7 +142,7 @@ class LocalScreensTest : ScreenshotTest() {
         }
     }
 
-    // region Terminal: Transcript face
+    // region Terminal: Chat face
 
     @Test
     fun transcriptOfTheRecordedSession() =
@@ -174,7 +174,7 @@ class LocalScreensTest : ScreenshotTest() {
 
     // endregion
 
-    // region Terminal: Screen face
+    // region Terminal: Terminal face
 
     @Test
     fun screenSizedForAnotherDevice() =

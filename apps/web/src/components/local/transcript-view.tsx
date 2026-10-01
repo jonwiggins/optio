@@ -147,7 +147,9 @@ export function TranscriptView({
         )}
       >
         <MessagesSquare className="w-6 h-6 opacity-30" />
-        {live ? "The conversation shows up here as the agent works." : "No conversation recorded."}
+        {live
+          ? "Nothing yet — the conversation shows up here as the agent works."
+          : "No conversation recorded."}
       </div>
     );
   }

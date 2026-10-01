@@ -365,7 +365,7 @@ id>.jsonl`, `cli/src/local/codex-transcript.ts`). Codex creates it with the firs
     with (the spawn's `prompt`, or a `claude -p` run's) is role `user` with source
     `prompt`, shown as **Prompt** rather than **You**. `GET
 /api/local/terminals/:id/transcript` serves it; the session page opens a finished agent
-    session on this **Transcript** view (the **Screen** toggle brings the recorded grid
+    session on this **Chat** view (the **Terminal** toggle brings the recorded grid
     back), which reflows to any width — a session run on a 132×40 grid reads on a phone.
     **Backfill**: a finished Claude Code or Codex session with a session id but no stored
     entries (it ran under a daemon that predates transcripts, or its hooks never named the
@@ -599,7 +599,7 @@ eliminates the classic "pasted JSON swallowed as control" bug):
 is its owner on some screen (a laptop tab, a second window, the phone), so the server picks:
 the screen in use (`services/local-grid.ts`, per terminal in the relay). Each viewer reports
 how it sees the terminal in `view` frames: the grid that fits its screen, whether the terminal
-is on screen (web: the tab is visible; iOS / Android: the Screen face is up with the app in
+is on screen (web: the tab is visible; iOS / Android: the Terminal face is up with the app in
 front), and how long since its user touched it. `open` marks an arrival: the pane opened, its
 tab came to the front, or the user came back after a minute away. On an arrival the PTY is
 fitted to that screen, unless the screen holding the grid is still in use: on screen, alive,
@@ -636,12 +636,16 @@ before.
   for a trigger-started one — Kill / Start / Delete). **Sessions** on the Work list
   (`/work`) opens it at the session that has waited on you longest, else the most recently
   active one (`sessionScreenTarget` in `lib/work-feed.ts`). Agent sessions with a recorded
-  conversation get a **Transcript / Screen** toggle (`components/local/session-view-toggle.tsx`,
-  rule in `session-view.ts`): a session opened after it finished lands on the transcript
+  conversation — and live Claude Code / Codex sessions before their first entry — get a
+  **Chat / Terminal** toggle (`components/local/session-view-toggle.tsx`, rule in
+  `session-view.ts`): a session opened after it finished lands on Chat
   (`components/local/transcript-view.tsx` — prompts, markdown replies, tool calls with
   results folded underneath, thinking collapsed, sticks to the bottom while live); a live
-  session opens on its screen, and one you watched end stays on the screen. The Job run /
-  Task pages' embedded session does the same. Inside a terminal the app sidebar
+  session opens on its terminal (on a phone-width screen, on Chat when there is a
+  conversation), and one you watched end stays where it was. While the session runs, Chat
+  has a reply box (`components/local/chat-composer.tsx`) that writes your text plus Enter
+  to the PTY over `POST /api/local/terminals/:id/input`. The Job run / Task pages' embedded
+  session does the same. Inside a terminal the app sidebar
   is replaced by the **session rail** (`components/local/terminal-rail.tsx`): every
   terminal grouped as Needs you (oldest wait first) / Working / Idle / Finished, searchable
   by title, dir, host, or PR / ticket, with badges per row. Keyboard, captured before

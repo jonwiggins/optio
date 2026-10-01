@@ -157,14 +157,14 @@ adb shell am start -a android.intent.action.VIEW -d 'optio://section/work?view=r
 
 ## Local sessions on the phone
 
-A Local (on-your-machine) terminal opens on its **Transcript** whenever one exists, live or
+A Local (on-your-machine) terminal opens on its **Chat** whenever one exists, live or
 finished: the agent's conversation, distilled by the daemon and reflowed for the phone, with a
 composer that writes your message plus Enter to the PTY. A plain shell, or an agent that hasn't
-said anything yet, opens on the **Screen**, the live terminal. The toggle in the header switches
+said anything yet, opens on the **Terminal**. The toggle in the header switches
 between them (`LocalSessionView` in `:feature:local`).
 
 **One PTY, one grid,** sized for the screen in use (the server decides:
-`apps/api/src/services/local-grid.ts`). The Screen face coming up fits the session to the phone,
+`apps/api/src/services/local-grid.ts`). The Terminal face coming up fits the session to the phone,
 unless another screen showing it was used in the last minute (a laptop you're working at). Then it
 renders that grid shrunk to fit (**Sized for another device**), and a tap on the terminal, a key
 from the key bar, or **Use this screen** takes the grid for the phone. TUI screens use absolute
