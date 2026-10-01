@@ -8,15 +8,11 @@ describe("agentOptionsEnv", () => {
       claudeModel: "claude-opus-4-8",
       claudeContextWindow: "1m",
       claudeEffort: "medium",
-      claudeThinking: true,
     });
     expect(env.OPTIO_CLAUDE_MODEL).toBe("claude-opus-4-8");
     expect(env.OPTIO_CLAUDE_CONTEXT_WINDOW).toBe("1m");
     expect(env.CLAUDE_CODE_EFFORT_LEVEL).toBe("medium");
-    expect(JSON.parse(env.OPTIO_CLAUDE_SETTINGS_JSON)).toEqual({
-      effortLevel: "medium",
-      alwaysThinkingEnabled: true,
-    });
+    expect(JSON.parse(env.OPTIO_CLAUDE_SETTINGS_JSON)).toEqual({ effortLevel: "medium" });
   });
 
   it("falls back to the legacy model column when options carry no model", () => {
@@ -74,15 +70,12 @@ describe("buildPooledAgentCommand", () => {
         claudeModel: "opus",
         claudeContextWindow: "1m",
         claudeEffort: "high",
-        claudeThinking: true,
       }),
       opts,
     );
     const last = cmds[cmds.length - 1];
     expect(last).toContain("--model opus[1m]");
-    expect(last).toContain(
-      `--settings "{\\"effortLevel\\":\\"high\\",\\"alwaysThinkingEnabled\\":true}"`,
-    );
+    expect(last).toContain(`--settings "{\\"effortLevel\\":\\"high\\"}"`);
     expect(cmds.join("\n")).toContain("--max-turns 10");
   });
 
@@ -145,12 +138,12 @@ describe("codexModelFlags with a model provider", () => {
 });
 
 describe("agentOptionsEnv — Claude effort and thinking", () => {
-  it("sends max through CLAUDE_CODE_EFFORT_LEVEL and nothing while thinking is off", () => {
+  it("sends max through CLAUDE_CODE_EFFORT_LEVEL and ignores a saved thinking switch", () => {
     const max = agentOptionsEnv("claude-code", { claudeEffort: "max" });
     expect(max.CLAUDE_CODE_EFFORT_LEVEL).toBe("max");
     expect(max.OPTIO_CLAUDE_SETTINGS_JSON).toBeUndefined();
-    const off = agentOptionsEnv("claude-code", { claudeEffort: "high", claudeThinking: false });
-    expect(off.CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();
-    expect(JSON.parse(off.OPTIO_CLAUDE_SETTINGS_JSON)).toEqual({ alwaysThinkingEnabled: false });
+    const old = agentOptionsEnv("claude-code", { claudeEffort: "high", claudeThinking: false });
+    expect(old.CLAUDE_CODE_EFFORT_LEVEL).toBe("high");
+    expect(JSON.parse(old.OPTIO_CLAUDE_SETTINGS_JSON)).toEqual({ effortLevel: "high" });
   });
 });

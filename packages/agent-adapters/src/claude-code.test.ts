@@ -247,18 +247,6 @@ describe("ClaudeCodeAdapter", () => {
       expect(settings.model).toBe("sonnet");
     });
 
-    it("sets alwaysThinkingEnabled when claudeThinking provided", () => {
-      const config = adapter.buildContainerConfig({
-        ...baseInput,
-        claudeThinking: true,
-      });
-      const settingsFile = config.setupFiles!.find(
-        (f) => f.path === "/home/agent/.claude/settings.json",
-      );
-      const settings = JSON.parse(settingsFile!.content);
-      expect(settings.alwaysThinkingEnabled).toBe(true);
-    });
-
     it("sets effortLevel when claudeEffort provided", () => {
       const config = adapter.buildContainerConfig({
         ...baseInput,
@@ -515,14 +503,8 @@ describe("ClaudeCodeAdapter effort and thinking", () => {
     expect(settingsOf(xhigh).effortLevel).toBe("xhigh");
   });
 
-  it("sends no effort while thinking is off (Claude Code would reject it)", () => {
-    const off = adapter.buildContainerConfig({
-      ...base,
-      claudeEffort: "high",
-      claudeThinking: false,
-    });
-    expect(off.env.CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();
-    expect(settingsOf(off)).toMatchObject({ alwaysThinkingEnabled: false });
-    expect(settingsOf(off).effortLevel).toBeUndefined();
+  it("leaves thinking at Claude Code's default", () => {
+    const c = adapter.buildContainerConfig({ ...base, claudeEffort: "high" });
+    expect(settingsOf(c).alwaysThinkingEnabled).toBeUndefined();
   });
 });

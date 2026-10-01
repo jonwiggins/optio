@@ -90,7 +90,6 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
       // Narrowed to the selected model's own efforts (Anthropic's Models API
       // reports them as capabilities.effort); hidden for a model without any.
       modelEfforts: true,
-      hiddenWhen: { key: "claudeThinking", equals: false },
       choices: [
         { value: "low", label: "Low" },
         { value: "medium", label: "Medium" },
@@ -98,17 +97,6 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
         { value: "xhigh", label: "Extra high" },
         { value: "max", label: "Max" },
       ],
-    },
-    {
-      key: "claudeThinking",
-      // Claude Code's alwaysThinkingEnabled: on lets supported models think
-      // (adaptive thinking on current models); off disables thinking, which
-      // also rules out an effort level.
-      label: "Thinking",
-      kind: "boolean",
-      default: true,
-      helpText:
-        "On: the model thinks as much as it needs (adaptive on current models), steered by effort. Off: no thinking, and no effort level.",
     },
     {
       // Pods always skip permission checks (the pod is the sandbox); on your
