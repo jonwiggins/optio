@@ -24,10 +24,17 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import dev.optio.core.ui.agent.OptionValue
+import dev.optio.core.ui.agent.CatalogState
+import dev.optio.core.ui.agent.AgentCatalogCache
+import dev.optio.core.ui.agent.catalog
 
 /**
  * The form state against a fake API serving fixtures captured from the private test API: loading
@@ -106,12 +113,11 @@ class WorkFormStateTest {
                     "claudeModel" to OptionValue.Str("opus"),
                     "claudeContextWindow" to OptionValue.Str("1m"),
                     "claudeEffort" to OptionValue.Str("high"),
-                    "claudeThinking" to OptionValue.Bool(true),
                 ),
                 state.draft.agentOptions,
             )
-            assertEquals("Opus 4.8", state.modelLabel)
-            assertEquals("Claude Code · Opus 4.8", state.summaryWho)
+            assertEquals("Opus 5.5", state.modelLabel)
+            assertEquals("Claude Code · Opus 5.5", state.summaryWho)
             assertEquals("Optio pod · e2e-org/e2e-repo", state.summaryWhere)
             assertEquals(4, state.templates.size)
             assertEquals(13, state.workCount)
@@ -366,9 +372,63 @@ class WorkFormStateTest {
         awaitUntil("last settings") { state.usingRemembered }
         on {
             assertEquals(OptionValue.Str("sonnet"), state.draft.agentOptions["claudeModel"])
+            assertNull(state.repoDefaultsHint, "your last settings show instead")
             state.resetRemembered()
             assertFalse(state.showsRememberedHint)
             assertEquals(OptionValue.Str("opus"), state.draft.agentOptions["claudeModel"])
+            assertEquals("Repo defaults", state.repoDefaultsHint)
+        }
+    }
+
+    /** The repos fixture with [overrides] applied to repo [index]. */
+    private fun reposWith(index: Int, vararg overrides: Pair<String, String>) {
+        val root = Fixtures.json("workform-repos.json").jsonObject
+        val repos = root["repos"]!!.jsonArray.mapIndexed { i, r ->
+            if (i != index) r else JsonObject(r.jsonObject + overrides.associate { (k, v) -> k to JsonPrimitive(v) })
+        }
+        server.json("/api/repos", OptioJson.encodeToString(JsonObject.serializer(), JsonObject(root + ("repos" to JsonArray(repos)))))
+    }
+
+    @Test
+    fun aRepoWithItsOwnDefaultsWinsOverYourLastSettings() {
+        reposWith(0, "claudeModel" to "sonnet", "claudeEffort" to "max")
+        server.json("/api/me/work-defaults", savedDefaults)
+        val state = loaded()
+        // Give the last settings time to arrive: they must not take over.
+        awaitUntil("providers") { server.count("GET", "/api/me/work-defaults") == 1 }
+        Thread.sleep(200)
+        on {
+            assertEquals("claude-code", state.draft.runtime, "the repo's agent, not the saved codex")
+            assertEquals(OptionValue.Str("sonnet"), state.draft.agentOptions["claudeModel"])
+            assertEquals(OptionValue.Str("max"), state.draft.agentOptions["claudeEffort"])
+            assertFalse(state.usingRemembered)
+            assertEquals("Repo defaults", state.repoDefaultsHint)
+
+            state.setOption("claudeEffort", OptionValue.Str("low"))
+            assertEquals("Changed from the repo's defaults", state.repoDefaultsHint)
+            state.setRuntime("gemini")
+            assertEquals("Changed from the repo's defaults", state.repoDefaultsHint)
+
+            state.resetRepoDefaults()
+            assertEquals("claude-code", state.draft.runtime)
+            assertEquals(OptionValue.Str("max"), state.draft.agentOptions["claudeEffort"])
+            assertEquals("Repo defaults", state.repoDefaultsHint)
+        }
+    }
+
+    @Test
+    fun pickingARepoStartsFromItsDefaultAgent() {
+        reposWith(1, "defaultAgentType" to "gemini", "geminiModel" to "gemini-3-pro")
+        val state = loaded()
+        on {
+            assertEquals("claude-code", state.draft.runtime, "the first repo is on the factory defaults")
+            state.setRepo(state.repos[1].id)
+            assertEquals("gemini", state.draft.runtime)
+            assertEquals(OptionValue.Str("gemini-3-pro"), state.draft.agentOptions["geminiModel"])
+            assertEquals("Repo defaults", state.repoDefaultsHint)
+            // Machine work doesn't take the repo's defaults.
+            state.setWhere(Where.LOCAL)
+            assertNull(state.repoDefaultsHint)
         }
     }
 

@@ -20,6 +20,9 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.modelFieldForRuntime
+import dev.optio.core.ui.agent.ProviderCatalog
 
 // Port of `apps/web/src/components/work-form/submit.ts`: turn a draft into the row(s) its kind
 // needs. Each branch calls the same endpoint the dedicated form for that kind calls, so nothing

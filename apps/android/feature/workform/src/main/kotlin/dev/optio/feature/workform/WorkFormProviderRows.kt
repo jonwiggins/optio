@@ -35,6 +35,11 @@ import dev.optio.core.model.PickableSecret
 import dev.optio.core.network.isOrganization
 import dev.optio.core.ui.theme.OptioTheme
 import dev.optio.core.ui.theme.Spacing
+import dev.optio.core.ui.form.MenuRow
+import dev.optio.core.ui.form.MenuChoice
+import dev.optio.core.ui.form.MenuCaption
+import dev.optio.core.ui.form.MenuDivider
+import dev.optio.core.ui.form.RowDivider
 
 // The Who card's provider / owner / secrets rows (contract "Work form"): the Provider control
 // (hidden when no provider serves the runtime, so the form looks as before), "Runs as" for pod

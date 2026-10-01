@@ -79,6 +79,20 @@ import dev.optio.core.ui.theme.Spacing
 import dev.optio.core.ui.theme.semibold
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import dev.optio.core.ui.agent.RuntimeMenuRow
+import dev.optio.core.ui.agent.RuntimeChoice
+import dev.optio.core.ui.agent.runtimeChoiceLabel
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.runtimeLabel
+import dev.optio.core.ui.agent.catalogFootnote
+import dev.optio.core.ui.agent.AgentOptionsPicker
+import dev.optio.core.ui.form.MenuScope
+import dev.optio.core.ui.form.MenuRow
+import dev.optio.core.ui.form.MenuChoice
+import dev.optio.core.ui.form.MenuCaption
+import dev.optio.core.ui.form.ValueField
+import dev.optio.core.ui.form.SwitchRow
+import dev.optio.core.ui.form.RowDivider
 
 // The six sections of `work-form.tsx` (iOS `WorkFormSections.swift`), one card each. They read the
 // state's draft and derived facts and write through its setters, so every change is normalized
@@ -119,7 +133,7 @@ internal fun thenIcon(then: Then): ImageVector = when (then) {
     Then.WAITS_FOR_MESSAGES -> OptioIcons.Bot
 }
 
-private fun runtimeName(runtime: String) = if (runtime == TERMINAL) "Terminal" else runtimeLabel(runtime)
+private fun runtimeName(runtime: String) = runtimeChoiceLabel(runtime)
 
 // region Presets
 
@@ -539,23 +553,13 @@ internal fun WhoSection(state: WorkFormState, modifier: Modifier = Modifier) {
     val d = state.draft
     val runtimes = state.runtimeChoices
     FormSectionCard(title = "Who", question = "A terminal, or an agent?", footer = whoFooter(state, runtimes), modifier = modifier.testTag("work-form-who")) {
-        MenuRow(
+        RuntimeMenuRow(
             label = "Runtime",
-            value = runtimeName(d.runtime),
-            leadingIcon = agentIcon(d.runtime),
+            runtime = d.runtime,
+            choices = runtimes.map { RuntimeChoice(it.value, it.disabled) },
+            onPick = state::setRuntime,
             modifier = Modifier.testTag("work-form-runtime"),
-        ) {
-            runtimes.forEach { r ->
-                MenuChoice(
-                    runtimeName(r.value),
-                    selected = r.value == d.runtime,
-                    icon = agentIcon(r.value),
-                    enabled = r.isEnabled,
-                    subtitle = r.disabled,
-                    onClick = { state.setRuntime(r.value) },
-                )
-            }
-        }
+        )
         if (!state.isTerminal && state.kind != WorkKind.POD_SESSION) {
             RowDivider()
             ProviderRows(state)
@@ -567,7 +571,11 @@ internal fun WhoSection(state: WorkFormState, modifier: Modifier = Modifier) {
                 onChange = state::setOption,
                 providerModels = state.providerModels,
             )
-            if (state.showsRememberedHint) RememberedHint(onReset = state::resetRemembered)
+            when {
+                state.showsRememberedHint -> DefaultsHint("Your last settings", "work-form-remembered", onReset = state::resetRemembered)
+                state.repoDefaultsHint != null ->
+                    DefaultsHint(state.repoDefaultsHint!!, "work-form-repo-defaults", onReset = state::resetRepoDefaults)
+            }
         }
         OwnerRows(state)
         PodSecretsRows(state)
@@ -578,19 +586,22 @@ internal fun WhoSection(state: WorkFormState, modifier: Modifier = Modifier) {
     }
 }
 
-/** "Your last settings · Reset": the parameters came from the last work you created. */
+/**
+ * "Your last settings · Reset" (the parameters came from the last work you created) or "Repo
+ * defaults · Reset" / "Changed from the repo's defaults · Reset" (the web's `DefaultsHint`).
+ */
 @Composable
-private fun RememberedHint(onReset: () -> Unit) {
+private fun DefaultsHint(text: String, tag: String, onReset: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.m).testTag("work-form-remembered"),
+        Modifier.fillMaxWidth().padding(start = Spacing.l, end = Spacing.l, bottom = Spacing.m).testTag(tag),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Your last settings · ", style = OptioTheme.type.footnote, color = OptioTheme.colors.secondaryLabel)
+        Text("$text · ", style = OptioTheme.type.footnote, color = OptioTheme.colors.secondaryLabel)
         Text(
             "Reset",
             style = OptioTheme.type.footnote,
             color = OptioTheme.colors.accent,
-            modifier = Modifier.clickable(role = Role.Button, onClick = onReset).testTag("work-form-remembered-reset"),
+            modifier = Modifier.clickable(role = Role.Button, onClick = onReset).testTag("$tag-reset"),
         )
     }
 }

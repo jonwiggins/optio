@@ -1,5 +1,8 @@
 package dev.optio.feature.workform
 
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.runtimeLabel
+
 // The sentence of `model.ts` (`describe` / `missingFields`): "Started now, a Claude Code run in an
 // Optio pod with acme/app that opens a PR and exits when done." Missing pieces render as gaps that
 // point at their field, so the sentence is also the validation.

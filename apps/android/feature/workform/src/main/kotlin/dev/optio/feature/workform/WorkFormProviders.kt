@@ -9,6 +9,9 @@ import dev.optio.core.network.MODEL_PROVIDER_OPTION_KEY
 import dev.optio.core.network.isOrganization
 import dev.optio.core.network.modelsFor
 import dev.optio.core.network.serves
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.modelFieldForRuntime
+import dev.optio.core.ui.agent.OptionValue
 
 // Model providers, owners and pod secrets in the work form (the contract's "Work form" rules):
 // pure functions over the draft; [WorkFormState] and the Who / Owner / Secrets rows sit on top.

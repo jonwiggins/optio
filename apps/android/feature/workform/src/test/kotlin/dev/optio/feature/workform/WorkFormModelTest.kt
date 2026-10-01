@@ -9,6 +9,10 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
+import dev.optio.core.ui.agent.TERMINAL
+import dev.optio.core.ui.agent.resolveModel
+import dev.optio.core.ui.agent.OptionValue
+import dev.optio.core.ui.agent.optionsFromRepo
 
 /**
  * Ports `apps/ios/OptioTests/WorkFormModelTests.swift` case for case, and the vectors of

@@ -1,43 +1,67 @@
 {
   "provider": "openai",
-  "source": "baseline",
+  "source": "live",
   "cached": false,
-  "refreshedAt": null,
+  "refreshedAt": 1790824105,
+  "liveFrom": "Codex on M1-Macbook.local",
   "catalog": {
     "provider": "openai",
     "label": "OpenAI Codex",
     "modelField": "copilotModel",
     "models": [
       {
-        "id": "gpt-5",
-        "label": "GPT-5",
-        "family": "gpt-5",
-        "source": "baseline"
+        "id": "gpt-5.6-sol",
+        "label": "GPT-5.6-Sol",
+        "description": "Latest frontier agentic coding model.",
+        "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "defaultEffort": "low",
+        "source": "live",
+        "latest": true
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "label": "GPT-5.6-Terra",
+        "description": "Balanced agentic coding model for everyday work.",
+        "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+        "defaultEffort": "medium",
+        "source": "live"
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "label": "GPT-5.6-Luna",
+        "description": "Fast and affordable agentic coding model.",
+        "efforts": ["low", "medium", "high", "xhigh", "max"],
+        "defaultEffort": "medium",
+        "source": "live"
+      },
+      {
+        "id": "gpt-5.5",
+        "label": "GPT-5.5",
+        "efforts": ["low", "medium", "high", "xhigh"],
+        "defaultEffort": "medium",
+        "source": "live",
+        "description": "Frontier model for complex coding, research, and real-world work."
       },
       {
         "id": "gpt-5.2",
         "label": "GPT-5.2",
-        "family": "gpt-5",
-        "source": "baseline"
+        "efforts": ["low", "medium", "high", "xhigh"],
+        "defaultEffort": "medium",
+        "source": "live",
+        "description": "Optimized for professional work and long-running agents."
       },
       {
         "id": "gpt-5.4",
         "label": "GPT-5.4",
-        "family": "gpt-5",
-        "latest": true,
+        "efforts": ["low", "medium", "high", "xhigh"],
+        "defaultEffort": "medium",
         "source": "baseline"
       },
       {
         "id": "gpt-5.4-mini",
-        "label": "GPT-5.4 Mini",
-        "family": "gpt-5-mini",
-        "latest": true,
-        "source": "baseline"
-      },
-      {
-        "id": "claude-sonnet-4.5",
-        "label": "Claude Sonnet 4.5",
-        "family": "sonnet",
+        "label": "GPT-5.4-Mini",
+        "efforts": ["low", "medium", "high", "xhigh"],
+        "defaultEffort": "medium",
         "source": "baseline"
       }
     ],
@@ -45,7 +69,57 @@
       "gpt-5": "gpt-5.4",
       "gpt-5-mini": "gpt-5.4-mini"
     },
-    "options": [],
+    "options": [
+      {
+        "key": "copilotEffort",
+        "label": "Reasoning effort",
+        "kind": "select",
+        "runsOn": ["pod", "local"],
+        "localParam": "effort",
+        "modelEfforts": true,
+        "choices": [
+          {
+            "value": "low",
+            "label": "Low"
+          },
+          {
+            "value": "medium",
+            "label": "Medium"
+          },
+          {
+            "value": "high",
+            "label": "High"
+          },
+          {
+            "value": "xhigh",
+            "label": "Extra high"
+          },
+          {
+            "value": "max",
+            "label": "Max"
+          },
+          {
+            "value": "ultra",
+            "label": "Ultra"
+          }
+        ]
+      },
+      {
+        "key": "codexPermissionMode",
+        "label": "Permissions",
+        "kind": "select",
+        "runsOn": ["local"],
+        "localParam": "permissionMode",
+        "choices": [
+          {
+            "value": "bypassPermissions",
+            "label": "Skip all checks",
+            "description": "--yolo: no approval prompts and no sandbox; every command runs as you on this machine"
+          }
+        ],
+        "helpText": "Default keeps Codex's own approval and sandbox settings on this machine."
+      }
+    ],
     "liveRefreshSupported": true
   }
 }

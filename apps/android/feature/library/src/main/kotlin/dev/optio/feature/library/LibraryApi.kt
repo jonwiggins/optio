@@ -5,9 +5,11 @@ import dev.optio.core.model.get
 import dev.optio.core.model.isNull
 import dev.optio.core.model.objectValue
 import dev.optio.core.model.stringValue
+import dev.optio.core.model.OptioJson
 import dev.optio.core.network.ApiClient
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 // The Library's endpoints (the prompt, repo, shared-directory, MCP and connection parts of iOS
@@ -136,7 +138,6 @@ data class RepoRow(
     val promptTemplateOverride: String? = null,
     val claudeModel: String? = null,
     val claudeContextWindow: String? = null,
-    val claudeThinking: Boolean? = null,
     val claudeEffort: String? = null,
     val maxTurnsCoding: Int? = null,
     val maxTurnsReview: Int? = null,
@@ -259,6 +260,9 @@ private data class ReposEnvelope(val repos: List<RepoRow> = emptyList())
 private data class RepoEnvelope(val repo: RepoRow)
 
 @Serializable
+private data class RawRepoEnvelope(val repo: JsonObject)
+
+@Serializable
 private data class RepoUrlBody(val repoUrl: String)
 
 @Serializable
@@ -279,6 +283,15 @@ private data class EnabledBody(val enabled: Boolean)
 suspend fun ApiClient.listRepos(): List<RepoRow> = get<ReposEnvelope>("/api/repos").repos
 
 suspend fun ApiClient.getRepo(id: String): RepoRow = get<RepoEnvelope>("/api/repos/$id").repo
+
+/**
+ * A repo as typed columns plus its raw row: the agent columns (copilotModel, geminiApprovalMode,
+ * opencode…) are read by the catalog's keys, so they aren't all on [RepoRow].
+ */
+suspend fun ApiClient.getRepoWithRaw(id: String): Pair<RepoRow, JsonObject> {
+    val raw = get<RawRepoEnvelope>("/api/repos/$id").repo
+    return OptioJson.decodeFromJsonElement(RepoRow.serializer(), raw) to raw
+}
 
 suspend fun ApiClient.createRepo(input: RepoCreateInput): RepoRow = post<RepoEnvelope>("/api/repos", input).repo
 

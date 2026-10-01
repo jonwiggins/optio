@@ -35,6 +35,8 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
+import dev.optio.core.ui.agent.CatalogState
+import dev.optio.core.ui.agent.AgentCatalogCache
 
 /**
  * The New work form end to end against a real API (the private test API: real server, fake
