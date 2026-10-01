@@ -4,7 +4,7 @@
  * concurrent runs. Rows live in `agent_pods` (pool "standalone", keyed by the
  * Job's id); picking, slots, and count repair are agent-pod-pool's.
  */
-import { and, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workflowRuns } from "../db/schema.js";
 import { getRuntime } from "./container-service.js";
@@ -20,6 +20,7 @@ import { resolveImage } from "./repo-pool-service.js";
 import { getWorkloadManager, isStatefulSetEnabled } from "./k8s-workload-service.js";
 import * as podPool from "./agent-pod-pool.js";
 import { buildPooledExecScript } from "../utils/pod-env.js";
+import { updatedAtMatches } from "../utils/pg-timestamp.js";
 
 const IDLE_TIMEOUT_MS = parseIntEnv("OPTIO_WORKFLOW_POD_IDLE_MS", 600000); // 10 min default
 
@@ -171,8 +172,9 @@ async function createWorkflowPodViaJob(
  * Execute a workflow run inside a pooled workflow pod. Each run isolates its
  * working dir to `/workspace/runs/<runId>` and injects per-run env vars
  * (including `OPTIO_PROMPT`) via the exec stream — nothing about the run is
- * baked into the pod spec. Takes a slot; callers must call
- * `releaseRun(pod.id)` on completion.
+ * baked into the pod spec. Takes a slot when the exec starts (and gives it
+ * back if it doesn't); callers that got a session call `releaseRun` when the
+ * run's attempt ends.
  */
 export async function execRunInPod(
   pod: WorkflowPod,
@@ -187,12 +189,36 @@ export async function execRunInPod(
     agentCommand,
     label: "workflow pod",
   });
-  return getRuntime().exec(podPool.podHandle(pod), ["bash", "-c", script], { tty: false });
+  try {
+    return await getRuntime().exec(podPool.podHandle(pod), ["bash", "-c", script], {
+      tty: false,
+    });
+  } catch (err) {
+    await podPool.releaseSlot(pod.id);
+    throw err;
+  }
 }
 
-/** A run on the pod ended: free its slot. */
-export async function releaseRun(podId: string): Promise<void> {
-  await podPool.releaseSlot(podId);
+/**
+ * A run's attempt on the pod ended: free the slot it took, and clear the
+ * run's pod while the run still points at this attempt's (a retry may hold it
+ * by now; `lastPodId` stays for retry affinity). Each step stands alone.
+ */
+export async function releaseRun(runId: string, podId: string, startedAt?: Date): Promise<void> {
+  await podPool
+    .releaseSlot(podId)
+    .catch((err) => logger.warn({ err, runId, podId }, "Failed to release workflow pod slot"));
+  await db
+    .update(workflowRuns)
+    .set({ podId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(workflowRuns.id, runId),
+        eq(workflowRuns.podId, podId),
+        startedAt ? updatedAtMatches(workflowRuns.startedAt, startedAt) : undefined,
+      ),
+    )
+    .catch((err) => logger.warn({ err, runId, podId }, "Failed to clear the run's pod"));
 }
 
 /**

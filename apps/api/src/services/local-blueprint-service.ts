@@ -1,15 +1,17 @@
 /**
- * Local Blueprints: reusable terminal specs spawned by triggers. Rows in
- * `local_blueprints`; triggers live in the generic `workflow_triggers` table
- * with target_type = "local_blueprint" (CRUD in trigger-service, firing in
- * trigger-dispatch).
+ * Local Blueprints: reusable terminal specs spawned by triggers —
+ * `local-blueprint` work definitions (rows in work_definitions, CRUD in
+ * work-definition-service), kept here in the shape /api/local/blueprints has
+ * always returned (`toLocalBlueprint`). Triggers live in the generic
+ * `workflow_triggers` table with target_type = "local_blueprint" (CRUD in
+ * trigger-service, firing in trigger-dispatch).
  *
  * Command safety: trigger payloads never carry commands. Params substitute
  * into the user-authored commandTemplate via renderTemplateString, and every
  * substituted value is shell-single-quoted first — write templates without
  * extra quotes around params (`claude {{prompt}}`, not `claude "{{prompt}}"`).
  */
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import {
   localAgentParams,
   shellQuote,
@@ -17,8 +19,9 @@ import {
   type LocalAgentSessionMode,
   type LocalTerminalSpec,
 } from "@optio/shared";
-import { db } from "../db/client.js";
-import { localBlueprints, workflowTriggers } from "../db/schema.js";
+import { workDefinitions } from "../db/schema.js";
+import * as definitions from "./work-definition-service.js";
+import type { WorkDefinition, WorkDefinitionValues } from "./work-definition-service.js";
 import { logger } from "../logger.js";
 import {
   getPromptTemplateById,
@@ -28,6 +31,7 @@ import {
 } from "./prompt-template-service.js";
 import { isAuthDisabled } from "./oauth/index.js";
 import {
+  canAccessHost,
   findHostDirForRepo,
   getHost,
   listHosts,
@@ -36,14 +40,40 @@ import {
 } from "./local-host-service.js";
 import { createTerminal, type LocalTerminalRow } from "./local-terminal-service.js";
 
-export type LocalBlueprintRow = typeof localBlueprints.$inferSelect;
+/** A Local automation as /api/local/blueprints has always returned it. */
+export function toLocalBlueprint(d: WorkDefinition) {
+  return {
+    id: d.id,
+    userId: d.userId,
+    workspaceId: d.workspaceId,
+    name: d.name,
+    description: d.description,
+    hostId: d.localHostId,
+    dir: d.localDir,
+    repoUrl: d.repoUrl,
+    baseBranch: d.repoBranch,
+    commandTemplate: d.prompt,
+    runTitle: d.runTitle,
+    promptTemplateId: d.promptTemplateId,
+    agent: d.agentType as LocalAgentKind | null,
+    spawnMode: d.spawnMode,
+    sessionMode: d.localSessionMode ?? "interactive",
+    agentOptions: d.agentOptions,
+    enabled: d.enabled,
+    createdAt: d.createdAt,
+    updatedAt: d.updatedAt,
+  };
+}
 
-function ownedBy(userId: string | null | undefined) {
-  return userId ? eq(localBlueprints.userId, userId) : isNull(localBlueprints.userId);
+export type LocalBlueprintRow = ReturnType<typeof toLocalBlueprint>;
+
+/** The automations a person owns (none: the unowned rows of auth-disabled dev). */
+export function ownedBy(userId: string | null | undefined) {
+  return userId ? eq(workDefinitions.userId, userId) : isNull(workDefinitions.userId);
 }
 
 export function canAccessBlueprint(
-  blueprint: LocalBlueprintRow,
+  blueprint: Pick<LocalBlueprintRow, "userId">,
   userId: string | null | undefined,
 ): boolean {
   if (blueprint.userId) return blueprint.userId === (userId ?? null);
@@ -77,32 +107,63 @@ export interface CreateBlueprintInput {
 }
 
 /**
+ * What a create / update must carry: a prompt (or a saved prompt that
+ * exists), and a host the person owns. Returns the problem, or null.
+ */
+export async function checkBlueprint(
+  body: {
+    commandTemplate?: string;
+    promptTemplateId?: string | null;
+    hostId?: string | null;
+  },
+  userId: string | null | undefined,
+): Promise<string | null> {
+  if (!body.commandTemplate?.trim() && !body.promptTemplateId) {
+    return "Give the automation a prompt / command, or pick a saved prompt";
+  }
+  if (body.promptTemplateId) {
+    const saved = await getPromptTemplateById(body.promptTemplateId);
+    if (!saved) return "Saved prompt not found";
+  }
+  if (body.hostId) {
+    const host = await getHost(body.hostId);
+    if (!host || !canAccessHost(host, userId)) return "Host not found";
+  }
+  return null;
+}
+
+/**
  * Where a blueprint runs. `dir` and `repoUrl` are both optional: an event
  * trigger (GitHub / Linear) can carry the repo, and as a last resort the
  * host's first allowlisted dir is used — see resolveBlueprintDir.
  */
-export async function createBlueprint(input: CreateBlueprintInput): Promise<LocalBlueprintRow> {
-  const [row] = await db
-    .insert(localBlueprints)
-    .values({
+export async function createBlueprint(
+  input: CreateBlueprintInput,
+  tx?: definitions.Db,
+): Promise<LocalBlueprintRow> {
+  const row = await definitions.createDefinition(
+    "local-blueprint",
+    {
       userId: input.userId,
       workspaceId: input.workspaceId,
       name: input.name,
       description: input.description,
-      hostId: input.hostId,
-      dir: input.dir,
+      runTarget: "local",
+      localHostId: input.hostId,
+      localDir: input.dir,
       repoUrl: input.repoUrl,
-      baseBranch: input.baseBranch ?? null,
-      commandTemplate: input.commandTemplate,
+      repoBranch: input.baseBranch ?? null,
+      prompt: input.commandTemplate,
       runTitle: input.runTitle?.trim() || null,
       promptTemplateId: input.promptTemplateId ?? null,
-      agent: input.agent ?? null,
+      agentType: input.agent ?? null,
       spawnMode: input.spawnMode ?? "auto",
-      sessionMode: input.sessionMode ?? "interactive",
+      localSessionMode: input.sessionMode ?? "interactive",
       agentOptions: cleanAgentOptions(input.agentOptions),
-    })
-    .returning();
-  return row;
+    },
+    tx,
+  );
+  return toLocalBlueprint(row);
 }
 
 /** Drop blank values; an empty map is stored as null (the machine's own defaults). */
@@ -117,63 +178,71 @@ function cleanAgentOptions(
 }
 
 export async function getBlueprint(id: string): Promise<LocalBlueprintRow | null> {
-  const [row] = await db.select().from(localBlueprints).where(eq(localBlueprints.id, id));
-  return row ?? null;
+  const row = await definitions.getDefinition(id, "local-blueprint");
+  return row && toLocalBlueprint(row);
 }
 
 export async function listBlueprints(
   userId: string | null | undefined,
 ): Promise<LocalBlueprintRow[]> {
-  return db
-    .select()
-    .from(localBlueprints)
-    .where(ownedBy(userId))
-    .orderBy(desc(localBlueprints.createdAt));
+  const rows = await definitions.listDefinitions("local-blueprint", ownedBy(userId));
+  return rows.map(toLocalBlueprint);
 }
+
+export type UpdateBlueprintInput = Partial<
+  Pick<
+    CreateBlueprintInput,
+    | "name"
+    | "commandTemplate"
+    | "runTitle"
+    | "promptTemplateId"
+    | "agent"
+    | "spawnMode"
+    | "sessionMode"
+    | "baseBranch"
+    | "agentOptions"
+  > & {
+    description: string | null;
+    hostId: string | null;
+    dir: string | null;
+    repoUrl: string | null;
+    enabled: boolean;
+  }
+>;
 
 export async function updateBlueprint(
   id: string,
-  updates: Partial<
-    Pick<
-      CreateBlueprintInput,
-      | "name"
-      | "commandTemplate"
-      | "runTitle"
-      | "promptTemplateId"
-      | "agent"
-      | "spawnMode"
-      | "sessionMode"
-      | "baseBranch"
-      | "agentOptions"
-    > & {
-      description: string | null;
-      hostId: string | null;
-      dir: string | null;
-      repoUrl: string | null;
-      enabled: boolean;
-    }
-  >,
+  updates: UpdateBlueprintInput,
 ): Promise<LocalBlueprintRow | null> {
-  const set = { ...updates, updatedAt: new Date() };
-  if (updates.runTitle !== undefined) set.runTitle = updates.runTitle?.trim() || null;
-  if (updates.agentOptions !== undefined)
-    set.agentOptions = cleanAgentOptions(updates.agentOptions);
-  const [row] = await db
-    .update(localBlueprints)
-    .set(set)
-    .where(eq(localBlueprints.id, id))
-    .returning();
-  return row ?? null;
+  const {
+    hostId,
+    dir,
+    baseBranch,
+    commandTemplate,
+    agent,
+    sessionMode,
+    runTitle,
+    agentOptions,
+    ...rest
+  } = updates;
+  const patch: Partial<WorkDefinitionValues> = {
+    ...rest,
+    ...(hostId !== undefined ? { localHostId: hostId } : {}),
+    ...(dir !== undefined ? { localDir: dir } : {}),
+    ...(baseBranch !== undefined ? { repoBranch: baseBranch } : {}),
+    ...(commandTemplate !== undefined ? { prompt: commandTemplate } : {}),
+    ...(agent !== undefined ? { agentType: agent } : {}),
+    ...(sessionMode !== undefined ? { localSessionMode: sessionMode } : {}),
+    ...(runTitle !== undefined ? { runTitle: runTitle?.trim() || null } : {}),
+    ...(agentOptions !== undefined ? { agentOptions: cleanAgentOptions(agentOptions) } : {}),
+  };
+  const row = await definitions.updateDefinition(id, "local-blueprint", patch);
+  return row && toLocalBlueprint(row);
 }
 
+/** Delete a Local automation and its triggers; terminals it spawned stay. */
 export async function deleteBlueprint(id: string): Promise<boolean> {
-  await db
-    .delete(workflowTriggers)
-    .where(
-      and(eq(workflowTriggers.targetType, "local_blueprint"), eq(workflowTriggers.targetId, id)),
-    );
-  const deleted = await db.delete(localBlueprints).where(eq(localBlueprints.id, id)).returning();
-  return deleted.length > 0;
+  return definitions.deleteDefinition(id, "local-blueprint");
 }
 
 /**

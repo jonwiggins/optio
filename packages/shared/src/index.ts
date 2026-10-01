@@ -43,3 +43,4 @@ export * from "./types/glance.js";
 export * from "./types/push.js";
 export * from "./agent-options/index.js";
 export * from "./work/feed.js";
+export * from "./work/spec.js";

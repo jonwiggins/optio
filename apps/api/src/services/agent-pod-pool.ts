@@ -13,6 +13,7 @@ import { db } from "../db/client.js";
 import { agentPods } from "../db/schema.js";
 import { getRuntime } from "./container-service.js";
 import { logger } from "../logger.js";
+import { isUniqueViolation } from "../utils/db-errors.js";
 
 export type PodPool = "repo" | "standalone" | "persistent-agent";
 export type AgentPod = typeof agentPods.$inferSelect;
@@ -121,14 +122,6 @@ export async function pickPod(
     }
     throw err;
   }
-}
-
-/** A Postgres unique violation — drizzle wraps it, so the code is on a `cause`. */
-function isUniqueViolation(err: unknown): boolean {
-  for (let e = err; e; e = (e as { cause?: unknown }).cause) {
-    if ((e as { code?: string }).code === "23505") return true;
-  }
-  return false;
 }
 
 /** Block until a provisioning pod is ready (or failed, or gone). */

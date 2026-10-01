@@ -160,3 +160,182 @@ describe("1791613000_agent_pods", () => {
     }
   });
 });
+
+describe("1791614000_work_definitions", () => {
+  it("moves scheduled Tasks, Jobs, and Local automations into work_definitions with their ids and links", async () => {
+    const db = await stageDatabase("1791613000_agent_pods");
+    try {
+      const { sql } = db;
+      const [user] = await sql`
+        INSERT INTO users (provider, external_id, email, display_name)
+        VALUES ('github', 'u1', 'u1@example.com', 'U1') RETURNING id`;
+      const [ws] = await sql`
+        INSERT INTO workspaces (name, slug) VALUES ('W', 'w-defs') RETURNING id`;
+      const [host] = await sql`
+        INSERT INTO local_hosts (user_id, name, hostname, platform)
+        VALUES (${user.id}, 'M1', 'm1', 'darwin') RETURNING id`;
+      const [template] = await sql`
+        INSERT INTO prompt_templates (name, template) VALUES ('Saved', 'do {{x}}') RETURNING id`;
+
+      const [config] = await sql`
+        INSERT INTO task_configs (name, description, workspace_id, title, prompt, prompt_template_id,
+          repo_url, repo_branch, agent_type, max_retries, priority, enabled, created_by,
+          run_target, local_host_id, local_dir, local_session_mode, agent_options, auto_resume, auto_merge)
+        VALUES ('Nightly', 'every night', ${ws.id}, 'Nightly {{date}}', 'fix things', ${template.id},
+          'https://github.com/acme/app', 'dev', 'codex', 4, 7, false, ${user.id},
+          'local', ${host.id}, '/src/app', 'interactive', ${JSON.stringify({ effort: "high" })}::jsonb,
+          true, false)
+        RETURNING id`;
+      const [job] = await sql`
+        INSERT INTO workflows (name, workspace_id, environment_spec, prompt_template, params_schema,
+          run_title, agent_runtime, model, max_turns, budget_usd, max_concurrent, max_retries,
+          warm_pool_size, max_pod_instances, max_agents_per_pod, created_by)
+        VALUES ('Report', ${ws.id}, ${JSON.stringify({ env: 1 })}::jsonb, 'report on {{x}}',
+          ${JSON.stringify({ type: "object" })}::jsonb, 'Report {{x}}', 'gemini', 'pro', 12, '2.5',
+          3, 2, 1, 4, 5, ${user.id})
+        RETURNING id`;
+      const [automation] = await sql`
+        INSERT INTO local_blueprints (user_id, workspace_id, name, host_id, dir, repo_url, base_branch,
+          command_template, run_title, prompt_template_id, agent, spawn_mode, session_mode, agent_options)
+        VALUES (${user.id}, ${ws.id}, 'Review PRs', ${host.id}, '/src/app', 'https://github.com/acme/app',
+          'main', 'review {{prUrl}}', 'Review {{prNumber}}', NULL, 'claude-code', 'hold', 'headless', NULL)
+        RETURNING id`;
+
+      const [run] = await sql`
+        INSERT INTO workflow_runs (workflow_id, state) VALUES (${job.id}, 'completed') RETURNING id`;
+      const [jobTrigger] = await sql`
+        INSERT INTO workflow_triggers (workflow_id, target_type, target_id, type)
+        VALUES (${job.id}, 'job', ${job.id}, 'manual') RETURNING id`;
+      const spawned = async (taskConfigId: string) => {
+        const [t] = await sql`
+          INSERT INTO tasks (title, prompt, repo_url, agent_type, metadata)
+          VALUES ('t', 'p', 'https://github.com/acme/app', 'codex',
+            ${JSON.stringify({ taskConfigId })}::jsonb)
+          RETURNING id`;
+        return t.id as string;
+      };
+      const fromConfig = await spawned(config.id);
+      const fromDeleted = await spawned("00000000-0000-0000-0000-000000000000");
+      const fromGarbage = await spawned("not-a-uuid");
+
+      await db.migrateRest();
+
+      for (const gone of ["task_configs", "workflows", "local_blueprints"]) {
+        const [{ exists }] =
+          await sql`SELECT to_regclass(${"public." + gone}) IS NOT NULL AS exists`;
+        expect(exists, gone).toBe(false);
+      }
+
+      const rows = await sql`SELECT * FROM work_definitions`;
+      const byKind = Object.fromEntries(rows.map((r) => [r.kind, r]));
+      expect(rows).toHaveLength(3);
+      expect(byKind["repo-blueprint"]).toMatchObject({
+        id: config.id,
+        name: "Nightly",
+        description: "every night",
+        workspace_id: ws.id,
+        user_id: null,
+        created_by: user.id,
+        enabled: false,
+        prompt: "fix things",
+        prompt_template_id: template.id,
+        run_title: "Nightly {{date}}",
+        agent_type: "codex",
+        agent_options: { effort: "high" },
+        repo_url: "https://github.com/acme/app",
+        repo_branch: "dev",
+        run_target: "local",
+        local_host_id: host.id,
+        local_dir: "/src/app",
+        local_session_mode: "interactive",
+        max_retries: 4,
+        priority: 7,
+        auto_resume: true,
+        auto_merge: false,
+      });
+      expect(byKind.standalone).toMatchObject({
+        id: job.id,
+        name: "Report",
+        workspace_id: ws.id,
+        created_by: user.id,
+        prompt: "report on {{x}}",
+        run_title: "Report {{x}}",
+        params_schema: { type: "object" },
+        environment_spec: { env: 1 },
+        agent_type: "gemini",
+        model: "pro",
+        max_turns: 12,
+        budget_usd: "2.5",
+        max_concurrent: 3,
+        max_retries: 2,
+        warm_pool_size: 1,
+        max_pod_instances: 4,
+        max_agents_per_pod: 5,
+        run_target: "cluster",
+        local_session_mode: "headless",
+        repo_url: null,
+      });
+      expect(byKind["local-blueprint"]).toMatchObject({
+        id: automation.id,
+        name: "Review PRs",
+        user_id: user.id,
+        workspace_id: ws.id,
+        run_target: "local",
+        local_host_id: host.id,
+        local_dir: "/src/app",
+        repo_url: "https://github.com/acme/app",
+        repo_branch: "main",
+        prompt: "review {{prUrl}}",
+        run_title: "Review {{prNumber}}",
+        agent_type: "claude-code",
+        spawn_mode: "hold",
+        local_session_mode: "headless",
+      });
+
+      // Spawned tasks point at their scheduled Task, when it still exists.
+      const links = await sql`SELECT id, work_id FROM tasks`;
+      const workId = Object.fromEntries(links.map((t) => [t.id, t.work_id]));
+      expect(workId[fromConfig]).toBe(config.id);
+      expect(workId[fromDeleted]).toBeNull();
+      expect(workId[fromGarbage]).toBeNull();
+
+      // Names stay unique per kind: per workspace for scheduled Tasks and Jobs,
+      // per person for Local automations.
+      await expect(
+        sql`INSERT INTO work_definitions (kind, name, workspace_id, prompt)
+            VALUES ('standalone', 'Report', ${ws.id}, 'x')`,
+      ).rejects.toThrow(/work_definitions_workspace_name_key/);
+      await sql`INSERT INTO work_definitions (kind, name, workspace_id, prompt, repo_url)
+                VALUES ('repo-blueprint', 'Report', ${ws.id}, 'x', 'https://github.com/acme/app')`;
+      await expect(
+        sql`INSERT INTO work_definitions (kind, name, user_id, prompt)
+            VALUES ('local-blueprint', 'Review PRs', ${user.id}, 'x')`,
+      ).rejects.toThrow(/work_definitions_user_name_key/);
+      // A scheduled Task needs a repo.
+      await expect(
+        sql`INSERT INTO work_definitions (kind, name, prompt) VALUES ('repo-blueprint', 'R', 'x')`,
+      ).rejects.toThrow(/work_definitions_repo_check/);
+
+      // Deleting a Job takes its runs and its triggers' legacy link with it;
+      // deleting a scheduled Task keeps the tasks it spawned.
+      await sql`DELETE FROM work_definitions WHERE id = ${job.id}`;
+      const [{ runs }] = await sql`
+        SELECT count(*)::int AS runs FROM workflow_runs WHERE id = ${run.id}`;
+      expect(runs).toBe(0);
+      const [{ triggers }] = await sql`
+        SELECT count(*)::int AS triggers FROM workflow_triggers WHERE id = ${jobTrigger.id}`;
+      expect(triggers).toBe(0);
+      await sql`DELETE FROM work_definitions WHERE id = ${config.id}`;
+      const [kept] = await sql`SELECT work_id FROM tasks WHERE id = ${fromConfig}`;
+      expect(kept.work_id).toBeNull();
+
+      // A Local automation belongs to its person.
+      await sql`DELETE FROM users WHERE id = ${user.id}`;
+      const [{ automations }] = await sql`
+        SELECT count(*)::int AS automations FROM work_definitions WHERE kind = 'local-blueprint'`;
+      expect(automations).toBe(0);
+    } finally {
+      await db.drop();
+    }
+  });
+});

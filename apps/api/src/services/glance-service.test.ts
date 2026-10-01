@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { appleSeconds, TaskState } from "@optio/shared";
 
 vi.mock("../logger.js", () => ({
@@ -7,15 +9,16 @@ vi.mock("../logger.js", () => ({
 
 const { mockSelectDistinct, tiles } = vi.hoisted(() => ({
   mockSelectDistinct: vi.fn(),
-  /** Rows `db.select().from(<table>).where()` resolves per table name. */
-  tiles: { rows: new Map<string, unknown[]>(), fail: false },
+  /** Rows `db.select().from(<table>).where()` resolves per table name, and the filter each got. */
+  tiles: { rows: new Map<string, unknown[]>(), where: new Map<string, unknown>(), fail: false },
 }));
 vi.mock("../db/client.js", () => ({
   db: {
     selectDistinct: (...args: unknown[]) => mockSelectDistinct(...args),
     select: () => ({
       from: (table: { _name: string }) => ({
-        where: async () => {
+        where: async (filter: unknown) => {
+          tiles.where.set(table._name, filter);
           if (tiles.fail) throw new Error("db down");
           return tiles.rows.get(table._name) ?? [];
         },
@@ -33,9 +36,7 @@ vi.mock("../db/schema.js", () => {
       senderId: "sender_id",
     },
     workspaceMembers: t("workspace_members", ["workspaceId", "userId"]),
-    taskConfigs: t("task_configs", ["enabled", "workspaceId"]),
-    workflows: t("workflows", ["enabled", "workspaceId"]),
-    localBlueprints: t("local_blueprints", ["enabled", "userId"]),
+    workDefinitions: t("work_definitions", ["enabled", "kind", "workspaceId", "userId"]),
     persistentAgents: t("persistent_agents", ["state", "workspaceId"]),
     tasks: t("tasks", ["state", "createdBy"]),
   };
@@ -171,15 +172,15 @@ beforeEach(() => {
   mockListHosts.mockResolvedValue([host()]);
   mockListTerminals.mockResolvedValue([]);
   tiles.rows.clear();
+  tiles.where.clear();
   tiles.fail = false;
 });
 afterEach(() => vi.useRealTimers());
 
 function seedTiles(input: {
   workspaces?: string[];
-  taskConfigs?: number;
-  workflows?: number;
-  localBlueprints?: number;
+  /** Enabled work definitions the one recurring count finds. */
+  recurring?: number;
   agents?: number;
   prOpen?: number;
 }) {
@@ -187,11 +188,15 @@ function seedTiles(input: {
     "workspace_members",
     (input.workspaces ?? ["ws1"]).map((workspaceId) => ({ workspaceId })),
   );
-  tiles.rows.set("task_configs", [{ n: input.taskConfigs ?? 0 }]);
-  tiles.rows.set("workflows", [{ n: input.workflows ?? 0 }]);
-  tiles.rows.set("local_blueprints", [{ n: input.localBlueprints ?? 0 }]);
+  tiles.rows.set("work_definitions", [{ n: input.recurring ?? 0 }]);
   tiles.rows.set("persistent_agents", [{ n: input.agents ?? 0 }]);
   tiles.rows.set("tasks", [{ n: input.prOpen ?? 0 }]);
+}
+
+/** The values the recurring count's filter binds (the mocked columns render as strings too). */
+function recurringFilterValues(): unknown[] {
+  const filter = tiles.where.get("work_definitions") as SQL;
+  return new PgDialect().sqlToQuery(filter).params;
 }
 
 describe("terminalToWatchItem / computeWatchState", () => {
@@ -345,7 +350,7 @@ describe("terminalToWatchItem / computeWatchState", () => {
   });
 
   it("adds the board tiles: recurring, agents, and waiting (open PRs + idle terminals)", async () => {
-    seedTiles({ taskConfigs: 2, workflows: 1, localBlueprints: 3, agents: 4, prOpen: 2 });
+    seedTiles({ recurring: 6, agents: 4, prOpen: 2 });
     mockListTerminals.mockResolvedValue([
       terminal({ id: "a", attentionState: "idle" }),
       terminal({ id: "b", attentionState: "working" }),
@@ -359,11 +364,20 @@ describe("terminalToWatchItem / computeWatchState", () => {
       runningCount: 2,
     });
     expect(state.head).toMatchObject({ where: { detail: "mbp · ~/optio/apps/web" } });
+    // One count: enabled scheduled Tasks / Jobs in the user's workspaces, plus their own Local automations.
+    expect(recurringFilterValues()).toEqual(
+      expect.arrayContaining(["repo-blueprint", "standalone", "ws1", "local-blueprint", "u1"]),
+    );
   });
 
   it("counts nothing workspace-scoped for a user without memberships, and survives a DB error", async () => {
-    seedTiles({ workspaces: [], localBlueprints: 1, prOpen: 1 });
+    seedTiles({ workspaces: [], recurring: 1, prOpen: 1 });
     expect(await countSessionTiles("u1")).toEqual({ waiting: 1, recurring: 1, agents: 0 });
+    // Only the user's own Local automations are counted — no workspace-scoped kinds.
+    const values = recurringFilterValues();
+    expect(values).toEqual(expect.arrayContaining(["local-blueprint", "u1"]));
+    expect(values).not.toContain("repo-blueprint");
+    expect(values).not.toContain("standalone");
     tiles.fail = true;
     const state = await computeWatchState("u1", NOW);
     expect(state.recurringCount).toBeNull();

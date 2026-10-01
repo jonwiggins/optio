@@ -208,6 +208,11 @@ export async function buildServer() {
           description:
             "Core task lifecycle: create, list, retrieve, retry, cancel, subtasks, dependencies, bulk operations, comments, and messages.",
         },
+        {
+          name: "Work",
+          description:
+            "Every kind of work as one resource: the Work list, creation from When / Where / Who / What / Then, saved definitions, their runs and triggers.",
+        },
         { name: "Workflows", description: "Workflow templates, runs, and triggers." },
         {
           name: "Sessions",

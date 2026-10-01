@@ -12,14 +12,13 @@
  * through the normal stale-task path.
  */
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workflowRuns, tasks } from "../db/schema.js";
 import { getPod } from "./agent-pod-pool.js";
 import { WorkflowRunState, TaskState } from "@optio/shared";
 import { getRuntime } from "./container-service.js";
 import { transitionWorkflowRunCas } from "./workflow-service.js";
-import { releaseRun } from "./workflow-pool-service.js";
 import * as taskService from "./task-service.js";
 import { logger } from "../logger.js";
 
@@ -86,7 +85,7 @@ export async function cleanupZombieWorkflowRuns(): Promise<number> {
 }
 
 /**
- * Fail a zombie Job run and release its pod slot. The transition wakes the
+ * Fail a zombie Job run and let go of its pod. The transition wakes the
  * reconciler, whose decideFailed retries the run within the Job's maxRetries.
  */
 async function failZombieRun(
@@ -98,24 +97,22 @@ async function failZombieRun(
     WorkflowRunState.RUNNING,
     WorkflowRunState.FAILED,
     { errorMessage: `Zombie run detected: ${reason}`, finishedAt: new Date() },
+    // Only the attempt that was seen dead — not a retry that claimed the run since.
+    { startedAt: run.startedAt ?? undefined },
   );
   if (!failed) return false; // someone else moved it first
 
   logger.info({ runId: run.id, workflowId: run.workflowId, reason }, "Zombie workflow run failed");
 
-  // Release the workflow pod's activeRunCount. The run points at its
-  // assigned pod via podId; once released we clear it so the counter and
-  // pod assignment stay consistent.
+  // The run no longer holds its pod. Its slot is the worker's to give back
+  // when the attempt ends; a dead worker's is repaired by the cleanup
+  // sweep's count reconciliation, which counts only runs that hold a pod.
   if (run.podId) {
-    try {
-      await releaseRun(run.podId);
-      await db
-        .update(workflowRuns)
-        .set({ podId: null, updatedAt: new Date() })
-        .where(eq(workflowRuns.id, run.id));
-    } catch (err) {
-      logger.warn({ err, runId: run.id }, "Failed to release workflow pod for zombie run");
-    }
+    await db
+      .update(workflowRuns)
+      .set({ podId: null, updatedAt: new Date() })
+      .where(and(eq(workflowRuns.id, run.id), eq(workflowRuns.podId, run.podId)))
+      .catch((err) => logger.warn({ err, runId: run.id }, "Failed to clear zombie run's pod"));
   }
   return true;
 }

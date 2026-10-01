@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { localTerminals, taskConfigs, tasks, users, workflows } from "../db/schema.js";
+import { localTerminals, tasks, users, workDefinitions } from "../db/schema.js";
 import * as relay from "./local-relay.js";
 import {
   codexModelsFor,
@@ -306,8 +306,8 @@ describe("local hosts", () => {
     expect((await getTerminal(finished.id))?.hostId).toBe(current.id);
     expect((await getBlueprint(automation.id))?.hostId).toBe(current.id);
     const [t] = await db.select().from(tasks).where(eq(tasks.id, task.id));
-    const [c] = await db.select().from(taskConfigs).where(eq(taskConfigs.id, config.id));
-    const [w] = await db.select().from(workflows).where(eq(workflows.id, job.id));
+    const [c] = await db.select().from(workDefinitions).where(eq(workDefinitions.id, config.id));
+    const [w] = await db.select().from(workDefinitions).where(eq(workDefinitions.id, job.id));
     expect([t.localHostId, c.localHostId, w.localHostId]).toEqual([
       current.id,
       current.id,

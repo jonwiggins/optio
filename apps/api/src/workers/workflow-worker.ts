@@ -8,7 +8,7 @@ import {
 import { getAdapter } from "@optio/agent-adapters";
 import { getEventParser } from "../services/event-parsers.js";
 import { db } from "../db/client.js";
-import { workflowRuns, workflows } from "../db/schema.js";
+import { workDefinitions, workflowRuns } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import * as workflowService from "../services/workflow-service.js";
 import { transitionWorkflowRunCas } from "../services/workflow-service.js";
@@ -98,6 +98,7 @@ export function startWorkflowWorker() {
       };
       const log = logger.child({ workflowRunId, jobId: job.id });
       let workflowPodId: string | null = null;
+      let attemptStartedAt: Date | undefined;
 
       try {
         // ── Verify run is in queued state ──────────────────────────────
@@ -149,9 +150,9 @@ export function startWorkflowWorker() {
           // don't occupy pods.
           const globalMax = parseIntEnv("OPTIO_MAX_WORKFLOW_CONCURRENT", 5);
           const runningRows = await db
-            .select({ workflowId: workflowRuns.workflowId, runTarget: workflows.runTarget })
+            .select({ workflowId: workflowRuns.workflowId, runTarget: workDefinitions.runTarget })
             .from(workflowRuns)
-            .innerJoin(workflows, eq(workflows.id, workflowRuns.workflowId))
+            .innerJoin(workDefinitions, eq(workDefinitions.id, workflowRuns.workflowId))
             .where(eq(workflowRuns.state, WorkflowRunState.RUNNING));
           const allRuns = runningRows.filter((r) => r.runTarget !== "local");
           if (allRuns.length >= globalMax) {
@@ -174,13 +175,12 @@ export function startWorkflowWorker() {
 
           // Claim: transition to running. CAS — a second worker holding the
           // same run (a reconcile re-enqueue) loses here instead of running it twice.
-          const claimedRow = await transitionWorkflowRunCas(
+          return transitionWorkflowRunCas(
             workflowRunId,
             WorkflowRunState.QUEUED,
             WorkflowRunState.RUNNING,
             { startedAt: new Date() },
           );
-          return claimedRow != null;
         });
 
         if (!claimed) {
@@ -192,6 +192,8 @@ export function startWorkflowWorker() {
           });
           return;
         }
+        // This attempt — every later write is conditional on still owning it.
+        attemptStartedAt = claimed.startedAt!;
         log.info("Workflow run claimed, provisioning pod");
 
         // ── Render prompt ─────────────────────────────────────────────
@@ -287,7 +289,6 @@ export function startWorkflowWorker() {
           memoryRequest: envSpec?.memoryRequest ?? null,
           memoryLimit: envSpec?.memoryLimit ?? null,
         });
-        workflowPodId = pod.id;
 
         // Record the assigned pod on the run so reconcile/zombie code can find
         // it, and remember it as lastPodId for retry affinity.
@@ -309,6 +310,8 @@ export function startWorkflowWorker() {
         });
 
         const execSession = await workflowPool.execRunInPod(pod, workflowRunId, agentCommand, env);
+        // The attempt holds a slot on the pod from here; the finally gives it back.
+        workflowPodId = pod.id;
 
         // For claude-code, deliver prompt via stdin (stream-json mode)
         if (workflow.agentRuntime === "claude-code") {
@@ -419,33 +422,34 @@ export function startWorkflowWorker() {
           ).catch(() => {});
         }
 
-        // This attempt's spend is ADDED to the run's: a retried run keeps
-        // what its earlier attempts spent (they were spent).
-        const usage = addUsage(workflowRuns, result);
+        // This attempt's spend is ADDED to the run's — whatever became of
+        // the run meanwhile (cancelled, retried): it was spent. Not a state
+        // change, so it doesn't touch the reconciler's version.
+        await db
+          .update(workflowRuns)
+          .set(addUsage(workflowRuns, result))
+          .where(eq(workflowRuns.id, workflowRunId));
 
-        if (effectiveSuccess) {
-          await transitionWorkflowRunCas(
-            workflowRunId,
-            WorkflowRunState.RUNNING,
-            WorkflowRunState.COMPLETED,
-            { ...usage, output: { summary: result.summary }, finishedAt: new Date() },
-          );
-          log.info("Workflow run completed");
-        } else {
-          await transitionWorkflowRunCas(
-            workflowRunId,
-            WorkflowRunState.RUNNING,
-            WorkflowRunState.FAILED,
-            {
-              ...usage,
-              errorMessage: effectiveError ?? "Agent execution failed",
-              finishedAt: new Date(),
-            },
-          );
-          log.warn({ error: effectiveError }, "Workflow run failed");
-          // The reconciler's decideFailed handles the FAILED→QUEUED retry +
-          // exponential backoff. The transition above wakes it.
-        }
+        const finished = effectiveSuccess
+          ? await transitionWorkflowRunCas(
+              workflowRunId,
+              WorkflowRunState.RUNNING,
+              WorkflowRunState.COMPLETED,
+              { output: { summary: result.summary }, finishedAt: new Date() },
+              { startedAt: attemptStartedAt },
+            )
+          : await transitionWorkflowRunCas(
+              workflowRunId,
+              WorkflowRunState.RUNNING,
+              WorkflowRunState.FAILED,
+              { errorMessage: effectiveError ?? "Agent execution failed", finishedAt: new Date() },
+              { startedAt: attemptStartedAt },
+            );
+        // The reconciler's decideFailed handles the FAILED→QUEUED retry +
+        // exponential backoff; the transition wakes it.
+        if (!finished) log.info("Run moved on while the agent ran; its result is not recorded");
+        else if (effectiveSuccess) log.info("Workflow run completed");
+        else log.warn({ error: effectiveError }, "Workflow run failed");
       } catch (err) {
         log.error({ err }, "Workflow worker error");
         try {
@@ -461,9 +465,16 @@ export function startWorkflowWorker() {
                   { provisioningRetryCount: provisioningRetryCount + 1 },
                   "Provisioning error, re-queuing",
                 );
-                await transitionWorkflowRunCas(workflowRunId, fromState, WorkflowRunState.FAILED, {
-                  errorMessage: String(err),
-                });
+                // Only while this attempt still owns the run: a cancel or the
+                // reconciler may have failed it meanwhile, and that stands.
+                const failed = await transitionWorkflowRunCas(
+                  workflowRunId,
+                  fromState,
+                  WorkflowRunState.FAILED,
+                  { errorMessage: String(err) },
+                  { startedAt: attemptStartedAt },
+                );
+                if (!failed) throw err;
                 await transitionWorkflowRunCas(
                   workflowRunId,
                   WorkflowRunState.FAILED,
@@ -485,12 +496,15 @@ export function startWorkflowWorker() {
               }
             }
 
-            // Terminal failure
+            // Terminal failure (of this attempt, if it got as far as claiming one)
             if (canTransitionWorkflowRun(fromState, WorkflowRunState.FAILED)) {
-              await transitionWorkflowRunCas(workflowRunId, fromState, WorkflowRunState.FAILED, {
-                errorMessage: String(err),
-                finishedAt: new Date(),
-              });
+              await transitionWorkflowRunCas(
+                workflowRunId,
+                fromState,
+                WorkflowRunState.FAILED,
+                { errorMessage: String(err), finishedAt: new Date() },
+                { startedAt: attemptStartedAt },
+              );
             }
           }
         } catch {
@@ -498,16 +512,8 @@ export function startWorkflowWorker() {
         }
         throw err;
       } finally {
-        // Release the pool slot so activeRunCount reflects only live runs.
-        // Clearing pod_id on the run keeps reconcileActiveRunCounts accurate
-        // if the worker later crashes; lastPodId is preserved for retry affinity.
         if (workflowPodId) {
-          await workflowPool.releaseRun(workflowPodId).catch(() => {});
-          await db
-            .update(workflowRuns)
-            .set({ podId: null, updatedAt: new Date() })
-            .where(eq(workflowRuns.id, workflowRunId))
-            .catch(() => {});
+          await workflowPool.releaseRun(workflowRunId, workflowPodId, attemptStartedAt);
         }
       }
     }),

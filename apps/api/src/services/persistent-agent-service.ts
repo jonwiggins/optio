@@ -117,8 +117,11 @@ export interface CreatePersistentAgentInput {
   createdBy?: string | null;
 }
 
-export async function createPersistentAgent(input: CreatePersistentAgentInput) {
-  const [row] = await db
+export async function createPersistentAgent(
+  input: CreatePersistentAgentInput,
+  tx: Pick<typeof db, "insert"> = db,
+) {
+  const [row] = await tx
     .insert(persistentAgents)
     .values({
       slug: input.slug,

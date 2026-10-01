@@ -160,17 +160,6 @@ beforeEach(() => {
   for (const fn of Object.values(podPool)) fn.mockReset();
 });
 
-// ── releaseRun ──────────────────────────────────────────────────────
-
-describe("releaseRun", () => {
-  it("decrements the active run count by releasing the pod's slot", async () => {
-    await releaseRun("pod-1");
-
-    expect(podPool.releaseSlot).toHaveBeenCalledTimes(1);
-    expect(podPool.releaseSlot).toHaveBeenCalledWith("pod-1");
-  });
-});
-
 // ── cleanupIdleWorkflowPods ─────────────────────────────────────────
 
 describe("cleanupIdleWorkflowPods", () => {

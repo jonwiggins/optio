@@ -40,7 +40,7 @@ import {
   type WorkLink,
 } from "@optio/shared";
 import { db } from "../db/client.js";
-import { tasks, workflowRuns, workflows } from "../db/schema.js";
+import { tasks, workDefinitions, workflowRuns } from "../db/schema.js";
 import { logger } from "../logger.js";
 import { canAccessHost, getHost, isDirAllowed, type LocalHostRow } from "./local-host-service.js";
 import {
@@ -51,10 +51,9 @@ import {
   type LocalTerminalRow,
 } from "./local-terminal-service.js";
 import * as taskService from "./task-service.js";
-import { transitionWorkflowRunCas } from "./workflow-service.js";
+import { transitionWorkflowRunCas, type Workflow } from "./workflow-service.js";
 
 type TaskRow = typeof tasks.$inferSelect;
-type WorkflowRow = typeof workflows.$inferSelect;
 type WorkflowRunRow = typeof workflowRuns.$inferSelect;
 
 export const CLUSTER_LOCATION: RunLocation = Object.freeze({
@@ -243,7 +242,7 @@ async function claimedTerminal(id: string | null | undefined): Promise<LocalTerm
  */
 export async function dispatchLocalWorkflowRun(
   run: WorkflowRunRow,
-  workflow: WorkflowRow,
+  workflow: Workflow,
   renderedPrompt: string,
 ): Promise<LocalTerminalRow | null> {
   const log = logger.child({ workflowRunId: run.id, workflowId: workflow.id, local: true });
@@ -320,7 +319,7 @@ export async function dispatchLocalWorkflowRun(
  */
 async function failLocalWorkflowRun(
   run: WorkflowRunRow,
-  workflow: WorkflowRow,
+  workflow: Workflow,
   message: string,
 ): Promise<void> {
   const [fresh] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, run.id));
@@ -506,9 +505,9 @@ function exitMessage(terminal: LocalTerminalRow): string {
 
 async function maxRetriesOf(workflowId: string): Promise<number> {
   const [wf] = await db
-    .select({ maxRetries: workflows.maxRetries })
-    .from(workflows)
-    .where(eq(workflows.id, workflowId));
+    .select({ maxRetries: workDefinitions.maxRetries })
+    .from(workDefinitions)
+    .where(eq(workDefinitions.id, workflowId));
   return wf?.maxRetries ?? 0;
 }
 

@@ -3,8 +3,7 @@ import { countWork, inView } from "@optio/shared";
 
 // projectWork is pure; keep the services it gathers from (DB, queues) out of the test.
 vi.mock("./task-service.js", () => ({}));
-vi.mock("./task-config-service.js", () => ({}));
-vi.mock("./workflow-service.js", () => ({}));
+vi.mock("./work-definition-service.js", () => ({}));
 vi.mock("./local-terminal-service.js", () => ({}));
 vi.mock("./local-blueprint-service.js", () => ({}));
 vi.mock("./local-host-service.js", () => ({}));
@@ -18,10 +17,8 @@ const at = (s: string) => new Date(s);
 function sources(over: Partial<WorkSources> = {}): WorkSources {
   return {
     tasks: [],
-    taskConfigs: [],
-    workflows: [],
+    definitions: [],
     localTerminals: [],
-    localBlueprints: [],
     podSessions: [],
     agents: [],
     hosts: [],
@@ -65,11 +62,12 @@ describe("projectWork", () => {
             updatedAt: at("2026-08-01T00:00:00Z"),
           },
         ] as unknown as WorkSources["tasks"],
-        taskConfigs: [
+        definitions: [
           {
             id: "b1",
+            kind: "repo-blueprint",
             name: "Nightly",
-            title: "Nightly",
+            runTitle: "Nightly",
             enabled: true,
             repoUrl: "https://github.com/acme/app",
             agentType: null,
@@ -80,20 +78,32 @@ describe("projectWork", () => {
             createdAt: at("2026-07-01T00:00:00Z"),
             updatedAt: at("2026-07-01T00:00:00Z"),
           },
-        ] as unknown as WorkSources["taskConfigs"],
-        workflows: [
           {
             id: "j1",
+            kind: "standalone",
             name: "Report",
             enabled: false,
-            agentRuntime: "gemini",
+            agentType: "gemini",
             runTarget: "cluster",
             localHostId: null,
             localDir: null,
             createdAt: at("2026-07-01T00:00:00Z"),
             updatedAt: at("2026-07-01T00:00:00Z"),
           },
-        ] as unknown as WorkSources["workflows"],
+          {
+            id: "a1",
+            kind: "local-blueprint",
+            name: "Review PRs",
+            agentType: "claude-code",
+            runTarget: "local",
+            localHostId: "h1",
+            localDir: null,
+            localSessionMode: "interactive",
+            enabled: true,
+            createdAt: at("2026-07-01T00:00:00Z"),
+            updatedAt: at("2026-07-01T00:00:00Z"),
+          },
+        ] as unknown as WorkSources["definitions"],
         localTerminals: [
           {
             id: "lt1",
@@ -120,19 +130,6 @@ describe("projectWork", () => {
             spec: { kind: "agent", agent: "claude-code" },
           },
         ] as unknown as WorkSources["localTerminals"],
-        localBlueprints: [
-          {
-            id: "a1",
-            name: "Review PRs",
-            agent: "claude-code",
-            hostId: "h1",
-            dir: null,
-            sessionMode: "interactive",
-            enabled: true,
-            createdAt: at("2026-07-01T00:00:00Z"),
-            updatedAt: at("2026-07-01T00:00:00Z"),
-          },
-        ] as unknown as WorkSources["localBlueprints"],
         podSessions: [
           {
             id: "s1abcdef-0000-0000-0000-000000000000",

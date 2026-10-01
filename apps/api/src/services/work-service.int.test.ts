@@ -8,13 +8,13 @@ import { describe, expect, it } from "vitest";
 import { db } from "../db/client.js";
 import {
   interactiveSessions,
-  localBlueprints,
   localHosts,
   localTerminals,
   persistentAgents,
   users,
 } from "../db/schema.js";
 import {
+  insertLocalBlueprint,
   insertTask,
   insertTaskConfig,
   insertWorkflow,
@@ -62,16 +62,13 @@ async function seedPerson(workspaceId: string, label: string) {
       attentionState: "needs_you",
     })
     .returning();
-  const [blueprint] = await db
-    .insert(localBlueprints)
-    .values({
-      userId: user.id,
-      workspaceId,
-      name: `${label} automation`,
-      hostId: host.id,
-      commandTemplate: "claude",
-    })
-    .returning();
+  const blueprint = await insertLocalBlueprint({
+    userId: user.id,
+    workspaceId,
+    name: `${label} automation`,
+    hostId: host.id,
+    commandTemplate: "claude",
+  });
   const [session] = await db
     .insert(interactiveSessions)
     .values({ userId: user.id, workspaceId, repoUrl: "https://github.com/acme/app", branch: "s" })

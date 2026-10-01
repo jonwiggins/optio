@@ -35,7 +35,6 @@ import {
 } from "../schemas/trigger.js";
 import { getGitPlatformForRepo } from "../services/git-token-service.js";
 import { buildTicketPrompt } from "../services/ticket-context.js";
-import { getPromptTemplateById } from "../services/prompt-template-service.js";
 
 const registerHostSchema = z
   .object({
@@ -155,28 +154,6 @@ const TriggersResponse = z.object({ triggers: z.array(LocalTriggerSchema) });
  * caller's own machine (a member could otherwise run commands on a
  * teammate's laptop by guessing its host id).
  */
-async function checkBlueprintBody(
-  body: {
-    commandTemplate?: string;
-    promptTemplateId?: string | null;
-    hostId?: string | null;
-  },
-  userId: string | null | undefined,
-): Promise<string | null> {
-  if (!body.commandTemplate?.trim() && !body.promptTemplateId) {
-    return "Give the automation a prompt / command, or pick a saved prompt";
-  }
-  if (body.promptTemplateId) {
-    const saved = await getPromptTemplateById(body.promptTemplateId);
-    if (!saved) return "Saved prompt not found";
-  }
-  if (body.hostId) {
-    const host = await hostService.getHost(body.hostId);
-    if (!host || !hostService.canAccessHost(host, userId)) return "Host not found";
-  }
-  return null;
-}
-
 /** A host row plus what its connected daemon can do right now. */
 function withLiveCapabilities<T extends { id: string }>(host: T) {
   return {
@@ -861,7 +838,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const problem = await checkBlueprintBody(req.body, req.user?.id);
+      const problem = await blueprintService.checkBlueprint(req.body, req.user?.id);
       if (problem) return reply.status(400).send({ error: problem });
       try {
         const blueprint = await blueprintService.createBlueprint({
@@ -920,7 +897,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
       if (!blueprint || !blueprintService.canAccessBlueprint(blueprint, req.user?.id)) {
         return reply.status(404).send({ error: "Blueprint not found" });
       }
-      const problem = await checkBlueprintBody(
+      const problem = await blueprintService.checkBlueprint(
         {
           commandTemplate: req.body.commandTemplate ?? blueprint.commandTemplate,
           promptTemplateId:

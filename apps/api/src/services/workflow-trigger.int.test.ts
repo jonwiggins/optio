@@ -146,7 +146,7 @@ describe("schedule trigger dispatch (workflow-trigger-worker)", () => {
 
     await runTriggerCheck();
 
-    const spawned = await tasksForRepo(config.repoUrl);
+    const spawned = await tasksForRepo(config.repoUrl!);
     expect(spawned).toHaveLength(1);
     const task = spawned[0];
     expect(task.state).toBe("queued");
@@ -742,14 +742,14 @@ describe("event triggers on every target (event-trigger-service.fireEventTrigger
       normalizeGitHubEvent("pull_request", prOpened("acme/elsewhere"))!,
     );
     expect(miss.map((f) => f.triggerId)).not.toContain(trigger.id);
-    expect(await tasksForRepo(config.repoUrl)).toHaveLength(0);
+    expect(await tasksForRepo(config.repoUrl!)).toHaveLength(0);
 
     const hit = await fireEventTriggers(
       "github",
       normalizeGitHubEvent("pull_request", prOpened("acme/reviewed", 3))!,
     );
     expect(hit.filter((f) => f.triggerId === trigger.id)).toHaveLength(1);
-    const spawned = await tasksForRepo(config.repoUrl);
+    const spawned = await tasksForRepo(config.repoUrl!);
     expect(spawned).toHaveLength(1);
     expect(spawned[0].state).toBe("queued");
     expect(spawned[0].title).toBe("Review PR #3");

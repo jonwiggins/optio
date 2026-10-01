@@ -8,6 +8,7 @@ const mockListTasks = vi.fn();
 const mockSearchTasks = vi.fn();
 const mockGetTask = vi.fn();
 const mockCreateTask = vi.fn();
+const mockSubmitTask = vi.fn();
 const mockTransitionTask = vi.fn();
 const mockForceRedoTask = vi.fn();
 const mockGetTaskLogs = vi.fn();
@@ -20,6 +21,8 @@ vi.mock("../services/task-service.js", () => ({
   searchTasks: (...args: unknown[]) => mockSearchTasks(...args),
   getTask: (...args: unknown[]) => mockGetTask(...args),
   createTask: (...args: unknown[]) => mockCreateTask(...args),
+  submitTask: (...args: unknown[]) => mockSubmitTask(...args),
+  TaskInputError: class TaskInputError extends Error {},
   transitionTask: (...args: unknown[]) => mockTransitionTask(...args),
   forceRedoTask: (...args: unknown[]) => mockForceRedoTask(...args),
   getTaskLogs: (...args: unknown[]) => mockGetTaskLogs(...args),
@@ -69,7 +72,7 @@ vi.mock("../services/review-service.js", () => ({
   launchReview: vi.fn().mockResolvedValue("review-task-1"),
 }));
 
-// The unified resolver falls through to task_configs and workflows when the
+// The unified resolver falls through to the work definitions when the
 // tasks table lookup returns null. Stub to null so existing repo-task tests
 // continue to see 404s.
 const mockResolveAnyTaskById = vi.fn().mockResolvedValue(null);
@@ -289,11 +292,10 @@ describe("POST /api/tasks", () => {
     app = await buildTestApp();
   });
 
-  it("creates a task, enqueues it, and responds with the post-transition (queued) row", async () => {
-    mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "pending" });
-    // transitionTask returns the updated row — the route must respond with
-    // this, not the stale `pending` row from createTask().
-    mockTransitionTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "queued" });
+  it("submits the task and responds with the post-transition (queued) row", async () => {
+    // submitTask returns the row in the state it moved to — the route must
+    // respond with that, never the `pending` row createTask made.
+    mockSubmitTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "queued" });
 
     const res = await app.inject({
       method: "POST",
@@ -307,23 +309,22 @@ describe("POST /api/tasks", () => {
     });
 
     expect(res.statusCode).toBe(201);
-    expect(mockCreateTask).toHaveBeenCalledWith(
+    expect(mockSubmitTask).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Fix bug",
         prompt: "Fix the bug",
         repoUrl: "https://github.com/org/repo",
         agentType: "claude-code",
         workspaceId: "ws-1",
+        runTarget: "cluster",
       }),
+      "user-1",
     );
-    expect(mockTransitionTask).toHaveBeenCalled();
-    expect(mockQueueAdd).toHaveBeenCalled();
-    expect(res.json().task.state).toBe("queued");
+    expect(res.json().task).toMatchObject({ type: "repo-task", state: "queued" });
   });
 
   it("accepts a pod location spelled with nulls (what the web form sends)", async () => {
-    mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "pending" });
-    mockTransitionTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "queued" });
+    mockSubmitTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "queued" });
 
     const res = await app.inject({
       method: "POST",
@@ -341,6 +342,25 @@ describe("POST /api/tasks", () => {
     });
 
     expect(res.statusCode).toBe(201);
+  });
+
+  it("answers 400 when the task can't be submitted as asked", async () => {
+    const { TaskInputError } = await import("../services/task-service.js");
+    mockSubmitTask.mockRejectedValue(new TaskInputError("Dependency cycle"));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: {
+        title: "Fix bug",
+        prompt: "Fix the bug",
+        repoUrl: "https://github.com/org/repo",
+        dependsOn: ["00000000-0000-0000-0000-000000000001"],
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("Dependency cycle");
   });
 
   it("creates a standalone task with per-run agent options", async () => {
@@ -389,14 +409,8 @@ describe("POST /api/tasks", () => {
     expect(res.json().error).toMatch(/already exists/);
   });
 
-  it("creates a task with dependencies", async () => {
-    mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "pending" });
-    mockTransitionTask.mockResolvedValue({
-      ...mockTaskData,
-      id: "new-task",
-      state: "waiting_on_deps",
-    });
-    mockAddDependencies.mockResolvedValue(undefined);
+  it("passes dependencies through to submitTask", async () => {
+    mockSubmitTask.mockResolvedValue({ ...mockTaskData, id: "new-task", state: "waiting_on_deps" });
 
     const res = await app.inject({
       method: "POST",
@@ -411,19 +425,10 @@ describe("POST /api/tasks", () => {
     });
 
     expect(res.statusCode).toBe(201);
-    expect(mockAddDependencies).toHaveBeenCalledWith("new-task", [
-      "00000000-0000-0000-0000-000000000001",
-    ]);
-    // Should transition to WAITING_ON_DEPS instead of QUEUED
-    expect(mockTransitionTask).toHaveBeenCalledWith(
-      "new-task",
-      "waiting_on_deps",
-      "task_submitted_with_deps",
-      undefined,
+    expect(mockSubmitTask).toHaveBeenCalledWith(
+      expect.objectContaining({ dependsOn: ["00000000-0000-0000-0000-000000000001"] }),
       "user-1",
     );
-    // Should NOT enqueue when dependencies exist
-    expect(mockQueueAdd).not.toHaveBeenCalled();
     expect(res.json().task.state).toBe("waiting_on_deps");
   });
 
@@ -471,8 +476,7 @@ describe("POST /api/tasks", () => {
   });
 
   it("accepts valid repoBranch names", async () => {
-    mockCreateTask.mockResolvedValue({ ...mockTaskData, id: "new-task" });
-    mockTransitionTask.mockResolvedValue(undefined);
+    mockSubmitTask.mockResolvedValue({ ...mockTaskData, id: "new-task" });
 
     const res = await app.inject({
       method: "POST",

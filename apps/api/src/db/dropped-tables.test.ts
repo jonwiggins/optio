@@ -15,7 +15,12 @@ const DROPPED_TABLES = [
   "persistent_agent_pods",
   "repo_pod_state",
   "workflow_pod_state",
+  "task_configs",
+  "local_blueprints",
 ];
+
+/** `workflows` is an English word too, so it only counts where SQL names a table. */
+const SQL_TABLE_REFERENCE = /\b(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+"?workflows\b/i;
 
 const SRC = join(import.meta.dirname, "..");
 const ALLOWED = new Set([
@@ -41,6 +46,7 @@ describe("dropped tables", () => {
       for (const table of DROPPED_TABLES) {
         if (new RegExp(`\\b${table}\\b`).test(text)) offenders.push(`${rel}: ${table}`);
       }
+      if (SQL_TABLE_REFERENCE.test(text)) offenders.push(`${rel}: workflows`);
     }
     expect(offenders).toEqual([]);
   });

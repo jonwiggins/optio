@@ -3,7 +3,7 @@ import { db } from "../db/client.js";
 import {
   tasks,
   workflowRuns,
-  workflows,
+  workDefinitions,
   repos,
   taskEvents,
   prReviews,
@@ -407,7 +407,10 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
   const [row] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, ref.id));
   if (!row) return null;
 
-  const [workflowRow] = await db.select().from(workflows).where(eq(workflows.id, row.workflowId));
+  const [workflowRow] = await db
+    .select()
+    .from(workDefinitions)
+    .where(eq(workDefinitions.id, row.workflowId));
   if (!workflowRow) {
     logger.warn({ runId: ref.id, workflowId: row.workflowId }, "workflow not found for run");
     return null;
@@ -480,14 +483,14 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
 
 function loadStandaloneRun(
   row: typeof workflowRuns.$inferSelect,
-  workflowRow: typeof workflows.$inferSelect,
+  workflowRow: typeof workDefinitions.$inferSelect,
   ref: RunRef,
 ): Run {
   const spec: StandaloneRunSpec = {
     workflowId: workflowRow.id,
     workflowEnabled: workflowRow.enabled,
-    agentRuntime: workflowRow.agentRuntime,
-    promptRendered: workflowRow.promptTemplate,
+    agentRuntime: workflowRow.agentType ?? "claude-code",
+    promptRendered: workflowRow.prompt,
     params: row.params ?? null,
     maxConcurrent: workflowRow.maxConcurrent,
     maxRetries: workflowRow.maxRetries,
@@ -523,9 +526,9 @@ async function loadGlobalWorkflowCapacity() {
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(workflowRuns)
-    .innerJoin(workflows, eq(workflows.id, workflowRuns.workflowId))
+    .innerJoin(workDefinitions, eq(workDefinitions.id, workflowRuns.workflowId))
     .where(
-      sql`${workflowRuns.state} = ${WorkflowRunState.RUNNING} AND ${workflows.runTarget} <> 'local'`,
+      sql`${workflowRuns.state} = ${WorkflowRunState.RUNNING} AND ${workDefinitions.runTarget} <> 'local'`,
     );
   return { running: Number(count), max };
 }

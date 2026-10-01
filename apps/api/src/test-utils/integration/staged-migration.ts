@@ -5,9 +5,9 @@
  * SQL, call `migrateRest()`, and assert where every row landed.
  *
  *     const db = await stageDatabase("1791600000_task_pr_follow_through");
- *     await db.sql`INSERT INTO workflows ...`;
+ *     await db.sql`INSERT INTO tasks ...`;
  *     await db.migrateRest();
- *     expect(await db.sql`SELECT ... FROM work_definitions`).toEqual(...);
+ *     expect(await db.sql`SELECT work_id FROM tasks`).toEqual(...);
  *     await db.drop();
  *
  * Databases are named like the per-file ones (`optio_it_run_<pid>_<hex>`), so

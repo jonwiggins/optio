@@ -10,31 +10,35 @@
  */
 
 /** What happens when a turn ends — the form's **Then**. */
-export type WorkThen = "exits" | "until-merged" | "waits-for-me" | "waits-for-messages";
+export const WORK_THENS = ["exits", "until-merged", "waits-for-me", "waits-for-messages"] as const;
+export type WorkThen = (typeof WORK_THENS)[number];
 
-/** The kind of row a Work list entry comes from. */
-export type WorkSource =
-  | "repo-task"
-  | "repo-blueprint"
-  | "standalone"
-  | "local-blueprint"
-  | "local-terminal"
-  | "pod-session"
-  | "persistent-agent";
+/** The kind of row a Work list entry comes from — every kind of work Optio stores. */
+export const WORK_SOURCES = [
+  "repo-task",
+  "repo-blueprint",
+  "standalone",
+  "local-blueprint",
+  "local-terminal",
+  "pod-session",
+  "persistent-agent",
+] as const;
+export type WorkSource = (typeof WORK_SOURCES)[number];
 
-export type WorkStatus =
-  | "needs_you"
-  | "running"
-  | "queued"
-  | "waiting"
-  | "scheduled"
-  | "paused"
-  | "done"
-  | "failed";
+export const WORK_STATUSES = [
+  "needs_you",
+  "running",
+  "queued",
+  "waiting",
+  "scheduled",
+  "paused",
+  "done",
+  "failed",
+] as const;
+export type WorkStatus = (typeof WORK_STATUSES)[number];
 
-export type WorkView = "active" | "recurring" | "agents" | "history" | "all";
-
-export const WORK_VIEWS: readonly WorkView[] = ["active", "recurring", "agents", "history", "all"];
+export const WORK_VIEWS = ["active", "recurring", "agents", "history", "all"] as const;
+export type WorkView = (typeof WORK_VIEWS)[number];
 
 export interface WorkWhere {
   target: "pod" | "machine";

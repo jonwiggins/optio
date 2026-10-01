@@ -43,7 +43,7 @@ const costRows = sql`(
     r.created_at, w.workspace_id,
     '/jobs/' || w.id || '/runs/' || r.id AS href
   FROM workflow_runs r
-  JOIN workflows w ON w.id = r.workflow_id
+  JOIN work_definitions w ON w.id = r.workflow_id
   UNION ALL
   SELECT id, title, dir AS repo_url, 'local-session' AS task_type,
     CASE

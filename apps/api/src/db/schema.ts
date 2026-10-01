@@ -14,8 +14,10 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { WorkDefinitionKind } from "@optio/shared";
 
 // ── Workspace enums ─────────────────────────────────────────────────────────
 
@@ -135,6 +137,9 @@ export const tasks = pgTable(
     worktreeState: text("worktree_state"), // "active" | "dirty" | "reset" | "preserved" | "removed"
     lastPodId: uuid("last_pod_id"), // last pod this task ran on (for same-pod retry affinity)
     workflowRunId: uuid("workflow_run_id"), // nullable FK to workflow_runs
+    // The definition this task was spawned from (a scheduled Task); null for
+    // ad-hoc tasks. Deleting the definition keeps its tasks.
+    workId: uuid("work_id").references(() => workDefinitions.id, { onDelete: "set null" }),
     // Run location: "cluster" (repo pod + worktree, default) or "local" — the
     // owner's own machine via the Optio Local daemon. Local tasks are backed
     // by a local_terminals row whose lifecycle drives the task's state
@@ -174,6 +179,9 @@ export const tasks = pgTable(
     index("tasks_workspace_id_idx").on(table.workspaceId),
     index("tasks_workspace_state_idx").on(table.workspaceId, table.state),
     index("tasks_workspace_updated_idx").on(table.workspaceId, table.updatedAt),
+    index("tasks_work_id_idx")
+      .on(table.workId)
+      .where(sql`${table.workId} IS NOT NULL`),
   ],
 );
 
@@ -623,112 +631,117 @@ export const taskDependencies = pgTable(
   ],
 );
 
-// ── Task Configs (reusable task blueprints) ─────────────────────────────────
+// ── Work definitions ────────────────────────────────────────────────────────
 
-// A task_config is a saved, reusable task definition — the "blueprint" that
-// a trigger (schedule/webhook/manual) instantiates into a concrete task run.
-// Pattern intentionally mirrors `workflows` so that both targets plug into
-// the same generic trigger table.
-export const taskConfigs = pgTable(
-  "task_configs",
+// Saved, re-runnable work: what a trigger (the When) starts each time it
+// fires. One table for the three kinds, told apart by `kind`
+// (services/work-definition-service.ts):
+//   repo-blueprint   a scheduled Task — each firing spawns a repo task
+//   standalone       a Job — each firing starts a Job run (workflow_runs)
+//   local-blueprint  a Local automation — each firing opens a terminal on
+//                    its owner's machine (local_terminals)
+// Columns a kind doesn't use keep their defaults. The legacy endpoints
+// (/api/task-configs, /api/jobs, /api/local/blueprints) project rows back to
+// the shapes they always returned.
+export const workDefinitions = pgTable(
+  "work_definitions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").$type<WorkDefinitionKind>().notNull(),
     name: text("name").notNull(),
     description: text("description"),
+    // Scheduled Tasks and Jobs belong to a workspace (deleting it deletes
+    // them: workspace-service). Local automations belong to a person.
     workspaceId: uuid("workspace_id"),
-    // Task spawn blueprint — fields passed to taskService.createTask() when instantiated.
-    title: text("title").notNull(),
+    // Nullable: auth-disabled dev/e2e has no user rows (mirrors interactive_sessions).
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => users.id),
+    enabled: boolean("enabled").notNull().default(true),
+
+    // What. The prompt (a Local automation's command when it runs no agent)
+    // is a `{{param}}` template rendered with each firing's params, unless a
+    // saved prompt from the Prompts library replaces it.
     prompt: text("prompt").notNull(),
-    promptTemplateId: uuid("prompt_template_id"),
-    repoUrl: text("repo_url").notNull(),
-    repoBranch: text("repo_branch").notNull().default("main"),
+    promptTemplateId: uuid("prompt_template_id").references(() => promptTemplates.id, {
+      onDelete: "set null",
+    }),
+    // Name each run gets, a `{{param}}` template ("Triage: {{ticketTitle}}").
+    // Null = the definition's name.
+    runTitle: text("run_title"),
+    paramsSchema: jsonb("params_schema").$type<Record<string, unknown>>(),
+
+    // Who. Null agent = a scheduled Task's template / the repo default, or a
+    // Local automation that runs a plain shell command.
     agentType: text("agent_type"),
-    maxRetries: integer("max_retries").notNull().default(3),
-    priority: integer("priority").notNull().default(100),
-    // Per-run agent parameters (model, effort, thinking, …) copied into each
-    // spawned task's metadata.agentOptions; null = the repo's defaults.
+    // Jobs' legacy single model field; agentOptions is the full set.
+    model: text("model"),
+    // Per-run agent parameters keyed like the provider catalog (model,
+    // effort, Claude Code's permission mode, …). Null = the defaults.
     agentOptions: jsonb("agent_options").$type<Record<string, string | boolean>>(),
-    // Run location inherited by every spawned task — see tasks.run_target.
+
+    // Where. Repo kinds: the repo and the branch the work starts from (and
+    // its PR targets); a Local automation with a null branch works in the
+    // checkout as it is.
+    repoUrl: text("repo_url"),
+    repoBranch: text("repo_branch"),
     runTarget: text("run_target").$type<"cluster" | "local">().notNull().default("cluster"),
     localHostId: uuid("local_host_id").references(() => localHosts.id, { onDelete: "set null" }),
     localDir: text("local_dir"),
     localSessionMode: text("local_session_mode").$type<"interactive" | "headless">(),
+    environmentSpec: jsonb("environment_spec").$type<Record<string, unknown>>(),
+    // Local automations: "hold" parks each spawned terminal until you start it.
+    spawnMode: text("spawn_mode").$type<"auto" | "hold">().notNull().default("auto"),
+
+    // How runs go.
+    maxRetries: integer("max_retries").notNull().default(1),
+    priority: integer("priority").notNull().default(100),
     // PR follow-through copied onto every spawned task (see tasks.auto_resume).
     autoResume: boolean("auto_resume"),
     autoMerge: boolean("auto_merge"),
-    enabled: boolean("enabled").notNull().default(true),
-    createdBy: uuid("created_by"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    unique("task_configs_workspace_name_key").on(table.workspaceId, table.name),
-    index("task_configs_workspace_id_idx").on(table.workspaceId),
-    index("task_configs_enabled_idx").on(table.enabled),
-  ],
-);
-
-// ── Workflows ────────────────────────────────────────────────────────────────
-
-export const workflows = pgTable(
-  "workflows",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    name: text("name").notNull(),
-    description: text("description"),
-    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
-    environmentSpec: jsonb("environment_spec").$type<Record<string, unknown>>(),
-    promptTemplate: text("prompt_template").notNull(),
-    paramsSchema: jsonb("params_schema").$type<Record<string, unknown>>(),
-    // Name each run gets, a `{{param}}` template rendered with the trigger's
-    // params ("Triage: {{ticketTitle}}"). Null = the workflow's name.
-    runTitle: text("run_title"),
-    agentRuntime: text("agent_runtime").notNull().default("claude-code"),
-    model: text("model"),
-    // Per-run agent parameters for the runtime (model, effort, thinking,
-    // approval mode, …) keyed like the provider catalog / repos columns.
-    // Null = the runtime's defaults. `model` stays as the legacy single field.
-    agentOptions: jsonb("agent_options").$type<Record<string, string | boolean>>(),
     maxTurns: integer("max_turns"),
     budgetUsd: text("budget_usd"),
     maxConcurrent: integer("max_concurrent").notNull().default(2),
-    maxRetries: integer("max_retries").notNull().default(1),
     warmPoolSize: integer("warm_pool_size").notNull().default(0),
-    // Pod pooling — mirrors repos.maxPodInstances / maxAgentsPerPod. Runs share
-    // pods within a workflow, scaling out to maxPodInstances replicas.
+    // Job pod pooling — mirrors repos.maxPodInstances / maxAgentsPerPod. Runs
+    // share pods within a Job, scaling out to maxPodInstances replicas.
     maxPodInstances: integer("max_pod_instances").notNull().default(1),
     maxAgentsPerPod: integer("max_agents_per_pod").notNull().default(2),
-    // Run location: "cluster" (pooled job pods, default) or "local" — every
-    // run of this job executes on the owner's machine in local_dir via the
-    // Optio Local daemon. See tasks.run_target.
-    runTarget: text("run_target").$type<"cluster" | "local">().notNull().default("cluster"),
-    localHostId: uuid("local_host_id").references(() => localHosts.id, { onDelete: "set null" }),
-    localDir: text("local_dir"),
-    localSessionMode: text("local_session_mode")
-      .$type<"interactive" | "headless">()
-      .notNull()
-      .default("headless"),
-    enabled: boolean("enabled").notNull().default(true),
-    createdBy: uuid("created_by").references(() => users.id),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    unique("workflows_workspace_name_key").on(table.workspaceId, table.name),
-    index("workflows_workspace_id_idx").on(table.workspaceId),
+    // Names are unique per kind: scheduled Tasks and Jobs per workspace,
+    // Local automations per person.
+    uniqueIndex("work_definitions_workspace_name_key")
+      .on(table.kind, table.workspaceId, table.name)
+      .where(sql`${table.kind} <> 'local-blueprint'`),
+    uniqueIndex("work_definitions_user_name_key")
+      .on(table.userId, table.name)
+      .where(sql`${table.kind} = 'local-blueprint'`),
+    index("work_definitions_workspace_id_idx").on(table.workspaceId),
+    check(
+      "work_definitions_kind_check",
+      sql`${table.kind} IN ('repo-blueprint', 'standalone', 'local-blueprint')`,
+    ),
+    check(
+      "work_definitions_repo_check",
+      sql`${table.kind} <> 'repo-blueprint' OR ${table.repoUrl} IS NOT NULL`,
+    ),
   ],
 );
 
-// Generic trigger table — dispatches to any target (jobs or task_configs).
-// Historical name "workflow_triggers" kept to avoid a large rename migration;
-// treat it as the generic `triggers` table.
+// Generic trigger table — dispatches to any target: a work definition (by its
+// kind's target type: "job", "task_config", "local_blueprint"), a persistent
+// agent, or a PR review. Historical name "workflow_triggers" kept to avoid a
+// large rename migration; treat it as the generic `triggers` table.
 export const workflowTriggers = pgTable(
   "workflow_triggers",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     // Legacy FK retained for back-compat with workflow_runs.triggerId joins.
     // For target_type='job' this mirrors target_id; for other types it is null.
-    workflowId: uuid("workflow_id").references(() => workflows.id, { onDelete: "cascade" }),
+    workflowId: uuid("workflow_id").references(() => workDefinitions.id, { onDelete: "cascade" }),
     targetType: text("target_type").notNull().default("job"), // "job" | "task_config" | "persistent_agent"
     targetId: uuid("target_id").notNull(),
     type: text("type").notNull(), // "manual" | "schedule" | "webhook"
@@ -753,11 +766,11 @@ export const workflowRuns = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     workflowId: uuid("workflow_id")
       .notNull()
-      .references(() => workflows.id, { onDelete: "cascade" }),
+      .references(() => workDefinitions.id, { onDelete: "cascade" }),
     // SET NULL: deleting a trigger keeps the runs it started (1791000000).
     triggerId: uuid("trigger_id").references(() => workflowTriggers.id, { onDelete: "set null" }),
     params: jsonb("params").$type<Record<string, unknown>>(),
-    // workflows.run_title rendered with this run's params; null = no template.
+    // The Job's run_title rendered with this run's params; null = no template.
     title: text("title"),
     state: text("state").notNull().default("queued"), // "queued" | "running" | "completed" | "failed"
     output: jsonb("output").$type<Record<string, unknown>>(),
@@ -775,7 +788,7 @@ export const workflowRuns = pgTable(
     // prefer same-pod retries (mirrors tasks.lastPodId). Not a hard FK so pod
     // cleanup doesn't require nulling out historical references.
     lastPodId: uuid("last_pod_id"),
-    // Local runs (workflows.run_target = "local"): the local_terminals row
+    // Local runs (the Job's run_target = "local"): the local_terminals row
     // executing this attempt. Soft pointer, replaced on retry.
     localTerminalId: uuid("local_terminal_id"),
     retryCount: integer("retry_count").notNull().default(0),
@@ -1074,7 +1087,7 @@ export const optioActions = pgTable(
 // ── PR Reviews (first-class primitive) ──────────────────────────────────────
 //
 // External PR reviews are a sibling of Repo Tasks (`tasks`) and Standalone
-// Tasks (`workflows`) — they have their own state machine, their own
+// Tasks (Jobs, `work_definitions`) — they have their own state machine, their own
 // execution runs, their own reconciler, and their own UI at `/reviews`.
 //
 // `pr_reviews`         canonical review record (one per PR being reviewed)
@@ -1368,7 +1381,7 @@ export const promptTemplates = pgTable(
     workspaceId: uuid("workspace_id"),
     // Discriminator: "prompt" (coding template, existing usage)
     //                "review" (review agent template)
-    //                "job"    (Job prompt template — previously inline on workflows)
+    //                "job"    (Job prompt template — previously inline on the Job)
     //                "task"   (Task config template)
     kind: text("kind").notNull().default("prompt"),
     paramsSchema: jsonb("params_schema").$type<Record<string, unknown>>(),
@@ -1447,7 +1460,7 @@ export const persistentAgents = pgTable(
     description: text("description"),
     agentRuntime: text("agent_runtime").notNull().default("claude-code"),
     model: text("model"),
-    // Per-turn agent parameters (see workflows.agentOptions). Null = defaults.
+    // Per-turn agent parameters (see work_definitions.agent_options). Null = defaults.
     agentOptions: jsonb("agent_options").$type<Record<string, string | boolean>>(),
     systemPrompt: text("system_prompt"),
     // Operator manual: "how to use the optio agent CLI/MCP". Injected into the
@@ -1671,6 +1684,7 @@ export const localTerminals = pgTable(
       .$type<"manual" | "ticket" | "trigger" | "blueprint" | "api" | "resume" | "job" | "task">()
       .notNull()
       .default("manual"),
+    // The Local automation (work_definitions) that spawned it. Soft pointer.
     blueprintId: uuid("blueprint_id"),
     triggerId: uuid("trigger_id"),
     // Back-links for terminals that execute a Job run / Repo Task whose run
@@ -1767,55 +1781,4 @@ export const localTerminalTranscripts = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.terminalId, table.seq] })],
-);
-
-export const localBlueprints = pgTable(
-  "local_blueprints",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    // Nullable: auth-disabled dev/e2e has no user rows (mirrors interactive_sessions).
-    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
-    workspaceId: uuid("workspace_id"),
-    name: text("name").notNull(),
-    description: text("description"),
-    hostId: uuid("host_id").references(() => localHosts.id, { onDelete: "set null" }),
-    dir: text("dir"),
-    repoUrl: text("repo_url"),
-    // "Work on a new branch that becomes a PR": agent spawns get their prompt
-    // wrapped with branch-and-PR instructions off this base. Null = the
-    // directory as it is.
-    baseBranch: text("base_branch"),
-    commandTemplate: text("command_template").notNull(),
-    // Title of each spawned terminal, a `{{param}}` template rendered with the
-    // trigger's params. Null = the blueprint name (plus the ticket, if any).
-    runTitle: text("run_title"),
-    // A saved prompt from the Prompts library. When set, its text is the
-    // agent's prompt (rendered with the trigger params) and commandTemplate
-    // is ignored — so one reviewed prompt can back many automations.
-    promptTemplateId: uuid("prompt_template_id").references(() => promptTemplates.id, {
-      onDelete: "set null",
-    }),
-    // When set, the rendered template is the agent's prompt (a single quoted
-    // argv element, so params are NOT shell-quoted) and the spawn runs through
-    // the daemon's agent path — so automation-spawned agents get attention
-    // hooks. Null = plain shell command (params shell-quoted).
-    agent: text("agent").$type<"claude-code" | "codex" | "cursor" | "gemini" | "opencode">(),
-    spawnMode: text("spawn_mode").$type<"auto" | "hold">().notNull().default("auto"),
-    // Agent spawns only. "interactive" = stay open at the prompt for chat
-    // (needs-you queue); "headless" = one-shot print mode, exit when done.
-    sessionMode: text("session_mode")
-      .$type<"interactive" | "headless">()
-      .notNull()
-      .default("interactive"),
-    // Agent spawns: per-run agent parameters keyed like the provider catalog
-    // (model, effort, Claude Code's permission mode). Null = the machine's own.
-    agentOptions: jsonb("agent_options").$type<Record<string, string | boolean>>(),
-    enabled: boolean("enabled").notNull().default(true),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    unique("local_blueprints_user_name_key").on(table.userId, table.name),
-    index("local_blueprints_user_id_idx").on(table.userId),
-  ],
 );

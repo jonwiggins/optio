@@ -9,6 +9,7 @@ import {
   normalizeRepoUrl,
   DEFAULT_STALL_THRESHOLD_MS,
   parseIntEnv,
+  toLocalAgentKind,
   type CreateTaskInput,
 } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
@@ -35,7 +36,13 @@ export class StateRaceError extends Error {
   }
 }
 
-export async function createTask(input: CreateTaskInput & { workspaceId?: string | null }) {
+export async function createTask(
+  input: CreateTaskInput & {
+    workspaceId?: string | null;
+    /** The work definition (scheduled Task) spawning it. */
+    workId?: string | null;
+  },
+) {
   const [task] = await db
     .insert(tasks)
     .values({
@@ -58,6 +65,7 @@ export async function createTask(input: CreateTaskInput & { workspaceId?: string
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
       autoResume: input.autoResume ?? null,
       autoMerge: input.autoMerge ?? null,
+      workId: input.workId ?? null,
     })
     .returning();
 
@@ -69,6 +77,78 @@ export async function createTask(input: CreateTaskInput & { workspaceId?: string
   });
 
   return task;
+}
+
+/** Why a task can't be submitted as asked (the caller answers 400). */
+export class TaskInputError extends Error {}
+
+/**
+ * Create a one-off repo task and put it in line: queued (and handed to the
+ * task worker), or waiting on the tasks it depends on. The agent defaults to
+ * the repo's. Returns the task in the state it moved to. Throws
+ * `TaskInputError` before creating anything when the agent can't run where
+ * asked, and after when a dependency can't be added (the task stays
+ * pending, as the HTTP route always left it).
+ */
+export async function submitTask(
+  input: Omit<CreateTaskInput, "agentType" | "dependsOn"> & {
+    agentType?: string | null;
+    workspaceId?: string | null;
+    dependsOn?: string[];
+  },
+  userId?: string,
+) {
+  let agentType = input.agentType ?? "";
+  if (!agentType) {
+    const { getRepoByUrl } = await import("./repo-service.js");
+    const repo = await getRepoByUrl(input.repoUrl, input.workspaceId ?? null);
+    agentType = repo?.defaultAgentType ?? "claude-code";
+  }
+  if (input.runTarget === "local" && !toLocalAgentKind(agentType)) {
+    throw new TaskInputError(
+      `${agentType} can't run on your machine — pick Claude Code, Codex, Cursor, Gemini, or OpenCode`,
+    );
+  }
+
+  const { dependsOn, ...rest } = input;
+  const task = await createTask({ ...rest, agentType, createdBy: userId ?? input.createdBy });
+  if (dependsOn && dependsOn.length > 0) {
+    const { addDependencies } = await import("./dependency-service.js");
+    try {
+      await addDependencies(task.id, dependsOn);
+    } catch (err) {
+      throw new TaskInputError(err instanceof Error ? err.message : String(err));
+    }
+    return (
+      (await transitionTask(
+        task.id,
+        TaskState.WAITING_ON_DEPS,
+        "task_submitted_with_deps",
+        undefined,
+        userId,
+      )) ?? task
+    );
+  }
+  const queued = await transitionTask(
+    task.id,
+    TaskState.QUEUED,
+    "task_submitted",
+    undefined,
+    userId,
+  );
+  // Dynamic import: the task worker imports this module.
+  const { taskQueue } = await import("../workers/task-worker.js");
+  await taskQueue.add(
+    "process-task",
+    { taskId: task.id },
+    {
+      jobId: task.id,
+      priority: task.priority ?? 100,
+      attempts: task.maxRetries + 1,
+      backoff: { type: "exponential", delay: 5000 },
+    },
+  );
+  return queued ?? task;
 }
 
 export async function getTask(id: string) {

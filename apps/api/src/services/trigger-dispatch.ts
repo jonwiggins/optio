@@ -17,6 +17,7 @@ import type { TriggerType } from "@optio/shared";
 import { logger } from "../logger.js";
 import * as workflowService from "./workflow-service.js";
 import * as taskConfigService from "./task-config-service.js";
+import { definitionKindOf, getDefinition, type WorkDefinition } from "./work-definition-service.js";
 import {
   listEnabledTriggersOfType,
   markTriggerFired,
@@ -82,49 +83,15 @@ async function dispatch(
     return null;
   };
 
+  const kind = definitionKindOf(trigger.targetType);
+  if (kind) {
+    const definition = await getDefinition(trigger.targetId, kind);
+    if (!definition) return skip("missing");
+    if (!definition.enabled) return skip("disabled");
+    return startDefinition(definition, trigger.id, firing);
+  }
+
   switch (trigger.targetType) {
-    case "job": {
-      const workflow = await workflowService.getWorkflow(trigger.targetId);
-      if (!workflow) return skip("missing");
-      if (!workflow.enabled) return skip("disabled");
-      const run = await workflowService.createWorkflowRun(workflow.id, {
-        triggerId: trigger.id,
-        params: firing.params,
-      });
-      return { kind: "workflow_run", id: run.id };
-    }
-
-    case "task_config": {
-      const config = await taskConfigService.getTaskConfig(trigger.targetId);
-      if (!config) return skip("missing");
-      if (!config.enabled) return skip("disabled");
-      const task = await taskConfigService.instantiateTask(config.id, {
-        triggerId: trigger.id,
-        params: firing.params,
-        // A ticket link closes the issue when the task completes — right for
-        // a ticket trigger, wrong for a PR / issue *event* the task only
-        // reacts to (its fields still reach the prompt as params).
-        ticket: firing.source === "ticket" ? firing.ticket : undefined,
-      });
-      return { kind: "task", id: task.id };
-    }
-
-    case "local_blueprint": {
-      const { getBlueprint, spawnFromBlueprint } = await import("./local-blueprint-service.js");
-      const blueprint = await getBlueprint(trigger.targetId);
-      if (!blueprint) return skip("missing");
-      if (!blueprint.enabled) return skip("disabled");
-      const terminal = await spawnFromBlueprint(blueprint, {
-        triggerId: trigger.id,
-        spawnedBy: firing.source === "ticket" ? "ticket" : "trigger",
-        params: firing.params,
-        ticket: firing.ticket,
-        repoUrlHint: firing.repoUrlHint,
-        title: firing.title,
-      });
-      return { kind: "local_terminal", id: terminal.id };
-    }
-
     case "persistent_agent": {
       const { getPersistentAgentUnscoped, wakeAgent, buildSenderId } =
         await import("./persistent-agent-service.js");
@@ -152,6 +119,46 @@ async function dispatch(
 
     default:
       return skip(`type "${trigger.targetType}" unknown`);
+  }
+}
+
+/** Start what a work definition starts: a Job run, a repo task, or a terminal on a machine. */
+async function startDefinition(
+  definition: WorkDefinition,
+  triggerId: string,
+  firing: TriggerFiring,
+): Promise<TriggerFireResult> {
+  switch (definition.kind) {
+    case "standalone": {
+      const run = await workflowService.createWorkflowRun(definition.id, {
+        triggerId,
+        params: firing.params,
+      });
+      return { kind: "workflow_run", id: run.id };
+    }
+    case "repo-blueprint": {
+      const task = await taskConfigService.instantiateTask(definition.id, {
+        triggerId,
+        params: firing.params,
+        // A ticket link closes the issue when the task completes — right for
+        // a ticket trigger, wrong for a PR / issue *event* the task only
+        // reacts to (its fields still reach the prompt as params).
+        ticket: firing.source === "ticket" ? firing.ticket : undefined,
+      });
+      return { kind: "task", id: task.id };
+    }
+    case "local-blueprint": {
+      const { spawnFromBlueprint, toLocalBlueprint } = await import("./local-blueprint-service.js");
+      const terminal = await spawnFromBlueprint(toLocalBlueprint(definition), {
+        triggerId,
+        spawnedBy: firing.source === "ticket" ? "ticket" : "trigger",
+        params: firing.params,
+        ticket: firing.ticket,
+        repoUrlHint: firing.repoUrlHint,
+        title: firing.title,
+      });
+      return { kind: "local_terminal", id: terminal.id };
+    }
   }
 }
 

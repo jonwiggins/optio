@@ -18,8 +18,10 @@ import { Queue } from "bullmq";
 import { eq } from "drizzle-orm";
 import { WorkflowRunState, reconcileStandalone } from "@optio/shared";
 import { db } from "../db/client.js";
-import { workflowRuns } from "../db/schema.js";
+import { agentPods, workflowRuns } from "../db/schema.js";
+import { releaseRun } from "./workflow-pool-service.js";
 import * as workflowService from "./workflow-service.js";
+import * as taskConfigService from "./task-config-service.js";
 import { buildWorldSnapshot } from "./reconcile-snapshot.js";
 import { getBullMQConnectionOptions } from "./redis-config.js";
 import {
@@ -105,14 +107,24 @@ describe("workflow CRUD", () => {
       );
     expect(err).toBeInstanceOf(Error);
     expect(String((err as Error).cause ?? err)).toMatch(
-      /duplicate key value.*workflows_workspace_name_key/,
+      /duplicate key value.*work_definitions_workspace_name_key/,
     );
 
-    // Actual behavior: the unique constraint is (workspace_id, name) and
+    // Actual behavior: the unique index is (kind, workspace_id, name) and
     // Postgres treats NULLs as distinct, so workspace-less duplicates insert.
     const a = await workflowService.createWorkflow({ name, promptTemplate: "p" });
     const b = await workflowService.createWorkflow({ name, promptTemplate: "p" });
     expect(a.id).not.toBe(b.id);
+
+    // Each kind is its own namespace: a scheduled Task may share a Job's name.
+    const config = await taskConfigService.createTaskConfig({
+      name,
+      title: name,
+      prompt: "p",
+      repoUrl: "https://github.com/acme/app",
+      workspaceId: ws.id,
+    });
+    expect(config.name).toBe(name);
   });
 
   it("updateWorkflow updates fields and returns null for an unknown id", async () => {
@@ -132,7 +144,7 @@ describe("workflow CRUD", () => {
     expect(updated!.enabled).toBe(false);
     // untouched fields survive
     expect(updated!.name).toBe(wf.name);
-    expect(updated!.promptTemplate).toBe(wf.promptTemplate);
+    expect(updated!.promptTemplate).toBe(wf.prompt);
     expect(updated!.updatedAt.getTime()).toBeGreaterThanOrEqual(wf.updatedAt.getTime());
 
     expect(await workflowService.updateWorkflow(randomUUID(), { description: "x" })).toBeNull();
@@ -298,6 +310,71 @@ describe("transitionWorkflowRunCas", () => {
         WorkflowRunState.RUNNING,
       ),
     ).toBeNull();
+  });
+});
+
+describe("a worker's attempt", () => {
+  it("only finishes and lets go of the attempt it claimed, never a retry that replaced it", async () => {
+    const wf = await insertWorkflow();
+    const [pod] = await db
+      .insert(agentPods)
+      .values({ pool: "standalone", poolKey: wf.id, state: "ready", podName: "p", activeCount: 2 })
+      .returning();
+    const first = await workflowService.createWorkflowRun(wf.id);
+    const claimed = await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.QUEUED,
+      WorkflowRunState.RUNNING,
+      { startedAt: new Date(Date.now() - 60_000), podId: pod.id },
+    );
+    const attempt1 = claimed!.startedAt!;
+
+    // Failed as stalled and retried: attempt 2 holds the run (and the same pod).
+    await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.RUNNING,
+      WorkflowRunState.FAILED,
+    );
+    await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.FAILED,
+      WorkflowRunState.QUEUED,
+    );
+    await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.QUEUED,
+      WorkflowRunState.RUNNING,
+      { startedAt: new Date() },
+    );
+
+    // Attempt 1's agent finishes late: its result doesn't land, and it gives
+    // back its own slot without taking attempt 2's pod away.
+    expect(
+      await workflowService.transitionWorkflowRunCas(
+        first.id,
+        WorkflowRunState.RUNNING,
+        WorkflowRunState.COMPLETED,
+        {},
+        { startedAt: attempt1 },
+      ),
+    ).toBeNull();
+    await releaseRun(first.id, pod.id, attempt1);
+    const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, first.id));
+    expect(run).toMatchObject({ state: "running", podId: pod.id });
+    const [after] = await db.select().from(agentPods).where(eq(agentPods.id, pod.id));
+    expect(after.activeCount).toBe(1);
+
+    // Attempt 2 finishes and lets go.
+    await workflowService.transitionWorkflowRunCas(
+      first.id,
+      WorkflowRunState.RUNNING,
+      WorkflowRunState.COMPLETED,
+      {},
+      { startedAt: run.startedAt! },
+    );
+    await releaseRun(first.id, pod.id, run.startedAt!);
+    const [done] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, first.id));
+    expect(done).toMatchObject({ state: "completed", podId: null });
   });
 });
 

@@ -11,7 +11,10 @@ import {
   deleteNetworkPolicy,
   killOrphanedAgentInPod,
 } from "../services/repo-pool-service.js";
-import { cleanupIdleWorkflowPods } from "../services/workflow-pool-service.js";
+import {
+  cleanupIdleWorkflowPods,
+  reconcileActiveRunCounts,
+} from "../services/workflow-pool-service.js";
 import { cleanupIdlePersistentAgentPods } from "../services/persistent-agent-pool-service.js";
 import {
   cleanupZombieWorkflowRuns,
@@ -532,8 +535,12 @@ export function startRepoCleanupWorker() {
         logger.info({ cleaned }, "Cleaned up idle repo pods");
       }
 
-      // Clean up idle workflow pods
+      // Clean up idle workflow pods, after repairing their counts the same way
       try {
+        const runCountsFixed = await reconcileActiveRunCounts();
+        if (runCountsFixed > 0) {
+          logger.info({ runCountsFixed }, "Reconciled workflow pod active counts");
+        }
         const workflowCleaned = await cleanupIdleWorkflowPods();
         if (workflowCleaned > 0) {
           logger.info({ workflowCleaned }, "Cleaned up idle workflow pods");

@@ -5,13 +5,13 @@
  *
  * The user-facing concept is one "Task" with the following internal shapes:
  *   - `repo-task`       → rows in `tasks`          (ad-hoc one-time Repo Task run)
- *   - `repo-blueprint`  → rows in `task_configs`   (reusable Repo Task blueprint)
- *   - `standalone`      → rows in `workflows`      (Standalone Task blueprint)
+ *   - `repo-blueprint`  → `work_definitions` rows of that kind (reusable Repo Task blueprint)
+ *   - `standalone`      → `work_definitions` rows of that kind (Standalone Task blueprint)
  *   - `pr-review`       → rows in `pr_reviews`     (external PR review)
  *
  * Runs underneath each:
  *   - `repo-task`       → has no sub-runs (the row itself IS a run)
- *   - `repo-blueprint`  → spawned `tasks` rows (linked via metadata.taskConfigId)
+ *   - `repo-blueprint`  → spawned `tasks` rows (linked via tasks.work_id)
  *   - `standalone`      → rows in `workflow_runs`
  *   - `pr-review`       → rows in `pr_review_runs`
  */
@@ -20,8 +20,7 @@ import { eq, and, desc, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import {
   tasks,
-  taskConfigs,
-  workflows,
+  workDefinitions,
   workflowRuns,
   workflowTriggers,
   prReviews,
@@ -42,7 +41,7 @@ export interface ResolvedTask {
 
 /**
  * Resolve an id across all three backing tables, in order of likelihood:
- * tasks (most common — ad-hoc runs) → task_configs → workflows. Returns null
+ * tasks (most common — ad-hoc runs) → scheduled Tasks → Jobs → PR reviews. Returns null
  * if no match. Optionally enforces workspace scoping.
  */
 export async function resolveAnyTaskById(
@@ -80,8 +79,8 @@ export async function resolveAnyTaskById(
  * List Tasks across backing tables.
  *
  * type="repo-task"       — tasks only
- * type="repo-blueprint"  — task_configs only
- * type="standalone"      — workflows only
+ * type="repo-blueprint"  — scheduled Tasks only
+ * type="standalone"      — Jobs only
  * type=undefined         — all three merged; individual rows tagged with `type`
  */
 /**
@@ -95,19 +94,30 @@ export async function countUnifiedTasks(opts: {
   workspaceId?: string | null;
 }): Promise<number> {
   const wsId = opts.workspaceId ?? null;
-  const countRows = async (
-    table: typeof tasks | typeof taskConfigs | typeof workflows | typeof prReviews,
-  ): Promise<number> => {
+  const countRows = async (table: typeof tasks | typeof prReviews): Promise<number> => {
     const [row] = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(table)
       .where(wsId ? eq(table.workspaceId, wsId) : undefined);
     return row?.n ?? 0;
   };
+  const countDefinitions = async (kind: "repo-blueprint" | "standalone"): Promise<number> => {
+    const [row] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(workDefinitions)
+      .where(
+        and(
+          eq(workDefinitions.kind, kind),
+          wsId ? eq(workDefinitions.workspaceId, wsId) : undefined,
+        ),
+      );
+    return row?.n ?? 0;
+  };
   let total = 0;
   if (!opts.type || opts.type === "repo-task") total += await countRows(tasks);
-  if (!opts.type || opts.type === "repo-blueprint") total += await countRows(taskConfigs);
-  if (!opts.type || opts.type === "standalone") total += await countRows(workflows);
+  if (!opts.type || opts.type === "repo-blueprint")
+    total += await countDefinitions("repo-blueprint");
+  if (!opts.type || opts.type === "standalone") total += await countDefinitions("standalone");
   if (!opts.type || opts.type === "pr-review") total += await countRows(prReviews);
   return total;
 }
@@ -169,12 +179,12 @@ export async function listUnifiedRuns(
   if (parent.type === "repo-task") return [];
 
   if (parent.type === "repo-blueprint") {
-    // Spawned tasks are normal tasks rows with metadata.taskConfigId set.
+    // Spawned tasks are normal tasks rows pointing at their definition.
     const parentId = parent.data.id as string;
     const rows = await db
       .select()
       .from(tasks)
-      .where(sql`${tasks.metadata}->>'taskConfigId' = ${parentId}`)
+      .where(eq(tasks.workId, parentId))
       .orderBy(desc(tasks.createdAt))
       .limit(limit);
     return rows as unknown as Array<Record<string, unknown>>;
@@ -217,7 +227,7 @@ export async function getUnifiedRun(
     const [row] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, runId), sql`${tasks.metadata}->>'taskConfigId' = ${parentId}`));
+      .where(and(eq(tasks.id, runId), eq(tasks.workId, parentId)));
     return (row as unknown as Record<string, unknown>) ?? null;
   }
 

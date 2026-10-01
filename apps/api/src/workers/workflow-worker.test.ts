@@ -28,7 +28,7 @@ vi.mock("../db/client.js", () => {
 
 vi.mock("../db/schema.js", () => ({
   workflowRuns: { id: "id", workflowId: "workflow_id", state: "state" },
-  workflows: { id: "id" },
+  workDefinitions: { id: "id", runTarget: "run_target" },
   workflowPods: { id: "id" },
 }));
 

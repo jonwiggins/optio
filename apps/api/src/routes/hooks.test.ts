@@ -6,25 +6,31 @@ import { buildRouteTestApp } from "../test-utils/build-route-test-app.js";
 // ─── Mocks ───
 
 const mockGetWebhookTriggerByPath = vi.fn();
-const mockGetWorkflow = vi.fn();
+const mockGetDefinition = vi.fn();
 const mockCreateWorkflowRun = vi.fn();
-const mockGetTaskConfig = vi.fn();
 const mockInstantiateTask = vi.fn();
 
 // The route finds the trigger through the trigger service and fires it
-// through the dispatcher, which reaches the per-kind services mocked here.
+// through the dispatcher, which looks the target up as a work definition and
+// starts it through the per-kind services mocked here.
 vi.mock("../services/trigger-service.js", () => ({
   getWebhookTriggerByPath: (...args: unknown[]) => mockGetWebhookTriggerByPath(...args),
   markTriggerFired: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../services/work-definition-service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/work-definition-service.js")>();
+  return {
+    definitionKindOf: actual.definitionKindOf,
+    getDefinition: (...args: unknown[]) => mockGetDefinition(...args),
+  };
+});
+
 vi.mock("../services/workflow-service.js", () => ({
-  getWorkflow: (...args: unknown[]) => mockGetWorkflow(...args),
   createWorkflowRun: (...args: unknown[]) => mockCreateWorkflowRun(...args),
 }));
 
 vi.mock("../services/task-config-service.js", () => ({
-  getTaskConfig: (...args: unknown[]) => mockGetTaskConfig(...args),
   instantiateTask: (...args: unknown[]) => mockInstantiateTask(...args),
 }));
 
@@ -66,11 +72,13 @@ const TASK_CONFIG_TRIGGER = {
   updatedAt: new Date(),
 };
 
+/** The Job the webhook fires — a `standalone` work definition. */
 const WORKFLOW = {
   id: "wf-1",
+  kind: "standalone",
   name: "Deploy",
   enabled: true,
-  promptTemplate: "Do the thing",
+  prompt: "Do the thing",
 };
 
 describe("POST /api/hooks/:webhookPath", () => {
@@ -83,7 +91,7 @@ describe("POST /api/hooks/:webhookPath", () => {
 
   it("returns 202 with runId on valid webhook", async () => {
     mockGetWebhookTriggerByPath.mockResolvedValue(TRIGGER);
-    mockGetWorkflow.mockResolvedValue(WORKFLOW);
+    mockGetDefinition.mockResolvedValue(WORKFLOW);
     mockCreateWorkflowRun.mockResolvedValue({ id: "run-1", state: "queued" });
 
     const body = JSON.stringify({ ref: "main" });
@@ -102,6 +110,7 @@ describe("POST /api/hooks/:webhookPath", () => {
     expect(res.statusCode).toBe(202);
     const json = res.json();
     expect(json.runId).toBe("run-1");
+    expect(mockGetDefinition).toHaveBeenCalledWith("wf-1", "standalone");
     expect(mockCreateWorkflowRun).toHaveBeenCalledWith("wf-1", {
       triggerId: "trig-1",
       params: expect.any(Object),
@@ -136,7 +145,7 @@ describe("POST /api/hooks/:webhookPath", () => {
 
   it("returns 404 when workflow not found", async () => {
     mockGetWebhookTriggerByPath.mockResolvedValue(TRIGGER);
-    mockGetWorkflow.mockResolvedValue(null);
+    mockGetDefinition.mockResolvedValue(null);
 
     const body = JSON.stringify({});
     const sig = hmacSign(body, "test-secret");
@@ -154,7 +163,7 @@ describe("POST /api/hooks/:webhookPath", () => {
 
   it("returns 404 when workflow is disabled", async () => {
     mockGetWebhookTriggerByPath.mockResolvedValue(TRIGGER);
-    mockGetWorkflow.mockResolvedValue({ ...WORKFLOW, enabled: false });
+    mockGetDefinition.mockResolvedValue({ ...WORKFLOW, enabled: false });
 
     const body = JSON.stringify({});
     const sig = hmacSign(body, "test-secret");
@@ -208,7 +217,7 @@ describe("POST /api/hooks/:webhookPath", () => {
       config: { webhookPath: "open-hook" },
     };
     mockGetWebhookTriggerByPath.mockResolvedValue(triggerNoSecret);
-    mockGetWorkflow.mockResolvedValue(WORKFLOW);
+    mockGetDefinition.mockResolvedValue(WORKFLOW);
     mockCreateWorkflowRun.mockResolvedValue({ id: "run-2", state: "queued" });
 
     const res = await app.inject({
@@ -232,7 +241,7 @@ describe("POST /api/hooks/:webhookPath", () => {
       },
     };
     mockGetWebhookTriggerByPath.mockResolvedValue(triggerWithMapping);
-    mockGetWorkflow.mockResolvedValue(WORKFLOW);
+    mockGetDefinition.mockResolvedValue(WORKFLOW);
     mockCreateWorkflowRun.mockResolvedValue({ id: "run-3", state: "queued" });
 
     const payload = {
@@ -270,7 +279,7 @@ describe("POST /api/hooks/:webhookPath", () => {
       paramMapping: null,
     };
     mockGetWebhookTriggerByPath.mockResolvedValue(triggerNoMapping);
-    mockGetWorkflow.mockResolvedValue(WORKFLOW);
+    mockGetDefinition.mockResolvedValue(WORKFLOW);
     mockCreateWorkflowRun.mockResolvedValue({ id: "run-4", state: "queued" });
 
     const payload = { ref: "main", action: "push" };
@@ -296,7 +305,12 @@ describe("POST /api/hooks/:webhookPath", () => {
 
   it("dispatches task_config webhook triggers to instantiateTask", async () => {
     mockGetWebhookTriggerByPath.mockResolvedValue(TASK_CONFIG_TRIGGER);
-    mockGetTaskConfig.mockResolvedValue({ id: "tc-1", name: "CVE patch", enabled: true });
+    mockGetDefinition.mockResolvedValue({
+      id: "tc-1",
+      kind: "repo-blueprint",
+      name: "CVE patch",
+      enabled: true,
+    });
     mockInstantiateTask.mockResolvedValue({ id: "task-42" });
 
     const body = JSON.stringify({ severity: "high" });
@@ -311,6 +325,7 @@ describe("POST /api/hooks/:webhookPath", () => {
 
     expect(res.statusCode).toBe(202);
     expect(res.json()).toEqual({ taskId: "task-42" });
+    expect(mockGetDefinition).toHaveBeenCalledWith("tc-1", "repo-blueprint");
     expect(mockInstantiateTask).toHaveBeenCalledWith("tc-1", {
       triggerId: "trig-tc-1",
       params: { severity: "high" },
@@ -321,7 +336,12 @@ describe("POST /api/hooks/:webhookPath", () => {
 
   it("returns 404 when task_config webhook target is disabled", async () => {
     mockGetWebhookTriggerByPath.mockResolvedValue(TASK_CONFIG_TRIGGER);
-    mockGetTaskConfig.mockResolvedValue({ id: "tc-1", name: "Off", enabled: false });
+    mockGetDefinition.mockResolvedValue({
+      id: "tc-1",
+      kind: "repo-blueprint",
+      name: "Off",
+      enabled: false,
+    });
 
     const body = JSON.stringify({});
     const sig = hmacSign(body, "test-secret");
@@ -347,7 +367,7 @@ describe("POST /api/hooks/:webhookPath", () => {
       },
     };
     mockGetWebhookTriggerByPath.mockResolvedValue(triggerWithMapping);
-    mockGetWorkflow.mockResolvedValue(WORKFLOW);
+    mockGetDefinition.mockResolvedValue(WORKFLOW);
     mockCreateWorkflowRun.mockResolvedValue({ id: "run-5", state: "queued" });
 
     const payload = { ref: "main" };

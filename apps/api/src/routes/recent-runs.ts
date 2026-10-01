@@ -99,13 +99,13 @@ export async function recentRunsRoutes(app: FastifyInstance) {
               w.id::text AS parent_id,
               NULL AS "where",
               r.error_message AS detail,
-              w.agent_runtime AS agent_type,
+              w.agent_type AS agent_type,
               r.cost_usd AS cost_usd,
               r.updated_at AS at,
               r.started_at AS started_at,
               r.finished_at AS ended_at
             FROM workflow_runs r
-            JOIN workflows w ON w.id = r.workflow_id
+            JOIN work_definitions w ON w.id = r.workflow_id
             WHERE ${scopeTo(sql`w.workspace_id`)}
             ORDER BY r.updated_at DESC
             LIMIT ${limit}

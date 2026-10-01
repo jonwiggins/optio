@@ -8,6 +8,7 @@
  *
  * See docs/tasks.md ("The Work feed") and docs/plans/work-unification.md.
  */
+import { desc, eq } from "drizzle-orm";
 import {
   sortWork,
   shortDir,
@@ -17,30 +18,30 @@ import {
   type WorkStatus,
   type WorkWhere,
 } from "@optio/shared";
-import type {
-  interactiveSessions,
-  localHosts,
-  persistentAgents,
-  taskConfigs,
+import { db } from "../db/client.js";
+import {
+  localTerminals,
   tasks,
-  workflows,
+  workDefinitions,
+  workflowRuns,
+  type interactiveSessions,
+  type localHosts,
+  type persistentAgents,
 } from "../db/schema.js";
 import * as taskService from "./task-service.js";
-import * as taskConfigService from "./task-config-service.js";
-import * as workflowService from "./workflow-service.js";
+import * as definitions from "./work-definition-service.js";
 import * as terminalService from "./local-terminal-service.js";
-import * as blueprintService from "./local-blueprint-service.js";
 import * as hostService from "./local-host-service.js";
 import * as sessionService from "./interactive-session-service.js";
 import * as paService from "./persistent-agent-service.js";
+import { canAccessBlueprint, ownedBy } from "./local-blueprint-service.js";
 import type { LocalTerminalRow } from "./local-terminal-service.js";
-import type { LocalBlueprintRow } from "./local-blueprint-service.js";
+import type { WorkDefinition } from "./work-definition-service.js";
 
 type TaskRow = typeof tasks.$inferSelect;
-type TaskConfigRow = typeof taskConfigs.$inferSelect;
-type WorkflowRow = typeof workflows.$inferSelect;
 type PodSessionRow = typeof interactiveSessions.$inferSelect;
 type PersistentAgentRow = typeof persistentAgents.$inferSelect;
+type JobRunRow = typeof workflowRuns.$inferSelect;
 type LocalHostRow = typeof localHosts.$inferSelect;
 
 /** Who is asking: workspace-scoped kinds use the workspace, personal kinds the user. */
@@ -52,10 +53,9 @@ export interface WorkScope {
 /** Every row the Work list is built from, as each kind's list endpoint returns it. */
 export interface WorkSources {
   tasks: TaskRow[];
-  taskConfigs: TaskConfigRow[];
-  workflows: WorkflowRow[];
+  /** Scheduled Tasks, Jobs, and Local automations. */
+  definitions: WorkDefinition[];
   localTerminals: LocalTerminalRow[];
-  localBlueprints: LocalBlueprintRow[];
   podSessions: PodSessionRow[];
   agents: PersistentAgentRow[];
   /** The caller's machines — names for rows that run on them. */
@@ -66,14 +66,18 @@ export interface WorkSources {
 const TASK_LIMIT = 200;
 const POD_SESSION_LIMIT = 100;
 
-export async function gatherWorkSources(scope: WorkScope): Promise<WorkSources> {
-  const [taskRows, configs, workflowRows, terminals, blueprints, podSessions, agents, hosts] =
+/** The Work list for whoever is asking, needs-you first. */
+export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
+  const inWorkspace = scope.workspaceId
+    ? eq(workDefinitions.workspaceId, scope.workspaceId)
+    : undefined;
+  const [taskRows, configs, jobs, automations, terminals, podSessions, agents, hosts] =
     await Promise.all([
       taskService.listTasks({ workspaceId: scope.workspaceId, limit: TASK_LIMIT }),
-      taskConfigService.listTaskConfigs({ workspaceId: scope.workspaceId }),
-      workflowService.listWorkflows(scope.workspaceId ?? undefined),
+      definitions.listDefinitions("repo-blueprint", inWorkspace),
+      definitions.listDefinitions("standalone", inWorkspace),
+      definitions.listDefinitions("local-blueprint", ownedBy(scope.userId)),
       terminalService.listTerminals(scope.userId),
-      blueprintService.listBlueprints(scope.userId),
       sessionService.listSessions({
         limit: POD_SESSION_LIMIT,
         userId: scope.userId ?? undefined,
@@ -81,21 +85,14 @@ export async function gatherWorkSources(scope: WorkScope): Promise<WorkSources> 
       paService.listPersistentAgents(scope.workspaceId),
       hostService.listHosts(scope.userId),
     ]);
-  return {
+  return projectWork({
     tasks: taskRows,
-    taskConfigs: configs.slice(0, TASK_LIMIT),
-    workflows: workflowRows.slice(0, TASK_LIMIT),
+    definitions: [...configs.slice(0, TASK_LIMIT), ...jobs.slice(0, TASK_LIMIT), ...automations],
     localTerminals: terminals,
-    localBlueprints: blueprints,
     podSessions,
     agents,
     hosts,
-  };
-}
-
-/** The Work list for whoever is asking, needs-you first. */
-export async function listWork(scope: WorkScope): Promise<WorkRow[]> {
-  return projectWork(await gatherWorkSources(scope));
+  });
 }
 
 // ── Projection ──────────────────────────────────────────────────────────────
@@ -164,187 +161,233 @@ function definitionStatus(enabled: boolean): Pick<WorkRow, "status" | "statusLab
     : { status: "paused", statusLabel: "paused" };
 }
 
+/** Where a row runs, named the way the list shows it. */
+interface Places {
+  machine(hostId: string | null, dir: string | null): WorkWhere;
+}
+
+function places(hosts: WorkSources["hosts"]): Places {
+  const hostName = new Map(hosts.map((h) => [h.id, h.name]));
+  return {
+    machine: (hostId, dir) => ({
+      target: "machine",
+      detail:
+        [hostName.get(hostId ?? "") ?? null, shortDir(dir)].filter(Boolean).join(" · ") || null,
+    }),
+  };
+}
+
+function repoWhere(
+  row: { runTarget: "cluster" | "local"; localHostId: string | null; localDir: string | null },
+  repoUrl: string | null,
+  at: Places,
+): WorkWhere {
+  return row.runTarget === "local"
+    ? at.machine(row.localHostId, row.localDir)
+    : { target: "pod", detail: shortRepo(repoUrl) };
+}
+
+function taskRow(t: TaskRow, at: Places): WorkRow {
+  const [status, statusLabel] = taskStatus(t.state);
+  const configId = (t.metadata as { taskConfigId?: string } | null)?.taskConfigId;
+  return {
+    key: `task-${t.id}`,
+    source: "repo-task",
+    id: t.id,
+    href: `/tasks/${t.id}`,
+    name: t.title,
+    when: configId ? "on a trigger" : "now",
+    where: repoWhere(t, t.repoUrl, at),
+    who: t.agentType ?? "claude-code",
+    then: t.autoResume ? "until-merged" : "exits",
+    status,
+    statusLabel,
+    note: t.prUrl ? `PR ${t.prUrl.split("/").pop()}` : null,
+    prUrl: t.prUrl ?? null,
+    lastActivity: iso(t.updatedAt ?? t.createdAt),
+    recurring: false,
+    editHref: null,
+    spawned: !!configId,
+  };
+}
+
+function definitionRow(d: WorkDefinition, at: Places): WorkRow {
+  const common = {
+    id: d.id,
+    name: d.name,
+    ...definitionStatus(d.enabled),
+    prUrl: null,
+    lastActivity: iso(d.updatedAt ?? d.createdAt),
+    recurring: true,
+    editHref: `/work/${d.id}/edit`,
+    spawned: false,
+  };
+  switch (d.kind) {
+    case "repo-blueprint":
+      return {
+        ...common,
+        key: `blueprint-${d.id}`,
+        source: "repo-blueprint",
+        href: `/tasks/scheduled/${d.id}`,
+        when: "on a trigger",
+        where: repoWhere(d, d.repoUrl, at),
+        who: d.agentType ?? "claude-code",
+        then: d.autoResume ? "until-merged" : "exits",
+        note: d.autoResume ? "works each PR until it merges" : "opens a PR each run",
+      };
+    case "standalone":
+      return {
+        ...common,
+        key: `job-${d.id}`,
+        source: "standalone",
+        href: `/jobs/${d.id}`,
+        when: "on a trigger",
+        where:
+          d.runTarget === "local"
+            ? at.machine(d.localHostId, d.localDir)
+            : { target: "pod", detail: null },
+        who: d.agentType ?? "claude-code",
+        then: "exits",
+        note: null,
+      };
+    case "local-blueprint":
+      return {
+        ...common,
+        key: `automation-${d.id}`,
+        source: "local-blueprint",
+        href: `/local/automations/${d.id}`,
+        when: "on an event",
+        where: at.machine(d.localHostId, d.localDir),
+        who: d.agentType ?? "terminal",
+        then: d.localSessionMode === "headless" ? "exits" : "waits-for-me",
+        note: null,
+      };
+  }
+}
+
+function terminalRow(t: LocalTerminalRow, at: Places): WorkRow {
+  const [status, statusLabel] = terminalStatus(t);
+  const spec = t.spec as { kind?: string; agent?: string; mode?: string };
+  const interactive = spec.kind !== "agent" || spec.mode !== "headless";
+  return {
+    key: `terminal-${t.id}`,
+    source: "local-terminal",
+    id: t.id,
+    href: `/local/${t.id}`,
+    name: t.title ?? "Terminal",
+    when: t.spawnedBy === "manual" || !t.spawnedBy ? "now" : t.spawnedBy,
+    where: at.machine(t.hostId, t.dir),
+    who: spec.kind === "agent" && spec.agent ? spec.agent : "terminal",
+    then: interactive ? "waits-for-me" : "exits",
+    status,
+    statusLabel,
+    note: t.attentionState === "needs_you" && t.attentionReason ? t.attentionReason : null,
+    prUrl: null,
+    lastActivity: iso(t.lastActivityAt ?? t.updatedAt),
+    recurring: false,
+    editHref: null,
+    spawned: !!t.blueprintId || !!t.workflowRunId,
+  };
+}
+
+function podSessionRow(s: PodSessionRow): WorkRow {
+  const active = s.state === "active";
+  return {
+    key: `session-${s.id}`,
+    source: "pod-session",
+    id: s.id,
+    href: `/sessions/${s.id}`,
+    name: s.title || s.branch || `Session ${s.id.slice(0, 8)}`,
+    when: "now",
+    where: { target: "pod", detail: shortRepo(s.repoUrl) },
+    who: "terminal",
+    then: "waits-for-me",
+    status: active ? "waiting" : "done",
+    statusLabel: active ? "open" : "ended",
+    note: null,
+    prUrl: null,
+    lastActivity: iso(s.endedAt ?? s.createdAt),
+    recurring: false,
+    editHref: null,
+    spawned: false,
+  };
+}
+
+function agentRow(a: PersistentAgentRow): WorkRow {
+  const [status, statusLabel] = agentStatus(a);
+  return {
+    key: `agent-${a.id}`,
+    source: "persistent-agent",
+    id: a.id,
+    href: `/agents/${a.id}`,
+    name: a.name ?? a.slug,
+    when: "messages",
+    where: { target: "pod", detail: a.slug ? `@${a.slug}` : null },
+    who: a.agentRuntime ?? "claude-code",
+    then: "waits-for-messages",
+    status,
+    statusLabel,
+    note: null,
+    prUrl: null,
+    lastActivity: iso(a.lastTurnAt ?? a.updatedAt ?? a.createdAt),
+    recurring: false,
+    editHref: null,
+    spawned: false,
+  };
+}
+
+function jobRunStatus(state: string): [WorkStatus, string] {
+  switch (state) {
+    case "queued":
+      return ["queued", "queued"];
+    case "running":
+      return ["running", "running"];
+    case "failed":
+      return ["failed", "failed"];
+    default:
+      return ["done", state];
+  }
+}
+
+/** One run of a Job, as a row of its own. */
+function jobRunRow(r: JobRunRow, job: WorkDefinition, at: Places): WorkRow {
+  const [status, statusLabel] = jobRunStatus(r.state);
+  return {
+    key: `job-run-${r.id}`,
+    source: "standalone",
+    id: r.id,
+    href: `/jobs/${job.id}/runs/${r.id}`,
+    name: r.title ?? job.name,
+    when: r.triggerId ? "on a trigger" : "now",
+    where:
+      job.runTarget === "local"
+        ? at.machine(job.localHostId, job.localDir)
+        : { target: "pod", detail: null },
+    who: job.agentType ?? "claude-code",
+    then: "exits",
+    status,
+    statusLabel,
+    note: r.errorMessage ?? null,
+    prUrl: null,
+    lastActivity: iso(r.updatedAt ?? r.createdAt),
+    recurring: false,
+    editHref: null,
+    spawned: true,
+  };
+}
+
 /** Projects each source row onto a `WorkRow`. Pure; `listWork` feeds it. */
 export function projectWork(src: WorkSources): WorkRow[] {
-  const hostName = new Map(src.hosts.map((h) => [h.id, h.name]));
-  const machine = (hostId: string | null, dir: string | null): WorkWhere => ({
-    target: "machine",
-    detail: [hostName.get(hostId ?? "") ?? null, shortDir(dir)].filter(Boolean).join(" · ") || null,
-  });
-  const repoWhere = (
-    row: { runTarget: "cluster" | "local"; localHostId: string | null; localDir: string | null },
-    repoUrl: string | null,
-  ): WorkWhere =>
-    row.runTarget === "local"
-      ? machine(row.localHostId, row.localDir)
-      : { target: "pod", detail: shortRepo(repoUrl) };
-  const rows: WorkRow[] = [];
-
-  for (const t of src.tasks) {
-    const [status, statusLabel] = taskStatus(t.state);
-    const configId = (t.metadata as { taskConfigId?: string } | null)?.taskConfigId;
-    rows.push({
-      key: `task-${t.id}`,
-      source: "repo-task",
-      id: t.id,
-      href: `/tasks/${t.id}`,
-      name: t.title,
-      when: configId ? "on a trigger" : "now",
-      where: repoWhere(t, t.repoUrl),
-      who: t.agentType ?? "claude-code",
-      then: t.autoResume ? "until-merged" : "exits",
-      status,
-      statusLabel,
-      note: t.prUrl ? `PR ${t.prUrl.split("/").pop()}` : null,
-      prUrl: t.prUrl ?? null,
-      lastActivity: iso(t.updatedAt ?? t.createdAt),
-      recurring: false,
-      editHref: null,
-      spawned: !!configId,
-    });
-  }
-
-  for (const c of src.taskConfigs) {
-    rows.push({
-      key: `blueprint-${c.id}`,
-      source: "repo-blueprint",
-      id: c.id,
-      href: `/tasks/scheduled/${c.id}`,
-      name: c.name ?? c.title,
-      when: "on a trigger",
-      where: repoWhere(c, c.repoUrl),
-      who: c.agentType ?? "claude-code",
-      then: c.autoResume ? "until-merged" : "exits",
-      ...definitionStatus(c.enabled),
-      note: c.autoResume ? "works each PR until it merges" : "opens a PR each run",
-      prUrl: null,
-      lastActivity: iso(c.updatedAt ?? c.createdAt),
-      recurring: true,
-      editHref: `/work/${c.id}/edit`,
-      spawned: false,
-    });
-  }
-
-  for (const w of src.workflows) {
-    rows.push({
-      key: `job-${w.id}`,
-      source: "standalone",
-      id: w.id,
-      href: `/jobs/${w.id}`,
-      name: w.name,
-      when: "on a trigger",
-      where:
-        w.runTarget === "local"
-          ? machine(w.localHostId, w.localDir)
-          : { target: "pod", detail: null },
-      who: w.agentRuntime ?? "claude-code",
-      then: "exits",
-      ...definitionStatus(w.enabled),
-      note: null,
-      prUrl: null,
-      lastActivity: iso(w.updatedAt ?? w.createdAt),
-      recurring: true,
-      editHref: `/work/${w.id}/edit`,
-      spawned: false,
-    });
-  }
-
-  for (const t of src.localTerminals) {
-    // A local Task run already has its `tasks` row above; a local Job run
-    // and hand-opened terminals only exist here.
-    if (t.taskId) continue;
-    const [status, statusLabel] = terminalStatus(t);
-    const spec = t.spec as { kind?: string; agent?: string; mode?: string };
-    const interactive = spec.kind !== "agent" || spec.mode !== "headless";
-    rows.push({
-      key: `terminal-${t.id}`,
-      source: "local-terminal",
-      id: t.id,
-      href: `/local/${t.id}`,
-      name: t.title ?? "Terminal",
-      when: t.spawnedBy === "manual" || !t.spawnedBy ? "now" : t.spawnedBy,
-      where: machine(t.hostId, t.dir),
-      who: spec.kind === "agent" && spec.agent ? spec.agent : "terminal",
-      then: interactive ? "waits-for-me" : "exits",
-      status,
-      statusLabel,
-      note: t.attentionState === "needs_you" && t.attentionReason ? t.attentionReason : null,
-      prUrl: null,
-      lastActivity: iso(t.lastActivityAt ?? t.updatedAt),
-      recurring: false,
-      editHref: null,
-      spawned: !!t.blueprintId || !!t.workflowRunId,
-    });
-  }
-
-  for (const b of src.localBlueprints) {
-    rows.push({
-      key: `automation-${b.id}`,
-      source: "local-blueprint",
-      id: b.id,
-      href: `/local/automations/${b.id}`,
-      name: b.name,
-      when: "on an event",
-      where: machine(b.hostId, b.dir),
-      who: b.agent ?? "terminal",
-      then: b.sessionMode === "headless" ? "exits" : "waits-for-me",
-      ...definitionStatus(b.enabled),
-      note: null,
-      prUrl: null,
-      lastActivity: iso(b.updatedAt ?? b.createdAt),
-      recurring: true,
-      editHref: `/work/${b.id}/edit`,
-      spawned: false,
-    });
-  }
-
-  for (const s of src.podSessions) {
-    const active = s.state === "active";
-    rows.push({
-      key: `session-${s.id}`,
-      source: "pod-session",
-      id: s.id,
-      href: `/sessions/${s.id}`,
-      name: s.title || s.branch || `Session ${s.id.slice(0, 8)}`,
-      when: "now",
-      where: { target: "pod", detail: shortRepo(s.repoUrl) },
-      who: "terminal",
-      then: "waits-for-me",
-      status: active ? "waiting" : "done",
-      statusLabel: active ? "open" : "ended",
-      note: null,
-      prUrl: null,
-      lastActivity: iso(s.endedAt ?? s.createdAt),
-      recurring: false,
-      editHref: null,
-      spawned: false,
-    });
-  }
-
-  for (const a of src.agents) {
-    const [status, statusLabel] = agentStatus(a);
-    rows.push({
-      key: `agent-${a.id}`,
-      source: "persistent-agent",
-      id: a.id,
-      href: `/agents/${a.id}`,
-      name: a.name ?? a.slug,
-      when: "messages",
-      where: { target: "pod", detail: a.slug ? `@${a.slug}` : null },
-      who: a.agentRuntime ?? "claude-code",
-      then: "waits-for-messages",
-      status,
-      statusLabel,
-      note: null,
-      prUrl: null,
-      lastActivity: iso(a.lastTurnAt ?? a.updatedAt ?? a.createdAt),
-      recurring: false,
-      editHref: null,
-      spawned: false,
-    });
-  }
-
-  return sortWork(rows);
+  const at = places(src.hosts);
+  return sortWork([
+    ...src.tasks.map((t) => taskRow(t, at)),
+    ...src.definitions.map((d) => definitionRow(d, at)),
+    // A local Task run already has its `tasks` row; a local Job run and
+    // hand-opened terminals only exist here.
+    ...src.localTerminals.filter((t) => !t.taskId).map((t) => terminalRow(t, at)),
+    ...src.podSessions.map(podSessionRow),
+    ...src.agents.map(agentRow),
+  ]);
 }
 
 // ── Resolution ──────────────────────────────────────────────────────────────
@@ -364,43 +407,26 @@ export async function resolveWork(id: string, scope: WorkScope): Promise<Resolve
   if (!UUID.test(id)) return null;
   const inWorkspace = (row: { workspaceId: string | null }) =>
     !scope.workspaceId || !row.workspaceId || row.workspaceId === scope.workspaceId;
-  const empty: WorkSources = {
-    tasks: [],
-    taskConfigs: [],
-    workflows: [],
-    localTerminals: [],
-    localBlueprints: [],
-    podSessions: [],
-    agents: [],
-    hosts: [],
-  };
-  const found = async (
-    source: WorkSource,
-    data: object,
-    sources: Partial<WorkSources>,
-  ): Promise<ResolvedWork> => {
-    const hosts = await hostService.listHosts(scope.userId);
-    const [row] = projectWork({ ...empty, ...sources, hosts });
-    return { source, data: data as Record<string, unknown>, row };
-  };
+  const at = async () => places(await hostService.listHosts(scope.userId));
+  const found = (source: WorkSource, data: object, row: WorkRow): ResolvedWork => ({
+    source,
+    data: data as Record<string, unknown>,
+    row,
+  });
 
   const task = await taskService.getTask(id);
-  if (task) return inWorkspace(task) ? found("repo-task", task, { tasks: [task] }) : null;
-
-  const config = await taskConfigService.getTaskConfig(id);
-  if (config) {
-    return inWorkspace(config) ? found("repo-blueprint", config, { taskConfigs: [config] }) : null;
+  if (task) {
+    return inWorkspace(task) ? found("repo-task", task, taskRow(task, await at())) : null;
   }
 
-  const workflow = await workflowService.getWorkflow(id);
-  if (workflow) {
-    return inWorkspace(workflow) ? found("standalone", workflow, { workflows: [workflow] }) : null;
-  }
-
-  const blueprint = await blueprintService.getBlueprint(id);
-  if (blueprint) {
-    return blueprintService.canAccessBlueprint(blueprint, scope.userId)
-      ? found("local-blueprint", blueprint, { localBlueprints: [blueprint] })
+  const definition = await definitions.getDefinition(id);
+  if (definition) {
+    const visible =
+      definition.kind === "local-blueprint"
+        ? canAccessBlueprint(definition, scope.userId)
+        : inWorkspace(definition);
+    return visible
+      ? found(definition.kind, definition, definitionRow(definition, await at()))
       : null;
   }
 
@@ -408,17 +434,57 @@ export async function resolveWork(id: string, scope: WorkScope): Promise<Resolve
   if (terminal) {
     // A terminal that executes a task is that task's run, not work of its own.
     if (terminal.taskId || !terminalService.canAccessTerminal(terminal, scope.userId)) return null;
-    return found("local-terminal", terminal, { localTerminals: [terminal] });
+    return found("local-terminal", terminal, terminalRow(terminal, await at()));
   }
 
   const session = await sessionService.getSession(id);
   if (session) {
     if (scope.userId && session.userId && session.userId !== scope.userId) return null;
-    return found("pod-session", session, { podSessions: [session] });
+    return found("pod-session", session, podSessionRow(session));
   }
 
   const agent = await paService.getPersistentAgentScoped(id, scope.workspaceId);
-  if (agent) return found("persistent-agent", agent, { agents: [agent] });
+  if (agent) return found("persistent-agent", agent, agentRow(agent));
 
   return null;
+}
+
+/** How many runs `listRuns` returns. */
+const RUN_LIMIT = 50;
+
+/**
+ * What a definition has started, newest first, as Work list rows: a
+ * scheduled Task's tasks, a Job's runs, a Local automation's terminals.
+ */
+export async function listRuns(definition: WorkDefinition, scope: WorkScope): Promise<WorkRow[]> {
+  const at = places(await hostService.listHosts(scope.userId));
+  switch (definition.kind) {
+    case "repo-blueprint": {
+      const rows = await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.workId, definition.id))
+        .orderBy(desc(tasks.createdAt))
+        .limit(RUN_LIMIT);
+      return rows.map((t) => taskRow(t, at));
+    }
+    case "standalone": {
+      const rows = await db
+        .select()
+        .from(workflowRuns)
+        .where(eq(workflowRuns.workflowId, definition.id))
+        .orderBy(desc(workflowRuns.createdAt))
+        .limit(RUN_LIMIT);
+      return rows.map((r) => jobRunRow(r, definition, at));
+    }
+    case "local-blueprint": {
+      const rows = await db
+        .select()
+        .from(localTerminals)
+        .where(eq(localTerminals.blueprintId, definition.id))
+        .orderBy(desc(localTerminals.createdAt))
+        .limit(RUN_LIMIT);
+      return rows.map((t) => terminalRow(t, at));
+    }
+  }
 }

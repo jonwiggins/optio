@@ -1,9 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { db } from "../db/client.js";
-import { workflows } from "../db/schema.js";
+import { getDefinition } from "../services/work-definition-service.js";
 import * as triggerService from "../services/trigger-service.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema } from "../schemas/common.js";
@@ -40,10 +38,7 @@ const TriggerResponseSchema = z
   })
   .describe("Single trigger envelope");
 
-async function getWorkflow(id: string) {
-  const [workflow] = await db.select().from(workflows).where(eq(workflows.id, id));
-  return workflow ?? null;
-}
+const getWorkflow = (id: string) => getDefinition(id, "standalone");
 
 export async function workflowTriggerRoutes(rawApp: FastifyInstance) {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();

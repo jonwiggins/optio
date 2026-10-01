@@ -137,7 +137,8 @@ spec:
               path: /api/health
               port: {{ .Values.api.port }}
             periodSeconds: 10
-            failureThreshold: {{ .Values.api.startupProbe.failureThreshold }}
+            # dig: an upgrade with --reuse-values keeps release values that predate this key.
+            failureThreshold: {{ dig "startupProbe" "failureThreshold" 60 .Values.api }}
           readinessProbe:
             httpGet:
               path: /api/health
