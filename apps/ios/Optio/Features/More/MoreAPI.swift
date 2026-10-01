@@ -68,8 +68,17 @@ struct RepoRow: Decodable, Identifiable, Hashable {
     var promptTemplateOverride: String?
     var claudeModel: String?
     var claudeContextWindow: String?
-    var claudeThinking: Bool?
     var claudeEffort: String?
+    var copilotModel: String?
+    var copilotEffort: String?
+    var geminiModel: String?
+    var geminiApprovalMode: String?
+    var opencodeModel: String?
+    var opencodeAgent: String?
+    var opencodeBaseUrl: String?
+    var openclawModel: String?
+    var openclawAgent: String?
+    var cursorModel: String?
     var maxTurnsCoding: Int?
     var maxTurnsReview: Int?
     var autoResume: Bool?
@@ -99,19 +108,31 @@ struct RepoRow: Decodable, Identifiable, Hashable {
     var updatedAt: String?
 
     var displayName: String { fullName ?? repoUrl ?? id }
+
+    /// The default agent and its option columns, keyed like the agent picker
+    /// (`WorkForm.repoOptionKeys`); null columns are absent.
+    var agentColumns: [String: AnyCodable] {
+        let pairs: [(String, String?)] = [
+            ("defaultAgentType", defaultAgentType),
+            ("claudeModel", claudeModel), ("claudeContextWindow", claudeContextWindow), ("claudeEffort", claudeEffort),
+            ("copilotModel", copilotModel), ("copilotEffort", copilotEffort),
+            ("geminiModel", geminiModel), ("geminiApprovalMode", geminiApprovalMode),
+            ("opencodeModel", opencodeModel), ("opencodeAgent", opencodeAgent), ("opencodeBaseUrl", opencodeBaseUrl),
+            ("openclawModel", openclawModel), ("openclawAgent", openclawAgent), ("cursorModel", cursorModel),
+        ]
+        var out: [String: AnyCodable] = [:]
+        for (k, v) in pairs { if let v { out[k] = .string(v) } }
+        return out
+    }
 }
 
-/// PATCH body for `/api/repos/:id`. Only the fields the iOS form edits.
+/// PATCH body for `/api/repos/:id`. Only the fields the iOS form edits; the
+/// agent columns ride along in `agent` (`WorkForm.repoAgentPatch`).
 struct RepoUpdateInput: Encodable {
     var defaultBranch: String?
-    var defaultAgentType: String?
     var imagePreset: String?
     var extraPackages: String?
     var setupCommands: String?
-    var claudeModel: String?
-    var claudeContextWindow: String?
-    var claudeThinking: Bool?
-    var claudeEffort: String?
     var maxTurnsCoding: Int?
     var maxTurnsReview: Int?
     var maxConcurrentTasks: Int?
@@ -132,6 +153,52 @@ struct RepoUpdateInput: Encodable {
     var secretProxy: Bool?
     var offPeakOnly: Bool?
     var dockerInDocker: Bool?
+    /// The default agent + its option columns, merged into the same JSON object.
+    var agent: [String: AnyCodable] = [:]
+
+    private enum CodingKeys: String, CodingKey {
+        case defaultBranch, imagePreset, extraPackages, setupCommands, maxTurnsCoding, maxTurnsReview
+        case maxConcurrentTasks, maxPodInstances, maxAgentsPerPod, cautiousMode, planningModeEnabled
+        case reviewEnabled, reviewTrigger, testCommand, reviewAgentType, reviewModel, autoResume, autoMerge
+        case externalReviewMode, externalReviewWaitForCi, networkPolicy, secretProxy, offPeakOnly, dockerInDocker
+    }
+
+    private struct DynamicKey: CodingKey {
+        let stringValue: String
+        init(stringValue: String) { self.stringValue = stringValue }
+        var intValue: Int? { nil }
+        init?(intValue: Int) { nil }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(defaultBranch, forKey: .defaultBranch)
+        try c.encodeIfPresent(imagePreset, forKey: .imagePreset)
+        try c.encodeIfPresent(extraPackages, forKey: .extraPackages)
+        try c.encodeIfPresent(setupCommands, forKey: .setupCommands)
+        try c.encodeIfPresent(maxTurnsCoding, forKey: .maxTurnsCoding)
+        try c.encodeIfPresent(maxTurnsReview, forKey: .maxTurnsReview)
+        try c.encodeIfPresent(maxConcurrentTasks, forKey: .maxConcurrentTasks)
+        try c.encodeIfPresent(maxPodInstances, forKey: .maxPodInstances)
+        try c.encodeIfPresent(maxAgentsPerPod, forKey: .maxAgentsPerPod)
+        try c.encodeIfPresent(cautiousMode, forKey: .cautiousMode)
+        try c.encodeIfPresent(planningModeEnabled, forKey: .planningModeEnabled)
+        try c.encodeIfPresent(reviewEnabled, forKey: .reviewEnabled)
+        try c.encodeIfPresent(reviewTrigger, forKey: .reviewTrigger)
+        try c.encodeIfPresent(testCommand, forKey: .testCommand)
+        try c.encodeIfPresent(reviewAgentType, forKey: .reviewAgentType)
+        try c.encodeIfPresent(reviewModel, forKey: .reviewModel)
+        try c.encodeIfPresent(autoResume, forKey: .autoResume)
+        try c.encodeIfPresent(autoMerge, forKey: .autoMerge)
+        try c.encodeIfPresent(externalReviewMode, forKey: .externalReviewMode)
+        try c.encodeIfPresent(externalReviewWaitForCi, forKey: .externalReviewWaitForCi)
+        try c.encodeIfPresent(networkPolicy, forKey: .networkPolicy)
+        try c.encodeIfPresent(secretProxy, forKey: .secretProxy)
+        try c.encodeIfPresent(offPeakOnly, forKey: .offPeakOnly)
+        try c.encodeIfPresent(dockerInDocker, forKey: .dockerInDocker)
+        var dyn = encoder.container(keyedBy: DynamicKey.self)
+        for (k, v) in agent.sorted(by: { $0.key < $1.key }) { try dyn.encode(v, forKey: DynamicKey(stringValue: k)) }
+    }
 }
 
 struct RepoCreateInput: Encodable {

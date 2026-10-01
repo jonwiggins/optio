@@ -219,12 +219,14 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertEqual(F.resolveModel("x", aliases: nil), "x")
     }
 
-    func testOptionsFromRepoReadsOnlyCatalogKeys() {
-        let repo: [String: AnyCodable] = ["claudeModel": .string("opus"), "claudeThinking": .bool(true), "fullName": .string("x"), "maxTurnsCoding": .int(5)]
-        let out = F.optionsFromRepo(runtime: "claude-code", repo: repo, keys: ["claudeModel", "claudeThinking", "claudeEffort"])
-        XCTAssertEqual(out, ["claudeModel": .string("opus"), "claudeThinking": .bool(true)])
-        XCTAssertEqual(F.optionsFromRepo(runtime: F.terminal, repo: repo, keys: ["claudeModel"]), [:])
-        XCTAssertEqual(F.optionsFromRepo(runtime: "claude-code", repo: nil, keys: ["claudeModel"]), [:])
+    func testOptionsFromRepoReadsOnlyTheRuntimesColumns() {
+        let repo: [String: AnyCodable] = ["claudeModel": .string("opus"), "claudeThinking": .bool(true), "fullName": .string("x"), "maxTurnsCoding": .int(5), "copilotModel": .string("gpt-5")]
+        XCTAssertEqual(F.optionsFromRepo(runtime: "claude-code", repo: repo), ["claudeModel": .string("opus")])
+        XCTAssertEqual(F.optionsFromRepo(runtime: "copilot", repo: repo), ["copilotModel": .string("gpt-5")])
+        // Codex shares Copilot's columns, so a repo keeps no settings for it.
+        XCTAssertEqual(F.optionsFromRepo(runtime: "codex", repo: repo), [:])
+        XCTAssertEqual(F.optionsFromRepo(runtime: F.terminal, repo: repo), [:])
+        XCTAssertEqual(F.optionsFromRepo(runtime: "claude-code", repo: nil), [:])
     }
 
     func testPickedModelAndSetOptions() {

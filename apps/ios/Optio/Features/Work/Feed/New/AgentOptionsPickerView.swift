@@ -22,6 +22,10 @@ struct AgentOptionsPickerView: View {
     /// matches an option instead of silently displaying the first one.
     private var loading: Bool { if case .loading = state { return true } else { return false } }
     private var modelValue: String { WorkForm.resolveModel(values[modelField]?.stringValue ?? "", aliases: catalog?.aliases) }
+    /// The selected catalog model (nil for Default, a provider's model, or free text).
+    private var selectedModel: ProviderCatalog.Model? {
+        providerModels == nil ? catalog?.model(named: modelValue) : nil
+    }
 
     /// What the owning section's footer should add: why the model list is a text field.
     static func footnote(_ state: AgentCatalogStore.State?) -> String? {
@@ -68,7 +72,7 @@ struct AgentOptionsPickerView: View {
             }
         } else if let catalog, catalog.modelIsFreeText != true {
             MenuRow(label: "Model", value: modelLabel(catalog)) {
-                MenuChoice(title: "Default", selected: modelValue.isEmpty) { onChange(modelField, .string("")) }
+                MenuChoice(title: "Default", selected: modelValue.isEmpty) { pickModel("", catalog) }
                 if !modelValue.isEmpty, !catalog.models.contains(where: { $0.id == modelValue }) {
                     MenuChoice(title: modelValue, selected: true) {}
                 }
@@ -87,7 +91,14 @@ struct AgentOptionsPickerView: View {
     }
 
     private func modelChoice(_ m: ProviderCatalog.Model) -> some View {
-        MenuChoice(title: m.displayLabel, selected: m.id == modelValue) { onChange(modelField, .string(m.id)) }
+        MenuChoice(title: m.displayLabel, selected: m.id == modelValue) { if let catalog { pickModel(m.id, catalog) } }
+    }
+
+    /// Pick a model; an effort it doesn't take goes back to its default.
+    private func pickModel(_ id: String, _ catalog: ProviderCatalog) {
+        let reset = catalog.keysToReset(values, newModel: id)
+        onChange(modelField, .string(id))
+        for key in reset { onChange(key, .string("")) }
     }
 
     private func modelLabel(_ catalog: ProviderCatalog) -> String {
@@ -95,15 +106,27 @@ struct AgentOptionsPickerView: View {
         return catalog.models.first { $0.id == modelValue }?.displayLabel ?? modelValue
     }
 
+    @ViewBuilder
     private func selectRow(_ field: ProviderCatalog.Option) -> some View {
+        // A per-model effort offers the selected model's efforts only; a model
+        // that takes none (Claude Haiku) gets no field.
+        let choices = ProviderCatalog.choices(for: field, model: selectedModel)
+        if !(field.modelEfforts == true && choices.isEmpty) {
+            selectMenu(field, choices: choices)
+        }
+    }
+
+    private func selectMenu(_ field: ProviderCatalog.Option, choices: [ProviderCatalog.Choice]) -> some View {
         // On a machine a field pods share (effort) has no default of its own:
         // unset leaves the machine's config, so the menu offers "Default".
         let fieldDefault = local && field.appliesToPods ? "" : field.defaultString
         let current = values[field.key]?.stringValue ?? fieldDefault
-        let choices = field.choices ?? []
-        return MenuRow(label: field.label, value: choices.first { $0.value == current }?.label ?? (current.isEmpty ? "Default" : current)) {
+        // Blank means the CLI's default — for effort per model, the model's own.
+        let modelDefault = field.modelEfforts == true ? selectedModel?.defaultEffort : nil
+        let defaultTitle = modelDefault.map { d in "Default (\(choices.first { $0.value == d }?.label ?? d))" } ?? "Default"
+        return MenuRow(label: field.label, value: choices.first { $0.value == current }?.label ?? (current.isEmpty ? defaultTitle : current)) {
             if fieldDefault.isEmpty {
-                MenuChoice(title: "Default", selected: current.isEmpty) { onChange(field.key, .string("")) }
+                MenuChoice(title: defaultTitle, selected: current.isEmpty) { onChange(field.key, .string("")) }
             }
             ForEach(choices) { c in
                 MenuChoice(title: c.label, subtitle: c.description, selected: c.value == current) { onChange(field.key, .string(c.value)) }
