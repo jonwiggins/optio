@@ -71,7 +71,15 @@ export class CodexAdapter implements AgentAdapter {
 
     const requiredSecrets: string[] = [];
 
-    if (input.codexAuthMode === "app-server") {
+    if (input.codexAuthMode === "bedrock") {
+      // A model provider (Amazon Bedrock): AWS region + credentials in env and
+      // `-c model_provider="amazon-bedrock"` (see codexModelFlags) — no OpenAI key.
+      env.OPTIO_CODEX_AUTH_MODE = "bedrock";
+      Object.assign(env, input.modelProviderEnv ?? {});
+      if (input.codexProviderConfig?.length) {
+        env.OPTIO_CODEX_PROVIDER_CONFIG = JSON.stringify(input.codexProviderConfig);
+      }
+    } else if (input.codexAuthMode === "app-server") {
       env.OPTIO_CODEX_AUTH_MODE = "app-server";
       if (input.codexAppServerUrl) {
         env.OPTIO_CODEX_APP_SERVER_URL = input.codexAppServerUrl;

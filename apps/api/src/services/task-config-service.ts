@@ -25,6 +25,10 @@ export interface CreateTaskConfigInput {
   enabled?: boolean;
   workspaceId?: string | null;
   createdBy?: string | null;
+  /** Null = the organization's; see services/work-ownership.ts. Spawned tasks inherit it. */
+  ownerUserId?: string | null;
+  /** Secrets (by name) spawned tasks get in their pod; null = the workspace's default. */
+  podSecrets?: string[] | null;
   // Run location inherited by spawned tasks (validate with validateRunLocation first).
   runTarget?: RunTarget;
   localHostId?: string | null;
@@ -49,6 +53,8 @@ export interface UpdateTaskConfigInput {
   localHostId?: string | null;
   localDir?: string | null;
   localSessionMode?: LocalAgentSessionMode | null;
+  ownerUserId?: string | null;
+  podSecrets?: string[] | null;
 }
 
 export async function createTaskConfig(input: CreateTaskConfigInput) {
@@ -73,6 +79,8 @@ export async function createTaskConfig(input: CreateTaskConfigInput) {
       enabled: input.enabled ?? true,
       workspaceId: input.workspaceId ?? null,
       createdBy: input.createdBy ?? null,
+      ownerUserId: input.ownerUserId ?? null,
+      podSecrets: input.podSecrets ?? null,
     })
     .returning();
   return row;
@@ -135,6 +143,8 @@ export async function updateTaskConfig(id: string, input: UpdateTaskConfigInput)
   if (input.localHostId !== undefined) updates.localHostId = input.localHostId;
   if (input.localDir !== undefined) updates.localDir = input.localDir;
   if (input.localSessionMode !== undefined) updates.localSessionMode = input.localSessionMode;
+  if (input.ownerUserId !== undefined) updates.ownerUserId = input.ownerUserId;
+  if (input.podSecrets !== undefined) updates.podSecrets = input.podSecrets;
 
   const [row] = await db.update(taskConfigs).set(updates).where(eq(taskConfigs.id, id)).returning();
   return row ?? null;
@@ -210,6 +220,9 @@ export async function instantiateTask(
     priority: config.priority,
     createdBy: config.createdBy ?? undefined,
     workspaceId,
+    // Spawned tasks run as the blueprint's owner, with the secrets it picked.
+    ownerUserId: config.ownerUserId,
+    podSecrets: config.podSecrets,
     runTarget: config.runTarget,
     localHostId: config.localHostId,
     localDir: config.localDir,

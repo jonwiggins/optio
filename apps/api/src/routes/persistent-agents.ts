@@ -3,6 +3,12 @@
 // Mirrors the workflow routes layout. The polymorphic /api/tasks layer
 // gains type='persistent_agent' resolution in tasks-unified.ts.
 
+import {
+  planNewWork,
+  planWorkUpdate,
+  workActor,
+  workChangeError,
+} from "../services/work-ownership.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -66,6 +72,8 @@ const createSchema = z.object({
   maxTurns: z.number().int().positive().optional(),
   consecutiveFailureLimit: z.number().int().positive().optional(),
   enabled: z.boolean().optional(),
+  owner: z.enum(["workspace", "me"]).optional(),
+  podSecrets: z.array(z.string().min(1).max(128)).max(100).nullable().optional(),
 });
 
 const updateSchema = z.object({
@@ -89,6 +97,8 @@ const updateSchema = z.object({
   maxTurns: z.number().int().positive().optional(),
   consecutiveFailureLimit: z.number().int().positive().optional(),
   enabled: z.boolean().optional(),
+  owner: z.enum(["workspace", "me"]).optional(),
+  podSecrets: z.array(z.string().min(1).max(128)).max(100).nullable().optional(),
 });
 
 const sendMessageSchema = z.object({
@@ -182,11 +192,19 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const body = req.body;
+      const { owner: _owner, podSecrets: _podSecrets, ...body } = req.body;
       const workspaceId = req.user?.workspaceId ?? null;
+      const plan = await planNewWork(req.body, workActor(req), {
+        agentType: body.agentRuntime ?? "claude-code",
+        agentOptions: body.agentOptions,
+        runsOn: "pod",
+      });
+      if (!plan.ok) return reply.code(plan.status).send({ error: plan.error });
       try {
         const agent = await paService.createPersistentAgent({
           ...body,
+          ownerUserId: plan.ownerUserId,
+          podSecrets: plan.podSecrets ?? null,
           podLifecycle: body.podLifecycle as PersistentAgentPodLifecycle | undefined,
           workspaceId,
           createdBy: req.user?.id ?? null,
@@ -238,10 +256,19 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const existing = await requireAgent(req, reply, id);
       if (!existing) return;
+      const { owner: _owner, podSecrets: _podSecrets, ...fields } = body;
+      const plan = await planWorkUpdate(existing, body, workActor(req), {
+        agentType: fields.agentRuntime ?? existing.agentRuntime,
+        runsOn: "pod",
+        touchesRuntime: fields.agentRuntime !== undefined,
+      });
+      if (!plan.ok) return reply.code(plan.status).send({ error: plan.error });
       const updated = await paService.updatePersistentAgent(
         id,
         {
-          ...body,
+          ...fields,
+          ...(plan.ownerUserId !== existing.ownerUserId ? { ownerUserId: plan.ownerUserId } : {}),
+          ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
           podLifecycle: body.podLifecycle as PersistentAgentPodLifecycle | undefined,
         },
         workspaceId,
@@ -268,6 +295,8 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const existing = await requireAgent(req, reply, id);
       if (!existing) return;
+      const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "delete");
+      if (changeErr) return reply.code(403).send({ error: changeErr });
       const ok = await paService.deletePersistentAgent(id, workspaceId);
       if (!ok) return reply.code(404).send({ error: "Not found" });
       reply.code(204).send();
@@ -295,6 +324,9 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const body = req.body;
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
+      // A personal agent works with its owner's credentials: only they wake it from here.
+      const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "run");
+      if (changeErr) return reply.code(403).send({ error: changeErr });
 
       const senderType: PersistentAgentMessageSenderType = body.senderType ?? "user";
       const senderId =
@@ -439,6 +471,10 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const body = req.body;
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
+      {
+        const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "edit");
+        if (changeErr) return reply.code(403).send({ error: changeErr });
+      }
 
       const configError = triggerService.validateTriggerConfig(body.type, body.config);
       if (configError) return reply.code(400).send({ error: configError });
@@ -474,6 +510,10 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const { id, triggerId } = req.params;
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
+      {
+        const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "edit");
+        if (changeErr) return reply.code(403).send({ error: changeErr });
+      }
       // Scoped to this agent's triggers so a trigger id from another agent
       // (or another tenant) can't be removed via a valid-for-caller :id.
       const existing = await triggerService.getTriggerFor("persistent_agent", id, triggerId);
@@ -501,6 +541,10 @@ export async function persistentAgentRoutes(rawApp: FastifyInstance) {
       const workspaceId = req.user?.workspaceId ?? null;
       const agent = await requireAgent(req, reply, id);
       if (!agent) return;
+      {
+        const changeErr = await workChangeError(agent.ownerUserId, workActor(req), "run");
+        if (changeErr) return reply.code(403).send({ error: changeErr });
+      }
       await paService.setControlIntent(id, intent, workspaceId);
       // Wake the reconciler so it observes the intent immediately.
       const { enqueueReconcile } = await import("../services/reconcile-queue.js");

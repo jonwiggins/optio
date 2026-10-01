@@ -11,6 +11,12 @@ export interface OAuthUser {
   /** The provider's handle (GitHub login, GitLab username), when it has one. */
   username?: string;
   avatarUrl?: string;
+  /**
+   * The provider vouches that the person controls `email` (Google
+   * `verified_email`, OIDC `email_verified`, GitHub's verified primary,
+   * GitLab's confirmed email). Joining a workspace by email domain needs it.
+   */
+  emailVerified?: boolean;
 }
 
 export interface OAuthProvider {

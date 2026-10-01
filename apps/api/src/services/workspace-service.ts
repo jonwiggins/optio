@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { workspaces, workspaceMembers, users } from "../db/schema.js";
 import { revokeAllUserSessions } from "./session-service.js";
@@ -58,6 +58,9 @@ export async function updateWorkspace(
     slug?: string;
     description?: string | null;
     allowDockerInDocker?: boolean;
+    autoJoinDomains?: string[];
+    autoJoinRole?: WorkspaceRole;
+    restrictPodSecrets?: boolean;
   },
 ): Promise<Workspace | null> {
   const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -66,6 +69,18 @@ export async function updateWorkspace(
   if (data.description !== undefined) updates.description = data.description;
   if (data.allowDockerInDocker !== undefined)
     updates.allowDockerInDocker = data.allowDockerInDocker;
+  if (data.autoJoinDomains !== undefined) {
+    const normalized = normalizeAutoJoinDomains(data.autoJoinDomains);
+    if ("error" in normalized) throw new WorkspaceSettingsError(normalized.error);
+    updates.autoJoinDomains = normalized.domains;
+  }
+  if (data.autoJoinRole !== undefined) {
+    if (data.autoJoinRole === "admin") {
+      throw new WorkspaceSettingsError("People joining by email domain can't be admins");
+    }
+    updates.autoJoinRole = data.autoJoinRole;
+  }
+  if (data.restrictPodSecrets !== undefined) updates.restrictPodSecrets = data.restrictPodSecrets;
 
   const [ws] = await db.update(workspaces).set(updates).where(eq(workspaces.id, id)).returning();
   return (ws as Workspace) ?? null;
@@ -214,4 +229,99 @@ export async function switchWorkspace(userId: string, workspaceId: string): Prom
     .update(users)
     .set({ defaultWorkspaceId: workspaceId, updatedAt: new Date() })
     .where(eq(users.id, userId));
+}
+
+// ── Sign-in by email domain ─────────────────────────────────────────────────
+
+export class WorkspaceSettingsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkspaceSettingsError";
+  }
+}
+
+/** Domains anyone can get an address at: never a company's sign-in rule. */
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "msn.com",
+  "yahoo.com",
+  "ymail.com",
+  "icloud.com",
+  "me.com",
+  "mac.com",
+  "aol.com",
+  "proton.me",
+  "protonmail.com",
+  "pm.me",
+  "gmx.com",
+  "gmx.net",
+  "mail.com",
+  "zoho.com",
+  "yandex.com",
+  "fastmail.com",
+  "hey.com",
+  "qq.com",
+  "163.com",
+  "users.noreply.github.com",
+  "privaterelay.appleid.com",
+]);
+
+/** Lowercased, deduplicated domains; an error for one that isn't a company domain. */
+export function normalizeAutoJoinDomains(
+  domains: string[],
+): { domains: string[] } | { error: string } {
+  const out = new Set<string>();
+  for (const raw of domains) {
+    const d = raw.trim().toLowerCase().replace(/^@/, "");
+    if (!d) continue;
+    if (!/^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(d)) {
+      return { error: `"${raw}" isn't an email domain (like acme.com)` };
+    }
+    if (PUBLIC_EMAIL_DOMAINS.has(d)) {
+      return { error: `Anyone can get a ${d} address — use your company's own domain` };
+    }
+    out.add(d);
+  }
+  if (out.size > 20) return { error: "At most 20 domains" };
+  return { domains: [...out].sort() };
+}
+
+/**
+ * After a sign-in: join every workspace that lets people with this verified
+ * email's domain in, with its join role. Existing memberships are kept as
+ * they are. A first-time user's default workspace becomes the first one
+ * joined (so they never get an empty personal one). Returns the ids joined.
+ */
+export async function joinWorkspacesByEmailDomain(
+  userId: string,
+  email: string,
+  emailVerified: boolean,
+): Promise<string[]> {
+  if (!emailVerified) return [];
+  const domain = email.split("@")[1]?.trim().toLowerCase();
+  if (!domain || PUBLIC_EMAIL_DOMAINS.has(domain)) return [];
+  const matching = await db
+    .select({ id: workspaces.id, role: workspaces.autoJoinRole })
+    .from(workspaces)
+    .where(sql`${workspaces.autoJoinDomains} @> ${JSON.stringify([domain])}::jsonb`);
+  const joined: string[] = [];
+  for (const ws of matching) {
+    const inserted = await db
+      .insert(workspaceMembers)
+      .values({ workspaceId: ws.id, userId, role: ws.role === "admin" ? "member" : ws.role })
+      .onConflictDoNothing({ target: [workspaceMembers.workspaceId, workspaceMembers.userId] })
+      .returning({ id: workspaceMembers.id });
+    if (inserted.length > 0) joined.push(ws.id);
+  }
+  if (joined.length > 0) {
+    await db
+      .update(users)
+      .set({ defaultWorkspaceId: joined[0] })
+      .where(and(eq(users.id, userId), isNull(users.defaultWorkspaceId)));
+  }
+  return joined;
 }

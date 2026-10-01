@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { workActor, workChangeError } from "../services/work-ownership.js";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { TaskState } from "@optio/shared";
@@ -92,6 +93,11 @@ export async function messageRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && task.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task not found" });
+      }
+      {
+        // Personal work runs with its owner's credentials: only they steer it.
+        const changeErr = await workChangeError(task.ownerUserId, workActor(req), "run");
+        if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
       if (req.user?.id) {

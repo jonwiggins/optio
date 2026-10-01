@@ -4,6 +4,12 @@ import { z } from "zod";
 import * as taskConfigService from "../services/task-config-service.js";
 import * as triggerService from "../services/trigger-service.js";
 import { validateRunLocation } from "../services/local-run-service.js";
+import {
+  planNewWork,
+  planWorkUpdate,
+  workActor,
+  workChangeError,
+} from "../services/work-ownership.js";
 import { logAction } from "../services/optio-action-service.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
@@ -78,6 +84,18 @@ const createTaskConfigSchema = z.object({
   localHostId: z.string().uuid().nullable().optional(),
   localDir: z.string().min(1).max(1000).nullable().optional(),
   localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
+  owner: z
+    .enum(["workspace", "me"])
+    .optional()
+    .describe(
+      "Who the work belongs to: `workspace` (the organization) or `me` (runs with your own secrets / model providers; only you can change it)",
+    ),
+  podSecrets: z
+    .array(z.string().min(1).max(128))
+    .max(100)
+    .nullable()
+    .optional()
+    .describe("Secrets (by name) spawned tasks get in their pod; null = the workspace's default"),
 });
 
 const updateTaskConfigSchema = z.object({
@@ -100,6 +118,18 @@ const updateTaskConfigSchema = z.object({
   localHostId: z.string().uuid().nullable().optional(),
   localDir: z.string().min(1).max(1000).nullable().optional(),
   localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
+  owner: z
+    .enum(["workspace", "me"])
+    .optional()
+    .describe(
+      "Who the work belongs to: `workspace` (the organization) or `me` (runs with your own secrets / model providers; only you can change it)",
+    ),
+  podSecrets: z
+    .array(z.string().min(1).max(128))
+    .max(100)
+    .nullable()
+    .optional()
+    .describe("Secrets (by name) spawned tasks get in their pod; null = the workspace's default"),
 });
 
 export async function taskConfigRoutes(rawApp: FastifyInstance) {
@@ -136,6 +166,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         tags: ["Task Configs"],
         body: createTaskConfigSchema,
         response: {
+          403: ErrorResponseSchema,
           201: TaskConfigResponseSchema,
           400: ErrorResponseSchema,
         },
@@ -155,10 +186,19 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         req.user?.id,
       );
       if (!location.ok) return reply.status(400).send({ error: location.error });
+      const { owner: _owner, podSecrets: _podSecrets, ...fields } = input;
+      const plan = await planNewWork(input, workActor(req), {
+        agentType: input.agentType ?? "claude-code",
+        agentOptions: input.agentOptions,
+        runsOn: location.location.runTarget === "local" ? "local" : "pod",
+      });
+      if (!plan.ok) return reply.status(plan.status).send({ error: plan.error });
       try {
         const taskConfig = await taskConfigService.createTaskConfig({
-          ...input,
+          ...fields,
           ...location.location,
+          ownerUserId: plan.ownerUserId,
+          ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
           workspaceId: req.user?.workspaceId ?? null,
           createdBy: req.user?.id ?? null,
         });
@@ -214,6 +254,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         params: IdParamsSchema,
         body: updateTaskConfigSchema,
         response: {
+          403: ErrorResponseSchema,
           200: TaskConfigResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -259,8 +300,20 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         patch = { ...input, ...location.location };
       }
 
+      const { owner: _owner, podSecrets: _podSecrets, ...patchFields } = patch;
+      const plan = await planWorkUpdate(existing, input, workActor(req), {
+        agentType:
+          (input.agentType !== undefined ? input.agentType : existing.agentType) ?? "claude-code",
+        runsOn: (patchFields.runTarget ?? existing.runTarget) === "local" ? "local" : "pod",
+        touchesRuntime: touchesLocation,
+      });
+      if (!plan.ok) return reply.status(plan.status).send({ error: plan.error });
       try {
-        const taskConfig = await taskConfigService.updateTaskConfig(id, patch);
+        const taskConfig = await taskConfigService.updateTaskConfig(id, {
+          ...patchFields,
+          ...(plan.ownerUserId !== existing.ownerUserId ? { ownerUserId: plan.ownerUserId } : {}),
+          ...(plan.podSecrets !== undefined ? { podSecrets: plan.podSecrets } : {}),
+        });
         if (!taskConfig) return reply.status(404).send({ error: "Task config not found" });
         logAction({
           workspaceId: req.user?.workspaceId ?? null,
@@ -292,6 +345,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         tags: ["Task Configs"],
         params: IdParamsSchema,
         response: {
+          403: ErrorResponseSchema,
           204: z.null(),
           404: ErrorResponseSchema,
         },
@@ -304,6 +358,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task config not found" });
+      }
+      {
+        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "delete");
+        if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
       await taskConfigService.deleteTaskConfig(id);
@@ -382,6 +440,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         params: IdParamsSchema,
         body: CreateTriggerBodySchema,
         response: {
+          403: ErrorResponseSchema,
           201: z.object({ trigger: TriggerSchema }),
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -397,6 +456,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task config not found" });
+      }
+      {
+        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+        if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
       const configError = triggerService.validateTriggerConfig(input.type, input.config);
@@ -438,6 +501,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         params: triggerParamsSchema,
         body: UpdateTriggerBodySchema,
         response: {
+          403: ErrorResponseSchema,
           200: z.object({ trigger: TriggerSchema }),
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -452,6 +516,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task config not found" });
+      }
+      {
+        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+        if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
       const trigger = await triggerService.getTriggerFor("task_config", id, triggerId);
@@ -493,6 +561,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         tags: ["Task Configs"],
         params: triggerParamsSchema,
         response: {
+          403: ErrorResponseSchema,
           204: z.null(),
           404: ErrorResponseSchema,
         },
@@ -505,6 +574,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task config not found" });
+      }
+      {
+        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "edit");
+        if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
       const trigger = await triggerService.getTriggerFor("task_config", id, triggerId);
@@ -537,6 +610,7 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
         tags: ["Task Configs"],
         params: IdParamsSchema,
         response: {
+          403: ErrorResponseSchema,
           202: z.object({ taskId: z.string() }),
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -550,6 +624,10 @@ export async function taskConfigRoutes(rawApp: FastifyInstance) {
       const wsId = req.user?.workspaceId;
       if (wsId && existing.workspaceId && existing.workspaceId !== wsId) {
         return reply.status(404).send({ error: "Task config not found" });
+      }
+      {
+        const changeErr = await workChangeError(existing.ownerUserId, workActor(req), "run");
+        if (changeErr) return reply.status(403).send({ error: changeErr });
       }
 
       try {

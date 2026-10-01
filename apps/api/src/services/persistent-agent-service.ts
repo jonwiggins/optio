@@ -115,6 +115,10 @@ export interface CreatePersistentAgentInput {
   consecutiveFailureLimit?: number;
   enabled?: boolean;
   createdBy?: string | null;
+  /** Null = the organization's; see services/work-ownership.ts. */
+  ownerUserId?: string | null;
+  /** Secrets (by name) its pod gets; null = the workspace's default. */
+  podSecrets?: string[] | null;
 }
 
 export async function createPersistentAgent(input: CreatePersistentAgentInput) {
@@ -141,6 +145,8 @@ export async function createPersistentAgent(input: CreatePersistentAgentInput) {
       consecutiveFailureLimit: input.consecutiveFailureLimit ?? 3,
       enabled: input.enabled ?? true,
       createdBy: input.createdBy ?? null,
+      ownerUserId: input.ownerUserId ?? null,
+      podSecrets: input.podSecrets ?? null,
     })
     .returning();
   return row;
@@ -164,6 +170,8 @@ export interface UpdatePersistentAgentInput {
   maxTurns?: number;
   consecutiveFailureLimit?: number;
   enabled?: boolean;
+  ownerUserId?: string | null;
+  podSecrets?: string[] | null;
 }
 
 export async function updatePersistentAgent(

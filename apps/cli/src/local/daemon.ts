@@ -1,4 +1,5 @@
 import os from "node:os";
+import { listAwsProfiles } from "./aws-profiles.js";
 import { dirname, join } from "node:path";
 import WebSocket from "ws";
 import type {
@@ -497,6 +498,8 @@ export async function runDaemon(opts: {
           claudeCredentials,
           transcriptBackfill: true,
           manageDirs: remoteDirs,
+          modelProviders: true,
+          awsProfiles: listAwsProfiles(),
         };
         socket.send(JSON.stringify(hello));
         status(green(`connected to ${client.serverUrl} as host "${host.name}" (${host.id})`));

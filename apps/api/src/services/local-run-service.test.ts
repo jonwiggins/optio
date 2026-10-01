@@ -3,7 +3,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── Mocks ────────────────────────────────────────────────────────────────────
 // The pure helpers under test don't touch the DB; the module's imports do.
 
-vi.mock("../db/client.js", () => ({ db: {} }));
+const { mockTranscriptRows, mockDetectTaskPrs } = vi.hoisted(() => ({
+  mockTranscriptRows: vi.fn(),
+  mockDetectTaskPrs: vi.fn(),
+}));
+vi.mock("../db/client.js", () => {
+  const chain: any = {
+    from: () => chain,
+    where: () => chain,
+    orderBy: () => Promise.resolve(mockTranscriptRows()),
+  };
+  return { db: { select: () => chain } };
+});
+vi.mock("./task-pr-service.js", () => ({
+  detectTaskPrs: (...args: unknown[]) => mockDetectTaskPrs(...args),
+}));
 vi.mock("../logger.js", () => ({
   logger: {
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -36,10 +50,12 @@ vi.mock("./local-host-service.js", async (importOriginal) => {
   };
 });
 
+import * as taskService from "./task-service.js";
 import {
   allowlistEntryFor,
   buildLocalTaskPrompt,
-  prLinkForTask,
+  localTaskPrMatches,
+  onTaskTranscript,
   validateRunLocation,
   CLUSTER_LOCATION,
 } from "./local-run-service.js";
@@ -207,6 +223,8 @@ describe("buildLocalTaskPrompt", () => {
     expect(p).toContain("`develop`");
     expect(p).toContain("gh pr create");
     expect(p).toContain("pull request URL");
+    // Extra PRs go on branches under the task's own.
+    expect(p).toContain("`optio/task-11111111-2222-3333-4444-555555555555-<short-slug>`");
   });
 
   it("speaks GitLab for GitLab repos", () => {
@@ -224,35 +242,92 @@ describe("buildLocalTaskPrompt", () => {
   });
 });
 
-// ── prLinkForTask ────────────────────────────────────────────────────────────
+// ── PR detection from the transcript ─────────────────────────────────────────
 
-describe("prLinkForTask", () => {
-  const task = { repoUrl: "https://github.com/acme/optio" };
-  const pr = (url: string) => ({
-    url,
-    kind: "pr" as const,
-    provider: "github" as const,
-    label: "pr",
+describe("local task PR detection", () => {
+  const toolRow = (
+    kind: "tool_use" | "tool_result",
+    toolUseId: string,
+    text: string,
+    detail: string | null = null,
+    isError = false,
+  ) => ({ kind, text, detail, toolName: kind === "tool_use" ? "Bash" : null, toolUseId, isError });
+  const rows = [
+    toolRow("tool_use", "a", "$ gh pr view 99", '{"command":"gh pr view 99"}'),
+    toolRow("tool_result", "a", "title: x\nurl: https://github.com/acme/optio/pull/99"),
+    toolRow(
+      "tool_use",
+      "b",
+      "$ gh pr create",
+      '{"command":"git push -u origin HEAD && gh pr create --fill"}',
+    ),
+    toolRow("tool_result", "b", "https://github.com/acme/optio/pull/12\n"),
+  ];
+  const terminal = {
+    id: "term-1",
+    taskId: "task-1",
+    startedAt: new Date("2026-09-30T10:00:00Z"),
+    createdAt: new Date("2026-09-30T09:59:00Z"),
+  } as any;
+  const runningTask = {
+    id: "task-1",
+    repoUrl: "https://github.com/acme/optio",
+    state: "running",
+    prUrl: null,
+    localTerminalId: "term-1",
+  };
+
+  beforeEach(() => {
+    mockTranscriptRows.mockReturnValue(rows);
   });
 
-  it("returns the first PR link that belongs to the task's repo", () => {
-    const links = [
+  it("finds only the PRs the agent's create calls returned", async () => {
+    const matches = await localTaskPrMatches("term-1");
+    expect(matches.map((m) => m.url)).toEqual(["https://github.com/acme/optio/pull/12"]);
+  });
+
+  it("adopts a created PR and moves the running task to pr_opened", async () => {
+    vi.mocked(taskService.getTask).mockResolvedValue(runningTask as any);
+    mockDetectTaskPrs.mockResolvedValue({
+      primaryUrl: "https://github.com/acme/optio/pull/12",
+      adopted: [],
+      platformChecked: true,
+    });
+    await onTaskTranscript(terminal, [{ kind: "tool_result", toolUseId: "b" }]);
+    expect(mockDetectTaskPrs).toHaveBeenCalledWith(
+      { id: "task-1", repoUrl: "https://github.com/acme/optio" },
       {
-        url: "https://github.com/acme/optio/issues/3",
-        kind: "issue" as const,
-        provider: "github" as const,
-        label: "#3",
+        matches: [expect.objectContaining({ url: "https://github.com/acme/optio/pull/12" })],
+        runStartedAt: terminal.startedAt,
       },
-      pr("https://github.com/other/repo/pull/9"),
-      pr("https://github.com/Acme/Optio/pull/12"),
-      pr("https://github.com/acme/optio/pull/13"),
-    ];
-    expect(prLinkForTask(task, links)?.url).toBe("https://github.com/Acme/Optio/pull/12");
+    );
+    expect(taskService.tryTransitionTask).toHaveBeenCalledWith(
+      "task-1",
+      "pr_opened",
+      "pr_detected",
+      expect.stringContaining("/pull/12"),
+    );
   });
 
-  it("ignores PRs of other repos and non-PR links", () => {
-    expect(prLinkForTask(task, [pr("https://github.com/other/repo/pull/9")])).toBeNull();
-    expect(prLinkForTask(task, [])).toBeNull();
-    expect(prLinkForTask(task, null)).toBeNull();
+  it("does nothing for batches without tool results, or a task that has its PR", async () => {
+    vi.mocked(taskService.getTask).mockResolvedValue(runningTask as any);
+    await onTaskTranscript(terminal, [{ kind: "text", toolUseId: null }]);
+    expect(mockDetectTaskPrs).not.toHaveBeenCalled();
+
+    vi.mocked(taskService.getTask).mockResolvedValue({
+      ...runningTask,
+      prUrl: "https://github.com/acme/optio/pull/1",
+    } as any);
+    await onTaskTranscript(terminal, [{ kind: "tool_result", toolUseId: "b" }]);
+    expect(mockDetectTaskPrs).not.toHaveBeenCalled();
+    expect(taskService.tryTransitionTask).not.toHaveBeenCalled();
+  });
+
+  it("skips the platform lookup mid-run when no call created a PR", async () => {
+    vi.mocked(taskService.getTask).mockResolvedValue(runningTask as any);
+    mockTranscriptRows.mockReturnValue(rows.slice(0, 2));
+    await onTaskTranscript(terminal, [{ kind: "tool_result", toolUseId: "a" }]);
+    expect(mockDetectTaskPrs).not.toHaveBeenCalled();
+    expect(taskService.tryTransitionTask).not.toHaveBeenCalled();
   });
 });

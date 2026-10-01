@@ -3,6 +3,8 @@
  * All resources are user-scoped: hosts are personal machines, and every
  * ownership miss is a 404. See docs/optio-local.md.
  */
+import { providerSelectionError } from "../services/model-provider-service.js";
+import { modelProviderIdFrom } from "@optio/shared";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -71,6 +73,13 @@ const createTerminalSchema = z
       })
       .optional()
       .describe("Start the terminal seeded with an issue's context"),
+    agentOptions: z
+      .record(z.union([z.string(), z.boolean()]))
+      .nullable()
+      .optional()
+      .describe(
+        "Agent spawns: `modelProvider` (a model provider id) runs the agent through that provider with the machine's own AWS credentials",
+      ),
   })
   .describe("Spawn a terminal on a local host");
 
@@ -183,6 +192,7 @@ function withLiveCapabilities<T extends { id: string }>(host: T) {
     ...host,
     claudeCredentials: relay.hostHasClaudeCredentials(host.id),
     manageDirs: relay.hostCanManageDirs(host.id),
+    modelProviders: relay.hostCanUseModelProviders(host.id),
   };
 }
 
@@ -523,6 +533,7 @@ export async function localRoutes(rawApp: FastifyInstance) {
           title,
           spawnedBy: body.ticket ? "ticket" : "manual",
           ticket: ticketMeta,
+          modelProviderId: modelProviderIdFrom(body.agentOptions),
         });
       } catch (err) {
         return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -861,7 +872,17 @@ export async function localRoutes(rawApp: FastifyInstance) {
       },
     },
     async (req, reply) => {
-      const problem = await checkBlueprintBody(req.body, req.user?.id);
+      const problem =
+        (await checkBlueprintBody(req.body, req.user?.id)) ??
+        (req.body.agent
+          ? await providerSelectionError({
+              agentType: req.body.agent,
+              agentOptions: req.body.agentOptions,
+              workspaceId: req.user?.workspaceId ?? null,
+              ownerUserId: req.user?.id ?? null,
+              runsOn: "local",
+            })
+          : null);
       if (problem) return reply.status(400).send({ error: problem });
       try {
         const blueprint = await blueprintService.createBlueprint({
@@ -932,6 +953,18 @@ export async function localRoutes(rawApp: FastifyInstance) {
         req.user?.id,
       );
       if (problem) return reply.status(400).send({ error: problem });
+      const agent = req.body.agent !== undefined ? req.body.agent : blueprint.agent;
+      if (agent && (req.body.agentOptions !== undefined || req.body.agent !== undefined)) {
+        const providerProblem = await providerSelectionError({
+          agentType: agent,
+          agentOptions:
+            req.body.agentOptions !== undefined ? req.body.agentOptions : blueprint.agentOptions,
+          workspaceId: blueprint.workspaceId,
+          ownerUserId: blueprint.userId,
+          runsOn: "local",
+        });
+        if (providerProblem) return reply.status(400).send({ error: providerProblem });
+      }
       const updated = await blueprintService.updateBlueprint(blueprint.id, req.body);
       reply.send({ blueprint: updated! });
     },

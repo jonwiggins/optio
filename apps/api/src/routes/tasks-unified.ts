@@ -12,6 +12,7 @@
  *   PATCH /api/tasks/:id/triggers/:tid update
  *   DELETE /api/tasks/:id/triggers/:tid
  */
+import { workActor, workChangeError } from "../services/work-ownership.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -112,6 +113,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         params: IdParamsSchema,
         body: createRunSchema,
         response: {
+          403: ErrorResponseSchema,
           202: z.object({
             runId: z.string().describe("ID of the created run"),
             type: z.string(),
@@ -125,6 +127,14 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
       if (!parent) return reply.status(404).send({ error: "Task not found" });
+      {
+        const changeErr = await workChangeError(
+          (parent.data as { ownerUserId?: string | null }).ownerUserId,
+          workActor(req),
+          "run",
+        );
+        if (changeErr) return reply.status(403).send({ error: changeErr });
+      }
 
       if (parent.type === "repo-task") {
         return reply.status(405).send({ error: "Ad-hoc Repo Tasks cannot spawn child runs" });
@@ -231,6 +241,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         params: IdParamsSchema,
         body: CreateTriggerBodySchema,
         response: {
+          403: ErrorResponseSchema,
           201: z.object({ trigger: TriggerSchema }),
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -243,6 +254,14 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       const { id } = req.params;
       const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
       if (!parent) return reply.status(404).send({ error: "Task not found" });
+      {
+        const changeErr = await workChangeError(
+          (parent.data as { ownerUserId?: string | null }).ownerUserId,
+          workActor(req),
+          "edit",
+        );
+        if (changeErr) return reply.status(403).send({ error: changeErr });
+      }
       if (parent.type === "repo-task") {
         return reply.status(405).send({ error: "Ad-hoc Repo Tasks do not have triggers" });
       }
@@ -280,6 +299,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         params: triggerParamsSchema,
         body: UpdateTriggerBodySchema,
         response: {
+          403: ErrorResponseSchema,
           200: z.object({ trigger: TriggerSchema }),
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
@@ -292,6 +312,14 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       const { id, triggerId } = req.params;
       const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
       if (!parent) return reply.status(404).send({ error: "Task not found" });
+      {
+        const changeErr = await workChangeError(
+          (parent.data as { ownerUserId?: string | null }).ownerUserId,
+          workActor(req),
+          "edit",
+        );
+        if (changeErr) return reply.status(403).send({ error: changeErr });
+      }
       if (parent.type === "repo-task") {
         return reply.status(405).send({ error: "Ad-hoc Repo Tasks do not have triggers" });
       }
@@ -326,6 +354,7 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
         tags: ["Tasks"],
         params: triggerParamsSchema,
         response: {
+          403: ErrorResponseSchema,
           204: z.null(),
           404: ErrorResponseSchema,
           405: ErrorResponseSchema,
@@ -336,6 +365,14 @@ export async function tasksUnifiedRoutes(rawApp: FastifyInstance) {
       const { id, triggerId } = req.params;
       const parent = await unifiedTaskService.resolveAnyTaskById(id, req.user?.workspaceId ?? null);
       if (!parent) return reply.status(404).send({ error: "Task not found" });
+      {
+        const changeErr = await workChangeError(
+          (parent.data as { ownerUserId?: string | null }).ownerUserId,
+          workActor(req),
+          "edit",
+        );
+        if (changeErr) return reply.status(403).send({ error: changeErr });
+      }
       if (parent.type === "repo-task") {
         return reply.status(405).send({ error: "Ad-hoc Repo Tasks do not have triggers" });
       }

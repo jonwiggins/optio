@@ -230,7 +230,7 @@ export async function mergeHosts(sourceId: string, targetId: string): Promise<Ho
 
 export async function markHostOnline(
   id: string,
-  updates: { dirs?: LocalHostDir[]; daemonVersion?: string },
+  updates: { dirs?: LocalHostDir[]; daemonVersion?: string; awsProfiles?: string[] },
 ): Promise<void> {
   const [row] = await db
     .update(localHosts)
@@ -240,6 +240,18 @@ export async function markHostOnline(
       updatedAt: new Date(),
       ...(updates.dirs ? { dirs: sanitizeDirs(updates.dirs) } : {}),
       ...(updates.daemonVersion ? { daemonVersion: updates.daemonVersion } : {}),
+      // Names only, as the machine reported them (bounded, plain names).
+      ...(updates.awsProfiles
+        ? {
+            awsProfiles: [
+              ...new Set(
+                updates.awsProfiles.filter(
+                  (p) => typeof p === "string" && /^[A-Za-z0-9._+=@-]{1,64}$/.test(p),
+                ),
+              ),
+            ].slice(0, 200),
+          }
+        : {}),
     })
     .where(eq(localHosts.id, id))
     .returning(HOST_CHANGE_COLUMNS);

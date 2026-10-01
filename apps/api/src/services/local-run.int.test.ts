@@ -5,11 +5,16 @@
  * handlers (started / exit / links / usage / spawn-error) drive the run's
  * state through local-run-service.syncLinkedRun.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { TaskState, WorkflowRunState } from "@optio/shared";
 import { db } from "../db/client.js";
 import { tasks, workflowRuns } from "../db/schema.js";
+// No git platform in this tier: a created PR is adopted on its call's word.
+vi.mock("./git-token-service.js", () => ({
+  getGitPlatformForRepo: vi.fn().mockRejectedValue(new Error("no token in tests")),
+}));
+
 import * as relay from "./local-relay.js";
 import { registerHost } from "./local-host-service.js";
 import {
@@ -20,6 +25,7 @@ import {
   handleSession,
   handleSpawnError,
   handleStarted,
+  handleTranscript,
   handleUsage,
   killTerminal,
 } from "./local-terminal-service.js";
@@ -35,6 +41,34 @@ import {
   dispatchLocalWorkflowRun,
   killLinkedTerminal,
 } from "./local-run-service.js";
+
+/** A transcript batch: a Bash call and its result. */
+function toolCall(seq: number, id: string, command: string, result: string, isError = false) {
+  return [
+    {
+      seq,
+      role: "assistant",
+      kind: "tool_use",
+      text: `$ ${command}`,
+      detail: JSON.stringify({ command }),
+      toolName: "Bash",
+      toolUseId: id,
+      isError: false,
+      at: null,
+    },
+    {
+      seq: seq + 1,
+      role: "tool",
+      kind: "tool_result",
+      text: result,
+      detail: null,
+      toolName: null,
+      toolUseId: id,
+      isError,
+      at: null,
+    },
+  ];
+}
 
 class FakeDaemonSocket implements relay.RelaySocket {
   readyState = 1;
@@ -338,7 +372,7 @@ describe("local run agent parameters", () => {
 });
 
 describe("local repo tasks", () => {
-  it("runs in the checkout, promotes to pr_opened on the PR link, and stays there after exit", async () => {
+  it("runs in the checkout, promotes to pr_opened on the PR it created, and stays there after exit", async () => {
     const { host, daemon } = await makeHost();
     const task = await makeLocalTask(host.id);
 
@@ -362,15 +396,29 @@ describe("local repo tasks", () => {
     await handleSession(host.id, t.id, "claude-sess-1");
     expect((await taskService.getTask(task.id))!.sessionId).toBe("claude-sess-1");
 
-    // A PR for another repo is ignored; the task's own PR promotes it.
+    // PR links the agent prints (its own repo's included) and PRs it only
+    // looks at are not adopted; the PR its create call returned is.
     await handleLinks(host.id, t.id, [
       { url: "https://github.com/other/repo/pull/1", kind: "pr", provider: "github", label: "#1" },
+      { url: `${REPO_URL}/pull/812`, kind: "pr", provider: "github", label: "#812" },
     ]);
+    await handleTranscript(
+      host.id,
+      t.id,
+      toolCall(1, "view", "gh pr view 812", `url: ${REPO_URL}/pull/812`),
+    );
     expect((await taskService.getTask(task.id))!.state).toBe(TaskState.RUNNING);
-    await handleLinks(host.id, t.id, [
-      { url: "https://github.com/other/repo/pull/1", kind: "pr", provider: "github", label: "#1" },
-      { url: `${REPO_URL}/pull/77`, kind: "pr", provider: "github", label: "#77" },
-    ]);
+    expect((await taskService.getTask(task.id))!.prUrl).toBeNull();
+    await handleTranscript(
+      host.id,
+      t.id,
+      toolCall(
+        3,
+        "create",
+        "git push -u origin HEAD && gh pr create --fill",
+        `${REPO_URL}/pull/77\n`,
+      ),
+    );
     let fresh = (await taskService.getTask(task.id))!;
     expect(fresh.state).toBe(TaskState.PR_OPENED);
     expect(fresh.prUrl).toBe(`${REPO_URL}/pull/77`);
@@ -404,10 +452,12 @@ describe("local repo tasks", () => {
     const task = await makeLocalTask(host.id);
     const t = (await dispatchLocalTask(task))!;
     await handleStarted(host.id, t.id);
-    // Links and exit collapse into one frame pair on a fast agent.
-    await handleLinks(host.id, t.id, [
-      { url: `${REPO_URL}/pull/5`, kind: "pr", provider: "github", label: "#5" },
-    ]);
+    // The transcript lands right before the exit on a fast agent.
+    await handleTranscript(
+      host.id,
+      t.id,
+      toolCall(1, "c", "gh pr create --fill", `${REPO_URL}/pull/5`),
+    );
     await handleExit(host.id, t.id, 1);
     const fresh = (await taskService.getTask(task.id))!;
     expect(fresh.state).toBe(TaskState.PR_OPENED);

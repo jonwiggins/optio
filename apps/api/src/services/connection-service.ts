@@ -441,6 +441,8 @@ export async function createConnection(
     scope?: string;
     repoUrl?: string;
     enabled?: boolean;
+    /** Null = the organization's; set = one person's own. */
+    ownerUserId?: string | null;
     assignments?: Array<{
       repoId?: string | null;
       agentTypes?: string[];
@@ -468,6 +470,7 @@ export async function createConnection(
       repoUrl: input.repoUrl ?? undefined,
       workspaceId: workspaceId ?? undefined,
       enabled: input.enabled ?? true,
+      ownerUserId: input.ownerUserId ?? null,
     })
     .returning();
 
@@ -689,6 +692,8 @@ export async function getConnectionsForTask(
   repoUrl: string,
   agentType: string,
   workspaceId?: string | null,
+  /** The work's owner: a personal connection only reaches work its owner owns. */
+  ownerUserId?: string | null,
 ): Promise<ResolvedConnection[]> {
   const results: ResolvedConnection[] = [];
 
@@ -696,6 +701,7 @@ export async function getConnectionsForTask(
     repoUrl,
     workspaceId,
   )) {
+    if (conn.ownerUserId && conn.ownerUserId !== (ownerUserId ?? null)) continue;
     // 5. An assignment that covers this repo AND this agent type (empty
     // agentTypes = all agents). Every covering assignment counts — a global
     // one limited to another agent must not hide the repo's own. The repo's
@@ -799,6 +805,7 @@ function mapConnectionRow(
     scope: row.scope,
     repoUrl: row.repoUrl,
     workspaceId: row.workspaceId,
+    ownerUserId: row.ownerUserId,
     enabled: row.enabled,
     status: row.status,
     statusMessage: row.statusMessage,

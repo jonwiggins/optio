@@ -16,14 +16,23 @@
  * The prompt controls the scripted behavior via directives:
  *
  *   (none)               → successful run: init + assistant text + result
- *   [[mock:pr]]          → also print a PR URL for the pod's repo
- *                          (OPTIO_REPO_URL) so repo tasks reach PR_OPENED
+ *   [[mock:pr]]          → open a PR for the pod's repo (OPTIO_REPO_URL):
+ *                          a Bash `tool_use` running `gh pr create` and its
+ *                          `tool_result` carrying the PR URL (what PR
+ *                          detection adopts), then a raw `Opened pull
+ *                          request: <url>` line — repo tasks reach PR_OPENED
+ *   [[mock:pr-mention]]  → assistant text that only *mentions* another PR of
+ *                          the repo (`<repo>/pull/9999`), plus a `gh pr view`
+ *                          call printing it — must never be adopted
  *   [[mock:fail]]        → result with is_error=true → run fails
  *   [[mock:silent]]      → no events at all → no session id → `no_output`
  *   [[mock:sleep:MS]]    → wait MS before emitting the result (stall testing)
  *   [[mock:hang]]        → emit init, then never finish — reaped only by
  *                          close(), destroy(), or a kill-style utility exec
  *   [[mock:cost:X]]      → report X as total_cost_usd (default 0.0123)
+ *   [[mock:env:NAME]]    → also print `env NAME=<value>` as the exec script
+ *                          exports it (`<unset>` when it doesn't) — lets e2e
+ *                          tests check what a run's agent was given
  *
  * Non-agent execs (worktree cleanup, orphan kills, health probes) return an
  * immediately-ending empty session; kill-style scripts (pkill/kill) also
@@ -47,6 +56,12 @@ const UNSUPPORTED_AGENT_MARKERS = [" codex ", " copilot ", " gemini ", " opencod
  * the exec script's `export OPTIO_PROMPT='...'` line — extract it from there.
  */
 const CURSOR_EXEC_MARKER = "cursor-agent ";
+
+/** The value an exec script exports for `name` (`export NAME='…'`), or null. */
+function extractScriptExport(script: string, name: string): string | null {
+  const m = script.match(new RegExp(`export ${name}='([^']*(?:'\\\\''[^']*)*)'`));
+  return m ? m[1].replaceAll("'\\''", "'") : null;
+}
 
 /** Pull the OPTIO_PROMPT value out of the exec script's single-quoted export. */
 function extractScriptPrompt(script: string): string {
@@ -258,13 +273,53 @@ export class FakeContainerRuntime implements ContainerRuntime {
         },
       });
 
+      for (const m of prompt.matchAll(/\[\[mock:env:([A-Z0-9_]+)\]\]/g)) {
+        const value = extractScriptExport(script, m[1]) ?? spec?.env?.[m[1]] ?? "<unset>";
+        emitRaw(`env ${m[1]}=${value}`);
+      }
+
+      const repoUrl = (spec?.env?.OPTIO_REPO_URL ?? "https://github.com/mock/repo").replace(
+        /\.git$/,
+        "",
+      );
+      const toolCall = (id: string, command: string, output: string) => {
+        emit({
+          type: "assistant",
+          session_id: sessionId,
+          message: {
+            model: "fake-model",
+            content: [{ type: "tool_use", id, name: "Bash", input: { command } }],
+          },
+        });
+        emit({
+          type: "user",
+          session_id: sessionId,
+          message: { content: [{ type: "tool_result", tool_use_id: id, content: output }] },
+        });
+      };
+
+      if (directive(prompt, "pr-mention")) {
+        const mentioned = `${repoUrl}/pull/9999`;
+        emit({
+          type: "assistant",
+          session_id: sessionId,
+          message: {
+            model: "fake-model",
+            content: [{ type: "text", text: `This is similar to ${mentioned} (see #9999).` }],
+          },
+        });
+        toolCall(`toolu_view_${randomUUID().slice(0, 8)}`, "gh pr view 9999", `url: ${mentioned}`);
+      }
+
       if (directive(prompt, "pr")) {
-        const repoUrl = (spec?.env?.OPTIO_REPO_URL ?? "https://github.com/mock/repo").replace(
-          /\.git$/,
-          "",
-        );
         this.prCounter += 1;
-        emitRaw(`Opened pull request: ${repoUrl}/pull/${this.prCounter}`);
+        const prUrl = `${repoUrl}/pull/${this.prCounter}`;
+        toolCall(
+          `toolu_create_${randomUUID().slice(0, 8)}`,
+          "git push -u origin HEAD && gh pr create --fill",
+          `${prUrl}\n`,
+        );
+        emitRaw(`Opened pull request: ${prUrl}`);
       }
 
       const isError = directive(prompt, "fail");

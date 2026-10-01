@@ -216,6 +216,28 @@ export class GitHubPlatform implements GitPlatform {
     return data.map(mapPr);
   }
 
+  async findPullRequestsByHeadPrefix(ri: RepoIdentifier, prefix: string): Promise<PullRequest[]> {
+    const out: PullRequest[] = [];
+    // REST can only filter by an exact head; list open PRs (bounded) and filter.
+    for (let page = 1; page <= 3; page++) {
+      const params = new URLSearchParams({
+        state: "open",
+        per_page: "100",
+        page: String(page),
+        sort: "created",
+        direction: "desc",
+      });
+      const data = await this.fetchJson<any[]>(this.url(ri, `/pulls?${params}`), {
+        headers: this.headers(),
+      });
+      for (const d of data) {
+        if (typeof d?.head?.ref === "string" && d.head.ref.startsWith(prefix)) out.push(mapPr(d));
+      }
+      if (data.length < 100) break;
+    }
+    return out;
+  }
+
   async getCIChecks(ri: RepoIdentifier, commitSha: string): Promise<CICheck[]> {
     const data = await this.fetchJson<any>(this.url(ri, `/commits/${commitSha}/check-runs`), {
       headers: this.headers(),
@@ -413,6 +435,8 @@ function mapPr(data: any): PullRequest {
     draft: data.draft ?? false,
     headSha: data.head?.sha ?? "",
     baseBranch: data.base?.ref ?? "",
+    headBranch: data.head?.ref ?? undefined,
+    headRepo: data.head?.repo?.full_name ?? undefined,
     url: data.html_url ?? "",
     author: data.user?.login ?? "",
     assignees: (data.assignees ?? []).map((a: any) => a.login ?? ""),

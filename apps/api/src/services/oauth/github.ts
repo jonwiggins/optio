@@ -69,6 +69,7 @@ export class GitHubOAuthProvider implements OAuthProvider {
     // GitHub Apps may not have this configured, so fall back to the public email
     // from /user if the emails endpoint is inaccessible.
     let email = user.email ?? "";
+    let emailVerified = false;
     const emailsRes = await fetch("https://api.github.com/user/emails", { headers });
     if (emailsRes.ok) {
       const emails = (await emailsRes.json()) as Array<{
@@ -76,9 +77,11 @@ export class GitHubOAuthProvider implements OAuthProvider {
         primary: boolean;
         verified: boolean;
       }>;
-      const primaryEmail = emails.find((e) => e.primary && e.verified)?.email ?? emails[0]?.email;
+      const verifiedPrimary = emails.find((e) => e.primary && e.verified)?.email;
+      const primaryEmail = verifiedPrimary ?? emails[0]?.email;
       if (primaryEmail) {
         email = primaryEmail;
+        emailVerified = !!verifiedPrimary;
       }
     }
 
@@ -88,6 +91,7 @@ export class GitHubOAuthProvider implements OAuthProvider {
       displayName: user.name || user.login || "",
       username: user.login || undefined,
       avatarUrl: user.avatar_url,
+      emailVerified,
     };
   }
 }

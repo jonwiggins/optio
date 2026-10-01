@@ -40,6 +40,8 @@ interface DaemonConn {
   transcriptBackfill: boolean;
   /** From the hello: the daemon adds / removes allowlisted dirs on request (`dirs`). */
   manageDirs: boolean;
+  /** From the hello: the daemon runs agents through a model provider (`spec.provider`). */
+  modelProviders: boolean;
 }
 
 interface PendingAttach {
@@ -77,6 +79,7 @@ export function registerDaemon(
     claudeCredentials?: boolean;
     transcriptBackfill?: boolean;
     manageDirs?: boolean;
+    modelProviders?: boolean;
   } = {},
 ): void {
   const existing = daemonsByHost.get(hostId);
@@ -94,6 +97,7 @@ export function registerDaemon(
     claudeCredentials: capabilities.claudeCredentials === true,
     transcriptBackfill: capabilities.transcriptBackfill === true,
     manageDirs: capabilities.manageDirs === true,
+    modelProviders: capabilities.modelProviders === true,
   });
 }
 
@@ -113,6 +117,12 @@ export function hostCanBackfillTranscripts(hostId: string): boolean {
 export function hostCanManageDirs(hostId: string): boolean {
   const conn = daemonsByHost.get(hostId);
   return conn !== undefined && conn.socket.readyState === WS_OPEN && conn.manageDirs;
+}
+
+/** Whether the host's connected daemon runs agents through a model provider (false when offline). */
+export function hostCanUseModelProviders(hostId: string): boolean {
+  const conn = daemonsByHost.get(hostId);
+  return conn !== undefined && conn.socket.readyState === WS_OPEN && conn.modelProviders;
 }
 
 /** Online hosts whose daemon advertised Claude credentials. */

@@ -29,6 +29,23 @@ const updateWorkspaceSchema = z
       .optional(),
     description: z.string().max(500).nullable().optional(),
     allowDockerInDocker: z.boolean().optional(),
+    autoJoinDomains: z
+      .array(z.string().max(253))
+      .max(20)
+      .optional()
+      .describe(
+        "Email domains whose people join this workspace when they sign in with a verified email (e.g. `acme.com`); public mail domains are refused",
+      ),
+    autoJoinRole: z
+      .enum(["member", "viewer"])
+      .optional()
+      .describe("The role people joining by email domain get"),
+    restrictPodSecrets: z
+      .boolean()
+      .optional()
+      .describe(
+        "Pods get only the secrets a piece of work picks (off: work that picks none gets every org secret, as before)",
+      ),
   })
   .describe("Partial update to a workspace");
 
@@ -142,6 +159,7 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
         params: IdParamsSchema,
         body: updateWorkspaceSchema,
         response: {
+          400: ErrorResponseSchema,
           200: WorkspaceResponseSchema,
           401: ErrorResponseSchema,
           403: ErrorResponseSchema,
@@ -156,7 +174,15 @@ export async function workspaceRoutes(rawApp: FastifyInstance) {
       const role = await workspaceService.getUserRole(id, req.user.id);
       if (role !== "admin") return reply.status(403).send({ error: "Admin role required" });
 
-      const workspace = await workspaceService.updateWorkspace(id, req.body);
+      let workspace;
+      try {
+        workspace = await workspaceService.updateWorkspace(id, req.body);
+      } catch (err) {
+        if (err instanceof workspaceService.WorkspaceSettingsError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
       if (!workspace) return reply.status(404).send({ error: "Workspace not found" });
       reply.send({ workspace });
     },

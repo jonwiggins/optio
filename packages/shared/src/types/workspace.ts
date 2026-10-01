@@ -7,6 +7,18 @@ export interface Workspace {
   description?: string | null;
   createdBy?: string | null;
   allowDockerInDocker: boolean;
+  /**
+   * Email domains whose people join this workspace when they sign in
+   * (verified email only), e.g. `["acme.com"]`.
+   */
+  autoJoinDomains?: string[];
+  /** The role people joining by domain get. */
+  autoJoinRole?: WorkspaceRole;
+  /**
+   * Pods get only the secrets a piece of work picks. Off keeps the legacy
+   * behavior for work that picks none: every org secret goes to repo pods.
+   */
+  restrictPodSecrets?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -36,4 +48,15 @@ export interface WorkspaceSummary {
   name: string;
   slug: string;
   role: WorkspaceRole;
+}
+
+/**
+ * The agent settings a person last used in the New work form, offered again
+ * next time: the runtime, and for each runtime its agent options (model,
+ * effort, model provider, …).
+ */
+export interface WorkFormDefaults {
+  runtime?: string;
+  /** Per runtime: option key → value (a string or a boolean, like work's `agentOptions`). */
+  agentOptions?: Record<string, Record<string, unknown>>;
 }

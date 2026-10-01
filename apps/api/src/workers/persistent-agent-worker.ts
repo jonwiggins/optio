@@ -28,7 +28,12 @@ import { getAdapter } from "@optio/agent-adapters";
 import { persistentAgents } from "../db/schema.js";
 import * as paService from "../services/persistent-agent-service.js";
 import * as paPool from "../services/persistent-agent-pool-service.js";
-import { resolveSecretsForTask, retrieveSecretWithFallback } from "../services/secret-service.js";
+import {
+  resolvePodSecrets,
+  resolveSecretsForTask,
+  retrieveSecretWithFallback,
+} from "../services/secret-service.js";
+import { podProviderRuntime, resolveProviderForWork } from "../services/model-provider-service.js";
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
 import { parseClaudeEvent } from "../services/agent-event-parser.js";
 import { parseCodexEvent } from "../services/codex-event-parser.js";
@@ -245,25 +250,51 @@ export function startPersistentAgentWorker() {
 
         // 5. Build env + invoke agent.
         const adapter = getAdapter(claimedAgent.agentRuntime);
-        const resolvedSecrets = await resolveSecretsForTask(
-          adapter.validateSecrets([]).missing,
-          "",
-          claimedAgent.workspaceId ?? null,
-          claimedAgent.createdBy ?? null,
-        );
-        const claudeAuthMode =
-          ((await retrieveSecretWithFallback(
-            "CLAUDE_AUTH_MODE",
-            "global",
-            claimedAgent.workspaceId ?? null,
-          ).catch(() => null)) as string | null) ?? "api-key";
+        // Personal agents run with their owner's secrets; organization agents
+        // never see anyone's (see services/work-ownership.ts).
+        const agentOwnerUserId = claimedAgent.ownerUserId ?? null;
+        const providerRow = await resolveProviderForWork({
+          agentType: claimedAgent.agentRuntime,
+          agentOptions: claimedAgent.agentOptions,
+          workspaceId: claimedAgent.workspaceId ?? null,
+          ownerUserId: agentOwnerUserId,
+          runsOn: "pod",
+        });
+        const providerRuntime = providerRow
+          ? podProviderRuntime(providerRow, claimedAgent.agentRuntime)
+          : null;
+        const resolvedSecrets = providerRuntime
+          ? {}
+          : await resolveSecretsForTask(
+              adapter.validateSecrets([]).missing,
+              "",
+              claimedAgent.workspaceId ?? null,
+              agentOwnerUserId,
+            );
+        const picked = await resolvePodSecrets(claimedAgent.podSecrets, {
+          workspaceId: claimedAgent.workspaceId ?? null,
+          ownerUserId: agentOwnerUserId,
+        });
+        const claudeAuthMode = providerRuntime
+          ? "bedrock"
+          : (((await retrieveSecretWithFallback(
+              "CLAUDE_AUTH_MODE",
+              "global",
+              claimedAgent.workspaceId ?? null,
+              agentOwnerUserId,
+            ).catch(() => null)) as string | null) ?? "api-key");
 
         const apiUrl =
           process.env.OPTIO_API_INTERNAL_URL ??
           process.env.OPTIO_API_URL ??
           `http://localhost:${process.env.API_PORT ?? "4000"}`;
         const env: Record<string, string> = {
+          ...picked.env,
           ...resolvedSecrets,
+          ...(providerRuntime?.env ?? {}),
+          ...(providerRuntime?.codexConfig.length
+            ? { OPTIO_CODEX_PROVIDER_CONFIG: JSON.stringify(providerRuntime.codexConfig) }
+            : {}),
           OPTIO_PROMPT: renderedPrompt,
           OPTIO_PERSISTENT_AGENT_ID: agentId,
           OPTIO_PERSISTENT_AGENT_SLUG: claimedAgent.slug,
@@ -287,7 +318,7 @@ export function startPersistentAgentWorker() {
             "ANTHROPIC_API_KEY",
             "global",
             claimedAgent.workspaceId ?? null,
-            claimedAgent.createdBy ?? null,
+            agentOwnerUserId,
           ).catch(() => null);
           if (apiKey) env.ANTHROPIC_API_KEY = apiKey as string;
         } else if (claudeAuthMode === "oauth-token") {
@@ -295,7 +326,7 @@ export function startPersistentAgentWorker() {
             "CLAUDE_CODE_OAUTH_TOKEN",
             "global",
             claimedAgent.workspaceId ?? null,
-            claimedAgent.createdBy ?? null,
+            agentOwnerUserId,
           ).catch(() => null);
           if (tok) env.CLAUDE_CODE_OAUTH_TOKEN = tok as string;
         }

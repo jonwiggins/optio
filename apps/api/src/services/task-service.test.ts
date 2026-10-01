@@ -35,6 +35,14 @@ vi.mock("../db/schema.js", () => ({
 }));
 
 vi.mock("./event-bus.js", () => ({ publishEvent: vi.fn() }));
+const mockEnsurePrimaryPrRow = vi.fn();
+vi.mock("./task-pr-service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./task-pr-service.js")>();
+  return {
+    prNumberFromUrl: actual.prNumberFromUrl,
+    ensurePrimaryPrRow: (...args: unknown[]) => mockEnsurePrimaryPrRow(...args),
+  };
+});
 vi.mock("./task-cancellation-service.js", () => ({
   terminateTaskExecution: vi.fn().mockResolvedValue({ streamAborted: true, agentKilled: true }),
 }));
@@ -207,6 +215,13 @@ describe("updateTaskPr", () => {
     await updateTaskPr("t1", "https://github.com/o/r/pull/42");
     expect(db.update(undefined as any).set).toHaveBeenCalledWith(
       expect.objectContaining({ prUrl: "https://github.com/o/r/pull/42", prNumber: 42 }),
+    );
+    // The primary PR is also tracked in task_prs.
+    expect(mockEnsurePrimaryPrRow).toHaveBeenCalledWith(
+      "t1",
+      undefined,
+      "https://github.com/o/r/pull/42",
+      "branch",
     );
   });
 

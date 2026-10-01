@@ -52,6 +52,11 @@ export interface Connection {
   scope: string; // "global" or repo URL
   repoUrl?: string | null;
   workspaceId?: string | null;
+  /**
+   * Null = the organization's; set = one person's own: only injected into
+   * work that person owns, and only visible to them (and admins, by name).
+   */
+  ownerUserId?: string | null;
   enabled: boolean;
   status: ConnectionStatus;
   statusMessage?: string | null;
@@ -71,6 +76,8 @@ export interface CreateConnectionInput {
   scope?: string;
   repoUrl?: string;
   enabled?: boolean;
+  /** Default `workspace`; `workspace` needs an admin. */
+  owner?: "workspace" | "me";
   // Inline assignment creation
   assignments?: Array<{
     repoId?: string | null;

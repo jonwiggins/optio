@@ -12,3 +12,9 @@ export interface CreateSecretInput {
   value: string;
   scope?: string;
 }
+
+/** A secret a piece of work can pick for its pod: the org's and the viewer's own. */
+export interface PickableSecret {
+  name: string;
+  owner: "workspace" | "me";
+}

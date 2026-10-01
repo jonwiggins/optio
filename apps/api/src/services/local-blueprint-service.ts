@@ -9,6 +9,7 @@
  * substituted value is shell-single-quoted first — write templates without
  * extra quotes around params (`claude {{prompt}}`, not `claude "{{prompt}}"`).
  */
+import { modelProviderIdFrom } from "@optio/shared";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import {
   localAgentParams,
@@ -324,5 +325,6 @@ export async function spawnFromBlueprint(
     triggerId: opts.triggerId,
     ticket: opts.ticket,
     hold: blueprint.spawnMode === "hold",
+    ...(blueprint.agent ? { modelProviderId: modelProviderIdFrom(blueprint.agentOptions) } : {}),
   });
 }

@@ -8,10 +8,12 @@ import {
   buildInitialClaudeStreamMessage,
   classifyRunOutcome,
   inferExitCode,
+  ingestPrToolCallLine,
   shellQuote,
   shouldEscalateNoPr,
 } from "./task-worker.js";
 import { ClaudeCodeAdapter } from "@optio/agent-adapters";
+import { PrToolCallTracker } from "@optio/shared";
 
 describe("buildAgentCommand", () => {
   describe("claude-code agent", () => {
@@ -728,5 +730,88 @@ describe("classifyRunOutcome", () => {
       detectedPrUrl: undefined,
     });
     expect(outcome).toBe("failure");
+  });
+});
+
+describe("ingestPrToolCallLine", () => {
+  const claudeStream = [
+    { type: "system", subtype: "init", session_id: "s", model: "m", tools: [] },
+    {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "text", text: "This is like https://github.com/o/r/pull/812, see #812." },
+          { type: "tool_use", id: "t1", name: "Bash", input: { command: "gh pr view 812" } },
+        ],
+      },
+    },
+    {
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "t1",
+            content: "url: https://github.com/o/r/pull/812",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "t2",
+            name: "Bash",
+            input: { command: "git push -u origin HEAD && gh pr create --fill" },
+          },
+        ],
+      },
+    },
+    {
+      type: "user",
+      message: {
+        content: [
+          { type: "tool_result", tool_use_id: "t2", content: "https://github.com/o/r/pull/900\n" },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Opened https://github.com/o/r/pull/900" }] },
+    },
+    { type: "result", subtype: "success", is_error: false, result: "done" },
+  ].map((e) => JSON.stringify(e));
+
+  it("adopts only the PR a claude create call returned, not ones it mentioned or viewed", () => {
+    const tracker = new PrToolCallTracker();
+    for (const line of [...claudeStream, "plain text https://github.com/o/r/pull/5"]) {
+      ingestPrToolCallLine(tracker, "claude-code", line);
+    }
+    expect(tracker.matches.map((m) => m.url)).toEqual(["https://github.com/o/r/pull/900"]);
+  });
+
+  it("reads codex exec --json command items", () => {
+    const tracker = new PrToolCallTracker();
+    ingestPrToolCallLine(
+      tracker,
+      "codex",
+      JSON.stringify({
+        type: "item.completed",
+        item: {
+          id: "i",
+          type: "command_execution",
+          command: "bash -lc 'gh pr create --fill'",
+          aggregated_output: "https://github.com/o/r/pull/3",
+          exit_code: 0,
+          status: "completed",
+        },
+      }),
+    );
+    // A claude-shaped line from a codex run is not misread.
+    for (const line of claudeStream) ingestPrToolCallLine(tracker, "codex", line);
+    expect(tracker.matches.map((m) => m.url)).toEqual(["https://github.com/o/r/pull/3"]);
   });
 });

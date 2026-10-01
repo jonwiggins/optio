@@ -489,6 +489,19 @@ single shell-quoted argv element.
   the effort field to the chosen model's own efforts, and says "Models from Codex on
   <machine>". Codex runs in pods get the same model and effort (`-m`,
   `model_reasoning_effort`).
+- **Model providers (Bedrock).** A spec with `provider` (`{kind: "bedrock", providerId,
+name, region, awsProfile?}`; see [model providers](model-providers.md)) runs Claude Code
+  or Codex through Amazon Bedrock with the machine's own AWS credentials. The command is
+  prefixed with `env`: `CLAUDE_CODE_USE_BEDROCK=1` (Claude Code), `AWS_REGION` /
+  `AWS_DEFAULT_REGION`, and `AWS_PROFILE` when the provider names one, set on the command
+  itself so login rc files can't override them; with a named profile, AWS keys exported in
+  the daemon's environment are dropped (`env -u`) so the profile wins. Codex also gets
+  `-c model_provider="amazon-bedrock"`. The server never sends a credential: it builds the
+  launch from the provider row (`createTerminal`'s `modelProviderId`) after checking that the
+  terminal's owner may use it. A daemon advertises `modelProviders: true` in its hello and
+  reports `awsProfiles` (profile names from `~/.aws/config` and `~/.aws/credentials`, never
+  keys); the server refuses a provider spawn on a daemon without the capability instead of
+  letting it run on the CLI's own sign-in.
 
 ## Daemon WebSocket protocol (`/ws/local/daemon`, JSON text frames)
 

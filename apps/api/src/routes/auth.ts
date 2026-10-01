@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { joinWorkspacesByEmailDomain } from "../services/workspace-service.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -509,6 +510,12 @@ export async function authRoutes(rawApp: FastifyInstance) {
         const tokens = await provider.exchangeCode(code);
         const profile = await provider.fetchUser(tokens.accessToken);
         const session = await createSession(providerName, profile);
+        // Workspaces that let people with this (verified) email domain in.
+        await joinWorkspacesByEmailDomain(
+          session.user.id,
+          profile.email,
+          profile.emailVerified === true,
+        ).catch((err) => app.log.warn({ err }, "auto-join by email domain failed"));
 
         // Store GitHub App user tokens for git/API operations
         if (providerName === "github" && tokens.refreshToken && tokens.expiresIn) {

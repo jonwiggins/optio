@@ -94,10 +94,12 @@ export async function localDaemonWs(app: FastifyInstance) {
           claudeCredentials: msg.claudeCredentials === true,
           transcriptBackfill: msg.transcriptBackfill === true,
           manageDirs: msg.manageDirs === true,
+          modelProviders: msg.modelProviders === true,
         });
         await markHostOnline(host.id, {
           dirs: msg.dirs,
           daemonVersion: msg.daemonVersion,
+          ...(Array.isArray(msg.awsProfiles) ? { awsProfiles: msg.awsProfiles } : {}),
         });
         await terminalService.flushParkedTerminals(host.id);
         log.info({ hostId: host.id, hostname: host.hostname }, "local daemon connected");

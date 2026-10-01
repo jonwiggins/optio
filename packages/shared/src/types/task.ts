@@ -41,10 +41,53 @@ export interface Task {
   localSessionMode?: LocalAgentSessionMode | null;
   /** Local runs: the `local_terminals` row executing this task. */
   localTerminalId?: string | null;
+  /**
+   * Who the work belongs to: null = the organization; set = one person's own.
+   * Personal work runs with that person's secrets, model providers and
+   * connections, and only they can change it.
+   */
+  ownerUserId?: string | null;
+  /**
+   * The secrets (by name) the agent gets in its pod. Null = the workspace's
+   * legacy behavior (see `Workspace.restrictPodSecrets`).
+   */
+  podSecrets?: string[] | null;
+  /**
+   * Every PR the task opened or tracks (GET /api/tasks/:id only). `prUrl`
+   * stays the primary one, which the PR lifecycle follows.
+   */
+  prs?: TaskPr[];
   createdAt: Date;
   updatedAt: Date;
   startedAt?: Date;
   completedAt?: Date;
+}
+
+/**
+ * How Optio learned a PR belongs to a task: the agent's own PR-creating tool
+ * call (`tool_call`), a PR whose head branch is under the task's branch
+ * (`branch`), or a person attached it (`attached`).
+ */
+export type TaskPrSource = "tool_call" | "branch" | "attached";
+
+/** A pull / merge request a task opened or tracks. */
+export interface TaskPr {
+  id: string;
+  taskId: string;
+  repoUrl: string;
+  number: number;
+  url: string;
+  headBranch: string | null;
+  /** `owner/repo` of the head branch (a fork's differs from the task's repo). */
+  headRepo: string | null;
+  baseBranch: string | null;
+  source: TaskPrSource;
+  /** `open` / `merged` / `closed` when last seen. */
+  state: string;
+  /** True for the task's primary PR (`tasks.pr_url`). */
+  primary: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface StallInfo {

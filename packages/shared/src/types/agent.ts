@@ -1,5 +1,5 @@
-export type ClaudeAuthMode = "api-key" | "max-subscription" | "vertex-ai";
-export type CodexAuthMode = "api-key" | "app-server";
+export type ClaudeAuthMode = "api-key" | "max-subscription" | "vertex-ai" | "bedrock";
+export type CodexAuthMode = "api-key" | "app-server" | "bedrock";
 export type CopilotAuthMode = "github-token";
 export type GeminiAuthMode = "api-key" | "vertex-ai";
 export type OpenClawAuthMode = "api-key";
@@ -42,6 +42,13 @@ export interface AgentTaskInput {
   googleCloudProject?: string;
   googleCloudLocation?: string;
   claudeVertexServiceAccountKey?: string;
+  /**
+   * Env that points the agent at a model provider (Bedrock), from
+   * `bedrockRuntime`; set with `claudeAuthMode` / `codexAuthMode` = "bedrock".
+   */
+  modelProviderEnv?: Record<string, string>;
+  /** Codex `-c` overrides for the model provider (`model_provider="amazon-bedrock"`). */
+  codexProviderConfig?: string[];
 }
 
 export interface AgentContainerConfig {

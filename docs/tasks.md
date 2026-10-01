@@ -97,6 +97,17 @@ Sidebar (v0.6): **Overview** · **Work** · **Reviews** · **Inbox** · **Librar
 
 State machine (`packages/shared/src/utils/state-machine.ts`): `pending → queued → provisioning → running → pr_opened → completed`, with `needs_attention`, `failed`, `cancelled`, and retry edges. Always transition via `taskService.transitionTask()`.
 
+### How Optio finds a task's PRs
+
+A PR URL in an agent's output is not evidence: agents print PRs they looked at (`gh pr view 812`), PRs they were told about, and example URLs. A task adopts only:
+
+1. **PRs its agent's tool calls created.** A shell call that runs `gh pr create`, `glab mr create`, `git push -o merge_request.create`, `hub pull-request`, `gh api … /pulls` with POST (or the GraphQL `createPullRequest` mutation), or `aws codecommit create-pull-request` — anywhere in a compound command, `$(…)` included — or an MCP `create_pull_request` / `create_merge_request` tool (any server prefix). The PR comes from that call's own result, paired by tool-use / call id. A failed call adopts nothing, except `gh pr create` reporting that a PR for the branch already exists. Pods read Claude Code's stream-json and Codex's `exec --json` events; local runs read the terminal's transcript. The detector is pure and lives in `packages/shared/src/utils/pr-tool-calls.ts`.
+2. **PRs on the task's branches.** A PR whose head branch is `optio/task-<id>`, `optio/task-<id>-<slug>` or `optio/task-<id>/<slug>` belongs to the task. The prompt asks an agent that needs more than one PR to name extra branches `optio/task-<id>-<slug>` (git can't hold both `optio/task-<id>` and `optio/task-<id>/x`). After a pod run Optio lists the task's pushed branches in the worktree and asks the platform for their PRs; every run (pod or local) also asks for open PRs by head-branch prefix (`GitPlatform.findPullRequestsByHeadPrefix`; GitHub and GitLab list and filter, CodeCommit filters its open PRs).
+
+Each tool-call PR is confirmed on the git platform before it is adopted: same repo as the task (the base repo; a fork's head may differ), open or merged, and either on the task's branches or created during this run (2 minutes of clock skew allowed). When the platform can't be asked (no token, an API error other than 404), a PR in the task's repo is adopted on the tool call's word and a warning is logged.
+
+Every PR is a `task_prs` row (`source`: `tool_call`, `branch` or `attached`). `tasks.pr_url` stays the **primary** PR — the first one adopted — and is what the PR watcher, reviews, auto-resume and auto-merge follow; other PRs are tracked alongside. `GET /api/tasks/:id` returns them as `task.prs`; `POST /api/tasks/:id/prs` attaches one by hand (member role; personal work only by its owner) and `DELETE /api/tasks/:id/prs/:prId` stops tracking one — the primary only while another can take its place. The task page lists them once a task has more than one.
+
 ## Pod sessions without a repo (`standalone`)
 
 An agent runs in a pooled job pod with no checkout and produces logs and side effects: querying Slack, writing to a database, posting a report, calling an MCP server, triaging a ticket queue. Pods are shared across runs of the same definition, keyed on `(workflow_id, instance_index)`, with `maxPodInstances` replicas × `maxAgentsPerPod` concurrent runs. Runs auto-retry with exponential backoff.

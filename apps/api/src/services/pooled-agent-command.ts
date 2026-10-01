@@ -105,6 +105,19 @@ export function buildPooledAgentCommand(
  */
 export function codexModelFlags(env: Record<string, string>): string {
   let flags = "";
+  // Model provider overrides (`model_provider="amazon-bedrock"`), as JSON.
+  if (env.OPTIO_CODEX_PROVIDER_CONFIG) {
+    try {
+      const overrides = JSON.parse(env.OPTIO_CODEX_PROVIDER_CONFIG) as unknown;
+      if (Array.isArray(overrides)) {
+        for (const o of overrides) {
+          if (typeof o === "string" && /^[A-Za-z0-9_.-]+=/.test(o)) flags += ` -c ${shellQuote(o)}`;
+        }
+      }
+    } catch {
+      // malformed: run with the CLI's own provider
+    }
+  }
   if (env.OPTIO_CODEX_MODEL) flags += ` -m ${shellQuote(env.OPTIO_CODEX_MODEL)}`;
   const effort = env.OPTIO_CODEX_EFFORT;
   if (effort && /^[A-Za-z0-9_-]{1,32}$/.test(effort)) {

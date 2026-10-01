@@ -19,6 +19,8 @@ import { namedSchemas } from "./schemas/registry.js";
 import { healthRoutes } from "./routes/health.js";
 import { taskRoutes } from "./routes/tasks.js";
 import { secretRoutes } from "./routes/secrets.js";
+import { modelProviderRoutes } from "./routes/model-providers.js";
+import { workDefaultsRoutes } from "./routes/work-defaults.js";
 import { ticketRoutes } from "./routes/tickets.js";
 import { setupRoutes } from "./routes/setup.js";
 import { authRoutes } from "./routes/auth.js";
@@ -281,6 +283,8 @@ export async function buildServer() {
   await app.register(healthRoutes);
   await app.register(taskRoutes);
   await app.register(secretRoutes);
+  await app.register(modelProviderRoutes);
+  await app.register(workDefaultsRoutes);
   await app.register(ticketRoutes);
   await app.register(setupRoutes);
   await app.register(authRoutes);

@@ -596,7 +596,7 @@ export async function clusterRoutes(rawApp: FastifyInstance) {
         operationId: "triggerClusterUpdate",
         summary: "Trigger a self-update",
         description:
-          "Roll the optio-api and optio-web deployments to a new image tag. " +
+          "Roll the optio-api deployment (its api and web containers) to a new image tag. " +
           "Only available in production deployments (fails in local dev). " +
           "Requires `admin` role.",
         tags: ["Cluster"],
@@ -620,35 +620,29 @@ export async function clusterRoutes(rawApp: FastifyInstance) {
       const imageOwner = process.env.OPTIO_IMAGE_OWNER ?? "jonwiggins";
       const registry = "ghcr.io";
 
-      const deployments = [
-        { name: "optio-api", image: `${registry}/${imageOwner}/optio-api:${targetVersion}` },
-        { name: "optio-web", image: `${registry}/${imageOwner}/optio-web:${targetVersion}` },
-      ];
+      // The API and the web UI are two containers in one Deployment
+      // (helm/optio/templates/api-deployment.yaml).
+      const apiImage = `${registry}/${imageOwner}/optio-api:${targetVersion}`;
+      const webImage = `${registry}/${imageOwner}/optio-web:${targetVersion}`;
 
       try {
         const appsApi = getAppsApi();
-
-        for (const dep of deployments) {
-          try {
-            await appsApi.patchNamespacedDeployment({
-              name: dep.name,
-              namespace: NAMESPACE,
-              body: {
+        await appsApi.patchNamespacedDeployment({
+          name: process.env.OPTIO_API_DEPLOYMENT ?? "optio-api",
+          namespace: NAMESPACE,
+          body: {
+            spec: {
+              template: {
                 spec: {
-                  template: {
-                    spec: {
-                      containers: [{ name: dep.name, image: dep.image }],
-                    },
-                  },
+                  containers: [
+                    { name: "api", image: apiImage },
+                    { name: "web", image: webImage },
+                  ],
                 },
               },
-            });
-          } catch (depErr: any) {
-            // If a deployment doesn't exist, skip it
-            if (depErr?.response?.statusCode === 404) continue;
-            throw depErr;
-          }
-        }
+            },
+          },
+        });
 
         reply.send({
           ok: true,

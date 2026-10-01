@@ -117,6 +117,11 @@ export class CodeCommitPlatform implements GitPlatform {
     return mapped;
   }
 
+  async findPullRequestsByHeadPrefix(ri: RepoIdentifier, prefix: string): Promise<PullRequest[]> {
+    const open = await this.listOpenPullRequests(ri, { perPage: 50 });
+    return open.filter((p) => p.headBranch?.startsWith(prefix));
+  }
+
   async getCIChecks(_ri: RepoIdentifier, _commitSha: string): Promise<CICheck[]> {
     // CodeCommit has no native CI. CodePipeline integration is a planned follow-up.
     return [];
@@ -437,6 +442,7 @@ function mapPr(pr: CCPullRequest, ri: RepoIdentifier): PullRequest {
     draft: false, // CodeCommit has no draft state
     headSha: target?.sourceCommit ?? "",
     baseBranch: stripRefsHeads(target?.destinationReference ?? ""),
+    headBranch: target?.sourceReference ? stripRefsHeads(target.sourceReference) : undefined,
     url: buildPrUrl(ri, number),
     author: shortenArn(pr.authorArn),
     assignees: [],
@@ -447,9 +453,8 @@ function mapPr(pr: CCPullRequest, ri: RepoIdentifier): PullRequest {
 }
 
 function sourceBranchMatches(pr: PullRequest, branch: string): boolean {
-  // We don't have the source ref on PullRequest after mapping; use a heuristic on title/branch.
-  // Callers that pass `branch` typically only need this filter as a sanity check.
-  return pr.baseBranch !== branch;
+  // Older mappings had no source ref; fall back to "not the target branch".
+  return pr.headBranch ? pr.headBranch === branch : pr.baseBranch !== branch;
 }
 
 function shortenArn(arn?: string): string {
