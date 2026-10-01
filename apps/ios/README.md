@@ -7,11 +7,11 @@ Reviews · Inbox); **Library** (Prompts · Repos · Machines · Connections);
 Account). The Sessions screen merges every kind of work — PR tasks, jobs,
 scheduled blueprints, Local automations and terminals, pod sessions, persistent
 agents — into one list (`Features/Work/Sessions/SessionsFeed.swift`, a port of the
-web's `lib/sessions-feed.ts`) with Active / Recurring / Agents / History / All
+web's `lib/work-feed.ts`) with Active / Recurring / Agents / History / All
 views; rows open the per-kind detail screens (there are no per-kind lists, on
 web or here). Local Automations are edited under Library › Machines. "New session" opens
 the native five-attribute form (`Features/Work/Sessions/New/`, a port of the web's
-`components/session-form/`): a grouped Form — When · Where · Who · What · Then ·
+`components/work-form/`): a grouped Form — When · Where · Who · What · Then ·
 Name — with example presets up top and a pinned bar that describes what the answers
 make and holds the one button that makes it.
 Designed to be used over a Tailscale network: your phone and the machine (or
@@ -66,14 +66,14 @@ once the API is behind TLS.
 
 ## Local sessions on the phone
 
-A Local (on-your-machine) session opens on its **Transcript** — the agent's
+A Local (on-your-machine) session opens on its **Chat** — the agent's
 conversation distilled by the daemon, reflowed for the phone, with a composer
 that writes your message plus Enter to the PTY — whenever one exists, live or
-finished; a plain shell falls back to the **Screen** (SwiftTerm). The toggle in
+finished; a plain shell falls back to the **Terminal** (SwiftTerm). The toggle in
 the header switches between them (`Features/Live/Local/SessionView.swift`).
 
 One PTY, one grid, sized for the screen in use (the server decides:
-`apps/api/src/services/local-grid.ts`). The Screen face coming on screen, with
+`apps/api/src/services/local-grid.ts`). The Terminal face coming on screen, with
 the app in front, fits the session to the phone, unless another screen showing
 it was used in the last minute (a laptop you're working at). Then it renders
 that grid shrunk to fit ("Sized for another device"), and focusing the

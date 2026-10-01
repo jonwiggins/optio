@@ -41,6 +41,13 @@ export interface Task {
   localSessionMode?: LocalAgentSessionMode | null;
   /** Local runs: the `local_terminals` row executing this task. */
   localTerminalId?: string | null;
+  /**
+   * PR follow-through over the repo's settings ("Works until merged"): resume
+   * the agent on failing CI, conflicts, and requested changes / merge once
+   * it's green. Null or absent = the repo's `autoResume` / `autoMerge`.
+   */
+  autoResume?: boolean | null;
+  autoMerge?: boolean | null;
   createdAt: Date;
   updatedAt: Date;
   startedAt?: Date;
@@ -117,6 +124,9 @@ export interface CreateTaskInput {
   localHostId?: string | null;
   localDir?: string | null;
   localSessionMode?: LocalAgentSessionMode | null;
+  /** PR follow-through over the repo's settings; see `Task.autoResume`. */
+  autoResume?: boolean | null;
+  autoMerge?: boolean | null;
 }
 
 // ── Review Draft types (PR Review Assistant) ────────────────────────────────

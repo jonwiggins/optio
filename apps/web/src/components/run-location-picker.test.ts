@@ -5,7 +5,11 @@ import {
   runLocationFromRow,
   runLocationPayload,
   defaultDir,
+  joinSubpath,
   repoUrlFromRemote,
+  rootDirFor,
+  subpathError,
+  subpathOf,
   shortRepo,
   usableDir,
 } from "./run-location-picker";
@@ -109,5 +113,49 @@ describe("local directories", () => {
   it("shortens a remote for display", () => {
     expect(shortRepo("https://github.com/acme/app.git")).toBe("github.com/acme/app");
     expect(shortRepo("git@gitlab.com:acme/app.git")).toBe("gitlab.com/acme/app");
+  });
+});
+
+describe("subdirectories of an allowlisted directory (#622)", () => {
+  const dirs = [
+    { path: "/home/dev/notes" },
+    { path: "/home/dev/app", repoUrl: "git@github.com:acme/app.git" },
+    { path: "/home/dev/app/vendor/lib" },
+  ];
+
+  it("finds the longest allowlisted root a directory sits under", () => {
+    expect(rootDirFor(dirs, "/home/dev/app")?.path).toBe("/home/dev/app");
+    expect(rootDirFor(dirs, "/home/dev/app/packages/api")?.path).toBe("/home/dev/app");
+    expect(rootDirFor(dirs, "/home/dev/app/vendor/lib/src")?.path).toBe("/home/dev/app/vendor/lib");
+    expect(rootDirFor(dirs, "/home/dev/application")).toBeUndefined();
+    expect(rootDirFor(dirs, "")).toBeUndefined();
+    expect(rootDirFor([{ path: "/" }], "/srv")?.path).toBe("/");
+  });
+
+  it("splits and joins the subpath", () => {
+    expect(subpathOf("/home/dev/app", "/home/dev/app")).toBe("");
+    expect(subpathOf("/home/dev/app", "/home/dev/app/packages/api")).toBe("packages/api");
+    expect(joinSubpath("/home/dev/app", "")).toBe("/home/dev/app");
+    expect(joinSubpath("/home/dev/app", " packages//api/ ")).toBe("/home/dev/app/packages/api");
+    expect(joinSubpath("/home/dev/app/", "./src")).toBe("/home/dev/app/src");
+    expect(joinSubpath("/", "srv")).toBe("/srv");
+  });
+
+  it("only accepts relative paths that stay inside the directory", () => {
+    expect(subpathError("")).toBeNull();
+    expect(subpathError("packages/api")).toBeNull();
+    expect(subpathError("/etc")).toMatch(/relative/);
+    expect(subpathError("~/x")).toMatch(/relative/);
+    expect(subpathError("../other")).toMatch(/\.\./);
+    expect(subpathError("a/../../b")).toMatch(/\.\./);
+  });
+
+  it("keeps a subdirectory selection when re-adopting a host's directory", () => {
+    expect(defaultDir("task", dirs, "/home/dev/app/packages/api")).toBe(
+      "/home/dev/app/packages/api",
+    );
+    // Under a non-checkout root a Task still moves to a checkout.
+    expect(defaultDir("task", dirs, "/home/dev/notes/sub")).toBe("/home/dev/app");
+    expect(defaultDir("job", dirs, "/home/dev/notes/sub")).toBe("/home/dev/notes/sub");
   });
 });

@@ -4,7 +4,7 @@ import { MessagesSquare, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SessionView } from "./session-view";
 
-/** Transcript ⇄ Screen segmented control for a session's header. */
+/** Chat ⇄ Terminal segmented control for a session's header. */
 export function SessionViewToggle({
   view,
   onChange,
@@ -25,8 +25,8 @@ export function SessionViewToggle({
     >
       {(
         [
-          ["transcript", MessagesSquare, "Transcript"],
-          ["screen", Terminal, "Screen"],
+          ["transcript", MessagesSquare, "Chat"],
+          ["screen", Terminal, "Terminal"],
         ] as Array<[SessionView, typeof Terminal, string]>
       ).map(([value, Icon, label]) => (
         <button
@@ -37,8 +37,8 @@ export function SessionViewToggle({
           aria-label={label}
           title={
             value === "transcript"
-              ? "The conversation: every prompt, reply, and tool call"
-              : "The terminal as it ran"
+              ? "The conversation — read it and reply"
+              : "The terminal, as it runs"
           }
           onClick={() => onChange(value)}
           className={cn(

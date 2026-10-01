@@ -170,7 +170,9 @@ final class WorkFormModelTests: XCTestCase {
     func testPresetsLandOnPromisedKinds() {
         var by: [String: F.Draft] = [:]
         for p in F.presets { by[p.id] = F.normalize(p.apply(empty)) }
+        XCTAssertEqual(F.presets.map(\.id), ["pr", "assign", "chat", "schedule", "agent"])
         XCTAssertEqual(F.deriveKind(by["pr"]!), .repoTask)
+        XCTAssertEqual(F.deriveKind(by["assign"]!), .repoBlueprint)
         XCTAssertEqual(F.deriveKind(local(by["chat"]!)), .localTerminal)
         XCTAssertEqual(F.deriveKind(by["schedule"]!), .standalone)
         XCTAssertEqual(F.deriveKind(by["agent"]!), .persistentAgent)
@@ -293,6 +295,7 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertEqual(F.submitLabel(with(empty) { $0.then = .waitsForMe }), "Open session")
         XCTAssertEqual(F.submitLabel(F.normalize(with(empty) { $0.withRepo = false; $0.then = .waitsForMessages })), "Create agent")
         XCTAssertEqual(F.submitLabel(with(empty) { $0.when = .schedule }), "Save")
+        XCTAssertEqual(F.submitLabel(with(empty) { $0.then = .untilMerged }), "Start work (until merged)")
     }
 
     func testCronValidity() {
@@ -301,5 +304,97 @@ final class WorkFormModelTests: XCTestCase {
         XCTAssertFalse(F.cronIsValid(nil))
         XCTAssertTrue(F.randomWebhookPath().hasPrefix("hook-"))
         XCTAssertEqual(F.randomWebhookPath().count, 13)
+    }
+
+    // MARK: Work until merged — PR follow-through
+
+    private var repoBase: F.Draft { with(empty) { $0.prompt = "p"; $0.repoUrl = "https://github.com/a/b" } }
+
+    func testUntilMergedNeedsAnAgentWithARepo() {
+        XCTAssertTrue(enabled(F.thenOptions(repoBase)).contains(.untilMerged))
+        XCTAssertTrue(enabled(F.thenOptions(local(repoBase))).contains(.untilMerged))
+        XCTAssertFalse(enabled(F.thenOptions(with(repoBase) { $0.withRepo = false })).contains(.untilMerged))
+        XCTAssertFalse(enabled(F.thenOptions(local(with(repoBase) { $0.withRepo = false }))).contains(.untilMerged))
+        XCTAssertFalse(enabled(F.thenOptions(with(repoBase) { $0.runtime = F.terminal })).contains(.untilMerged))
+    }
+
+    func testUntilMergedIsStillATaskHeadless() {
+        let d = F.normalize(with(repoBase) { $0.then = .untilMerged })
+        XCTAssertEqual(d.then, .untilMerged)
+        XCTAssertEqual(F.deriveKind(d), .repoTask)
+        XCTAssertEqual(F.deriveKind(with(d) { $0.when = .ticket; $0.trigger = F.TriggerConfig(type: .ticket) }), .repoBlueprint)
+        XCTAssertEqual(F.normalize(local(d)).location.localSessionMode, .headless)
+    }
+
+    func testUntilMergedSnapsBackToExitsWithoutARepo() {
+        XCTAssertEqual(F.normalize(with(repoBase) { $0.then = .untilMerged; $0.withRepo = false }).then, .exits)
+    }
+
+    func testUntilMergedReadsAsASentence() {
+        XCTAssertEqual(
+            text(with(repoBase) { $0.then = .untilMerged }),
+            "Started now, a Claude Code run in an Optio pod with https://github.com/a/b that opens a PR and keeps working on it until it merges."
+        )
+        XCTAssertTrue(text(with(repoBase) { $0.then = .untilMerged; $0.mergeWhenReady = false }).hasSuffix("keeps it green until you merge it."))
+    }
+
+    func testAssignToOptioPresetIsATicketLabeledScheduledTaskWorkedUntilMerged() {
+        let d = F.normalize(F.preset("assign")!.apply(empty))
+        XCTAssertEqual(d.when, .ticket)
+        XCTAssertEqual(d.trigger.ticketLabels, ["optio"])
+        XCTAssertEqual(d.trigger.ticketSource, .github)
+        XCTAssertEqual(d.then, .untilMerged)
+        XCTAssertTrue(d.mergeWhenReady)
+        XCTAssertEqual(F.deriveKind(d), .repoBlueprint)
+    }
+
+    private func on(_ plan: F.FollowThrough?) -> [F.FollowThroughStep.Key] {
+        plan?.steps.filter(\.on).map(\.key) ?? []
+    }
+
+    func testExitWhenDoneShowsTheReposSettings() {
+        let plan = F.followThrough(repoBase, repo: F.RepoPrSettings(autoResume: false, autoMerge: false))
+        XCTAssertEqual(plan?.fromRepo, true)
+        XCTAssertEqual(on(plan), [.pr, .done])
+        XCTAssertEqual(
+            on(F.followThrough(repoBase, repo: F.RepoPrSettings(autoResume: true, autoMerge: true, reviewEnabled: true, reviewTrigger: "on_ci_pass"))),
+            [.pr, .review, .ci, .changes, .merge, .done]
+        )
+    }
+
+    func testUntilMergedResumesAndMergesWhateverTheRepoSays() {
+        let d = with(repoBase) { $0.then = .untilMerged }
+        let plan = F.followThrough(d, repo: F.RepoPrSettings(autoResume: false, autoMerge: false, maxAutoResumes: 4))
+        XCTAssertEqual(plan?.fromRepo, false)
+        XCTAssertEqual(on(plan), [.pr, .ci, .changes, .merge, .done])
+        XCTAssertTrue(plan?.steps.first { $0.key == .ci }?.detail?.contains("up to 4 times") == true)
+        XCTAssertEqual(on(F.followThrough(with(d) { $0.mergeWhenReady = false }, repo: nil)), [.pr, .ci, .changes, .done])
+    }
+
+    func testCautiousModeHoldsTheMergeBack() {
+        let plan = F.followThrough(with(repoBase) { $0.then = .untilMerged }, repo: F.RepoPrSettings(cautiousMode: true))
+        let merge = plan?.steps.first { $0.key == .merge }
+        XCTAssertEqual(merge?.on, false)
+        XCTAssertTrue(merge?.detail?.contains("cautious mode") == true)
+        XCTAssertEqual(plan?.steps.first?.label, "Opens a draft PR")
+    }
+
+    func testOnlyWorkThatOpensAPRHasAPlan() {
+        XCTAssertNil(F.followThrough(with(repoBase) { $0.withRepo = false }, repo: nil))
+        XCTAssertNil(F.followThrough(with(repoBase) { $0.then = .waitsForMe }, repo: nil))
+    }
+
+    func testRepoPrSettingsReadTheRawRepoRow() {
+        let s = F.RepoPrSettings(row: [
+            "autoResume": .bool(true), "autoMerge": .null, "cautiousMode": .bool(false),
+            "reviewEnabled": .bool(true), "reviewTrigger": .string("on_pr"), "maxAutoResumes": .int(3),
+        ])
+        XCTAssertEqual(s, F.RepoPrSettings(autoResume: true, autoMerge: nil, cautiousMode: false, reviewEnabled: true, reviewTrigger: "on_pr", maxAutoResumes: 3))
+    }
+
+    func testFollowThroughBodyFields() {
+        XCTAssertEqual(F.followThroughFor(with(repoBase) { $0.then = .untilMerged }), ["autoResume": .bool(true), "autoMerge": .bool(true)])
+        XCTAssertEqual(F.followThroughFor(with(repoBase) { $0.then = .untilMerged; $0.mergeWhenReady = false }), ["autoResume": .bool(true), "autoMerge": .bool(false)])
+        XCTAssertEqual(F.followThroughFor(repoBase), ["autoResume": .null, "autoMerge": .null])
     }
 }

@@ -1,10 +1,11 @@
 import Foundation
 
-/// Which face of a Local session is showing: the terminal (`screen`) or the
-/// conversation distilled from the agent's transcript (`transcript`). Port of
-/// the web's `session-view.ts` with one phone-specific change: the transcript
-/// is the default whenever there is one, live or not — a phone is for reading
-/// and replying, not for driving a 160-column TUI.
+/// Which face of a Local session is showing: the terminal (`screen`, labeled
+/// "Terminal") or the conversation distilled from the agent's transcript
+/// (`transcript`, labeled "Chat"). Port of the web's `session-view.ts` with
+/// the phone's rule: Chat is the default whenever there is a conversation, live
+/// or not — a phone is for reading and replying, not for driving a 160-column
+/// TUI.
 enum LocalSessionView: String, CaseIterable, Identifiable {
     case transcript, screen
     var id: String { rawValue }
@@ -20,5 +21,15 @@ enum LocalSessionViewRule {
         if let choice { return choice }
         if !loaded { return nil }
         return hasTranscript ? .transcript : .screen
+    }
+
+    /// Whether the Chat ⇄ Terminal toggle is offered (`canShowChat` in
+    /// `session-view.ts`): once there is a conversation, or for a live agent
+    /// session whose agent writes one (Claude Code, Codex) before its first
+    /// entry lands — Chat then shows its empty state and its composer.
+    static func canShowChat(_ terminal: LocalTerminal, hasTranscript: Bool) -> Bool {
+        if hasTranscript { return true }
+        guard !LocalPresentation.isDead(terminal), case .agent(let p) = terminal.spec else { return false }
+        return p.agent == .claudeCode || p.agent == .codex
     }
 }

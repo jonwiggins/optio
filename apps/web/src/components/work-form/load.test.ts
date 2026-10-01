@@ -240,3 +240,28 @@ describe("loadEditTarget", () => {
     await expect(loadEditTarget("t-1")).rejects.toMatchObject({ status: 405 });
   });
 });
+
+describe("loading a scheduled Task's follow-through", () => {
+  const row = {
+    name: "Assign",
+    title: "Assign",
+    prompt: "fix {{ticketTitle}}",
+    repoUrl: "https://github.com/a/b",
+    repoBranch: "main",
+    agentType: "claude-code",
+  };
+
+  it("a row with its own follow-through opens as Work until merged", () => {
+    const d = draftFromRow("repo-blueprint", { ...row, autoResume: true, autoMerge: false }, null);
+    expect(d.then).toBe("until-merged");
+    expect(d.mergeWhenReady).toBe(false);
+    expect(draftFromRow("repo-blueprint", { ...row, autoResume: true }, null).mergeWhenReady).toBe(
+      true,
+    );
+  });
+
+  it("a row without one opens as Exit when done", () => {
+    expect(draftFromRow("repo-blueprint", row, null).then).toBe("exits");
+    expect(draftFromRow("repo-blueprint", { ...row, autoResume: null }, null).then).toBe("exits");
+  });
+});

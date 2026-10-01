@@ -1,7 +1,13 @@
 package dev.optio.feature.local.model
 
+import dev.optio.core.model.LocalAgentKind
+import dev.optio.core.model.LocalTerminalSpec
+import dev.optio.core.model.LocalTerminalState
+import dev.optio.core.testing.Samples
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.Test
 
 /**
@@ -31,5 +37,28 @@ class LocalSessionViewTest {
     fun fallsBackToScreenWithoutTranscript() {
         // A plain shell, or an agent that hasn't said anything yet.
         assertEquals(LocalSessionView.SCREEN, r.resolve(null, hasTranscript = false, loaded = true))
+    }
+
+    @Test
+    fun facesAreLabeledChatAndTerminal() {
+        assertEquals("Chat", LocalSessionView.TRANSCRIPT.label)
+        assertEquals("Terminal", LocalSessionView.SCREEN.label)
+    }
+
+    @Test
+    fun offersChatOnceThereIsAConversation() {
+        val shell = Samples.localTerminal(state = LocalTerminalState.EXITED).copy(spec = LocalTerminalSpec.Shell)
+        assertTrue(r.canShowChat(shell, hasTranscript = true))
+    }
+
+    @Test
+    fun offersChatToALiveClaudeOrCodexSessionBeforeItsFirstEntry() {
+        val live = Samples.localTerminal(state = LocalTerminalState.RUNNING)
+        assertTrue(r.canShowChat(live.copy(spec = LocalTerminalSpec.Agent(LocalAgentKind.CLAUDE_CODE)), hasTranscript = false))
+        assertTrue(r.canShowChat(live.copy(spec = LocalTerminalSpec.Agent(LocalAgentKind.CODEX)), hasTranscript = false))
+        assertFalse(r.canShowChat(live.copy(spec = LocalTerminalSpec.Agent(LocalAgentKind.GEMINI)), hasTranscript = false))
+        assertFalse(r.canShowChat(live.copy(spec = LocalTerminalSpec.Shell), hasTranscript = false))
+        val exited = Samples.localTerminal(state = LocalTerminalState.EXITED)
+        assertFalse(r.canShowChat(exited.copy(spec = LocalTerminalSpec.Agent(LocalAgentKind.CLAUDE_CODE)), hasTranscript = false))
     }
 }

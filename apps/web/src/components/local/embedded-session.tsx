@@ -16,7 +16,9 @@ import type { ConnState } from "./conn-state";
 import { useLocalTranscript } from "./use-transcript";
 import { TranscriptView } from "./transcript-view";
 import { SessionViewToggle } from "./session-view-toggle";
-import { resolveSessionView, type SessionView } from "./session-view";
+import { canShowChat, resolveSessionView, type SessionView } from "./session-view";
+import { LocalChatComposer } from "./chat-composer";
+import { useNarrow } from "./use-narrow";
 
 const LocalTerminal = dynamic(() => import("./local-terminal").then((m) => m.LocalTerminal), {
   ssr: false,
@@ -53,15 +55,18 @@ export function EmbeddedLocalSession({
   const handleOutput = useCallback(() => setStreamedOutput(true), []);
   const onTerminalRef = useRefLatest(onTerminal);
   // Same rule as the Local pane: a finished run opens on its conversation,
-  // a live one on its screen, and a run you watched end stays on the screen.
+  // a live one on its terminal, and a run you watched end stays on the face
+  // you were watching.
   const [viewChoice, setViewChoice] = useState<SessionView | null>(null);
+  const narrow = useNarrow();
+  const viewRef = useRef<SessionView | null>(null);
   const terminalAlive =
     terminal != null && terminal.state !== "exited" && terminal.state !== "error";
   const transcript = useLocalTranscript(terminalId, terminalAlive);
   const wasAlive = useRef(false);
   useEffect(() => {
     if (terminalAlive) wasAlive.current = true;
-    else if (wasAlive.current) setViewChoice((c) => c ?? "screen");
+    else if (wasAlive.current) setViewChoice((c) => c ?? viewRef.current ?? "screen");
   }, [terminalAlive]);
 
   const fetchTerminal = useCallback(async () => {
@@ -172,7 +177,10 @@ export function EmbeddedLocalSession({
     isDead,
     hasTranscript,
     loaded: transcript.loaded && !readingTranscript,
+    narrow,
   });
+  // The face shown while it ran — what a session you watched end stays on.
+  if (!isDead) viewRef.current = view;
   const button =
     "inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium text-text-muted hover:text-text hover:bg-bg-hover/70 disabled:opacity-50 transition-colors";
 
@@ -212,7 +220,9 @@ export function EmbeddedLocalSession({
             <WorkLinkBadges links={links} size="xs" max={3} />
           </span>
           <SessionUsageChip usage={terminal.usage} collapsible className="hidden sm:inline-flex" />
-          {hasTranscript && view && <SessionViewToggle view={view} onChange={setViewChoice} />}
+          {canShowChat(terminal, hasTranscript) && view && (
+            <SessionViewToggle view={view} onChange={setViewChoice} />
+          )}
           {canResume && (
             <button
               onClick={handleResume}
@@ -251,8 +261,16 @@ export function EmbeddedLocalSession({
               : "Loading session…"}
           </div>
         ) : view === "transcript" ? (
-          <div className="flex-1 min-h-0">
-            <TranscriptView entries={transcript.entries} live={!isDead} />
+          <div className="flex-1 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0">
+              <TranscriptView entries={transcript.entries} live={!isDead} />
+            </div>
+            {terminal.state === "running" && (
+              <LocalChatComposer
+                terminalId={terminal.id}
+                working={terminal.attentionState === "working"}
+              />
+            )}
           </div>
         ) : isDead && !streamedOutput && terminal.preview ? (
           <div className="flex-1 min-h-0 flex flex-col bg-[#09090b] px-4 py-3">

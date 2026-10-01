@@ -110,6 +110,30 @@ describe("RunLocationPicker on my machine", () => {
     expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ localDir: "__add__" }));
   });
 
+  it("lets a run use a subdirectory of an allowlisted directory (#622)", () => {
+    hostsState.hosts = [laptop({ dirs: [{ path: "/Users/me/app" }] })];
+    const onChange = vi.fn();
+    render(
+      <RunLocationPicker
+        value={{ ...LOCAL, localHostId: "h1", localDir: "/Users/me/app/packages/api" }}
+        onChange={onChange}
+        kind="job"
+      />,
+    );
+    // The select shows the allowlisted root, the input the part below it.
+    expect(screen.getAllByRole("combobox")[1]).toHaveValue("/Users/me/app");
+    const sub = screen.getByLabelText(/Subdirectory/);
+    expect(sub).toHaveValue("packages/api");
+
+    fireEvent.change(sub, { target: { value: "packages/web" } });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ localDir: "/Users/me/app/packages/web" }),
+    );
+
+    fireEvent.change(sub, { target: { value: "../secrets" } });
+    expect(screen.getByText(/can't leave the directory/)).toBeInTheDocument();
+  });
+
   it("gives the command to run when the machine can't take the request", () => {
     hostsState.hosts = [laptop({ manageDirs: false, state: "offline" })];
     render(

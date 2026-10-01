@@ -42,6 +42,8 @@ const TaskConfigSchema = z
     localHostId: z.string().nullable().optional(),
     localDir: z.string().nullable().optional(),
     localSessionMode: z.string().nullable().optional(),
+    autoResume: z.boolean().nullable().optional(),
+    autoMerge: z.boolean().nullable().optional(),
     enabled: z.boolean(),
     createdBy: z.string().nullable(),
     createdAt: flexibleTimestamp,
@@ -78,6 +80,18 @@ const createTaskConfigSchema = z.object({
   localHostId: z.string().uuid().nullable().optional(),
   localDir: z.string().min(1).max(1000).nullable().optional(),
   localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
+  autoResume: z
+    .boolean()
+    .nullable()
+    .optional()
+    .describe(
+      "Spawned tasks resume on failing CI, conflicts, or requested changes (null = the repo's setting)",
+    ),
+  autoMerge: z
+    .boolean()
+    .nullable()
+    .optional()
+    .describe("Spawned tasks' PRs merge once checks pass (null = the repo's setting)"),
 });
 
 const updateTaskConfigSchema = z.object({
@@ -100,6 +114,18 @@ const updateTaskConfigSchema = z.object({
   localHostId: z.string().uuid().nullable().optional(),
   localDir: z.string().min(1).max(1000).nullable().optional(),
   localSessionMode: z.enum(["interactive", "headless"]).nullable().optional(),
+  autoResume: z
+    .boolean()
+    .nullable()
+    .optional()
+    .describe(
+      "Spawned tasks resume on failing CI, conflicts, or requested changes (null = the repo's setting)",
+    ),
+  autoMerge: z
+    .boolean()
+    .nullable()
+    .optional()
+    .describe("Spawned tasks' PRs merge once checks pass (null = the repo's setting)"),
 });
 
 export async function taskConfigRoutes(rawApp: FastifyInstance) {

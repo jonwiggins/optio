@@ -212,7 +212,7 @@ export function collectWork(src: WorkSources): WorkRow[] {
           ? machine(t.localHostId, t.localDir)
           : { target: "pod", detail: shortRepo(t.repoUrl) },
         who: t.agentType ?? "claude-code",
-        then: "exits",
+        then: t.autoResume ? "until-merged" : "exits",
         status,
         statusLabel,
         note: t.prUrl ? "PR " + t.prUrl.split("/").pop() : null,
@@ -233,10 +233,10 @@ export function collectWork(src: WorkSources): WorkRow[] {
           ? machine(t.localHostId, t.localDir)
           : { target: "pod", detail: shortRepo(t.repoUrl) },
         who: t.agentType ?? "claude-code",
-        then: "exits",
+        then: t.autoResume ? "until-merged" : "exits",
         status: t.enabled === false ? "paused" : "scheduled",
         statusLabel: t.enabled === false ? "paused" : "armed",
-        note: "opens a PR each run",
+        note: t.autoResume ? "works each PR until it merges" : "opens a PR each run",
         prUrl: null,
         lastActivity: t.updatedAt ?? t.createdAt ?? null,
         recurring: true,

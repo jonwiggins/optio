@@ -93,8 +93,8 @@ import kotlinx.coroutines.launch
 /**
  * `LocalTerminalRoute`: the focus view of one Optio Local terminal (iOS `LocalTerminalScreen`,
  * web `/local/:id`). A header with state and the usage pill, then one of two faces: the
- * **Transcript** (the agent's conversation, with a composer) whenever there is one, else the
- * **Screen** (the live terminal). [compose] (`optio://local/<id>?compose=1`) lands with the composer
+ * **Chat** (the agent's conversation, with a composer) whenever there is one, else the
+ * **Terminal** (the live terminal). [compose] (`optio://local/<id>?compose=1`) lands with the composer
  * focused.
  */
 @Composable

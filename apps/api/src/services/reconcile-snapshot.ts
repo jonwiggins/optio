@@ -154,9 +154,12 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
     heartbeat,
     settings: {
       stallThresholdMs,
-      autoMerge: repoConfig?.autoMerge ?? false,
+      // A task's own PR follow-through ("Works until merged") wins over the
+      // repo's; null on the task means the repo decides. Cautious mode still
+      // holds back the merge either way (reconcile-repo).
+      autoMerge: row.autoMerge ?? repoConfig?.autoMerge ?? false,
       cautiousMode: repoConfig?.cautiousMode ?? false,
-      autoResume: repoConfig?.autoResume ?? false,
+      autoResume: row.autoResume ?? repoConfig?.autoResume ?? false,
       reviewEnabled: repoConfig?.reviewEnabled ?? false,
       reviewTrigger:
         repoConfig?.reviewTrigger === "on_pr" || repoConfig?.reviewTrigger === "on_ci_pass"

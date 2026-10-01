@@ -77,6 +77,7 @@ import dev.optio.core.ui.theme.medium
 import dev.optio.core.ui.theme.semibold
 import dev.optio.feature.local.model.LocalPresentation
 import dev.optio.feature.local.model.LocalSessionView
+import dev.optio.feature.local.model.LocalSessionViewRule
 import dev.optio.feature.local.stream.LocalTerminalStream
 import dev.optio.feature.local.transcript.LocalTranscriptLog
 import dev.optio.feature.local.ui.WorkLinkBadges
@@ -91,8 +92,8 @@ import java.time.format.FormatStyle
 /**
  * The terminal's header (iOS `LocalTerminalScreen.header`): state badge and a `·`-joined line
  * (host, exit code, "starts when the host reconnects", cost), the directory (or the error of a dead
- * terminal), the needs-you row, the Claude usage pill, and, when there is a conversation, the
- * Transcript ⇄ Screen toggle; then the PR / ticket badges in a strip of their own, as the web lays
+ * terminal), the needs-you row, the Claude usage pill, and, when there is a conversation (or a live
+ * Claude Code / Codex session that will have one), the Chat ⇄ Terminal toggle; then the PR / ticket badges in a strip of their own, as the web lays
  * them out on a phone (iOS squeezes them into the badge row).
  */
 @Composable
@@ -121,7 +122,7 @@ internal fun TerminalHeader(
     val secondary: AnnotatedString =
         if (LocalPresentation.isDead(t) && !t.errorMessage.isNullOrEmpty()) AnnotatedString(t.errorMessage!!) else mono(t.dir)
     val stateTone = LocalPresentation.stateTone(t)
-    val showToggle = hasTranscript && view != null
+    val showToggle = LocalSessionViewRule.canShowChat(t, hasTranscript) && view != null
     val waiting =
         if (needsYou) {
             val label = LocalPresentation.waitingLabel(t).capitalizedFirst()
@@ -159,7 +160,7 @@ internal fun TerminalHeader(
 private val SHORT_TIME: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 
 /**
- * Transcript ⇄ Screen (iOS `SessionViewToggle`, web `session-view-toggle.tsx`): two small icon
+ * Chat ⇄ Terminal (iOS `SessionViewToggle`, web `session-view-toggle.tsx`): two small icon
  * segments in one capsule, the chosen one raised and tinted.
  */
 @Composable
@@ -200,10 +201,10 @@ internal fun SessionViewToggle(
 
 // endregion
 
-// region Transcript face
+// region Chat face
 
 /**
- * The Transcript face (iOS `LocalTranscriptFace`, web `transcript-view.tsx` + a composer): the
+ * The Chat face (iOS `LocalTranscriptFace`, web `transcript-view.tsx` + a composer): the
  * agent's conversation reflowed for the phone, "Session in progress" while it runs, and a composer
  * that writes your message plus Enter to the PTY.
  */
@@ -226,7 +227,7 @@ internal fun TranscriptFace(
                 EmptyState(
                     title = if (live) "Nothing yet" else "No conversation recorded",
                     icon = Icons.Outlined.ChatBubbleOutline,
-                    message = if (live) "The conversation shows up here as the agent works." else "Switch to Screen to see the terminal as it ran.",
+                    message = if (live) "The conversation shows up here as the agent works." else "Switch to Terminal to see the terminal as it ran.",
                 )
             }
         } else {
@@ -264,10 +265,10 @@ internal fun TranscriptFace(
 
 // endregion
 
-// region Screen face
+// region Terminal face
 
 /**
- * The Screen face (iOS `LocalTerminalStreamView`): a strip only when the stream isn't healthy, the
+ * The Terminal face (iOS `LocalTerminalStreamView`): a strip only when the stream isn't healthy, the
  * "Sized for another device" strip with "Use this screen" (or "Recorded screen" for an exited
  * terminal), the terminal, an error banner, and the extra-keys bar. A finished terminal that never
  * streamed a byte (a row from before screens were recorded) shows its text preview instead; the two

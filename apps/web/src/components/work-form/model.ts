@@ -17,7 +17,8 @@ import { CLUSTER_RUN_LOCATION, type RunLocationValue } from "@/components/run-lo
  *          (in the directory as it is, or on a new branch that becomes a PR)
  *   WHO    a terminal with no agent, or an agent runtime and its parameters
  *   WHAT   the prompt (agents only), with the trigger's params available
- *   THEN   what happens when a turn ends: exits / waits for me / persistent agent
+ *   THEN   what happens when a turn ends: exits / works until the PR merges /
+ *          waits for me / persistent agent
  *   NAME   yours, or "Job N" / "Terminal N" for its kind
  *
  * `normalize` keeps a draft inside the space: an upstream change (say, a
@@ -25,7 +26,10 @@ import { CLUSTER_RUN_LOCATION, type RunLocationValue } from "@/components/run-lo
  * becomes an agent), never the other way round.
  */
 
-export type Then = "exits" | "waits-for-me" | "waits-for-messages";
+export type Then = "exits" | "until-merged" | "waits-for-me" | "waits-for-messages";
+
+/** Then answers that are one headless run (or one per firing), not a session. */
+export const isOneShot = (then: Then): boolean => then === "exits" || then === "until-merged";
 
 export type EventTriggerType = "github" | "slack" | "linear";
 export type WhenType = TriggerConfig["type"] | EventTriggerType;
@@ -87,6 +91,11 @@ export interface WorkDraft {
   agentOptions: AgentOptionsValues;
   prompt: string;
   then: Then;
+  /**
+   * "Works until merged" only: merge the PR once it's green and approved
+   * (vs. keep it green and leave the merge to you).
+   */
+  mergeWhenReady: boolean;
   agent: {
     slug: string;
     podLifecycle: "sticky" | "always-on" | "on-demand";
@@ -136,6 +145,7 @@ export const EMPTY_DRAFT: WorkDraft = {
   agentOptions: {},
   prompt: "",
   then: "exits",
+  mergeWhenReady: true,
   agent: { slug: "", podLifecycle: "sticky", systemPrompt: "", agentsMd: "" },
   name: "",
   runName: "",
@@ -168,6 +178,22 @@ export const PRESETS: Preset[] = [
       runtime: d.runtime || "claude-code",
       agentOptions: {},
       then: "exits",
+    }),
+  },
+  {
+    id: "assign",
+    label: "Assign to Optio",
+    hint: "Issues labeled optio become PRs an agent works on until they merge.",
+    apply: (d) => ({
+      ...d,
+      when: "ticket",
+      trigger: { type: "ticket", ticketSource: "github", ticketLabels: ["optio"] },
+      location: { ...d.location, runTarget: "cluster" },
+      withRepo: true,
+      runtime: d.runtime || "claude-code",
+      agentOptions: {},
+      then: "until-merged",
+      mergeWhenReady: true,
     }),
   },
   {
@@ -345,6 +371,18 @@ export function thenOptions(d: WorkDraft): Choice<Then>[] {
       ...(terminal ? { disabled: "A terminal with no agent waits for you." } : {}),
     },
     {
+      value: "until-merged",
+      ...(terminal
+        ? { disabled: "Following a PR through needs an agent to fix what CI and reviewers find." }
+        : !d.withRepo
+          ? {
+              disabled: local
+                ? "It works on the PR it opens — pick “On a new branch” above."
+                : "It works on the PR it opens — pick a repository above.",
+            }
+          : {}),
+    },
+    {
       value: "waits-for-me",
       ...(!local && !d.withRepo
         ? { disabled: "A pod terminal is attached to a repo — pick a repository above." }
@@ -445,6 +483,103 @@ export function slugify(name: string): string {
     .slice(0, 40);
 }
 
+// ── PR follow-through ────────────────────────────────────────────────────────
+
+/** The repo settings that decide what happens to a PR after it opens. */
+export interface RepoPrSettings {
+  autoResume?: boolean | null;
+  autoMerge?: boolean | null;
+  cautiousMode?: boolean | null;
+  reviewEnabled?: boolean | null;
+  reviewTrigger?: string | null;
+  maxAutoResumes?: number | null;
+}
+
+/** The server's cap when a repo sets none (OPTIO_MAX_AUTO_RESUMES' default). */
+export const DEFAULT_MAX_AUTO_RESUMES = 10;
+
+export interface FollowThroughStep {
+  key: "pr" | "review" | "ci" | "changes" | "merge" | "done";
+  label: string;
+  on: boolean;
+  detail?: string;
+}
+
+/**
+ * What happens to the PR once the agent opens it, step by step — the same
+ * rules the reconciler applies (`reconcile-repo.ts`): a task's own
+ * follow-through ("Works until merged") wins over the repo's settings, review
+ * is always the repo's, and cautious mode (draft PRs) never merges. Null when
+ * the work doesn't open a PR.
+ */
+export function followThrough(
+  d: WorkDraft,
+  repo: RepoPrSettings | null | undefined,
+): { fromRepo: boolean; steps: FollowThroughStep[] } | null {
+  if (!d.withRepo || d.runtime === TERMINAL || !isOneShot(d.then)) return null;
+  const own = d.then === "until-merged";
+  const resume = own ? true : !!repo?.autoResume;
+  const merge = own ? d.mergeWhenReady : !!repo?.autoMerge;
+  const cautious = !!repo?.cautiousMode;
+  const cap = repo?.maxAutoResumes ?? DEFAULT_MAX_AUTO_RESUMES;
+  // The reconciler launches a review only on these two triggers.
+  const reviewOn =
+    !!repo?.reviewEnabled &&
+    (repo?.reviewTrigger === "on_pr" || repo?.reviewTrigger === "on_ci_pass");
+  const resumes = `the agent picks it back up (up to ${cap} times)`;
+  return {
+    fromRepo: !own,
+    steps: [
+      {
+        key: "pr",
+        label: cautious ? "Opens a draft PR" : "Opens a PR",
+        on: true,
+        detail: "The agent's turn ends here; Optio watches CI and reviews from then on.",
+      },
+      {
+        key: "review",
+        label: "A review agent reviews it",
+        on: reviewOn,
+        detail: reviewOn
+          ? repo?.reviewTrigger === "on_pr"
+            ? "As soon as the PR opens."
+            : "Once CI passes."
+          : "Off for this repo — turn it on in the repo's settings.",
+      },
+      {
+        key: "ci",
+        label: "Fixes failing CI and merge conflicts",
+        on: resume,
+        detail: resume ? `When checks fail or it conflicts, ${resumes}.` : "It waits for you.",
+      },
+      {
+        key: "changes",
+        label: "Addresses requested changes",
+        on: resume,
+        detail: resume
+          ? `When a reviewer requests changes, ${resumes}.`
+          : "It waits for you to resume it.",
+      },
+      {
+        key: "merge",
+        label: "Merges when it's ready",
+        on: merge && !cautious,
+        detail:
+          merge && cautious
+            ? "Held back: this repo opens draft PRs (cautious mode), so a person merges."
+            : merge
+              ? "Squash-merges once checks pass and any blocking review is done."
+              : "You merge it.",
+      },
+      {
+        key: "done",
+        label: "Completes on merge, fails if the PR is closed",
+        on: true,
+      },
+    ],
+  };
+}
+
 // ── Kind: the storage row a draft becomes ────────────────────────────────────
 
 export type WorkKind =
@@ -493,7 +628,7 @@ function whenPhrase(d: WorkDraft): SentencePart[] {
   switch (d.when) {
     case "manual":
       if (d.then === "waits-for-messages") return [{ text: "Woken by messages," }];
-      return [{ text: d.then === "exits" ? "Started now," : "Opened now," }];
+      return [{ text: isOneShot(d.then) ? "Started now," : "Opened now," }];
     case "schedule": {
       const cron = d.trigger.cronExpression?.trim();
       if (!cron || cron.split(/\s+/).length !== 5) {
@@ -578,6 +713,12 @@ export function describe(
   if (d.then === "exits") {
     parts.push({
       text: d.withRepo ? "that opens a PR and exits when done." : "that exits when done.",
+    });
+  } else if (d.then === "until-merged") {
+    parts.push({
+      text: d.mergeWhenReady
+        ? "that opens a PR and keeps working on it until it merges."
+        : "that opens a PR and keeps it green until you merge it.",
     });
   } else if (d.then === "waits-for-me") {
     parts.push({ text: "that waits for you between turns." });

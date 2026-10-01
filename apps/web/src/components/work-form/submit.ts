@@ -48,6 +48,20 @@ function setOptions(d: WorkDraft): Record<string, string | boolean> | null {
   return Object.keys(out).length ? out : null;
 }
 
+/**
+ * A repo row's PR follow-through: "Works until merged" resumes (and merges,
+ * unless you'd rather) whatever the repo says; "Exit when done" leaves both
+ * to the repo (null).
+ */
+export function followThroughFor(d: WorkDraft): {
+  autoResume: boolean | null;
+  autoMerge: boolean | null;
+} {
+  return d.then === "until-merged"
+    ? { autoResume: true, autoMerge: d.mergeWhenReady }
+    : { autoResume: null, autoMerge: null };
+}
+
 /** The model the draft picked for its runtime, for rows that carry just a model. */
 export function pickedModel(d: WorkDraft): string | undefined {
   if (d.runtime === TERMINAL) return undefined;
@@ -136,11 +150,19 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
         priority: d.priority,
         repoUrl,
         repoBranch: d.repoBranch,
+        ...(d.then === "until-merged" ? followThroughFor(d) : {}),
         ...(options ? { metadata: { agentOptions: options } } : {}),
         ...(d.dependsOn.length ? { dependsOn: d.dependsOn } : {}),
         ...location,
       });
-      return { kind, href: `/tasks/${task.id}`, toast: `${name} started — it will open a PR` };
+      return {
+        kind,
+        href: `/tasks/${task.id}`,
+        toast:
+          d.then === "until-merged"
+            ? `${name} started — it will work the PR until it merges`
+            : `${name} started — it will open a PR`,
+      };
     }
 
     case "repo-blueprint": {
@@ -159,6 +181,7 @@ async function createOnce(d: WorkDraft, ctx: { repoUrl: string; name: string }):
               priority: d.priority,
               repoUrl,
               repoBranch: d.repoBranch,
+              ...(d.then === "until-merged" ? followThroughFor(d) : {}),
               enabled: true,
               ...location,
             })
@@ -350,6 +373,9 @@ export async function updateWork(
         priority: d.priority,
         repoUrl,
         repoBranch: d.repoBranch,
+        // Always sent, so switching back to "Exit when done" hands the PR
+        // back to the repo's settings.
+        ...followThroughFor(d),
         ...location,
       });
       await syncTrigger(target, wanted, {

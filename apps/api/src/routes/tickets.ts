@@ -13,6 +13,7 @@ import { RECENT_AUTH_FAILURE_WINDOW_MS } from "../services/auth-failure-detector
 import { isSsrfSafeUrl, isSsrfSafeHost } from "../utils/ssrf.js";
 import { HmacSha256Verifier } from "../services/crypto/signer.js";
 import { logger } from "../logger.js";
+import { claimDelivery } from "./event-ingress.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import { TicketProviderSchema } from "../schemas/integration.js";
 import { requireRole } from "../plugins/auth.js";
@@ -116,9 +117,6 @@ const SENSITIVE_PROVIDER_FIELDS: Record<string, string[]> = {
   notion: ["apiKey"],
 };
 
-/** Maximum age (in minutes) for a webhook event before it is rejected. */
-const WEBHOOK_MAX_AGE_MINUTES = 5;
-
 export async function verifyGitHubSignature(
   rawBody: Buffer,
   signature: string,
@@ -130,17 +128,6 @@ export async function verifyGitHubSignature(
 
   const verifier = new HmacSha256Verifier(secret);
   return verifier.verify(rawBody, sigBytes);
-}
-
-export function isReplayedEvent(
-  timestampHeader: string | undefined,
-  maxAgeMinutes: number = WEBHOOK_MAX_AGE_MINUTES,
-): boolean {
-  if (!timestampHeader) return false;
-  const ts = Number(timestampHeader);
-  if (Number.isNaN(ts)) return false;
-  const ageMs = Date.now() - ts * 1000;
-  return ageMs > maxAgeMinutes * 60 * 1000;
 }
 
 export async function ticketRoutes(rawApp: FastifyInstance) {
@@ -351,10 +338,13 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         return reply.status(401).send({ error: "Invalid signature" });
       }
 
-      const timestamp = req.headers["x-github-delivery-timestamp"] as string | undefined;
-      if (isReplayedEvent(timestamp)) {
-        logger.warn({ timestamp }, "Rejecting replayed webhook event");
-        return reply.status(401).send({ error: "Replayed event" });
+      // GitHub signs no timestamp, so a captured delivery stays validly
+      // signed forever. Drop replays (and GitHub's own redeliveries) by the
+      // unique X-GitHub-Delivery id, claimed durably in Redis.
+      const delivery = req.headers["x-github-delivery"];
+      if (typeof delivery === "string" && !(await claimDelivery("github", delivery))) {
+        logger.info({ delivery }, "Ignoring already-processed GitHub delivery");
+        return reply.status(200).send({ ok: true });
       }
 
       const event = req.headers["x-github-event"];
@@ -368,10 +358,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         try {
           const { normalizeGitHubEvent, fireEventTriggers } =
             await import("../services/event-trigger-service.js");
-          const { rememberDelivery } = await import("./event-ingress.js");
-          const delivery = req.headers["x-github-delivery"];
-          const fresh = typeof delivery !== "string" || rememberDelivery("github", delivery);
-          const normalized = fresh ? normalizeGitHubEvent(event, rawPayload) : null;
+          const normalized = normalizeGitHubEvent(event, rawPayload);
           // Fire-and-forget: GitHub gives us 10 s to answer, and a fan-out
           // that spawns N runs mustn't eat it.
           if (normalized) {
@@ -401,8 +388,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         (payload.pull_request as Record<string, unknown> | undefined)?.merged
       ) {
         const prUrl = String((payload.pull_request as Record<string, unknown>).html_url ?? "");
-        const allTasks = await taskService.listTasks({ limit: 500 });
-        const matchingTask = allTasks.find((t) => t.prUrl === prUrl);
+        const matchingTask = await taskService.getTaskByPrUrl(prUrl);
 
         if (matchingTask) {
           try {
