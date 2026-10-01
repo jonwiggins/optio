@@ -54,6 +54,7 @@ import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { codexModelFlags } from "../services/pooled-agent-command.js";
 import { addUsage } from "../services/run-usage.js";
+import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
 
 const connectionOpts = getBullMQConnectionOptions();
 
@@ -357,6 +358,8 @@ export function startTaskWorker() {
         const isPlanningRun =
           !!repoConfig?.planningModeEnabled && !resumeSessionId && !reviewOverride;
 
+        // The task's own cautious mode (WorkSettings) wins over the repo's.
+        const cautious = task.settings?.cautiousMode ?? promptConfig.cautiousMode;
         const renderedPrompt = renderPromptTemplate(promptConfig.template, {
           TASK_FILE: taskFilePath,
           BRANCH_NAME: branchName,
@@ -365,10 +368,8 @@ export function startTaskWorker() {
           REPO_NAME: repoName,
           // The task's own follow-through wins over the repo's; cautious mode
           // (draft PRs) never merges.
-          AUTO_MERGE: String(
-            promptConfig.cautiousMode ? false : (task.autoMerge ?? promptConfig.autoMerge),
-          ),
-          DRAFT_PR: String(promptConfig.cautiousMode),
+          AUTO_MERGE: String(cautious ? false : (task.autoMerge ?? promptConfig.autoMerge)),
+          DRAFT_PR: String(cautious),
           ISSUE_NUMBER: task.ticketExternalId ?? "",
           GIT_PLATFORM_GITLAB: isGitLab ? "true" : "",
           GIT_PLATFORM_CODECOMMIT: isCodeCommit ? "true" : "",
@@ -461,229 +462,23 @@ export function startTaskWorker() {
           claudeVertexServiceAccountKey,
         });
 
-        // ── MCP servers & custom skills injection ────────────────────
-        const { getMcpServersForTask, buildMcpJsonContent } =
-          await import("../services/mcp-server-service.js");
-        const { getSkillsForTask, buildSkillSetupFiles } =
-          await import("../services/skill-service.js");
-
-        const mcpServers = await getMcpServersForTask(task.repoUrl, taskWorkspaceId);
-        if (mcpServers.length > 0) {
-          const mcpJsonContent = await buildMcpJsonContent(mcpServers, task.repoUrl);
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          agentConfig.setupFiles.push({
-            path: ".mcp.json",
-            content: mcpJsonContent,
-          });
-
-          // Collect install commands
-          const installCommands = mcpServers
-            .filter((s) => s.installCommand)
-            .map((s) => s.installCommand!);
-          if (installCommands.length > 0) {
-            agentConfig.env.OPTIO_MCP_INSTALL_COMMANDS = installCommands.join(" && ");
-          }
-          log.info({ count: mcpServers.length }, "Injecting MCP servers");
-        }
-
-        // ── Connection-based MCP injection ─────────────────────────
-        const { getConnectionsForTask } = await import("../services/connection-service.js");
-        const resolvedConnections = await getConnectionsForTask(
-          task.repoUrl,
-          task.agentType,
-          taskWorkspaceId,
-          runOwnerUserId,
+        // ── The agent's environment: MCP servers, connections, skills, and
+        // the work's own setup commands — the repo's defaults with the
+        // task's settings applied (agent-environment-service).
+        const environment = await buildAgentEnvironment(
+          {
+            repoUrl: task.repoUrl,
+            agentType: task.agentType,
+            workspaceId: taskWorkspaceId,
+            ownerUserId: runOwnerUserId,
+            settings: task.settings,
+          },
+          log,
         );
-        if (resolvedConnections.length > 0) {
-          // Build MCP entries from connections and merge into .mcp.json
-          const connectionMcpEntries: Record<
-            string,
-            { command: string; args: string[]; env?: Record<string, string> }
-          > = {};
-          const connectionInstallCommands: string[] = [];
-
-          for (const conn of resolvedConnections) {
-            if (!conn.mcpConfig) continue;
-            const mcpCfg = conn.mcpConfig;
-
-            // Resolve env vars by mapping config values through envMapping
-            const resolvedEnv: Record<string, string> = {};
-            for (const [envKey, configKey] of Object.entries(mcpCfg.envMapping)) {
-              const value = conn.config[configKey];
-              if (typeof value === "string") {
-                // Check if it's a secret reference
-                if (value.startsWith("${{") && value.endsWith("}}")) {
-                  const secretName = value.slice(3, -2).trim();
-                  try {
-                    let secretValue: string;
-                    try {
-                      secretValue = await retrieveSecretWithFallback(
-                        secretName,
-                        task.repoUrl,
-                        taskWorkspaceId,
-                        runOwnerUserId,
-                      );
-                    } catch {
-                      secretValue = await retrieveSecretWithFallback(
-                        secretName,
-                        "global",
-                        taskWorkspaceId,
-                        runOwnerUserId,
-                      );
-                    }
-                    resolvedEnv[envKey] = secretValue;
-                  } catch {
-                    // Secret not found — try the config key as a secret name directly
-                    try {
-                      resolvedEnv[envKey] = await retrieveSecretWithFallback(
-                        configKey,
-                        task.repoUrl,
-                        taskWorkspaceId,
-                        runOwnerUserId,
-                      );
-                    } catch {
-                      try {
-                        resolvedEnv[envKey] = await retrieveSecretWithFallback(
-                          configKey,
-                          "global",
-                          taskWorkspaceId,
-                          runOwnerUserId,
-                        );
-                      } catch {
-                        // Leave unresolved
-                      }
-                    }
-                  }
-                } else {
-                  resolvedEnv[envKey] = value;
-                }
-              } else {
-                // Try resolving the config key as a secret name
-                try {
-                  resolvedEnv[envKey] = await retrieveSecretWithFallback(
-                    configKey,
-                    task.repoUrl,
-                    taskWorkspaceId,
-                    runOwnerUserId,
-                  );
-                } catch {
-                  try {
-                    resolvedEnv[envKey] = await retrieveSecretWithFallback(
-                      configKey,
-                      "global",
-                      taskWorkspaceId,
-                      runOwnerUserId,
-                    );
-                  } catch {
-                    // Leave unresolved
-                  }
-                }
-              }
-            }
-
-            // Resolve template args (e.g., {{ROOT_PATH}})
-            const resolvedArgs = mcpCfg.args.map((arg) =>
-              arg.replace(/\{\{(\w+)\}\}/g, (_match, key) => {
-                const val = conn.config[key];
-                return typeof val === "string" ? val : arg;
-              }),
-            );
-
-            connectionMcpEntries[conn.connectionName] = {
-              command: mcpCfg.command,
-              args: resolvedArgs,
-              ...(Object.keys(resolvedEnv).length > 0 ? { env: resolvedEnv } : {}),
-            };
-
-            if (mcpCfg.installCommand) {
-              connectionInstallCommands.push(mcpCfg.installCommand);
-            }
-          }
-
-          if (Object.keys(connectionMcpEntries).length > 0) {
-            // Find existing .mcp.json in setup files and merge, or create new
-            agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-            const existingIdx = agentConfig.setupFiles.findIndex((f) => f.path === ".mcp.json");
-
-            if (existingIdx >= 0) {
-              // Merge with existing MCP servers
-              const existing = JSON.parse(agentConfig.setupFiles[existingIdx].content);
-              existing.mcpServers = {
-                ...existing.mcpServers,
-                ...connectionMcpEntries,
-              };
-              agentConfig.setupFiles[existingIdx].content = JSON.stringify(existing, null, 2);
-            } else {
-              agentConfig.setupFiles.push({
-                path: ".mcp.json",
-                content: JSON.stringify({ mcpServers: connectionMcpEntries }, null, 2),
-              });
-            }
-
-            // Merge install commands
-            if (connectionInstallCommands.length > 0) {
-              const existing = agentConfig.env.OPTIO_MCP_INSTALL_COMMANDS;
-              agentConfig.env.OPTIO_MCP_INSTALL_COMMANDS = existing
-                ? `${existing} && ${connectionInstallCommands.join(" && ")}`
-                : connectionInstallCommands.join(" && ");
-            }
-
-            log.info(
-              { count: Object.keys(connectionMcpEntries).length },
-              "Injecting connections as MCP servers",
-            );
-          }
-        }
-
-        const skills = await getSkillsForTask(task.repoUrl, taskWorkspaceId, task.agentType);
-        if (skills.length > 0) {
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          const skillFiles = buildSkillSetupFiles(skills);
-          agentConfig.setupFiles.push(...skillFiles);
-          log.info({ count: skills.length, agentType: task.agentType }, "Injecting custom skills");
-        }
-
-        // ── Marketplace-installed skills (Claude Code only for now) ─────
-        if (task.agentType === "claude-code") {
-          const { getInstalledSkillsForTask } =
-            await import("../services/installed-skill-service.js");
-          const { readInstalledSkillFiles } = await import("../workers/skill-sync-worker.js");
-          const installed = await getInstalledSkillsForTask(
-            task.repoUrl,
-            taskWorkspaceId,
-            task.agentType,
-          );
-          if (installed.length > 0) {
-            agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-            let injected = 0;
-            for (const skill of installed) {
-              try {
-                const files = await readInstalledSkillFiles(skill.resolvedSha!, skill.subpath);
-                for (const f of files) {
-                  agentConfig.setupFiles.push({
-                    path: `.claude/skills/${skill.name}/${f.relativePath}`,
-                    content: "",
-                    contentBase64: f.content.toString("base64"),
-                    executable: f.executable,
-                  });
-                }
-                injected++;
-              } catch (err) {
-                log.warn(
-                  { err, skillId: skill.id, name: skill.name },
-                  "Skipping installed skill — cache miss or read error",
-                );
-              }
-            }
-            log.info({ injected, total: installed.length }, "Injecting marketplace skills");
-          }
-        }
-
-        // Encode setup files
-        if (agentConfig.setupFiles && agentConfig.setupFiles.length > 0) {
-          agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(
-            JSON.stringify(agentConfig.setupFiles),
-          ).toString("base64");
+        agentConfig.setupFiles = [...(agentConfig.setupFiles ?? []), ...environment.setupFiles];
+        Object.assign(agentConfig.env, environment.env);
+        if (agentConfig.setupFiles.length > 0) {
+          agentConfig.env.OPTIO_SETUP_FILES = encodeSetupFiles(agentConfig.setupFiles);
         }
 
         // Resolve secrets (workspace → repo-scoped → global fallback)

@@ -11,10 +11,14 @@ import {
   missingFields,
   normalize,
   optionsFromRepo,
+  overrideOn,
   runtimeOptions,
+  settingsChanges,
   slugify,
   thenOptions,
+  toggleOverride,
   whereOptions,
+  withOverride,
   type WhenType,
   type WorkDraft,
 } from "./model";
@@ -638,6 +642,62 @@ suite("Work until merged — PR follow-through", () => {
   it("only work that opens a PR has a plan", () => {
     expect(followThrough({ ...base, withRepo: false }, null)).toBeNull();
     expect(followThrough({ ...base, then: "waits-for-me" }, null)).toBeNull();
+  });
+
+  it("the work's own settings win over the repo's: review, drafts, resumes", () => {
+    const repo = { autoResume: true, reviewEnabled: false, cautiousMode: true, maxAutoResumes: 9 };
+    const plan = followThrough(
+      {
+        ...base,
+        settings: {
+          review: { enabled: true, trigger: "on_pr" },
+          cautiousMode: false,
+          maxAutoResumes: 2,
+        },
+      },
+      repo,
+    );
+    expect(on(plan)).toContain("review");
+    expect(plan!.steps.find((s) => s.key === "review")!.detail).toMatch(/as soon as the PR opens/i);
+    expect(plan!.steps[0].label).toBe("Opens a PR");
+    expect(plan!.steps.find((s) => s.key === "ci")!.detail).toMatch(/up to 2 times/);
+
+    const off = followThrough(
+      { ...base, settings: { review: { enabled: false } } },
+      { reviewEnabled: true, reviewTrigger: "on_pr" },
+    );
+    expect(on(off)).not.toContain("review");
+    expect(off!.steps.find((s) => s.key === "review")!.detail).toBe("Off for this work.");
+  });
+});
+
+suite("environment overrides — only the changes from the defaults", () => {
+  it("a default item is on until taken out; another is off until added", () => {
+    expect(overrideOn(undefined, "a", true)).toBe(true);
+    expect(overrideOn({ remove: ["a"] }, "a", true)).toBe(false);
+    expect(overrideOn(undefined, "b", false)).toBe(false);
+    expect(overrideOn({ add: ["b"] }, "b", false)).toBe(true);
+  });
+
+  it("toggling back to the default leaves no override", () => {
+    const off = toggleOverride(undefined, "a", true, false);
+    expect(off).toEqual({ remove: ["a"] });
+    expect(toggleOverride(off, "a", true, true)).toEqual({});
+    const added = toggleOverride(undefined, "b", false, true);
+    expect(added).toEqual({ add: ["b"] });
+    expect(toggleOverride(added, "b", false, false)).toEqual({});
+  });
+
+  it("counts what the work changes", () => {
+    const d = withOverride(
+      withOverride(EMPTY_DRAFT, "mcpServers", "m", true, false),
+      "connections",
+      "c",
+      false,
+      true,
+    );
+    expect(d.settings).toEqual({ mcpServers: { remove: ["m"] }, connections: { add: ["c"] } });
+    expect(settingsChanges({ ...d.settings, setupCommands: " ", cautiousMode: false })).toBe(3);
   });
 });
 

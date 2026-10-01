@@ -13,7 +13,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx src/db/migrate.ts",
     "openapi:dump": "tsx scripts/dump-openapi.ts",
     "openapi:lint": "redocly lint openapi.generated.json",
     "openapi:types": "openapi-typescript openapi.generated.json -o openapi.generated.d.ts"

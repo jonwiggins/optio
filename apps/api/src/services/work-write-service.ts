@@ -9,6 +9,7 @@
  * nothing behind.
  */
 import {
+  cleanWorkSettings,
   localAgentParams,
   kindOfSpec,
   modelProviderIdFrom,
@@ -19,7 +20,9 @@ import {
   type WorkCreated,
   type WorkDefinitionKind,
   type WorkKind,
+  type WorkSettings,
   type WorkSpec,
+  withoutPrSettings,
 } from "@optio/shared";
 import { db } from "../db/client.js";
 import * as definitions from "./work-definition-service.js";
@@ -169,6 +172,17 @@ function followThrough(spec: WorkSpec) {
     : { autoResume: null, autoMerge: null };
 }
 
+/**
+ * The environment settings a spec keeps (`WorkSettings`): pod work only — a
+ * machine runs with its own configuration — and the PR follow-through only
+ * for work that opens a PR. Nothing changed is stored as null.
+ */
+function settingsOf(spec: WorkSpec, kind: WorkKind): WorkSettings | null {
+  if (spec.where.runTarget === "local") return null;
+  const settings = cleanWorkSettings(spec.settings);
+  return kind === "repo-task" || kind === "repo-blueprint" ? settings : withoutPrSettings(settings);
+}
+
 /** Only the options that are set; an empty set is the defaults (null). */
 function options(spec: WorkSpec): Record<string, string | boolean> | null {
   const set = Object.entries(spec.who.agentOptions ?? {}).filter(
@@ -205,6 +219,7 @@ async function definitionColumns(
         maxRetries: spec.maxRetries ?? 3,
         priority: spec.priority ?? 100,
         ...followThrough(spec),
+        settings: settingsOf(spec, kind),
       };
     case "standalone":
       return {
@@ -214,6 +229,7 @@ async function definitionColumns(
         model: spec.who.model ?? null,
         agentOptions: options(spec),
         maxRetries: spec.maxRetries ?? 1,
+        settings: settingsOf(spec, kind),
       };
     case "local-blueprint": {
       const problem = await blueprintService.checkBlueprint(
@@ -287,6 +303,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
             ...(options(spec) ? { metadata: { agentOptions: options(spec) } } : {}),
             dependsOn: spec.dependsOn,
             workspaceId: actor.workspaceId,
+            settings: settingsOf(spec, kind),
             ...owned,
             ...location,
           },
@@ -406,6 +423,7 @@ export async function createWork(spec: WorkSpec, actor: Actor): Promise<WorkCrea
               agentsMd: spec.agent?.agentsMd || null,
               initialPrompt: spec.what.prompt.trim(),
               podLifecycle: spec.agent?.podLifecycle as PersistentAgentPodLifecycle | undefined,
+              settings: settingsOf(spec, kind),
               workspaceId: actor.workspaceId,
               createdBy: actor.userId,
               ...owned,
@@ -452,14 +470,24 @@ export async function getOwnDefinition(id: string, actor: Actor): Promise<WorkDe
   return !actor.workspaceId || !ws || ws === actor.workspaceId ? definition : null;
 }
 
+/**
+ * What a trigger keeps when its work is saved: the parts its config holds
+ * that the attributes don't carry — a webhook's signing secret, set through
+ * the trigger API. Dropping it would let unsigned requests start the work.
+ */
+function kept(trigger: { type: string; config: unknown }): Record<string, unknown> {
+  const config = (trigger.config ?? {}) as Record<string, unknown>;
+  return trigger.type === "webhook" && config.secret ? { secret: config.secret } : {};
+}
+
 /** The trigger an edit replaces: the first enabled one, else the first (the form shows the same one). */
 export function editedTrigger<T extends { enabled: boolean }>(triggers: T[]): T | null {
   return triggers.find((t) => t.enabled) ?? triggers[0] ?? null;
 }
 
 /**
- * Save a definition from its attributes. Its kind is fixed: answers that
- * would make it another kind are refused. The one trigger the form edits
+ * Save a definition from its attributes. Its kind is fixed: the answers are
+ * read for the saved kind, and ones it can't take are refused. The one trigger the form edits
  * follows the answer — patched in place when the type is the same (a webhook
  * keeps its path, a schedule its id), replaced when it changes, removed for
  * "now" — and other triggers are left alone. Row and trigger change together.
@@ -467,14 +495,11 @@ export function editedTrigger<T extends { enabled: boolean }>(triggers: T[]): T 
 export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Promise<WorkCreated> {
   const existing = await getOwnDefinition(id, actor);
   if (!existing) throw new WorkError(404, "Work not found");
+  // The saved kind stays, and the answers are read for it. The form keeps an
+  // edit from moving it (`kindLock`), but a row can load at a point that
+  // derives elsewhere — a scheduled Task with no trigger reads as "now", a
+  // headless automation as a Job — and still saves as what it is.
   const kind = existing.kind;
-  const asked = kindOfSpec(spec);
-  if (asked !== kind) {
-    throw new WorkError(
-      400,
-      `These answers would make it a ${NOUN[asked]}; a saved ${NOUN[kind]} stays one`,
-    );
-  }
   check(spec, kind);
   const wanted = triggerOf(spec, kind);
   const columns = await definitionColumns(kind, spec, actor);
@@ -503,7 +528,8 @@ export async function updateWork(id: string, spec: WorkSpec, actor: Actor): Prom
       if (!wanted) {
         if (current) await triggerService.deleteTrigger(current.id, tx);
       } else if (current && current.type === wanted.type) {
-        await triggerService.updateTrigger(current.id, { config: wanted.config }, tx);
+        const config = { ...kept(current), ...wanted.config };
+        await triggerService.updateTrigger(current.id, { config }, tx);
       } else {
         await triggerService.createTrigger({ targetType, targetId: id, ...wanted }, tx);
         if (current) await triggerService.deleteTrigger(current.id, tx);

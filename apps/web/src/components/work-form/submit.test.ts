@@ -118,6 +118,7 @@ describe("specFor — the draft as the five attributes", () => {
       dependsOn: ["t-0"],
       owner: "workspace",
       podSecrets: [],
+      settings: null,
     });
   });
 
@@ -605,6 +606,62 @@ describe("owner and pod secrets on the wire", () => {
       { repoUrl: "" },
     );
     expect(api.updateWork.mock.calls[0][1]).toMatchObject({ owner: "workspace", podSecrets: null });
+  });
+});
+
+describe("environment settings on the wire", () => {
+  const settings = {
+    connections: { add: ["c1", "c1"], remove: [] },
+    setupCommands: "  npm ci ",
+    review: { enabled: false },
+    cautiousMode: true,
+  };
+
+  it("pod work that opens a PR sends only its changes, PR follow-through included", () => {
+    const spec = specFor(draft({ repoUrl: REPO, prompt: "Fix", settings }), {
+      repoUrl: REPO,
+      name: "Fix",
+    });
+    expect(spec.settings).toEqual({
+      connections: { add: ["c1"] },
+      setupCommands: "npm ci",
+      review: { enabled: false },
+      cautiousMode: true,
+    });
+  });
+
+  it("a Job and a persistent agent keep the environment but no PR settings", () => {
+    const job = specFor(draft({ withRepo: false, prompt: "Hi", settings }), {
+      repoUrl: REPO,
+      name: "Job",
+    });
+    expect(job.settings).toEqual({ connections: { add: ["c1"] }, setupCommands: "npm ci" });
+    const agent = specFor(
+      draft({ withRepo: false, prompt: "Hi", then: "waits-for-messages", settings }),
+      { repoUrl: REPO, name: "Forge" },
+    );
+    expect(agent.settings).toEqual({ connections: { add: ["c1"] }, setupCommands: "npm ci" });
+  });
+
+  it("work on a machine sends none (it runs with the machine's own configuration)", () => {
+    const spec = specFor(
+      draft({
+        location: onMachine("headless"),
+        withRepo: false,
+        prompt: "Hi",
+        settings,
+      }),
+      { repoUrl: "", name: "Local" },
+    );
+    expect(spec).not.toHaveProperty("settings");
+  });
+
+  it("nothing changed is null, so the work keeps following the repo", () => {
+    const spec = specFor(draft({ repoUrl: REPO, prompt: "Fix", settings: { skills: {} } }), {
+      repoUrl: REPO,
+      name: "Fix",
+    });
+    expect(spec.settings).toBeNull();
   });
 });
 

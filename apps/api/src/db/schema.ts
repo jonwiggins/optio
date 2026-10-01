@@ -17,7 +17,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { WorkDefinitionKind } from "@optio/shared";
+import type { WorkDefinitionKind, WorkSettings } from "@optio/shared";
 
 // ── Workspace enums ─────────────────────────────────────────────────────────
 
@@ -172,6 +172,9 @@ function runColumns() {
     // pod gets by name (null = the workspace's legacy behavior).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
+    // What the work changes about the repo's / workspace's agent environment
+    // (null = the defaults; packages/shared/src/work/settings.ts).
+    settings: jsonb("settings").$type<WorkSettings>(),
     createdBy: uuid("created_by"), // nullable FK to users (null when auth is disabled)
     ignoreOffPeak: boolean("ignore_off_peak").notNull().default(false),
     // PR follow-through for this task, over the repo's settings: null = the
@@ -213,6 +216,7 @@ export const workRuns = pgTable(
   },
   (table) => [
     index("tasks_kind_state_idx").on(table.kind, table.state),
+    index("tasks_kind_created_at_idx").on(table.kind, table.createdAt.desc()),
     index("tasks_pod_id_idx")
       .on(table.podId)
       .where(sql`${table.podId} IS NOT NULL`),
@@ -300,7 +304,6 @@ export const taskLogs = pgTable(
   },
   (table) => [
     index("task_logs_task_id_timestamp_idx").on(table.taskId, table.timestamp),
-    index("task_logs_workflow_run_id_idx").on(table.workflowRunId),
     index("task_logs_pr_review_run_id_idx").on(table.prReviewRunId, table.timestamp),
     index("task_logs_persistent_agent_turn_id_idx")
       .on(table.persistentAgentTurnId, table.timestamp)
@@ -734,6 +737,9 @@ export const workDefinitions = pgTable(
     createdBy: uuid("created_by").references(() => users.id),
     // The secrets its pod gets, by name (null = the workspace's legacy behavior).
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
+    // What the work changes about the repo's / workspace's agent environment
+    // (null = the defaults; packages/shared/src/work/settings.ts).
+    settings: jsonb("settings").$type<WorkSettings>(),
     enabled: boolean("enabled").notNull().default(true),
 
     // What. The prompt (a Local automation's command when it runs no agent)
@@ -886,6 +892,10 @@ export const workflowRuns = pgTable("workflow_runs", {
   // What the attempt actually ran: the rendered prompt and the agent.
   prompt: text("prompt"),
   agentType: text("agent_type"),
+  // Where and how often it runs, from the Job when the run is made (the
+  // worker reads the Job live; these keep the runs table truthful).
+  runTarget: text("run_target").$type<"cluster" | "local">(),
+  maxRetries: integer("max_retries"),
   // Stall detection: the attempt's last agent event.
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1601,6 +1611,9 @@ export const persistentAgents = pgTable(
     // pod gets by name (null = the workspace's legacy behavior).
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
     podSecrets: jsonb("pod_secrets").$type<string[]>(),
+    // What the work changes about the repo's / workspace's agent environment
+    // (null = the defaults; packages/shared/src/work/settings.ts).
+    settings: jsonb("settings").$type<WorkSettings>(),
     createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

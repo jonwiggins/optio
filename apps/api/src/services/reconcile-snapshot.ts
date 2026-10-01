@@ -156,23 +156,35 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
       // repo's; null on the task means the repo decides. Cautious mode still
       // holds back the merge either way (reconcile-repo).
       autoMerge: row.autoMerge ?? repoConfig?.autoMerge ?? false,
-      cautiousMode: repoConfig?.cautiousMode ?? false,
+      // The task's own settings (WorkSettings) win over the repo's the same way.
+      cautiousMode: row.settings?.cautiousMode ?? repoConfig?.cautiousMode ?? false,
       autoResume: row.autoResume ?? repoConfig?.autoResume ?? false,
-      reviewEnabled: repoConfig?.reviewEnabled ?? false,
-      reviewTrigger:
-        repoConfig?.reviewTrigger === "on_pr" || repoConfig?.reviewTrigger === "on_ci_pass"
-          ? (repoConfig.reviewTrigger as "on_pr" | "on_ci_pass")
-          : null,
+      reviewEnabled: row.settings?.review?.enabled ?? repoConfig?.reviewEnabled ?? false,
+      // A task that asks for a review gets one: its trigger, else the repo's
+      // when that one launches reviews, else once CI passes.
+      reviewTrigger: row.settings?.review?.enabled
+        ? (reviewTriggerOf(row.settings.review.trigger) ??
+          reviewTriggerOf(repoConfig?.reviewTrigger) ??
+          "on_ci_pass")
+        : reviewTriggerOf(repoConfig?.reviewTrigger),
       offPeakOnly: repoConfig?.offPeakOnly ?? false,
       offPeakActive: offPeak.isOffPeak,
       hasReviewSubtask,
-      maxAutoResumes: repoConfig?.maxAutoResumes ?? parseIntEnv("OPTIO_MAX_AUTO_RESUMES", 10),
+      maxAutoResumes:
+        row.settings?.maxAutoResumes ??
+        repoConfig?.maxAutoResumes ??
+        parseIntEnv("OPTIO_MAX_AUTO_RESUMES", 10),
       recentAutoResumeCount,
     },
     readErrors,
   };
 
   return Object.freeze(snapshot);
+}
+
+/** The review triggers the reconciler acts on; anything else ("manual") launches none. */
+function reviewTriggerOf(trigger: string | null | undefined): "on_pr" | "on_ci_pass" | null {
+  return trigger === "on_pr" || trigger === "on_ci_pass" ? trigger : null;
 }
 
 /**

@@ -37,11 +37,53 @@ export function buildEnvExports(env: Record<string, string>): string[] {
 }
 
 /**
+ * Script lines that write the run's setup files (`OPTIO_SETUP_FILES`: base64
+ * JSON of `{ path, content | contentBase64, executable }`) into the current
+ * directory; `/opt/optio/…` paths land in the agent's home. Every pod exec
+ * script uses them, so a Job or a persistent agent gets the same `.mcp.json`
+ * and skills a Repo Task does.
+ */
+export const WRITE_SETUP_FILES: readonly string[] = [
+  `if [ -n "\${OPTIO_SETUP_FILES:-}" ]; then`,
+  `  echo "[optio] Writing setup files..."`,
+  `  echo "\${OPTIO_SETUP_FILES}" | base64 -d | python3 -c "`,
+  `import base64, json, os, sys`,
+  `for f in json.load(sys.stdin):`,
+  `    p = f['path']`,
+  `    if p.startswith('/opt/optio/'):`,
+  `        p = '/home/agent/optio/' + p[len('/opt/optio/'):]`,
+  `    elif not p.startswith('/'):`,
+  `        p = os.path.join(os.getcwd(), p)`,
+  `    os.makedirs(os.path.dirname(p), exist_ok=True)`,
+  `    data = base64.b64decode(f['contentBase64']) if f.get('contentBase64') else f.get('content', '').encode()`,
+  `    with open(p, 'wb') as fh:`,
+  `        fh.write(data)`,
+  `    if f.get('executable'):`,
+  `        os.chmod(p, 0o755)`,
+  `    print(f'  wrote {p}')`,
+  `"`,
+  `fi`,
+];
+
+/**
+ * Script lines that run the work's own setup commands
+ * (`OPTIO_WORK_SETUP_COMMANDS`, from its settings) in the current directory
+ * just before the agent starts, stopping the run if they fail.
+ */
+export const RUN_WORK_SETUP_COMMANDS: readonly string[] = [
+  `if [ -n "\${OPTIO_WORK_SETUP_COMMANDS:-}" ]; then`,
+  `  echo "[optio] Running setup commands..."`,
+  `  bash -c "\$OPTIO_WORK_SETUP_COMMANDS" || { echo "[optio] ERROR: setup commands failed"; exit 1; }`,
+  `fi`,
+];
+
+/**
  * The exec script that runs one agent in a pooled pod (a Job's or a
  * persistent agent's): export the run's env, wait for the pod's init to
- * finish, then run the agent command in the run's own working directory and
- * exit with its status. `label` names the pod in the progress lines; without
- * it the script only speaks up on failure.
+ * finish, then, in the run's own working directory, write its setup files,
+ * run its setup commands, and run the agent command, exiting with its
+ * status. `label` names the pod in the progress lines; without it the script
+ * only speaks up on failure.
  */
 export function buildPooledExecScript(input: {
   env: Record<string, string>;
@@ -61,6 +103,8 @@ export function buildPooledExecScript(input: {
     ...(input.label ? [`echo "[optio] ${what[0].toUpperCase()}${what.slice(1)} ready"`] : []),
     `mkdir -p ${shellSingleQuote(input.workDir)}`,
     `cd ${shellSingleQuote(input.workDir)}`,
+    ...WRITE_SETUP_FILES,
+    ...RUN_WORK_SETUP_COMMANDS,
     `set +e`,
     ...input.agentCommand,
     `AGENT_EXIT=$?`,

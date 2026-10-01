@@ -142,7 +142,12 @@ export async function insertWorkflowRun(
   overrides: Insert<typeof workflowRuns> = {},
 ) {
   const [job] = await db
-    .select({ workspaceId: workDefinitions.workspaceId, ownerUserId: workDefinitions.ownerUserId })
+    .select({
+      workspaceId: workDefinitions.workspaceId,
+      ownerUserId: workDefinitions.ownerUserId,
+      runTarget: workDefinitions.runTarget,
+      maxRetries: workDefinitions.maxRetries,
+    })
     .from(workDefinitions)
     .where(eq(workDefinitions.id, workflowId));
   const [row] = await db

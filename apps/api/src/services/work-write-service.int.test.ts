@@ -293,13 +293,21 @@ describe("updateWork", () => {
     expect(replaced[0]).toMatchObject({ type: "schedule" });
     expect(replaced[0].id).not.toBe(first.id);
 
-    // Answers that would make it another kind are refused, and nothing changes.
+    // Answers that leave out what the saved kind needs are refused, and nothing changes.
     const err = await rejection(
       updateWork(id, { ...base, where: { runTarget: "cluster" } }, actor),
     );
     expect(err.status).toBe(400);
-    expect(err.message).toMatch(/would make it a Job/);
+    expect(err.message).toMatch(/needs a repo/);
     expect((await triggersOf(id))[0].id).toBe(replaced[0].id);
+
+    // "Now" reads as a one-off Task, but the saved scheduled Task stays one:
+    // its trigger goes, and it runs when started by hand.
+    const saved = await updateWork(id, { ...base, when: { type: "manual" } }, actor);
+    expect(saved).toMatchObject({ kind: "repo-blueprint", id });
+    expect(await triggersOf(id)).toHaveLength(0);
+    const [kept] = await db.select().from(workDefinitions).where(eq(workDefinitions.id, id));
+    expect(kept.kind).toBe("repo-blueprint");
   });
 
   it("only saves definitions the caller can see", async () => {
@@ -317,6 +325,85 @@ describe("updateWork", () => {
     expect(await deleteWork(id, { workspaceId: other.id, userId: null, isAdmin: false })).toBe(
       false,
     );
+  });
+});
+
+describe("settings", () => {
+  const settings = {
+    mcpServers: { add: ["m1", "m1"], remove: [] },
+    setupCommands: "  npm ci ",
+    review: { enabled: true, trigger: "on_pr" as const },
+    maxAutoResumes: 2,
+  };
+
+  it("stores what pod work changes, cleaned; PR follow-through only where a PR opens", async () => {
+    const ws = await insertWorkspace();
+    const actor = { workspaceId: ws.id, userId: null, isAdmin: false };
+
+    const task = await createWork(spec({ where: repo(), settings }), actor);
+    const [taskRow] = await db.select().from(tasks).where(eq(tasks.id, task.id));
+    expect(taskRow.settings).toEqual({
+      mcpServers: { add: ["m1"] },
+      setupCommands: "npm ci",
+      review: { enabled: true, trigger: "on_pr" },
+      maxAutoResumes: 2,
+    });
+
+    // A Job opens no PR: only its environment is kept.
+    const job = await createWork(
+      spec({ when: { type: "schedule", config: { cronExpression: "0 9 * * *" } }, settings }),
+      actor,
+    );
+    const [jobRow] = await db.select().from(workDefinitions).where(eq(workDefinitions.id, job.id));
+    expect(jobRow.settings).toEqual({ mcpServers: { add: ["m1"] }, setupCommands: "npm ci" });
+
+    // Settings that change nothing store nothing; a save can clear them.
+    await updateWork(
+      job.id,
+      spec({
+        name: jobRow.name,
+        when: { type: "schedule", config: { cronExpression: "0 9 * * *" } },
+        settings: { mcpServers: {} },
+      }),
+      actor,
+    );
+    const [cleared] = await db.select().from(workDefinitions).where(eq(workDefinitions.id, job.id));
+    expect(cleared.settings).toBeNull();
+  });
+
+  it("copies a scheduled Task's settings into each task it spawns", async () => {
+    const ws = await insertWorkspace();
+    const actor = { workspaceId: ws.id, userId: null, isAdmin: false };
+    const blueprint = await createWork(
+      spec({
+        where: repo(),
+        when: { type: "schedule", config: { cronExpression: "0 9 * * *" } },
+        settings: { cautiousMode: true },
+      }),
+      actor,
+    );
+    const { instantiateTask } = await import("./task-config-service.js");
+    const spawned = await instantiateTask(blueprint.id);
+    const [row] = await db.select().from(tasks).where(eq(tasks.id, spawned.id));
+    expect(row.settings).toEqual({ cautiousMode: true });
+    expect(row.workId).toBe(blueprint.id);
+  });
+
+  it("keeps a webhook's signing secret when the work is saved", async () => {
+    const ws = await insertWorkspace();
+    const actor = { workspaceId: ws.id, userId: null, isAdmin: false };
+    const path = `hook-${uniq()}`;
+    const base = spec({ when: { type: "webhook", config: { path } } });
+    const { id } = await createWork(base, actor);
+    const [trigger] = await triggersOf(id);
+    await db
+      .update(workflowTriggers)
+      .set({ config: { path, secret: "s3cret" } })
+      .where(eq(workflowTriggers.id, trigger.id));
+
+    await updateWork(id, { ...base, what: { prompt: "do it better" } }, actor);
+    const [saved] = await triggersOf(id);
+    expect(saved.config).toEqual({ path, secret: "s3cret" });
   });
 });
 

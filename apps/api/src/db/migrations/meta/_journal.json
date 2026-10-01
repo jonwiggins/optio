@@ -785,6 +785,13 @@
       "when": 1791930000000,
       "tag": "1791930000_one_runs_table",
       "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1791940000000,
+      "tag": "1791940000_work_settings",
+      "breakpoints": true
     }
   ]
 }

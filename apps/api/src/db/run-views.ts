@@ -12,11 +12,14 @@
  * in their kind; `workflow_runs` defaults `kind` for its inserts. A view's
  * column list is fixed when it is made, so the migrator drops them before
  * every migration and makes them again after (`migrate-safe.ts`): a new
- * `tasks` column shows up in `repo_tasks` without anyone remembering to.
+ * `tasks` column shows up in `repo_tasks` without anyone remembering to. A
+ * migration therefore sees `tasks` but not the views. The migrator also
+ * remakes them at boot when this file's definition changed.
  */
+import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
 
-export const RUN_VIEWS_SQL = [
+const VIEWS = [
   `CREATE VIEW "repo_tasks" AS
      SELECT * FROM "tasks" WHERE "kind" = 'repo'
      WITH CASCADED CHECK OPTION`,
@@ -26,12 +29,32 @@ export const RUN_VIEWS_SQL = [
        "session_id", "container_id" AS "pod_name", "pod_id", "last_pod_id", "local_terminal_id",
        "retry_count", "started_at", "completed_at" AS "finished_at", "control_intent",
        "reconcile_backoff_until", "reconcile_attempts", "workspace_id", "owner_user_id",
-       "prompt", "agent_type", "last_activity_at", "created_at", "updated_at"
+       "prompt", "agent_type", "run_target", "max_retries", "last_activity_at",
+       "created_at", "updated_at"
      FROM "tasks" WHERE "kind" = 'standalone'
      WITH CASCADED CHECK OPTION`,
   `ALTER VIEW "workflow_runs" ALTER COLUMN "kind" SET DEFAULT 'standalone'`,
   `ALTER VIEW "workflow_runs" ALTER COLUMN "state" SET DEFAULT 'queued'`,
 ];
+
+/**
+ * Which definition of the views a database has, kept as a comment on
+ * `workflow_runs`: the migrator remakes the views at boot when it differs,
+ * so changing them here needs no migration.
+ */
+export const RUN_VIEWS_MARKER = `optio-run-views:${createHash("sha256")
+  .update(VIEWS.join("\n"))
+  .digest("hex")
+  .slice(0, 16)}`;
+
+export const RUN_VIEWS_SQL = [...VIEWS, `COMMENT ON VIEW "workflow_runs" IS '${RUN_VIEWS_MARKER}'`];
+
+/** Whether the database's views are this code's (false when they're missing or older). */
+export const RUN_VIEWS_CURRENT = sql`
+  SELECT COALESCE(
+    obj_description(to_regclass('workflow_runs'), 'pg_class') = ${RUN_VIEWS_MARKER},
+    false
+  ) AS "current"`;
 
 /** The runs table has its views once `tasks.kind` exists (the phase 3 migration). */
 export const HAS_RUN_KINDS = sql`

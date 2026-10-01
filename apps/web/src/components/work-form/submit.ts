@@ -1,7 +1,10 @@
 import {
+  cleanWorkSettings,
   getProviderCatalog,
   providerForAgentType,
+  withoutPrSettings,
   type WorkFormDefaults,
+  type WorkSettings,
   type WorkSpec,
 } from "@optio/shared";
 import { api } from "@/lib/api-client";
@@ -12,6 +15,7 @@ import {
   isEventWhen,
   isLocal,
   isPodWork,
+  prSettingsApply,
   slugify,
   takesOwner,
   TERMINAL,
@@ -86,16 +90,25 @@ export function rememberWorkDefaults(d: WorkDraft): void {
  * Who the row belongs to and what its pod may read: every Task, Job and
  * agent carries an owner (a machine run is always "me"); pod work also
  * carries the picked secrets (an array for new work, possibly empty; a
- * legacy row that never picked keeps null).
+ * legacy row that never picked keeps null) and its environment settings.
  */
 export function ownership(d: WorkDraft): {
   owner?: "workspace" | "me";
   podSecrets?: string[] | null;
+  settings?: WorkSettings | null;
 } {
   if (!takesOwner(d)) return {};
   return {
     owner: effectiveOwner(d),
-    ...(isPodWork(d) ? { podSecrets: d.podSecrets } : {}),
+    ...(isPodWork(d)
+      ? {
+          podSecrets: d.podSecrets,
+          // Only what changes the defaults; PR follow-through only where a PR opens.
+          settings: prSettingsApply(d)
+            ? cleanWorkSettings(d.settings)
+            : withoutPrSettings(cleanWorkSettings(d.settings)),
+        }
+      : {}),
   };
 }
 

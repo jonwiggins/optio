@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { isWorkDefinitionKind, kindOfSpec, type WorkSpec } from "@optio/shared";
+import {
+  cleanWorkSettings,
+  isWorkDefinitionKind,
+  kindOfSpec,
+  withoutPrSettings,
+  type WorkSpec,
+} from "@optio/shared";
 
 const api = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
@@ -19,6 +25,7 @@ import {
   kindLock,
   missingFields,
   normalize,
+  prSettingsApply,
   type WorkDraft,
   type WorkKind,
 } from "./model";
@@ -65,6 +72,13 @@ function rowFromSpec(spec: WorkSpec): Record<string, unknown> {
     // The owner the server plans: yours, or the organization's.
     ownerUserId: spec.owner === "me" ? ME : null,
     podSecrets: spec.podSecrets ?? null,
+    // `settingsOf`: pod work only; PR follow-through only for a scheduled Task.
+    settings:
+      spec.where.runTarget === "local"
+        ? null
+        : kind === "repo-blueprint"
+          ? cleanWorkSettings(spec.settings)
+          : withoutPrSettings(cleanWorkSettings(spec.settings)),
   };
   // `runLocation`: a Task or Job on a machine runs headless.
   const location =
@@ -109,6 +123,7 @@ function rowFromSpec(spec: WorkSpec): Record<string, unknown> {
         // An automation is always its owner's, and has no pod.
         ownerUserId: ME,
         podSecrets: null,
+        settings: null,
       };
   }
 }
@@ -131,9 +146,15 @@ function kept(d: WorkDraft) {
   const { repoId: _repoId, dependsOn: _dependsOn, agent: _agent, ...rest } = d;
   return {
     ...rest,
-    // Work on a machine is always yours, and has no pod to give secrets to.
+    // Work on a machine is always yours, and has no pod to give secrets to
+    // or environment to change.
     owner: effectiveOwner(d),
     podSecrets: isPodWork(d) ? d.podSecrets : null,
+    settings: isPodWork(d)
+      ? prSettingsApply(d)
+        ? cleanWorkSettings(d.settings)
+        : withoutPrSettings(cleanWorkSettings(d.settings))
+      : null,
     // An event When has no trigger form; any other When has no event.
     ...(isEventWhen(d.when) ? { trigger: undefined } : { event: undefined }),
     ...(d.withRepo ? {} : { repoUrl: undefined, repoBranch: undefined }),
@@ -175,6 +196,15 @@ const SAVED: [string, WorkKind, Partial<WorkDraft>][] = [
       maxRetries: 1,
       owner: "me",
       podSecrets: ["NPM_TOKEN"],
+      // Its own environment: a connection added, an MCP server off, setup
+      // commands, and review on as the PR opens.
+      settings: {
+        connections: { add: ["c-1"] },
+        mcpServers: { remove: ["m-1"] },
+        setupCommands: "npm ci",
+        review: { enabled: true, trigger: "on_pr" },
+        maxAutoResumes: 3,
+      },
     },
   ],
   [

@@ -97,10 +97,13 @@ import {
   type WorkDraft,
   type Then,
   type WhenType,
+  prSettingsApply,
+  withOverride,
 } from "./model";
 import { createWork, rememberWorkDefaults, updateWork } from "./submit";
 import { detailHref, type EditTarget } from "./load";
 import { OwnerRow, SecretsRow } from "./who-extras";
+import { EnvironmentPanel } from "./environment-panel";
 
 /**
  * The one creation form. Six groups in dependency order — When, Where, Who,
@@ -942,6 +945,61 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                   </>
                 )}
               </div>
+
+              {podWork && (
+                <div className="pt-3 border-t border-border">
+                  <EnvironmentPanel
+                    settings={draft.settings}
+                    repoUrl={draft.withRepo ? effectiveRepoUrl || null : null}
+                    agentType={draft.runtime}
+                    owner={draft.owner}
+                    prApplies={prSettingsApply(draft)}
+                    secrets={
+                      showSecrets ? (
+                        <SecretsRow
+                          picked={draft.podSecrets ?? []}
+                          pickable={pickable}
+                          addable={addableSecrets(draft, pickable)}
+                          canCreateOrg={me?.role === "admin"}
+                          onAdd={(x) => {
+                            if (
+                              x.owner === "me" &&
+                              draft.owner !== "me" &&
+                              isPersonalOnlySecret(x.name, pickable)
+                            ) {
+                              setOwnerNote(
+                                `${x.name} is your own secret, so this work now runs as you.`,
+                              );
+                            }
+                            setDraft((d) =>
+                              // A name the org also has stays org-safe.
+                              x.owner === "me" && !isPersonalOnlySecret(x.name, pickable)
+                                ? withSecret(d, { ...x, owner: "workspace" })
+                                : withSecret(d, x),
+                            );
+                          }}
+                          onRemove={(name) => setDraft((d) => withoutSecret(d, name))}
+                          onCreated={(x) => {
+                            setPickable((list) => [...list, x]);
+                            if (x.owner === "me" && draft.owner !== "me") {
+                              setOwnerNote(
+                                `${x.name} is your own secret, so this work now runs as you.`,
+                              );
+                            }
+                            setDraft((d) => withSecret(d, x));
+                          }}
+                        />
+                      ) : null
+                    }
+                    onToggle={(part, item, on) =>
+                      setDraft((d) => withOverride(d, part, item.id, item.default, on))
+                    }
+                    onChange={(patch) =>
+                      setDraft((d) => ({ ...d, settings: { ...d.settings, ...patch } }))
+                    }
+                  />
+                </div>
+              )}
             </div>
           </Section>
 
@@ -1016,40 +1074,6 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                     onChange={(owner) => {
                       setOwnerNote(null);
                       setDraft((d) => withOwner(d, owner, providers, pickable));
-                    }}
-                  />
-                </div>
-              )}
-
-              {showSecrets && (
-                <div className="pt-3 border-t border-border">
-                  <SecretsRow
-                    picked={draft.podSecrets ?? []}
-                    pickable={pickable}
-                    addable={addableSecrets(draft, pickable)}
-                    canCreateOrg={me?.role === "admin"}
-                    onAdd={(x) => {
-                      if (
-                        x.owner === "me" &&
-                        draft.owner !== "me" &&
-                        isPersonalOnlySecret(x.name, pickable)
-                      ) {
-                        setOwnerNote(`${x.name} is your own secret, so this work now runs as you.`);
-                      }
-                      setDraft((d) =>
-                        // A name the org also has stays org-safe.
-                        x.owner === "me" && !isPersonalOnlySecret(x.name, pickable)
-                          ? withSecret(d, { ...x, owner: "workspace" })
-                          : withSecret(d, x),
-                      );
-                    }}
-                    onRemove={(name) => setDraft((d) => withoutSecret(d, name))}
-                    onCreated={(x) => {
-                      setPickable((list) => [...list, x]);
-                      if (x.owner === "me" && draft.owner !== "me") {
-                        setOwnerNote(`${x.name} is your own secret, so this work now runs as you.`);
-                      }
-                      setDraft((d) => withSecret(d, x));
                     }}
                   />
                 </div>
@@ -1418,17 +1442,22 @@ export function WorkForm({ edit }: { edit?: EditTarget } = {}) {
                           </p>
                         </div>
                       )}
-                      <div>
-                        <label className="block text-sm text-text-muted mb-1.5">Max retries</label>
-                        <NumberInput
-                          min={0}
-                          max={10}
-                          value={draft.maxRetries}
-                          onChange={(v) => setDraft({ maxRetries: v })}
-                          fallback={3}
-                          className="w-24 px-3 py-2 rounded-lg bg-bg border border-border text-sm"
-                        />
-                      </div>
+                      {/* A Local automation's runs are terminals; they don't retry. */}
+                      {locked !== "local-blueprint" && (
+                        <div>
+                          <label className="block text-sm text-text-muted mb-1.5">
+                            Max retries
+                          </label>
+                          <NumberInput
+                            min={0}
+                            max={10}
+                            value={draft.maxRetries}
+                            onChange={(v) => setDraft({ maxRetries: v })}
+                            fallback={3}
+                            className="w-24 px-3 py-2 rounded-lg bg-bg border border-border text-sm"
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                   {kind === "repo-task" && (

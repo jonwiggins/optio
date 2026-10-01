@@ -23,6 +23,7 @@ import { podProviderRuntime, resolveProviderForWork } from "../services/model-pr
 import { detectAuthFailureInLogs, recordAuthEvent } from "../services/auth-failure-detector.js";
 import { agentOptionsEnv } from "../services/agent-options-env.js";
 import { buildPooledAgentCommand } from "../services/pooled-agent-command.js";
+import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
 
@@ -327,6 +328,23 @@ export function startWorkflowWorker() {
               `Max subscription auth failed: ${authResult.error ?? "Token not available"}`,
             );
           }
+        }
+
+        // The agent's environment: the workspace's MCP servers, connections,
+        // and skills with the Job's settings applied, and its setup commands.
+        const environment = await buildAgentEnvironment(
+          {
+            repoUrl: null,
+            agentType: workflow.agentRuntime,
+            workspaceId,
+            ownerUserId: workflowUserId,
+            settings: workflow.settings,
+          },
+          log,
+        );
+        Object.assign(env, environment.env);
+        if (environment.setupFiles.length > 0) {
+          env.OPTIO_SETUP_FILES = encodeSetupFiles(environment.setupFiles);
         }
 
         // ── Provision pod (shared across runs within the workflow) ────

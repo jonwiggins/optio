@@ -8,8 +8,10 @@ import {
   type LocalHost,
   type ModelProvider,
   type PickableSecret,
+  type IdOverrides,
   type ResourceOwner,
   type WorkFormDefaults,
+  type WorkSettings,
   type WorkThen,
 } from "@optio/shared";
 import type { TriggerConfig } from "@/components/trigger-selector";
@@ -145,6 +147,12 @@ export interface WorkDraft {
    * row predates picking (legacy behavior) and nothing was picked since.
    */
   podSecrets: string[] | null;
+  /**
+   * Pod work: what it changes about the repo's / workspace's environment —
+   * connections, MCP servers, skills, setup commands, PR follow-through
+   * (`WorkSettings`). Empty = the defaults.
+   */
+  settings: WorkSettings;
 }
 
 export { RUNTIMES, TERMINAL, runtimeLabel, optionsFromRepo };
@@ -172,6 +180,7 @@ export const EMPTY_DRAFT: WorkDraft = {
   dependsOn: [],
   owner: "workspace",
   podSecrets: [],
+  settings: {},
 };
 
 // ── Presets ──────────────────────────────────────────────────────────────────
@@ -479,6 +488,65 @@ export { slugify } from "@optio/shared";
 
 // ── PR follow-through ────────────────────────────────────────────────────────
 
+// ── Environment (Where) ──────────────────────────────────────────────────────
+
+/** The environment parts of `WorkSettings` that switch things on and off by id. */
+export type EnvironmentPart = "connections" | "mcpServers" | "skills";
+
+/** Whether an item is on for this work: on by default and not taken out, or added. */
+export function overrideOn(o: IdOverrides | undefined, id: string, isDefault: boolean): boolean {
+  return isDefault ? !(o?.remove ?? []).includes(id) : (o?.add ?? []).includes(id);
+}
+
+/** Switch one item on or off, keeping only the changes from the defaults. */
+export function toggleOverride(
+  o: IdOverrides | undefined,
+  id: string,
+  isDefault: boolean,
+  on: boolean,
+): IdOverrides {
+  const add = (o?.add ?? []).filter((x) => x !== id);
+  const remove = (o?.remove ?? []).filter((x) => x !== id);
+  if (isDefault && !on) remove.push(id);
+  if (!isDefault && on) add.push(id);
+  return { ...(add.length ? { add } : {}), ...(remove.length ? { remove } : {}) };
+}
+
+/** A draft with one environment item switched on or off. */
+export function withOverride(
+  d: WorkDraft,
+  part: EnvironmentPart,
+  id: string,
+  isDefault: boolean,
+  on: boolean,
+): WorkDraft {
+  return {
+    ...d,
+    settings: { ...d.settings, [part]: toggleOverride(d.settings[part], id, isDefault, on) },
+  };
+}
+
+/** How many things the work changes from its defaults (for the collapsed summary). */
+export function settingsChanges(s: WorkSettings): number {
+  const ids = (o?: IdOverrides) => (o?.add?.length ?? 0) + (o?.remove?.length ?? 0);
+  return (
+    ids(s.connections) +
+    ids(s.mcpServers) +
+    ids(s.skills) +
+    (s.setupCommands?.trim() ? 1 : 0) +
+    (s.review ? 1 : 0) +
+    (typeof s.cautiousMode === "boolean" ? 1 : 0) +
+    (typeof s.maxAutoResumes === "number" ? 1 : 0)
+  );
+}
+
+/** Work that opens a PR: its follow-through settings apply. */
+export function prSettingsApply(d: WorkDraft): boolean {
+  return d.withRepo && d.runtime !== TERMINAL && isOneShot(d.then);
+}
+
+// ── PR follow-through ────────────────────────────────────────────────────────
+
 /** The repo settings that decide what happens to a PR after it opens. */
 export interface RepoPrSettings {
   autoResume?: boolean | null;
@@ -501,25 +569,34 @@ export interface FollowThroughStep {
 
 /**
  * What happens to the PR once the agent opens it, step by step — the same
- * rules the reconciler applies (`reconcile-repo.ts`): a task's own
- * follow-through ("Works until merged") wins over the repo's settings, review
- * is always the repo's, and cautious mode (draft PRs) never merges. Null when
- * the work doesn't open a PR.
+ * rules the reconciler applies (`reconcile-snapshot.ts`, `reconcile-repo.ts`):
+ * a task's own follow-through ("Works until merged") and its settings (review,
+ * draft PRs, how often it resumes) win over the repo's, and cautious mode
+ * (draft PRs) never merges. Null when the work doesn't open a PR.
  */
 export function followThrough(
   d: WorkDraft,
   repo: RepoPrSettings | null | undefined,
 ): { fromRepo: boolean; steps: FollowThroughStep[] } | null {
-  if (!d.withRepo || d.runtime === TERMINAL || !isOneShot(d.then)) return null;
+  if (!prSettingsApply(d)) return null;
   const own = d.then === "until-merged";
+  const s = isLocal(d) ? {} : d.settings;
   const resume = own ? true : !!repo?.autoResume;
   const merge = own ? d.mergeWhenReady : !!repo?.autoMerge;
-  const cautious = !!repo?.cautiousMode;
-  const cap = repo?.maxAutoResumes ?? DEFAULT_MAX_AUTO_RESUMES;
+  // The work's own settings (Where → Environment) win over the repo's.
+  const cautious = s.cautiousMode ?? !!repo?.cautiousMode;
+  const cap = s.maxAutoResumes ?? repo?.maxAutoResumes ?? DEFAULT_MAX_AUTO_RESUMES;
+  const automatic = (t: string | null | undefined): t is "on_pr" | "on_ci_pass" =>
+    t === "on_pr" || t === "on_ci_pass";
   // The reconciler launches a review only on these two triggers.
-  const reviewOn =
-    !!repo?.reviewEnabled &&
-    (repo?.reviewTrigger === "on_pr" || repo?.reviewTrigger === "on_ci_pass");
+  const reviewTrigger = s.review?.enabled
+    ? automatic(s.review.trigger)
+      ? s.review.trigger
+      : automatic(repo?.reviewTrigger)
+        ? repo.reviewTrigger
+        : "on_ci_pass"
+    : repo?.reviewTrigger;
+  const reviewOn = s.review ? s.review.enabled : !!repo?.reviewEnabled && automatic(reviewTrigger);
   const resumes = `the agent picks it back up (up to ${cap} times)`;
   return {
     fromRepo: !own,
@@ -535,10 +612,12 @@ export function followThrough(
         label: "A review agent reviews it",
         on: reviewOn,
         detail: reviewOn
-          ? repo?.reviewTrigger === "on_pr"
+          ? reviewTrigger === "on_pr"
             ? "As soon as the PR opens."
             : "Once CI passes."
-          : "Off for this repo — turn it on in the repo's settings.",
+          : s.review
+            ? "Off for this work."
+            : "Off for this repo — turn it on under Where → Environment, or in the repo's settings.",
       },
       {
         key: "ci",
@@ -560,7 +639,7 @@ export function followThrough(
         on: merge && !cautious,
         detail:
           merge && cautious
-            ? "Held back: this repo opens draft PRs (cautious mode), so a person merges."
+            ? "Held back: this work opens draft PRs (cautious mode), so a person merges."
             : merge
               ? "Squash-merges once checks pass and any blocking review is done."
               : "You merge it.",

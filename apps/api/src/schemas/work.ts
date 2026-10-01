@@ -5,6 +5,7 @@ import {
   WORK_THENS,
   WORK_VIEWS,
   type WorkCreated,
+  type WorkEnvironmentOptions,
   type WorkSpec,
 } from "@optio/shared";
 import { AgentTypeSchema } from "./task.js";
@@ -75,6 +76,52 @@ export const WorkDetailResponseSchema = z
 const branch = z.string().regex(/^[a-zA-Z0-9._/-]+$/, "Invalid branch name");
 
 /** Work described by its five attributes — mirrors `WorkSpec` in @optio/shared. */
+const IdOverridesSchema = z
+  .object({
+    add: z.array(z.string().min(1).max(100)).max(200).optional(),
+    remove: z.array(z.string().min(1).max(100)).max(200).optional(),
+  })
+  .describe("Ids added to the default set, and ids taken out of it");
+
+/** What a piece of pod work changes about its agent environment — `WorkSettings`. */
+export const WorkSettingsSchema = z
+  .object({
+    connections: IdOverridesSchema.optional().describe(
+      "Connections beyond the ones the repo's assignments give, or left out",
+    ),
+    mcpServers: IdOverridesSchema.optional().describe(
+      "MCP servers beyond the workspace's and the repo's, or left out",
+    ),
+    skills: IdOverridesSchema.optional().describe(
+      "Custom and marketplace skills beyond the workspace's and the repo's, or left out",
+    ),
+    setupCommands: z
+      .string()
+      .max(20_000)
+      .nullable()
+      .optional()
+      .describe("Shell commands run in the work's directory before the agent starts"),
+    review: z
+      .object({ enabled: z.boolean(), trigger: z.enum(["on_pr", "on_ci_pass"]).optional() })
+      .nullable()
+      .optional()
+      .describe("Repo work: a review agent reviews the PR (over the repo's setting)"),
+    cautiousMode: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe("Repo work: draft PRs a person merges (over the repo's setting)"),
+    maxAutoResumes: z
+      .number()
+      .int()
+      .min(0)
+      .max(100)
+      .nullable()
+      .optional()
+      .describe("Repo work: how many times the agent is resumed on CI failures and reviews"),
+  })
+  .describe("Changes to the repo's / workspace's agent environment; unset = the default");
+
 export const WorkSpecSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
@@ -140,8 +187,46 @@ export const WorkSpecSchema = z
       .nullable()
       .optional()
       .describe("Pod work: the secrets its pod gets, by name"),
+    settings: WorkSettingsSchema.nullable().optional(),
   })
   .describe("Work described by When / Where / Who / What / Then");
+
+export const WorkEnvironmentQuerySchema = z
+  .object({
+    repoUrl: z.string().optional().describe("The repo the work runs in; unset = no repo"),
+    agentType: z.string().optional().describe("The agent runtime (default claude-code)"),
+    owner: z
+      .enum(["workspace", "me"])
+      .optional()
+      .describe("Whose the work is: personal connections only reach their owner's work"),
+  })
+  .describe("The work the environment is for");
+
+const WorkEnvironmentItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  detail: z.string().nullable().optional(),
+  scope: z.string().describe('Where it comes from: "global", "repo", "assigned", …'),
+  default: z.boolean().describe("On without any override"),
+});
+
+export const WorkEnvironmentResponseSchema = z
+  .object({
+    connections: z.array(WorkEnvironmentItemSchema),
+    mcpServers: z.array(WorkEnvironmentItemSchema),
+    skills: z.array(WorkEnvironmentItemSchema),
+    repo: z
+      .object({
+        setupCommands: z.string().nullable(),
+        reviewEnabled: z.boolean(),
+        reviewTrigger: z.string().nullable(),
+        cautiousMode: z.boolean(),
+        maxAutoResumes: z.number().nullable(),
+      })
+      .nullable()
+      .describe("The repo's own values the overrides start from"),
+  })
+  .describe("What a piece of pod work's agent could get, with the defaults marked");
 
 export const WorkCreatedSchema = z
   .object({
@@ -172,5 +257,7 @@ export const WorkRunsResponseSchema = z
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 const _spec: WorkSpec = {} as z.infer<typeof WorkSpecSchema>;
 const _created: Same<z.infer<typeof WorkCreatedSchema>, WorkCreated> = true;
+const _environment: WorkEnvironmentOptions = {} as z.infer<typeof WorkEnvironmentResponseSchema>;
 void _spec;
 void _created;
+void _environment;

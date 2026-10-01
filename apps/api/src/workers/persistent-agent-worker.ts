@@ -39,6 +39,7 @@ import { getEventParser } from "../services/event-parsers.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { agentOptionsEnv } from "../services/agent-options-env.js";
 import { buildPooledAgentCommand } from "../services/pooled-agent-command.js";
+import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
 import { getBullMQConnectionOptions } from "../services/redis-config.js";
 import { logger } from "../logger.js";
 import { instrumentWorkerProcessor } from "../telemetry/instrument-worker.js";
@@ -307,6 +308,23 @@ export function startPersistentAgentWorker() {
             agentOwnerUserId,
           ).catch(() => null);
           if (tok) env.CLAUDE_CODE_OAUTH_TOKEN = tok as string;
+        }
+
+        // The agent's environment: MCP servers, connections, and skills with
+        // its settings applied, and its setup commands — as every pod run gets.
+        const environment = await buildAgentEnvironment(
+          {
+            repoUrl: null,
+            agentType: claimedAgent.agentRuntime,
+            workspaceId: claimedAgent.workspaceId ?? null,
+            ownerUserId: agentOwnerUserId,
+            settings: claimedAgent.settings,
+          },
+          log,
+        );
+        Object.assign(env, environment.env);
+        if (environment.setupFiles.length > 0) {
+          env.OPTIO_SETUP_FILES = encodeSetupFiles(environment.setupFiles);
         }
 
         const agentCommand = buildAgentCommand(

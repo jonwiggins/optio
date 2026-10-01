@@ -97,6 +97,7 @@ function definition(overrides: Partial<WorkDefinition> = {}): WorkDefinition {
     workspaceId: null,
     ownerUserId: null,
     podSecrets: null,
+    settings: null,
     createdBy: null,
     enabled: true,
     prompt: "Deploy it",

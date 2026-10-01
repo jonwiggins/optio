@@ -48,6 +48,7 @@ export function toWorkflow(d: WorkDefinition) {
     enabled: d.enabled,
     ownerUserId: d.ownerUserId,
     podSecrets: d.podSecrets,
+    settings: d.settings,
     createdBy: d.createdBy,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
@@ -409,6 +410,8 @@ export async function createWorkflowRun(
       // A run is its Job's: seen in the Job's workspace, run as its owner.
       workspaceId: workflow.workspaceId,
       ownerUserId: workflow.ownerUserId,
+      runTarget: workflow.runTarget,
+      maxRetries: workflow.maxRetries,
     })
     .returning();
 

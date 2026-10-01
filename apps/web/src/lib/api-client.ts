@@ -18,6 +18,7 @@ import type {
   WorkRow,
   WorkSource,
   WorkSpec,
+  WorkEnvironmentOptions,
 } from "@optio/shared";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
@@ -1631,6 +1632,21 @@ export const api = {
 
   /** The triggers of a definition or a persistent agent. */
   listWorkTriggers: (id: string) => request<{ triggers: any[] }>(`/api/work/${id}/triggers`),
+
+  /**
+   * What pod work's agent could get — connections, MCP servers, skills, each
+   * marked when the repo / workspace gives it by default — and the repo's own
+   * setup commands and PR settings, for the Where section's Environment.
+   */
+  getWorkEnvironment: (q: {
+    repoUrl?: string | null;
+    agentType: string;
+    owner: "workspace" | "me";
+  }) => {
+    const params = new URLSearchParams({ agentType: q.agentType, owner: q.owner });
+    if (q.repoUrl) params.set("repoUrl", q.repoUrl);
+    return request<WorkEnvironmentOptions>(`/api/work/environment?${params}`);
+  },
 
   // ── Unified Tasks (polymorphic over repo-task | repo-blueprint | standalone) ──
 

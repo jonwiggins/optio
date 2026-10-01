@@ -48,6 +48,7 @@ import * as prReviewService from "../services/pr-review-service.js";
 import { enqueueReconcile } from "../services/reconcile-queue.js";
 import { resolveReviewConfig } from "../services/review-config.js";
 import * as optioSettingsService from "../services/optio-settings-service.js";
+import { buildAgentEnvironment, encodeSetupFiles } from "../services/agent-environment-service.js";
 import {
   buildAgentCommand,
   buildInitialClaudeStreamMessage,
@@ -334,94 +335,15 @@ export function startPrReviewWorker() {
           googleCloudLocation,
         });
 
-        // ── MCP + connections + skills (shared with task-worker) ──
-        const { getMcpServersForTask, buildMcpJsonContent } =
-          await import("../services/mcp-server-service.js");
-        const { getSkillsForTask, buildSkillSetupFiles } =
-          await import("../services/skill-service.js");
-        const { getConnectionsForTask } = await import("../services/connection-service.js");
-
-        const mcpServers = await getMcpServersForTask(review.repoUrl, workspaceId);
-        if (mcpServers.length > 0) {
-          const mcpJsonContent = await buildMcpJsonContent(mcpServers, review.repoUrl);
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          agentConfig.setupFiles.push({ path: ".mcp.json", content: mcpJsonContent });
-          const installCommands = mcpServers
-            .filter((s) => s.installCommand)
-            .map((s) => s.installCommand!);
-          if (installCommands.length > 0) {
-            agentConfig.env.OPTIO_MCP_INSTALL_COMMANDS = installCommands.join(" && ");
-          }
-        }
-
-        const resolvedConnections = await getConnectionsForTask(
-          review.repoUrl,
-          agentType,
-          workspaceId,
+        // ── MCP + connections + skills (agent-environment-service) ──
+        const environment = await buildAgentEnvironment(
+          { repoUrl: review.repoUrl, agentType, workspaceId, ownerUserId: null },
+          log,
         );
-        if (resolvedConnections.length > 0) {
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          // For simplicity, push a separate .mcp.json block for connections if
-          // one doesn't already exist. The task-worker merges them; we do the
-          // same.
-          const connectionMcpEntries: Record<string, unknown> = {};
-          for (const conn of resolvedConnections) {
-            if (!conn.mcpConfig) continue;
-            connectionMcpEntries[conn.connectionName] = {
-              command: conn.mcpConfig.command,
-              args: conn.mcpConfig.args,
-            };
-          }
-          if (Object.keys(connectionMcpEntries).length > 0) {
-            const existingIdx = agentConfig.setupFiles.findIndex((f) => f.path === ".mcp.json");
-            if (existingIdx >= 0) {
-              const existing = JSON.parse(agentConfig.setupFiles[existingIdx].content);
-              existing.mcpServers = { ...existing.mcpServers, ...connectionMcpEntries };
-              agentConfig.setupFiles[existingIdx].content = JSON.stringify(existing, null, 2);
-            } else {
-              agentConfig.setupFiles.push({
-                path: ".mcp.json",
-                content: JSON.stringify({ mcpServers: connectionMcpEntries }, null, 2),
-              });
-            }
-          }
-        }
-
-        const skills = await getSkillsForTask(review.repoUrl, workspaceId, agentType);
-        if (skills.length > 0) {
-          agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-          agentConfig.setupFiles.push(...buildSkillSetupFiles(skills));
-        }
-
-        if (agentType === "claude-code") {
-          const { getInstalledSkillsForTask } =
-            await import("../services/installed-skill-service.js");
-          const { readInstalledSkillFiles } = await import("./skill-sync-worker.js");
-          const installed = await getInstalledSkillsForTask(review.repoUrl, workspaceId, agentType);
-          if (installed.length > 0) {
-            agentConfig.setupFiles = agentConfig.setupFiles ?? [];
-            for (const skill of installed) {
-              try {
-                const files = await readInstalledSkillFiles(skill.resolvedSha!, skill.subpath);
-                for (const f of files) {
-                  agentConfig.setupFiles.push({
-                    path: `.claude/skills/${skill.name}/${f.relativePath}`,
-                    content: "",
-                    contentBase64: f.content.toString("base64"),
-                    executable: f.executable,
-                  });
-                }
-              } catch {
-                // best-effort — log via worker telemetry only
-              }
-            }
-          }
-        }
-
-        if (agentConfig.setupFiles && agentConfig.setupFiles.length > 0) {
-          agentConfig.env.OPTIO_SETUP_FILES = Buffer.from(
-            JSON.stringify(agentConfig.setupFiles),
-          ).toString("base64");
+        agentConfig.setupFiles = [...(agentConfig.setupFiles ?? []), ...environment.setupFiles];
+        Object.assign(agentConfig.env, environment.env);
+        if (agentConfig.setupFiles.length > 0) {
+          agentConfig.env.OPTIO_SETUP_FILES = encodeSetupFiles(agentConfig.setupFiles);
         }
 
         // ── Secrets ───────────────────────────────────────────────

@@ -1,9 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { shellSingleQuote, buildEnvExports } from "./pod-env.js";
+import {
+  shellSingleQuote,
+  buildEnvExports,
+  RUN_WORK_SETUP_COMMANDS,
+  WRITE_SETUP_FILES,
+} from "./pod-env.js";
 
 /**
  * Regression payload for the Phase 4F shell-quoting bug: a realistic task
@@ -101,6 +106,64 @@ describe("buildEnvExports", () => {
       ].join("\n");
       runBash(script, dir);
       expect(readFileSync(join(dir, "out"), "utf8")).toBe(value);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("WRITE_SETUP_FILES / RUN_WORK_SETUP_COMMANDS", () => {
+  const files = [
+    { path: ".mcp.json", content: '{"mcpServers":{}}' },
+    { path: ".claude/commands/release.md", content: "How we release\n" },
+    // Marketplace skills travel as base64, possibly binary and executable.
+    {
+      path: ".claude/skills/tool/run.sh",
+      content: "",
+      contentBase64: Buffer.from("#!/bin/sh\necho hi\n").toString("base64"),
+      executable: true,
+    },
+  ];
+
+  function run(env: Record<string, string>, dir: string): string {
+    return runBash(
+      [...buildEnvExports(env), ...WRITE_SETUP_FILES, ...RUN_WORK_SETUP_COMMANDS].join("\n"),
+      dir,
+    );
+  }
+
+  it("writes every setup file under the working directory, base64 ones decoded", () => {
+    const dir = mkdtempSync(join(tmpdir(), "optio-setup-"));
+    try {
+      run({ OPTIO_SETUP_FILES: Buffer.from(JSON.stringify(files)).toString("base64") }, dir);
+      expect(readFileSync(join(dir, ".mcp.json"), "utf8")).toBe('{"mcpServers":{}}');
+      expect(readFileSync(join(dir, ".claude/commands/release.md"), "utf8")).toBe(
+        "How we release\n",
+      );
+      const script = join(dir, ".claude/skills/tool/run.sh");
+      expect(readFileSync(script, "utf8")).toBe("#!/bin/sh\necho hi\n");
+      expect(statSync(script).mode & 0o111).not.toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs the work's setup commands in the working directory, and stops when they fail", () => {
+    const dir = mkdtempSync(join(tmpdir(), "optio-setup-"));
+    try {
+      run({ OPTIO_WORK_SETUP_COMMANDS: "echo ready > marker && echo 'it''s set'" }, dir);
+      expect(readFileSync(join(dir, "marker"), "utf8")).toBe("ready\n");
+      expect(() => run({ OPTIO_WORK_SETUP_COMMANDS: "false" }, dir)).toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does nothing without setup files or commands", () => {
+    const dir = mkdtempSync(join(tmpdir(), "optio-setup-"));
+    try {
+      expect(run({}, dir)).toBe("");
+      expect(readdirSync(dir)).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

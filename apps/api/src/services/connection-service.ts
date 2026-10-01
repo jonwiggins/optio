@@ -9,7 +9,9 @@ import type {
   RepoConnection,
   ResolvedConnection,
   ConnectionProviderMcpConfig,
+  IdOverrides,
 } from "@optio/shared";
+import { applyIdOverrides } from "@optio/shared";
 
 // ── Built-in provider definitions ─────────────────────────────────────────
 
@@ -693,6 +695,63 @@ export async function getConnectionsForTask(
   agentType: string,
   workspaceId?: string | null,
   /** The work's owner: a personal connection only reaches work its owner owns. */
+  ownerUserId?: string | null,
+  /** The work's own changes (`WorkSettings.connections`): ids added or left out. */
+  overrides?: IdOverrides | null,
+): Promise<ResolvedConnection[]> {
+  const defaults = await assignedConnections(repoUrl, agentType, workspaceId, ownerUserId);
+  if (!overrides?.add?.length && !overrides?.remove?.length) return defaults;
+  const added = (overrides.add ?? []).filter((id) => !defaults.some((d) => d.connectionId === id));
+  const available = added.length ? await usableConnections(added, workspaceId, ownerUserId) : [];
+  return applyIdOverrides(defaults, available, (c) => c.connectionId, overrides);
+}
+
+/**
+ * Connections by id that a piece of work may add for itself: enabled, in its
+ * workspace (or global), and the organization's or its owner's. An added
+ * connection has no assignment, so it reaches every agent with the default
+ * permission.
+ */
+export async function usableConnections(
+  ids: string[],
+  workspaceId?: string | null,
+  ownerUserId?: string | null,
+): Promise<ResolvedConnection[]> {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .select({ connection: connections, provider: connectionProviders })
+    .from(connections)
+    .innerJoin(connectionProviders, eq(connections.providerId, connectionProviders.id))
+    .where(
+      and(
+        inArray(connections.id, ids),
+        eq(connections.enabled, true),
+        workspaceId
+          ? or(eq(connections.workspaceId, workspaceId), isNull(connections.workspaceId))
+          : undefined,
+      ),
+    );
+  return rows
+    .filter((r) => !r.connection.ownerUserId || r.connection.ownerUserId === (ownerUserId ?? null))
+    .map(({ connection: conn, provider }) => ({
+      connectionId: conn.id,
+      connectionName: conn.name,
+      providerId: provider.id,
+      providerSlug: provider.slug,
+      providerName: provider.name,
+      providerType: provider.type,
+      mcpConfig: (provider.mcpConfig as ConnectionProviderMcpConfig) ?? null,
+      config: (conn.config as Record<string, unknown>) ?? {},
+      permission: "read",
+      agentTypes: [],
+    }));
+}
+
+/** The connections the repo's (and global) assignments give this agent. */
+async function assignedConnections(
+  repoUrl: string,
+  agentType: string,
+  workspaceId?: string | null,
   ownerUserId?: string | null,
 ): Promise<ResolvedConnection[]> {
   const results: ResolvedConnection[] = [];

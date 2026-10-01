@@ -96,6 +96,7 @@ export function toTaskConfig(d: WorkDefinition) {
     enabled: d.enabled,
     ownerUserId: d.ownerUserId,
     podSecrets: d.podSecrets,
+    settings: d.settings,
     createdBy: d.createdBy,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
@@ -257,6 +258,8 @@ export async function instantiateTask(
     // Spawned tasks run as the blueprint's owner, with the secrets it picked.
     ownerUserId: config.ownerUserId,
     podSecrets: config.podSecrets,
+    // Each spawned task keeps the environment settings it started with.
+    settings: config.settings,
     runTarget: config.runTarget,
     localHostId: config.localHostId,
     localDir: config.localDir,

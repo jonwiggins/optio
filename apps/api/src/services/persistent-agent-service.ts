@@ -20,6 +20,7 @@ import {
   type PersistentAgentMessageSenderType,
   type PersistentAgentTurnHaltReason,
   type PersistentAgentWakeSource,
+  type WorkSettings,
   canTransitionPersistentAgent,
   buildSenderId,
 } from "@optio/shared";
@@ -119,6 +120,8 @@ export interface CreatePersistentAgentInput {
   ownerUserId?: string | null;
   /** Secrets (by name) its pod gets; null = the workspace's default. */
   podSecrets?: string[] | null;
+  /** What it changes about the workspace's agent environment; null = the defaults. */
+  settings?: WorkSettings | null;
 }
 
 export async function createPersistentAgent(
@@ -150,6 +153,7 @@ export async function createPersistentAgent(
       createdBy: input.createdBy ?? null,
       ownerUserId: input.ownerUserId ?? null,
       podSecrets: input.podSecrets ?? null,
+      settings: input.settings ?? null,
     })
     .returning();
   return row;
@@ -175,6 +179,7 @@ export interface UpdatePersistentAgentInput {
   enabled?: boolean;
   ownerUserId?: string | null;
   podSecrets?: string[] | null;
+  settings?: WorkSettings | null;
 }
 
 export async function updatePersistentAgent(

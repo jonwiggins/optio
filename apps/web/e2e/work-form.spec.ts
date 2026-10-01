@@ -524,3 +524,61 @@ test.describe("Remembered agent settings", () => {
     await expect(whoCard.getByLabel("Model")).not.toHaveValue("claude-sonnet-4-6");
   });
 });
+
+test.describe("Where → Environment", () => {
+  test("environment: a Job leaves out a workspace MCP server and runs its own setup commands", async ({
+    page,
+  }) => {
+    const { server } = await api("/api/mcp-servers", {
+      method: "POST",
+      body: JSON.stringify({ name: named("mcp"), command: "e2e-mcp" }),
+    });
+    await open(page);
+    await preset(page, "Scheduled run").click();
+    await prompt(page).fill("Report");
+    await nameInput(page).fill(named("env job"));
+    await page
+      .locator("#session-where")
+      .getByRole("button", { name: /^Environment/ })
+      .click();
+    const mcp = page.getByRole("group", { name: "MCP servers" });
+    const chip = mcp.getByRole("button", { name: new RegExp(named("mcp")) });
+    // A workspace server is on by default; this work turns it off.
+    await expect(chip).toHaveAttribute("aria-pressed", "true");
+    await chip.click();
+    await expect(chip).toHaveAttribute("aria-pressed", "false");
+    await page.getByLabel("Setup commands").fill("echo ready");
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+
+    const id = page.url().split("/").pop()!;
+    const { work } = await api(`/api/work/${id}`);
+    expect(work.settings).toEqual({
+      mcpServers: { remove: [server.id] },
+      setupCommands: "echo ready",
+    });
+  });
+
+  test("environment: a pod Task asks for a review as its PR opens, over the repo", async ({
+    page,
+  }) => {
+    await open(page);
+    await preset(page, "Open a PR").click();
+    await prompt(page).fill("Fix the flaky test");
+    await nameInput(page).fill(named("env task"));
+    await page
+      .locator("#session-where")
+      .getByRole("button", { name: /^Environment/ })
+      .click();
+    await page.getByRole("button", { name: "Review", exact: true }).click();
+    await page.getByRole("button", { name: "When the PR opens", exact: true }).click();
+    // The plan under Then follows the work's own setting.
+    await expect(page.getByText("As soon as the PR opens.")).toBeVisible();
+    await submit(page).click();
+    await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+
+    const id = page.url().split("/").pop()!;
+    const { work } = await api(`/api/work/${id}`);
+    expect(work.settings).toEqual({ review: { enabled: true, trigger: "on_pr" } });
+  });
+});

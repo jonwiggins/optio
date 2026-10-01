@@ -23,7 +23,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { sql } from "drizzle-orm";
 import type { Database } from "./client.js";
-import { HAS_RUN_KINDS, RUN_VIEWS_SQL } from "./run-views.js";
+import { HAS_RUN_KINDS, RUN_VIEWS_CURRENT, RUN_VIEWS_SQL } from "./run-views.js";
 
 interface MigrationEntry {
   sql: string[];
@@ -106,6 +106,18 @@ export async function migrateSafe(db: Database, migrationsFolder: string): Promi
       });
 
       applied++;
+    }
+
+    // The views' definition can change without a migration (run-views.ts).
+    const [{ has }] = await db.execute<{ has: boolean }>(HAS_RUN_KINDS);
+    const [{ current }] = has
+      ? await db.execute<{ current: boolean }>(RUN_VIEWS_CURRENT)
+      : [{ current: true }];
+    if (!current) {
+      await db.transaction(async (tx) => {
+        await tx.execute(DROP_RUN_VIEWS);
+        for (const stmt of RUN_VIEWS_SQL) await tx.execute(sql.raw(stmt));
+      });
     }
   } finally {
     await db.execute(sql`SELECT pg_advisory_unlock(${sql.raw(String(ADVISORY_LOCK_ID))})`);

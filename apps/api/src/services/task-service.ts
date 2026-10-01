@@ -12,6 +12,7 @@ import {
   parseIntEnv,
   toLocalAgentKind,
   type CreateTaskInput,
+  type WorkSettings,
 } from "@optio/shared";
 import { publishEvent } from "./event-bus.js";
 import { logger } from "../logger.js";
@@ -46,6 +47,8 @@ export async function createTask(
     ownerUserId?: string | null;
     /** Secrets (by name) the agent gets in its pod; null = the workspace's default. */
     podSecrets?: string[] | null;
+    /** What it changes about the repo's agent environment; null = the repo's. */
+    settings?: WorkSettings | null;
   },
 ) {
   const [task] = await db
@@ -70,6 +73,7 @@ export async function createTask(
       localSessionMode: input.runTarget === "local" ? (input.localSessionMode ?? "headless") : null,
       ownerUserId: input.ownerUserId ?? null,
       podSecrets: input.podSecrets ?? null,
+      settings: input.settings ?? null,
       autoResume: input.autoResume ?? null,
       autoMerge: input.autoMerge ?? null,
       workId: input.workId ?? null,
@@ -127,6 +131,7 @@ export async function submitTask(
     workspaceId?: string | null;
     ownerUserId?: string | null;
     podSecrets?: string[] | null;
+    settings?: WorkSettings | null;
     dependsOn?: string[];
   },
   userId?: string,

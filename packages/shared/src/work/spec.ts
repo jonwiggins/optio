@@ -8,6 +8,7 @@
  */
 import type { ResourceOwner } from "../types/model-provider.js";
 import type { WorkSource, WorkThen } from "./feed.js";
+import type { WorkSettings } from "./settings.js";
 
 /** The kind of row a piece of work is stored as — the same names the Work list uses. */
 export type WorkKind = WorkSource;
@@ -122,6 +123,12 @@ export interface WorkSpec {
   owner?: ResourceOwner;
   /** Pod work: the secrets its pod gets, by name (null = the workspace's legacy behavior). */
   podSecrets?: string[] | null;
+  /**
+   * Pod work: what it changes about the repo's / workspace's environment —
+   * connections, MCP servers, skills, setup commands, PR follow-through
+   * (`settings.ts`). Null = the defaults.
+   */
+  settings?: WorkSettings | null;
 }
 
 /** What `POST /api/work` made. */

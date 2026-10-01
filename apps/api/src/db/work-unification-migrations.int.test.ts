@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { stageDatabase } from "../test-utils/integration/staged-migration.js";
+import { RUN_VIEWS_MARKER } from "./run-views.js";
 
 /** The last migration before the unification. */
 const BEFORE = "1791800000_task_prs";
@@ -525,6 +526,21 @@ ALTER TABLE "tasks" ALTER COLUMN "title" TYPE varchar(1000);`,
         SELECT column_default AS def FROM information_schema.columns
         WHERE table_schema = current_schema() AND table_name = 'workflow_runs' AND column_name = 'kind'`;
       expect(def).toMatch(/standalone/);
+
+      // Views made by older code (another definition) are remade at the next
+      // boot, with no migration pending.
+      await sql.unsafe(`DROP VIEW "workflow_runs"`);
+      await sql.unsafe(
+        `CREATE VIEW "workflow_runs" AS SELECT "id", "work_id" AS "workflow_id" FROM "tasks" WHERE "kind" = 'standalone'`,
+      );
+      await sql.unsafe(`COMMENT ON VIEW "workflow_runs" IS 'optio-run-views:older'`);
+      await db.migrateRest();
+      expect(await columnsOf("workflow_runs")).toEqual(
+        expect.arrayContaining(["pod_name", "finished_at", "run_target", "max_retries"]),
+      );
+      const [{ marker }] = await sql`
+        SELECT obj_description(to_regclass('workflow_runs'), 'pg_class') AS marker`;
+      expect(marker).toBe(RUN_VIEWS_MARKER);
     } finally {
       await db.drop();
     }

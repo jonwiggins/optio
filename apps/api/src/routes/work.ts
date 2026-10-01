@@ -16,6 +16,7 @@ import { TRIGGER_TARGET } from "../services/work-definition-service.js";
 import { getPersistentAgentScoped } from "../services/persistent-agent-service.js";
 import { workActor, workChangeError } from "../services/work-ownership.js";
 import { logAction } from "../services/optio-action-service.js";
+import { environmentOptions } from "../services/agent-environment-service.js";
 import { requireRole } from "../plugins/auth.js";
 import { ErrorResponseSchema, IdParamsSchema } from "../schemas/common.js";
 import {
@@ -26,6 +27,8 @@ import {
 import {
   WorkCreatedSchema,
   WorkDetailResponseSchema,
+  WorkEnvironmentQuerySchema,
+  WorkEnvironmentResponseSchema,
   WorkListQuerySchema,
   WorkListResponseSchema,
   WorkRunsResponseSchema,
@@ -106,6 +109,36 @@ export async function workRoutes(rawApp: FastifyInstance) {
   );
 
   app.get(
+    "/api/work/environment",
+    {
+      schema: {
+        operationId: "getWorkEnvironment",
+        summary: "What a piece of pod work's agent could get",
+        description:
+          "The connections, MCP servers, and skills an agent in a pod could get for work on " +
+          "this repo (or none) with this runtime, each marked when the repo and the workspace " +
+          "give it by default, plus the repo's own setup commands and PR settings. The Where " +
+          "section of the New work form starts from these and saves only the changes " +
+          "(`WorkSpec.settings`).",
+        tags: ["Work"],
+        querystring: WorkEnvironmentQuerySchema,
+        response: { 200: WorkEnvironmentResponseSchema },
+      },
+    },
+    async (req, reply) => {
+      const actor = workActor(req);
+      reply.send(
+        await environmentOptions({
+          repoUrl: req.query.repoUrl || null,
+          agentType: req.query.agentType || "claude-code",
+          workspaceId: actor.workspaceId,
+          ownerUserId: req.query.owner === "me" ? actor.userId : null,
+        }),
+      );
+    },
+  );
+
+  app.get(
     "/api/work/:id",
     {
       schema: {
@@ -135,7 +168,8 @@ export async function workRoutes(rawApp: FastifyInstance) {
         summary: "Save a definition from its attributes",
         description:
           "Saves a scheduled Task, Job, or Local automation from the same attributes it was " +
-          "created from. Its kind is fixed: answers that would make it another kind are a 400. " +
+          "created from. Its kind is fixed: the answers are read for the saved kind, and ones " +
+          "it can't take (a scheduled Task with no repo) are a 400. " +
           "The trigger the form edits (the first enabled one) follows the When answer, in the " +
           "same transaction. Requires `member` role.",
         tags: ["Work"],

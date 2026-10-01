@@ -30,7 +30,7 @@ import {
 } from "./envoy-sidecar.js";
 import { parseIntEnv } from "@optio/shared";
 import { withSpan } from "../telemetry/spans.js";
-import { buildEnvExports } from "../utils/pod-env.js";
+import { buildEnvExports, RUN_WORK_SETUP_COMMANDS, WRITE_SETUP_FILES } from "../utils/pod-env.js";
 
 const IDLE_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_POD_IDLE_MS", 600000); // 10 min default
 const REPO_INIT_TIMEOUT_MS = parseIntEnv("OPTIO_REPO_INIT_TIMEOUT_MS", 120000); // 2 min default
@@ -895,27 +895,7 @@ export async function execTaskInRepoPod(
         `git config --local user.email "\${GITHUB_APP_BOT_EMAIL:-optio-agent@noreply.github.com}"`,
         `echo "${runToken}" > /workspace/tasks/${taskId}/.optio-run-token`,
         `export OPTIO_TASK_ID="${taskId}"`,
-        `if [ -n "\${OPTIO_SETUP_FILES:-}" ]; then`,
-        `  echo "[optio] Writing setup files..."`,
-        `  WORKTREE_DIR=$(pwd)`,
-        `  echo "\${OPTIO_SETUP_FILES}" | base64 -d | python3 -c "`,
-        `import json, sys, os`,
-        `worktree = os.environ.get('WORKTREE_DIR', '.')`,
-        `files = json.load(sys.stdin)`,
-        `for f in files:`,
-        `    p = f['path']`,
-        `    if p.startswith('/opt/optio/'):`,
-        `        p = '/home/agent/optio/' + p[len('/opt/optio/'):]`,
-        `    elif not p.startswith('/'):`,
-        `        p = os.path.join(worktree, p)`,
-        `    os.makedirs(os.path.dirname(p), exist_ok=True)`,
-        `    with open(p, 'w') as fh:`,
-        `        fh.write(f['content'])`,
-        `    if f.get('executable'):`,
-        `        os.chmod(p, 0o755)`,
-        `    print(f'  wrote {p}')`,
-        `"`,
-        `fi`,
+        ...WRITE_SETUP_FILES,
         // Exclude Optio runtime files from git tracking using the local exclude file
         // (never committed, unlike .gitignore modifications)
         `EXCLUDE_FILE="$(git rev-parse --git-dir)/info/exclude"`,
@@ -932,6 +912,7 @@ export async function execTaskInRepoPod(
         // Writes an empty line every 30s (skipped by the NDJSON parser). If stdout is broken
         // (API pod died), sends SIGTERM to the main script which triggers the EXIT trap.
         `(trap '' PIPE; while sleep 30; do printf '\\n' 2>/dev/null || { kill -TERM $_optio_main_pid 2>/dev/null; exit; }; done) &`,
+        ...RUN_WORK_SETUP_COMMANDS,
         `set +e`,
         ...agentCommand,
         `AGENT_EXIT=$?`,

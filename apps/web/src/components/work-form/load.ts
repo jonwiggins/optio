@@ -143,6 +143,7 @@ export function draftFromRow(row: any, trigger: any | null, meId?: string | null
     ...whenFromTrigger(trigger),
     owner: ownerFromRow(row, meId).owner,
     podSecrets: podSecretsFromRow(row),
+    settings: row.settings && typeof row.settings === "object" ? row.settings : {},
     name,
     description: String(row.description ?? ""),
     runName: runTitle,
