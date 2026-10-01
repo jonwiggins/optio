@@ -17,23 +17,3 @@ spec:
     matchLabels:
       app: optio-api
 {{- end }}
----
-{{- if .Values.web.pdb.enabled }}
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: {{ .Release.Name }}-web
-  namespace: {{ .Values.namespace }}
-  labels:
-    app: optio-web
-    {{- include "optio.labels" . | nindent 4 }}
-spec:
-  {{- if .Values.web.pdb.minAvailable }}
-  minAvailable: {{ .Values.web.pdb.minAvailable }}
-  {{- else }}
-  maxUnavailable: {{ .Values.web.pdb.maxUnavailable | default 1 }}
-  {{- end }}
-  selector:
-    matchLabels:
-      app: optio-web
-{{- end }}
