@@ -74,6 +74,21 @@ export async function getTask(id: string) {
 }
 
 /**
+ * The most recent task whose PR is `prUrl`, across all workspaces (the
+ * GitHub merge webhook is not workspace-scoped). Null when none matches.
+ */
+export async function getTaskByPrUrl(prUrl: string) {
+  if (!prUrl) return null;
+  const [task] = await db
+    .select()
+    .from(tasks)
+    .where(eq(tasks.prUrl, prUrl))
+    .orderBy(desc(tasks.createdAt))
+    .limit(1);
+  return task ?? null;
+}
+
+/**
  * No-op shim kept for call-site back-compat. External PR reviews moved off
  * the `tasks` table into the `pr_reviews` primitive, so there are no
  * pr_review tasks rows to hydrate anymore. The function returns rows

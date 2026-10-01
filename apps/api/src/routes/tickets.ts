@@ -401,8 +401,7 @@ export async function ticketRoutes(rawApp: FastifyInstance) {
         (payload.pull_request as Record<string, unknown> | undefined)?.merged
       ) {
         const prUrl = String((payload.pull_request as Record<string, unknown>).html_url ?? "");
-        const allTasks = await taskService.listTasks({ limit: 500 });
-        const matchingTask = allTasks.find((t) => t.prUrl === prUrl);
+        const matchingTask = await taskService.getTaskByPrUrl(prUrl);
 
         if (matchingTask) {
           try {
