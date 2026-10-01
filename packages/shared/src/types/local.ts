@@ -218,8 +218,8 @@ export function toLocalAgentKind(agentType: string | null | undefined): LocalAge
 }
 
 // ── Run location ────────────────────────────────────────────────────────────
-// Shared by Repo Tasks (`tasks`), their blueprints (`task_configs`), and Jobs
-// (`workflows`): where the agent executes.
+// Shared by every run (`tasks`) and every saved definition
+// (`work_definitions`: scheduled Tasks, Jobs): where the agent executes.
 
 /**
  * `cluster` — an Optio-managed Kubernetes pod (the default).

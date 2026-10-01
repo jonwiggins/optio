@@ -3,11 +3,11 @@
 /**
  * Local Automations: "when X happens, run this agent on my machine".
  *
- * An automation (a `local_blueprints` row) is Who (agent) + What (prompt) +
- * Where (host / dir / repo — or the event's repo) + When (triggers) + Then
- * (keep the session open for chat, or exit when done). Triggers are the
- * generic schedule / webhook / ticket ones plus GitHub / Slack / Linear event
- * triggers fed by the signed ingress endpoints.
+ * An automation (a `work_definitions` row of kind `local-blueprint`) is Who
+ * (agent) + What (prompt) + Where (host / dir / repo — or the event's repo) +
+ * When (triggers) + Then (keep the session open for chat, or exit when
+ * done). Triggers are the generic schedule / webhook / ticket ones plus
+ * GitHub / Slack / Linear event triggers fed by the signed ingress endpoints.
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";

@@ -154,7 +154,7 @@ function runColumns() {
     blocksParent: boolean("blocks_parent").notNull().default(false), // if true, parent waits for this
     worktreeState: text("worktree_state"), // "active" | "dirty" | "reset" | "preserved" | "removed"
     lastPodId: uuid("last_pod_id"), // last pod this task ran on (for same-pod retry affinity)
-    workflowRunId: uuid("workflow_run_id"), // nullable FK to workflow_runs
+    workflowRunId: uuid("workflow_run_id"), // legacy, unwritten (a Job run is a row of this table)
     // The definition this task was spawned from (a scheduled Task); null for
     // ad-hoc tasks. Deleting the definition keeps its tasks.
     workId: uuid("work_id").references(() => workDefinitions.id, { onDelete: "set null" }),
@@ -292,7 +292,7 @@ export const taskLogs = pgTable(
     content: text("content").notNull(),
     logType: text("log_type"), // "text" | "tool_use" | "tool_result" | "thinking" | "system" | "error" | "info"
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-    workflowRunId: uuid("workflow_run_id"), // nullable FK to workflow_runs for aggregating logs across a run
+    workflowRunId: uuid("workflow_run_id"), // legacy, unwritten: a Job run's lines are keyed by task_id
     prReviewRunId: uuid("pr_review_run_id"), // nullable FK to pr_review_runs
     // A persistent agent's turn (its agent is the turn's). Deleting the turn
     // or the agent deletes its logs.
@@ -715,7 +715,8 @@ export const taskDependencies = pgTable(
 // fires. One table for the three kinds, told apart by `kind`
 // (services/work-definition-service.ts):
 //   repo-blueprint   a scheduled Task — each firing spawns a repo task
-//   standalone       a Job — each firing starts a Job run (workflow_runs)
+//   standalone       a Job — each firing starts a Job run (a `tasks` row of
+//                    kind 'standalone', read through the workflow_runs view)
 //   local-blueprint  a Local automation — each firing opens a terminal on
 //                    its owner's machine (local_terminals)
 // Columns a kind doesn't use keep their defaults. The legacy endpoints
@@ -826,12 +827,14 @@ export const workflowTriggers = pgTable(
   "workflow_triggers",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    // Legacy FK retained for back-compat with workflow_runs.triggerId joins.
-    // For target_type='job' this mirrors target_id; for other types it is null.
+    // Legacy, from before target_type: still written (it mirrors target_id
+    // for target_type='job', null for other types) but nothing reads it.
     workflowId: uuid("workflow_id").references(() => workDefinitions.id, { onDelete: "cascade" }),
-    targetType: text("target_type").notNull().default("job"), // "job" | "task_config" | "persistent_agent"
+    // "job" | "task_config" | "local_blueprint" | "persistent_agent" | "pr_review"
+    targetType: text("target_type").notNull().default("job"),
     targetId: uuid("target_id").notNull(),
-    type: text("type").notNull(), // "manual" | "schedule" | "webhook"
+    // "manual" | "schedule" | "webhook" | "ticket" | "github" | "slack" | "linear"
+    type: text("type").notNull(),
     config: jsonb("config").$type<Record<string, unknown>>(),
     paramMapping: jsonb("param_mapping").$type<Record<string, unknown>>(),
     enabled: boolean("enabled").notNull().default(true),

@@ -3,7 +3,7 @@
  * something", whatever the trigger type (schedule, webhook, ticket, GitHub /
  * Slack / Linear event) and whatever it targets:
  *
- *   job              → a workflow run
+ *   job              → a Job run
  *   task_config      → a task (the full Repo Task pipeline)
  *   local_blueprint  → a terminal on the owner's machine
  *   persistent_agent → a message in the agent's inbox (the reconciler starts a turn)

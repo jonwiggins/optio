@@ -1348,7 +1348,8 @@ export async function listTaskBranchesInPod(podId: string, taskId: string): Prom
 }
 
 /**
- * Reconcile activeTaskCount on all repo pods to match actual running/provisioning tasks.
+ * Reconcile each repo pod's active count (`agent_pods.active_count`) to match
+ * actual running/provisioning tasks.
  *
  * The stored counter can drift if the worker process is killed before the finally
  * block decrements it. This function resets each pod's counter to the real count

@@ -523,7 +523,7 @@ export function startRepoCleanupWorker() {
         }
       }
 
-      // Reconcile activeTaskCount on all repo pods to catch any drift
+      // Reconcile each repo pod's active count to catch any drift
       const reconciled = await reconcileActiveTaskCounts();
       if (reconciled > 0) {
         logger.info({ reconciled }, "Reconciled repo pod activeTaskCounts");
