@@ -220,6 +220,26 @@ describe("POST /api/setup/validate/github-token", () => {
     expect(res.json().user.login).toBe("testuser");
   });
 
+  it("falls back to the login when the account has no display name (#621)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ login: "testuser", name: null }),
+      }),
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/setup/validate/github-token",
+      payload: { token: "ghp_valid_token" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().valid).toBe(true);
+    expect(res.json().user).toEqual({ login: "testuser", name: "testuser" });
+  });
+
   it("returns invalid for bad token", async () => {
     vi.stubGlobal(
       "fetch",
@@ -237,6 +257,53 @@ describe("POST /api/setup/validate/github-token", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().valid).toBe(false);
+  });
+});
+
+describe("POST /api/setup/validate/copilot-token + gitlab-token null names (#621)", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = await buildTestApp();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("copilot: falls back to the login when name is null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ login: "octo", name: null }),
+      }),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/setup/validate/copilot-token",
+      payload: { token: "github_pat_abc" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user).toEqual({ login: "octo", name: "octo" });
+  });
+
+  it("gitlab: falls back to the username when name is null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ username: "gl-user", name: null }),
+      }),
+    );
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/setup/validate/gitlab-token",
+      payload: { token: "glpat-abc" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user).toEqual({ login: "gl-user", name: "gl-user" });
   });
 });
 
