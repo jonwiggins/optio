@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LogMarkdown } from "@/components/log-markdown";
+import { CHAT_WIDTH_PX, DEFAULT_CHAT_FONT_SIZE, useChatDisplayStore } from "./chat-display-store";
+import { ChatDisplayControls } from "./chat-display-controls";
 
 const TOOL_ICONS: Record<string, typeof Wrench> = {
   Bash: Terminal,
@@ -136,6 +138,21 @@ export function TranscriptView({
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
   };
 
+  const fontSize = useChatDisplayStore((s) => s.fontSize);
+  const width = useChatDisplayStore((s) => s.width);
+  useEffect(() => useChatDisplayStore.getState().hydrate(), []);
+
+  // ⌘/Ctrl + = / − / 0 while the chat has focus: font size, like a browser's zoom.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const store = useChatDisplayStore.getState();
+    if (e.key === "=" || e.key === "+") store.stepFontSize(1);
+    else if (e.key === "-") store.stepFontSize(-1);
+    else if (e.key === "0") store.setFontSize(DEFAULT_CHAT_FONT_SIZE);
+    else return;
+    e.preventDefault();
+  };
+
   const thinkingCount = entries.reduce((n, e) => n + (e.kind === "thinking" ? 1 : 0), 0);
 
   if (entries.length === 0) {
@@ -158,19 +175,28 @@ export function TranscriptView({
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className={cn("h-full overflow-y-auto overscroll-contain bg-bg", className)}
+      onKeyDown={onKeyDown}
+      tabIndex={-1}
+      className={cn("h-full overflow-y-auto overscroll-contain bg-bg outline-none", className)}
       data-testid="local-transcript"
     >
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex flex-col gap-3">
+      <div className="sticky top-0 z-10 flex items-center gap-2 px-3 h-8 bg-bg/90 backdrop-blur border-b border-border/50">
         {thinkingCount > 0 && (
           <button
             type="button"
             onClick={() => setShowThinking((v) => !v)}
-            className="self-end text-[11px] text-text-muted hover:text-text transition-colors"
+            className="text-[11px] text-text-muted hover:text-text transition-colors"
           >
             {showThinking ? "Hide" : "Show"} thinking ({thinkingCount})
           </button>
         )}
+        <ChatDisplayControls className="ml-auto" />
+      </div>
+      <div
+        className="mx-auto px-4 sm:px-6 py-4 flex flex-col gap-3"
+        style={{ fontSize, maxWidth: CHAT_WIDTH_PX[width] ?? "none" }}
+        data-testid="local-transcript-column"
+      >
         {items.map((item) =>
           item.kind === "tool" ? (
             <ToolCallRow key={item.use.seq} use={item.use} result={item.result} />
@@ -193,7 +219,7 @@ export function TranscriptView({
           ),
         )}
         {live && (
-          <div className="flex items-center gap-2 text-[11px] text-text-muted py-1">
+          <div className="flex items-center gap-2 text-[0.85em] text-text-muted py-1">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
             Session in progress
           </div>
@@ -211,10 +237,10 @@ const UserRow = memo(function UserRow({ entry }: { entry: LocalTranscriptEntry }
       </span>
       <div className="min-w-0 flex-1 rounded-lg bg-bg-card border border-border px-3 py-2">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-[11px] font-medium text-primary">You</span>
-          <span className="text-[10px] text-text-muted tabular-nums">{formatTime(entry.at)}</span>
+          <span className="text-[0.85em] font-medium text-primary">You</span>
+          <span className="text-[0.77em] text-text-muted tabular-nums">{formatTime(entry.at)}</span>
         </div>
-        <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-text">
+        <div className="text-[1em] leading-relaxed whitespace-pre-wrap break-words text-text">
           {entry.text}
         </div>
       </div>
@@ -235,10 +261,10 @@ const PromptRow = memo(function PromptRow({ entry }: { entry: LocalTranscriptEnt
       </span>
       <div className="min-w-0 flex-1 rounded-lg bg-bg-card border border-dashed border-border px-3 py-2">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-[11px] font-medium text-text-muted">Prompt</span>
-          <span className="text-[10px] text-text-muted tabular-nums">{formatTime(entry.at)}</span>
+          <span className="text-[0.85em] font-medium text-text-muted">Prompt</span>
+          <span className="text-[0.77em] text-text-muted tabular-nums">{formatTime(entry.at)}</span>
         </div>
-        <div className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-text">
+        <div className="text-[1em] leading-relaxed whitespace-pre-wrap break-words text-text">
           {entry.text}
         </div>
       </div>
@@ -273,7 +299,7 @@ const SystemRow = memo(function SystemRow({ entry }: { entry: LocalTranscriptEnt
           type="button"
           onClick={() => rest && setOpen((v) => !v)}
           className={cn(
-            "flex items-start gap-1.5 w-full text-left text-[11px] text-text-muted",
+            "flex items-start gap-1.5 w-full text-left text-[0.85em] text-text-muted",
             rest && "hover:text-text",
           )}
           aria-expanded={rest ? open : undefined}
@@ -290,12 +316,12 @@ const SystemRow = memo(function SystemRow({ entry }: { entry: LocalTranscriptEnt
             {!turn.collapse && <span className="font-medium">{turn.label} · </span>}
             <span className={cn(turn.collapse && "font-medium")}>{head}</span>
           </span>
-          <span className="ml-auto pl-2 text-[10px] tabular-nums shrink-0">
+          <span className="ml-auto pl-2 text-[0.9em] tabular-nums shrink-0">
             {formatTime(entry.at)}
           </span>
         </button>
         {open && rest && (
-          <div className="mt-1.5 text-[12px] leading-relaxed text-text-muted whitespace-pre-wrap break-words max-h-96 overflow-auto">
+          <div className="mt-1.5 text-[0.92em] leading-relaxed text-text-muted whitespace-pre-wrap break-words max-h-96 overflow-auto">
             {rest}
           </div>
         )}
@@ -311,7 +337,7 @@ const AssistantRow = memo(function AssistantRow({ entry }: { entry: LocalTranscr
         <Sparkles className="w-3.5 h-3.5" />
       </span>
       <div className="min-w-0 flex-1 px-1 py-1">
-        <LogMarkdown content={entry.text} className="text-text/90" />
+        <LogMarkdown content={entry.text} className="chat-md text-text/90" />
       </div>
     </div>
   );
@@ -325,14 +351,14 @@ const ThinkingRow = memo(function ThinkingRow({ entry }: { entry: LocalTranscrip
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text"
+          className="flex items-center gap-1.5 text-[0.85em] text-text-muted hover:text-text"
         >
           {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           <Brain className="w-3 h-3" />
           Thinking
         </button>
         {open && (
-          <div className="mt-1.5 text-[12px] leading-relaxed text-text-muted whitespace-pre-wrap break-words">
+          <div className="mt-1.5 text-[0.92em] leading-relaxed text-text-muted whitespace-pre-wrap break-words">
             {entry.text}
           </div>
         )}
@@ -383,27 +409,27 @@ const ToolCallRow = memo(function ToolCallRow({
         )}
         <span
           className={cn(
-            "text-[11px] font-medium shrink-0",
+            "text-[0.85em] font-medium shrink-0",
             isError ? "text-error" : "text-primary",
           )}
         >
           {toolName}
         </span>
-        <span className="text-[11px] font-mono text-text-muted truncate flex-1 min-w-0">
+        <span className="text-[0.85em] font-mono text-text-muted truncate flex-1 min-w-0">
           {use?.text}
         </span>
       </button>
       {open && (
         <div className="border-t border-border/40 bg-bg divide-y divide-border/40">
           {use?.detail && (
-            <pre className="px-3 py-2 text-[11px] leading-relaxed font-mono text-text-muted/80 whitespace-pre-wrap break-all max-h-72 overflow-auto">
+            <pre className="px-3 py-2 text-[0.85em] leading-relaxed font-mono text-text-muted/80 whitespace-pre-wrap break-all max-h-72 overflow-auto">
               {use.detail}
             </pre>
           )}
           {result && (
             <pre
               className={cn(
-                "px-3 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-all max-h-96 overflow-auto",
+                "px-3 py-2 text-[0.85em] leading-relaxed font-mono whitespace-pre-wrap break-all max-h-96 overflow-auto",
                 isError ? "text-error/80" : "text-text-muted/70",
               )}
             >
