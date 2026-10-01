@@ -77,7 +77,6 @@ struct RepoSettingsView: View {
                 Picker("Context window", selection: $claudeContextWindow) {
                     Text("200k").tag("200k"); Text("1m").tag("1m")
                 }
-                Toggle("Extended thinking", isOn: $claudeThinking)
                 Picker("Effort", selection: $claudeEffort) {
                     Text("Low").tag("low"); Text("Medium").tag("medium"); Text("High").tag("high")
                 }

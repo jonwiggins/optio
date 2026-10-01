@@ -339,7 +339,6 @@ web:
             {[
               ["claudeModel", "sonnet", "Model for coding tasks (sonnet, opus, haiku)"],
               ["claudeContextWindow", "null", "Context window override (null = model default)"],
-              ["claudeThinking", "false", "Enable extended thinking mode"],
               ["claudeEffort", "null", "Effort level override"],
               ["maxTurnsCoding", "null", "Max agent turns for coding tasks"],
               ["maxTurnsReview", "null", "Max agent turns for review tasks"],
