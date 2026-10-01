@@ -621,8 +621,8 @@ before.
 
 ## Web UI
 
-- `/sessions` — local terminals are rows in the unified sessions list (the old `/local`
-  cockpit redirects here; `/local?new=1` redirects to `/sessions/new`). Paired hosts, their
+- `/work` — local terminals are rows in the unified Work list (the old `/local`
+  cockpit redirects here; `/local?new=1` redirects to `/work/new`). Paired hosts, their
   directories, and the **Automations** (blueprints) editor live on `/machines`. **Add
   machine** there (and "My machine" in the New work form while none is paired) shows the
   pairing steps with this server's own commands — `--server` is the API as the page reaches

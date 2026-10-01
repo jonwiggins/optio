@@ -7,11 +7,11 @@ Reviews · Inbox); **Library** (Prompts · Repos · Machines · Connections);
 Account). The Sessions screen merges every kind of work — PR tasks, jobs,
 scheduled blueprints, Local automations and terminals, pod sessions, persistent
 agents — into one list (`Features/Work/Sessions/SessionsFeed.swift`, a port of the
-web's `lib/sessions-feed.ts`) with Active / Recurring / Agents / History / All
+web's `lib/work-feed.ts`) with Active / Recurring / Agents / History / All
 views; rows open the per-kind detail screens (there are no per-kind lists, on
 web or here). Local Automations are edited under Library › Machines. "New session" opens
 the native five-attribute form (`Features/Work/Sessions/New/`, a port of the web's
-`components/session-form/`): a grouped Form — When · Where · Who · What · Then ·
+`components/work-form/`): a grouped Form — When · Where · Who · What · Then ·
 Name — with example presets up top and a pinned bar that describes what the answers
 make and holds the one button that makes it.
 Designed to be used over a Tailscale network: your phone and the machine (or
