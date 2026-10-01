@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-01
+
 ### Added
 
 - **Work until merged.** The New work form's **Then** has a fourth answer for work that opens a PR: **Work until merged**. The agent opens the PR, then Optio brings it back to fix failing CI, merge conflicts, and review feedback, and squash-merges once it's green, whatever the repo's own auto-resume and auto-merge settings say. Untick **Merge it for me** to have the agent keep the PR green and leave the merge to you. Under Then, **What happens to the PR** lists each step (review, CI fixes, requested changes, merge) for any work that opens a PR, so **Exit when done** now shows what the repo's settings will do too. A repo in cautious mode (draft PRs) still never merges. Scheduled Tasks pass the setting to every run, the Work list shows "until merged", and a new **Assign to Optio** preset turns issues labeled `optio` into PRs worked until they merge.
@@ -28,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Text size and column width in Chat.** A session's Chat view has A− / A+ and Narrower / Wider controls (and ⌘/Ctrl + = / − / 0), remembered per browser for every chat.
 - **Refresh Codex's usage.** The Codex usage pill has a refresh button like Claude's: the machine's daemon asks Codex for its current limits instead of waiting for the next Codex turn. Restart `optio local up` to get it.
+- **Environment per piece of work.** The New work form's **Where** has an **Environment** section: pod work can switch the repo's connections, MCP servers and skills on or off, pick its secrets, run its own setup commands before the agent, and make its PR follow-through more careful than the repo's (ask for a review, open draft PRs, resume fewer times), never less. Jobs and persistent agents now get connections, MCP servers and skills like Tasks do.
+- **Commands as work.** A Job can run a shell command instead of an agent, in a pod or on a machine, on any trigger: its `{{params}}` arrive as shell variables (never spliced into the command) and its exit status settles the run. A trigger on a machine can open a plain shell.
+- **Persistent agents with a repo.** A persistent agent can work in one checkout of one of the workspace's repos, fetched each turn.
 
 ### Changed
 
@@ -41,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sessions stay put in the Machines list.** Sessions used to be grouped by Needs you / Working / Idle, so with many of them flipping between states the list kept moving under your cursor. It is now ordered by when you last typed into a session, then by when it started, with finished sessions below; a session that needs you is marked on its row, and the count in the header jumps to the next one. Same on iOS and Android.
 - **Personal secrets follow the work's owner, not its creator.** A run used to look up the creator's own secrets first. It now does that only for work that belongs to someone ("Just me"), and organization work never sees anyone's personal secrets, agent sign-in included. Set work you rely on personal secrets for to **Just me**.
 - Members can now add their own (personal) secrets and connections; the organization's still need an admin.
+- **One backend for Work.** Scheduled Tasks, Jobs and Local automations are now one `work_definitions` table, and Job runs are rows in `tasks` (`kind = 'standalone'`), with one log table and one pod table under them. `/api/work` lists, creates, saves and deletes every kind (create and save write the trigger in the same transaction). Every legacy endpoint keeps its response shape. Five migrations move the data on first boot; back up the database before upgrading.
 
 ### Fixed
 
