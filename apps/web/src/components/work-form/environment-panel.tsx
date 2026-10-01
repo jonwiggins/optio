@@ -144,6 +144,13 @@ export function EnvironmentPanel({
             </p>
           </div>
 
+          {repoUrl && (
+            <p className="text-[11px] text-text-muted/80">
+              The pod itself — image, resources, network — is the repo&apos;s: its tasks share its
+              pods. Change it in the repo&apos;s settings.
+            </p>
+          )}
+
           {prApplies && <PrSettings settings={settings} repo={options?.repo} onChange={onChange} />}
 
           {changes > 0 && (
