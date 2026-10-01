@@ -2015,6 +2015,13 @@ export const api = {
   deleteLocalTerminal: (id: string) =>
     request<{}>(`/api/local/terminals/${id}`, { method: "DELETE" }),
 
+  /** Write to a running terminal's stdin (REST; 409 unless it's running). */
+  sendLocalTerminalInput: (id: string, data: string) =>
+    request<{}>(`/api/local/terminals/${id}/input`, {
+      method: "POST",
+      body: JSON.stringify({ data }),
+    }),
+
   /** Open an exited agent session again as a fresh interactive terminal. */
   /** `reused`: a resume of this session that hasn't ended, returned instead of a second one. */
   resumeLocalTerminal: (id: string) =>

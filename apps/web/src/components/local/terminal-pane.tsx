@@ -41,7 +41,9 @@ import { useTitleFit } from "./use-title-fit";
 import { useLocalTranscript } from "./use-transcript";
 import { TranscriptView } from "./transcript-view";
 import { SessionViewToggle } from "./session-view-toggle";
-import { resolveSessionView, type SessionView } from "./session-view";
+import { canShowChat, resolveSessionView, type SessionView } from "./session-view";
+import { LocalChatComposer } from "./chat-composer";
+import { useNarrow } from "./use-narrow";
 
 const LocalTerminal = dynamic(() => import("./local-terminal").then((m) => m.LocalTerminal), {
   ssr: false,
@@ -111,15 +113,17 @@ export function TerminalPane({
   // from before transcripts were recorded). A finished session opens on it;
   // the toggle switches to the recorded screen and back.
   const [viewChoice, setViewChoice] = useState<SessionView | null>(null);
+  const narrow = useNarrow();
+  const viewRef = useRef<SessionView | null>(null);
   const terminalAlive =
     terminal != null && terminal.state !== "exited" && terminal.state !== "error";
   const transcript = useLocalTranscript(terminalId, terminalAlive);
-  // Watching a session end keeps the screen you were watching; only a
+  // Watching a session end keeps the face you were watching; only a
   // session opened after it finished lands on the conversation.
   const wasAlive = useRef(false);
   useEffect(() => {
     if (terminalAlive) wasAlive.current = true;
-    else if (wasAlive.current) setViewChoice((c) => c ?? "screen");
+    else if (wasAlive.current) setViewChoice((c) => c ?? viewRef.current ?? "screen");
   }, [terminalAlive]);
   const fit = useTitleFit(!loading && terminal != null);
   const railCollapsed = useRailStore((s) => s.collapsed);
@@ -329,11 +333,14 @@ export function TerminalPane({
     isDead,
     hasTranscript,
     loaded: transcript.loaded && !readingTranscript,
+    narrow,
   });
+  // The face shown while it ran — what a session you watched end stays on.
+  if (!isDead) viewRef.current = view;
   const parked = terminal.state === "pending" && terminal.pendingReason === "host_offline";
   // The likeliest reason a machine never comes back: it's online under a new name.
   const onlineElsewhere = hosts.find((h) => h.id !== terminal.hostId && h.state === "online");
-  const viewToggle = hasTranscript && view && (
+  const viewToggle = canShowChat(terminal, hasTranscript) && view && (
     <SessionViewToggle view={view} onChange={setViewChoice} />
   );
 
@@ -701,8 +708,16 @@ export function TerminalPane({
               : "Loading session…"}
           </div>
         ) : view === "transcript" ? (
-          <div className="flex-1 min-h-0">
-            <TranscriptView entries={transcript.entries} live={!isDead} />
+          <div className="flex-1 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0">
+              <TranscriptView entries={transcript.entries} live={!isDead} />
+            </div>
+            {terminal.state === "running" && (
+              <LocalChatComposer
+                terminalId={terminal.id}
+                working={terminal.attentionState === "working"}
+              />
+            )}
           </div>
         ) : parked ? (
           <div className="flex-1 min-h-0 bg-[#09090b] flex flex-col items-center justify-center gap-2 px-6 text-center">
