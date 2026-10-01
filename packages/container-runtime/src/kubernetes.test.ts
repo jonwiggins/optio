@@ -259,6 +259,13 @@ describe("KubernetesContainerRuntime", () => {
       expect(podSpec.hostUsers).toBe(false);
     });
 
+    it("never auto-mounts a Kubernetes API token into the pod", async () => {
+      await runtime.create(baseSpec());
+
+      const podSpec = mockCoreApi.createNamespacedPod.mock.calls[0][0].body.spec;
+      expect(podSpec.automountServiceAccountToken).toBe(false);
+    });
+
     it("uses spec.name when provided", async () => {
       const spec = baseSpec({ name: "my-custom-pod" });
 
