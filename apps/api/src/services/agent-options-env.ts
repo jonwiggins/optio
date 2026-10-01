@@ -36,9 +36,15 @@ export function agentOptionsEnv(
       // Effort + thinking ride along as a `--settings` JSON blob — the same
       // keys the claude-code adapter writes to ~/.claude/settings.json.
       const settings: Record<string, unknown> = {};
+      // Thinking stays at Claude Code's default (on); a saved claudeThinking
+      // is ignored.
       const effort = str("claudeEffort");
-      if (effort) settings.effortLevel = effort;
-      if (typeof o.claudeThinking === "boolean") settings.alwaysThinkingEnabled = o.claudeThinking;
+      if (effort) {
+        // The settings key only persists up to xhigh; the env var takes every
+        // level (incl. max) for this session.
+        if (effort !== "max") settings.effortLevel = effort;
+        env.CLAUDE_CODE_EFFORT_LEVEL = effort;
+      }
       if (Object.keys(settings).length) env.OPTIO_CLAUDE_SETTINGS_JSON = JSON.stringify(settings);
       break;
     }

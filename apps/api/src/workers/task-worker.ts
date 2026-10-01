@@ -443,10 +443,6 @@ export function startTaskWorker() {
           taskFilePath: finalTaskFilePath,
           claudeModel: finalClaudeModel,
           claudeContextWindow: opt("claudeContextWindow"),
-          claudeThinking:
-            typeof agentOptions.claudeThinking === "boolean"
-              ? agentOptions.claudeThinking
-              : (repoConfig?.claudeThinking ?? undefined),
           claudeEffort: opt("claudeEffort"),
           copilotModel: copilotOpt("copilotModel"),
           copilotEffort: copilotOpt("copilotEffort"),

@@ -24,7 +24,6 @@ export interface AgentTaskInput {
   taskFilePath?: string;
   claudeModel?: string;
   claudeContextWindow?: string;
-  claudeThinking?: boolean;
   claudeEffort?: string;
   copilotModel?: string;
   copilotEffort?: string;

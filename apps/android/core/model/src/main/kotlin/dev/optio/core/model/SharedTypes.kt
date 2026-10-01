@@ -169,7 +169,6 @@ data class AgentTaskInput(
     val taskFilePath: String? = null,
     val claudeModel: String? = null,
     val claudeContextWindow: String? = null,
-    val claudeThinking: Boolean? = null,
     val claudeEffort: String? = null,
     val copilotModel: String? = null,
     val copilotEffort: String? = null,

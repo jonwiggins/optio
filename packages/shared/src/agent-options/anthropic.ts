@@ -99,12 +99,6 @@ export const ANTHROPIC_CATALOG: ProviderCatalog = {
       ],
     },
     {
-      key: "claudeThinking",
-      label: "Extended Thinking",
-      kind: "boolean",
-      default: true,
-    },
-    {
       // Pods always skip permission checks (the pod is the sandbox); on your
       // own machine the daemon passes `--permission-mode`.
       key: "claudePermissionMode",

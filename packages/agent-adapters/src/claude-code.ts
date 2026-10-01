@@ -93,11 +93,13 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       const ctx = input.claudeContextWindow === "1m" ? "[1m]" : "";
       claudeSettings.model = `${input.claudeModel}${ctx}`;
     }
-    if (input.claudeThinking !== undefined) {
-      claudeSettings.alwaysThinkingEnabled = input.claudeThinking;
-    }
+    // Thinking stays at Claude Code's default (on: adaptive thinking on
+    // current models). The settings key only persists effort up to xhigh;
+    // CLAUDE_CODE_EFFORT_LEVEL takes every level, max included, for the
+    // session (older releases ignore it).
     if (input.claudeEffort) {
-      claudeSettings.effortLevel = input.claudeEffort;
+      if (input.claudeEffort !== "max") claudeSettings.effortLevel = input.claudeEffort;
+      env.CLAUDE_CODE_EFFORT_LEVEL = input.claudeEffort;
     }
     setupFiles.push({
       path: "/home/agent/.claude/settings.json",

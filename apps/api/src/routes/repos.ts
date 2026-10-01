@@ -43,7 +43,10 @@ const updateRepoSchema = z
     defaultBranch: z.string().optional(),
     claudeModel: z.string().optional(),
     claudeContextWindow: z.string().optional(),
-    claudeThinking: z.boolean().optional(),
+    claudeThinking: z
+      .boolean()
+      .optional()
+      .describe("Deprecated and ignored: Claude Code always thinks (its default)"),
     claudeEffort: z.string().optional(),
     copilotModel: z.string().optional(),
     copilotEffort: z.string().optional(),

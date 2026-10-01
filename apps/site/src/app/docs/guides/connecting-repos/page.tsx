@@ -203,7 +203,6 @@ apt-get update && apt-get install -y jq`}</CodeBlock>
             {[
               ["claudeModel", "Model for coding tasks (sonnet, opus, haiku)"],
               ["claudeContextWindow", "Context window override (null = model default)"],
-              ["claudeThinking", "Enable extended thinking mode for more complex reasoning"],
               ["claudeEffort", "Agent effort level override"],
               ["maxTurnsCoding", "Limit agent turns for coding tasks (controls cost)"],
               ["maxTurnsReview", "Limit agent turns for review tasks"],

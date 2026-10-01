@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Max effort now reaches pod runs.** Optio passed effort to pods through Claude Code's `effortLevel` setting, which only persists up to Extra high, so Max was silently dropped. Pods now also get `CLAUDE_CODE_EFFORT_LEVEL`, which takes every level.
+- **No more "Extended thinking" toggle.** Claude Code always thinks (its default; adaptive thinking on current models, steered by effort), and turning it off made any run with an effort level fail. The toggle is gone from the New work form, repo settings, and the iOS and Android apps; a saved value is ignored.
 - **PRs an agent only mentions are no longer adopted.** A task used to take the last PR link in its agent's output for its own repo, so `gh pr view 812` or "like #812" could make an unrelated PR the task's, and on your machine the first PR link the session printed won. Optio now adopts a PR only from the result of the agent's own PR-creating call (or a PR on the task's branch), checks it with GitHub / GitLab / CodeCommit (right repo, open or merged, new or on the task's branch), and still shows other links as links.
 
 ## [0.6.5] - 2026-09-28

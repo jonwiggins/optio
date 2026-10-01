@@ -323,7 +323,6 @@ export function startPrReviewWorker() {
           taskFilePath,
           claudeModel,
           claudeContextWindow: repoConfig.claudeContextWindow ?? undefined,
-          claudeThinking: repoConfig.claudeThinking ?? undefined,
           claudeEffort: repoConfig.claudeEffort ?? undefined,
           copilotModel,
           copilotEffort:

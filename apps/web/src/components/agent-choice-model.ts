@@ -70,7 +70,6 @@ export const REPO_FACTORY_AGENT = "claude-code";
 export const REPO_FACTORY_OPTIONS: AgentOptionsValues = {
   claudeModel: "opus",
   claudeContextWindow: "1m",
-  claudeThinking: true,
   claudeEffort: "high",
   geminiModel: "gemini-2.5-pro",
   geminiApprovalMode: "yolo",

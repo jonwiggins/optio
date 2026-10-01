@@ -34,7 +34,6 @@ describe("agent-choice-model — picker keys are repo columns", () => {
     expect(optionsFromRepo("claude-code", r)).toEqual({
       claudeModel: "sonnet",
       claudeContextWindow: "1m",
-      claudeThinking: true,
       claudeEffort: "high",
     });
     expect(optionsFromRepo("copilot", r)).toEqual({});
@@ -63,7 +62,8 @@ describe("agent-choice-model — picker keys are repo columns", () => {
     expect(patch.claudeModel).toBe("opus");
     // Claude's blank effort goes as-is (the model's own default) …
     expect(patch.claudeEffort).toBe("");
-    expect(patch.claudeThinking).toBe(true);
+    // Thinking is no longer a setting: nothing is sent for it.
+    expect(patch.claudeThinking).toBeUndefined();
     // … other blanks are left alone, the base URL blank clears it.
     expect(patch.copilotModel).toBeUndefined();
     expect(patch.opencodeBaseUrl).toBeNull();

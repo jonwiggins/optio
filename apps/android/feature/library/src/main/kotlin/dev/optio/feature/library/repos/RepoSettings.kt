@@ -282,8 +282,6 @@ internal fun RepoSettingsContent(
             InsetDivider()
             PickerRow("Context window", ContextWindows, form.claudeContextWindow, { v -> onChange { it.copy(claudeContextWindow = v) } })
             InsetDivider()
-            SwitchRow("Extended thinking", form.claudeThinking, { v -> onChange { it.copy(claudeThinking = v) } })
-            InsetDivider()
             PickerRow("Effort", Efforts, form.claudeEffort, { v -> onChange { it.copy(claudeEffort = v) } })
             InsetDivider()
             StepperRow("Max turns", form.maxTurnsCoding, { v -> onChange { it.copy(maxTurnsCoding = v) } }, range = 1..1000, step = 10)

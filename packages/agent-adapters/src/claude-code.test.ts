@@ -247,18 +247,6 @@ describe("ClaudeCodeAdapter", () => {
       expect(settings.model).toBe("sonnet");
     });
 
-    it("sets alwaysThinkingEnabled when claudeThinking provided", () => {
-      const config = adapter.buildContainerConfig({
-        ...baseInput,
-        claudeThinking: true,
-      });
-      const settingsFile = config.setupFiles!.find(
-        (f) => f.path === "/home/agent/.claude/settings.json",
-      );
-      const settings = JSON.parse(settingsFile!.content);
-      expect(settings.alwaysThinkingEnabled).toBe(true);
-    });
-
     it("sets effortLevel when claudeEffort provided", () => {
       const config = adapter.buildContainerConfig({
         ...baseInput,
@@ -497,5 +485,26 @@ describe("ClaudeCodeAdapter", () => {
       const result = adapter.parseResult(3, "failed");
       expect(result.summary).toBe("Agent exited with code 3");
     });
+  });
+});
+
+describe("ClaudeCodeAdapter effort and thinking", () => {
+  const adapter = new ClaudeCodeAdapter();
+  const base = { taskId: "t", prompt: "p", repoUrl: "https://github.com/o/r", repoBranch: "main" };
+  const settingsOf = (c: ReturnType<ClaudeCodeAdapter["buildContainerConfig"]>) =>
+    JSON.parse(c.setupFiles!.find((f) => f.path.endsWith("settings.json"))!.content);
+
+  it("passes every effort level through the env; the settings file only up to xhigh", () => {
+    const max = adapter.buildContainerConfig({ ...base, claudeEffort: "max" });
+    expect(max.env.CLAUDE_CODE_EFFORT_LEVEL).toBe("max");
+    expect(settingsOf(max).effortLevel).toBeUndefined();
+    const xhigh = adapter.buildContainerConfig({ ...base, claudeEffort: "xhigh" });
+    expect(xhigh.env.CLAUDE_CODE_EFFORT_LEVEL).toBe("xhigh");
+    expect(settingsOf(xhigh).effortLevel).toBe("xhigh");
+  });
+
+  it("leaves thinking at Claude Code's default", () => {
+    const c = adapter.buildContainerConfig({ ...base, claudeEffort: "high" });
+    expect(settingsOf(c).alwaysThinkingEnabled).toBeUndefined();
   });
 });
