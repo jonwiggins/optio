@@ -29,6 +29,9 @@ struct SettingsView: View {
                 NavigationLink { OptioAgentSettingsView() } label: {
                     Label("Optio agent settings", systemImage: "sparkles")
                 }
+                NavigationLink { ModelProvidersView() } label: {
+                    Label("Model providers", systemImage: "cloud")
+                }
                 NavigationLink { ApiKeysView() } label: {
                     Label("Personal access tokens", systemImage: "key.horizontal")
                 }

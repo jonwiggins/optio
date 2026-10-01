@@ -30,10 +30,12 @@ struct WhenSection: View {
 
     var body: some View {
         Section {
-            MenuRow(label: "Starts", value: state.draft.when.menuLabel) {
+            MenuRow(label: "Starts", value: state.draft.when.menuLabel, glyph: whenGlyph) {
                 ForEach(F.WhenType.allCases, id: \.self) { w in
                     Button { state.setWhen(w) } label: {
-                        Label(w.menuLabel, systemImage: w == state.draft.when ? "checkmark" : w.systemImage)
+                        Label { Text(w.menuLabel) } icon: {
+                            w == state.draft.when ? Image(systemName: "checkmark") : w.glyph.image()
+                        }
                     }
                 }
             }
@@ -49,6 +51,11 @@ struct WhenSection: View {
         } footer: {
             if let footer { Text(footer) }
         }
+    }
+
+    /// The answer's mark on the row: the event's brand, or the ticket source's.
+    private var whenGlyph: Glyph {
+        state.draft.when == .ticket ? (state.draft.trigger.ticketSource ?? .github).glyph : state.draft.when.glyph
     }
 
     private var footer: String? {
@@ -93,9 +100,9 @@ private struct TicketRows: View {
     private var source: F.TicketSource { state.draft.trigger.ticketSource ?? .github }
 
     var body: some View {
-        MenuRow(label: "Source", value: source.label) {
+        MenuRow(label: "Source", value: source.label, glyph: source.glyph) {
             ForEach(F.TicketSource.allCases, id: \.self) { s in
-                MenuChoice(title: s.label, selected: s == source) { state.edit { $0.trigger.ticketSource = s } }
+                MenuChoice(title: s.label, selected: s == source, glyph: s.glyph) { state.edit { $0.trigger.ticketSource = s } }
             }
         }
         HStack(spacing: Spacing.s) {
@@ -323,23 +330,38 @@ struct WhoSection: View {
 
     var body: some View {
         Section {
-            MenuRow(label: "Runtime", value: name(state.draft.runtime)) {
+            MenuRow(label: "Runtime", value: name(state.draft.runtime), glyph: .agent(state.draft.runtime, fallback: "cpu")) {
                 ForEach(runtimes, id: \.value) { r in
                     Button { state.setRuntime(r.value) } label: {
-                        Label(name(r.value), systemImage: r.value == state.draft.runtime ? "checkmark" : r.value == F.terminal ? "terminal" : "cpu")
+                        Label {
+                            Text(name(r.value))
+                        } icon: {
+                            r.value == state.draft.runtime ? Image(systemName: "checkmark") : Glyph.agent(r.value, fallback: "cpu").image()
+                        }
                         if let why = r.disabled { Text(why) }
                     }
                     .disabled(!r.isEnabled)
                 }
             }
             if !state.isTerminal {
+                if !state.usableProviders.isEmpty { ProviderRow(state: state) }
                 AgentOptionsPickerView(
                     provider: state.provider,
                     state: state.catalogs.state(state.provider),
                     values: state.draft.agentOptions,
                     local: !state.fullOptionsApply,
+                    providerModels: state.providerModels,
                     onChange: state.setOption
                 )
+                if state.lastSettingsShown {
+                    HStack(spacing: 4) {
+                        Text("Your last settings ·").foregroundStyle(.secondary)
+                        Button("Reset") { withAnimation(.snappy) { state.resetLastSettings() } }
+                            .buttonStyle(.borderless)
+                    }
+                    .font(.footnote)
+                    .accessibilityIdentifier("work-last-settings")
+                }
             }
         } header: {
             FormSectionHeader("Who", question: "A terminal, or an agent?", anchor: .who)
@@ -367,8 +389,172 @@ struct WhoSection: View {
             if why.hasSuffix(".") { why.removeLast() }
             lines.append("\(disabled.map { name($0.value) }.joined(separator: ", ")) — \(why).")
         }
-        if let note = AgentOptionsPickerView.footnote(state.catalogs.state(state.provider)) { lines.append(note) }
+        if let p = state.pickedProvider {
+            lines.append("Reaches the models through \(p.name) (Amazon Bedrock, \(p.region)) instead of \(state.isLocal ? "the CLI's own sign-in" : "the server's agent credentials").")
+        } else if let note = AgentOptionsPickerView.footnote(state.catalogs.state(state.provider)) { lines.append(note) }
+        if let note = state.ownerNote { lines.append(note) }
         return lines.joined(separator: " ")
+    }
+}
+
+/// Provider: Default + each usable provider. A segmented control while every
+/// choice can be picked and they fit; otherwise a menu whose rows say why a
+/// provider can't run here.
+private struct ProviderRow: View {
+    @Bindable var state: WorkFormState
+
+    private var options: [(provider: ModelProvider, disabled: String?)] {
+        state.usableProviders.map { ($0, F.providerDisabled($0, state.draft, host: state.host)) }
+    }
+
+    var body: some View {
+        let opts = options
+        let pickedId = state.pickedProvider?.id ?? ""
+        if opts.count <= 2, opts.allSatisfy({ $0.disabled == nil }) {
+            Picker("Provider", selection: Binding(
+                get: { pickedId },
+                set: { id in state.setProvider(opts.first { $0.provider.id == id }?.provider) }
+            )) {
+                Text("Default").tag("")
+                ForEach(opts, id: \.provider.id) { o in Text(o.provider.name).tag(o.provider.id) }
+            }
+            .pickerStyle(.segmented)
+            .listRowInsets(EdgeInsets(top: Spacing.s, leading: Spacing.l, bottom: Spacing.s, trailing: Spacing.l))
+            .accessibilityLabel("Provider")
+        } else {
+            MenuRow(label: "Provider", value: state.pickedProvider?.name ?? "Default") {
+                MenuChoice(title: "Default", subtitle: state.isLocal ? "The CLI's own sign-in" : "The server's agent credentials", selected: pickedId.isEmpty) { state.setProvider(nil) }
+                ForEach(opts, id: \.provider.id) { o in
+                    MenuChoice(
+                        title: o.provider.name,
+                        subtitle: o.disabled ?? "Bedrock · \(o.provider.region)\(F.isPersonal(o.provider) ? " · Just me" : "")",
+                        selected: o.provider.id == pickedId
+                    ) { state.setProvider(o.provider) }
+                    .disabled(o.disabled != nil)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Access (owner + pod secrets)
+
+/// "Runs as" and the secrets the pod gets — pod work that runs an agent only.
+struct AccessSection: View {
+    @Bindable var state: WorkFormState
+    @State private var showNewSecret = false
+
+    private var addable: [PickableSecret] {
+        F.pickableSecrets(state.pickable, owner: state.draft.owner, picked: state.draft.podSecrets)
+    }
+
+    var body: some View {
+        Section {
+            Picker("Runs as", selection: Binding(get: { state.draft.owner }, set: { state.setOwner($0) })) {
+                Text("Organization").tag(ResourceOwner.workspace)
+                Text("Just me").tag(ResourceOwner.me)
+            }
+            if !state.draft.podSecrets.isEmpty {
+                FlowLayout(spacing: Spacing.s) {
+                    ForEach(state.draft.podSecrets, id: \.self) { name in
+                        let mine = F.secretOwner(name, state.pickable, owner: state.draft.owner) == .me
+                        Button { state.removeSecret(name) } label: {
+                            HStack(spacing: 4) {
+                                Text(name).font(.footnote.monospaced())
+                                Text(mine ? "me" : "org").font(.caption2).foregroundStyle(.secondary)
+                                Image(systemName: "xmark").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, Spacing.m).padding(.vertical, 6)
+                            .background(.fill.tertiary, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove \(name)")
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            Menu {
+                ForEach(addable, id: \.name) { s in
+                    Button { state.addSecret(s.name) } label: {
+                        Label(s.name, systemImage: s.owner == .me ? "person" : "building.2")
+                    }
+                }
+                if !addable.isEmpty { Divider() }
+                Button { showNewSecret = true } label: { Label("New secret…", systemImage: "plus") }
+            } label: {
+                Label("Add secret", systemImage: "key")
+            }
+        } header: {
+            FormSectionHeader("Access", question: "Whose credentials?")
+        } footer: {
+            Text(footer)
+        }
+        .sheet(isPresented: $showNewSecret) {
+            NewPodSecretSheet(allowOrg: state.isAdmin, defaultOwner: state.draft.owner) { name, value, owner in
+                await state.createSecret(name: name, value: value, owner: owner)
+            }
+        }
+    }
+
+    private var footer: String {
+        var lines = ["Only what you pick is available to the agent."]
+        lines.append(state.draft.owner == .me
+            ? "Just me: runs with your secrets, providers and connections; only you can change it."
+            : "Organization: uses only the organization's secrets, providers and connections.")
+        return lines.joined(separator: " ")
+    }
+}
+
+/// Inline "New secret…": name + value (write-only) + owner.
+private struct NewPodSecretSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let allowOrg: Bool
+    let defaultOwner: ResourceOwner
+    let onSave: (String, String, ResourceOwner) async -> Bool
+
+    @State private var name = ""
+    @State private var value = ""
+    @State private var owner: ResourceOwner = .me
+    @State private var saving = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("NAME", text: $name)
+                        .font(.body.monospaced())
+                        .autocorrectionDisabled().textInputAutocapitalization(.characters)
+                    SecureField("Value", text: $value)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    if allowOrg {
+                        Picker("Owner", selection: $owner) {
+                            Text("Organization").tag(ResourceOwner.workspace)
+                            Text("Just me").tag(ResourceOwner.me)
+                        }
+                    }
+                } footer: {
+                    Text("Encrypted at rest; the value is never shown again.")
+                }
+            }
+            .navigationTitle("New secret")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear { owner = allowOrg ? defaultOwner : .me }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task {
+                            saving = true
+                            let ok = await onSave(name.trimmingCharacters(in: .whitespaces), value, owner)
+                            saving = false
+                            value = ""
+                            if ok { dismiss() }
+                        }
+                    } label: { if saving { ProgressView() } else { Text("Save") } }
+                    .disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty || value.isEmpty)
+                }
+            }
+        }
     }
 }
 

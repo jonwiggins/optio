@@ -206,7 +206,8 @@ struct PullRequestRow: View {
             meta: Text.meta([Text.mono("#\(pr.number)"), pr.repo?.fullName.map { Text($0) }, pr.author.map { Text($0) }, pr.updatedAt.map { Text($0.relativeDescription) }]),
             trailing: trailing.0,
             trailingTone: trailing.1,
-            footer: (pr.labels?.isEmpty == false) ? Text(pr.labels!.joined(separator: " · ")) : nil
+            footer: (pr.labels?.isEmpty == false) ? Text(pr.labels!.joined(separator: " · ")) : nil,
+            glyph: Brand(url: pr.url) == .gitlab ? .brand(.gitlab) : .pr(pr.draft == true ? .draft : PRGlyphState(pr.state))
         )
     }
 }
@@ -227,7 +228,10 @@ struct PullRequestSummaryView: View {
                 if let a = pr.author { LabeledContent("Author", value: a) }
                 if let u = pr.updatedAt { LabeledContent("Updated", value: u.relativeDescription) }
                 if pr.draft == true { LabeledContent("State") { StatusBadge(text: "Draft", tone: .idle) } }
-                if let url = URL(string: pr.url) { Link("Open on \(pr.url.contains("gitlab") ? "GitLab" : "GitHub")", destination: url) }
+                if let url = URL(string: pr.url) {
+                    let brand = Brand(url: pr.url) ?? .github
+                    Link(destination: url) { Label { Text("Open on \(brand.label)") } icon: { BrandMark(brand, size: 17) } }
+                }
             }
             if let labels = pr.labels, !labels.isEmpty {
                 Section("Labels") { Text(labels.joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary) }

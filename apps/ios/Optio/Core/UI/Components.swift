@@ -317,6 +317,8 @@ struct OptioRow: View {
     var trailingTone: Tone? = nil
     var footer: Text? = nil
     var titleLineLimit = 2
+    /// A mark leading the meta line: the PR / issue glyph, the source's brand.
+    var glyph: Glyph? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.s) {
@@ -326,7 +328,10 @@ struct OptioRow: View {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text(title).font(.body).foregroundStyle(.primary).lineLimit(titleLineLimit)
                 if let meta {
-                    meta.font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    HStack(spacing: 5) {
+                        if let glyph { GlyphView(glyph: glyph, size: 13, label: glyph.accessibilityLabel.isEmpty ? nil : glyph.accessibilityLabel) }
+                        meta.font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
                 if let footer {
                     footer.font(.footnote).foregroundStyle(.tertiary).lineLimit(2)

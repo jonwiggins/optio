@@ -12,6 +12,8 @@ struct AgentOptionsPickerView: View {
     let state: AgentCatalogStore.State?
     let values: WorkForm.AgentOptions
     let local: Bool
+    /// A picked model provider's models: the model row lists these instead of the catalog's.
+    var providerModels: [ModelProviderModel]? = nil
     let onChange: (String, WorkForm.OptionValue) -> Void
 
     private var catalog: ProviderCatalog? { if case .loaded(let c) = state { return c } else { return nil } }
@@ -52,7 +54,19 @@ struct AgentOptionsPickerView: View {
 
     @ViewBuilder
     private var modelRow: some View {
-        if let catalog, catalog.modelIsFreeText != true {
+        if let providerModels {
+            let raw = values[modelField]?.stringValue ?? ""
+            if providerModels.isEmpty {
+                ValueField(label: "Model", placeholder: "Provider model id",
+                           text: Binding(get: { raw }, set: { onChange(modelField, .string($0)) }))
+            } else {
+                MenuRow(label: "Model", value: providerModels.first { $0.id == raw }?.label ?? (raw.isEmpty ? "Pick a model…" : raw), placeholder: raw.isEmpty) {
+                    ForEach(providerModels, id: \.id) { m in
+                        MenuChoice(title: m.label ?? m.id, subtitle: m.label == nil ? nil : m.id, selected: m.id == raw) { onChange(modelField, .string(m.id)) }
+                    }
+                }
+            }
+        } else if let catalog, catalog.modelIsFreeText != true {
             MenuRow(label: "Model", value: modelLabel(catalog)) {
                 MenuChoice(title: "Default", selected: modelValue.isEmpty) { onChange(modelField, .string("")) }
                 if !modelValue.isEmpty, !catalog.models.contains(where: { $0.id == modelValue }) {

@@ -90,7 +90,9 @@ struct ReviewDetailView: View {
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 if let r = model.review {
-                    Button { openURL(URL(string: r.prUrl)!) } label: { Label("View on \(r.platformName)", systemImage: "arrow.up.right.square") }
+                    Button { openURL(URL(string: r.prUrl)!) } label: {
+                        Label { Text("View on \(r.platformName)") } icon: { (Brand(url: r.prUrl).map(Glyph.brand) ?? .symbol("arrow.up.right.square")).image() }
+                    }
                     if r.canReReview {
                         Button { Task { await model.reReview(reviewId, api: api) } } label: { Label("Re-review", systemImage: "arrow.counterclockwise") }
                     }
@@ -140,7 +142,9 @@ struct ReviewDetailView: View {
                 if logs.connected { StateDot(tone: .working, size: 6).accessibilityLabel("Live") }
                 Button {
                     if let url = URL(string: review.prUrl) { openURL(url) }
-                } label: { Image(systemName: "arrow.up.right.square") }
+                } label: {
+                    GlyphView(glyph: Brand(url: review.prUrl) == .gitlab ? .brand(.gitlab) : .pr(PRGlyphState(s?.prState)), size: 17)
+                }
                 .buttonStyle(.plain).font(.subheadline).foregroundStyle(.secondary)
                 .accessibilityLabel("Open pull request")
             }

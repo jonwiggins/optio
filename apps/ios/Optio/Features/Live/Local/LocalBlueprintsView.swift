@@ -152,10 +152,10 @@ struct LocalBlueprintDetailView: View {
                             }
                             ForEach(triggers) { t in
                                 HStack(spacing: 8) {
-                                    Image(systemName: t.systemImage).foregroundStyle(.secondary).frame(width: 18)
+                                    TriggerIcon(type: t.type, source: t.config?["source"]?.stringValue, size: 14).foregroundStyle(.secondary).frame(width: 18)
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 6) {
-                                            Text(t.type.capitalized).font(.caption.weight(.semibold))
+                                            Text(TriggerIcon.label(t.type)).font(.caption.weight(.semibold))
                                             if !t.enabled { Text("disabled").font(.caption2).foregroundStyle(.tertiary) }
                                         }
                                         Text(t.summary).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2)

@@ -214,6 +214,11 @@ struct IssueRow: Decodable, Identifiable {
     var isAssignable: Bool {
         (source == nil || source == "github" || source == "gitlab") && repo?.id != nil && optioTask == nil
     }
+    /// GitHub issues get the Octicon (green open, purple closed); other sources their brand.
+    var glyph: Glyph {
+        let brand = Brand(provider: source) ?? Brand(url: url) ?? .github
+        return brand == .github ? .issue(open: state != "closed") : .brand(brand)
+    }
     var identity: String { "\(repo?.fullName ?? source ?? "")-\(numberText)-\(id?.stringValue ?? id?.doubleValue.map { String($0) } ?? "")" }
 }
 

@@ -126,11 +126,11 @@ struct LocalTerminalScreen: View {
                     }
                     Divider()
                     if let url = URL(string: terminal.ticketUrl ?? ""), terminal.ticketUrl != nil {
-                        Link(destination: url) { Label("Open ticket", systemImage: "ticket") }
+                        Link(destination: url) { Label { Text("Open ticket") } icon: { Glyph.trigger("ticket", source: terminal.ticketSource).image() } }
                     }
                     ForEach(terminal.links, id: \.url) { link in
                         if let url = URL(string: link.url) {
-                            Link(destination: url) { Label(link.label, systemImage: link.kind == .pr ? "arrow.triangle.pull" : "circle.circle") }
+                            Link(destination: url) { Label { Text(link.label) } icon: { WorkLinkBadges.glyph(link).image() } }
                         }
                     }
                     Divider()

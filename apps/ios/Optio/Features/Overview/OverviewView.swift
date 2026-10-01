@@ -406,9 +406,9 @@ private struct RecentTaskRow: View {
             title: task.title ?? "Untitled",
             tone: Tone.forState(task.state),
             meta: Text.meta([
-                task.repoUrl.map { InsightsFormat.repoShortName($0) },
-                task.agentType.map { RunFormatting.agentLabel($0) },
-                Cost.formatIfNonZero(task.cost),
+                task.repoUrl.map { Text(InsightsFormat.repoShortName($0)) },
+                task.agentType.map { Text.agent($0, RunFormatting.agentLabel($0)) },
+                Cost.formatIfNonZero(task.cost).map { Text($0) },
             ]),
             trailing: trailing?.0,
             trailingTone: trailing?.1

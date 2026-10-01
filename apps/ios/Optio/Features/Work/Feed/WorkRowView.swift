@@ -33,40 +33,34 @@ struct WorkRowView: View {
                     }
                     if let pr = row.prUrl, let url = URL(string: pr) {
                         Spacer(minLength: Spacing.s)
-                        Link(destination: url) {
-                            HStack(spacing: 3) {
-                                Image(systemName: "arrow.triangle.pull")
-                                Text("PR")
-                            }
-                            .font(.caption2.weight(.medium))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.fill.tertiary, in: Radius.smallShape)
-                            .foregroundStyle(AppTheme.accent)
-                        }
-                        .buttonStyle(.plain)
+                        LinkChip(url: url, glyph: .pr(PRGlyphState(row.prState)), text: "PR", mono: false)
                     }
                 }
                 .font(.subheadline)
                 LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 2) {
-                    attr(row.whenSystemImage, row.when)
-                    attr(row.where.systemImage, row.where.label, mono: true)
-                    attr(row.whoSystemImage, row.whoLabel)
-                    attr(row.then.systemImage, row.then.label)
+                    attr(row.whenGlyph, row.when, a11y: row.origin?.label)
+                    attr(.symbol(row.where.systemImage), row.where.label, mono: true)
+                    attr(row.whoGlyph, row.whoLabel)
+                    attr(.symbol(row.then.systemImage), row.then.label)
                 }
             }
         }
         .padding(.vertical, Spacing.row)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(row.name), \(row.statusLabel)")
+        .accessibilityLabel([row.name, row.statusLabel, row.origin.map { "from \($0.label)" }, row.prUrl == nil ? nil : PRGlyphState(row.prState).label].compactMap { $0 }.joined(separator: ", "))
     }
 
-    private func attr(_ systemImage: String, _ label: String, mono: Bool = false) -> some View {
+    private func attr(_ glyph: Glyph, _ label: String, mono: Bool = false, a11y: String? = nil) -> some View {
         HStack(spacing: 4) {
-            Image(systemName: systemImage)
-                .font(.caption2)
-                .foregroundStyle(.quaternary)
-                .frame(width: 12)
+            Group {
+                if case .symbol(let name) = glyph {
+                    Image(systemName: name).font(.caption2).foregroundStyle(.quaternary)
+                } else {
+                    // Brand marks read at secondary weight; quaternary washes them out.
+                    GlyphView(glyph: glyph, size: 11, label: a11y).foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 12)
             Text(label)
                 .font(mono ? .caption.monospaced() : .caption)
                 .foregroundStyle(.secondary)

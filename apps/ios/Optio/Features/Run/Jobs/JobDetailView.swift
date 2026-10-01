@@ -105,10 +105,10 @@ struct JobDetailView: View {
                         state: job.isEnabled ? (model.activeRunCount > 0 ? "running" : "active") : "paused",
                         tone: job.isEnabled ? (model.activeRunCount > 0 ? .working : .idle) : .idle,
                         line: Text.meta([
-                            JobFormat.runtimeLabel(job.runtime),
-                            job.model.flatMap { $0.isEmpty ? nil : $0 },
-                            job.lastRunAt.map { "last run \($0.relativeDescription)" } ?? "no runs yet",
-                            model.activeRunCount > 0 ? "\(model.activeRunCount) active" : nil,
+                            Text.agent(job.runtime, JobFormat.runtimeLabel(job.runtime)),
+                            job.model.flatMap { $0.isEmpty ? nil : Text($0) },
+                            Text(job.lastRunAt.map { "last run \($0.relativeDescription)" } ?? "no runs yet"),
+                            model.activeRunCount > 0 ? Text("\(model.activeRunCount) active") : nil,
                         ]),
                         secondary: job.description.flatMap { $0.isEmpty ? nil : Text($0) }
                     )
@@ -284,13 +284,13 @@ struct JobTriggerRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: JobFormat.triggerIcon(trigger.type))
+            TriggerIcon(type: trigger.type, source: trigger.config?["source"]?.stringValue ?? "github", size: 16)
                 .frame(width: 32, height: 32)
                 .background(.fill.tertiary, in: Radius.smallShape)
                 .foregroundStyle((trigger.enabled ?? true) ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(trigger.type.capitalized).font(.subheadline.weight(.medium))
+                    Text(TriggerIcon.label(trigger.type)).font(.subheadline.weight(.medium))
                     if !(trigger.enabled ?? true) { StatusBadge(text: "Paused", tone: .idle) }
                 }
                 if let cron = trigger.cronExpression {

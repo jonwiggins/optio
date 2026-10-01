@@ -65,11 +65,23 @@ enum WorkForm {
             case .linear: return "bolt"
             }
         }
+
+        /// The menu / row mark: GitHub, Slack and Linear show their brands; a
+        /// ticket trigger shows its source's (see `ticketGlyph`).
+        var glyph: Glyph {
+            switch self {
+            case .github: return .brand(.github)
+            case .slack: return .brand(.slack)
+            case .linear: return .brand(.linear)
+            default: return .symbol(systemImage)
+            }
+        }
     }
 
     enum TicketSource: String, CaseIterable, Hashable, Sendable {
         case github, linear, jira, notion
-        var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+        var label: String { Brand(provider: rawValue)?.label ?? rawValue.capitalized }
+        var glyph: Glyph { Brand(provider: rawValue).map(Glyph.brand) ?? .symbol("ticket") }
     }
 
     enum Where: String, CaseIterable, Hashable, Sendable {
@@ -193,6 +205,10 @@ enum WorkForm {
         var priority = 100
         var maxRetries = 3
         var dependsOn: [String] = []
+        /// "Runs as": the organization or you (pod work; a machine is always you).
+        var owner: ResourceOwner = .workspace
+        /// Secret names the agent gets in its pod; only what's picked.
+        var podSecrets: [String] = []
 
         static let empty = Draft()
     }

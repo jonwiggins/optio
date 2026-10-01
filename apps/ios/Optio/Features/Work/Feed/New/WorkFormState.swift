@@ -55,6 +55,14 @@ final class WorkFormState {
     var templates: [PromptTemplateRow] = []
     var existingTasks: [TaskRow] = []
     var sessionCount: Int?
+    /// Model providers you can see (org + yours; admins also see others' by name).
+    var providers: [ModelProvider] = []
+    /// `GET /api/secrets/pickable`: the org's secret names and yours.
+    var pickable: [PickableSecret] = []
+    /// Admins may create organization secrets inline.
+    var isAdmin = false
+    /// One-line note after picking a personal provider moved the work to "Just me".
+    var ownerNote: String?
     var submitting = false
     var error: String?
     var more = false
@@ -63,6 +71,11 @@ final class WorkFormState {
     var scrollRequest: WorkFormAnchor?
     /// Dev script asked for a submit once the form is filled in.
     var submitRequest = false
+    /// Your last-used runtime + per-runtime options (`GET /api/me/work-defaults`); nil until loaded.
+    private(set) var savedDefaults: WorkFormDefaults?
+    /// Runtimes whose parameters you've changed here: switching back to one
+    /// starts from scratch, not your saved settings, and drops the hint.
+    private(set) var touchedRuntimes: Set<String> = []
 
     let catalogs = AgentCatalogStore.shared
     private let api: APIClient
@@ -82,7 +95,73 @@ final class WorkFormState {
         change(&d)
         draft = F.normalize(d)
         preset = nil
+        if draft.agentOptions.isEmpty { startFromSavedOptions() }
         seedOptionsIfNeeded()
+        dropUnusableProvider()
+    }
+
+    /// A runtime's parameters start from your saved ones unless you've changed them here.
+    private func startFromSavedOptions() {
+        guard !touchedRuntimes.contains(draft.runtime),
+              let saved = F.savedOptions(savedDefaults, runtime: draft.runtime, providers: providers) else { return }
+        draft = F.withSavedOptions(draft, saved, providers: providers)
+    }
+
+    /// The parameters are still your saved ones ("Your last settings · Reset").
+    var lastSettingsShown: Bool {
+        guard !isTerminal, !touchedRuntimes.contains(draft.runtime),
+              let saved = F.savedOptions(savedDefaults, runtime: draft.runtime, providers: providers) else { return false }
+        return F.sameOptions(draft.agentOptions, saved)
+    }
+
+    /// Back to the runtime's defaults for this form (the repo's, for a pod Task).
+    func resetLastSettings() {
+        touchedRuntimes.insert(draft.runtime)
+        edit { $0.agentOptions = [:] }
+    }
+
+    /// A provider that can't run here any more (new host, pod vs machine) goes back to Default.
+    private func dropUnusableProvider() {
+        guard let p = pickedProvider else { return }
+        let usable = F.usableProviders(providers, runtime: draft.runtime).contains { $0.id == p.id }
+        if !usable || F.providerDisabled(p, draft, host: host) != nil {
+            draft = F.pickProvider(draft, nil)
+        }
+    }
+
+    func setProvider(_ p: ModelProvider?) {
+        touchedRuntimes.insert(draft.runtime)
+        let wasMine = draft.owner == .me
+        edit { d in d = F.pickProvider(d, p) }
+        ownerNote = (!wasMine && draft.owner == .me && !isLocal) ? "Runs as you now — \(p?.name ?? "this provider") is yours." : nil
+    }
+
+    func setOwner(_ owner: ResourceOwner) {
+        ownerNote = nil
+        edit { d in d = F.setOwner(d, owner, providers: providers, secrets: pickable) }
+    }
+
+    func addSecret(_ name: String) {
+        edit { d in if !d.podSecrets.contains(name) { d.podSecrets.append(name) } }
+    }
+
+    func removeSecret(_ name: String) {
+        edit { d in d.podSecrets.removeAll { $0 == name } }
+    }
+
+    /// Store a new secret (`scope: "user"` for Just me) and pick it.
+    func createSecret(name: String, value: String, owner: ResourceOwner) async -> Bool {
+        do {
+            _ = try await api.upsertSecret(name: name, value: value, scope: owner == .me ? "user" : "global")
+            if let list = try? await api.listPickableSecrets() { pickable = list }
+            else { pickable.append(PickableSecret(name: name, owner: owner == .me ? .me : .workspace)) }
+            if owner == .me, draft.owner == .workspace, !isLocal { setOwner(.me) }
+            addSecret(name)
+            return true
+        } catch {
+            self.error = "Couldn't save the secret: \(ErrorText.humanize(error))"
+            return false
+        }
     }
 
     func applyPreset(_ id: String) {
@@ -90,7 +169,10 @@ final class WorkFormState {
         draft = F.normalize(p.apply(draft))
         preset = id
         adoptHostIfNeeded()
+        // A chip that leaves the options blank starts from your saved settings.
+        if draft.agentOptions.isEmpty { startFromSavedOptions() }
         seedOptionsIfNeeded()
+        dropUnusableProvider()
     }
 
     func setWhen(_ w: F.WhenType) {
@@ -162,6 +244,7 @@ final class WorkFormState {
     }
 
     func setOption(_ key: String, _ value: F.OptionValue) {
+        touchedRuntimes.insert(draft.runtime)
         edit { $0.agentOptions[key] = value }
     }
 
@@ -184,7 +267,10 @@ final class WorkFormState {
             d.repoId = first.id
             d.repoUrl = first.repoUrl
             d.repoBranch = first.defaultBranch
-            d.agentOptions = F.optionsFromRepo(runtime: d.runtime, repo: first.raw, keys: optionKeys(for: d.runtime))
+            // (or keeps your saved settings, when those were applied first).
+            if d.agentOptions.isEmpty {
+                d.agentOptions = F.optionsFromRepo(runtime: d.runtime, repo: first.raw, keys: optionKeys(for: d.runtime))
+            }
             draft = d
         }
     }
@@ -199,9 +285,34 @@ final class WorkFormState {
         async let t = try? api.listPromptTemplates()
         async let x = try? api.listTasks(limit: 100)
         async let c = try? api.sessionCount()
+        async let pr = try? api.listModelProviders()
+        async let ps = try? api.listPickableSecrets()
+        async let me = try? api.get("/api/auth/me", as: MeRole.self)
+        async let wd = try? api.getWorkDefaults()
+        providers = await pr ?? []
+        applySavedDefaults(await wd ?? WorkFormDefaults())
+        pickable = await ps ?? []
+        if let me = await me { isAdmin = me.authDisabled == true || (me.user.workspaceRole ?? me.user.role) == "admin" }
         templates = await t ?? []
         existingTasks = await x ?? []
         sessionCount = await c
+    }
+
+    /// A blank New work form starts from your last settings — once, and only
+    /// while it is still the untouched first example (not anything you've
+    /// changed). Another example chip keeps its runtime but takes that
+    /// runtime's saved options when it leaves them blank.
+    func applySavedDefaults(_ defaults: WorkFormDefaults) {
+        savedDefaults = defaults
+        guard let preset else { return }
+        if preset == F.presets[0].id {
+            draft = F.applyDefaults(draft, defaults, providers: providers)
+        } else if draft.agentOptions.isEmpty {
+            // Another chip picked before the settings loaded: fill its blank options.
+            startFromSavedOptions()
+        }
+        adoptHostIfNeeded()
+        dropUnusableProvider()
     }
 
     /// Fetch the catalog for the current runtime (once per provider).
@@ -210,7 +321,26 @@ final class WorkFormState {
         catalogs.load(F.provider(for: draft.runtime), api: api)
     }
 
+    private struct MeRole: Decodable {
+        struct User: Decodable { var role: String?; var workspaceRole: String? }
+        var user: User
+        var authDisabled: Bool?
+    }
+
     // MARK: Derived
+
+    /// Providers that serve the runtime and you may use; empty hides the Provider row.
+    var usableProviders: [ModelProvider] { F.usableProviders(providers, runtime: draft.runtime) }
+    var pickedProvider: ModelProvider? {
+        guard let id = F.modelProviderId(draft) else { return nil }
+        return providers.first { $0.id == id }
+    }
+    /// The picked provider's models for this runtime (nil = the normal catalog).
+    var providerModels: [ModelProviderModel]? {
+        guard let p = pickedProvider, let agent = F.providerAgent(draft.runtime) else { return nil }
+        return F.providerModels(p, agent: agent)
+    }
+    var takesPodAccess: Bool { F.takesPodAccess(draft) }
 
     var isLocal: Bool { F.isLocal(draft) }
     var kind: F.Kind { F.deriveKind(draft) }
@@ -237,6 +367,9 @@ final class WorkFormState {
     var modelLabel: String {
         guard !isTerminal else { return "" }
         let raw = draft.agentOptions[catalog?.modelField ?? F.modelField(forRuntime: draft.runtime)]?.stringValue ?? ""
+        if let models = providerModels {
+            return raw.isEmpty ? "" : (models.first { $0.id == raw }?.label ?? raw)
+        }
         let id = F.resolveModel(raw, aliases: catalog?.aliases)
         guard !id.isEmpty else { return "" }
         return catalog?.models.first { $0.id == id }?.label ?? id
@@ -251,7 +384,7 @@ final class WorkFormState {
     var summaryWho: String {
         if isTerminal { return "Terminal" }
         let m = modelLabel
-        return F.runtimeLabel(draft.runtime) + (m.isEmpty ? "" : " · \(m)")
+        return F.runtimeLabel(draft.runtime) + (m.isEmpty ? "" : " · \(m)") + (pickedProvider == nil ? "" : " · Bedrock")
     }
     var summaryThen: String {
         switch draft.then {
@@ -350,7 +483,13 @@ final class WorkFormState {
         submitting = true
         defer { submitting = false }
         do {
-            return try await WorkFormSubmitter(api: api).create(draft, repoUrl: effectiveRepoUrl, autoName: autoName, catalog: catalog)
+            let created = try await WorkFormSubmitter(api: api).create(draft, repoUrl: effectiveRepoUrl, autoName: autoName, catalog: catalog, providers: providers)
+            // Remember what you picked for next time (never blocks or fails the submit).
+            if let body = F.workDefaults(from: draft) {
+                let api = api
+                Task { try? await api.putWorkDefaults(body) }
+            }
+            return created
         } catch {
             self.error = "Couldn't create it: \(ErrorText.humanize(error))"
             return nil
