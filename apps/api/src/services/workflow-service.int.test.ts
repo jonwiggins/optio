@@ -536,6 +536,27 @@ describe("retryWorkflowRun / cancelWorkflowRun", () => {
     });
   });
 
+  it("a retried run's heartbeat starts at its claim, not the last attempt's activity", async () => {
+    const wf = await insertWorkflow();
+    const hourAgo = new Date(Date.now() - 60 * 60_000);
+    // The previous attempt went quiet an hour ago; this attempt was just claimed.
+    const run = await insertWorkflowRun(wf.id, {
+      state: "running",
+      startedAt: new Date(),
+      lastActivityAt: hourAgo,
+    });
+    const snapshot = await buildWorldSnapshot({ kind: "standalone", id: run.id });
+    expect(snapshot!.heartbeat.isStale).toBe(false);
+
+    const quiet = await insertWorkflowRun(wf.id, {
+      state: "running",
+      startedAt: hourAgo,
+      lastActivityAt: hourAgo,
+    });
+    const stale = await buildWorldSnapshot({ kind: "standalone", id: quiet.id });
+    expect(stale!.heartbeat.isStale).toBe(true);
+  });
+
   it("cancel never lowers a retryCount already above the workflow's maxRetries", async () => {
     const wf = await insertWorkflow({ maxRetries: 1 });
     const run = await insertWorkflowRun(wf.id, { state: "running", retryCount: 4 });

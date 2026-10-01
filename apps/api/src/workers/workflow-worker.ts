@@ -9,7 +9,8 @@ import { getAdapter } from "@optio/agent-adapters";
 import { getEventParser } from "../services/event-parsers.js";
 import { db } from "../db/client.js";
 import { workflowRuns } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { updatedAtMatches } from "../utils/pg-timestamp.js";
 import * as workflowService from "../services/workflow-service.js";
 import { transitionWorkflowRunCas } from "../services/workflow-service.js";
 import * as workflowPool from "../services/workflow-pool-service.js";
@@ -179,11 +180,14 @@ export function startWorkflowWorker() {
 
           // Claim: transition to running. CAS — a second worker holding the
           // same run (a reconcile re-enqueue) loses here instead of running it twice.
+          // The claim is the attempt's first sign of life: a retried run must
+          // not be judged stalled by the previous attempt's last activity.
+          const now = new Date();
           return transitionWorkflowRunCas(
             workflowRunId,
             WorkflowRunState.QUEUED,
             WorkflowRunState.RUNNING,
-            { startedAt: new Date() },
+            { startedAt: now, lastActivityAt: now },
           );
         });
 
@@ -198,6 +202,12 @@ export function startWorkflowWorker() {
         }
         // This attempt — every later write is conditional on still owning it.
         attemptStartedAt = claimed.startedAt!;
+        const attempt = attemptStartedAt;
+        const thisAttempt = () =>
+          and(
+            eq(workflowRuns.id, workflowRunId),
+            updatedAtMatches(workflowRuns.startedAt, attempt),
+          );
         log.info("Workflow run claimed, provisioning pod");
 
         // ── Render prompt ─────────────────────────────────────────────
@@ -206,16 +216,11 @@ export function startWorkflowWorker() {
           run.params as Record<string, unknown> | null,
         );
         // What this attempt runs (the Job is read live, so it can differ per
-        // attempt), and its first sign of life for stall detection. Not a
-        // state change: the reconciler's version is left alone.
+        // attempt). Not a state change: the reconciler's version is left alone.
         await db
           .update(workflowRuns)
-          .set({
-            prompt: renderedPrompt,
-            agentType: workflow.agentRuntime,
-            lastActivityAt: new Date(),
-          })
-          .where(eq(workflowRuns.id, workflowRunId));
+          .set({ prompt: renderedPrompt, agentType: workflow.agentRuntime })
+          .where(thisAttempt());
 
         // ── Resolve secrets ───────────────────────────────────────────
         const workspaceId = workflow.workspaceId ?? null;
@@ -403,12 +408,10 @@ export function startWorkflowWorker() {
         })().catch(() => {});
 
         // Signs of life, written at most every ACTIVITY_FLUSH_MS.
+        // Only this attempt's: a zombie earlier attempt still streaming must
+        // not keep a stalled retry looking alive.
         const activity = activityFlusher(
-          (at) =>
-            db
-              .update(workflowRuns)
-              .set({ lastActivityAt: at })
-              .where(eq(workflowRuns.id, workflowRunId)),
+          (at) => db.update(workflowRuns).set({ lastActivityAt: at }).where(thisAttempt()),
           ACTIVITY_FLUSH_MS,
         );
 

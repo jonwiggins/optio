@@ -184,6 +184,13 @@ async function buildRepoSnapshot(ref: RunRef): Promise<WorldSnapshot | null> {
   return Object.freeze(snapshot);
 }
 
+/** The later of two times (either may be missing). */
+function latest(a: Date | null | undefined, b: Date | null | undefined): Date | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return a.getTime() >= b.getTime() ? a : b;
+}
+
 /** The review triggers the reconciler acts on; anything else ("manual") launches none. */
 function reviewTriggerOf(trigger: string | null | undefined): "on_pr" | "on_ci_pass" | null {
   return trigger === "on_pr" || trigger === "on_ci_pass" ? trigger : null;
@@ -439,7 +446,7 @@ async function buildStandaloneSnapshot(ref: RunRef): Promise<WorldSnapshot | nul
   // in for it). Local runs are exempt: the daemon owns liveness and
   // interactive sessions idle by design.
   const heartbeat = computeHeartbeat(
-    row.lastActivityAt ?? row.startedAt ?? null,
+    latest(row.lastActivityAt, row.startedAt),
     row.state === WorkflowRunState.RUNNING && workflowRow.runTarget !== "local",
     stallThresholdMs,
     now,

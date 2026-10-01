@@ -463,9 +463,11 @@ export function projectWork(src: WorkSources): WorkRow[] {
     ...src.tasks.map((t) => taskRow(t, at)),
     ...src.jobRuns.map(({ run, job }) => jobRunRow(run, job, at)),
     ...src.definitions.map((d) => definitionRow(d, at)),
-    // A local Task run already has its `tasks` row; a local Job run and
-    // hand-opened terminals only exist here.
-    ...src.localTerminals.filter((t) => !t.taskId).map((t) => terminalRow(t, at)),
+    // A terminal running a Task or a Job run is that run, which has its own
+    // row above; hand-opened terminals and automation spawns only exist here.
+    ...src.localTerminals
+      .filter((t) => !t.taskId && !t.workflowRunId)
+      .map((t) => terminalRow(t, at)),
     ...src.podSessions.map(podSessionRow),
     ...src.agents.map(agentRow),
   ]);
@@ -521,10 +523,31 @@ export async function resolveWork(id: string, scope: WorkScope): Promise<Resolve
       : null;
   }
 
+  const run = await workflowService.getWorkflowRun(id);
+  if (run) {
+    const job = await definitions.getDefinition(run.workflowId, "standalone");
+    if (!job || !inWorkspace(job)) return null;
+    return found(
+      "standalone",
+      run,
+      jobRunRow(
+        run,
+        job,
+        await at([], triggerIdsOf({ tasks: [], localTerminals: [], jobRuns: [{ run, job }] })),
+      ),
+    );
+  }
+
   const terminal = await terminalService.getTerminal(id);
   if (terminal) {
-    // A terminal that executes a task is that task's run, not work of its own.
-    if (terminal.taskId || !terminalService.canAccessTerminal(terminal, scope.userId)) return null;
+    // A terminal that executes a task or a Job run is that run, not work of its own.
+    if (
+      terminal.taskId ||
+      terminal.workflowRunId ||
+      !terminalService.canAccessTerminal(terminal, scope.userId)
+    ) {
+      return null;
+    }
     const ctx = await at([], triggerIdsOf({ tasks: [], localTerminals: [terminal] }));
     return found("local-terminal", terminal, terminalRow(terminal, ctx));
   }

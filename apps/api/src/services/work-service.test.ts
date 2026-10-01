@@ -314,4 +314,57 @@ describe("projectWork — Job runs and what started them", () => {
       { type: "ticket", source: "linear" },
     ]);
   });
+
+  it("lists a local Job run once — its terminal is the run, not work of its own", () => {
+    const job = {
+      id: "j1",
+      kind: "standalone",
+      name: "Report",
+      agentType: "claude-code",
+      runTarget: "local",
+      localHostId: "h1",
+      localDir: "/Users/dev/notes",
+      enabled: true,
+      createdAt: new Date("2026-09-01T00:00:00Z"),
+      updatedAt: new Date("2026-09-01T00:00:00Z"),
+    } as unknown as WorkSources["definitions"][number];
+    const rows = projectWork(
+      sources({
+        definitions: [job],
+        jobRuns: [
+          {
+            job,
+            run: {
+              id: "r1",
+              workflowId: "j1",
+              triggerId: null,
+              title: null,
+              state: "running",
+              errorMessage: null,
+              createdAt: new Date("2026-09-02T00:00:00Z"),
+              updatedAt: new Date("2026-09-02T01:00:00Z"),
+            } as unknown as WorkSources["jobRuns"][number]["run"],
+          },
+        ],
+        localTerminals: [
+          {
+            id: "lt-run",
+            title: "Report",
+            state: "running",
+            attentionState: "working",
+            hostId: "h1",
+            dir: "/Users/dev/notes",
+            spec: { kind: "agent", agent: "claude-code" },
+            spawnedBy: "job",
+            taskId: null,
+            workflowRunId: "r1",
+            updatedAt: new Date("2026-09-02T01:00:00Z"),
+          },
+        ] as unknown as WorkSources["localTerminals"],
+      }),
+    );
+    expect(rows.filter((r) => r.source !== "standalone" || r.key.startsWith("job-run-"))).toEqual([
+      expect.objectContaining({ key: "job-run-r1" }),
+    ]);
+  });
 });

@@ -18,6 +18,7 @@ import {
   insertTask,
   insertTaskConfig,
   insertWorkflow,
+  insertWorkflowRun,
   insertWorkspace,
 } from "../test-utils/integration/fixtures.js";
 import { listWork, resolveWork } from "./work-service.js";
@@ -141,6 +142,15 @@ describe("resolveWork", () => {
     expect((await resolveWork(me.blueprint.id, scope))?.source).toBe("local-blueprint");
     expect((await resolveWork(me.terminal.id, scope))?.source).toBe("local-terminal");
     expect((await resolveWork(me.session.id, scope))?.source).toBe("pod-session");
+    // A Job run is a row of the Work list too, so its id resolves.
+    const run = await insertWorkflowRun(job.id, { state: "completed" });
+    expect(await resolveWork(run.id, scope)).toMatchObject({
+      source: "standalone",
+      row: { key: `job-run-${run.id}`, href: `/jobs/${job.id}/runs/${run.id}`, spawned: true },
+    });
+    const foreignJob = await insertWorkflow({ workspaceId: other.id });
+    const foreignRun = await insertWorkflowRun(foreignJob.id);
+    expect(await resolveWork(foreignRun.id, scope)).toBeNull();
 
     expect(await resolveWork(foreign.id, scope)).toBeNull();
     expect(await resolveWork(teammate.terminal.id, scope)).toBeNull();
