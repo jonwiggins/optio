@@ -21,21 +21,27 @@ import {
 import { pgIso } from "../utils/pg-timestamp.js";
 
 // Every row that can carry AI spend, normalised to the `tasks` cost columns so
-// the /costs queries below read one source:
+// the /costs queries below read one source, plus the page each row opens:
 //   - `tasks`: Repo Task runs (cluster and local — a local Task's terminal folds
 //     its usage into the task row via syncLinkedRun)
 //   - `workflow_runs`: Job runs (same folding for local Jobs)
 //   - `local_terminals`: ad-hoc / blueprint local sessions that are not linked
 //     to a task or run. Linked terminals are excluded so cost is never counted
 //     twice. Their working directory stands in for repo_url.
+//   - `persistent_agent_turns`: each turn of a persistent agent (the agent's
+//     running total is the sum of these, so only the turns are counted)
+//   - `pr_review_runs`: runs of an external PR review
+//   - `interactive_sessions`: a pod session's chat spend
 const costRows = sql`(
   SELECT id, title, repo_url, task_type, state::text AS state, cost_usd, model_used,
-    input_tokens, output_tokens, created_at, workspace_id
+    input_tokens, output_tokens, created_at, workspace_id,
+    '/tasks/' || id AS href
   FROM tasks
   UNION ALL
-  SELECT r.id, w.name AS title, 'job:' || w.name AS repo_url, 'job' AS task_type,
-    r.state, r.cost_usd, r.model_used, r.input_tokens, r.output_tokens,
-    r.created_at, w.workspace_id
+  SELECT r.id, COALESCE(r.title, w.name) AS title, 'job:' || w.name AS repo_url,
+    'job' AS task_type, r.state, r.cost_usd, r.model_used, r.input_tokens, r.output_tokens,
+    r.created_at, w.workspace_id,
+    '/jobs/' || w.id || '/runs/' || r.id AS href
   FROM workflow_runs r
   JOIN workflows w ON w.id = r.workflow_id
   UNION ALL
@@ -49,10 +55,38 @@ const costRows = sql`(
     usage->>'model' AS model_used,
     (usage->>'inputTokens')::integer AS input_tokens,
     (usage->>'outputTokens')::integer AS output_tokens,
-    created_at, workspace_id
+    created_at, workspace_id,
+    '/local/' || id AS href
   FROM local_terminals
   WHERE task_id IS NULL AND workflow_run_id IS NULL
     AND usage->>'costUsd' IS NOT NULL
+  UNION ALL
+  SELECT t.id, a.name || ' · turn ' || t.turn_number AS title, 'agent:' || a.slug AS repo_url,
+    'agent-turn' AS task_type,
+    CASE
+      WHEN t.finished_at IS NULL THEN 'running'
+      WHEN t.halt_reason IN ('error', 'cancelled') THEN 'failed'
+      ELSE 'completed'
+    END AS state,
+    t.cost_usd, a.model AS model_used, t.input_tokens, t.output_tokens,
+    t.created_at, a.workspace_id,
+    '/agents/' || a.id AS href
+  FROM persistent_agent_turns t
+  JOIN persistent_agents a ON a.id = t.agent_id
+  UNION ALL
+  SELECT r.id, 'Review ' || p.repo_owner || '/' || p.repo_name || '#' || p.pr_number AS title,
+    p.repo_url, 'pr-review' AS task_type, r.state::text AS state, r.cost_usd, r.model_used,
+    r.input_tokens, r.output_tokens, r.created_at, p.workspace_id,
+    '/reviews/' || p.id AS href
+  FROM pr_review_runs r
+  JOIN pr_reviews p ON p.id = r.pr_review_id
+  UNION ALL
+  SELECT id, COALESCE(title, branch) AS title, repo_url, 'pod-session' AS task_type,
+    CASE WHEN state = 'active' THEN 'running' ELSE 'completed' END AS state,
+    NULLIF(cost_usd, '') AS cost_usd, NULL AS model_used,
+    NULL::integer AS input_tokens, NULL::integer AS output_tokens, created_at, workspace_id,
+    '/sessions/' || id AS href
+  FROM interactive_sessions
 ) AS tasks`;
 
 const costsQuerySchema = z
@@ -263,6 +297,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         repo_avg_cost: string;
         cost_ratio: string;
         created_at: string;
+        href: string;
       }>(sql`
       WITH repo_avgs AS (
         SELECT
@@ -285,7 +320,8 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         COALESCE(tasks.model_used, 'unknown') AS model_used,
         ra.avg_cost::text AS repo_avg_cost,
         (CAST(tasks.cost_usd AS NUMERIC) / ra.avg_cost)::text AS cost_ratio,
-        tasks.created_at::text
+        tasks.created_at::text,
+        tasks.href
       FROM ${costRows}
       JOIN repo_avgs ra ON tasks.repo_url = ra.repo_url
       WHERE tasks.cost_usd IS NOT NULL
@@ -380,8 +416,9 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
         output_tokens: string;
         model_used: string;
         created_at: string;
+        href: string;
       }>(sql`
-      SELECT id, title, repo_url, task_type, state, cost_usd,
+      SELECT id, title, repo_url, task_type, state, cost_usd, href,
         COALESCE(input_tokens, 0)::text AS input_tokens,
         COALESCE(output_tokens, 0)::text AS output_tokens,
         COALESCE(model_used, 'unknown') AS model_used,
@@ -455,6 +492,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
           repoAvgCost: parseFloat(r.repo_avg_cost) || 0,
           costRatio: parseFloat(r.cost_ratio) || 0,
           createdAt: pgIso(r.created_at),
+          href: r.href,
         })),
         modelSuggestions: modelSuggestions.map((r) => ({
           repoUrl: r.repo_url,
@@ -474,6 +512,7 @@ export async function analyticsRoutes(rawApp: FastifyInstance) {
           outputTokens: parseInt(r.output_tokens) || 0,
           modelUsed: r.model_used,
           createdAt: pgIso(r.created_at),
+          href: r.href,
         })),
       });
     },

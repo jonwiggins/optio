@@ -162,6 +162,9 @@ interface MigratedRoute {
 }
 
 const MIGRATED_ROUTES: MigratedRoute[] = [
+  // Work — the one resource for every kind of work
+  { method: "get", path: "/api/work" },
+  { method: "get", path: "/api/work/{id}" },
   // Phase 1 — tasks.ts (14 routes)
   { method: "get", path: "/api/tasks" },
   { method: "get", path: "/api/tasks/stats" },
@@ -419,8 +422,9 @@ describe("OpenAPI spec — migrated routes are fully documented", () => {
   it("migrated routes count matches the sum of completed phases", () => {
     // Removed 14 routes (8 schedule + 6 task-template) that were redundant
     // with agent workflows. 183 - 14 = 169. Then added 2 CodeCommit setup
-    // routes (validate/aws-credentials and repos/codecommit) → 171.
-    expect(MIGRATED_ROUTES).toHaveLength(171);
+    // routes (validate/aws-credentials and repos/codecommit) → 171. Then the
+    // Work resource's list + detail → 173.
+    expect(MIGRATED_ROUTES).toHaveLength(173);
   });
 
   it("components.schemas contains the Task domain types", () => {

@@ -4,7 +4,13 @@
  * Bearer token to the real API — the session token never touches client-side JS.
  */
 
-import type { LocalTranscriptEntry, TriggerType } from "@optio/shared";
+import type {
+  LocalTranscriptEntry,
+  TriggerType,
+  WorkRow,
+  WorkSource,
+  WorkView,
+} from "@optio/shared";
 
 /** Read the current workspace ID from localStorage (set by workspace switcher). */
 function getWorkspaceId(): string | null {
@@ -661,6 +667,8 @@ export const api = {
         repoAvgCost: number;
         costRatio: number;
         createdAt: string;
+        /** The page the row opens (a task, a Job run, a session, an agent, a review). */
+        href: string;
       }>;
       modelSuggestions: Array<{
         repoUrl: string;
@@ -680,6 +688,7 @@ export const api = {
         outputTokens: number;
         modelUsed: string;
         createdAt: string;
+        href: string;
       }>;
     }>(`/api/analytics/costs${query ? `?${query}` : ""}`);
   },
@@ -1553,6 +1562,14 @@ export const api = {
    * existing enriched shape (back-compat). With a `type`, returns the
    * requested kind tagged with a `type` field per row.
    */
+  /** The Work list: every kind of work the caller can see, needs-you first. */
+  listWork: (opts?: { view?: WorkView }) =>
+    request<{ rows: WorkRow[] }>(`/api/work${opts?.view ? `?view=${opts.view}` : ""}`),
+
+  /** Any piece of work by id, whatever its kind. */
+  getWork: (id: string) =>
+    request<{ source: WorkSource; row: WorkRow; work: Record<string, any> }>(`/api/work/${id}`),
+
   listTasksUnified: (opts?: {
     type?: "repo-task" | "repo-blueprint" | "standalone" | "all";
     state?: string;

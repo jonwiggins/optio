@@ -54,7 +54,7 @@ Each branch of `submit.ts` calls the same service the dedicated form for that ki
 
 ## The Work feed
 
-`/work` merges every kind into one list (`apps/web/src/lib/work-feed.ts`). Each row is projected onto the same shape — When, Where, Who, Then, and a **status** on one scale:
+`/work` shows every kind in one list, built server-side by `GET /api/work` (`apps/api/src/services/work-service.ts`; the row vocabulary — `WorkRow`, `inView`, `countWork` — lives in `@optio/shared`). Each row is projected onto the same shape — When, Where, Who, Then, and a **status** on one scale:
 
 | Status      | Meaning                                                             |
 | ----------- | ------------------------------------------------------------------- |
@@ -69,7 +69,7 @@ Each branch of `submit.ts` calls the same service the dedicated form for that ki
 
 Views: **Active** (`needs_you` / `running` / `queued` / `waiting`), **Recurring** (definitions that spawn runs), **Agents** (persistent agents), **History** (`done` / `failed`). Rows sort needs-you first, then live, then by recency. The Overview's board and the iOS app's Work tab consume the same projection.
 
-Today the feed is a client-side merge of the per-kind endpoints (unified tasks, local terminals + automations, pod sessions, persistent agents). A server-side `/api/work` read model can replace `collectWork` without touching the pages.
+The server scopes each kind the way its own endpoint does — workspace rows by workspace, a person's machines and pod sessions by person — and `GET /api/work/:id` resolves an id of any kind. The iOS and Android apps still merge the per-kind endpoints client-side: they also talk to self-hosted servers older than `/api/work`, and every endpoint they read keeps its shape.
 
 ## Surfaces
 
@@ -155,6 +155,6 @@ The other kinds have their own resources: `/api/local/*` (hosts, terminals, blue
 | Persistent agents      | `services/persistent-agent-service.ts`, `workers/persistent-agent-worker.ts`                                           | `routes/persistent-agents.ts`, `routes/persistent-agent-internal.ts`          |
 | Triggers               | `services/trigger-service.ts`, `trigger-dispatch.ts`, `event-trigger-service.ts`, `workers/workflow-trigger-worker.ts` | trigger sub-routes of the above, `routes/hooks.ts`, `routes/event-ingress.ts` |
 | Templates              | `services/prompt-template-service.ts`                                                                                  | `routes/prompt-templates.ts`                                                  |
-| Work feed (web)        | `apps/web/src/lib/work-feed.ts`, `components/work-form/`                                                               | `/work`, `/work/new`, `/work/:id/edit`                                        |
+| Work list / resolver   | `services/work-service.ts` (rows), `@optio/shared` `work/feed.ts` (vocabulary), web `components/work-form/`            | `routes/work.ts` (`/api/work`); web `/work`, `/work/new`, `/work/:id/edit`    |
 
 State changes for every kind flow through the [reconciliation control plane](./reconciliation.md); local runs skip its capacity / stall / pod checks because the terminal is the source of truth.

@@ -365,7 +365,7 @@ export default function CostsPage() {
                 {anomalies.slice(0, 5).map((a) => (
                   <div key={a.id} className="flex items-center gap-2 text-xs">
                     <Link
-                      href={`/tasks/${a.id}`}
+                      href={a.href}
                       className="text-text hover:text-primary flex items-center gap-1"
                     >
                       {truncate(a.title, 40)}
@@ -616,7 +616,7 @@ export default function CostsPage() {
                           <AlertTriangle className="w-3.5 h-3.5 text-error shrink-0" />
                         )}
                         <Link
-                          href={`/tasks/${task.id}`}
+                          href={task.href}
                           className="text-text hover:text-primary flex items-center gap-1"
                         >
                           {truncate(task.title, 40)}

@@ -51,6 +51,7 @@ import { persistentAgentRoutes } from "./routes/persistent-agents.js";
 import { persistentAgentInternalRoutes } from "./routes/persistent-agent-internal.js";
 import { taskConfigRoutes } from "./routes/task-configs.js";
 import { tasksUnifiedRoutes } from "./routes/tasks-unified.js";
+import { workRoutes } from "./routes/work.js";
 import { sharedDirectoryRoutes } from "./routes/shared-directories.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { optioRoutes } from "./routes/optio.js";
@@ -311,6 +312,7 @@ export async function buildServer() {
   await app.register(persistentAgentInternalRoutes);
   await app.register(taskConfigRoutes);
   await app.register(tasksUnifiedRoutes);
+  await app.register(workRoutes);
   await app.register(sharedDirectoryRoutes);
   await app.register(notificationRoutes);
   await app.register(optioRoutes);

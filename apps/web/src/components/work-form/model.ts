@@ -1,4 +1,9 @@
-import { getProviderCatalog, providerForAgentType, toLocalAgentKind } from "@optio/shared";
+import {
+  getProviderCatalog,
+  providerForAgentType,
+  toLocalAgentKind,
+  type WorkThen,
+} from "@optio/shared";
 import type { TriggerConfig } from "@/components/trigger-selector";
 import type { AgentOptionsValues } from "@/components/agent-options-picker";
 import { CLUSTER_RUN_LOCATION, type RunLocationValue } from "@/components/run-location-picker";
@@ -26,7 +31,7 @@ import { CLUSTER_RUN_LOCATION, type RunLocationValue } from "@/components/run-lo
  * becomes an agent), never the other way round.
  */
 
-export type Then = "exits" | "until-merged" | "waits-for-me" | "waits-for-messages";
+export type Then = WorkThen;
 
 /** Then answers that are one headless run (or one per firing), not a session. */
 export const isOneShot = (then: Then): boolean => then === "exits" || then === "until-merged";
