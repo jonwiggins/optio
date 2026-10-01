@@ -1,33 +1,28 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ANSWERS, type AnswerKey } from "./answers";
 
 /**
  * The article's animation: five answers, recombined. Every few seconds a
  * different piece of real work is composed from the same five columns, and
- * the sentence the New work form would show updates with it. Hover (or
- * focus) pauses it; the dots pick one. With reduced motion it holds still.
+ * the sentence the New work form would show updates with it (each one is
+ * what `describe()` in apps/web/src/components/work-form/model.ts says for
+ * that draft). Hover (or focus) pauses it; the dots pick one. With reduced
+ * motion it holds still.
  */
 
-const ATTRIBUTES = [
-  { key: "when", label: "When", color: "#a78bfa" },
-  { key: "where", label: "Where", color: "#60a5fa" },
-  { key: "who", label: "Who", color: "#f0a040" },
-  { key: "env", label: "Environment", color: "#818cf8" },
-  { key: "then", label: "Then", color: "#34d399" },
-] as const;
-
-type Example = Record<(typeof ATTRIBUTES)[number]["key"], string> & { sentence: string };
+type Example = Record<AnswerKey, string> & { sentence: string };
 
 const EXAMPLES: Example[] = [
   {
     when: "Ticket labeled optio",
     where: "Pod · acme/web",
-    who: "Codex",
+    who: "OpenAI Codex",
     env: "+ Sentry, review on PR",
     then: "Works until merged",
     sentence:
-      "Started by GitHub tickets, a Codex run in an Optio pod with acme/web that opens a PR and keeps working on it until it merges.",
+      "Started by GitHub tickets, an OpenAI Codex run in an Optio pod with acme/web that opens a PR and keeps working on it until it merges.",
   },
   {
     when: "Weekdays 09:00",
@@ -58,10 +53,11 @@ const EXAMPLES: Example[] = [
   {
     when: "Slack mention",
     where: "Pod · no repo",
-    who: "Gemini",
+    who: "Google Gemini",
     env: "+ Linear, Postgres",
     then: "Exits",
-    sentence: "Started by Slack events, a Gemini run in an Optio pod that exits when done.",
+    sentence:
+      "Started by Slack messages, a Google Gemini run in an Optio pod that exits when done.",
   },
 ];
 
@@ -78,7 +74,6 @@ export function WorkComposer() {
     return () => clearInterval(timer);
   }, [paused]);
 
-  const example = EXAMPLES[index];
   return (
     <figure
       className="rounded-2xl border border-border bg-bg-card p-5 sm:p-7"
@@ -89,49 +84,68 @@ export function WorkComposer() {
       aria-label="Five answers compose a piece of work"
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {ATTRIBUTES.map((a, i) => (
+        {ANSWERS.map((a, i) => (
           <div key={a.key} className="min-w-0">
             <div
               className="text-[11px] font-semibold uppercase tracking-wider"
               style={{ color: a.color }}
             >
-              {a.label}
+              {a.name}
             </div>
-            <div
-              // Re-keyed per example so each answer slides in fresh, staggered.
-              key={`${index}-${a.key}`}
-              className="composer-chip mt-2 flex min-h-[3.4rem] items-center rounded-lg border px-3 py-2 text-[13px] leading-snug text-text-heading"
-              style={{
-                borderColor: `${a.color}55`,
-                background: `${a.color}14`,
-                animationDelay: `${i * 90}ms`,
-              }}
-            >
-              {example[a.key]}
+            {/* Every example's answer sits in the same grid cell, so the chip is
+                as tall as the longest at any width and never jumps; only the
+                current one shows, re-keyed so it slides in fresh, staggered. */}
+            <div className="mt-2 grid">
+              {EXAMPLES.map((e, j) => (
+                <div
+                  key={`${j}-${j === index}`}
+                  aria-hidden={j === index ? undefined : true}
+                  className={`${j === index ? "composer-chip" : "invisible"} col-start-1 row-start-1 flex min-h-[3.4rem] items-center rounded-lg border px-3 py-2 text-[13px] leading-snug text-text-heading`}
+                  style={{
+                    borderColor: `${a.color}55`,
+                    background: `${a.color}14`,
+                    animationDelay: `${i * 90}ms`,
+                  }}
+                >
+                  {e[a.key]}
+                </div>
+              ))}
             </div>
           </div>
         ))}
       </div>
-      <figcaption
-        key={`s-${index}`}
-        className="composer-sentence mt-5 min-h-[4.6rem] rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-[14px] leading-6 text-primary-light"
-      >
-        {example.sentence}
-      </figcaption>
-      <div className="mt-4 flex items-center justify-center gap-2">
-        {EXAMPLES.map((_, i) => (
+      {/* The sentences share one cell too: the box holds the longest. */}
+      <div className="mt-5 grid">
+        {EXAMPLES.map((e, j) => (
+          <p
+            key={`${j}-${j === index}`}
+            aria-hidden={j === index ? undefined : true}
+            className={`${j === index ? "composer-sentence" : "invisible"} col-start-1 row-start-1 rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-[14px] leading-6 text-primary-light`}
+          >
+            {e.sentence}
+          </p>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center justify-center gap-1">
+        {EXAMPLES.map((e, i) => (
           <button
             key={i}
             type="button"
-            aria-label={`Example ${i + 1}`}
+            aria-label={`Show example ${i + 1}: ${e.when}, ${e.who}`}
             aria-pressed={i === index}
             onClick={() => setIndex(i)}
-            className="h-1.5 rounded-full transition-all"
-            style={{
-              width: i === index ? 22 : 8,
-              background: i === index ? "var(--color-primary-light)" : "var(--color-border-strong)",
-            }}
-          />
+            // A 24px-tall hit area (wider for the current one) around the pill.
+            className="flex h-6 items-center justify-center rounded-full"
+            style={{ width: i === index ? 34 : 24 }}
+          >
+            <span
+              className="block h-1.5 rounded-full transition-all"
+              style={{
+                width: i === index ? 22 : 8,
+                background: i === index ? "var(--color-primary-light)" : "var(--color-text-muted)",
+              }}
+            />
+          </button>
         ))}
       </div>
     </figure>

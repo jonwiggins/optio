@@ -2,52 +2,71 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { WorkComposer } from "@/components/platform/work-composer";
 import { WorkDiagram } from "@/components/platform/work-diagram";
+import { ANSWERS } from "@/components/platform/answers";
 
 export const metadata: Metadata = {
   title: "One noun: Work — Optio's approach to an AI platform",
   description:
-    "Optio composes AI work from five answers — When, Where, Who, Environment, and Then — and any answer combines with any other. One model of work in the backend, on the web, and on your phone.",
+    "Optio composes AI work from a prompt and five answers — When, Where, Who, Environment, and Then — and nearly any answer combines with any other. One model of work in the backend, on the web, and on your phone.",
 };
 
-const ANSWERS = [
-  {
-    name: "When",
-    color: "#a78bfa",
-    text: "now, a cron, a webhook, a ticket, a GitHub, Slack, or Linear event, or a message from a person or another agent.",
-  },
-  {
-    name: "Where",
-    color: "#60a5fa",
-    text: "an isolated pod, with one of your repos or none, or a directory on your own machine.",
-  },
-  {
-    name: "Who",
-    color: "#f0a040",
-    text: "Claude Code, Codex, Copilot, Gemini, Cursor, OpenCode, or a plain shell command.",
-  },
-  {
-    name: "Environment",
-    color: "#818cf8",
-    text: "the repo's MCP servers, connections, skills, secrets, and setup as defaults — each piece of work adds or removes.",
-  },
-  {
-    name: "Then",
-    color: "#34d399",
-    text: "exit when done, work the PR until it merges, wait for you, or stay on as an agent with memory.",
-  },
-];
-
-function Shot({ src, alt, caption }: { src: string; alt: string; caption: string }) {
+function Shot({
+  src,
+  alt,
+  caption,
+  width,
+  height,
+}: {
+  src: string;
+  alt: string;
+  caption: string;
+  width: number;
+  height: number;
+}) {
   return (
     <figure className="my-10">
       <img
         src={src}
         alt={alt}
+        width={width}
+        height={height}
         loading="lazy"
-        className="w-full rounded-xl border border-border shadow-2xl shadow-black/40"
+        className="h-auto w-full rounded-xl border border-border shadow-2xl shadow-black/40"
       />
       <figcaption className="mt-3 text-center text-[13px] text-text-muted">{caption}</figcaption>
     </figure>
+  );
+}
+
+/** A phone widget on a soft, home-screen-like backdrop, the same for both platforms. */
+function Widget({
+  src,
+  alt,
+  width,
+  height,
+}: {
+  src: string;
+  alt: string;
+  width: number;
+  height: number;
+}) {
+  return (
+    <div
+      className="flex items-center justify-center rounded-2xl border border-border p-4 sm:p-5"
+      style={{
+        background:
+          "linear-gradient(140deg, rgba(109, 40, 217, 0.22), rgba(96, 165, 250, 0.12)), var(--color-bg-card)",
+      }}
+    >
+      <img
+        src={src}
+        alt={alt}
+        width={width}
+        height={height}
+        loading="lazy"
+        className="h-auto w-full"
+      />
+    </div>
   );
 }
 
@@ -63,8 +82,9 @@ export default function PlatformArticle() {
         </h1>
         <p className="mt-6 text-lg leading-8 text-text-muted">
           Most agent tools ship features: a PR bot, a cron runner, a chat window. Optio ships a
-          grammar. Every piece of work is five answers, and any answer combines with any other — so
-          a new trigger starts everything, and a new runtime runs everywhere.
+          grammar. Every piece of work is a prompt plus five answers, and nearly any answer combines
+          with any other — a new trigger starts every kind of saved work, and a new runtime runs
+          Tasks, Jobs, and agents alike.
         </p>
 
         <div className="mt-10">
@@ -74,7 +94,7 @@ export default function PlatformArticle() {
         <h2 className="mt-16 text-2xl font-bold tracking-tight text-text-heading">Five answers</h2>
         <ul className="mt-6 space-y-3">
           {ANSWERS.map((a) => (
-            <li key={a.name} className="flex gap-3 leading-7 text-text">
+            <li key={a.key} className="flex gap-3 leading-7 text-text">
               <span
                 className="mt-2.5 h-2 w-2 shrink-0 rounded-full"
                 style={{ background: a.color }}
@@ -86,25 +106,29 @@ export default function PlatformArticle() {
           ))}
         </ul>
         <p className="mt-6 leading-7 text-text-muted">
-          What stays apart is only what doesn&apos;t make sense: following a PR to merge needs an
-          agent and a repo, and a persistent agent lives where it can always be reached.
+          What stays apart is what doesn&apos;t make sense: following a PR to merge needs an agent
+          and a repo, a persistent agent lives in a pod, and a pod terminal is one you open
+          yourself.
         </p>
 
         <h2 className="mt-16 text-2xl font-bold tracking-tight text-text-heading">
           One model, all the way down
         </h2>
         <p className="mt-4 leading-7 text-text-muted">
-          The answers aren&apos;t a form laid over separate products. The backend stores every saved
-          definition in one table and every run in another, fires every trigger through one
-          dispatcher, and builds every agent&apos;s environment the same way. One{" "}
-          <code className="font-mono text-[13px] text-text">/api/work</code> serves the web, the
-          mobile apps, and the CLI. A capability lands once, and the matrix stays full.
+          The answers aren&apos;t a form over separate products. The backend keeps saved Tasks,
+          Jobs, and automations in one table and Task and Job runs in another, fires every trigger
+          through one dispatcher, and builds every Task&apos;s, Job&apos;s, review&apos;s, and
+          agent&apos;s pod environment one way. The web reads it all through{" "}
+          <code className="font-mono text-[13px] text-text">/api/work</code>; the iOS and Android
+          apps and the CLI read the same rows. A capability lands once, and the matrix stays full.
         </p>
         <div className="mt-8">
           <WorkDiagram />
         </div>
         <Shot
           src="/screenshots/work-environment.webp"
+          width={1436}
+          height={1668}
           alt="The Where section of the New work form with Environment open: connections, MCP servers, and skills toggled, setup commands, and code review set for this work."
           caption="Where → Environment: the repo's settings are the defaults; this work turns a server off, adds a connection, and asks for a review."
         />
@@ -114,22 +138,22 @@ export default function PlatformArticle() {
         </h2>
         <p className="mt-4 leading-7 text-text-muted">
           Agents work for hours; they need you for seconds. The iOS and Android apps carry the same
-          Work list, with push notifications, widgets, and a Live Activity that surface the moment
-          an agent asks to be allowed, answered, or merged — so you can check in from anywhere,
-          without being tied to a laptop.
+          Work list, with notifications, home-screen widgets, and a live status (a Live Activity on
+          iPhone, an ongoing notification on Android). When an agent asks to be allowed, answered,
+          or merged, you check in from wherever you are — no computer needed.
         </p>
-        <div className="my-10 grid items-center gap-4 sm:grid-cols-[3fr_2fr]">
-          <img
+        <div className="my-10 grid items-stretch gap-4 sm:grid-cols-2">
+          <Widget
             src="/screenshots/mobile-ios-widget.webp"
+            width={676}
+            height={316}
             alt="The iOS widget: 3 need you, 2 working — Vesper is quiet, api wants a reply, web asks to allow a command."
-            loading="lazy"
-            className="w-full rounded-2xl"
           />
-          <img
+          <Widget
             src="/screenshots/mobile-android-widget.webp"
+            width={477}
+            height={223}
             alt="The Android widget: 2 need you, 2 running, with counts for waiting, recurring, and agents."
-            loading="lazy"
-            className="w-full rounded-2xl bg-white p-3"
           />
         </div>
 
@@ -138,13 +162,15 @@ export default function PlatformArticle() {
         </h2>
         <p className="mt-4 leading-7 text-text-muted">
           Work belongs to the organization or to one person. Organization work runs on shared
-          secrets, model providers, and connections, and anyone in the workspace can run it.
-          Personal work runs with your own credentials: the team sees it, only you change it. Roles
-          keep viewers read-only, and every kind of work sits in one list.
+          secrets, model providers, and connections, and any member can run it. Personal work runs
+          with your own credentials: the team sees it; only you change or run it. Viewers stay
+          read-only.
         </p>
         <Shot
           src="/screenshots/work-list.webp"
-          alt="The Work list: persistent agents, a Task with an open PR, scheduled Jobs including a shell command, and finished runs — one status scale."
+          width={1536}
+          height={1189}
+          alt="The Work list: Tasks with open PRs, two persistent agents, a scheduled Task and Jobs started by a ticket, Slack, and schedules — one a shell command — and finished runs, on one status scale."
           caption="One list for agents, PRs, schedules, commands, and runs."
         />
 
