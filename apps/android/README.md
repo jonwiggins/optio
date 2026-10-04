@@ -729,6 +729,20 @@ The hub side uses `rememberHubController()`, provides it through `LocalHubContro
   other than Overview returns to Overview. The router's state survives rotation and process death.
   `handle(url)` / `handle(DeepLink)` route `optio://` links (details push onto the Work tab).
 
+### Organization and private scope (`dev.optio.core.ui.scope`)
+
+Every scoped row (secrets, connections, model providers, work) carries `ownerUserId`: null is the
+**organization's**, set is someone's **private** one — visible to its owner, read-only to a
+workspace admin (`docs/plans/org-scoping-and-sso.md`). One helper file holds the vocabulary so
+screens never re-type it: `Scope.viewer` (a `ScopeViewer` from `LocalCurrentUser`; null id on an
+auth-disabled server, so nothing looks like someone else's), `scopeSections(rows, viewer) { it.ownerUserId }`
+(the **Organization / Private / Other people's** sections every list draws, Other people's only when
+there are any), `PrivateTag` (the compact **Private** / **Private · Name** chip where scopes mix,
+e.g. Work rows), `OwnerPicker` (the **Organization / Private** radio rows every create form shows,
+Organization disabled with its reason for non-admins), and the copy helpers `privateHint`,
+`organizationNeedsAdmin`, `othersReadOnly`. Say **Organization / Private**, never "global", "mine"
+or "just me", in UI copy.
+
 ### Tests
 
 - Use JUnit 4 with `kotlin.test` assertions, `kotlinx-coroutines-test` and Turbine.

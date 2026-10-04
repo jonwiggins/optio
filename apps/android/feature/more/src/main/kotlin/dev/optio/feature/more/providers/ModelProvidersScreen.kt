@@ -51,6 +51,13 @@ import dev.optio.core.ui.components.EmptyState
 import dev.optio.core.ui.components.InsetDivider
 import dev.optio.core.ui.components.readableWidth
 import dev.optio.core.ui.components.rememberConfirmState
+import dev.optio.core.ui.scope.OwnerChoice
+import dev.optio.core.ui.scope.OwnerPicker
+import dev.optio.core.ui.scope.OwnerScope
+import dev.optio.core.ui.scope.Scope
+import dev.optio.core.ui.scope.ScopeViewer
+import dev.optio.core.ui.scope.privateHint
+import dev.optio.core.ui.scope.scopeSections
 import dev.optio.core.ui.state.LoadState
 import dev.optio.core.ui.state.Loadable
 import dev.optio.core.ui.theme.OptioTheme
@@ -104,7 +111,10 @@ fun ModelProvidersScreen() {
     }
 }
 
-/** The list, stateless. */
+/**
+ * The list, stateless, sectioned by scope: Organization / Private / Other people's (an admin's
+ * list carries other members' private providers by name; they open read-only, `canEdit` false).
+ */
 @Composable
 fun ModelProvidersContent(
     state: LoadState<List<ModelProvider>>,
@@ -113,6 +123,7 @@ fun ModelProvidersContent(
     onEdit: (ModelProvider) -> Unit,
     onDelete: (ModelProvider) -> Unit,
     modifier: Modifier = Modifier,
+    viewer: ScopeViewer = Scope.viewer,
 ) {
     val confirm = rememberConfirmState()
     Loadable(state = state, onRetry = onRetry, what = "model providers", contentPadding = contentPadding, modifier = modifier) { providers ->
@@ -126,18 +137,28 @@ fun ModelProvidersContent(
                     )
                 }
             } else {
-                groupedItem("providers", footer = "Credentials are encrypted on the server and never shown again. Work picks a provider in its agent parameters.") {
-                    providers.forEachIndexed { index, p ->
-                        if (index > 0) InsetDivider()
-                        ProviderItem(
-                            provider = p,
-                            onClick = { onEdit(p) },
-                            onDelete = {
-                                confirm.ask(title = "Delete ${p.name}?", message = "Work that picks it can't run until it picks another provider.", confirmLabel = "Delete", destructive = true) {
-                                    onDelete(p)
-                                }
-                            },
-                        )
+                scopeSections(providers, viewer) { it.ownerUserId }.forEach { section ->
+                    groupedItem("providers-${section.scope.name.lowercase()}", header = section.scope.label, footer = sectionFooter(section.scope)) {
+                        if (section.rows.isEmpty()) {
+                            Text(
+                                if (section.scope == OwnerScope.PRIVATE) privateHint("model providers") else "Nothing shared with the organization yet.",
+                                style = OptioTheme.type.footnote,
+                                color = OptioTheme.colors.secondaryLabel,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.m),
+                            )
+                        }
+                        section.rows.forEachIndexed { index, p ->
+                            if (index > 0) InsetDivider()
+                            ProviderItem(
+                                provider = p,
+                                onClick = { onEdit(p) },
+                                onDelete = {
+                                    confirm.ask(title = "Delete ${p.name}?", message = "Work that picks it can't run until it picks another provider.", confirmLabel = "Delete", destructive = true) {
+                                        onDelete(p)
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -147,7 +168,13 @@ fun ModelProvidersContent(
     ConfirmHost(confirm)
 }
 
-/** "Bedrock · Organization · Claude Code, Codex · us-west-2 · Pods: access key". */
+private fun sectionFooter(scope: OwnerScope): String? = when (scope) {
+    OwnerScope.ORGANIZATION -> "Credentials are encrypted on the server and never shown again. Work picks a provider in its agent parameters."
+    OwnerScope.PRIVATE -> "Only your own work can pick a private provider; picking one makes the work private."
+    OwnerScope.OTHERS -> "Read-only: these run with their owners' credentials."
+}
+
+/** "Bedrock · Organization · Claude Code, Codex · us-west-2 · Pods: access key" ("Private" / "Private · Name" for someone's). */
 internal fun providerSummary(p: ModelProvider): String = listOf(
     "Bedrock",
     p.ownerLabel,
@@ -246,15 +273,14 @@ private fun Field(
 fun ModelProviderEditor(draft: ModelProviderDraft, allowOrganization: Boolean, onChange: (ModelProviderDraft) -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
         Field(draft.name, { onChange(draft.copy(name = it)) }, "Name", "provider-name", placeholder = "Bedrock")
-        Caption("Owner")
-        ChipPicker(
-            options = if (allowOrganization || draft.owner == ResourceOwner.WORKSPACE) {
-                listOf(ResourceOwner.WORKSPACE to "Organization", ResourceOwner.ME to "Just me")
-            } else {
-                listOf(ResourceOwner.ME to "Just me")
-            },
-            selection = draft.owner,
-            onSelect = { if (allowOrganization || it == ResourceOwner.ME) onChange(draft.copy(owner = it)) },
+        OwnerPicker(
+            value = if (draft.owner == ResourceOwner.WORKSPACE) OwnerChoice.ORGANIZATION else OwnerChoice.PRIVATE,
+            onChange = { onChange(draft.copy(owner = if (it == OwnerChoice.ORGANIZATION) ResourceOwner.WORKSPACE else ResourceOwner.ME)) },
+            what = "provider",
+            // A saved organization provider keeps its owner even when a member opens it (the server decides).
+            canOrganization = allowOrganization || draft.owner == ResourceOwner.WORKSPACE,
+            organizationHint = "Every member can pick it for the organization's work.",
+            privateHint = "Only your own work can pick it, and picking it makes that work private. Admins see that it exists.",
         )
         Caption("Agents")
         PROVIDER_AGENTS.forEach { agent ->

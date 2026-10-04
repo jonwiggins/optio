@@ -81,7 +81,7 @@ class WorkFormState(
     /** Runtimes whose options the user changed (or reset): last settings never overwrite them. */
     private val touchedRuntimes = mutableSetOf<String>()
 
-    /** The owner became Just me because the last settings picked a personal provider. */
+    /** The owner became Private because the last settings picked a private provider. */
     private var ownerFromRemembered = false
 
     /** The parameters came from your last settings (the "Your last settings · Reset" hint). */
@@ -139,7 +139,7 @@ class WorkFormState(
     var pickableSecrets: List<PickableSecret> by mutableStateOf(emptyList())
         private set
 
-    /** A one-line note after the form changed the owner on its own ("Runs as Just me now"). */
+    /** A one-line note after the form changed the owner on its own ("Private now — …"). */
     var ownerNote: String? by mutableStateOf(null)
         private set
 
@@ -266,12 +266,12 @@ class WorkFormState(
         usingRemembered = false
     }
 
-    /** Picks a model provider (null = Default); a personal one on pod work switches the owner to Just me. */
+    /** Picks a model provider (null = Default); a private one on pod work switches the owner to Private. */
     fun setProvider(p: ModelProvider?) {
         touchOptions()
         val before = draft.owner
         update { withProvider(it, p, catalog?.modelField) }
-        ownerNote = if (before != draft.owner && draft.owner == WorkOwner.ME) "Runs as Just me now — ${p?.name} is your own provider." else null
+        ownerNote = if (before != draft.owner && draft.owner == WorkOwner.ME) "Private now — ${p?.name} is your own provider." else null
     }
 
     fun setOwner(owner: WorkOwner) {
@@ -294,8 +294,9 @@ class WorkFormState(
     fun removePodSecret(name: String) = update { d -> d.copy(podSecrets = d.podSecrets.orEmpty() - name) }
 
     /**
-     * "New secret…": creates it (`POST /api/secrets`, personal or org), reloads the pickable list
-     * and picks it. A personal one makes the work Just me. Returns false (with [error]) on failure.
+     * "New secret…": creates it (`POST /api/secrets`, private or the organization's), reloads the
+     * pickable list and picks it. A private one makes the work private. Returns false (with
+     * [error]) on failure.
      */
     suspend fun createSecret(name: String, value: String, personal: Boolean): Boolean {
         val n = name.trim()
@@ -306,7 +307,7 @@ class WorkFormState(
             pickableSecrets = attempt { api.listPickableSecrets() } ?: (pickableSecrets + PickableSecret(n, if (personal) PickableSecret.Owner.ME else PickableSecret.Owner.WORKSPACE))
             if (personal && draft.owner != WorkOwner.ME) {
                 update { it.copy(owner = WorkOwner.ME) }
-                ownerNote = "Runs as Just me now — $n is your own secret."
+                ownerNote = "Private now — $n is your own secret."
             }
             addPodSecret(n)
             true
@@ -578,7 +579,7 @@ class WorkFormState(
     val canSubmit: Boolean
         get() = !submitting && ready && readOnlyReason == null
 
-    /** Editing someone else's personal work: the form is read-only, and this says why. */
+    /** Editing someone else's private work (an admin's read-only view): this says why the form is read-only. */
     val readOnlyReason: String?
         get() = edit?.let { foreignOwnerReason(it.ownerUserId, me?.id, null) }
 
@@ -768,7 +769,7 @@ class WorkFormState(
         if (p != null && !p.isOrganization && !isLocal(next) && next.owner != WorkOwner.ME) {
             next = next.copy(owner = WorkOwner.ME)
             ownerFromRemembered = true
-            ownerNote = "Runs as Just me — your last settings use ${p.name}, your own provider."
+            ownerNote = "Private — your last settings use ${p.name}, your own provider."
         }
         draft = normalize(next)
         usingRemembered = true

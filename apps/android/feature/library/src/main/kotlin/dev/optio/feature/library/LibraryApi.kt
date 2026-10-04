@@ -418,7 +418,11 @@ private fun schemaDefaultText(value: JsonElement): String? = when {
     else -> value.toString()
 }
 
-/** A configured connection. `config` is deliberately not decoded: it may hold secret values. */
+/**
+ * A configured connection. `config` is deliberately not decoded: it may hold secret values.
+ * [ownerUserId] is null for the organization's and set for someone's private one (lists carry
+ * [ownerName] so an admin can tell whose).
+ */
 @Serializable
 data class ConnectionRow(
     val id: String,
@@ -426,6 +430,8 @@ data class ConnectionRow(
     val providerId: String? = null,
     val scope: String? = null,
     val repoUrl: String? = null,
+    val ownerUserId: String? = null,
+    val ownerName: String? = null,
     val enabled: Boolean? = null,
     val status: String? = null,
     val statusMessage: String? = null,
@@ -460,13 +466,17 @@ data class ConnectionAssignmentRow(
     val createdAt: String? = null,
 )
 
-/** Body of `POST /api/connections`. */
+/**
+ * Body of `POST /api/connections`. [owner] is `workspace` (the organization's; needs an admin) or
+ * `me` (the caller's private connection); null = the server's default (the organization's).
+ */
 @Serializable
 data class ConnectionCreateInput(
     val providerId: String,
     val name: String,
     val config: Map<String, String>,
     val assignments: List<ConnectionAssignmentInput>,
+    val owner: String? = null,
 )
 
 /** One assignment (inline on create, or `POST /api/connections/:id/assignments`). */

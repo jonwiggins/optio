@@ -70,7 +70,9 @@ object MoreSamples {
             SecretRow("s1", "ANTHROPIC_API_KEY", "global", createdAt = ago(60 * 24 * 12), updatedAt = ago(60 * 26)),
             SecretRow("s2", "GITHUB_TOKEN", "global", createdAt = ago(60 * 24 * 12)),
             SecretRow("s3", "SENTRY_AUTH_TOKEN", "https://github.com/e2e-org/e2e-repo", updatedAt = ago(55)),
-            SecretRow("s4", "LINEAR_API_KEY", "user", userId = "u-mia", updatedAt = ago(8)),
+            SecretRow("s4", "LINEAR_API_KEY", "user", userId = "u-mia", ownerUserId = "u-mia", ownerName = "Mia Member", updatedAt = ago(8)),
+            // Someone else's private secret: only an admin's list carries it, named with its owner.
+            SecretRow("s5", "NOTION_TOKEN", "user", userId = "u-ada", ownerUserId = "u-ada", ownerName = "Ada Admin", updatedAt = ago(60 * 3)),
         ),
         repos = listOf(RepoRef("r1", "https://github.com/e2e-org/e2e-repo", "e2e-org/e2e-repo"), RepoRef("r2", "https://github.com/e2e-org/mobile-app", "e2e-org/mobile-app")),
     )

@@ -362,4 +362,27 @@ class WorkFeedTest {
         assertEquals(true, row.autoResume)
         assertNull(OptioJson.decodeFromString(UnifiedRow.serializer(), """{"type":"repo-task","autoResume":null}""").autoResume)
     }
+
+    /** Private work (an `ownerUserId`) keeps its owner on the row, so the list can tag it; the organization's carries none. */
+    @Test
+    fun carriesTheOwnerOfPrivateWork() {
+        val rows = WorkFeed.collect(
+            Sources(
+                unified = listOf(
+                    UnifiedRow(type = "repo-task", id = "t1", title = "Mine", state = "running", repoUrl = "x", ownerUserId = "u-me"),
+                    UnifiedRow(type = "repo-blueprint", id = "b1", name = "Theirs", enabled = true, repoUrl = "x", ownerUserId = "u-ann", ownerName = "Ann"),
+                    UnifiedRow(type = "standalone", id = "j1", name = "Org", enabled = true, ownerUserId = ""),
+                ),
+                agents = listOf(AgentRow(id = "a1", slug = "bot", name = "Bot", state = "idle", ownerUserId = "u-me")),
+            ),
+        ).associateBy { it.key }
+        assertEquals("u-me", rows.getValue("task-t1").ownerUserId)
+        assertTrue(rows.getValue("task-t1").isPrivate)
+        assertEquals("Ann", rows.getValue("blueprint-b1").ownerName)
+        assertNull(rows.getValue("job-j1").ownerUserId, "an empty owner is the organization's")
+        assertFalse(rows.getValue("job-j1").isPrivate)
+        assertTrue(rows.getValue("agent-a1").isPrivate)
+        val decoded = OptioJson.decodeFromString(AgentRow.serializer(), """{"id":"a","ownerUserId":"u","ownerName":"Ann"}""")
+        assertEquals("Ann", decoded.ownerName)
+    }
 }

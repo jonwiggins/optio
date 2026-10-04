@@ -15,19 +15,35 @@ import kotlinx.serialization.json.buildJsonObject
 
 // region Secrets
 
-/** One secret: name and scope only. Values are write-only and never returned by the API. */
+/**
+ * One secret: name and scope only. Values are write-only and never returned by the API.
+ *
+ * [ownerUserId] is null for the organization's (a `global` or repo scope) and set for someone's
+ * private one (`scope: "user"`); lists carry [ownerName] so an admin can tell whose. Older servers
+ * send only [userId] on user-scoped rows, so [owner] reads either.
+ */
 @Serializable
 data class SecretRow(
     val id: String? = null,
     val name: String,
     val scope: String? = null,
     val userId: String? = null,
+    val ownerUserId: String? = null,
+    val ownerName: String? = null,
     val createdAt: String? = null,
     val updatedAt: String? = null,
 ) {
     /** Secrets are unique per (name, scope); some rows may lack an id (iOS `listId`). */
     val listId: String
         get() = id ?: "$name@${scope ?: SCOPE_GLOBAL}"
+
+    /** Who it belongs to: null = the organization's; set = that person's private secret. */
+    val owner: String?
+        get() = ownerUserId?.takeIf { it.isNotEmpty() } ?: userId?.takeIf { it.isNotEmpty() && scope == SCOPE_USER }
+
+    /** A private secret (`scope: "user"`), whoever's. */
+    val isPrivate: Boolean
+        get() = scope == SCOPE_USER || owner != null
 
     companion object {
         const val SCOPE_GLOBAL = "global"
@@ -365,11 +381,16 @@ suspend fun ApiClient.upsertSecret(
     scope: String,
 ): SecretCreateResult = post<SecretCreateResult>("/api/secrets", SecretBody(name, value, scope))
 
-/** `DELETE /api/secrets/:name?scope=` (the name is one path segment; OkHttp percent-encodes it). */
+/**
+ * `DELETE /api/secrets/:name?scope=` (the name is one path segment; OkHttp percent-encodes it).
+ * With `scope=user`, an admin names the owner of someone else's private secret in [userId]
+ * (offboarding); the server ignores it for anyone else.
+ */
 suspend fun ApiClient.deleteSecret(
     name: String,
     scope: String?,
-) = delete("/api/secrets/$name", mapOf("scope" to scope))
+    userId: String? = null,
+) = delete("/api/secrets/$name", mapOf("scope" to scope, "userId" to userId))
 
 suspend fun ApiClient.listRepoRefs(): List<RepoRef> = get<ReposEnvelope>("/api/repos").repos
 

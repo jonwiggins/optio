@@ -29,7 +29,6 @@ import dev.optio.feature.more.api.AuthProviders
 import dev.optio.feature.more.api.CreatedApiKey
 import dev.optio.feature.more.secrets.SecretForm
 import dev.optio.feature.more.secrets.SecretsContent
-import dev.optio.feature.more.secrets.secretScopes
 import dev.optio.feature.more.servers.ServerDraft
 import dev.optio.feature.more.servers.ServerEditContent
 import dev.optio.feature.more.servers.ServerProbe
@@ -312,10 +311,20 @@ class MoreScreenshotsTest : ScreenshotTest() {
 
     // region Admin
 
+    /** An admin's view: Organization, Private (theirs) and Other people's (Mia's) sections. */
     @Test
-    fun secrets() = captureScreens("More_Secrets") {
+    fun secrets() = captureScreens("More_Secrets", size = ScreenSize.TALL) {
         Detail("Secrets", actions = { AddAction() }) { padding ->
-            SecretsContent(LoadState.Loaded(MoreSamples.secrets), "all", isAdmin = true, contentPadding = padding, onFilter = {}, onRetry = {}, onDelete = {})
+            SecretsContent(LoadState.Loaded(MoreSamples.secrets), "all", isAdmin = true, contentPadding = padding, onFilter = {}, onRetry = {}, onDelete = {}, viewerId = "u-ada")
+        }
+    }
+
+    /** A member's view: their own private secret, and the organization's read-only. */
+    @Test
+    fun secretsMember() = captureScreens("More_Secrets_member", size = ScreenSize.TALL) {
+        Detail("Secrets", actions = { AddAction() }) { padding ->
+            val mine = MoreSamples.secrets.copy(secrets = MoreSamples.secrets.secrets.filter { it.owner != "u-ada" })
+            SecretsContent(LoadState.Loaded(mine), "all", isAdmin = false, contentPadding = padding, onFilter = {}, onRetry = {}, onDelete = {}, viewerId = "u-mia")
         }
     }
 
@@ -344,7 +353,8 @@ class MoreScreenshotsTest : ScreenshotTest() {
                 onValue = {},
                 scope = "https://github.com/e2e-org/e2e-repo",
                 onScope = {},
-                scopes = secretScopes(MoreSamples.secrets.repos, allowGlobal = true),
+                repos = MoreSamples.secrets.repos,
+                allowGlobal = true,
             )
         }
     }

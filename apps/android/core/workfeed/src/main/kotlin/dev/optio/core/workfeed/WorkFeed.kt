@@ -122,7 +122,18 @@ data class WorkRow(
      * its creation, so it doesn't move as its agent works. Null = [lastActivity].
      */
     val orderAt: String? = null,
+    /**
+     * Who the work belongs to: null = the organization's; set = someone's private work (visible
+     * to them, and read-only to admins — whose rows carry [ownerName]). A row wears a "Private"
+     * tag when set.
+     */
+    val ownerUserId: String? = null,
+    val ownerName: String? = null,
 ) {
+    /** Private work (someone's own), whoever's. */
+    val isPrivate: Boolean
+        get() = !ownerUserId.isNullOrEmpty()
+
     /** The detail screen this row opens (the web's `href`). */
     val destination: WorkDestination
         get() = when (source) {
@@ -190,6 +201,9 @@ object WorkFeed {
         val localHostId: String? = null,
         val localDir: String? = null,
         val metadata: JsonElement? = null,
+        /** Null = the organization's; set = someone's private work (`ownerName` when the list names them). */
+        val ownerUserId: String? = null,
+        val ownerName: String? = null,
         val createdAt: String? = null,
         val updatedAt: String? = null,
     ) {
@@ -272,6 +286,9 @@ object WorkFeed {
         val lastTurnAt: String? = null,
         val updatedAt: String? = null,
         val createdAt: String? = null,
+        /** Null = the organization's; set = someone's private agent. */
+        val ownerUserId: String? = null,
+        val ownerName: String? = null,
     )
 
     /** `GET /api/local/hosts` (only the name is needed here). */
@@ -494,6 +511,8 @@ object WorkFeed {
                         spawned = spawned,
                         origin = t.ticketSource?.takeIf { it.isNotEmpty() },
                         prState = t.prState,
+                        ownerUserId = t.ownerUserId?.takeIf { it.isNotEmpty() },
+                        ownerName = t.ownerName,
                     )
                 }
                 "repo-blueprint" -> {
@@ -515,6 +534,8 @@ object WorkFeed {
                         lastActivity = last,
                         recurring = true,
                         spawned = false,
+                        ownerUserId = t.ownerUserId?.takeIf { it.isNotEmpty() },
+                        ownerName = t.ownerName,
                     )
                 }
                 "standalone" -> {
@@ -536,6 +557,8 @@ object WorkFeed {
                         lastActivity = last,
                         recurring = true,
                         spawned = false,
+                        ownerUserId = t.ownerUserId?.takeIf { it.isNotEmpty() },
+                        ownerName = t.ownerName,
                     )
                 }
                 else -> Unit
@@ -641,6 +664,8 @@ object WorkFeed {
                 lastActivity = a.lastTurnAt ?: a.updatedAt ?: a.createdAt,
                 recurring = false,
                 spawned = false,
+                ownerUserId = a.ownerUserId?.takeIf { it.isNotEmpty() },
+                ownerName = a.ownerName,
             )
         }
 

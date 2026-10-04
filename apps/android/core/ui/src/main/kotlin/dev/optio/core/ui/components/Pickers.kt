@@ -40,6 +40,8 @@ fun <T> ChipPicker(
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(horizontal = Spacing.l, vertical = Spacing.s),
+    /** The test-tag prefix of each chip (`<tagPrefix>-<label>`); a second picker on one screen takes its own. */
+    tagPrefix: String = "chip",
 ) {
     val colors = OptioTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -76,7 +78,7 @@ fun <T> ChipPicker(
                     selectedLabelColor = colors.page,
                 ),
                 border = null,
-                modifier = Modifier.bringIntoViewRequester(requester).testTag("chip-$label"),
+                modifier = Modifier.bringIntoViewRequester(requester).testTag("$tagPrefix-$label"),
             )
         }
     }

@@ -42,6 +42,8 @@
       "workspaceId": null,
       "slug": "release-captain",
       "name": "Release Captain",
+      "ownerUserId": "u-mia",
+      "ownerName": "Mia Member",
       "description": "Coordinates releases and answers questions about what is blocking them",
       "agentRuntime": "claude-code",
       "model": null,

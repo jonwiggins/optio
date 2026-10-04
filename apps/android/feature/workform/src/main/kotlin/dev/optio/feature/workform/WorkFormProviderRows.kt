@@ -42,8 +42,8 @@ import dev.optio.core.ui.form.MenuDivider
 import dev.optio.core.ui.form.RowDivider
 
 // The Who card's provider / owner / secrets rows (contract "Work form"): the Provider control
-// (hidden when no provider serves the runtime, so the form looks as before), "Runs as" for pod
-// work, and the secrets the agent's pod gets.
+// (hidden when no provider serves the runtime, so the form looks as before), "Owner" for pod
+// work (Organization / Private), and the secrets the agent's pod gets.
 
 /** Up to this many providers the control is a segmented row; more become a menu. */
 private const val SEGMENTED_MAX = 2
@@ -73,7 +73,7 @@ internal fun ProviderRows(state: WorkFormState) {
                 MenuChoice(
                     p.name,
                     selected = p.id == pickedId,
-                    subtitle = reason ?: if (p.isOrganization) "Organization · ${p.region}" else "Just me · ${p.region}",
+                    subtitle = reason ?: if (p.isOrganization) "Organization · ${p.region}" else "Private · ${p.region}",
                     enabled = reason == null || p.id == pickedId,
                     onClick = { state.setProvider(p) },
                 )
@@ -86,13 +86,19 @@ internal fun ProviderRows(state: WorkFormState) {
     RowDivider()
 }
 
-/** "Runs as": Organization / Just me (pod work only). */
+/** The private work's helper sentence (web `PRIVATE_WORK_HINT`). */
+internal const val PRIVATE_WORK_HINT = "Runs with your own secrets, model providers and connections. Only you see it; admins see that it exists."
+
+/** The organization's (web `ORG_WORK_HINT`). */
+internal const val ORG_WORK_HINT = "Uses the organization's secrets, providers and connections. Everyone in the workspace sees it."
+
+/** "Owner": Organization / Private (pod work only). */
 @Composable
 internal fun OwnerRows(state: WorkFormState) {
     if (!state.showsOwner) return
     RowDivider()
     Text(
-        "Runs as",
+        "Owner",
         style = OptioTheme.type.footnote,
         color = OptioTheme.colors.secondaryLabel,
         modifier = Modifier.padding(start = Spacing.l, top = Spacing.s),
@@ -105,9 +111,9 @@ internal fun OwnerRows(state: WorkFormState) {
         modifier = Modifier.testTag("work-form-owner"),
     )
     if (state.draft.owner == WorkOwner.WORKSPACE) {
-        state.organizationDisabled?.let { CardNote(it) }
+        CardNote(state.organizationDisabled ?: ORG_WORK_HINT)
     } else {
-        CardNote("Runs with your own secrets, providers and connections. Everyone sees it; only you can change it.")
+        CardNote(PRIVATE_WORK_HINT)
     }
 }
 
@@ -214,7 +220,7 @@ private fun NewSecretSheet(
                     onSelect = { owner = it },
                 )
             } else {
-                Text("Saved as yours (Just me).", style = OptioTheme.type.footnote, color = OptioTheme.colors.secondaryLabel)
+                Text("Saved as private: only you see it, and only your work can use it.", style = OptioTheme.type.footnote, color = OptioTheme.colors.secondaryLabel)
             }
             Button(
                 onClick = { onCreate(name, value, owner == WorkOwner.ME || !allowOrganization) { ok -> if (ok) onDismiss() } },

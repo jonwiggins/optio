@@ -140,8 +140,8 @@ class WorkFormProvidersTest {
         assertEquals(listOf("GH" to PickableSecret.Owner.ME, "MINE" to PickableSecret.Owner.ME, "ORG" to PickableSecret.Owner.WORKSPACE), addableSecrets(mine, pickable).map { it.name to it.owner })
         assertEquals(listOf("MINE", "ORG"), addableSecrets(mine.copy(podSecrets = listOf("GH")), pickable).map { it.name })
         assertEquals("Organization", secretOwnerTag("GH", pod, pickable))
-        assertEquals("Just me", secretOwnerTag("GH", mine, pickable))
-        assertEquals("Just me", secretOwnerTag("MINE", pod, pickable))
+        assertEquals("Private", secretOwnerTag("GH", mine, pickable))
+        assertEquals("Private", secretOwnerTag("MINE", pod, pickable))
         assertTrue(organizationDisabled(mine.copy(podSecrets = listOf("MINE")), emptyList(), pickable)!!.startsWith("MINE is your own"))
         assertNull(organizationDisabled(mine.copy(podSecrets = listOf("GH")), emptyList(), pickable))
     }

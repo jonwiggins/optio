@@ -20,8 +20,13 @@ import dev.optio.feature.more.api.WorkspaceRow
 import dev.optio.feature.more.secrets.SecretsData
 import dev.optio.feature.more.secrets.normalizeSecrets
 import dev.optio.feature.more.secrets.saveNotice
+import dev.optio.feature.more.secrets.SecretsViewModel
+import dev.optio.feature.more.secrets.canDeleteSecret
+import dev.optio.feature.more.secrets.ownerChoiceOf
+import dev.optio.feature.more.secrets.repoScopes
 import dev.optio.feature.more.secrets.scopeFilters
-import dev.optio.feature.more.secrets.secretScopes
+import dev.optio.core.ui.scope.OwnerChoice
+import dev.optio.core.ui.scope.ScopeViewer
 import dev.optio.feature.more.servers.ServerDraft
 import dev.optio.feature.more.servers.ServerDraftSaver
 import dev.optio.feature.more.settings.AgentSettingsForm
@@ -90,26 +95,50 @@ class MoreLogicTest {
     @Test
     fun secretsNormalizeAndScopes() {
         val rows = listOf(
-            SecretRow(id = "1", name = "A", scope = "user"),
+            SecretRow(id = "1", name = "A", scope = "user", userId = "u-me"),
             SecretRow(id = "2", name = "B", scope = "https://github.com/o/r"),
-            SecretRow(id = "1", name = "A", scope = "user"),
+            SecretRow(id = "1", name = "A", scope = "user", userId = "u-me"),
             SecretRow(name = "C"),
         )
         assertEquals(listOf("A", "B", "C"), normalizeSecrets(rows, "all").map { it.name })
         assertEquals(listOf("C"), normalizeSecrets(rows, "global").map { it.name }, "a scope-less row is global")
+        assertEquals(listOf("B", "C"), normalizeSecrets(rows, SecretsViewModel.FILTER_ORGANIZATION).map { it.name }, "Organization = every scope but user")
         assertEquals(listOf("A"), normalizeSecrets(rows, "user").map { it.name })
         assertEquals("C@global", rows[3].listId)
 
         val repos = listOf(RepoRef("r1", "https://github.com/o/r", "o/r"), RepoRef("r2", null, "no-url"))
         val data = SecretsData(rows, repos)
-        assertEquals("Global", data.scopeLabel(null))
-        assertEquals("User-only", data.scopeLabel("user"))
+        assertEquals("All repos", data.scopeLabel(null))
+        assertEquals("Private", data.scopeLabel("user"))
         assertEquals("o/r", data.scopeLabel("https://github.com/o/r"))
         assertEquals("https://x/y", data.scopeLabel("https://x/y"))
 
-        assertEquals(listOf("all", "global", "user", "https://github.com/o/r"), scopeFilters(repos).map { it.first })
-        assertEquals(listOf("global", "user", "https://github.com/o/r"), secretScopes(repos, allowGlobal = true).map { it.first })
-        assertEquals(listOf("user"), secretScopes(repos, allowGlobal = false).map { it.first }, "members store only their own secrets")
+        assertEquals(listOf("all", "organization", "user", "https://github.com/o/r"), scopeFilters(repos).map { it.first })
+        assertEquals(listOf("All", "Organization", "Private", "o/r"), scopeFilters(repos).map { it.second })
+        assertEquals(listOf("global", "https://github.com/o/r"), repoScopes(repos).map { it.first })
+        assertEquals(OwnerChoice.PRIVATE, ownerChoiceOf("user"))
+        assertEquals(OwnerChoice.ORGANIZATION, ownerChoiceOf("global"))
+        assertEquals(OwnerChoice.ORGANIZATION, ownerChoiceOf("https://github.com/o/r"))
+    }
+
+    @Test
+    fun secretOwnersAndWhoMayDelete() {
+        val legacy = SecretRow(id = "1", name = "A", scope = "user", userId = "u-me")
+        val tagged = SecretRow(id = "2", name = "B", scope = "user", userId = "u-other", ownerUserId = "u-other", ownerName = "Ann")
+        val org = SecretRow(id = "3", name = "C", scope = "global", userId = "u-me")
+        assertEquals("u-me", legacy.owner, "older servers name the owner in userId")
+        assertEquals("u-other", tagged.owner)
+        assertNull(org.owner, "userId on a global row is who stored it, not an owner")
+        assertTrue(legacy.isPrivate)
+        assertFalse(org.isPrivate)
+
+        val me = ScopeViewer("u-me", isAdmin = false)
+        val admin = ScopeViewer("u-admin", isAdmin = true)
+        assertTrue(canDeleteSecret(legacy, me), "your own private secret")
+        assertFalse(canDeleteSecret(tagged, me), "someone else's is never yours to delete")
+        assertFalse(canDeleteSecret(org, me), "the organization's need an admin")
+        assertTrue(canDeleteSecret(tagged, admin), "admins delete other people's for offboarding")
+        assertTrue(canDeleteSecret(org, admin))
     }
 
     @Test

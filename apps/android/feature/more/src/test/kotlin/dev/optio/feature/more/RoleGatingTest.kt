@@ -85,18 +85,22 @@ class RoleGatingTest {
     fun secretsAdminAddsInEveryScope() {
         secretsScreen("admin")
         compose.onNodeWithTag("add-secret").performClick()
-        compose.onNodeWithTag("scope-global").assertIsDisplayed()
-        compose.onNodeWithTag("scope-user").assertIsDisplayed()
-        compose.onNodeWithTag("scope-https://github.com/e2e-org/e2e-repo").assertIsDisplayed()
+        compose.onNodeWithTag("owner-organization").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("owner-private").assertIsDisplayed()
+        // The organization's secret applies to all repos or one.
+        compose.onNodeWithTag("secret-scope-All repos").assertIsDisplayed()
+        compose.onNodeWithTag("secret-scope-e2e-org/e2e-repo").assertIsDisplayed()
     }
 
     @Test
     fun secretsMemberAddsOnlyTheirOwn() {
         secretsScreen("member")
         compose.onNodeWithTag("add-secret").performClick()
-        compose.onNodeWithTag("scope-user").assertIsDisplayed()
-        compose.onAllNodesWithTag("scope-global").assertCountEquals(0)
-        compose.onAllNodesWithTag("scope-https://github.com/e2e-org/e2e-repo").assertCountEquals(0)
+        compose.onNodeWithTag("owner-private").assertIsDisplayed()
+        // Organization stays visible, disabled with the reason: only an admin may make one.
+        compose.onNodeWithTag("owner-organization").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithText("Only an admin can make this secret the organization's.").assertIsDisplayed()
+        compose.onAllNodesWithTag("secret-scope-e2e-org/e2e-repo").assertCountEquals(0)
     }
 
     @Test
@@ -107,17 +111,23 @@ class RoleGatingTest {
 
     @Test
     fun secretsDeleteIsAdminOnlyExceptYourOwn() {
-        show { SecretsContent(LoadState.Loaded(MoreSamples.secrets), "all", isAdmin = false, contentPadding = PaddingValues(), onFilter = {}, onRetry = {}, onDelete = {}) }
+        show { SecretsContent(LoadState.Loaded(MoreSamples.secrets), "all", isAdmin = false, contentPadding = PaddingValues(), onFilter = {}, onRetry = {}, onDelete = {}, viewerId = "u-mia") }
         compose.onAllNodesWithTag("delete-ANTHROPIC_API_KEY").assertCountEquals(0)
         compose.onAllNodesWithTag("delete-SENTRY_AUTH_TOKEN").assertCountEquals(0)
         compose.onNodeWithTag("delete-LINEAR_API_KEY").assertIsDisplayed()
+        // Someone else's private secret is never a member's to delete.
+        compose.onAllNodesWithTag("delete-NOTION_TOKEN").assertCountEquals(0)
     }
 
     @Test
     fun secretsAdminDeletesAnything() {
-        show { SecretsContent(LoadState.Loaded(MoreSamples.secrets), "all", isAdmin = true, contentPadding = PaddingValues(), onFilter = {}, onRetry = {}, onDelete = {}) }
+        show { SecretsContent(LoadState.Loaded(MoreSamples.secrets), "all", isAdmin = true, contentPadding = PaddingValues(), onFilter = {}, onRetry = {}, onDelete = {}, viewerId = "u-ada") }
         compose.onNodeWithTag("delete-ANTHROPIC_API_KEY").assertIsDisplayed()
         compose.onNodeWithTag("delete-SENTRY_AUTH_TOKEN").assertIsDisplayed()
+        // Other people's private secrets: read-only but deletable (offboarding), under their own section.
+        compose.onNodeWithText("Other people's").assertIsDisplayed()
+        compose.onNodeWithText("Private · Mia Member", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag("delete-LINEAR_API_KEY").assertIsDisplayed()
     }
 
     @Test

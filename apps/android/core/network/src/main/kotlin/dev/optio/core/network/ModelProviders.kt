@@ -88,12 +88,12 @@ fun ModelProvider.serves(runtime: String): Boolean = agents.any { it.raw == runt
 val ModelProvider.isOrganization: Boolean
     get() = ownerUserId == null
 
-/** "Organization" / "Just me" / "<name>'s". */
+/** "Organization" / "Private" (yours) / "Private · <name>" (someone else's, as an admin sees it). */
 val ModelProvider.ownerLabel: String
     get() = when {
         isOrganization -> "Organization"
-        mine -> "Just me"
-        else -> ownerName?.let { "$it's" } ?: "Someone's"
+        mine -> "Private"
+        else -> "Private · ${ownerName ?: "someone"}"
     }
 
 /** "Pods: access key" etc. */

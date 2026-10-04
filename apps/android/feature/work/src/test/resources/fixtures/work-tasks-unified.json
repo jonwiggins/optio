@@ -581,6 +581,7 @@
       "type": "standalone",
       "id": "0d35390c-0ad5-4cb5-954a-5af54e4efeed",
       "name": "Triage Sentry alerts",
+      "ownerUserId": "user-1",
       "description": null,
       "workspaceId": null,
       "environmentSpec": null,

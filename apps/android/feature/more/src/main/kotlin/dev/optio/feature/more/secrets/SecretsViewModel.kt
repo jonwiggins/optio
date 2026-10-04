@@ -28,10 +28,14 @@ data class SecretsData(
     val secrets: List<SecretRow>,
     val repos: List<RepoRef>,
 ) {
-    /** iOS `SecretsModel.scopeLabel`: Global, User-only, or the repo's name. */
+    /**
+     * Where a secret applies (iOS `SecretsModel.scopeLabel`): the organization's reach every repo
+     * ("All repos") or one repo (its name); a private one is "Private" (the row's owner tag says
+     * whose when it isn't yours).
+     */
     fun scopeLabel(scope: String?): String = when (scope) {
-        null, SecretRow.SCOPE_GLOBAL -> "Global"
-        SecretRow.SCOPE_USER -> "User-only"
+        null, SecretRow.SCOPE_GLOBAL -> "All repos"
+        SecretRow.SCOPE_USER -> "Private"
         else -> repos.firstOrNull { it.repoUrl == scope }?.displayName ?: scope
     }
 }
@@ -46,7 +50,7 @@ class SecretsViewModel(private val api: ApiClient) : NoticeViewModel() {
 
     private val _scopeFilter = MutableStateFlow(FILTER_ALL)
 
-    /** "all", "global", "user" or a repo URL. */
+    /** [FILTER_ALL], [FILTER_ORGANIZATION], "global", "user" or a repo URL. */
     val scopeFilter: StateFlow<String> = _scopeFilter.asStateFlow()
 
     private val _saving = MutableStateFlow(false)
@@ -78,7 +82,8 @@ class SecretsViewModel(private val api: ApiClient) : NoticeViewModel() {
                         _state.value.value?.repos.orEmpty()
                     }
                 }
-                val secrets = api.listSecrets(if (filter == FILTER_ALL) null else filter)
+                // Organization (global + every repo) is filtered here; the server knows one scope at a time.
+                val secrets = api.listSecrets(if (filter == FILTER_ALL || filter == FILTER_ORGANIZATION) null else filter)
                 SecretsData(normalizeSecrets(secrets, filter), repos.await())
             }
         }
@@ -110,10 +115,17 @@ class SecretsViewModel(private val api: ApiClient) : NoticeViewModel() {
         }
     }
 
-    fun delete(secret: SecretRow) {
+    /**
+     * Deletes [secret]. An admin deleting someone else's private secret (offboarding) passes its
+     * owner as [ownerUserId]; your own and the organization's need nothing more.
+     */
+    fun delete(
+        secret: SecretRow,
+        ownerUserId: String? = null,
+    ) {
         viewModelScope.launch {
             try {
-                api.deleteSecret(secret.name, secret.scope)
+                api.deleteSecret(secret.name, secret.scope, userId = ownerUserId)
                 load()
             } catch (e: CancellationException) {
                 throw e
@@ -125,6 +137,9 @@ class SecretsViewModel(private val api: ApiClient) : NoticeViewModel() {
 
     companion object {
         const val FILTER_ALL = "all"
+
+        /** The organization's secrets: every scope but `user`. */
+        const val FILTER_ORGANIZATION = "organization"
     }
 }
 
@@ -138,7 +153,13 @@ internal fun normalizeSecrets(
     filter: String,
 ): List<SecretRow> = rows
     .distinctBy { it.listId }
-    .filter { filter == SecretsViewModel.FILTER_ALL || (it.scope ?: SecretRow.SCOPE_GLOBAL) == filter }
+    .filter {
+        when (filter) {
+            SecretsViewModel.FILTER_ALL -> true
+            SecretsViewModel.FILTER_ORGANIZATION -> !it.isPrivate
+            else -> (it.scope ?: SecretRow.SCOPE_GLOBAL) == filter
+        }
+    }
 
 /** iOS copy after a save: a failed validation still saved the value. */
 internal fun saveNotice(result: SecretCreateResult): Pair<String, Tone> {
