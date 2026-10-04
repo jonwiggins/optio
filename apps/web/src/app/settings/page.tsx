@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, type ReactNode } from "react";
+import { FORM_WIDTH } from "@/components/ui/page";
 import { usePageTitle } from "@/hooks/use-page-title";
 import { api } from "@/lib/api-client";
 import { NumberInput } from "@/components/number-input";
@@ -63,6 +64,7 @@ import {
   Tag,
   TemplateVars,
 } from "@/components/settings/settings-ui";
+import { inputClass } from "@/components/ui/input";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -945,7 +947,7 @@ function GlobalSkills() {
                         )
                       }
                       placeholder="reference.md or scripts/lint.sh"
-                      className="flex-1 px-2 py-1 rounded bg-bg-card border border-border text-xs font-mono focus:outline-none focus:border-primary"
+                      className={inputClass({ size: "sm", className: "flex-1 font-mono" })}
                     />
                     <button
                       type="button"
@@ -965,7 +967,7 @@ function GlobalSkills() {
                     }
                     rows={3}
                     placeholder="File contents"
-                    className="w-full px-2 py-1 rounded bg-bg-card border border-border text-xs font-mono focus:outline-none focus:border-primary resize-y"
+                    className={inputClass({ size: "sm", className: "font-mono resize-y" })}
                   />
                 </div>
               ))}
@@ -1500,7 +1502,7 @@ function OptioAgentSettings() {
             value={maxTurns}
             onChange={(v) => setMaxTurns(v)}
             fallback={25}
-            className="w-28 px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+            className={inputClass({ className: "w-28" })}
           />
         </Field>
       </div>
@@ -2013,13 +2015,13 @@ export default function SettingsPage() {
   usePageTitle("Settings");
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={SettingsIcon}
         title="Settings"
         description="Defaults for every agent, how people and clients sign in, and the integrations Optio injects into pods."
       />
-      <div className="space-y-8">
+      <div className={`${FORM_WIDTH} space-y-8`}>
         <Group title="Agents">
           <OptioAgentSettings />
           <PromptTemplateEditor />

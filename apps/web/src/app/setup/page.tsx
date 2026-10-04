@@ -25,6 +25,8 @@ import {
   ExternalLink,
   FileText,
 } from "lucide-react";
+import { Button, buttonClass } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 const STEPS = [
   { id: "welcome", label: "Welcome", icon: Zap },
@@ -864,13 +866,9 @@ export default function SetupPage() {
                 </div>
               </div>
               <div className="flex justify-end">
-                <button
-                  onClick={goNext}
-                  disabled={!runtimeHealthy}
-                  className="flex items-center gap-2 px-5 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50 transition-colors"
-                >
-                  Get Started <ArrowRight className="w-4 h-4" />
-                </button>
+                <Button onClick={goNext} disabled={!runtimeHealthy}>
+                  Get Started <ArrowRight />
+                </Button>
               </div>
             </div>
           )}
@@ -978,9 +976,9 @@ export default function SetupPage() {
                         href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Optio+Agent"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-bg-hover text-text text-sm hover:bg-border transition-colors"
+                        className={buttonClass({ variant: "secondary" })}
                       >
-                        <ExternalLink className="w-4 h-4" />
+                        <ExternalLink />
                         Create GitHub Personal Access Token
                       </a>
                       <div>
@@ -1004,7 +1002,7 @@ export default function SetupPage() {
                             }
                           }}
                           placeholder="ghp_..."
-                          className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                          className={inputClass()}
                         />
                       </div>
                       {githubError && (
@@ -1034,9 +1032,9 @@ export default function SetupPage() {
                     href={`https://${gitlabHost || "gitlab.com"}/-/user_settings/personal_access_tokens?name=Optio+Agent&scopes=api,read_user,read_repository,write_repository`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-bg-hover text-text text-sm hover:bg-border transition-colors"
+                    className={buttonClass({ variant: "secondary" })}
                   >
-                    <ExternalLink className="w-4 h-4" />
+                    <ExternalLink />
                     Create GitLab Personal Access Token
                   </a>
                   <div>
@@ -1053,7 +1051,7 @@ export default function SetupPage() {
                         setGitlabError("");
                       }}
                       placeholder="gitlab.com"
-                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                      className={inputClass()}
                     />
                   </div>
                   <div>
@@ -1077,7 +1075,7 @@ export default function SetupPage() {
                         }
                       }}
                       placeholder="glpat-..."
-                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                      className={inputClass()}
                     />
                   </div>
                   {gitlabError && (
@@ -1117,7 +1115,7 @@ export default function SetupPage() {
                         setAwsError("");
                       }}
                       placeholder="us-east-1"
-                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                      className={inputClass()}
                     />
                   </div>
                   <div>
@@ -1133,7 +1131,7 @@ export default function SetupPage() {
                         setAwsError("");
                       }}
                       placeholder="AKIA…"
-                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                      className={inputClass()}
                     />
                   </div>
                   <div>
@@ -1148,7 +1146,7 @@ export default function SetupPage() {
                         setAwsValidated(false);
                         setAwsError("");
                       }}
-                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                      className={inputClass()}
                     />
                   </div>
                   <div>
@@ -1164,7 +1162,7 @@ export default function SetupPage() {
                         setAwsValidated(false);
                         setAwsError("");
                       }}
-                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                      className={inputClass()}
                     />
                   </div>
                   {awsError && (
@@ -1184,33 +1182,31 @@ export default function SetupPage() {
               )}
 
               <div className="flex items-center justify-between">
-                <button
-                  onClick={goBack}
-                  className="flex items-center gap-2 px-4 py-2 rounded-md text-text-muted text-sm hover:bg-bg-hover"
-                >
-                  <ArrowLeft className="w-4 h-4" /> Back
-                </button>
+                <Button variant="ghost" onClick={goBack}>
+                  <ArrowLeft /> Back
+                </Button>
                 <div className="flex gap-2">
                   {githubEnabled && !githubAppConfigured && !githubValidated && (
-                    <button
+                    <Button
+                      variant="secondary"
                       onClick={() => validateGithub()}
                       disabled={loading || !githubToken.trim()}
-                      className="flex items-center gap-2 px-4 py-2 rounded-md bg-bg-hover text-text text-sm hover:bg-border disabled:opacity-50"
                     >
-                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Validate GitHub"}
-                    </button>
+                      {loading ? <Loader2 className="animate-spin" /> : "Validate GitHub"}
+                    </Button>
                   )}
                   {gitlabEnabled && !gitlabValidated && (
-                    <button
+                    <Button
+                      variant="secondary"
                       onClick={() => validateGitlab()}
                       disabled={loading || !gitlabToken.trim()}
-                      className="flex items-center gap-2 px-4 py-2 rounded-md bg-bg-hover text-text text-sm hover:bg-border disabled:opacity-50"
                     >
-                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Validate GitLab"}
-                    </button>
+                      {loading ? <Loader2 className="animate-spin" /> : "Validate GitLab"}
+                    </Button>
                   )}
                   {codecommitEnabled && !awsValidated && (
-                    <button
+                    <Button
+                      variant="secondary"
                       onClick={() => validateAws()}
                       disabled={
                         loading ||
@@ -1218,12 +1214,11 @@ export default function SetupPage() {
                         !awsSecretAccessKey.trim() ||
                         !awsRegion.trim()
                       }
-                      className="flex items-center gap-2 px-4 py-2 rounded-md bg-bg-hover text-text text-sm hover:bg-border disabled:opacity-50"
                     >
-                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Validate AWS"}
-                    </button>
+                      {loading ? <Loader2 className="animate-spin" /> : "Validate AWS"}
+                    </Button>
                   )}
-                  <button
+                  <Button
                     onClick={saveGitStep}
                     disabled={
                       loading ||
@@ -1232,16 +1227,15 @@ export default function SetupPage() {
                       (gitlabEnabled && !gitlabValidated) ||
                       (codecommitEnabled && !awsValidated)
                     }
-                    className="flex items-center gap-2 px-5 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"
                   >
                     {loading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="animate-spin" />
                     ) : (
                       <>
-                        Continue <ArrowRight className="w-4 h-4" />
+                        Continue <ArrowRight />
                       </>
                     )}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -1417,7 +1411,7 @@ export default function SetupPage() {
                                   value={oauthToken}
                                   onChange={(e) => setOauthToken(e.target.value)}
                                   placeholder="Paste token here"
-                                  className="w-full px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary font-mono"
+                                  className={inputClass({ className: "font-mono" })}
                                 />
                               </div>
                               {oauthToken.trim().length > 0 && (
@@ -1504,15 +1498,15 @@ export default function SetupPage() {
                                 }
                               }}
                               placeholder="sk-ant-..."
-                              className="flex-1 px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                              className={inputClass({ className: "flex-1 bg-bg-card" })}
                             />
-                            <button
+                            <Button
+                              variant="secondary"
                               onClick={() => validateAnthropic()}
                               disabled={loading || !anthropicKey.trim() || anthropicValidated}
-                              className="px-3 py-2 rounded-md bg-bg-hover text-sm hover:bg-border disabled:opacity-50"
                             >
-                              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Validate"}
-                            </button>
+                              {loading ? <Loader2 className="animate-spin" /> : "Validate"}
+                            </Button>
                           </div>
                           {anthropicError && (
                             <p className="text-error text-xs flex items-center gap-1">
@@ -1560,14 +1554,14 @@ export default function SetupPage() {
                             value={claudeVertexProject}
                             onChange={(e) => setClaudeVertexProject(e.target.value)}
                             placeholder="GCP Project ID (required)"
-                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                            className={inputClass({ className: "bg-bg-card" })}
                           />
                           <input
                             type="text"
                             value={claudeVertexRegion}
                             onChange={(e) => setClaudeVertexRegion(e.target.value)}
                             placeholder="Region (e.g. us-east5, global)"
-                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                            className={inputClass({ className: "bg-bg-card" })}
                           />
                           <div className="space-y-1">
                             <label className="text-xs text-text-muted">
@@ -1589,7 +1583,9 @@ export default function SetupPage() {
                               }}
                               placeholder='{"type":"service_account",...}'
                               rows={4}
-                              className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-xs font-mono focus:outline-none focus:border-primary resize-none"
+                              className={inputClass({
+                                className: "bg-bg-card text-xs font-mono resize-none",
+                              })}
                             />
                             {claudeVertexKeyError && (
                               <p className="text-error text-xs flex items-center gap-1">
@@ -1664,7 +1660,7 @@ export default function SetupPage() {
                                 }
                               }}
                               placeholder="ws://localhost:3900/v1/connect"
-                              className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary font-mono"
+                              className={inputClass({ className: "bg-bg-card font-mono" })}
                             />
                           </div>
                           {codexAppServerUrl.trim().length > 0 && (
@@ -1719,15 +1715,15 @@ export default function SetupPage() {
                                 }
                               }}
                               placeholder="sk-..."
-                              className="flex-1 px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                              className={inputClass({ className: "flex-1 bg-bg-card" })}
                             />
-                            <button
+                            <Button
+                              variant="secondary"
                               onClick={() => validateOpenai()}
                               disabled={loading || !openaiKey.trim() || openaiValidated}
-                              className="px-3 py-2 rounded-md bg-bg-hover text-sm hover:bg-border disabled:opacity-50"
                             >
-                              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Validate"}
-                            </button>
+                              {loading ? <Loader2 className="animate-spin" /> : "Validate"}
+                            </Button>
                           </div>
                           {openaiError && (
                             <p className="text-error text-xs flex items-center gap-1">
@@ -1783,15 +1779,15 @@ export default function SetupPage() {
                         }
                       }}
                       placeholder="github_pat_... or gho_..."
-                      className="flex-1 px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                      className={inputClass({ className: "flex-1 bg-bg-card" })}
                     />
-                    <button
+                    <Button
+                      variant="secondary"
                       onClick={() => validateCopilot()}
                       disabled={loading || !copilotToken.trim() || copilotValidated}
-                      className="px-3 py-2 rounded-md bg-bg-hover text-sm hover:bg-border disabled:opacity-50"
                     >
-                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Validate"}
-                    </button>
+                      {loading ? <Loader2 className="animate-spin" /> : "Validate"}
+                    </Button>
                   </div>
                   {copilotError && (
                     <p className="text-error text-xs flex items-center gap-1">
@@ -1890,14 +1886,14 @@ export default function SetupPage() {
                             value={opencodeBaseUrl}
                             onChange={(e) => setOpencodeBaseUrl(e.target.value)}
                             placeholder="https://your-inference-server/v1"
-                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                            className={inputClass({ className: "bg-bg-card" })}
                           />
                           <input
                             type="text"
                             value={opencodeDefaultModel}
                             onChange={(e) => setOpencodeDefaultModel(e.target.value)}
                             placeholder="Default model (optional, e.g. openai/gpt-oss-120b)"
-                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                            className={inputClass({ className: "bg-bg-card" })}
                           />
                           <p className="text-xs text-text-muted">
                             These become defaults for all repos. Each repo can override them in its
@@ -1971,19 +1967,15 @@ export default function SetupPage() {
                                   }
                                 }}
                                 placeholder="AIza..."
-                                className="flex-1 px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                                className={inputClass({ className: "flex-1 bg-bg-card" })}
                               />
-                              <button
+                              <Button
+                                variant="secondary"
                                 onClick={() => validateGemini()}
                                 disabled={loading || !geminiKey.trim() || geminiValidated}
-                                className="px-3 py-2 rounded-md bg-bg-hover text-sm hover:bg-border disabled:opacity-50"
                               >
-                                {loading ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  "Validate"
-                                )}
-                              </button>
+                                {loading ? <Loader2 className="animate-spin" /> : "Validate"}
+                              </Button>
                             </div>
                             {geminiError && (
                               <p className="text-error text-xs flex items-center gap-1">
@@ -2023,14 +2015,14 @@ export default function SetupPage() {
                               value={geminiVertexProject}
                               onChange={(e) => setGeminiVertexProject(e.target.value)}
                               placeholder="GCP Project ID"
-                              className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                              className={inputClass({ className: "bg-bg-card" })}
                             />
                             <input
                               type="text"
                               value={geminiVertexLocation}
                               onChange={(e) => setGeminiVertexLocation(e.target.value)}
                               placeholder="Location (e.g. us-central1)"
-                              className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                              className={inputClass({ className: "bg-bg-card" })}
                             />
                           </div>
                         )}
@@ -2070,19 +2062,16 @@ export default function SetupPage() {
                     value={cursorKey}
                     onChange={(e) => setCursorKey(e.target.value)}
                     placeholder="key_..."
-                    className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                    className={inputClass({ className: "bg-bg-card" })}
                   />
                 </div>
               </div>
 
               <div className="flex items-center justify-between">
-                <button
-                  onClick={goBack}
-                  className="flex items-center gap-2 px-4 py-2 rounded-md text-text-muted text-sm hover:bg-bg-hover"
-                >
-                  <ArrowLeft className="w-4 h-4" /> Back
-                </button>
-                <button
+                <Button variant="ghost" onClick={goBack}>
+                  <ArrowLeft /> Back
+                </Button>
+                <Button
                   onClick={saveAgentKeysStep}
                   disabled={
                     (!claudeReady &&
@@ -2093,16 +2082,15 @@ export default function SetupPage() {
                       !cursorReady) ||
                     loading
                   }
-                  className="flex items-center gap-2 px-5 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"
                 >
                   {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="animate-spin" />
                   ) : (
                     <>
-                      Continue <ArrowRight className="w-4 h-4" />
+                      Continue <ArrowRight />
                     </>
                   )}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -2213,9 +2201,10 @@ export default function SetupPage() {
                       }
                     }}
                     placeholder="https://github.com/owner/repo"
-                    className="flex-1 px-3 py-2 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                    className={inputClass({ className: "flex-1" })}
                   />
-                  <button
+                  <Button
+                    variant="secondary"
                     onClick={() => {
                       if (!manualRepoUrl.trim()) return;
                       const url = manualRepoUrl.trim();
@@ -2223,33 +2212,25 @@ export default function SetupPage() {
                       setManualRepoUrl("");
                     }}
                     disabled={!manualRepoUrl.trim()}
-                    className="px-3 py-2 rounded-md bg-bg-hover text-sm hover:bg-border disabled:opacity-50"
                   >
-                    <Plus className="w-4 h-4" />
-                  </button>
+                    <Plus />
+                  </Button>
                 </div>
               </div>
 
               <div className="flex items-center justify-between">
-                <button
-                  onClick={goBack}
-                  className="flex items-center gap-2 px-4 py-2 rounded-md text-text-muted text-sm hover:bg-bg-hover"
-                >
-                  <ArrowLeft className="w-4 h-4" /> Back
-                </button>
-                <button
-                  onClick={saveReposStep}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-5 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"
-                >
+                <Button variant="ghost" onClick={goBack}>
+                  <ArrowLeft /> Back
+                </Button>
+                <Button onClick={saveReposStep} disabled={loading}>
                   {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="animate-spin" />
                   ) : (
                     <>
-                      Continue <ArrowRight className="w-4 h-4" />
+                      Continue <ArrowRight />
                     </>
                   )}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -2288,7 +2269,9 @@ export default function SetupPage() {
                       value={promptTemplate}
                       onChange={(e) => setPromptTemplate(e.target.value)}
                       rows={14}
-                      className="w-full px-3 py-2 rounded-md bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary transition-colors resize-y leading-relaxed"
+                      className={inputClass({
+                        className: "text-xs font-mono resize-y leading-relaxed",
+                      })}
                     />
                     <p className="text-xs text-text-muted mt-1">
                       Variables: <code className="text-primary">{"{{TASK_FILE}}"}</code>{" "}
@@ -2319,25 +2302,18 @@ export default function SetupPage() {
               )}
 
               <div className="flex items-center justify-between">
-                <button
-                  onClick={goBack}
-                  className="flex items-center gap-2 px-4 py-2 rounded-md text-text-muted text-sm hover:bg-bg-hover"
-                >
-                  <ArrowLeft className="w-4 h-4" /> Back
-                </button>
-                <button
-                  onClick={savePromptStep}
-                  disabled={loading || !promptTemplate.trim()}
-                  className="flex items-center gap-2 px-5 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"
-                >
+                <Button variant="ghost" onClick={goBack}>
+                  <ArrowLeft /> Back
+                </Button>
+                <Button onClick={savePromptStep} disabled={loading || !promptTemplate.trim()}>
                   {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="animate-spin" />
                   ) : (
                     <>
-                      Continue <ArrowRight className="w-4 h-4" />
+                      Continue <ArrowRight />
                     </>
                   )}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -2434,7 +2410,7 @@ export default function SetupPage() {
                       onChange={(e) =>
                         setDraftProvider(e.target.value as "linear" | "notion" | "jira")
                       }
-                      className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                      className={inputClass({ className: "bg-bg-card" })}
                     >
                       <option value="linear">Linear</option>
                       <option value="notion">Notion</option>
@@ -2451,7 +2427,7 @@ export default function SetupPage() {
                           value={linearApiKey}
                           onChange={(e) => setLinearApiKey(e.target.value)}
                           placeholder="lin_api_..."
-                          className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          className={inputClass({ className: "bg-bg-card" })}
                         />
                       </div>
                       <div>
@@ -2461,7 +2437,7 @@ export default function SetupPage() {
                         <input
                           value={linearTeamId}
                           onChange={(e) => setLinearTeamId(e.target.value)}
-                          className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          className={inputClass({ className: "bg-bg-card" })}
                         />
                       </div>
                     </div>
@@ -2478,7 +2454,7 @@ export default function SetupPage() {
                           value={notionApiKey}
                           onChange={(e) => setNotionApiKey(e.target.value)}
                           placeholder="ntn_..."
-                          className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          className={inputClass({ className: "bg-bg-card" })}
                         />
                         <p className="text-xs text-text-muted mt-1">
                           Create an integration at notion.so/my-integrations and share the database
@@ -2491,7 +2467,7 @@ export default function SetupPage() {
                           value={notionDatabaseId}
                           onChange={(e) => setNotionDatabaseId(e.target.value)}
                           placeholder="abc123..."
-                          className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          className={inputClass({ className: "bg-bg-card" })}
                         />
                       </div>
                     </div>
@@ -2505,7 +2481,7 @@ export default function SetupPage() {
                           value={jiraBaseUrl}
                           onChange={(e) => setJiraBaseUrl(e.target.value)}
                           placeholder="https://your-org.atlassian.net"
-                          className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          className={inputClass({ className: "bg-bg-card" })}
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
@@ -2514,7 +2490,7 @@ export default function SetupPage() {
                           <input
                             value={jiraEmail}
                             onChange={(e) => setJiraEmail(e.target.value)}
-                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                            className={inputClass({ className: "bg-bg-card" })}
                           />
                         </div>
                         <div>
@@ -2523,7 +2499,7 @@ export default function SetupPage() {
                             type="password"
                             value={jiraApiToken}
                             onChange={(e) => setJiraApiToken(e.target.value)}
-                            className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                            className={inputClass({ className: "bg-bg-card" })}
                           />
                         </div>
                       </div>
@@ -2535,7 +2511,7 @@ export default function SetupPage() {
                           value={jiraProjectKey}
                           onChange={(e) => setJiraProjectKey(e.target.value)}
                           placeholder="ENG"
-                          className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                          className={inputClass({ className: "bg-bg-card" })}
                         />
                       </div>
                     </div>
@@ -2548,7 +2524,7 @@ export default function SetupPage() {
                     <select
                       value={draftRepoUrl}
                       onChange={(e) => setDraftRepoUrl(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+                      className={inputClass({ className: "bg-bg-card" })}
                     >
                       {repos.length === 0 && <option value="">— No repos selected —</option>}
                       {repos.map((r) => (
@@ -2560,37 +2536,31 @@ export default function SetupPage() {
                   </div>
 
                   <div className="flex justify-end">
-                    <button
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={addDraftTracker}
                       disabled={!buildDraftTracker()}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-bg-card border border-border text-sm hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Plus className="w-3.5 h-3.5" /> Add tracker
-                    </button>
+                      <Plus /> Add tracker
+                    </Button>
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center justify-between">
-                <button
-                  onClick={goBack}
-                  className="flex items-center gap-2 px-4 py-2 rounded-md text-text-muted text-sm hover:bg-bg-hover"
-                >
-                  <ArrowLeft className="w-4 h-4" /> Back
-                </button>
-                <button
-                  onClick={saveTicketsStep}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-5 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover disabled:opacity-50"
-                >
+                <Button variant="ghost" onClick={goBack}>
+                  <ArrowLeft /> Back
+                </Button>
+                <Button onClick={saveTicketsStep} disabled={loading}>
                   {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="animate-spin" />
                   ) : (
                     <>
-                      Continue <ArrowRight className="w-4 h-4" />
+                      Continue <ArrowRight />
                     </>
                   )}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -2679,18 +2649,12 @@ export default function SetupPage() {
               </div>
 
               <div className="flex justify-center gap-3">
-                <button
-                  onClick={() => router.push("/work/new")}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover"
-                >
-                  Create Your First Task <ArrowRight className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => router.push("/")}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-md bg-bg-hover text-text-muted text-sm hover:text-text"
-                >
+                <Button onClick={() => router.push("/work/new")}>
+                  Create Your First Task <ArrowRight />
+                </Button>
+                <Button variant="secondary" onClick={() => router.push("/")}>
                   Go to Dashboard
-                </button>
+                </Button>
               </div>
             </div>
           )}

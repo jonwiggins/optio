@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Skeleton } from "@/components/skeleton";
 import { SectionCard } from "@/components/ui/section-card";
+import { buttonClass } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 /**
@@ -8,28 +10,22 @@ import { cn } from "@/lib/utils";
  * uses the New work form's field, label, and button styles.
  */
 
-export const INPUT =
-  "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 disabled:opacity-50";
-export const MONO_AREA =
-  "w-full px-3 py-2 rounded-lg bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 resize-y leading-relaxed";
+export const INPUT = inputClass();
+export const MONO_AREA = inputClass({ className: "text-xs font-mono resize-y leading-relaxed" });
 export const LABEL = "block text-xs font-medium text-text-muted mb-1.5";
 /** Small helper text under a field. */
 export const HELP = "text-[11px] text-text-muted/80 mt-1";
 
 /** The work-form footer's primary button. */
-export const BTN_PRIMARY =
-  "inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 whitespace-nowrap";
+export const BTN_PRIMARY = buttonClass({ variant: "primary" });
 /** The matching secondary (outlined) button. */
-export const BTN_SECONDARY =
-  "inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md border border-border bg-bg text-sm text-text hover:bg-bg-hover transition-colors disabled:opacity-50 whitespace-nowrap";
+export const BTN_SECONDARY = buttonClass({ variant: "secondary" });
 /** A compact header action (in a SectionCard's `actions`). */
-export const BTN_HEADER =
-  "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-bg-card text-xs text-text hover:bg-bg-hover transition-colors disabled:opacity-50 whitespace-nowrap";
+export const BTN_HEADER = buttonClass({ variant: "secondary", size: "sm" });
 /** The work-form footer's Cancel. */
-export const BTN_TEXT = "text-sm text-text-muted hover:text-text transition-colors";
+export const BTN_TEXT = buttonClass({ variant: "ghost" });
 /** A quiet inline row action (Disable, Sync, …). */
-export const BTN_ROW =
-  "px-2 py-1 rounded-md text-xs text-text-muted hover:text-text hover:bg-bg-hover transition-colors disabled:opacity-50";
+export const BTN_ROW = buttonClass({ variant: "ghost", size: "sm" });
 /** A row's delete / remove icon button. */
 export const BTN_ROW_DANGER =
   "p-1.5 rounded-md text-text-muted hover:text-error hover:bg-error/10 transition-colors disabled:opacity-50";

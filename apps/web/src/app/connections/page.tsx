@@ -34,6 +34,8 @@ import { OwnerPicker } from "@/components/ui/owner-picker";
 import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
 import { ScopedList } from "@/components/ui/scoped-list";
 import { OwnerChip } from "@/components/ui/owner-chip";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 import { ManagedChip } from "@/components/ui/managed-chip";
 import { brandFor, brandIconComponent } from "@/components/brand-icon";
 import { countByOwner, ownerOf, ownerScope, privateHint, scopeOf } from "@/lib/owner";
@@ -123,7 +125,7 @@ export default function ConnectionsPage() {
   usePageTitle("Connections");
   // `useOwnerFilter` reads the URL, which Next needs inside a Suspense boundary.
   return (
-    <Suspense fallback={<div className="p-6 max-w-5xl mx-auto h-16 skeleton-shimmer rounded-lg" />}>
+    <Suspense fallback={<div className="page-column py-6 h-16 skeleton-shimmer rounded-lg" />}>
       <ConnectionsBody />
     </Suspense>
   );
@@ -328,7 +330,7 @@ function ConnectionsBody() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="page-column py-6">
         <div className="h-16 skeleton-shimmer rounded-lg mb-6" />
         <div className="space-y-2">
           {[...Array(4)].map((_, i) => (
@@ -347,7 +349,7 @@ function ConnectionsBody() {
   const configRequired: string[] = selectedProvider?.configSchema?.required ?? [];
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="page-column py-6">
       <div className="space-y-6 [&>header]:mb-0">
         <PageHeader
           icon={Plug}
@@ -365,13 +367,10 @@ function ConnectionsBody() {
           }
           actions={
             !showForm && (
-              <button
-                onClick={() => startForm()}
-                className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
-              >
-                <Plus className="w-4 h-4" />
+              <Button onClick={() => startForm()}>
+                <Plus />
                 Add Connection
-              </button>
+              </Button>
             )
           }
         />
@@ -403,12 +402,9 @@ function ConnectionsBody() {
                   })}
                 </div>
                 <div className="flex justify-end">
-                  <button
-                    onClick={closeForm}
-                    className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover"
-                  >
+                  <Button variant="ghost" onClick={closeForm}>
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </>
             )}
@@ -460,7 +456,7 @@ function ConnectionsBody() {
                       value={formName}
                       onChange={(e) => setFormName(e.target.value)}
                       placeholder="e.g. Production Notion"
-                      className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                      className={inputClass()}
                     />
                   </div>
                   {/* Render first config field inline if there's exactly 1 or 2 */}
@@ -486,7 +482,7 @@ function ConnectionsBody() {
                                   setFormConfig((prev) => ({ ...prev, [key]: e.target.value }))
                                 }
                                 placeholder={schema.placeholder ?? ""}
-                                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 pr-9"
+                                className={inputClass({ className: "pr-9" })}
                                 autoComplete={isSecret ? "new-password" : "off"}
                               />
                               {isSecret && (
@@ -534,7 +530,7 @@ function ConnectionsBody() {
                                 setFormConfig((prev) => ({ ...prev, [key]: e.target.value }))
                               }
                               placeholder={schema.placeholder ?? ""}
-                              className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 pr-9"
+                              className={inputClass({ className: "pr-9" })}
                               autoComplete={isSecret ? "new-password" : "off"}
                             />
                             {isSecret && (
@@ -659,21 +655,13 @@ function ConnectionsBody() {
 
                 {/* Actions */}
                 <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={closeForm}
-                    className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover"
-                  >
+                  <Button type="button" variant="ghost" onClick={closeForm}>
                     Cancel
-                  </button>
-                  <button
-                    onClick={handleCreate}
-                    disabled={submitting}
-                    className="px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {submitting && <Loader2 className="w-3 h-3 animate-spin" />}
+                  </Button>
+                  <Button onClick={handleCreate} disabled={submitting}>
+                    {submitting && <Loader2 className="animate-spin" />}
                     {submitting ? "Saving..." : "Add Connection"}
-                  </button>
+                  </Button>
                 </div>
               </>
             )}

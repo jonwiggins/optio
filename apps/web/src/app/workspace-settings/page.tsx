@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { FORM_WIDTH } from "@/components/ui/page";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { Loader2, Building2, Users, Trash2, UserPlus, Shield, Eye, Edit3, X } from "lucide-react";
@@ -611,13 +612,13 @@ function DangerZone() {
 
 export default function WorkspaceSettingsPage() {
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={Building2}
         title="Workspace Settings"
         description="This workspace's name, who can join it, and what each member can do."
       />
-      <div className="space-y-4">
+      <div className={`${FORM_WIDTH} space-y-4`}>
         <WorkspaceInfo />
         <AccessSettings />
         <MemberManagement />

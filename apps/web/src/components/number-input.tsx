@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, type InputHTMLAttributes } from "react";
+import { inputClass } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 interface NumberInputProps extends Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -96,9 +98,7 @@ export function NumberInput({
     handleBlur();
   };
 
-  const baseClass =
-    className ||
-    "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20";
+  const baseClass = className || inputClass();
 
   const errorClass = error ? "border-red-500 focus:border-red-500 focus:ring-red-500/20" : "";
 
@@ -112,7 +112,7 @@ export function NumberInput({
         onChange={handleChange}
         onBlur={wrappedBlur}
         onFocus={handleFocus}
-        className={`${baseClass} ${errorClass}`}
+        className={cn(baseClass, errorClass)}
       />
       {error && <p className="text-[10px] text-red-500 mt-0.5">{error}</p>}
     </div>

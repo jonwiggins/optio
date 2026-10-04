@@ -7,6 +7,7 @@ import { GitBranch, Laptop, Loader2, MessageSquare, Server, Square } from "lucid
 import { normalizeRepoUrl, toLocalAgentKind } from "@optio/shared";
 import { cn } from "@/lib/utils";
 import { Segmented } from "@/components/ui/segmented";
+import { inputClass } from "@/components/ui/input";
 import { useLocalHosts } from "@/hooks/use-local-hosts";
 import { PairMachineGuide } from "@/components/local/pair-machine";
 import { AddDirForm, dirsLockedReason } from "@/components/local/host-dirs";
@@ -371,7 +372,7 @@ export function RunLocationPicker({
               <select
                 value={value.localHostId}
                 onChange={(e) => onChange({ ...value, localHostId: e.target.value, localDir: "" })}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+                className={inputClass()}
               >
                 {hosts.map((h) => (
                   <option key={h.id} value={h.id}>
@@ -397,7 +398,7 @@ export function RunLocationPicker({
                   setSubInput("");
                   onChange({ ...value, localDir: e.target.value });
                 }}
-                className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary"
+                className={inputClass({ className: "font-mono" })}
               >
                 {!value.localDir && (
                   <option value="">

@@ -11,6 +11,8 @@
 import { useMemo, useState } from "react";
 import { Clock, Play, Webhook, Ticket } from "lucide-react";
 import { SegmentedButton, SegmentedGroup } from "@/components/ui/segmented";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 export type TriggerType = "manual" | "schedule" | "webhook" | "ticket";
 
@@ -140,7 +142,7 @@ export function TriggerSelector({
             type="text"
             value={value.cronExpression ?? ""}
             onChange={(e) => onChange({ ...value, cronExpression: e.target.value })}
-            className="w-full px-3 py-2 rounded bg-bg border border-border font-mono text-sm focus:outline-none focus:border-primary"
+            className={inputClass({ className: "font-mono" })}
           />
           <div className="flex flex-wrap gap-1.5">
             {CRON_PRESETS.map((p) => (
@@ -167,7 +169,7 @@ export function TriggerSelector({
               type="text"
               value={value.webhookPath ?? ""}
               onChange={(e) => onChange({ ...value, webhookPath: e.target.value })}
-              className="flex-1 px-3 py-2 rounded bg-bg border border-border font-mono text-sm focus:outline-none focus:border-primary"
+              className={inputClass({ className: "flex-1 font-mono" })}
             />
           </div>
           <p className="text-xs text-text-muted/60">
@@ -226,7 +228,7 @@ function TicketConfigPanel({
           id="ticket-source"
           value={source}
           onChange={(e) => onSourceChange(e.target.value as TicketSource)}
-          className="w-full px-3 py-2 rounded bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+          className={inputClass()}
         >
           {TICKET_SOURCES.map((s) => (
             <option key={s} value={s}>
@@ -252,15 +254,11 @@ function TicketConfigPanel({
               }
             }}
             placeholder="e.g. cve, bug"
-            className="flex-1 px-3 py-2 rounded bg-bg border border-border text-sm focus:outline-none focus:border-primary"
+            className={inputClass({ className: "flex-1" })}
           />
-          <button
-            type="button"
-            onClick={addLabel}
-            className="px-3 py-2 rounded bg-bg border border-border text-sm text-text-muted hover:text-text transition-colors"
-          >
+          <Button type="button" variant="secondary" onClick={addLabel}>
             Add
-          </button>
+          </Button>
         </div>
         {labels.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-2">

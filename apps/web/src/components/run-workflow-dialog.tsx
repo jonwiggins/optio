@@ -6,6 +6,7 @@ import { Play, X, Loader2 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
 import { WorkflowParamsForm } from "./workflow-params-form";
+import { Button } from "@/components/ui/button";
 
 interface RunWorkflowDialogProps {
   workflowId: string;
@@ -93,25 +94,13 @@ export function RunWorkflowDialog({
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border">
-          <button
-            onClick={onClose}
-            disabled={submitting}
-            className="px-4 py-2 rounded-md bg-bg-hover text-text-muted text-sm hover:bg-bg-hover/80 transition-colors"
-          >
+          <Button variant="secondary" onClick={onClose} disabled={submitting}>
             Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary-hover transition-colors disabled:opacity-50"
-          >
-            {submitting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
+          </Button>
+          <Button onClick={handleSubmit} disabled={submitting}>
+            {submitting ? <Loader2 className="animate-spin" /> : <Play />}
             Run
-          </button>
+          </Button>
         </div>
       </div>
     </div>

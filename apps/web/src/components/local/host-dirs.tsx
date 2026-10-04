@@ -6,6 +6,8 @@ import { FolderGit2, FolderPlus, Loader2, X } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { shortDir } from "@/lib/work-feed";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 /**
  * A machine's directories, changed from here: the machine's daemon does
@@ -86,29 +88,16 @@ export function AddDirForm({
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
-          className="flex-1 min-w-0 px-3 py-1.5 rounded-lg bg-bg border border-border text-sm font-mono focus:outline-none focus:border-primary"
+          className={inputClass({ size: "sm", className: "flex-1 min-w-0 font-mono" })}
         />
-        <button
-          type="button"
-          onClick={submit}
-          disabled={busy || !path.trim()}
-          className="h-8 px-3 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 inline-flex items-center gap-1.5 shrink-0"
-        >
-          {busy ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <FolderPlus className="w-3.5 h-3.5" />
-          )}
+        <Button size="sm" onClick={submit} disabled={busy || !path.trim()} className="shrink-0">
+          {busy ? <Loader2 className="animate-spin" /> : <FolderPlus />}
           Add
-        </button>
+        </Button>
         {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="h-8 px-2 rounded-lg text-xs text-text-muted hover:text-text shrink-0"
-          >
+          <Button variant="ghost" size="sm" onClick={onCancel} className="shrink-0">
             Cancel
-          </button>
+          </Button>
         )}
       </div>
       {error ? (

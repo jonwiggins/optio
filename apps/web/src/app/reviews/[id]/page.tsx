@@ -37,6 +37,8 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { PrIcon } from "@/components/brand-icon";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 interface Review {
   id: string;
@@ -423,8 +425,8 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         }
       />
 
-      <div className="shrink-0 border-b border-border bg-bg-card px-4 py-2">
-        <div className="max-w-5xl mx-auto">
+      <div className="shrink-0 border-b border-border bg-bg-card py-2">
+        <div className="page-column">
           <PrStatusBar
             checksStatus={prStatus?.checksStatus}
             reviewStatus={prStatus?.reviewStatus}
@@ -450,7 +452,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
           const classified = classifyError(review.errorMessage);
           return (
             <div className="shrink-0 border-b border-error/20 bg-error/5">
-              <div className="max-w-5xl mx-auto px-4 py-3">
+              <div className="page-column py-3">
                 <div className="flex items-start gap-3">
                   <AlertCircle className="w-5 h-5 text-error shrink-0 mt-0.5" />
                   <div className="min-w-0 flex-1 space-y-2">
@@ -468,14 +470,15 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
                     </div>
                     <div className="flex items-center gap-2">
                       {classified.retryable && (
-                        <button
+                        <Button
+                          size="sm"
                           onClick={handleReReview}
                           disabled={reReviewing}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
+                          className="btn-press"
                         >
-                          <RotateCcw className="w-3 h-3" />
+                          <RotateCcw />
                           Re-review
-                        </button>
+                        </Button>
                       )}
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-error/10 text-error">
                         {classified.category}
@@ -489,8 +492,8 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         })()}
 
       {review.state === "stale" && (
-        <div className="shrink-0 border-b border-warning/20 bg-warning/5 px-4 py-3">
-          <div className="max-w-5xl mx-auto flex items-center gap-2 text-sm text-warning">
+        <div className="shrink-0 border-b border-warning/20 bg-warning/5 py-3">
+          <div className="page-column flex items-center gap-2 text-sm text-warning">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>The PR has new commits since this review. Consider re-reviewing.</span>
           </div>
@@ -551,7 +554,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
           )}
           {hasDraft && !verdictCollapsed && (
             <div className="shrink-0 border-b border-border bg-bg-card max-h-[55vh] overflow-y-auto">
-              <div className="max-w-5xl mx-auto px-4 pb-4 space-y-4">
+              <div className="page-column pb-4 space-y-4">
                 {/* Verdict */}
                 <div>
                   <label className="text-xs font-medium text-text-muted mb-2 block">Verdict</label>
@@ -605,7 +608,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
                       setDirty(true);
                     }}
                     rows={5}
-                    className="w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:border-primary focus:ring-1 focus:ring-primary/20 focus:outline-none resize-y disabled:opacity-70"
+                    className={inputClass({ className: "resize-y" })}
                     placeholder="Review summary..."
                   />
                 </div>
@@ -625,7 +628,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
                               readOnly={!isEditable}
                               onChange={(e) => updateComment(i, "path", e.target.value)}
                               placeholder="file/path.ts"
-                              className="flex-1 px-2 py-1 rounded bg-bg-card border border-border text-xs focus:border-primary focus:outline-none"
+                              className={inputClass({ size: "sm", className: "flex-1 bg-bg-card" })}
                             />
                             <input
                               value={c.line ?? ""}
@@ -640,7 +643,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
                               placeholder="Line"
                               type="text"
                               inputMode="numeric"
-                              className="w-20 px-2 py-1 rounded bg-bg-card border border-border text-xs focus:border-primary focus:outline-none"
+                              className={inputClass({ size: "sm", className: "w-20 bg-bg-card" })}
                             />
                           </div>
                           <textarea
@@ -649,7 +652,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
                             onChange={(e) => updateComment(i, "body", e.target.value)}
                             placeholder="Comment..."
                             rows={2}
-                            className="w-full px-2 py-1 rounded bg-bg-card border border-border text-xs focus:border-primary focus:outline-none resize-y"
+                            className={inputClass({ size: "sm", className: "bg-bg-card resize-y" })}
                           />
                         </div>
                         {isEditable && (
@@ -678,28 +681,16 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
                 <div className="flex items-center justify-between gap-3 pt-2 border-t border-border">
                   <div className="flex items-center gap-2">
                     {isEditable && dirty && (
-                      <button
-                        onClick={handleSave}
-                        disabled={saving}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg border border-border text-xs text-text-muted hover:bg-bg-hover disabled:opacity-50"
-                      >
-                        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                      <Button variant="secondary" size="sm" onClick={handleSave} disabled={saving}>
+                        {saving ? <Loader2 className="animate-spin" /> : null}
                         Save Draft
-                      </button>
+                      </Button>
                     )}
                     {isEditable && (
-                      <button
-                        onClick={handleSubmit}
-                        disabled={submitting || !verdict}
-                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50"
-                      >
-                        {submitting ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Send className="w-3 h-3" />
-                        )}
+                      <Button size="sm" onClick={handleSubmit} disabled={submitting || !verdict}>
+                        {submitting ? <Loader2 className="animate-spin" /> : <Send />}
                         Submit Review
-                      </button>
+                      </Button>
                     )}
                     {review.state === "submitted" && (
                       <span className="inline-flex items-center gap-1 text-xs text-success">
@@ -773,8 +764,8 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
 
           {/* Working state hint while there's nothing to show yet */}
           {isWorking && (
-            <div className="shrink-0 border-b border-border bg-bg px-4 py-2">
-              <div className="max-w-5xl mx-auto flex items-center gap-2 text-xs text-text-muted">
+            <div className="shrink-0 border-b border-border bg-bg py-2">
+              <div className="page-column flex items-center gap-2 text-xs text-text-muted">
                 {review.state === "waiting_ci" ? (
                   <Clock className="w-3.5 h-3.5" />
                 ) : (

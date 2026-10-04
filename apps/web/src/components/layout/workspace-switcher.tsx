@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api-client";
 import { Building2, ChevronDown, Plus, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 interface WorkspaceSummary {
   id: string;
@@ -129,25 +131,23 @@ export function WorkspaceSwitcher() {
                   onChange={(e) => setNewName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleCreate()}
                   placeholder="Workspace name"
-                  className="w-full px-2 py-1.5 text-xs rounded border border-border bg-bg focus:outline-none focus:border-primary"
+                  className={inputClass({ size: "sm" })}
                   autoFocus
                 />
                 <div className="flex gap-1 mt-1.5">
-                  <button
-                    onClick={handleCreate}
-                    className="flex-1 px-2 py-1 text-[10px] bg-primary text-white rounded hover:bg-primary/90"
-                  >
+                  <Button size="sm" onClick={handleCreate} className="flex-1">
                     Create
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => {
                       setCreating(false);
                       setNewName("");
                     }}
-                    className="px-2 py-1 text-[10px] text-text-muted hover:text-text"
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (

@@ -9,6 +9,7 @@ import {
 } from "@/lib/push-subscription";
 import { toast } from "sonner";
 import { Bell, BellOff, Loader2, Trash2, Send } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const EVENT_LABELS: Record<string, { title: string; description: string }> = {
   "task.pr_opened": {
@@ -167,18 +168,10 @@ export function NotificationPreferences() {
           </div>
           <div className="flex items-center gap-2">
             {permissionState === "granted" && subscriptions.length > 0 && (
-              <button
-                onClick={handleTest}
-                disabled={testing}
-                className="px-3 py-1.5 rounded-md text-xs bg-bg-hover text-text-muted hover:text-text transition-colors"
-              >
-                {testing ? (
-                  <Loader2 className="w-3 h-3 animate-spin inline" />
-                ) : (
-                  <Send className="w-3 h-3 inline mr-1" />
-                )}
+              <Button variant="secondary" size="sm" onClick={handleTest} disabled={testing}>
+                {testing ? <Loader2 className="animate-spin" /> : <Send />}
                 Test
-              </button>
+              </Button>
             )}
             {permissionState === "denied" ? (
               <div className="flex items-center gap-1.5 text-xs text-warning">
@@ -190,14 +183,10 @@ export function NotificationPreferences() {
                 Enabled
               </span>
             ) : (
-              <button
-                onClick={handleEnable}
-                disabled={subscribing}
-                className="px-3 py-1.5 rounded-md text-xs bg-primary text-white hover:bg-primary-hover disabled:opacity-50"
-              >
-                {subscribing ? <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> : null}
+              <Button size="sm" onClick={handleEnable} disabled={subscribing}>
+                {subscribing ? <Loader2 className="animate-spin" /> : null}
                 Enable
-              </button>
+              </Button>
             )}
           </div>
         </div>

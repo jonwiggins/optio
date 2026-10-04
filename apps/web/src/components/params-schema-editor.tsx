@@ -2,6 +2,8 @@
 
 import { useState, useCallback } from "react";
 import { Plus, Trash2, ChevronDown, ChevronUp, Code } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -27,9 +29,6 @@ const PARAM_TYPES = [
   { value: "integer", label: "Integer" },
   { value: "boolean", label: "Boolean" },
 ] as const;
-
-const INPUT_CLASS =
-  "w-full px-2.5 py-1.5 rounded-md bg-bg-card border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors";
 
 // ── Schema ↔ Fields conversion ─────────────────────────────────────────────────
 
@@ -146,7 +145,7 @@ export function ParamsSchemaEditor({ value, onChange, detectedParams }: ParamsSc
           value={value}
           onChange={(e) => handleRawJsonChange(e.target.value)}
           placeholder={`{\n  "type": "object",\n  "properties": {\n    "PARAM": { "type": "string" }\n  },\n  "required": ["PARAM"]\n}`}
-          className={`${INPUT_CLASS} font-mono text-xs resize-y`}
+          className={inputClass({ size: "sm", className: "font-mono resize-y" })}
         />
       </div>
     );
@@ -166,13 +165,9 @@ export function ParamsSchemaEditor({ value, onChange, detectedParams }: ParamsSc
             </button>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => setShowRawJson(true)}
-          className="flex items-center gap-1 text-xs text-text-muted hover:text-text transition-colors"
-        >
-          <Code className="w-3 h-3" /> Raw JSON
-        </button>
+        <Button variant="ghost" size="sm" type="button" onClick={() => setShowRawJson(true)}>
+          <Code /> Raw JSON
+        </Button>
       </div>
 
       {fields.length === 0 ? (
@@ -211,12 +206,12 @@ export function ParamsSchemaEditor({ value, onChange, detectedParams }: ParamsSc
                   })
                 }
                 placeholder="PARAM_NAME"
-                className={`${INPUT_CLASS} font-mono text-xs py-1.5`}
+                className={inputClass({ size: "sm", className: "font-mono" })}
               />
               <select
                 value={field.type}
                 onChange={(e) => updateField(index, { type: e.target.value as ParamField["type"] })}
-                className={`${INPUT_CLASS} text-xs py-1.5`}
+                className={inputClass({ size: "sm" })}
               >
                 {PARAM_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>
@@ -229,7 +224,7 @@ export function ParamsSchemaEditor({ value, onChange, detectedParams }: ParamsSc
                 value={field.description}
                 onChange={(e) => updateField(index, { description: e.target.value })}
                 placeholder="Description"
-                className={`${INPUT_CLASS} text-xs py-1.5`}
+                className={inputClass({ size: "sm" })}
               />
               <div className="flex items-center justify-center">
                 <input
@@ -249,13 +244,9 @@ export function ParamsSchemaEditor({ value, onChange, detectedParams }: ParamsSc
             </div>
           ))}
 
-          <button
-            type="button"
-            onClick={() => addField()}
-            className="flex items-center gap-1.5 text-xs text-text-muted hover:text-primary transition-colors"
-          >
-            <Plus className="w-3 h-3" /> Add Parameter
-          </button>
+          <Button variant="ghost" size="sm" type="button" onClick={() => addField()}>
+            <Plus /> Add Parameter
+          </Button>
         </>
       )}
     </div>

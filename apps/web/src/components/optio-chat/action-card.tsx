@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Check, X, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { OptioPendingAction } from "@/hooks/use-optio-chat";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 interface ActionCardProps {
   action: OptioPendingAction;
@@ -76,7 +78,7 @@ export function ActionCard({ action, onApprove, onDeny }: ActionCardProps) {
                 }}
                 placeholder="Your feedback..."
                 autoFocus
-                className="flex-1 text-sm bg-bg-card border border-border rounded-md px-2.5 py-1.5 placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary/50"
+                className={inputClass({ size: "sm", className: "flex-1" })}
               />
               <button
                 onClick={handleSubmitFeedback}
@@ -88,20 +90,14 @@ export function ActionCard({ action, onApprove, onDeny }: ActionCardProps) {
           </div>
         ) : (
           <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={handleDeny}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg-card border border-border text-xs text-text-muted hover:text-text hover:bg-bg-hover transition-colors btn-press"
-            >
-              <MessageSquare className="w-3 h-3" />
+            <Button variant="secondary" size="sm" onClick={handleDeny} className="btn-press">
+              <MessageSquare />
               Deny
-            </button>
-            <button
-              onClick={() => onApprove(action.id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover transition-colors btn-press"
-            >
-              <Check className="w-3 h-3" />
+            </Button>
+            <Button size="sm" onClick={() => onApprove(action.id)} className="btn-press">
+              <Check />
               Approve
-            </button>
+            </Button>
           </div>
         )}
       </div>

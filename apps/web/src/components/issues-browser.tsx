@@ -20,6 +20,7 @@ import {
 import { BRAND_LABEL, BrandIcon, IssueIcon, brandFor } from "@/components/brand-icon";
 import { EmptyState } from "@/components/empty-state";
 import { Chip, RepoFilter, RowSkeleton } from "@/components/pr-browser";
+import { Button, ButtonLink } from "@/components/ui/button";
 
 /**
  * Browser of GitHub Issues across the workspace's connected repos.
@@ -197,19 +198,15 @@ export function IssuesBrowser() {
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
         <RepoFilter repos={repos} value={selectedRepo} onChange={setSelectedRepo} />
         {!loading && unassignedIssues.length > 0 && (
-          <button
+          <Button
             onClick={handleAssignAll}
             disabled={bulkAssigning}
             title="Create a Repo Task for every unassigned issue in this list"
-            className="sm:ml-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
+            className="sm:ml-auto"
           >
-            {bulkAssigning ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Zap className="w-3.5 h-3.5" />
-            )}
+            {bulkAssigning ? <Loader2 className="animate-spin" /> : <Zap />}
             {bulkAssigning ? "Assigning..." : `Assign all to Optio (${unassignedIssues.length})`}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -257,15 +254,17 @@ export function IssuesBrowser() {
                 </>
               )}
             </div>
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               type="button"
               onClick={() => setReloadKey((k) => k + 1)}
-              className="flex items-center gap-1 text-xs text-text-muted hover:text-text shrink-0"
+              className="shrink-0"
               title="Retry"
             >
-              <RefreshCw className="w-3 h-3" />
+              <RefreshCw />
               Retry
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -349,13 +348,15 @@ export function IssuesBrowser() {
 
                 <div className="flex items-center gap-2">
                   {issue.optioTask ? (
-                    <Link
+                    <ButtonLink
+                      variant="secondary"
+                      size="sm"
                       href={`/tasks/${issue.optioTask.taskId}`}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-bg-card text-xs text-text-muted hover:text-text hover:bg-bg-hover transition-colors sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                      className="sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
                     >
-                      <ArrowUpRight className="w-3 h-3" />
+                      <ArrowUpRight />
                       Open task
-                    </Link>
+                    </ButtonLink>
                   ) : isAssignable(issue) ? (
                     <div
                       className={cn(
@@ -365,32 +366,33 @@ export function IssuesBrowser() {
                       )}
                     >
                       {localHost && localKey && (
-                        <button
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           onClick={() => handleWorkLocally(issue, localHost)}
                           disabled={workingLocally === localKey}
                           title={`Start an attended terminal in the matching checkout on ${localHost.name}`}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-border bg-bg-card text-xs text-text-muted hover:text-text hover:bg-bg-hover disabled:opacity-50 transition-colors"
                         >
                           {workingLocally === localKey ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <Loader2 className="animate-spin" />
                           ) : (
-                            <Terminal className="w-3 h-3" />
+                            <Terminal />
                           )}
                           Work on locally
-                        </button>
+                        </Button>
                       )}
-                      <button
+                      <Button
+                        size="sm"
                         onClick={() => handleAssign(issue)}
                         disabled={assigning === issue.number}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50 transition-colors"
                       >
                         {assigning === issue.number ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <Loader2 className="animate-spin" />
                         ) : (
-                          <Zap className="w-3 h-3" />
+                          <Zap />
                         )}
                         Assign to Optio
-                      </button>
+                      </Button>
                     </div>
                   ) : (
                     <span

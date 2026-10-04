@@ -5,18 +5,16 @@ import { toast } from "sonner";
 import { KeyRound, Loader2, Plus, X } from "lucide-react";
 import type { ModelProvider, PickableSecret, ResourceOwner } from "@optio/shared";
 import { api } from "@/lib/api-client";
-import { cn } from "@/lib/utils";
 import { ownerOf, scopeOf } from "@/lib/owner";
 import { Segmented } from "@/components/ui/segmented";
 import { OwnerPicker } from "@/components/ui/owner-picker";
+import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 /**
  * The Who section's ownership rows: which model provider the agent reaches
  * its models through, who owns the work, and which secrets its pod gets.
  */
-
-const INPUT =
-  "w-full px-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-colors";
 
 const DEFAULT = "__default__";
 
@@ -184,7 +182,7 @@ export function SecretsRow({
               const s = addable.find((x) => x.owner === o && x.name === rest.join(":"));
               if (s) onAdd(s);
             }}
-            className="px-2 py-1 rounded-md bg-bg border border-border text-xs text-text-muted"
+            className={inputClass({ size: "sm", className: "w-auto text-text-muted" })}
             aria-label="Add secret"
           >
             <option value="">+ Add secret</option>
@@ -196,14 +194,10 @@ export function SecretsRow({
           </select>
         )}
         {!creating && (
-          <button
-            type="button"
-            onClick={startCreating}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-text-muted hover:text-text"
-          >
-            <Plus className="w-3 h-3" />
+          <Button variant="ghost" size="sm" onClick={startCreating}>
+            <Plus />
             New secret…
-          </button>
+          </Button>
         )}
       </div>
       {creating && (
@@ -213,7 +207,7 @@ export function SecretsRow({
               value={name}
               onChange={(e) => setName(e.target.value.replace(/\s/g, "_"))}
               placeholder="NAME"
-              className={cn(INPUT, "font-mono")}
+              className={inputClass({ className: "font-mono" })}
               aria-label="Secret name"
             />
             <input
@@ -221,7 +215,7 @@ export function SecretsRow({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder="Value"
-              className={INPUT}
+              className={inputClass()}
               aria-label="Secret value"
               autoComplete="off"
             />
@@ -235,22 +229,18 @@ export function SecretsRow({
               canOrg={canCreateOrg}
             />
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setCreating(false)}
-                className="text-xs text-text-muted hover:text-text"
-              >
+              <Button variant="ghost" size="sm" type="button" onClick={() => setCreating(false)}>
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                size="sm"
                 type="button"
                 onClick={create}
                 disabled={saving || !name.trim() || !value}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50"
               >
-                {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+                {saving && <Loader2 className="animate-spin" />}
                 Save and add
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Globe, Loader2, Lock, Search } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { inputClass } from "@/components/ui/input";
 
 type BrowsedRepo = Awaited<ReturnType<typeof api.browseGitHubRepos>>["repos"][number];
 
@@ -73,7 +74,7 @@ export function GitHubRepoBrowser({
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search your repositories…"
           aria-label="Search accessible repositories"
-          className="w-full pl-9 pr-3 py-2 rounded-lg bg-bg border border-border text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+          className={inputClass({ className: "pl-9" })}
           autoFocus
         />
       </div>

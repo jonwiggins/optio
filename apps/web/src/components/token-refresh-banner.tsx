@@ -4,6 +4,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { AlertTriangle, Check, Copy, ExternalLink, Key, Laptop, Loader2 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
+import { Button, buttonClass } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 
 const COPY_COMMAND = `security find-generic-password -s "Claude Code-credentials" -w | python3 -c "import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])" | pbcopy`;
 
@@ -130,20 +132,15 @@ export function TokenRefreshBanner({ onSaved }: { onSaved?: () => void | Promise
           </div>
           <div className="flex flex-wrap gap-2">
             {hosts.map((host) => (
-              <button
+              <Button
                 key={host.id}
-                type="button"
+                size="sm"
                 onClick={() => handleRefreshFromHost(host)}
                 disabled={refreshingHost !== null}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
               >
-                {refreshingHost === host.id ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <Laptop className="w-3 h-3" />
-                )}
+                {refreshingHost === host.id ? <Loader2 className="animate-spin" /> : <Laptop />}
                 Refresh from {host.name}
-              </button>
+              </Button>
             ))}
           </div>
           <div className="text-[11px] text-text-muted mt-1.5">
@@ -184,16 +181,12 @@ export function TokenRefreshBanner({ onSaved }: { onSaved?: () => void | Promise
             value={token}
             onChange={(e) => setToken(e.target.value)}
             placeholder="Paste token here"
-            className="flex-1 px-2.5 py-1.5 rounded-md bg-bg border border-border text-xs font-mono focus:outline-none focus:border-primary"
+            className={inputClass({ size: "sm", className: "flex-1 font-mono" })}
           />
-          <button
-            onClick={handleSave}
-            disabled={!token.trim() || saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover disabled:opacity-50 btn-press transition-all"
-          >
-            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Key className="w-3 h-3" />}
+          <Button size="sm" onClick={handleSave} disabled={!token.trim() || saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Key />}
             Update
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -238,9 +231,9 @@ export function GitHubTokenBanner({ onSaved }: { onSaved?: () => void | Promise<
         href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=Optio+Agent"
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-bg-hover text-text text-sm hover:bg-border transition-colors"
+        className={buttonClass({ variant: "secondary", size: "sm" })}
       >
-        <ExternalLink className="w-4 h-4" />
+        <ExternalLink />
         Create GitHub Personal Access Token
       </a>
 
@@ -250,24 +243,20 @@ export function GitHubTokenBanner({ onSaved }: { onSaved?: () => void | Promise<
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="Paste GitHub token here"
-          className="flex-1 px-3 py-1.5 rounded-md bg-bg border border-border text-sm focus:outline-none focus:border-primary font-mono"
+          className={inputClass({ size: "sm", className: "flex-1 font-mono" })}
         />
-        <button
-          onClick={handleSave}
-          disabled={!token.trim() || saving}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
-        >
+        <Button size="sm" onClick={handleSave} disabled={!token.trim() || saving}>
           {saving ? (
             "Saving..."
           ) : token.trim() ? (
             <>
-              <Check className="w-3 h-3" />
+              <Check />
               Save Token
             </>
           ) : (
             "Save Token"
           )}
-        </button>
+        </Button>
       </div>
     </div>
   );

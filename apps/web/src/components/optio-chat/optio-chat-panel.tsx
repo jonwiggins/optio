@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { inputClass } from "@/components/ui/input";
 import { X, Send, RotateCcw, Bot, User, Loader2, AlertCircle, Info } from "lucide-react";
 import {
   useOptioChatStore,
@@ -407,12 +408,10 @@ export function OptioChatPanel() {
                 }
                 disabled={status === "unavailable" || status === "thinking" || atLimit}
                 rows={1}
-                className={cn(
-                  "w-full resize-none rounded-lg border border-border bg-bg px-3 py-2.5 text-sm",
-                  "placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary/30 focus:border-primary/50",
-                  "disabled:opacity-50 disabled:cursor-not-allowed",
-                  "min-h-[40px] max-h-[100px]",
-                )}
+                className={inputClass({
+                  className:
+                    "resize-none py-2.5 disabled:cursor-not-allowed min-h-[40px] max-h-[100px]",
+                })}
                 style={{ height: "auto" }}
                 onInput={(e) => {
                   const target = e.target as HTMLTextAreaElement;

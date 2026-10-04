@@ -82,7 +82,7 @@ export default function ClusterPage() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="page-column py-6">
         {header}
         <div className="space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -103,7 +103,7 @@ export default function ClusterPage() {
 
   if (!data) {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="page-column py-6">
         {header}
         <EmptyState
           icon={AlertTriangle}
@@ -117,7 +117,7 @@ export default function ClusterPage() {
   const { nodes, pods, services, events, repoPods, summary } = data;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-column py-6">
       {header}
       <div className="space-y-6">
         {/* Summary tiles */}

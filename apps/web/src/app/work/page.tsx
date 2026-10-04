@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   Plus,
@@ -22,6 +21,8 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Segmented } from "@/components/ui/segmented";
 import { OwnerSegments, useOwnerFilter } from "@/components/ui/owner-segments";
+import { Button, ButtonLink } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/input";
 import { WorkRowView } from "@/components/work-row";
 import { countByOwner, inOwnerFilter } from "@/lib/owner";
 import { countWork, inView, sessionScreenTarget, type WorkView } from "@/lib/work-feed";
@@ -43,7 +44,7 @@ const VIEWS: Array<{ id: WorkView; label: string }> = [
 export default function WorkPage() {
   usePageTitle("Work");
   return (
-    <Suspense fallback={<div className="p-6 max-w-6xl mx-auto h-32 skeleton-shimmer rounded-lg" />}>
+    <Suspense fallback={<div className="page-column py-6 h-32 skeleton-shimmer rounded-lg" />}>
       <WorkList />
     </Suspense>
   );
@@ -114,7 +115,7 @@ function WorkList() {
   );
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-column py-6">
       <PageHeader
         icon={Terminal}
         title="Work"
@@ -122,22 +123,19 @@ function WorkList() {
         actions={
           <div className="flex items-center gap-2">
             {view === "history" && failedTasks && (
-              <button
-                onClick={retryFailed}
-                disabled={bulkLoading}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-text hover:bg-bg-hover disabled:opacity-50 transition-colors"
-              >
-                <RotateCcw className="w-3 h-3" /> Retry failed
-              </button>
+              <Button variant="secondary" onClick={retryFailed} disabled={bulkLoading}>
+                <RotateCcw /> Retry failed
+              </Button>
             )}
             {view === "active" && activeTasks && (
-              <button
+              <Button
+                variant="secondary"
                 onClick={cancelActive}
                 disabled={bulkLoading}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-bg-card border border-border text-text-muted hover:text-error hover:bg-error/5 disabled:opacity-50 transition-colors"
+                className="hover:text-error hover:bg-error/5"
               >
-                <XCircle className="w-3 h-3" /> Cancel active
-              </button>
+                <XCircle /> Cancel active
+              </Button>
             )}
             <button
               onClick={refetch}
@@ -147,16 +145,16 @@ function WorkList() {
               <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
             </button>
             {sessionScreen && (
-              <Link
+              <ButtonLink
+                variant="secondary"
                 href={sessionScreen.href}
                 title={
                   sessionScreen.status === "needs_you"
                     ? `Open the session screen at "${sessionScreen.name}", which is waiting on you`
                     : "Open the session screen — every session on your machines, one click apart"
                 }
-                className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-bg-card text-sm font-medium text-text-muted hover:text-text hover:bg-bg-hover transition-colors"
               >
-                <SquareTerminal className="w-4 h-4" /> Sessions
+                <SquareTerminal /> Sessions
                 {sessionsWaiting > 0 && (
                   <span
                     title={`${sessionsWaiting} waiting on you`}
@@ -165,14 +163,11 @@ function WorkList() {
                     {sessionsWaiting}
                   </span>
                 )}
-              </Link>
+              </ButtonLink>
             )}
-            <Link
-              href="/work/new"
-              className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors"
-            >
-              <Plus className="w-4 h-4" /> New work
-            </Link>
+            <ButtonLink href="/work/new">
+              <Plus /> New work
+            </ButtonLink>
           </div>
         }
         meta={
@@ -216,7 +211,7 @@ function WorkList() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search name, place, agent…"
-            className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-bg-card border border-border text-sm focus:outline-none focus:border-primary"
+            className={inputClass({ size: "sm", className: "pl-8 bg-bg-card" })}
           />
         </div>
       </div>
@@ -245,12 +240,9 @@ function WorkList() {
               : "Start something — a PR, a chat on your machine, a schedule, or a persistent agent."
           }
           action={
-            <Link
-              href="/work/new"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover"
-            >
-              <Plus className="w-4 h-4" /> New work
-            </Link>
+            <ButtonLink href="/work/new">
+              <Plus /> New work
+            </ButtonLink>
           }
         />
       ) : (

@@ -22,6 +22,7 @@ import { useBellStore } from "./bell-store";
 import { collectWorkLinks, WorkLinkBadges, workLinksSearchText } from "./work-links";
 import { addToSplit, parseSplit, splitHref, MAX_PANES } from "./split-state";
 import { nextNeedsYou, orderSessions } from "./session-order";
+import { inputClass } from "@/components/ui/input";
 
 /**
  * Session rail: replaces the app sidebar while you're inside a terminal
@@ -195,7 +196,7 @@ export function TerminalRail({ onNavigate }: { onNavigate?: () => void }) {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Title, dir, PR, ticket…"
             aria-label="Search sessions"
-            className="w-full pl-7 pr-2 py-1.5 rounded-md bg-bg border border-border text-xs focus:outline-none focus:border-primary"
+            className={inputClass({ size: "sm", className: "pl-7 pr-2" })}
           />
         </div>
         {needsYouCount > 0 && (

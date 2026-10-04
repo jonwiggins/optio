@@ -39,6 +39,7 @@ import { RunsAsBadge } from "@/components/runs-as-badge";
 import { EmptyState } from "@/components/empty-state";
 import { Panel, PanelEmpty } from "@/components/ui/panel";
 import { Segmented } from "@/components/ui/segmented";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { ManagedBanner } from "@/components/ui/managed-banner";
 import { ManagedChip } from "@/components/ui/managed-chip";
 import type { ManagedBy } from "@optio/shared";
@@ -231,7 +232,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
 
   if (error || !workflow) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="page-column py-6">
         <Link
           href="/work?view=recurring"
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text mb-4"
@@ -303,28 +304,26 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
         }
         actions={
           <>
-            <button
+            <Button
+              size="sm"
               onClick={() => setShowRunDialog(true)}
               disabled={!workflow.enabled || actionLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-white text-xs hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title={workflow.enabled ? "Run this task" : "Task is disabled"}
             >
-              <Play className="w-3 h-3" /> Run
-            </button>
-            <Link
-              href={`/work/${id}/edit`}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg text-text-muted text-xs hover:bg-bg-hover hover:text-text transition-colors"
-            >
-              <Pencil className="w-3 h-3" /> Edit
-            </Link>
-            <button
+              <Play /> Run
+            </Button>
+            <ButtonLink variant="secondary" size="sm" href={`/work/${id}/edit`}>
+              <Pencil /> Edit
+            </ButtonLink>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={handleDuplicate}
               disabled={actionLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-bg text-text-muted text-xs hover:bg-bg-hover hover:text-text transition-colors"
               title="Duplicate workflow"
             >
-              <CopyPlus className="w-3 h-3" /> Duplicate
-            </button>
+              <CopyPlus /> Duplicate
+            </Button>
             <button
               onClick={handleToggleEnabled}
               disabled={actionLoading}
@@ -363,7 +362,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
         />
       )}
 
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="page-column py-6">
         {/* Stats bar */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <MetadataCard icon={Hash} label="Total Runs" value={workflow.runCount} size="lg" />
@@ -475,13 +474,9 @@ function RunsTable({
         title="No runs yet"
         description="Start your first run to see results here."
         action={
-          <button
-            onClick={onRunClick}
-            disabled={!canRun}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Play className="w-3.5 h-3.5" /> Run Now
-          </button>
+          <Button onClick={onRunClick} disabled={!canRun}>
+            <Play /> Run Now
+          </Button>
         }
       />
     );
@@ -627,12 +622,9 @@ function TriggersList({
         title="No triggers configured"
         description="Triggers define how this job is started (manually, on schedule, or via webhook)."
         action={
-          <Link
-            href={`/work/${workflowId}/edit`}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-bg-hover text-text-muted hover:text-text transition-colors"
-          >
-            <Pencil className="w-3.5 h-3.5" /> Configure Triggers
-          </Link>
+          <ButtonLink variant="secondary" href={`/work/${workflowId}/edit`}>
+            <Pencil /> Configure Triggers
+          </ButtonLink>
         }
       />
     );
